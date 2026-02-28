@@ -331,6 +331,8 @@ export default function Home() {
   const platformFee = 5; // 5 cents
   const total = cents + platformFee;
 
+  console.log("SESSION USER ID:", session?.user?.id);
+  
   try {
     const res = await fetch("/api/coinbase/create-charge", {
       method: "POST",

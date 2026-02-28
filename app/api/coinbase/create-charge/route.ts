@@ -10,12 +10,17 @@ export async function POST(req: Request) {
       process.env.SUPABASE_SERVICE_ROLE_KEY! // server-only key
     );
 
+    console.log("Incoming merchant_id:", merchant_id);
+
     // 🔹 Get merchant's stored Coinbase key
     const { data: merchant, error: merchantError } = await supabase
       .from("merchant_settings")
       .select("coinbase_api_key")
       .eq("merchant_id", merchant_id)
       .single();
+
+      console.log("Merchant query result:", merchant);
+      console.log("Merchant query error:", merchantError);
 
     if (merchantError || !merchant?.coinbase_api_key) {
       return NextResponse.json(
