@@ -1,51 +1,51 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
 export async function POST(request: Request) {
   try {
     console.log("🔥 WEBHOOK HIT");
 
     const rawBody = await request.text();
-    console.log("RAW BODY STRING:", rawBody);
-
     const body = JSON.parse(rawBody);
 
-    // Coinbase wraps payload inside "event"
     const event = body.event ?? body;
 
-    console.log("FULL PARSED:", JSON.stringify(event, null, 2));
-
     const eventType = event?.type;
-    const eventId = event?.id;
-    const chargeId = event?.data?.id ?? event?.data?.code ?? event?.data?.charge_id;
+    const chargeId = event?.data?.id;
 
     console.log("EVENT TYPE:", eventType);
-    console.log("EVENT ID:", eventId);
     console.log("CHARGE ID:", chargeId);
 
-    if (!eventType) {
-      console.log("❌ No event type found");
+    if (!eventType || !chargeId) {
+      console.log("❌ Missing event type or charge ID");
       return NextResponse.json({ received: true });
     }
 
-    switch (eventType) {
-      case "charge:created":
-        console.log("🆕 Charge Created:", chargeId);
-        break;
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
 
-      case "charge:pending":
-        console.log("⏳ Charge Pending:", chargeId);
-        break;
+    if (eventType === "charge:confirmed") {
+      console.log("✅ Updating transaction to CONFIRMED");
 
-      case "charge:confirmed":
-        console.log("✅ Charge Confirmed:", chargeId);
-        break;
+      const { error } = await supabase
+        .from("transactions")
+        .update({ status: "confirmed" })
+        .eq("provider_transaction_id", chargeId);
 
-      case "charge:failed":
-        console.log("❌ Charge Failed:", chargeId);
-        break;
+      if (error) {
+        console.log("❌ Supabase update error:", error.message);
+      }
+    }
 
-      default:
-        console.log("ℹ️ Other event:", eventType);
+    if (eventType === "charge:failed") {
+      console.log("❌ Updating transaction to FAILED");
+
+      await supabase
+        .from("transactions")
+        .update({ status: "failed" })
+        .eq("provider_transaction_id", chargeId);
     }
 
     return NextResponse.json({ received: true });
