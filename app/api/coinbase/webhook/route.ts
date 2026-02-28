@@ -7,36 +7,44 @@ export async function POST(request: Request) {
     const body = await request.json();
     console.log("RAW BODY:", JSON.stringify(body, null, 2));
 
-    const eventType = body.type;
-    const eventId = body.id;
+    const eventType = body?.type;
+    const eventId = body?.id;
+    const chargeId = body?.data?.id;
 
     console.log("EVENT TYPE:", eventType);
     console.log("EVENT ID:", eventId);
+    console.log("CHARGE ID:", chargeId);
 
     if (!eventType) {
       console.log("❌ No event type found");
       return NextResponse.json({ received: true });
     }
 
-    // Handle successful payments
-    if (eventType === "charge:confirmed") {
-      const chargeId = body.data?.id;
+    switch (eventType) {
+      case "charge:created":
+        console.log("🆕 Charge Created:", chargeId);
+        break;
 
-      console.log("✅ Charge Confirmed:", chargeId);
+      case "charge:pending":
+        console.log("⏳ Charge Pending:", chargeId);
+        break;
 
-      // TODO: update your database here
+      case "charge:confirmed":
+        console.log("✅ Charge Confirmed:", chargeId);
+        break;
 
-    } else if (eventType === "charge:pending") {
-      console.log("⏳ Charge Pending");
+      case "charge:failed":
+        console.log("❌ Charge Failed:", chargeId);
+        break;
 
-    } else {
-      console.log("ℹ️ Other event type:", eventType);
+      default:
+        console.log("ℹ️ Other event:", eventType);
     }
 
     return NextResponse.json({ received: true });
 
-  } catch (err) {
-    console.error("❌ WEBHOOK ERROR:", err);
+  } catch (error) {
+    console.error("❌ WEBHOOK ERROR:", error);
     return NextResponse.json({ error: "Webhook failed" }, { status: 500 });
   }
 }
