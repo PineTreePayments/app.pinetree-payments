@@ -469,8 +469,7 @@ export default function Home() {
             ☰
           </button>
 
-          {(currentPage === "processing" ||
-            currentPage === "confirm") && (
+          {currentPage === "processing" && (
             <button
               onClick={() => goTo("pos")}
               className="text-base font-semibold text-black hover:text-blue-600 transition -tracking-[1px]"
