@@ -307,6 +307,13 @@ export default function Home() {
 
   const handleCharge = async () => {
   if (isCharging) return;
+
+  // 🔒 Ensure session is ready
+  if (!session?.user?.id) {
+    showToast("Session not ready. Please try again.", "error");
+    return;
+  }
+
   setIsCharging(true);
 
   if (!apiConnected) {
@@ -332,7 +339,7 @@ export default function Home() {
       },
       body: JSON.stringify({
         amount: total,
-        merchant_id: session?.user?.id,
+        merchant_id: session.user.id, // no optional chaining
       }),
     });
 
