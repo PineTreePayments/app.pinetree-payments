@@ -20,6 +20,7 @@ export default function Home() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [isLogin, setIsLogin] = useState(true);
 
   const [cents, setCents] = useState(0);
@@ -394,14 +395,24 @@ export default function Home() {
               autoComplete="email"
             />
 
-            <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full border border-gray-300 rounded-xl px-4 py-3 text-black placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              autoComplete={isLogin ? "current-password" : "new-password"}
-            />
+            <div className="relative w-full">
+  <input
+    type={showPassword ? "text" : "password"}
+    placeholder="Password"
+    value={password}
+    onChange={(e) => setPassword(e.target.value)}
+    className="w-full border border-gray-300 rounded-xl px-4 py-3 text-black placeholder-gray-500 pr-16"
+    autoComplete={isLogin ? "current-password" : "new-password"}
+  />
+
+  <button
+    type="button"
+    onClick={() => setShowPassword((prev) => !prev)}
+    className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-gray-500 hover:text-black"
+  >
+    {showPassword ? "Hide" : "Show"}
+  </button>
+</div>
 
             <button
               onClick={isLogin ? handleLogin : handleSignup}
