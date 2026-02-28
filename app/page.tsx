@@ -116,8 +116,19 @@ useEffect(() => {
         table: "transactions",
         filter: `merchant_id=eq.${session.user.id}`,
       },
-      () => {
+      (payload) => {
         fetchTransactions();
+
+        if (!coinbaseChargeId) return;
+
+        const updated = payload.new as any;
+
+        if (
+          updated &&
+          updated.provider_transaction_id === coinbaseChargeId
+        ) {
+          setPaymentStatus(updated.status);
+        }
       }
     )
     .subscribe();
@@ -125,7 +136,7 @@ useEffect(() => {
   return () => {
     supabase.removeChannel(channel);
   };
-}, [session]);
+}, [session, coinbaseChargeId]);
 
   useEffect(() => {
     const savedProvider = localStorage.getItem("provider") as Provider | null;
