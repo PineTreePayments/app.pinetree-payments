@@ -809,16 +809,11 @@ useEffect(() => {
   <div className="flex flex-col items-center justify-center mt-6">
 
     {/* Blinking Circle */}
-    <div className="flex items-center justify-center mt-4">
-  <div className="w-3 h-3 rounded-full bg-yellow-500 animate-pulse mr-2"></div>
-  <span className="text-base font-medium text-gray-700">
-    Waiting for Payment
-  </span>
-</div>
 
-    <div className="mt-4 text-base font-medium text-gray-700">
-      Waiting for Payment
-    </div>
+    <div className="mt-4 flex items-center justify-center text-base font-medium text-gray-700">
+  <div className="w-3 h-3 rounded-full bg-yellow-500 animate-pulse mr-2"></div>
+  Waiting for Payment
+</div>
 
   </div>
 )}
