@@ -48,7 +48,9 @@ export default function Home() {
 
   const [coinbaseHostedUrl, setCoinbaseHostedUrl] = useState<string | null>(null);
   const [coinbaseChargeId, setCoinbaseChargeId] = useState<string | null>(null);
-  const [paymentStatus, setPaymentStatus] = useState<"pending" | "confirmed" | "failed">("pending");
+  const [paymentStatus, setPaymentStatus] = useState<
+  "pending" | "processing" | "confirmed" | "failed"
+>("pending");
   const [isCharging, setIsCharging] = useState(false);
 
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -131,11 +133,19 @@ useEffect(() => {
         const updated = payload.new as any;
 
         if (
-          updated &&
-          updated.provider_transaction_id === coinbaseChargeId
-        ) {
-          setPaymentStatus(updated.status);
-        }
+  updated &&
+  updated.provider_transaction_id === coinbaseChargeId
+) {
+  if (updated.status === "confirmed") {
+    setPaymentStatus("processing");
+
+    setTimeout(() => {
+      setPaymentStatus("confirmed");
+    }, 1200);
+  } else {
+    setPaymentStatus(updated.status);
+  }
+}
       }
     )
     .subscribe();
@@ -811,8 +821,18 @@ useEffect(() => {
     {/* Blinking Circle */}
 
     <div className="mt-4 flex items-center justify-center text-base font-medium text-gray-700">
-  <div className="w-3 h-3 rounded-full bg-yellow-500 animate-pulse mr-2"></div>
-  Waiting for Payment
+  <div
+  className={`
+    w-3 h-3 rounded-full mr-2 animate-pulse
+    ${paymentStatus === "pending" ? "bg-yellow-500" : ""}
+    ${paymentStatus === "processing" ? "bg-blue-500" : ""}
+    ${paymentStatus === "failed" ? "bg-red-500" : ""}
+  `}
+></div>
+
+{paymentStatus === "pending" && "Waiting for Payment"}
+{paymentStatus === "processing" && "Processing Payment"}
+{paymentStatus === "failed" && "Payment Failed"}
 </div>
 
   </div>
