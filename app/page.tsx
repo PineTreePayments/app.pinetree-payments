@@ -8,7 +8,7 @@ type Provider = "Shift4" | "Coinbase Commerce";
 
 function CardWrapper({ children }: { children: React.ReactNode }) {
   return (
-    <div className="bg-gray-50 rounded-2xl p-8 min-h-[380px] shadow-inner relative text-black">
+    <div className="bg-gray-50 rounded-2xl p-8 min-h-[380px] max-h-[70vh] overflow-y-auto shadow-inner relative text-black">
       {children}
     </div>
   );
@@ -788,39 +788,47 @@ useEffect(() => {
                   />
                 </div>
 
-                <div className="w-full bg-gray-100 rounded-xl p-5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-gray-700">
-                      Payment Status
-                    </span>
-                    <span
-                      className={`text-xs font-semibold ${
-                        paymentStatus === "confirmed"
-                          ? "text-green-600"
-                          : paymentStatus === "failed"
-                          ? "text-red-600"
-                          : "text-blue-600"
-                      }`}
-                    >
-                      {paymentStatus === "confirmed"
-                        ? "Confirmed"
-                        : paymentStatus === "failed"
-                        ? "Failed"
-                        : "Pending"}
-                    </span>
-                  </div>
+                {paymentStatus === "confirmed" ? (
+  <div className="flex flex-col items-center justify-center py-10">
+    <div className="w-24 h-24 rounded-full bg-green-500 flex items-center justify-center shadow-lg">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        className="h-12 w-12 text-white"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={3}
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M5 13l4 4L19 7"
+        />
+      </svg>
+    </div>
 
-                  <div className="mt-4 h-2 bg-gray-200 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        paymentStatus === "confirmed"
-                          ? "w-full bg-green-500"
-                          : paymentStatus === "failed"
-                          ? "w-full bg-red-500"
-                          : "w-1/3 bg-blue-500 animate-pulse"
-                      }`}
-                    />
-                  </div>
+    <h3 className="text-lg font-semibold mt-6 text-green-600">
+      Payment Confirmed
+    </h3>
+  </div>
+) : (
+  <>
+    <div className="w-full bg-gray-100 rounded-xl p-5">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-gray-700">
+          Waiting for payment
+        </span>
+        <span className="text-xs font-semibold text-blue-600">
+          {paymentStatus}
+        </span>
+      </div>
+
+      <div className="mt-4 h-2 bg-gray-200 rounded-full overflow-hidden">
+        <div className="h-full w-1/3 bg-blue-500 animate-pulse" />
+      </div>
+    </div>
+  </>
+)}
 
                   <div className="mt-4 flex items-center justify-center gap-2">
                     <div
@@ -841,7 +849,6 @@ useEffect(() => {
                     </span>
                   </div>
                 </div>
-              </div>
             </CardWrapper>
           )}
 
