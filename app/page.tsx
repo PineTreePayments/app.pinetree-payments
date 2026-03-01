@@ -136,19 +136,22 @@ useEffect(() => {
   updated &&
   updated.provider_transaction_id === coinbaseChargeId
 ) {
-  if (updated.status === "pending") {
+  // Pending stays yellow
+if (updated.status === "pending") {
   setPaymentStatus("pending");
 }
 
-if (updated.status === "confirmed") {
-  // show processing immediately
+// First non-pending update becomes processing (blue)
+if (updated.status !== "pending" && updated.status !== "confirmed" && updated.status !== "failed") {
   setPaymentStatus("processing");
-
-  setTimeout(() => {
-    setPaymentStatus("confirmed");
-  }, 400); // shorter = feels instant
 }
 
+// Confirmed goes green immediately
+if (updated.status === "confirmed") {
+  setPaymentStatus("confirmed");
+}
+
+// Failed goes red immediately
 if (updated.status === "failed") {
   setPaymentStatus("failed");
 }
@@ -849,30 +852,47 @@ if (updated.status === "failed") {
 {paymentStatus === "confirmed" && (
   <div className="flex flex-col items-center justify-center min-h-[350px]">
 
-    <div className="w-36 h-36 rounded-full bg-green-500 flex items-center justify-center shadow-xl transition-all duration-300 scale-110">
+    <div className="w-36 h-36 rounded-full bg-green-500 flex items-center justify-center shadow-xl">
+
       <svg
-        xmlns="http://www.w3.org/2000/svg"
-        className="h-20 w-20 text-white"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        strokeWidth={3}
+        className="w-20 h-20 text-white"
+        viewBox="0 0 52 52"
       >
+        <circle
+          cx="26"
+          cy="26"
+          r="25"
+          fill="none"
+        />
         <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M5 13l4 4L19 7"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="4"
+          d="M14 27l7 7 16-16"
+          className="checkmark"
         />
       </svg>
+
     </div>
 
-    <h3 className="text-2xl font-semibold mt-6 text-green-600 text-center">
+    <p className="mt-6 text-lg font-semibold text-gray-800">
       Payment Confirmed
-    </h3>
-
+    </p>
   </div>
 )}
+<style jsx>{`
+  .checkmark {
+    stroke-dasharray: 48;
+    stroke-dashoffset: 48;
+    animation: draw 0.6s ease forwards;
+  }
 
+  @keyframes draw {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+`}</style>
 
                 </div>
             </CardWrapper>
