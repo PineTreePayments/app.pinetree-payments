@@ -842,13 +842,13 @@ useEffect(() => {
                           : "bg-blue-500 animate-pulse"
                       }`}
                     />
-                    <span className="text-xs text-gray-600">
-                      {paymentStatus === "confirmed"
-                        ? "Payment confirmed."
-                        : paymentStatus === "failed"
-                        ? "Payment failed or expired."
-                        : "Waiting for payment confirmation..."}
-                    </span>
+                    {paymentStatus !== "confirmed" && (
+  <span className="text-xs text-gray-600">
+    {paymentStatus === "failed"
+      ? "Payment failed or expired."
+      : "Waiting for payment confirmation..."}
+  </span>
+)}
                   </div>
                 </div>
             </CardWrapper>
