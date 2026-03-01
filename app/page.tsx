@@ -46,6 +46,7 @@ export default function Home() {
   const [isCharging, setIsCharging] = useState(false);
 
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [selectedTx, setSelectedTx] = useState<any | null>(null);
 
   const formatCurrency = (value: number) =>
     (value / 100).toLocaleString("en-US", {
@@ -790,9 +791,33 @@ useEffect(() => {
   </div>
 )}
 
-                {paymentStatus === "confirmed" ? (
+                {/* Pending State */}
+{paymentStatus !== "confirmed" && (
+  <div className="flex flex-col items-center justify-center mt-6">
+
+    {/* Blinking Circle */}
+    <div
+      className="
+  w-28 h-28 rounded-full flex items-center justify-center
+  bg-yellow-500 text-white text-lg font-semibold
+  animate-[pulse_1s_ease-in-out_infinite]
+"
+    >
+      ...
+    </div>
+
+    <div className="mt-4 text-base font-medium text-gray-700">
+      Waiting for Payment
+    </div>
+
+  </div>
+)}
+
+{/* Confirmed State */}
+{paymentStatus === "confirmed" && (
   <div className="flex flex-col items-center justify-center min-h-[350px]">
-    <div className="w-36 h-36 rounded-full bg-green-500 flex items-center justify-center shadow-xl">
+
+    <div className="w-36 h-36 rounded-full bg-green-500 flex items-center justify-center shadow-xl transition-all duration-300 scale-110">
       <svg
         xmlns="http://www.w3.org/2000/svg"
         className="h-20 w-20 text-white"
@@ -812,24 +837,8 @@ useEffect(() => {
     <h3 className="text-2xl font-semibold mt-6 text-green-600 text-center">
       Payment Confirmed
     </h3>
-  </div>
-) : (
-  <>
-    <div className="w-full bg-gray-100 rounded-xl p-5">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-gray-700">
-          Waiting for payment
-        </span>
-        <span className="text-xs font-semibold text-blue-600">
-          {paymentStatus}
-        </span>
-      </div>
 
-      <div className="mt-4 h-2 bg-gray-200 rounded-full overflow-hidden">
-        <div className="h-full w-1/3 bg-blue-500 animate-pulse" />
-      </div>
-    </div>
-  </>
+  </div>
 )}
 
 
@@ -847,10 +856,11 @@ useEffect(() => {
 ) : (
   <div className="space-y-3">
     {transactions.map((tx) => (
-      <div
-        key={tx.id}
-        className="p-3 bg-gray-100 rounded-xl flex justify-between items-center"
-      >
+  <div
+    key={tx.id}
+    onClick={() => setSelectedTx(tx)}
+    className="p-3 bg-gray-100 rounded-xl flex justify-between items-center cursor-pointer hover:bg-gray-200 transition"
+  >
         <div>
           <div className="font-semibold text-sm">
             ${formatCurrency(tx.total_amount)}
@@ -873,6 +883,83 @@ useEffect(() => {
         </div>
       </div>
     ))}
+  </div>
+)}
+{selectedTx && (
+  <div className="mt-6 bg-white border border-gray-200 rounded-2xl p-5 shadow-md animate-fade-in">
+
+    <div className="flex justify-between items-center mb-4">
+      <h3 className="text-lg font-semibold">Transaction Details</h3>
+      <button
+        onClick={() => setSelectedTx(null)}
+        className="text-sm text-gray-500 hover:text-black"
+      >
+        Close
+      </button>
+    </div>
+
+    <div className="space-y-3 text-sm">
+
+      <div className="flex justify-between">
+        <span className="text-gray-500">Amount</span>
+        <span className="font-semibold">
+          ${formatCurrency(selectedTx.total_amount)}
+        </span>
+      </div>
+
+      <div className="flex justify-between">
+        <span className="text-gray-500">Status</span>
+        <span className={`font-semibold ${
+          selectedTx.status === "confirmed"
+            ? "text-green-600"
+            : selectedTx.status === "failed"
+            ? "text-red-600"
+            : "text-blue-600"
+        }`}>
+          {selectedTx.status}
+        </span>
+      </div>
+
+      <div className="flex justify-between">
+        <span className="text-gray-500">Created</span>
+        <span>{new Date(selectedTx.created_at).toLocaleString()}</span>
+      </div>
+
+      {selectedTx.provider && (
+        <div className="flex justify-between">
+          <span className="text-gray-500">Provider</span>
+          <span>{selectedTx.provider}</span>
+        </div>
+      )}
+
+      {selectedTx.network && (
+        <div className="flex justify-between">
+          <span className="text-gray-500">Network</span>
+          <span>{selectedTx.network}</span>
+        </div>
+      )}
+
+      {selectedTx.provider_transaction_id && (
+        <div className="flex flex-col">
+          <span className="text-gray-500 mb-1">Transaction ID</span>
+          <div className="flex items-center justify-between bg-gray-100 rounded-lg px-3 py-2">
+            <span className="truncate text-xs">
+              {selectedTx.provider_transaction_id}
+            </span>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(selectedTx.provider_transaction_id);
+                showToast("Copied to clipboard", "success");
+              }}
+              className="text-xs text-blue-600 hover:underline ml-2"
+            >
+              Copy
+            </button>
+          </div>
+        </div>
+      )}
+
+    </div>
   </div>
 )}
             </CardWrapper>
