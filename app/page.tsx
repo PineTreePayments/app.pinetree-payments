@@ -417,21 +417,35 @@ const resetPaymentState = () => {
 };
 
     const handleShift4Apply = async () => {
-    try {
-      const res = await fetch("/api/shift4/apply", { method: "POST" });
-      const data = await res.json();
-
-      if (!data?.url) {
-        showToast("Unable to start Shift4 application", "error");
-        return;
-      }
-
-      setShift4Url(data.url);
-      setShowShift4Modal(true);
-    } catch {
-      showToast("Shift4 connection error", "error");
+  try {
+    if (!session?.user?.email) {
+      showToast("User email not found", "error");
+      return;
     }
-  };
+
+    const res = await fetch("/api/shift4/apply", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email: session.user.email,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || !data?.url) {
+      showToast("Unable to start Shift4 application", "error");
+      return;
+    }
+
+    setShift4Url(data.url);
+    setShowShift4Modal(true);
+  } catch {
+    showToast("Shift4 connection error", "error");
+  }
+};
 
   const fetchTransactions = async () => {
   if (!session?.user?.id) return;
