@@ -787,7 +787,7 @@ const keypadSmallBtnClass =
           {currentPage === "pos" && (
             <CardWrapper>
               <div className="flex flex-col justify-between min-h-[460px] max-w-[320px] mx-auto w-full">
-                <div className="text-4xl font-semibold mb-8 text-black">
+                <div className="text-4xl font-semibold mb-8 text-black text-center">
                   ${formatCurrency(cents)}
                 </div>
 
