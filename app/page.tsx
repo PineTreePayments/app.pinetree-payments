@@ -62,6 +62,19 @@ const [timeLeft, setTimeLeft] = useState<number | null>(null);
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
+const msToClock = (ms: number) => {
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+};
+
+// Smooth fade green -> red as time runs out
+const timerColor = (ms: number, totalMs = 7 * 60 * 1000) => {
+  const t = Math.max(0, Math.min(1, ms / totalMs)); // 1 -> 0
+  const hue = 120 * t; // 120 (green) down to 0 (red)
+  return `hsl(${hue}, 85%, 45%)`;
+};
 
   const showToast = (msg: string, kind: "error" | "success" = "error") => {
     setToast({ msg, kind });
@@ -124,6 +137,16 @@ useEffect(() => {
 
     if (remaining === 0) {
       clearInterval(interval);
+
+      // Immediately reflect expiration in UI
+      setPaymentStatus("expired");
+
+      // Update database status
+      supabase
+        .from("transactions")
+        .update({ status: "expired" })
+        .eq("provider_transaction_id", coinbaseChargeId)
+        .eq("status", "pending");
     }
   }, 1000);
 
@@ -876,39 +899,42 @@ const resetPaymentState = () => {
 
                 {/* Pending State */}
 {paymentStatus !== "confirmed" && (
-  <div className="flex flex-col items-center justify-center mt-6">
+  <div className="mt-6 flex justify-center">
+    <div className="w-full max-w-sm">
+      <div className="flex items-center justify-between">
 
-    {/* Blinking Circle */}
+        {/* Left side */}
+        <div className="flex items-center gap-2 text-base font-medium text-gray-700">
+          <div
+            className={`
+              w-3 h-3 rounded-full animate-pulse
+              ${paymentStatus === "pending" ? "bg-yellow-500" : ""}
+              ${paymentStatus === "processing" ? "bg-blue-500" : ""}
+              ${paymentStatus === "failed" ? "bg-red-500" : ""}
+            `}
+          />
+          <span>
+            {paymentStatus === "pending" && "Waiting for Payment"}
+            {paymentStatus === "processing" && "Processing Payment"}
+            {paymentStatus === "failed" && "Payment Failed"}
+          </span>
+        </div>
 
-    <div className="mt-4 flex items-center justify-center text-base font-medium text-gray-700">
-  <div
-  className={`
-    w-3 h-3 rounded-full mr-2 animate-pulse
-    ${paymentStatus === "pending" ? "bg-yellow-500" : ""}
-    ${paymentStatus === "processing" ? "bg-blue-500" : ""}
-    ${paymentStatus === "failed" ? "bg-red-500" : ""}
-  `}
-></div>
+        {/* Timer */}
+        {paymentStatus === "pending" && timeLeft !== null && (
+          <div
+            className="text-sm font-semibold tabular-nums"
+            style={{
+              color: `hsl(${120 * (timeLeft / (7 * 60 * 1000))}, 85%, 45%)`
+            }}
+          >
+            Expires in {Math.floor(timeLeft / 60000)}:
+            {String(Math.floor((timeLeft % 60000) / 1000)).padStart(2, "0")}
+          </div>
+        )}
 
-{paymentStatus === "pending" && "Waiting for Payment"}
-{paymentStatus === "pending" && timeLeft !== null && (
-  <div
-    className={`mt-2 text-xs text-center w-full font-medium ${
-      timeLeft > 4 * 60 * 1000
-        ? "text-green-600"
-        : timeLeft > 60 * 1000
-        ? "text-yellow-500"
-        : "text-red-600"
-    }`}
-  >
-    Expires in {Math.floor(timeLeft / 60000)}:
-    {String(Math.floor((timeLeft % 60000) / 1000)).padStart(2, "0")}
-  </div>
-)}
-{paymentStatus === "processing" && "Processing Payment"}
-{paymentStatus === "failed" && "Payment Failed"}
-</div>
-
+      </div>
+    </div>
   </div>
 )}
 
