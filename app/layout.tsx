@@ -20,15 +20,13 @@ export const metadata: Metadata = {
   description:
     "Crypto-enabled merchant POS platform for modern businesses. Accept digital assets seamlessly in-store and online.",
 
-  metadataBase: new URL("https://pos.pinetree-payments.com"), // change if needed
-
-  
+  metadataBase: new URL("https://pos.pinetree-payments.com"),
 
   openGraph: {
     title: "PineTree Payments",
     description:
       "Crypto-enabled merchant POS platform for modern businesses.",
-    url: "https://pinetree-payments.com", // change if needed
+    url: "https://pos.pinetree-payments.com",
     siteName: "PineTree Payments",
     images: [
       {
@@ -53,11 +51,14 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
     <html lang="en">
+      <head>
+        <link rel="icon" type="image/png" href="/favicon.png" />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
