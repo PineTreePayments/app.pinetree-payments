@@ -14,7 +14,7 @@ type Provider = "Shift4" | "Coinbase Commerce";
 
 function CardWrapper({ children }: { children: React.ReactNode }) {
   return (
-    <div className="bg-gray-50 rounded-2xl p-8 min-h-[380px] max-h-[70vh] overflow-y-auto shadow-inner relative text-black">
+    <div className="bg-gray-50 rounded-2xl p-8 min-h-[420px] shadow-inner relative text-black flex flex-col justify-center">
       {children}
     </div>
   );
