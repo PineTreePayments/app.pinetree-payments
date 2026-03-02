@@ -959,12 +959,14 @@ const resetPaymentState = () => {
 
         <div
           className={`text-xs font-semibold ${
-            tx.status === "confirmed"
-              ? "text-green-600"
-              : tx.status === "failed"
-              ? "text-red-600"
-              : "text-blue-600"
-          }`}
+  tx.status === "confirmed"
+    ? "text-green-600"
+    : tx.status === "failed"
+    ? "text-red-600"
+    : tx.status === "expired"
+    ? "text-gray-500"
+    : "text-blue-600"
+}`}
         >
           {tx.status}
         </div>
@@ -996,12 +998,14 @@ const resetPaymentState = () => {
         <span className="text-gray-500">Status</span>
         <span
           className={`font-semibold ${
-            selectedTx.status === "confirmed"
-              ? "text-green-600"
-              : selectedTx.status === "failed"
-              ? "text-red-600"
-              : "text-blue-600"
-          }`}
+  selectedTx.status === "confirmed"
+    ? "text-green-600"
+    : selectedTx.status === "failed"
+    ? "text-red-600"
+    : selectedTx.status === "expired"
+    ? "text-gray-500"
+    : "text-blue-600"
+}`}
         >
           {selectedTx.status}
         </span>
