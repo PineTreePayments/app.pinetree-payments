@@ -908,44 +908,41 @@ const resetPaymentState = () => {
   </div>
 )}
 
-                {/* Pending State */}
+                {/* Pending / Processing / Failed State */}
 {paymentStatus !== "confirmed" && (
-  <div className="mt-6 flex justify-center">
-    <div className="w-full max-w-sm">
-      <div className="flex flex-col items-center gap-2">
+  <div className="mt-6 flex flex-col items-center text-center gap-2">
 
-        {/* Left side */}
-        <div className="flex items-center gap-2 text-base font-medium text-gray-700">
-          <div
-            className={`
-              w-3 h-3 rounded-full animate-pulse
-              ${paymentStatus === "pending" ? "bg-yellow-500" : ""}
-              ${paymentStatus === "processing" ? "bg-blue-500" : ""}
-              ${paymentStatus === "failed" ? "bg-red-500" : ""}
-            `}
-          />
-          <span>
-            {paymentStatus === "pending" && "Waiting for Payment"}
-            {paymentStatus === "processing" && "Processing Payment"}
-            {paymentStatus === "failed" && "Payment Failed"}
-          </span>
-        </div>
-
-        {/* Timer */}
-        {paymentStatus === "pending" && timeLeft !== null && (
-          <div
-            className="text-sm font-semibold tabular-nums"
-            style={{
-              color: `hsl(${120 * (timeLeft / (7 * 60 * 1000))}, 85%, 45%)`
-            }}
-          >
-            Expires in {Math.floor(timeLeft / 60000)}:
-            {String(Math.floor((timeLeft % 60000) / 1000)).padStart(2, "0")}
-          </div>
-        )}
-
-      </div>
+    {/* Status Row */}
+    <div className="flex items-center gap-2 text-base font-medium text-gray-700">
+      <div
+        className={`
+          w-3 h-3 rounded-full animate-pulse
+          ${paymentStatus === "pending" ? "bg-yellow-500" : ""}
+          ${paymentStatus === "processing" ? "bg-blue-500" : ""}
+          ${paymentStatus === "failed" ? "bg-red-500" : ""}
+        `}
+      />
+      <span>
+        {paymentStatus === "pending" && "Waiting for Payment"}
+        {paymentStatus === "processing" && "Processing Payment"}
+        {paymentStatus === "failed" && "Payment Failed"}
+      </span>
     </div>
+
+    {/* Timer (only while pending) */}
+    {paymentStatus === "pending" && timeLeft !== null && (
+      <div
+        className="text-sm font-semibold tabular-nums"
+        style={{
+          color: `hsl(${120 * (timeLeft / (7 * 60 * 1000))}, 85%, 45%)`
+        }}
+      >
+        Expires in {Math.floor(timeLeft / 60000)}:
+        {String(Math.floor((timeLeft % 60000) / 1000)).padStart(2, "0")}
+      </div>
+    )}
+
+
   </div>
 )}
 
