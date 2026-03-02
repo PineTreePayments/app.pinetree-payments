@@ -22,11 +22,7 @@ export const metadata: Metadata = {
 
   metadataBase: new URL("https://pinetree-payments.com"), // change if needed
 
-  icons: {
-    icon: "/favicon.png",
-    shortcut: "/favicon.png",
-    apple: "/favicon.png",
-  },
+  
 
   openGraph: {
     title: "PineTree Payments",
