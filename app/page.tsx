@@ -154,6 +154,17 @@ useEffect(() => {
 }, [coinbaseChargeId, paymentStatus]);
 
 useEffect(() => {
+  if (paymentStatus === "confirmed" || paymentStatus === "expired") {
+    const timeout = setTimeout(() => {
+      resetPaymentState();
+      setCurrentPage("pos");
+    }, 3000); // 3 seconds
+
+    return () => clearTimeout(timeout);
+  }
+}, [paymentStatus]);
+
+useEffect(() => {
   if (!session?.user?.id) return;
 
   const channel = supabase
@@ -901,7 +912,7 @@ const resetPaymentState = () => {
 {paymentStatus !== "confirmed" && (
   <div className="mt-6 flex justify-center">
     <div className="w-full max-w-sm">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col items-center gap-2">
 
         {/* Left side */}
         <div className="flex items-center gap-2 text-base font-medium text-gray-700">
