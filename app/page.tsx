@@ -14,7 +14,7 @@ type Provider = "Shift4" | "Coinbase Commerce";
 
 function CardWrapper({ children }: { children: React.ReactNode }) {
   return (
-    <div className="bg-gray-50 rounded-2xl p-8 min-h-[420px] shadow-inner relative text-black">
+    <div className="bg-gray-50 rounded-2xl shadow-inner p-6 min-h-[500px] flex flex-col">
       {children}
     </div>
   );
@@ -786,7 +786,7 @@ const resetPaymentState = () => {
 
           {currentPage === "pos" && (
             <CardWrapper>
-              <div className="flex flex-col justify-between min-h-[460px]">
+              <div className="flex flex-col justify-between min-h-[460px] max-w-[320px] mx-auto w-full">
                 <div className="text-4xl font-semibold mb-8 text-black">
                   ${formatCurrency(cents)}
                 </div>
