@@ -265,7 +265,19 @@ if (updated.status === "failed") {
     setApiKey("");
     setApiConnected(false);
   };
+const cancelPendingTransaction = async () => {
+  if (!coinbaseChargeId) return;
 
+  try {
+    await supabase
+      .from("transactions")
+      .update({ status: "failed" })
+      .eq("provider_transaction_id", coinbaseChargeId)
+      .eq("status", "pending");
+  } catch (err) {
+    console.error("Failed to cancel transaction");
+  }
+};
 const resetPaymentState = () => {
   setCents(0);
   setCoinbaseHostedUrl(null);
@@ -582,9 +594,10 @@ const resetPaymentState = () => {
       if (currentPage === "transactionDetail") {
         setCurrentPage("transactions");
            } else {
-        resetPaymentState();
-        goTo("pos");
-      }
+  cancelPendingTransaction();
+  resetPaymentState();
+  goTo("pos");
+}
     }}
     className="text-base font-semibold text-black hover:text-blue-600 transition -tracking-[1px]"
   >
