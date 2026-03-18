@@ -6,6 +6,7 @@ type GenerateSplitPaymentInput = {
   pinetreeWallet: string
   pinetreeFee: number
   network: string
+  paymentId?: string
 }
 
 export async function generateSplitPayment(
@@ -16,12 +17,24 @@ export async function generateSplitPayment(
   const totalAmount = merchantAmount + pinetreeFee
 
   /* --------------------------------
+  BASE URL (PRODUCTION SAFE)
+  -------------------------------- */
+
+  const BASE_URL =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    "https://app.pinetree-payments.com"
+
+  const returnUrl = `${BASE_URL}/solana-return`
+
+  /* --------------------------------
   BUILD STRUCTURED PAYMENT PAYLOAD
   -------------------------------- */
 
   const payload = {
     type: "pinetree_split_payment",
     network: input.network,
+    reference: input.paymentId || crypto.randomUUID(),
+
     outputs: [
       {
         address: input.merchantWallet,
@@ -32,7 +45,11 @@ export async function generateSplitPayment(
         amount: pinetreeFee
       }
     ],
-    totalAmount
+
+    totalAmount,
+
+    /* 🔥 THIS IS THE FIX */
+    redirect: returnUrl
   }
 
   const payloadString = JSON.stringify(payload)

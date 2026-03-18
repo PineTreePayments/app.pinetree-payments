@@ -120,7 +120,8 @@ export async function createPayment(input: CreatePaymentInput) {
     merchantAmount,
     pinetreeWallet,
     pinetreeFee,
-    network
+    network,
+    paymentId
   })
 
   /* ---------------------------
