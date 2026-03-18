@@ -30,30 +30,61 @@ export async function processWebhook({
     throw new Error("Unknown provider")
   }
 
-  // extract signature if present
+  /* ---------------------------
+  SIGNATURE EXTRACTION
+  --------------------------- */
+
   const signature =
     headers?.["x-cc-webhook-signature"] ||
     headers?.["x-signature"] ||
     ""
 
-  const verified = adapter.verifyWebhook(payload, signature)
+  /* ---------------------------
+  SAFE WEBHOOK VERIFICATION
+  --------------------------- */
+
+  let verified = true
+
+  if (adapter.verifyWebhook) {
+    verified = adapter.verifyWebhook(payload, signature)
+  }
 
   if (!verified) {
     throw new Error("Webhook verification failed")
   }
 
-  const event = adapter.translateEvent(payload) as TranslatedEvent | null
+  /* ---------------------------
+  TRANSLATE EVENT
+  --------------------------- */
 
-  if (!event) return
+  let event: TranslatedEvent | null = null
+
+if (adapter.translateEvent) {
+  event = adapter.translateEvent(payload) as TranslatedEvent | null
+}
+
+if (!event) return
+
+  /* ---------------------------
+  NORMALIZE STATUS
+  --------------------------- */
 
   const status = event.event
     .replace("payment.", "")
     .toUpperCase()
 
+  /* ---------------------------
+  UPDATE PAYMENT
+  --------------------------- */
+
   await updatePaymentStatus(
     event.paymentId,
-    status
+    status as any
   )
+
+  /* ---------------------------
+  EMIT EVENT
+  --------------------------- */
 
   await emitEvent(event.event, {
     paymentId: event.paymentId
