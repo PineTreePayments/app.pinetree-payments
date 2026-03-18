@@ -1,4 +1,4 @@
-import { supabase } from "../providers/supabase"
+import { supabase } from "@/lib/database/supabase"
 
 type PaymentEventInput = {
   paymentId: string
