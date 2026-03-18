@@ -1,5 +1,5 @@
-import POSLayout from "../components/pos/POSLayout";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return <POSLayout locked={false} />;
+  redirect("/login");
 }
