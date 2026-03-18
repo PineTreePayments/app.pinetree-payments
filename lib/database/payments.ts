@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/providers/supabase"
+import { supabase } from "@/lib/database/supabase"
 
 export async function createPaymentRecord(payment: any) {
 
