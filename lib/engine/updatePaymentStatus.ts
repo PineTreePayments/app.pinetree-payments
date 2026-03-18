@@ -18,7 +18,7 @@ export async function updatePaymentStatus(
 
   const currentStatus = payment.status
 
-  assertValidTransition(currentStatus, nextStatus)
+  assertValidTransition(currentStatus as any, nextStatus as any)
 
   await supabase
     .from("payments")
