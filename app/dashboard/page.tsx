@@ -26,6 +26,9 @@ export default function DashboardPage() {
 
   const [walletValue,setWalletValue] = useState(0)
 
+  // ✅ NEW
+  const [lastRun,setLastRun] = useState<string | null>(null)
+
   useEffect(()=>{
 
     async function loadStats(){
@@ -37,18 +40,18 @@ export default function DashboardPage() {
       /* LOAD TRANSACTIONS */
 
       const { data: tx } = await supabase
-      .from("transactions")
-      .select(`
-        id,
-        status,
-        network,
-        created_at,
-        payments (
-          subtotal_amount
-        )
-      `)
-      .eq("merchant_id", user.id)
-      .order("created_at",{ ascending:false })
+        .from("transactions")
+        .select(`
+          id,
+          status,
+          network,
+          created_at,
+          payments (
+            subtotal_amount
+          )
+        `)
+        .eq("merchant_id", user.id)
+        .order("created_at",{ ascending:false })
 
       if(tx){
 
@@ -125,7 +128,7 @@ export default function DashboardPage() {
       setProviders(count ?? 0)
 
 
-      /* LOAD WALLET BALANCES (FIXED + ROBUST) */
+      /* LOAD WALLET BALANCES */
 
       const { data: balances, error } = await supabase
         .from("wallet_balances")
@@ -144,12 +147,10 @@ export default function DashboardPage() {
           const asset = String(b.asset || "").toUpperCase()
           const value = Number(b.balance ?? 0) || 0
 
-          // SOL variants
           if(asset === "SOL" || asset === "SOLANA"){
             total += value * 150
           }
 
-          // ETH / BASE variants
           if(
             asset === "ETH" ||
             asset === "ETHEREUM" ||
@@ -166,9 +167,26 @@ export default function DashboardPage() {
         setWalletValue(0)
       }
 
+
+      /* ✅ LOAD CRON STATUS */
+
+      const { data: system } = await supabase
+        .from("system_status")
+        .select("*")
+        .single()
+
+      if(system){
+        setLastRun(system.last_run)
+      }
+
     }
 
     loadStats()
+
+    // ✅ AUTO REFRESH EVERY 15 SECONDS
+    const interval = setInterval(loadStats,15000)
+
+    return () => clearInterval(interval)
 
   },[])
 
@@ -178,9 +196,14 @@ export default function DashboardPage() {
 
     <div className="p-8 bg-gray-100 min-h-screen">
 
-      <h1 className="text-2xl font-semibold text-gray-900 mb-8">
+      <h1 className="text-2xl font-semibold text-gray-900 mb-2">
         Overview
       </h1>
+
+      {/* ✅ LAST UPDATED */}
+      <p className="text-sm text-gray-500 mb-6">
+        Last system update: {lastRun ? new Date(lastRun).toLocaleString() : "Loading..."}
+      </p>
 
 
       {/* WALLET TREASURY CARD */}
@@ -219,54 +242,31 @@ export default function DashboardPage() {
       <div className="grid grid-cols-4 gap-6 mb-10">
 
         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-
-          <p className="text-sm text-gray-500 mb-1">
-            Total Volume
-          </p>
-
+          <p className="text-sm text-gray-500 mb-1">Total Volume</p>
           <p className="text-3xl font-semibold text-gray-900">
             ${volume.toFixed(2)}
           </p>
-
         </div>
 
-
         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-
-          <p className="text-sm text-gray-500 mb-1">
-            Transactions
-          </p>
-
+          <p className="text-sm text-gray-500 mb-1">Transactions</p>
           <p className="text-3xl font-semibold text-gray-900">
             {txCount}
           </p>
-
         </div>
 
-
         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-
-          <p className="text-sm text-gray-500 mb-1">
-            Success Rate
-          </p>
-
+          <p className="text-sm text-gray-500 mb-1">Success Rate</p>
           <p className="text-3xl font-semibold text-gray-900">
             {successRate}%
           </p>
-
         </div>
 
-
         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-
-          <p className="text-sm text-gray-500 mb-1">
-            Active Providers
-          </p>
-
+          <p className="text-sm text-gray-500 mb-1">Active Providers</p>
           <p className="text-3xl font-semibold text-gray-900">
             {providers}
           </p>
-
         </div>
 
       </div>
@@ -338,7 +338,6 @@ export default function DashboardPage() {
             <table className="w-full text-sm">
 
               <thead className="text-left text-gray-500 border-b">
-
                 <tr>
                   <th className="py-2">Transaction</th>
                   <th className="py-2">Amount</th>
@@ -346,7 +345,6 @@ export default function DashboardPage() {
                   <th className="py-2">Status</th>
                   <th className="py-2">Time</th>
                 </tr>
-
               </thead>
 
               <tbody>
@@ -358,11 +356,11 @@ export default function DashboardPage() {
                     : tx.payments
 
                   const statusColor =
-                  tx.status === "CONFIRMED"
-                    ? "text-green-600"
-                    : tx.status === "FAILED"
-                    ? "text-red-600"
-                    : "text-yellow-600"
+                    tx.status === "CONFIRMED"
+                      ? "text-green-600"
+                      : tx.status === "FAILED"
+                      ? "text-red-600"
+                      : "text-yellow-600"
 
                   return(
 
