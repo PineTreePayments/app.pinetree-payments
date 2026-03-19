@@ -4,19 +4,11 @@ import { supabase } from "@/lib/supabaseClient"
 export async function GET() {
   try {
 
-    /* =========================
-       1. GET ALL MERCHANT WALLETS
-    ========================= */
-
     const { data: wallets, error } = await supabase
       .from("merchant_wallets")
       .select("*")
 
     if (error) throw error
-
-    /* =========================
-       2. LOOP THROUGH WALLETS
-    ========================= */
 
     for (const wallet of wallets || []) {
 
@@ -27,29 +19,65 @@ export async function GET() {
 
       try {
 
+        let balance = 0
+
         /* =========================
-           3. CALL YOUR EXISTING API
+           SOLANA
         ========================= */
 
-        const res = await fetch(
-          `${process.env.NEXT_PUBLIC_APP_URL}/api/wallet-balance`,
-          {
+        if (network === "solana") {
+
+          const response = await fetch("https://api.mainnet-beta.solana.com", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              address: walletAddress,
-              network,
+              jsonrpc: "2.0",
+              id: 1,
+              method: "getBalance",
+              params: [walletAddress],
             }),
-          }
-        )
+          })
 
-        const json = await res.json()
-        const balance = json.balance ?? 0
+          const data = await response.json()
+
+          const lamports = data?.result?.value ?? 0
+          balance = lamports / 1_000_000_000
+        }
 
         /* =========================
-           4. UPSERT BALANCE
+           ETH / BASE
+        ========================= */
+
+        if (network === "base" || network === "ethereum") {
+
+          const response = await fetch("https://eth.llamarpc.com", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "eth_getBalance",
+              params: [walletAddress, "latest"],
+            }),
+          })
+
+          const data = await response.json()
+          const hex = data?.result ?? "0x0"
+
+          try {
+            const wei = BigInt(hex)
+            balance = Number(wei) / 1e18
+          } catch {
+            balance = 0
+          }
+        }
+
+        /* =========================
+           STORE BALANCE
         ========================= */
 
         await supabase
