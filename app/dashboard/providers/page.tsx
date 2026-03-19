@@ -42,9 +42,7 @@ declare global {
 
 function getConnectedAndEnabledProvidersCount(providers: ProviderRecord[]) {
   return providers.filter(
-    (p) =>
-      p.enabled &&
-      (p.status === "connected" || p.status === "active")
+    (p) => p.enabled && (p.status === "connected" || p.status === "active")
   ).length
 }
 
@@ -94,9 +92,7 @@ function getInjectedBaseProvider(preferredType?: string | null) {
   }
 
   if (preferredType === "TRUST") {
-    return (
-      providers.find((p: any) => p?.isTrust || p?.isTrustWallet) || null
-    )
+    return providers.find((p: any) => p?.isTrust || p?.isTrustWallet) || null
   }
 
   return providers[0] || null
@@ -187,23 +183,51 @@ export default function ProvidersPage() {
     }
   }, [walletSessionId, activeProvider, showQr])
 
+  async function getMerchantContext() {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
+
+    if (userError || !user) {
+      toast.error("Please sign in again")
+      return null
+    }
+
+    const { data: merchant, error: merchantError } = await supabase
+      .from("merchants")
+      .select("id")
+      .eq("user_id", user.id)
+      .single()
+
+    if (merchantError || !merchant) {
+      console.error("Merchant lookup failed:", merchantError)
+      toast.error("Merchant not found")
+      return null
+    }
+
+    return {
+      user,
+      merchantId: merchant.id as string,
+    }
+  }
+
   async function loadAll() {
     await Promise.all([loadProvidersAndWallets(), loadSettings()])
   }
 
   async function loadProvidersAndWallets() {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const ctx = await getMerchantContext()
+    if (!ctx) return
 
-    if (!user) return
+    const { merchantId } = ctx
 
     const [
       { data: providerRows, error: providerError },
       { data: walletRows, error: walletError },
     ] = await Promise.all([
-      supabase.from("merchant_providers").select("*").eq("merchant_id", user.id),
-      supabase.from("merchant_wallets").select("*").eq("merchant_id", user.id),
+      supabase.from("merchant_providers").select("*").eq("merchant_id", merchantId),
+      supabase.from("merchant_wallets").select("*").eq("merchant_id", merchantId),
     ])
 
     if (providerError) {
@@ -223,16 +247,15 @@ export default function ProvidersPage() {
   }
 
   async function loadSettings() {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const ctx = await getMerchantContext()
+    if (!ctx) return
 
-    if (!user) return
+    const { merchantId } = ctx
 
     const { data, error } = await supabase
       .from("merchant_settings")
       .select("*")
-      .eq("merchant_id", user.id)
+      .eq("merchant_id", merchantId)
       .single()
 
     if (error) {
@@ -248,15 +271,14 @@ export default function ProvidersPage() {
   }
 
   async function updateSettings(field: string, value: boolean) {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const ctx = await getMerchantContext()
+    if (!ctx) return
 
-    if (!user) return
+    const { merchantId } = ctx
 
     const { error } = await supabase.from("merchant_settings").upsert(
       {
-        merchant_id: user.id,
+        merchant_id: merchantId,
         [field]: value,
       },
       {
@@ -332,9 +354,10 @@ export default function ProvidersPage() {
     provider: "solana" | "base",
     walletType?: string | null
   ) {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const ctx = await getMerchantContext()
+    if (!ctx) throw new Error("Merchant not found")
+
+    const { merchantId } = ctx
 
     const sessionId =
       typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -348,7 +371,7 @@ export default function ProvidersPage() {
       },
       body: JSON.stringify({
         session_id: sessionId,
-        merchant_id: user?.id || null,
+        merchant_id: merchantId,
         provider,
         wallet_type: walletType || null,
         status: "pending",
@@ -434,41 +457,40 @@ export default function ProvidersPage() {
   }
 
   async function generateSolanaQR(walletType?: string | null) {
-  try {
-    console.log("SOLANA QR START", walletType)
+    try {
+      console.log("SOLANA QR START", walletType)
 
-    if (!walletType) {
-      toast.error("Select Phantom or Solflare first")
-      return
+      if (!walletType) {
+        toast.error("Select Phantom or Solflare first")
+        return
+      }
+
+      const sessionId = await createWalletConnectSession("solana", walletType)
+      console.log("SESSION CREATED:", sessionId)
+
+      const returnUrl = buildMobileBridgeUrl("solana", walletType, sessionId)
+
+      let deeplink = ""
+
+      if (walletType === "PHANTOM") {
+        deeplink = `https://phantom.app/ul/browse/${encodeURIComponent(returnUrl)}`
+      } else {
+        deeplink = `https://solflare.com/ul/v1/browse/${encodeURIComponent(returnUrl)}`
+      }
+
+      console.log("DEEPLINK:", deeplink)
+
+      const qr = await QRCode.toDataURL(deeplink)
+
+      console.log("QR GENERATED")
+
+      setQrCode(qr)
+      setShowQr(true)
+    } catch (err) {
+      console.error("🔥 SOLANA QR ERROR:", err)
+      toast.error("Failed to generate Solana QR")
     }
-
-    const sessionId = await createWalletConnectSession("solana", walletType)
-    console.log("SESSION CREATED:", sessionId)
-
-    const returnUrl = `${window.location.origin}/solana-return?provider=solana&wallet_type=${walletType}&session_id=${sessionId}`
-
-    let deeplink = ""
-
-    if (walletType === "PHANTOM") {
-      deeplink = `https://phantom.app/ul/browse/${encodeURIComponent(returnUrl)}`
-    } else {
-      deeplink = `https://solflare.com/ul/v1/browse/${encodeURIComponent(returnUrl)}`
-    }
-
-    console.log("DEEPLINK:", deeplink)
-
-    const qr = await QRCode.toDataURL(deeplink)
-
-    console.log("QR GENERATED")
-
-    setQrCode(qr)
-    setShowQr(true)
-
-  } catch (err) {
-    console.error("🔥 SOLANA QR ERROR:", err)
-    toast.error("Failed to generate Solana QR")
   }
-}
 
   async function generateBaseWalletConnectQR() {
     const sessionId = await createWalletConnectSession("base", "BASEAPP")
@@ -538,44 +560,43 @@ export default function ProvidersPage() {
   }
 
   async function generateBaseQR() {
-  try {
-    console.log("BASE QR START", selectedWalletType)
+    try {
+      console.log("BASE QR START", selectedWalletType)
 
-    if (!selectedWalletType) {
-      toast.error("Select wallet first")
-      return
+      if (!selectedWalletType) {
+        toast.error("Select wallet first")
+        return
+      }
+
+      const sessionId = await createWalletConnectSession("base", selectedWalletType)
+      console.log("SESSION CREATED:", sessionId)
+
+      const returnUrl = buildMobileBridgeUrl("base", selectedWalletType, sessionId)
+
+      let deeplink = ""
+
+      if (selectedWalletType === "METAMASK") {
+        const dapp = returnUrl.replace(/^https?:\/\//, "")
+        deeplink = `https://link.metamask.io/dapp/${dapp}`
+      } else if (selectedWalletType === "TRUST") {
+        deeplink = `https://link.trustwallet.com/open_url?coin_id=60&url=${encodeURIComponent(returnUrl)}`
+      } else if (selectedWalletType === "BASEAPP") {
+        deeplink = `https://go.cb-w.com/dapp?cb_url=${encodeURIComponent(returnUrl)}`
+      }
+
+      console.log("DEEPLINK:", deeplink)
+
+      const qr = await QRCode.toDataURL(deeplink)
+
+      console.log("QR GENERATED")
+
+      setQrCode(qr)
+      setShowQr(true)
+    } catch (err) {
+      console.error("🔥 BASE QR ERROR:", err)
+      toast.error("Failed to generate Base QR")
     }
-
-    const sessionId = await createWalletConnectSession("base", selectedWalletType)
-    console.log("SESSION CREATED:", sessionId)
-
-    const returnUrl = `${window.location.origin}/solana-return?provider=base&wallet_type=${selectedWalletType}&session_id=${sessionId}`
-
-    let deeplink = ""
-
-    if (selectedWalletType === "METAMASK") {
-      const dapp = returnUrl.replace(/^https?:\/\//, "")
-      deeplink = `https://link.metamask.io/dapp/${dapp}`
-    } else if (selectedWalletType === "TRUST") {
-      deeplink = `https://link.trustwallet.com/open_url?coin_id=60&url=${encodeURIComponent(returnUrl)}`
-    } else if (selectedWalletType === "BASEAPP") {
-      deeplink = `https://go.cb-w.com/dapp?cb_url=${encodeURIComponent(returnUrl)}`
-    }
-
-    console.log("DEEPLINK:", deeplink)
-
-    const qr = await QRCode.toDataURL(deeplink)
-
-    console.log("QR GENERATED")
-
-    setQrCode(qr)
-    setShowQr(true)
-
-  } catch (err) {
-    console.error("🔥 BASE QR ERROR:", err)
-    toast.error("Failed to generate Base QR")
   }
-}
 
   async function fetchSolanaBalance(walletAddress: string) {
     try {
@@ -628,7 +649,7 @@ export default function ProvidersPage() {
   }
 
   async function upsertWalletRow(
-    userId: string,
+    merchantId: string,
     network: string,
     asset: string,
     walletAddress: string,
@@ -637,7 +658,7 @@ export default function ProvidersPage() {
     const { data: existing, error: existingError } = await supabase
       .from("merchant_wallets")
       .select("id")
-      .eq("merchant_id", userId)
+      .eq("merchant_id", merchantId)
       .eq("network", network)
       .maybeSingle()
 
@@ -658,7 +679,7 @@ export default function ProvidersPage() {
       if (error) throw error
     } else {
       const { error } = await supabase.from("merchant_wallets").insert({
-        merchant_id: userId,
+        merchant_id: merchantId,
         network,
         asset,
         wallet_address: walletAddress,
@@ -706,11 +727,10 @@ export default function ProvidersPage() {
     setLoading(true)
 
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+      const ctx = await getMerchantContext()
+      if (!ctx) return
 
-      if (!user) return
+      const { merchantId } = ctx
 
       let credentials: any = {}
       let walletAddress = inputValue.trim()
@@ -733,10 +753,16 @@ export default function ProvidersPage() {
           return
         }
 
-        await upsertWalletRow(user.id, "solana", `SOL-${walletType}`, walletAddress, walletType)
+        await upsertWalletRow(
+          merchantId,
+          "solana",
+          `SOL-${walletType}`,
+          walletAddress,
+          walletType
+        )
 
         const solBalance = await fetchSolanaBalance(walletAddress)
-        await syncWalletBalance(user.id, "SOL", solBalance)
+        await syncWalletBalance(merchantId, "SOL", solBalance)
 
         credentials = {
           wallet: walletAddress,
@@ -767,7 +793,7 @@ export default function ProvidersPage() {
         walletAddress = walletAddress.trim()
 
         await upsertWalletRow(
-          user.id,
+          merchantId,
           "base",
           `ETH-${walletType}`,
           walletAddress,
@@ -789,9 +815,9 @@ export default function ProvidersPage() {
 
       const { error } = await supabase.from("merchant_providers").upsert(
         {
-          merchant_id: user.id,
+          merchant_id: merchantId,
           provider,
-          status: "connected",
+          status: "active",
           enabled: true,
           credentials,
         },
@@ -847,17 +873,16 @@ export default function ProvidersPage() {
   }
 
   async function disconnect(provider: string) {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const ctx = await getMerchantContext()
+    if (!ctx) return
 
-    if (!user) return
+    const { merchantId } = ctx
 
     if (provider === "solana" || provider === "base") {
       const { error: walletDeleteError } = await supabase
         .from("merchant_wallets")
         .delete()
-        .eq("merchant_id", user.id)
+        .eq("merchant_id", merchantId)
         .eq("network", provider)
 
       if (walletDeleteError) {
@@ -870,7 +895,7 @@ export default function ProvidersPage() {
         const { error: balanceDeleteError } = await supabase
           .from("wallet_balances")
           .delete()
-          .eq("merchant_id", user.id)
+          .eq("merchant_id", merchantId)
           .eq("asset", "SOL")
 
         if (balanceDeleteError) {
@@ -885,7 +910,7 @@ export default function ProvidersPage() {
           enabled: false,
           credentials: {},
         })
-        .eq("merchant_id", user.id)
+        .eq("merchant_id", merchantId)
         .eq("provider", provider)
 
       if (providerError) {
@@ -900,7 +925,7 @@ export default function ProvidersPage() {
           status: "disconnected",
           enabled: false,
         })
-        .eq("merchant_id", user.id)
+        .eq("merchant_id", merchantId)
         .eq("provider", provider)
 
       if (error) {
@@ -915,11 +940,10 @@ export default function ProvidersPage() {
   }
 
   async function toggleProvider(provider: string, value: boolean) {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const ctx = await getMerchantContext()
+    if (!ctx) return
 
-    if (!user) return
+    const { merchantId } = ctx
 
     if (value && (provider === "solana" || provider === "base") && !getWallet(provider)) {
       toast.error("Connect wallet first")
@@ -931,7 +955,7 @@ export default function ProvidersPage() {
       .update({
         enabled: value,
       })
-      .eq("merchant_id", user.id)
+      .eq("merchant_id", merchantId)
       .eq("provider", provider)
 
     if (error) {
