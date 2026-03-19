@@ -4,29 +4,32 @@ import { supabase } from "@/lib/supabaseClient"
 export async function GET() {
   try {
 
-    /* 1. GET ALL ACTIVE WALLETS */
+    /* =========================
+       1. GET ALL MERCHANT WALLETS
+    ========================= */
 
-    const { data: providers, error } = await supabase
-      .from("merchant_providers")
+    const { data: wallets, error } = await supabase
+      .from("merchant_wallets")
       .select("*")
-      .eq("status", "active")
 
-    if (error) {
-      throw error
-    }
+    if (error) throw error
 
-    /* 2. LOOP THROUGH WALLETS */
+    /* =========================
+       2. LOOP THROUGH WALLETS
+    ========================= */
 
-    for (const provider of providers) {
+    for (const wallet of wallets || []) {
 
-      const walletAddress = provider.credentials?.wallet
-      const network = provider.provider
+      const walletAddress = wallet.wallet_address
+      const network = wallet.network
 
       if (!walletAddress || !network) continue
 
       try {
 
-        /* 3. CALL YOUR EXISTING API */
+        /* =========================
+           3. CALL YOUR EXISTING API
+        ========================= */
 
         const res = await fetch(
           `${process.env.NEXT_PUBLIC_APP_URL}/api/wallet-balance`,
@@ -45,12 +48,14 @@ export async function GET() {
         const json = await res.json()
         const balance = json.balance ?? 0
 
-        /* 4. STORE IN DB */
+        /* =========================
+           4. UPSERT BALANCE
+        ========================= */
 
         await supabase
           .from("wallet_balances")
           .upsert({
-            merchant_id: provider.merchant_id,
+            merchant_id: wallet.merchant_id,
             asset: network.toUpperCase(),
             balance,
             last_updated: new Date().toISOString(),
@@ -64,7 +69,7 @@ export async function GET() {
     return NextResponse.json({ success: true })
 
   } catch (err) {
-    console.error("cron error:", err)
+    console.error("Cron route error:", err)
     return NextResponse.json({ success: false })
   }
 }

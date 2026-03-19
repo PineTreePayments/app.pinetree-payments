@@ -2,40 +2,54 @@
 
 import { useEffect, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
-import { getSolanaBalance, getEthereumBalance } from "@/lib/walletBalances"
 
 /* =========================
 TYPES
 ========================= */
 
+type WalletRow = {
+  id: string
+  network: string
+  wallet_address: string
+  wallet_type?: string | null
+  provider?: string | null
+}
+
+type BalanceRow = {
+  asset: string
+  balance: number | string | null
+}
+
 type Wallet = {
-  id:string
-  network:string
-  provider:string | null
-  wallet_address:string
-  balance?:number
+  id: string
+  network: string
+  provider: string | null
+  wallet_address: string
+  balance?: number
 }
 
 /* =========================
 FORMAT PROVIDER NAME
 ========================= */
 
-function formatProvider(name?: string | null, network?: string){
+function formatProvider(name?: string | null, network?: string) {
+  const normalized = String(name || "").toLowerCase()
 
-  const map:any = {
+  const map: any = {
     phantom: "Phantom",
     solflare: "Solflare",
     metamask: "MetaMask",
     trust: "Trust Wallet",
     coinbase: "Coinbase Wallet",
-    base: "Base Wallet"
+    base: "Base Wallet",
+    baseapp: "Base Wallet"
   }
 
-  if(name && map[name]) return map[name]
+  if (normalized && map[normalized]) return map[normalized]
 
-  if(network === "solana") return "Phantom"
-  if(network === "base") return "Base Wallet"
-  if(network === "ethereum") return "MetaMask"
+  if (network === "solana") return "Phantom"
+  if (network === "base") return "Base Wallet"
+  if (network === "ethereum") return "MetaMask"
 
   return "Connected"
 }
@@ -44,62 +58,100 @@ function formatProvider(name?: string | null, network?: string){
 PAGE
 ========================= */
 
-export default function WalletsPage(){
+export default function WalletsPage() {
+  const [wallets, setWallets] = useState<Wallet[]>([])
+  const [totalBalance, setTotalBalance] = useState(0)
 
-  const [wallets,setWallets] = useState<Wallet[]>([])
-  const [totalBalance,setTotalBalance] = useState(0)
-
-  useEffect(()=>{
+  useEffect(() => {
     loadAll()
-  },[])
+  }, [])
 
-  async function loadAll(){
+  async function loadAll() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
 
-    const { data:{ user } } = await supabase.auth.getUser()
-    if(!user) return
+    const [{ data: walletRows, error: walletError }, { data: balanceRows, error: balanceError }] =
+      await Promise.all([
+        supabase
+          .from("merchant_wallets")
+          .select("*")
+          .eq("merchant_id", user.id),
+        supabase
+          .from("wallet_balances")
+          .select("asset, balance")
+          .eq("merchant_id", user.id)
+      ])
 
-    const { data: walletRows } = await supabase
-      .from("merchant_wallets")
-      .select("*")
-      .eq("merchant_id",user.id)
+    if (walletError) {
+      console.error("merchant_wallets load error:", walletError)
+      setWallets([])
+      setTotalBalance(0)
+      return
+    }
 
-    let total = 0
+    if (balanceError) {
+      console.error("wallet_balances load error:", balanceError)
+    }
 
-    const solPrice = await fetch(
-      "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
+    const balances = (balanceRows || []) as BalanceRow[]
+    const walletsData = (walletRows || []) as WalletRow[]
+
+    const solBalance =
+      Number(
+        balances.find((b) => b.asset === "SOL")?.balance ?? 0
+      ) || 0
+
+    const ethBalance =
+      Number(
+        balances.find((b) => b.asset === "ETH")?.balance ?? 0
+      ) || 0
+
+    const prices = await fetch(
+      "https://api.coingecko.com/api/v3/simple/price?ids=solana,ethereum&vs_currencies=usd"
     )
-      .then(res => res.json())
-      .then(d => d?.solana?.usd || 0)
-      .catch(()=>0)
+      .then((res) => res.json())
+      .then((d) => ({
+        sol: d?.solana?.usd || 0,
+        eth: d?.ethereum?.usd || 0
+      }))
+      .catch(() => ({
+        sol: 0,
+        eth: 0
+      }))
 
-    const enriched = await Promise.all(
-      (walletRows || []).map(async(w)=>{
+    const enriched: Wallet[] = walletsData.map((w) => {
+      let balance = 0
 
-        let balance = 0
+      if (w.network === "solana") {
+        balance = solBalance
+      }
 
-        try{
-          if(w.network === "solana"){
-            balance = await getSolanaBalance(w.wallet_address)
-            total += balance * solPrice
-          } else {
-            balance = await getEthereumBalance(w.wallet_address)
-            total += balance * 3000
-          }
-        }catch{}
+      if (w.network === "base" || w.network === "ethereum") {
+        balance = ethBalance
+      }
 
-        return {...w, balance}
-      })
-    )
+      return {
+        id: w.id,
+        network: w.network,
+        provider: w.provider || w.wallet_type || null,
+        wallet_address: w.wallet_address,
+        balance
+      }
+    })
+
+    const total =
+      solBalance * prices.sol +
+      ethBalance * prices.eth
 
     setWallets(enriched)
     setTotalBalance(total)
   }
 
   /* =========================
-UI
-========================= */
+  UI
+  ========================= */
 
-  return(
+  return (
     <div className="w-full px-8 py-10">
 
       <h1 className="text-3xl font-semibold text-black mb-8">
@@ -129,7 +181,7 @@ UI
             </p>
           )}
 
-          {wallets.map(w=>(
+          {wallets.map((w) => (
             <div key={w.id} className="flex justify-between items-center border rounded-xl p-6 min-h-[90px]">
 
               {/* LEFT */}
@@ -150,7 +202,7 @@ UI
                 </p>
 
                 <p className="text-lg text-black font-semibold">
-                  {w.balance ?? 0}
+                  {Number(w.balance ?? 0)}
                 </p>
               </div>
 
