@@ -75,6 +75,8 @@ export default function DashboardPage() {
           setSuccessRate(
             Math.round((successTx.length / totalTx) * 100)
           )
+        } else {
+          setSuccessRate(0)
         }
 
         setRecentTx(tx.slice(0,10))
@@ -123,7 +125,7 @@ export default function DashboardPage() {
       setProviders(count ?? 0)
 
 
-      /* LOAD WALLET BALANCES (FIXED) */
+      /* LOAD WALLET BALANCES (FIXED + ROBUST) */
 
       const { data: balances, error } = await supabase
         .from("wallet_balances")
@@ -139,12 +141,21 @@ export default function DashboardPage() {
 
         balances.forEach((b:any)=>{
 
-          if(b.asset === "SOL"){
-            total += Number(b.balance ?? 0) * 150
+          const asset = String(b.asset || "").toUpperCase()
+          const value = Number(b.balance ?? 0) || 0
+
+          // SOL variants
+          if(asset === "SOL" || asset === "SOLANA"){
+            total += value * 150
           }
 
-          if(b.asset === "ETH"){
-            total += Number(b.balance ?? 0) * 3000
+          // ETH / BASE variants
+          if(
+            asset === "ETH" ||
+            asset === "ETHEREUM" ||
+            asset === "BASE"
+          ){
+            total += value * 3000
           }
 
         })
