@@ -739,11 +739,30 @@ try {
   }
 
   // ===== SAVE BALANCE =====
-  await supabase.from("wallet_balances").upsert({
-    merchant_id: merchantId,
-    asset: network === "solana" ? "SOL" : "ETH",
-    balance
-  })
+  // 1. Check if row exists
+const { data: existingBalance } = await supabase
+  .from("wallet_balances")
+  .select("id")
+  .eq("merchant_id", merchantId)
+  .eq("asset", network === "solana" ? "SOL" : "ETH")
+  .single()
+
+if (existingBalance) {
+  // 2. Update
+  await supabase
+    .from("wallet_balances")
+    .update({ balance })
+    .eq("id", existingBalance.id)
+} else {
+  // 3. Insert
+  await supabase
+    .from("wallet_balances")
+    .insert({
+      merchant_id: merchantId,
+      asset: network === "solana" ? "SOL" : "ETH",
+      balance
+    })
+}
 
 } catch (err) {
   console.error("Balance fetch failed:", err)
