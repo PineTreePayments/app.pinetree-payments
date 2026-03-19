@@ -10,28 +10,33 @@ export async function GET() {
 
     if (error) throw error
 
-    for (const wallet of wallets || []) {
+    console.log("WALLETS FOUND:", wallets?.length)
+
+    if (!wallets || wallets.length === 0) {
+      return NextResponse.json({
+        success: false,
+        message: "No wallets found"
+      })
+    }
+
+    const results = []
+
+    for (const wallet of wallets) {
 
       const walletAddress = wallet.wallet_address
       const network = wallet.network
 
       if (!walletAddress || !network) continue
 
+      let balance = 0
+
       try {
 
-        let balance = 0
-
-        /* =========================
-           SOLANA
-        ========================= */
-
+        /* SOLANA */
         if (network === "solana") {
-
           const response = await fetch("https://api.mainnet-beta.solana.com", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               jsonrpc: "2.0",
               id: 1,
@@ -41,22 +46,15 @@ export async function GET() {
           })
 
           const data = await response.json()
-
           const lamports = data?.result?.value ?? 0
           balance = lamports / 1_000_000_000
         }
 
-        /* =========================
-           ETH / BASE
-        ========================= */
-
+        /* ETH / BASE */
         if (network === "base" || network === "ethereum") {
-
           const response = await fetch("https://eth.llamarpc.com", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               jsonrpc: "2.0",
               id: 1,
@@ -76,11 +74,7 @@ export async function GET() {
           }
         }
 
-        /* =========================
-           STORE BALANCE
-        ========================= */
-
-        await supabase
+        const { error: upsertError } = await supabase
           .from("wallet_balances")
           .upsert({
             merchant_id: wallet.merchant_id,
@@ -89,15 +83,31 @@ export async function GET() {
             last_updated: new Date().toISOString(),
           })
 
-      } catch (err) {
-        console.error("Balance update failed:", err)
+        results.push({
+          wallet: walletAddress,
+          network,
+          balance,
+          error: upsertError?.message || null
+        })
+
+      } catch (err: any) {
+        results.push({
+          wallet: walletAddress,
+          network,
+          error: err.message
+        })
       }
     }
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({
+      success: true,
+      results
+    })
 
-  } catch (err) {
-    console.error("Cron route error:", err)
-    return NextResponse.json({ success: false })
+  } catch (err: any) {
+    return NextResponse.json({
+      success: false,
+      error: err.message
+    })
   }
 }
