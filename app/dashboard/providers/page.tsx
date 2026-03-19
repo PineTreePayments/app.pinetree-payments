@@ -159,6 +159,14 @@ export default function ProvidersPage() {
 
           if (session.wallet_type) {
             setSelectedWalletType(session.wallet_type)
+          } else {
+            if (activeProvider === "solana") {
+              setSelectedWalletType("PHANTOM")
+            }
+
+            if (activeProvider === "base") {
+              setSelectedWalletType("BASEAPP")
+            }
           }
 
           if (!didToastSyncRef.current) {
@@ -167,6 +175,8 @@ export default function ProvidersPage() {
           }
 
           setShowQr(false)
+
+          await loadProvidersAndWallets()
 
           if (pollerRef.current) {
             clearInterval(pollerRef.current)
@@ -256,7 +266,7 @@ export default function ProvidersPage() {
       .from("merchant_settings")
       .select("*")
       .eq("merchant_id", merchantId)
-      .single()
+      .maybeSingle()
 
     if (error) {
       console.error("Failed to load settings:", error)
@@ -264,10 +274,28 @@ export default function ProvidersPage() {
       return
     }
 
-    if (data) {
-      setSmartRouting(data.smart_routing_enabled || false)
-      setAutoConversion(data.auto_conversion_enabled || false)
+    if (!data) {
+      const { error: insertError } = await supabase
+        .from("merchant_settings")
+        .insert({
+          merchant_id: merchantId,
+          smart_routing_enabled: false,
+          auto_conversion_enabled: false,
+        })
+
+      if (insertError) {
+        console.error("Failed creating settings:", insertError)
+        toast.error("Failed to initialize settings")
+        return
+      }
+
+      setSmartRouting(false)
+      setAutoConversion(false)
+      return
     }
+
+    setSmartRouting(data.smart_routing_enabled || false)
+    setAutoConversion(data.auto_conversion_enabled || false)
   }
 
   async function updateSettings(field: string, value: boolean) {
@@ -714,6 +742,7 @@ export default function ProvidersPage() {
     setSelectedWalletType(null)
     setWalletSessionId(null)
     setWalletSessionStatus(null)
+    didToastSyncRef.current = false
 
     if (pollerRef.current) {
       clearInterval(pollerRef.current)
@@ -733,7 +762,12 @@ export default function ProvidersPage() {
       const { merchantId } = ctx
 
       let credentials: any = {}
-      let walletAddress = inputValue.trim()
+      let walletAddress = (inputValue || "").trim()
+
+      if (!walletAddress && walletSessionStatus === "connected") {
+        toast.error("Wallet detected but not yet loaded. Try again.")
+        return
+      }
 
       if (provider === "solana") {
         let walletType = selectedWalletType || "MANUAL"
@@ -849,6 +883,7 @@ export default function ProvidersPage() {
       setSelectedWalletType(null)
       setWalletSessionId(null)
       setWalletSessionStatus(null)
+      didToastSyncRef.current = false
 
       if (pollerRef.current) {
         clearInterval(pollerRef.current)
@@ -1334,6 +1369,7 @@ export default function ProvidersPage() {
                   setSelectedWalletType(null)
                   setWalletSessionId(null)
                   setWalletSessionStatus(null)
+                  didToastSyncRef.current = false
 
                   if (pollerRef.current) {
                     clearInterval(pollerRef.current)
