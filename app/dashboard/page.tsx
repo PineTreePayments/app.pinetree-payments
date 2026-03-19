@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import { getSolanaBalance, getEthereumBalance } from "@/lib/walletBalances"
 
 import {
   LineChart,
@@ -116,46 +115,44 @@ export default function DashboardPage() {
       /* CONNECTED PROVIDERS */
 
       const { count } = await supabase
-      .from("merchant_providers")
-      .select("*",{ count:"exact", head:true })
-      .eq("merchant_id", user.id)
-      .eq("status","connected")
+        .from("merchant_providers")
+        .select("*",{ count:"exact", head:true })
+        .eq("merchant_id", user.id)
+        .eq("status","connected")
 
       setProviders(count ?? 0)
 
 
-      /* LOAD WALLET BALANCES */
+      /* LOAD WALLET BALANCES (FIXED) */
 
-      const { data: wallets } = await supabase
-      .from("merchant_wallets")
-      .select("*")
-      .eq("merchant_id",user.id)
+      const { data: balances, error } = await supabase
+        .from("wallet_balances")
+        .select("asset, balance")
+        .eq("merchant_id", user.id)
 
-      if(wallets){
+      if(error){
+        console.error("wallet_balances error:", error)
+        setWalletValue(0)
+      } else if(balances && balances.length > 0){
 
-        let sol = 0
-        let eth = 0
+        let total = 0
 
-        for(const w of wallets){
+        balances.forEach((b:any)=>{
 
-          if(w.network === "solana"){
-            const bal = await getSolanaBalance(w.wallet_address)
-            sol += bal
+          if(b.asset === "SOL"){
+            total += Number(b.balance ?? 0) * 150
           }
 
-          if(w.network === "base" || w.network === "ethereum"){
-            const bal = await getEthereumBalance(w.wallet_address)
-            eth += bal
+          if(b.asset === "ETH"){
+            total += Number(b.balance ?? 0) * 3000
           }
 
-        }
+        })
 
-        const estimatedValue =
-          sol * 150 +
-          eth * 3000
+        setWalletValue(total)
 
-        setWalletValue(estimatedValue)
-
+      } else {
+        setWalletValue(0)
       }
 
     }
@@ -288,19 +285,8 @@ export default function DashboardPage() {
               }
             >
 
-              <XAxis
-                dataKey="date"
-                tick={{ fill:"#6b7280", fontSize:12 }}
-                axisLine={false}
-                tickLine={false}
-              />
-
-              <YAxis
-                tick={{ fill:"#6b7280", fontSize:12 }}
-                axisLine={false}
-                tickLine={false}
-              />
-
+              <XAxis dataKey="date" />
+              <YAxis />
               <Tooltip />
 
               <Line
@@ -330,15 +316,12 @@ export default function DashboardPage() {
         </h2>
 
         {recentTx.length === 0 && (
-
           <div className="text-gray-500 text-sm">
             No transactions yet.
           </div>
-
         )}
 
         {recentTx.length > 0 && (
-
           <div className="overflow-x-auto">
 
             <table className="w-full text-sm">
@@ -372,10 +355,7 @@ export default function DashboardPage() {
 
                   return(
 
-                    <tr
-                      key={tx.id}
-                      className="border-b last:border-none"
-                    >
+                    <tr key={tx.id} className="border-b last:border-none">
 
                       <td className="py-3 font-mono text-xs text-gray-700">
                         {tx.id.slice(0,12)}...
@@ -408,7 +388,6 @@ export default function DashboardPage() {
             </table>
 
           </div>
-
         )}
 
       </div>
