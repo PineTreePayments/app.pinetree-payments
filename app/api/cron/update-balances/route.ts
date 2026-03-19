@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
 export async function GET() {
-  console.log("Cron running every minute")
+  console.log("Cron running every minute - v2")
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -101,17 +101,22 @@ export async function GET() {
         }
 
         /* =========================
-           4. UPSERT BALANCE
+           4. UPSERT BALANCE (FIXED)
         ========================= */
 
         const { error: upsertError } = await supabase
           .from("wallet_balances")
-          .upsert({
-            merchant_id: wallet.merchant_id,
-            asset: network.toUpperCase(),
-            balance,
-            last_updated: now
-          })
+          .upsert(
+            {
+              merchant_id: wallet.merchant_id,
+              asset: network.toUpperCase(),
+              balance,
+              last_updated: now
+            },
+            {
+              onConflict: "merchant_id,asset"
+            }
+          )
 
         if (upsertError) {
           console.error("Upsert error:", upsertError)
