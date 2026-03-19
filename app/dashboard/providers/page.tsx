@@ -365,18 +365,25 @@ export default function ProvidersPage() {
     return `${getOrigin()}/dashboard/providers`
   }
 
-  function buildMobileBridgeUrl(
-    provider: "solana" | "base",
-    walletType: string,
-    sessionId: string
-  ) {
-    const url = new URL(`${getOrigin()}/solana-return`)
-    url.searchParams.set("provider", provider)
-    url.searchParams.set("wallet_type", walletType)
-    url.searchParams.set("session_id", sessionId)
-    url.searchParams.set("return_to", getDesktopProvidersUrl())
-    return url.toString()
-  }
+ function buildMobileBridgeUrl(
+  provider: "solana" | "base",
+  walletType: string,
+  sessionId: string
+) {
+  const path =
+    provider === "solana"
+      ? "/solana-return"
+      : "/base-return"
+
+  const url = new URL(`${getOrigin()}${path}`)
+
+  url.searchParams.set("provider", provider)
+  url.searchParams.set("wallet_type", walletType)
+  url.searchParams.set("session_id", sessionId)
+  url.searchParams.set("return_to", getDesktopProvidersUrl())
+
+  return url.toString()
+}
 
   async function createWalletConnectSession(
     provider: "solana" | "base",

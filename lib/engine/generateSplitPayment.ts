@@ -24,7 +24,25 @@ export async function generateSplitPayment(
     process.env.NEXT_PUBLIC_APP_URL ||
     "https://app.pinetree-payments.com"
 
-  const returnUrl = `${BASE_URL}/solana-return`
+  /* --------------------------------
+  🔥 FIX: DYNAMIC RETURN BASED ON NETWORK
+  -------------------------------- */
+
+  let returnPath = "/solana-return"
+
+  if (
+    input.network === "base" ||
+    input.network === "base_pay" ||
+    input.network === "ethereum"
+  ) {
+    returnPath = "/base-return"
+  }
+
+  if (input.network === "coinbase") {
+    returnPath = "/coinbase-return"
+  }
+
+  const returnUrl = `${BASE_URL}${returnPath}`
 
   /* --------------------------------
   BUILD STRUCTURED PAYMENT PAYLOAD
@@ -48,7 +66,6 @@ export async function generateSplitPayment(
 
     totalAmount,
 
-    /* 🔥 THIS IS THE FIX */
     redirect: returnUrl
   }
 
