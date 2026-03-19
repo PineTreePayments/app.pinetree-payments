@@ -96,15 +96,29 @@ export default function WalletsPage() {
     const balances = (balanceRows || []) as BalanceRow[]
     const walletsData = (walletRows || []) as WalletRow[]
 
-    const solBalance =
-      Number(
-        balances.find((b) => b.asset === "SOL")?.balance ?? 0
-      ) || 0
+    /* =========================
+       NORMALIZE BALANCES
+    ========================= */
 
-    const ethBalance =
-      Number(
-        balances.find((b) => b.asset === "ETH")?.balance ?? 0
-      ) || 0
+    let solBalance = 0
+    let ethBalance = 0
+
+    for (const b of balances) {
+      const asset = String(b.asset || "").toUpperCase()
+      const value = Number(b.balance ?? 0) || 0
+
+      if (asset === "SOL" || asset === "SOLANA") {
+        solBalance = value
+      }
+
+      if (asset === "ETH" || asset === "ETHEREUM" || asset === "BASE") {
+        ethBalance = value
+      }
+    }
+
+    /* =========================
+       GET PRICES
+    ========================= */
 
     const prices = await fetch(
       "https://api.coingecko.com/api/v3/simple/price?ids=solana,ethereum&vs_currencies=usd"
@@ -118,6 +132,10 @@ export default function WalletsPage() {
         sol: 0,
         eth: 0
       }))
+
+    /* =========================
+       MERGE DATA
+    ========================= */
 
     const enriched: Wallet[] = walletsData.map((w) => {
       let balance = 0
@@ -202,7 +220,7 @@ export default function WalletsPage() {
                 </p>
 
                 <p className="text-lg text-black font-semibold">
-                  {Number(w.balance ?? 0)}
+                  {Number(w.balance ?? 0).toFixed(6)}
                 </p>
               </div>
 
