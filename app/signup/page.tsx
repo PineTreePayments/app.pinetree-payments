@@ -4,6 +4,12 @@ import { useState } from "react"
 import { supabase } from "@/lib/database/supabase"
 import { useRouter } from "next/navigation"
 
+/* =============================
+TOGGLE GOOGLE SIGNUP HERE
+============================= */
+
+const ENABLE_GOOGLE = false
+
 export default function SignupPage() {
   const router = useRouter()
 
@@ -30,11 +36,10 @@ export default function SignupPage() {
   }
 
   /* -----------------------------
-  GOOGLE SIGNUP (FIXED)
+  GOOGLE SIGNUP (SAFE TO KEEP)
   ----------------------------- */
 
   async function handleGoogle() {
-
     const redirectUrl =
       process.env.NODE_ENV === "development"
         ? "http://localhost:3000/dashboard"
@@ -62,20 +67,24 @@ export default function SignupPage() {
           Create PineTree Account
         </h1>
 
-        {/* GOOGLE BUTTON */}
-        <button
-          onClick={handleGoogle}
-          className="w-full border py-2 rounded mb-4 flex items-center justify-center gap-2 hover:bg-gray-50"
-        >
-          Continue with Google
-        </button>
+        {/* GOOGLE BUTTON (TOGGLED) */}
+        {ENABLE_GOOGLE && (
+          <>
+            <button
+              onClick={handleGoogle}
+              className="w-full border py-2 rounded mb-4 flex items-center justify-center gap-2 hover:bg-gray-50"
+            >
+              Continue with Google
+            </button>
 
-        {/* DIVIDER */}
-        <div className="flex items-center my-4">
-          <div className="flex-1 h-px bg-gray-200"></div>
-          <span className="px-2 text-sm text-gray-400">OR</span>
-          <div className="flex-1 h-px bg-gray-200"></div>
-        </div>
+            {/* DIVIDER */}
+            <div className="flex items-center my-4">
+              <div className="flex-1 h-px bg-gray-200"></div>
+              <span className="px-2 text-sm text-gray-400">OR</span>
+              <div className="flex-1 h-px bg-gray-200"></div>
+            </div>
+          </>
+        )}
 
         {/* EMAIL INPUT */}
         <input

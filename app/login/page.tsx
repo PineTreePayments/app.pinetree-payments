@@ -6,6 +6,12 @@ import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
+/* =============================
+TOGGLE GOOGLE LOGIN HERE
+============================= */
+
+const ENABLE_GOOGLE = false
+
 export default function LoginPage() {
   const [mode, setMode] = useState("login")
   const [email, setEmail] = useState("")
@@ -92,7 +98,7 @@ export default function LoginPage() {
   }
 
   /* -----------------------------
-  GOOGLE LOGIN
+  GOOGLE LOGIN (SAFE TO KEEP)
   ----------------------------- */
 
   async function googleLogin() {
@@ -139,28 +145,31 @@ export default function LoginPage() {
             : "Create your PineTree account"}
         </h2>
 
-        <button
-          onClick={googleLogin}
-          className="w-full border border-gray-300 rounded-md py-2.5 flex items-center justify-center gap-3 hover:bg-gray-50 transition"
-        >
-          <img
-            src="https://www.svgrepo.com/show/475656/google-color.svg"
-            width="20"
-            alt="Google"
-          />
+        {/* GOOGLE BUTTON (TOGGLED) */}
+        {ENABLE_GOOGLE && (
+          <>
+            <button
+              onClick={googleLogin}
+              className="w-full border border-gray-300 rounded-md py-2.5 flex items-center justify-center gap-3 hover:bg-gray-50 transition"
+            >
+              <img
+                src="https://www.svgrepo.com/show/475656/google-color.svg"
+                width="20"
+                alt="Google"
+              />
 
-          <span className="text-gray-900 font-medium">
-            Continue with Google
-          </span>
-        </button>
+              <span className="text-gray-900 font-medium">
+                Continue with Google
+              </span>
+            </button>
 
-        <div className="flex items-center my-4">
-          <div className="flex-grow border-t border-gray-300"></div>
-
-          <span className="mx-4 text-xs text-gray-500">OR</span>
-
-          <div className="flex-grow border-t border-gray-300"></div>
-        </div>
+            <div className="flex items-center my-4">
+              <div className="flex-grow border-t border-gray-300"></div>
+              <span className="mx-4 text-xs text-gray-500">OR</span>
+              <div className="flex-grow border-t border-gray-300"></div>
+            </div>
+          </>
+        )}
 
         <input
           type="email"
@@ -237,11 +246,9 @@ export default function LoginPage() {
           0% {
             transform: scale(1.05) translateY(0px);
           }
-
           50% {
             transform: scale(1.07) translateY(-15px);
           }
-
           100% {
             transform: scale(1.05) translateY(10px);
           }
