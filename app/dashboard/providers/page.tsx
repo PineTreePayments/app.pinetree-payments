@@ -712,6 +712,42 @@ export default function ProvidersPage() {
         .eq("id", existing.id)
 
       if (error) throw error
+      // ===== FETCH BALANCE =====
+let balance = 0
+
+try {
+  if (network === "solana") {
+    const { Connection, PublicKey } = await import("@solana/web3.js")
+
+    const connection = new Connection("https://api.mainnet-beta.solana.com")
+
+    const lamports = await connection.getBalance(
+      new PublicKey(walletAddress)
+    )
+
+    balance = lamports / 1_000_000_000
+  }
+
+  if (network === "base") {
+    const { ethers } = await import("ethers")
+
+    const provider = new ethers.JsonRpcProvider("https://mainnet.base.org")
+
+    const raw = await provider.getBalance(walletAddress)
+
+    balance = Number(ethers.formatEther(raw))
+  }
+
+  // ===== SAVE BALANCE =====
+  await supabase.from("wallet_balances").upsert({
+    merchant_id: merchantId,
+    asset: network === "solana" ? "SOL" : "ETH",
+    balance
+  })
+
+} catch (err) {
+  console.error("Balance fetch failed:", err)
+}
     } else {
       const { error } = await supabase.from("merchant_wallets").insert({
         merchant_id: merchantId,
