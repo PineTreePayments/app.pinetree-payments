@@ -194,33 +194,52 @@ export default function ProvidersPage() {
   }, [walletSessionId, activeProvider, showQr])
 
   async function getMerchantContext() {
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser()
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser()
 
-    if (userError || !user) {
-      toast.error("Please sign in again")
-      return null
-    }
+  if (userError || !user) {
+    toast.error("Please sign in again")
+    return null
+  }
 
-    const { data: merchant, error: merchantError } = await supabase
+  const { data: merchant, error: merchantError } = await supabase
+    .from("merchants")
+    .select("id")
+    .eq("id", user.id) // ✅ FIXED
+    .maybeSingle()
+
+  if (merchantError) {
+    console.error("Merchant lookup failed:", merchantError)
+    toast.error("Merchant error")
+    return null
+  }
+
+  if (!merchant) {
+    const { error: insertError } = await supabase
       .from("merchants")
-      .select("id")
-      .eq("user_id", user.id)
-      .single()
+      .insert({
+        id: user.id,
+      })
 
-    if (merchantError || !merchant) {
-      console.error("Merchant lookup failed:", merchantError)
-      toast.error("Merchant not found")
+    if (insertError) {
+      console.error("Merchant create failed:", insertError)
+      toast.error("Failed to initialize merchant")
       return null
     }
 
     return {
       user,
-      merchantId: merchant.id as string,
+      merchantId: user.id,
     }
   }
+
+  return {
+    user,
+    merchantId: merchant.id as string,
+  }
+}
 
   async function loadAll() {
     await Promise.all([loadProvidersAndWallets(), loadSettings()])
