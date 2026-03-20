@@ -3,7 +3,6 @@
 export const dynamic = "force-dynamic"
 
 import { useEffect } from "react"
-import { supabase } from "@/lib/supabaseClient"
 
 declare global {
   interface Window {
@@ -22,73 +21,70 @@ export default function BaseReturnPage() {
         const sessionId = params.get("session_id")
         const returnTo = params.get("return_to")
 
+        if (!sessionId) {
+          console.error("❌ Missing session_id")
+          return
+        }
+
         if (!window.ethereum) {
           alert("No EVM wallet found (MetaMask / Trust / Coinbase)")
           return
         }
 
+        /* =========================
+           CONNECT WALLET
+        ========================= */
+
         const accounts = await window.ethereum.request({
           method: "eth_requestAccounts",
         })
 
-        if (!accounts?.[0]) return
-
-        const walletAddress = accounts[0]
-
-        /* =========================
-           GET CURRENT USER
-        ========================= */
-
-        const { data: { user } } = await supabase.auth.getUser()
-
-        if (!user) {
-          console.error("No user session found")
+        if (!accounts?.[0]) {
+          console.error("❌ No wallet account returned")
           return
         }
 
+        const walletAddress = accounts[0]
+
+        console.log("✅ Base wallet connected:", walletAddress)
+
         /* =========================
-           EXISTING SESSION SAVE
+           UPDATE SESSION (FIXED)
         ========================= */
 
-        await fetch("/api/wallet-connect-session", {
+        const origin = window.location.origin
+
+        const res = await fetch(`${origin}/api/wallet-connect-session`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
             session_id: sessionId,
-            provider,
-            wallet_type: walletType,
+            provider: provider || "base",
+            wallet_type: walletType || "BASEAPP",
             wallet_address: walletAddress,
             status: "connected",
           }),
         })
 
-        /* =========================
-           🔥 INSERT WALLET (FIX)
-        ========================= */
-
-        const { error } = await supabase
-          .from("merchant_wallets")
-          .insert({
-            merchant_id: user.id,
-            wallet_address: walletAddress,
-            network: "base",
-            provider: provider || walletType || "base"
-          })
-
-        if (error) {
-          console.error("wallet insert error:", error)
+        if (!res.ok) {
+          const text = await res.text().catch(() => "")
+          console.error("❌ Session update failed:", text)
+          throw new Error("Failed to update session")
         }
 
+        console.log("✅ Session updated successfully")
+
         /* =========================
-           REDIRECT
+           REDIRECT BACK
         ========================= */
 
         window.location.href = returnTo || "/dashboard/providers"
 
       } catch (err) {
-        console.error("BASE RETURN ERROR:", err)
+        console.error("❌ BASE RETURN ERROR:", err)
+        alert("Wallet connection failed")
       }
     }
 
@@ -96,7 +92,14 @@ export default function BaseReturnPage() {
   }, [])
 
   return (
-    <div className="flex items-center justify-center h-screen text-black">
+    <div
+      className="flex items-center justify-center h-screen"
+      style={{
+        background: "black",
+        color: "white",
+        fontFamily: "sans-serif"
+      }}
+    >
       Connecting wallet...
     </div>
   )
