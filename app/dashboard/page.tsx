@@ -32,31 +32,9 @@ export default function DashboardPage() {
 
       const { data:{ user } } = await supabase.auth.getUser()
 
-      /* 🔒 NOT LOGGED IN */
       if(!user){
         router.push("/signup")
         return
-      }
-
-      /* =========================
-         🔥 ENSURE MERCHANT EXISTS
-      ========================= */
-
-      const { data: merchant } = await supabase
-        .from("merchants")
-        .select("id")
-        .eq("id", user.id)
-        .single()
-
-      if(!merchant){
-        const { error } = await supabase
-          .from("merchants")
-          .insert({ id: user.id })
-
-        if(error){
-          console.error("merchant create error:", error)
-          return
-        }
       }
 
       /* =========================
@@ -178,15 +156,17 @@ export default function DashboardPage() {
         setWalletValue(0)
       }
 
-      /* CRON STATUS */
+      /* CRON STATUS (SAFE) */
 
       const { data: system } = await supabase
         .from("system_status")
         .select("*")
-        .single()
+        .maybeSingle()
 
       if(system){
         setLastRun(system.last_run)
+      } else {
+        setLastRun(null)
       }
 
     }
@@ -208,7 +188,7 @@ export default function DashboardPage() {
       </h1>
 
       <p className="text-sm text-gray-500 mb-6">
-        Last system update: {lastRun ? new Date(lastRun).toLocaleString() : "Loading..."}
+        Last system update: {lastRun ? new Date(lastRun).toLocaleString() : "—"}
       </p>
 
       <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm mb-10 flex justify-between items-center">

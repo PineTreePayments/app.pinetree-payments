@@ -3,6 +3,7 @@
 export const dynamic = "force-dynamic"
 
 import { useEffect } from "react"
+import { supabase } from "@/lib/supabaseClient"
 
 declare global {
   interface Window {
@@ -34,6 +35,21 @@ export default function BaseReturnPage() {
 
         const walletAddress = accounts[0]
 
+        /* =========================
+           GET CURRENT USER
+        ========================= */
+
+        const { data: { user } } = await supabase.auth.getUser()
+
+        if (!user) {
+          console.error("No user session found")
+          return
+        }
+
+        /* =========================
+           EXISTING SESSION SAVE
+        ========================= */
+
         await fetch("/api/wallet-connect-session", {
           method: "POST",
           headers: {
@@ -48,7 +64,29 @@ export default function BaseReturnPage() {
           }),
         })
 
+        /* =========================
+           🔥 INSERT WALLET (FIX)
+        ========================= */
+
+        const { error } = await supabase
+          .from("merchant_wallets")
+          .insert({
+            merchant_id: user.id,
+            wallet_address: walletAddress,
+            network: "base",
+            provider: provider || walletType || "base"
+          })
+
+        if (error) {
+          console.error("wallet insert error:", error)
+        }
+
+        /* =========================
+           REDIRECT
+        ========================= */
+
         window.location.href = returnTo || "/dashboard/providers"
+
       } catch (err) {
         console.error("BASE RETURN ERROR:", err)
       }

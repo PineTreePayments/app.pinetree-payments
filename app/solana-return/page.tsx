@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
+import { supabase } from "@/lib/supabaseClient"
 
 export default function SolanaReturnPage() {
 
@@ -25,14 +26,30 @@ export default function SolanaReturnPage() {
           return
         }
 
-        // 🔥 FORCE WALLET CONNECTION
-        const resp = await provider.connect()
+        /* =========================
+           CONNECT WALLET
+        ========================= */
 
+        const resp = await provider.connect()
         const wallet_address = resp.publicKey.toString()
 
         console.log("Wallet connected:", wallet_address)
 
-        // ✅ SEND BACK TO YOUR SESSION TABLE
+        /* =========================
+           GET USER
+        ========================= */
+
+        const { data: { user } } = await supabase.auth.getUser()
+
+        if (!user) {
+          console.error("No user session found")
+          return
+        }
+
+        /* =========================
+           EXISTING SESSION UPDATE
+        ========================= */
+
         const res = await fetch("/api/wallet-connect-session", {
           method: "POST",
           headers: {
@@ -51,7 +68,27 @@ export default function SolanaReturnPage() {
           throw new Error("Failed to update session")
         }
 
-        // ✅ GO BACK TO DASHBOARD
+        /* =========================
+           🔥 INSERT WALLET (FIX)
+        ========================= */
+
+        const { error } = await supabase
+          .from("merchant_wallets")
+          .insert({
+            merchant_id: user.id,
+            wallet_address,
+            network: "solana",
+            provider: wallet_type || "solana"
+          })
+
+        if (error) {
+          console.error("wallet insert error:", error)
+        }
+
+        /* =========================
+           REDIRECT
+        ========================= */
+
         window.location.href = return_to || "/dashboard/providers"
 
       } catch (err) {
