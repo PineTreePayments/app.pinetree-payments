@@ -23,6 +23,7 @@ export default function LoginPage() {
 
   /* -----------------------------
   AUTO REDIRECT IF LOGGED IN
+  + AUTH LISTENER (FIX)
   ----------------------------- */
 
   useEffect(() => {
@@ -35,16 +36,26 @@ export default function LoginPage() {
     }
 
     checkSession()
+
+    const {
+      data: { subscription }
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        router.replace("/dashboard")
+      }
+    })
+
+    return () => subscription.unsubscribe()
   }, [router])
 
   /* -----------------------------
-  LOGIN
+  LOGIN (FIXED)
   ----------------------------- */
 
   async function login() {
     setLoading(true)
 
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
       password
     })
@@ -55,13 +66,10 @@ export default function LoginPage() {
       return
     }
 
-    if (data?.session) {
-      toast.success("Welcome back")
-      router.replace("/dashboard")
-      return
-    }
+    toast.success("Welcome back")
 
-    setLoading(false)
+    // 🔥 FORCE REDIRECT (DO NOT RELY ON session)
+    router.replace("/dashboard")
   }
 
   /* -----------------------------

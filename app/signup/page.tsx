@@ -18,7 +18,7 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false)
 
   /* =============================
-  AUTO REDIRECT IF SESSION EXISTS
+  AUTO REDIRECT + AUTH LISTENER (FIX)
   ============================= */
 
   useEffect(() => {
@@ -26,21 +26,31 @@ export default function SignupPage() {
       const { data: { session } } = await supabase.auth.getSession()
 
       if (session) {
-        router.push("/dashboard")
+        router.replace("/dashboard")
       }
     }
 
     checkSession()
+
+    const {
+      data: { subscription }
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        router.replace("/dashboard")
+      }
+    })
+
+    return () => subscription.unsubscribe()
   }, [router])
 
   /* =============================
-  SIGNUP HANDLER
+  SIGNUP HANDLER (FIXED)
   ============================= */
 
   async function handleSignup() {
     setLoading(true)
 
-    const { data, error } = await supabase.auth.signUp({
+    const { error } = await supabase.auth.signUp({
       email,
       password
     })
@@ -51,19 +61,9 @@ export default function SignupPage() {
       return
     }
 
-    /* =============================
-    HANDLE SESSION CORRECTLY
-    ============================= */
-
-    const session = data.session
-
-    if (session) {
-      // Email confirm OFF → instant login
-      router.push("/dashboard")
-    } else {
-      // Email confirm ON → user must verify email
-      alert("Check your email to confirm your account")
-    }
+    // 🔥 DO NOT RELY ON data.session
+    // Let auth listener handle redirect if session exists
+    alert("Account created. If email confirmation is enabled, check your email.")
 
     setLoading(false)
   }
@@ -135,7 +135,8 @@ export default function SignupPage() {
 
         <button
           onClick={handleSignup}
-          className="w-full bg-black text-white py-2 rounded"
+          disabled={loading}
+          className="w-full bg-black text-white py-2 rounded disabled:opacity-60"
         >
           {loading ? "Creating..." : "Create Account"}
         </button>
