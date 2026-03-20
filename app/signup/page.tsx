@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { supabase } from "@/lib/database/supabase"
 import { useRouter } from "next/navigation"
 
@@ -17,22 +17,55 @@ export default function SignupPage() {
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
 
+  /* =============================
+  AUTO REDIRECT IF SESSION EXISTS
+  ============================= */
+
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+
+      if (session) {
+        router.push("/dashboard")
+      }
+    }
+
+    checkSession()
+  }, [router])
+
+  /* =============================
+  SIGNUP HANDLER
+  ============================= */
+
   async function handleSignup() {
     setLoading(true)
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password
     })
 
-    setLoading(false)
-
     if (error) {
+      setLoading(false)
       alert(error.message)
       return
     }
 
-    router.push("/dashboard")
+    /* =============================
+    HANDLE SESSION CORRECTLY
+    ============================= */
+
+    const session = data.session
+
+    if (session) {
+      // Email confirm OFF → instant login
+      router.push("/dashboard")
+    } else {
+      // Email confirm ON → user must verify email
+      alert("Check your email to confirm your account")
+    }
+
+    setLoading(false)
   }
 
   /* -----------------------------
@@ -77,7 +110,6 @@ export default function SignupPage() {
               Continue with Google
             </button>
 
-            {/* DIVIDER */}
             <div className="flex items-center my-4">
               <div className="flex-1 h-px bg-gray-200"></div>
               <span className="px-2 text-sm text-gray-400">OR</span>
@@ -86,7 +118,6 @@ export default function SignupPage() {
           </>
         )}
 
-        {/* EMAIL INPUT */}
         <input
           className="w-full border p-2 mb-4 rounded"
           placeholder="Email"
@@ -94,7 +125,6 @@ export default function SignupPage() {
           onChange={(e)=>setEmail(e.target.value)}
         />
 
-        {/* PASSWORD INPUT */}
         <input
           type="password"
           className="w-full border p-2 mb-4 rounded"
@@ -103,7 +133,6 @@ export default function SignupPage() {
           onChange={(e)=>setPassword(e.target.value)}
         />
 
-        {/* SIGNUP BUTTON */}
         <button
           onClick={handleSignup}
           className="w-full bg-black text-white py-2 rounded"

@@ -23,10 +23,7 @@ export default function DashboardPage() {
   const [providers,setProviders] = useState(0)
   const [recentTx,setRecentTx] = useState<any[]>([])
   const [chartData,setChartData] = useState<any[]>([])
-
   const [walletValue,setWalletValue] = useState(0)
-
-  // ✅ NEW
   const [lastRun,setLastRun] = useState<string | null>(null)
 
   useEffect(()=>{
@@ -34,10 +31,37 @@ export default function DashboardPage() {
     async function loadStats(){
 
       const { data:{ user } } = await supabase.auth.getUser()
-      if(!user) return
 
+      /* 🔒 NOT LOGGED IN */
+      if(!user){
+        router.push("/signup")
+        return
+      }
 
-      /* LOAD TRANSACTIONS */
+      /* =========================
+         🔥 ENSURE MERCHANT EXISTS
+      ========================= */
+
+      const { data: merchant } = await supabase
+        .from("merchants")
+        .select("id")
+        .eq("id", user.id)
+        .single()
+
+      if(!merchant){
+        const { error } = await supabase
+          .from("merchants")
+          .insert({ id: user.id })
+
+        if(error){
+          console.error("merchant create error:", error)
+          return
+        }
+      }
+
+      /* =========================
+         LOAD TRANSACTIONS
+      ========================= */
 
       const { data: tx } = await supabase
         .from("transactions")
@@ -74,18 +98,13 @@ export default function DashboardPage() {
         setTxCount(totalTx)
         setVolume(totalVolume)
 
-        if(totalTx > 0){
-          setSuccessRate(
-            Math.round((successTx.length / totalTx) * 100)
-          )
-        } else {
-          setSuccessRate(0)
-        }
+        setSuccessRate(
+          totalTx > 0
+            ? Math.round((successTx.length / totalTx) * 100)
+            : 0
+        )
 
         setRecentTx(tx.slice(0,10))
-
-
-        /* CHART DATA */
 
         const map:any = {}
 
@@ -98,9 +117,7 @@ export default function DashboardPage() {
           const date =
             new Date(t.created_at).toLocaleDateString()
 
-          if(!map[date]){
-            map[date] = 0
-          }
+          if(!map[date]) map[date] = 0
 
           map[date] += Number(payment?.subtotal_amount ?? 0)
 
@@ -113,9 +130,7 @@ export default function DashboardPage() {
           }))
 
         setChartData(formatted.reverse())
-
       }
-
 
       /* CONNECTED PROVIDERS */
 
@@ -127,18 +142,14 @@ export default function DashboardPage() {
 
       setProviders(count ?? 0)
 
+      /* WALLET BALANCES */
 
-      /* LOAD WALLET BALANCES */
-
-      const { data: balances, error } = await supabase
+      const { data: balances } = await supabase
         .from("wallet_balances")
         .select("asset, balance")
         .eq("merchant_id", user.id)
 
-      if(error){
-        console.error("wallet_balances error:", error)
-        setWalletValue(0)
-      } else if(balances && balances.length > 0){
+      if(balances && balances.length > 0){
 
         let total = 0
 
@@ -167,8 +178,7 @@ export default function DashboardPage() {
         setWalletValue(0)
       }
 
-
-      /* ✅ LOAD CRON STATUS */
+      /* CRON STATUS */
 
       const { data: system } = await supabase
         .from("system_status")
@@ -183,35 +193,27 @@ export default function DashboardPage() {
 
     loadStats()
 
-    // ✅ AUTO REFRESH EVERY 15 SECONDS
     const interval = setInterval(loadStats,15000)
-
     return () => clearInterval(interval)
 
-  },[])
+  },[router])
 
 
 
   return (
-
     <div className="p-8 bg-gray-100 min-h-screen">
 
       <h1 className="text-2xl font-semibold text-gray-900 mb-2">
         Overview
       </h1>
 
-      {/* ✅ LAST UPDATED */}
       <p className="text-sm text-gray-500 mb-6">
         Last system update: {lastRun ? new Date(lastRun).toLocaleString() : "Loading..."}
       </p>
 
-
-      {/* WALLET TREASURY CARD */}
-
       <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm mb-10 flex justify-between items-center">
 
         <div>
-
           <p className="text-sm text-gray-500 mb-1">
             Wallet Balance
           </p>
@@ -223,7 +225,6 @@ export default function DashboardPage() {
           <p className="text-sm text-gray-500 mt-1">
             Combined balance across connected wallets
           </p>
-
         </div>
 
         <button
@@ -234,10 +235,6 @@ export default function DashboardPage() {
         </button>
 
       </div>
-
-
-
-      {/* ANALYTICS */}
 
       <div className="grid grid-cols-4 gap-6 mb-10">
 
@@ -270,10 +267,6 @@ export default function DashboardPage() {
         </div>
 
       </div>
-
-
-
-      {/* TRANSACTION GRAPH */}
 
       <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm mb-10">
 
@@ -315,10 +308,6 @@ export default function DashboardPage() {
         </div>
 
       </div>
-
-
-
-      {/* RECENT ACTIVITY */}
 
       <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
 
@@ -402,7 +391,5 @@ export default function DashboardPage() {
       </div>
 
     </div>
-
   )
-
 }
