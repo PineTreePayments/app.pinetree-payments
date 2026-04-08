@@ -1,6 +1,2 @@
-import { createClient } from "@supabase/supabase-js"
-
-export const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+// Re-export from centralized database module for backward compatibility
+export { supabase, supabaseAdmin } from "@/lib/database/supabase"

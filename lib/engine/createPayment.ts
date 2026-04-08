@@ -1,9 +1,24 @@
+/**
+ * PineTree Payment Creation
+ * 
+ * Central payment creation logic for the PineTree platform.
+ * Handles the complete payment creation flow from validation to database storage.
+ */
+
 import { chooseBestProvider } from "./providerSelector"
 import { getProvider } from "./providerRegistry"
 import { PaymentProvider } from "@/types/payment"
-import { supabase } from "@/lib/database/supabase"
+import {
+  createPayment as createPaymentRecord,
+  createTransaction,
+  getIdempotencyKey,
+  storeIdempotencyKey,
+  getPaymentById
+} from "@/lib/database"
 import { generateSplitPayment } from "./generateSplitPayment"
 import { watchPayment } from "./paymentWatcher"
+import { calculateGrossAmount } from "./fees"
+import { getMerchantDefaultProvider } from "@/lib/database/merchants"
 
 type CreatePaymentInput = {
   amount: number
@@ -13,43 +28,49 @@ type CreatePaymentInput = {
   channel?: "pos" | "online" | "api" | "invoice"
   metadata?: any
   idempotencyKey?: string
+  pinetreeFee?: number
 }
 
-export async function createPayment(input: CreatePaymentInput) {
+type CreatePaymentResult = {
+  id: string
+  provider: string
+  paymentUrl: string
+  qrCodeUrl: string
+}
+
+/**
+ * Create a new payment
+ * 
+ * This is the main entry point for creating payments in the PineTree system.
+ * It handles idempotency, provider selection, fee calculation, and payment storage.
+ */
+export async function createPayment(
+  input: CreatePaymentInput
+): Promise<CreatePaymentResult> {
 
   /* ---------------------------
-  IDEMPOTENCY PROTECTION
+     IDEMPOTENCY PROTECTION
   --------------------------- */
 
   if (input.idempotencyKey) {
-
-    const { data: existing } = await supabase
-      .from("idempotency_keys")
-      .select("payment_id")
-      .eq("key", input.idempotencyKey)
-      .maybeSingle()
-
-    if (existing?.payment_id) {
-
-      const { data: payment } = await supabase
-        .from("payments")
-        .select("*")
-        .eq("id", existing.payment_id)
-        .single()
-
-      return {
-        id: payment.id,
-        provider: payment.provider,
-        paymentUrl: payment.payment_url,
-        qrCodeUrl: payment.qr_code_url
+    const existingPaymentId = await getIdempotencyKey(input.idempotencyKey)
+    
+    if (existingPaymentId) {
+      const existingPayment = await getPaymentById(existingPaymentId)
+      
+      if (existingPayment) {
+        return {
+          id: existingPayment.id,
+          provider: existingPayment.provider,
+          paymentUrl: existingPayment.payment_url || "",
+          qrCodeUrl: existingPayment.qr_code_url || ""
+        }
       }
-
     }
-
   }
 
   /* ---------------------------
-  PROVIDER SELECTION
+     PROVIDER SELECTION
   --------------------------- */
 
   let providerName = input.provider
@@ -69,50 +90,43 @@ export async function createPayment(input: CreatePaymentInput) {
   }
 
   /* ---------------------------
-  EXTRACT PINETREE FEE DATA
+     EXTRACT PINETREE FEE DATA
   --------------------------- */
 
-  const merchantAmount =
-    input.metadata?.merchantAmount ?? input.amount
-
-  const pinetreeFee =
-    input.metadata?.pinetreeFee ?? 0
-
-  const grossAmount = input.amount
+  const merchantAmount = input.metadata?.merchantAmount ?? input.amount
+  const pinetreeFee = input.pinetreeFee ?? input.metadata?.pinetreeFee ?? 0
+  const grossAmount = calculateGrossAmount(merchantAmount, pinetreeFee)
 
   /* ---------------------------
-  GET MERCHANT WALLET
+     GET MERCHANT WALLET
   --------------------------- */
 
   if (!provider.getMerchantWallet) {
     throw new Error("Provider does not support wallet rails")
   }
 
-  const merchantWalletData =
-    await provider.getMerchantWallet(input.merchantId)
-
+  const merchantWalletData = await provider.getMerchantWallet(input.merchantId)
   const merchantWallet = merchantWalletData.address
   const network = merchantWalletData.network
 
   /* ---------------------------
-  PINETREE TREASURY WALLET
+     PINETREE TREASURY WALLET
   --------------------------- */
 
-  const pinetreeWallet =
-    process.env.PINETREE_TREASURY_WALLET || ""
+  const pinetreeWallet = process.env.PINETREE_TREASURY_WALLET || ""
 
   if (!pinetreeWallet) {
     throw new Error("PineTree treasury wallet not configured")
   }
 
   /* ---------------------------
-  CREATE PAYMENT ID
+     CREATE PAYMENT ID
   --------------------------- */
 
   const paymentId = crypto.randomUUID()
 
   /* ---------------------------
-  GENERATE SPLIT PAYMENT
+     GENERATE SPLIT PAYMENT
   --------------------------- */
 
   const splitPayment = await generateSplitPayment({
@@ -125,70 +139,54 @@ export async function createPayment(input: CreatePaymentInput) {
   })
 
   /* ---------------------------
-  INSERT PAYMENT RECORD
+     INSERT PAYMENT RECORD
   --------------------------- */
 
-  const { error: paymentError } = await supabase
-    .from("payments")
-    .insert({
-      id: paymentId,
-      merchant_id: input.merchantId,
-      currency: input.currency,
-      subtotal_amount: merchantAmount,
-      platform_fee: pinetreeFee,
-      total_amount: grossAmount,
-      provider: providerName,
-      status: "PENDING",
-      payment_url: splitPayment.paymentUrl,
-      qr_code_url: splitPayment.qrCodeUrl,
-      metadata: input.metadata
-    })
-
-  if (paymentError) {
-    throw new Error(paymentError.message)
-  }
+  const payment = await createPaymentRecord({
+    id: paymentId,
+    merchant_id: input.merchantId,
+    merchant_amount: merchantAmount,
+    pinetree_fee: pinetreeFee,
+    gross_amount: grossAmount,
+    currency: input.currency,
+    provider: providerName,
+    network: network,
+    payment_url: splitPayment.paymentUrl,
+    qr_code_url: splitPayment.qrCodeUrl,
+    metadata: input.metadata
+  })
 
   /* ---------------------------
-  DETERMINE CHANNEL
+     DETERMINE CHANNEL
   --------------------------- */
 
   const channel = input.channel ?? "pos"
 
   /* ---------------------------
-  INSERT TRANSACTION RECORD
+     INSERT TRANSACTION RECORD
   --------------------------- */
 
-  const { error: txError } = await supabase
-    .from("transactions")
-    .insert({
-      payment_id: paymentId,
-      provider: providerName,
-      network: network,
-      status: "PENDING",
-      channel: channel
-    })
-
-  if (txError) {
-    throw new Error(txError.message)
-  }
+  const transactionId = crypto.randomUUID()
+  
+  await createTransaction({
+    id: transactionId,
+    payment_id: paymentId,
+    merchant_id: input.merchantId,
+    provider: providerName,
+    network: network,
+    channel: channel
+  })
 
   /* ---------------------------
-  STORE IDEMPOTENCY KEY
+     STORE IDEMPOTENCY KEY
   --------------------------- */
 
   if (input.idempotencyKey) {
-
-    await supabase
-      .from("idempotency_keys")
-      .insert({
-        key: input.idempotencyKey,
-        payment_id: paymentId
-      })
-
+    await storeIdempotencyKey(input.idempotencyKey, paymentId)
   }
 
   /* ---------------------------
-  START PAYMENT WATCHER
+     START PAYMENT WATCHER
   --------------------------- */
 
   watchPayment({
@@ -201,7 +199,7 @@ export async function createPayment(input: CreatePaymentInput) {
   }).catch(console.error)
 
   /* ---------------------------
-  RETURN RESULT
+     RETURN RESULT
   --------------------------- */
 
   return {
@@ -210,5 +208,4 @@ export async function createPayment(input: CreatePaymentInput) {
     paymentUrl: splitPayment.paymentUrl,
     qrCodeUrl: splitPayment.qrCodeUrl
   }
-
 }

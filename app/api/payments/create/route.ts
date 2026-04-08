@@ -1,6 +1,15 @@
+/**
+ * POST /api/payments/create
+ * 
+ * Creates a new payment in the PineTree system.
+ * This is the main entry point for POS and checkout payment creation.
+ */
+
 import { NextRequest, NextResponse } from "next/server"
 import { createPayment } from "@/lib/engine/createPayment"
 import { PaymentProvider } from "@/types/payment"
+import { calculateGrossAmount, calculateTax } from "@/lib/engine/fees"
+import { getMerchantTaxSettings } from "@/lib/database/merchants"
 
 type CreatePaymentBody = {
   amount: number
@@ -13,9 +22,7 @@ type CreatePaymentBody = {
 }
 
 export async function POST(req: NextRequest) {
-
   try {
-
     const body = (await req.json()) as CreatePaymentBody
 
     const idempotencyKey =
@@ -57,11 +64,31 @@ export async function POST(req: NextRequest) {
     }
 
     /* ---------------------------
+       TAX CALCULATION
+    --------------------------- */
+
+    let totalAmount = merchantAmount
+    let taxAmount = 0
+
+    // Get merchant tax settings if available
+    try {
+      const taxSettings = await getMerchantTaxSettings(body.merchantId)
+      
+      if (taxSettings.taxEnabled && taxSettings.taxRate > 0) {
+        taxAmount = calculateTax(merchantAmount, taxSettings.taxRate)
+        totalAmount = merchantAmount + taxAmount
+      }
+    } catch (err) {
+      // Tax settings not configured, continue without tax
+      console.warn("Tax settings not available:", err)
+    }
+
+    /* ---------------------------
        PINETREE FEE CALCULATION
     --------------------------- */
 
     const pinetreeFee = body.pinetreeFee ?? 0.15
-    const grossAmount = merchantAmount + pinetreeFee
+    const grossAmount = calculateGrossAmount(totalAmount, pinetreeFee)
 
     /* ---------------------------
        CREATE PAYMENT
@@ -76,7 +103,9 @@ export async function POST(req: NextRequest) {
         ...body.metadata,
         terminalId: body.terminalId,
         merchantAmount,
-        pinetreeFee
+        taxAmount,
+        pinetreeFee,
+        totalAmount
       },
       idempotencyKey
     })
@@ -89,18 +118,21 @@ export async function POST(req: NextRequest) {
       paymentId: payment.id,
       provider: payment.provider,
       paymentUrl: payment.paymentUrl,
-      qrCodeUrl: payment.qrCodeUrl
+      qrCodeUrl: payment.qrCodeUrl,
+      breakdown: {
+        merchantAmount,
+        taxAmount,
+        pinetreeFee,
+        grossAmount
+      }
     })
 
-  } catch (error:any) {
-
+  } catch (error: any) {
     console.error("Payment creation error:", error)
 
     return NextResponse.json(
-      { error: "Payment creation failed" },
+      { error: "Payment creation failed", details: error.message },
       { status: 500 }
     )
-
   }
-
 }
