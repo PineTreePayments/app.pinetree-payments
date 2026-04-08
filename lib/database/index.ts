@@ -21,3 +21,6 @@ export * from "./merchants"
 
 // Wallet Balances
 export * from "./walletBalances"
+
+// Merchant Wallets
+export * from "./merchantWallets"

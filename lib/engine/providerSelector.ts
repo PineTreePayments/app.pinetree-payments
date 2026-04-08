@@ -1,40 +1,68 @@
-import { supabase } from "@/lib/database/supabase"
-import { isProviderHealthy } from "./providerHealth"
-import { PaymentProvider } from "@/types/payment"
+/**
+ * PineTree Provider Selector & Smart Routing
+ * 
+ * Automatically selects the best available provider and wallet
+ * for a given merchant based on priority, health, and availability.
+ */
 
+import { getMerchantProviders } from "@/lib/database/merchants"
+import { selectBestWallet } from "@/lib/database/merchantWallets"
+import { getProvider, isProviderHealthy } from "./providerRegistry"
+
+/**
+ * Choose the best available provider for a merchant
+ */
 export async function chooseBestProvider(
-  merchantId: string
-): Promise<PaymentProvider> {
-
-  /* ---------------------------
-  LOAD MERCHANT PROVIDERS
-  --------------------------- */
-
-  const { data, error } = await supabase
-    .from("merchant_providers")
-    .select("provider,status")
-    .eq("merchant_id", merchantId)
-    .eq("status", "connected")
-
-  if (error || !data || data.length === 0) {
-    throw new Error("No payment providers connected")
-  }
-
-  const providers = data.map(p => p.provider as PaymentProvider)
-
-  /* ---------------------------
-  HEALTH CHECK ROUTING
-  --------------------------- */
+  merchantId: string,
+  preferredNetwork?: string
+) {
+  // Get all connected providers for this merchant
+  const providers = await getMerchantProviders(merchantId)
 
   for (const provider of providers) {
+    const adapter = getProvider(provider.provider)
 
-    const healthy = await isProviderHealthy(provider)
-
-    if (healthy) {
-      return provider
+    if (!adapter) {
+      continue
     }
 
+    // Check if provider is healthy
+    if (!isProviderHealthy(provider.provider)) {
+      continue
+    }
+
+    // Check if merchant has wallet for this provider
+    const hasWallet = await selectBestWallet(
+      merchantId,
+      provider.provider
+    )
+
+    if (hasWallet) {
+      return provider.provider
+    }
   }
 
-  throw new Error("No healthy payment providers available")
+  // Fallback to first connected provider
+  if (providers.length > 0) {
+    return providers[0].provider
+  }
+
+  return null
+}
+
+/**
+ * Get available payment networks for a merchant
+ */
+export async function getAvailableNetworks(merchantId: string) {
+  const providers = await getMerchantProviders(merchantId)
+  
+  const networks = []
+
+  for (const provider of providers) {
+    if (isProviderHealthy(provider.provider)) {
+      networks.push(provider.provider)
+    }
+  }
+
+  return networks
 }

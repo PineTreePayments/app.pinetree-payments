@@ -58,4 +58,10 @@ export interface ProviderAdapter {
       | "payment.failed"
   }
 
+  /**
+   * Health check implementation
+   * Returns true if provider is healthy and available
+   */
+  healthCheck?(): Promise<boolean>
+
 }

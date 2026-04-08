@@ -19,6 +19,7 @@ import { generateSplitPayment } from "./generateSplitPayment"
 import { watchPayment } from "./paymentWatcher"
 import { calculateGrossAmount } from "./fees"
 import { getMerchantDefaultProvider } from "@/lib/database/merchants"
+import { selectBestWallet, hasAnyWalletConnected } from "@/lib/database/merchantWallets"
 
 type CreatePaymentInput = {
   amount: number
