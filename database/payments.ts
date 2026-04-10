@@ -43,6 +43,17 @@ export type CreatePaymentInput = {
   status?: PaymentStatus
 }
 
+function mapSchemaError(message: string): string {
+  if (
+    message.includes("gross_amount") &&
+    message.includes("schema cache")
+  ) {
+    return "Failed to create payment: database schema is out of date. Missing column payments.gross_amount. Run the DB migration for payments gross_amount and reload PostgREST schema cache."
+  }
+
+  return `Failed to create payment: ${message}`
+}
+
 /**
  * Create a new payment record in the database
  */
@@ -67,7 +78,7 @@ export async function createPayment(input: CreatePaymentInput) {
     .single()
 
   if (error) {
-    throw new Error(`Failed to create payment: ${error.message}`)
+    throw new Error(mapSchemaError(error.message))
   }
 
   return data as Payment
