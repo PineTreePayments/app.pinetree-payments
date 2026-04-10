@@ -253,6 +253,7 @@ export async function getMerchantDailyVolume(
   type PaymentDailyVolumeRow = { created_at?: string | null; gross_amount?: number | string | null }
 
   data.forEach((payment: PaymentDailyVolumeRow) => {
+    if (!payment.created_at) return
     const date = new Date(payment.created_at).toLocaleDateString()
     dailyVolume[date] = (dailyVolume[date] || 0) + Number(payment.gross_amount || 0)
   })

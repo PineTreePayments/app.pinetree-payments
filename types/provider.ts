@@ -5,6 +5,8 @@ export type PaymentStatus =
   | "CONFIRMED"
   | "FAILED"
   | "INCOMPLETE"
+  | "EXPIRED"
+  | "REFUNDED"
 
 export interface ProviderAdapter {
 
@@ -52,10 +54,15 @@ export interface ProviderAdapter {
   translateEvent?(payload: any): {
     paymentId: string
     event:
+      | "payment.created"
       | "payment.pending"
       | "payment.processing"
       | "payment.confirmed"
       | "payment.failed"
+      | "payment.cancelled"
+      | "payment.incomplete"
+      | "payment.expired"
+      | "payment.refunded"
   }
 
   /**

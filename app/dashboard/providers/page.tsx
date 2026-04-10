@@ -68,11 +68,12 @@ type ProvidersApiResponse = {
   error?: string
 }
 
-declare global {
-  interface Window {
-    solana?: SolanaProviderLike
-    ethereum?: Eip1193ProviderLike
-  }
+function getInjectedSolanaProvider() {
+  return window.solana as SolanaProviderLike | undefined
+}
+
+function getInjectedEthereumProvider() {
+  return window.ethereum as Eip1193ProviderLike | undefined
 }
 
 function getConnectedAndEnabledProvidersCount(providers: ProviderRecord[]) {
@@ -104,7 +105,7 @@ function formatWalletLabel(
 }
 
 function getInjectedBaseProvider(preferredType?: string | null) {
-  const eth = window.ethereum
+  const eth = getInjectedEthereumProvider()
   if (!eth) return null
 
   const providers =
@@ -385,11 +386,11 @@ export default function ProvidersPage() {
   }
 
   async function connectSolanaWallet(preferredType?: string | null) {
-    let provider = window.solana
+    let provider = getInjectedSolanaProvider()
 
     if (!provider) {
       await new Promise((resolve) => setTimeout(resolve, 500))
-      provider = window.solana
+      provider = getInjectedSolanaProvider()
     }
 
     if (!provider) return null

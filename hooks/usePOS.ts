@@ -155,7 +155,7 @@ export function usePOS() {
 
     async function pollPaymentStatus() {
       try {
-        const qs = new URLSearchParams({ mode: "status", paymentId })
+        const qs = new URLSearchParams({ mode: "status", paymentId: paymentId || "" })
         const res = await fetch(`/api/pos/payment?${qs.toString()}`, {
           cache: "no-store"
         })

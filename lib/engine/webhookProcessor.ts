@@ -9,6 +9,7 @@ import { getProvider } from "./providerRegistry"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 import { emitEvent } from "./eventBus"
 import { getPaymentById, createPaymentEvent } from "@/lib/database"
+import { PaymentStatus } from "./paymentStateMachine"
 
 type WebhookInput = {
   provider: string
@@ -25,8 +26,21 @@ type TranslatedEvent = {
     | "payment.confirmed"
     | "payment.failed"
     | "payment.cancelled"
+    | "payment.incomplete"
     | "payment.expired"
     | "payment.refunded"
+}
+
+const eventToStatus: Record<TranslatedEvent["event"], PaymentStatus> = {
+  "payment.created": "CREATED",
+  "payment.pending": "PENDING",
+  "payment.processing": "PROCESSING",
+  "payment.confirmed": "CONFIRMED",
+  "payment.failed": "FAILED",
+  "payment.cancelled": "INCOMPLETE",
+  "payment.incomplete": "INCOMPLETE",
+  "payment.expired": "EXPIRED",
+  "payment.refunded": "REFUNDED"
 }
 
 /**
@@ -113,13 +127,12 @@ export async function processWebhook({
      UPDATE PAYMENT STATUS
   --------------------------- */
 
-  // Convert event to status
-  const status = event.event.replace("payment.", "").toUpperCase()
+  const status = eventToStatus[event.event]
 
   try {
     await updatePaymentStatus(
       event.paymentId,
-      status as any,
+      status,
       {
         providerEvent: payload?.event?.type,
         rawPayload: payload
