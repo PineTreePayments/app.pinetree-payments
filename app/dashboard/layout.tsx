@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { Toaster } from "sonner"
 
@@ -17,6 +17,7 @@ export default function DashboardLayout({
   const [userEmail, setUserEmail] = useState("")
   const [menuOpen, setMenuOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const accountMenuRef = useRef<HTMLDivElement | null>(null)
 
   /* -----------------------------
   SESSION CHECK
@@ -42,9 +43,36 @@ export default function DashboardLayout({
   ----------------------------- */
 
   useEffect(() => {
-    setMenuOpen(false)
-    setSidebarOpen(false)
+    queueMicrotask(() => {
+      setMenuOpen(false)
+      setSidebarOpen(false)
+    })
   }, [pathname])
+
+  useEffect(() => {
+    if (!menuOpen) return
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node | null
+      if (!target) return
+      if (accountMenuRef.current?.contains(target)) return
+      setMenuOpen(false)
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMenuOpen(false)
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown)
+    document.addEventListener("keydown", handleEscape)
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown)
+      document.removeEventListener("keydown", handleEscape)
+    }
+  }, [menuOpen])
 
   /* -----------------------------
   LOGOUT
@@ -157,7 +185,7 @@ export default function DashboardLayout({
               </button>
             </div>
 
-            <div className="relative">
+            <div ref={accountMenuRef} className="relative">
               <button
                 onClick={() => setMenuOpen((prev) => !prev)}
                 className="text-sm font-medium text-white cursor-pointer hover:opacity-80"

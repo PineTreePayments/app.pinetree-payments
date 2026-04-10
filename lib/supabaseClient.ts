@@ -1,2 +1,8 @@
-// Re-export from centralized database module for backward compatibility
-export { supabase, supabaseAdmin } from "@/lib/database/supabase"
+/**
+ * Backward compatibility file
+ * All new code should import from @/lib/database instead
+ */
+
+import { supabase } from "./database"
+
+export { supabase }

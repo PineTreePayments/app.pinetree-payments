@@ -57,12 +57,30 @@ export { onEvent, emitEvent } from "./eventBus"
 export { processWebhook } from "./webhookProcessor"
 
 // Provider Management
-export { getProvider, registerProvider } from "./providerRegistry"
+export { 
+  getProvider, 
+  registerProvider,
+  isProviderHealthy,
+  setProviderHealth,
+  getProviderHealthStatus
+} from "./providerRegistry"
+
 export { chooseBestProvider } from "./providerSelector"
-export { isProviderHealthy, setProviderHealth } from "./providerHealth"
+export { runProviderHealthChecks, startHealthCheckDaemon } from "./providerHealth"
 
 // Payment Monitoring
 export { watchPayment } from "./paymentWatcher"
 
 // Split Payments
 export { generateSplitPayment } from "./generateSplitPayment"
+
+// Balance Updater
+export { 
+  updateSingleWalletBalance,
+  updateAllMerchantBalances
+} from "./balanceUpdater"
+
+// Wallet Overview / Pricing
+export { getMarketPricesUSD } from "./marketPrices"
+export { refreshWalletBalancesEngine, getWalletOverviewEngine } from "./walletOverview"
+export { getDashboardOverviewEngine } from "./dashboardOverview"

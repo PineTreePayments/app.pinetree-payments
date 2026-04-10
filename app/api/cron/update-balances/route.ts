@@ -17,12 +17,17 @@ export async function GET() {
        1. UPDATE SYSTEM STATUS
     ========================= */
 
-    await supabase
-      .from("system_status")
-      .upsert({
-        id: 1,
-        last_run: now
-      })
+    try {
+      await supabase
+        .from("system_status")
+        .upsert({
+          id: 1,
+          last_run: now
+        })
+    } catch (e) {
+      // Ignore system status errors
+      console.warn("System status update failed:", e)
+    }
 
 
     /* =========================
@@ -104,12 +109,14 @@ export async function GET() {
            4. UPSERT BALANCE (FIXED)
         ========================= */
 
+        const assetName = network === "solana" ? "SOL" : network === "base" ? "ETH" : network.toUpperCase()
+
         const { error: upsertError } = await supabase
           .from("wallet_balances")
           .upsert(
             {
               merchant_id: wallet.merchant_id,
-              asset: network.toUpperCase(),
+              asset: assetName,
               balance,
               last_updated: now
             },

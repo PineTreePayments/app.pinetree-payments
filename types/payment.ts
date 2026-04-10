@@ -4,8 +4,11 @@ export type PaymentProvider =
   | "solana"
 
 export type PaymentStatus =
-  | "pending"
-  | "confirmed"
-  | "failed"
-  | "expired"
-  | "refunded"
+  | "CREATED"
+  | "PENDING"
+  | "PROCESSING"
+  | "CONFIRMED"
+  | "FAILED"
+  | "INCOMPLETE"
+  | "EXPIRED"
+  | "REFUNDED"

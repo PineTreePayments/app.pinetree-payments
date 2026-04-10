@@ -1,41 +1,30 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { supabase } from "@/lib/supabaseClient"
+import { supabase } from "@/lib/database/supabase"
 
-/* =========================
-TYPES
-========================= */
-
-type WalletRow = {
-  id: string
-  network: string
-  wallet_address: string
-  wallet_type?: string | null
-  provider?: string | null
-}
-
-type BalanceRow = {
-  asset: string
-  balance: number | string | null
-}
-
-type Wallet = {
+type WalletItem = {
   id: string
   network: string
   provider: string | null
   wallet_address: string
-  balance?: number
+  assetSymbol: "SOL" | "ETH"
+  nativeBalance: number
+  usdValue: number
 }
 
-/* =========================
-FORMAT PROVIDER NAME
-========================= */
+type WalletOverviewResponse = {
+  success?: boolean
+  wallets?: WalletItem[]
+  totalUsd?: number
+  lastRun?: string | null
+  error?: string
+}
 
 function formatProvider(name?: string | null, network?: string) {
   const normalized = String(name || "").toLowerCase()
 
-  const map: any = {
+  const map: Record<string, string> = {
     phantom: "Phantom",
     solflare: "Solflare",
     metamask: "MetaMask",
@@ -46,7 +35,6 @@ function formatProvider(name?: string | null, network?: string) {
   }
 
   if (normalized && map[normalized]) return map[normalized]
-
   if (network === "solana") return "Phantom"
   if (network === "base") return "Base Wallet"
   if (network === "ethereum") return "MetaMask"
@@ -54,155 +42,95 @@ function formatProvider(name?: string | null, network?: string) {
   return "Connected"
 }
 
-/* =========================
-PAGE
-========================= */
-
 export default function WalletsPage() {
-  const [wallets, setWallets] = useState<Wallet[]>([])
+  const [wallets, setWallets] = useState<WalletItem[]>([])
   const [totalBalance, setTotalBalance] = useState(0)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [refreshError, setRefreshError] = useState<string | null>(null)
+  const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null)
 
   useEffect(() => {
-    loadAll()
+    loadOverview(false)
   }, [])
 
-  async function loadAll() {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+  async function loadOverview(refresh: boolean) {
+    setIsRefreshing(true)
+    setRefreshError(null)
 
-    const [{ data: walletRows, error: walletError }, { data: balanceRows, error: balanceError }] =
-      await Promise.all([
-        supabase
-          .from("merchant_wallets")
-          .select("*")
-          .eq("merchant_id", user.id),
-        supabase
-          .from("wallet_balances")
-          .select("asset, balance")
-          .eq("merchant_id", user.id)
-      ])
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
 
-    if (walletError) {
-      console.error("merchant_wallets load error:", walletError)
-      setWallets([])
-      setTotalBalance(0)
-      return
+      if (!token) {
+        throw new Error("No active auth session")
+      }
+
+      const endpoint = refresh
+        ? "/api/wallets/overview?refresh=1"
+        : "/api/wallets/overview"
+
+      const res = await fetch(endpoint, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        cache: "no-store"
+      })
+
+      const payload = (await res.json().catch(() => null)) as WalletOverviewResponse | null
+
+      if (!res.ok) {
+        throw new Error(payload?.error || "Failed to load wallet overview")
+      }
+
+      setWallets(payload?.wallets || [])
+      setTotalBalance(Number(payload?.totalUsd ?? 0) || 0)
+      setLastRefreshAt(payload?.lastRun || null)
+    } catch (err) {
+      setRefreshError(err instanceof Error ? err.message : "Wallet refresh failed")
+    } finally {
+      setIsRefreshing(false)
     }
-
-    if (balanceError) {
-      console.error("wallet_balances load error:", balanceError)
-    }
-
-    const balances = (balanceRows || []) as BalanceRow[]
-    const walletsData = (walletRows || []) as WalletRow[]
-
-    /* =========================
-       NORMALIZE BALANCES
-    ========================= */
-
-    let solBalance = 0
-    let ethBalance = 0
-
-    for (const b of balances) {
-      const asset = String(b.asset || "").toUpperCase()
-      const value = Number(b.balance ?? 0) || 0
-
-      if (asset === "SOL" || asset === "SOLANA") {
-        solBalance = value
-      }
-
-      if (asset === "ETH" || asset === "ETHEREUM" || asset === "BASE") {
-        ethBalance = value
-      }
-    }
-
-    /* =========================
-       GET PRICES
-    ========================= */
-
-    const prices = await fetch(
-      "https://api.coingecko.com/api/v3/simple/price?ids=solana,ethereum&vs_currencies=usd"
-    )
-      .then((res) => res.json())
-      .then((d) => ({
-        sol: d?.solana?.usd || 0,
-        eth: d?.ethereum?.usd || 0
-      }))
-      .catch(() => ({
-        sol: 0,
-        eth: 0
-      }))
-
-    /* =========================
-       MERGE DATA
-    ========================= */
-
-    const enriched: Wallet[] = walletsData.map((w) => {
-      let balance = 0
-
-      if (w.network === "solana") {
-        balance = solBalance
-      }
-
-      if (w.network === "base" || w.network === "ethereum") {
-        balance = ethBalance
-      }
-
-      return {
-        id: w.id,
-        network: w.network,
-        provider: w.provider || w.wallet_type || null,
-        wallet_address: w.wallet_address,
-        balance
-      }
-    })
-
-    const total =
-      solBalance * prices.sol +
-      ethBalance * prices.eth
-
-    setWallets(enriched)
-    setTotalBalance(total)
   }
 
-  /* =========================
-  UI
-  ========================= */
-
   return (
-    <div className="w-full px-8 py-10">
+    <div className="w-full px-4 md:px-8 py-6 md:py-10">
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl font-semibold text-black">Wallets</h1>
 
-      <h1 className="text-3xl font-semibold text-black mb-8">
-        Wallets
-      </h1>
-
-      {/* TOTAL */}
-      <div className="bg-white border border-gray-200 rounded-2xl p-8 mb-8 shadow-sm w-full">
-        <p className="text-sm text-blue-600 mb-2">Total Balance</p>
-        <p className="text-4xl font-semibold text-black">
-          ${totalBalance.toFixed(2)}
-        </p>
+        <button
+          onClick={() => loadOverview(true)}
+          disabled={isRefreshing}
+          className="px-4 py-2 bg-blue-600 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition"
+        >
+          {isRefreshing ? "Refreshing..." : "Refresh Balances"}
+        </button>
       </div>
 
-      {/* CONNECTED */}
-      <div className="bg-white border border-gray-200 rounded-2xl p-8 shadow-sm w-full">
+      {refreshError && (
+        <p className="text-sm text-red-600 mb-4">Refresh error: {refreshError}</p>
+      )}
 
-        <h2 className="text-lg font-semibold text-black mb-6">
-          Connected Wallets
-        </h2>
+      {lastRefreshAt && !refreshError && (
+        <p className="text-xs text-gray-500 mb-4">
+          Last wallet sync: {new Date(lastRefreshAt).toLocaleString()}
+        </p>
+      )}
+
+      <div className="bg-white border border-gray-200 rounded-2xl p-5 md:p-8 mb-6 md:mb-8 shadow-sm w-full">
+        <p className="text-sm text-blue-600 mb-2">Total Balance</p>
+        <p className="text-4xl font-semibold text-black">${totalBalance.toFixed(2)}</p>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-2xl p-5 md:p-8 shadow-sm w-full">
+        <h2 className="text-lg font-semibold text-black mb-6">Connected Wallets</h2>
 
         <div className="space-y-5">
-
           {wallets.length === 0 && (
-            <p className="text-gray-400 text-sm">
-              No wallets connected yet
-            </p>
+            <p className="text-gray-400 text-sm">No wallets connected yet</p>
           )}
 
           {wallets.map((w) => (
-            <div key={w.id} className="flex justify-between items-center border rounded-xl p-6 min-h-[90px]">
-
-              {/* LEFT */}
+            <div key={w.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border rounded-xl p-5 min-h-[90px]">
               <div>
                 <p className="text-sm text-blue-600 font-medium mb-1">
                   {formatProvider(w.provider, w.network)}
@@ -213,24 +141,21 @@ export default function WalletsPage() {
                 </p>
               </div>
 
-              {/* RIGHT */}
-              <div className="text-right">
-                <p className="text-sm text-blue-600 mb-1">
-                  Balance
-                </p>
+              <div className="text-left sm:text-right">
+                <p className="text-sm text-blue-600 mb-1">Balance</p>
 
                 <p className="text-lg text-black font-semibold">
-                  {Number(w.balance ?? 0).toFixed(6)}
+                  {Number(w.nativeBalance ?? 0).toFixed(6)} {w.assetSymbol}
+                </p>
+
+                <p className="text-xs text-gray-500 mt-1">
+                  ${Number(w.usdValue ?? 0).toFixed(2)} USD
                 </p>
               </div>
-
             </div>
           ))}
-
         </div>
-
       </div>
-
     </div>
   )
 }

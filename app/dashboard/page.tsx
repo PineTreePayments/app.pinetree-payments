@@ -1,8 +1,8 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { supabase } from "@/lib/supabaseClient"
+import { supabase } from "@/lib/database/supabase"
 
 import {
   LineChart,
@@ -13,6 +13,36 @@ import {
   ResponsiveContainer
 } from "recharts"
 
+type DashboardOverviewResponse = {
+  success?: boolean
+  volume?: number
+  txCount?: number
+  successRate?: number
+  providers?: number
+  recentTx?: RecentTxRow[]
+  chartData?: ChartPoint[]
+  walletValue?: number
+  lastRun?: string | null
+  error?: string
+}
+
+type PaymentSummary = {
+  subtotal_amount?: number | string | null
+}
+
+type RecentTxRow = {
+  id: string
+  status: string
+  network?: string | null
+  created_at: string
+  payments?: PaymentSummary | PaymentSummary[] | null
+}
+
+type ChartPoint = {
+  date: string
+  volume: number
+}
+
 export default function DashboardPage() {
 
   const router = useRouter()
@@ -21,177 +51,111 @@ export default function DashboardPage() {
   const [txCount,setTxCount] = useState(0)
   const [successRate,setSuccessRate] = useState(0)
   const [providers,setProviders] = useState(0)
-  const [recentTx,setRecentTx] = useState<any[]>([])
-  const [chartData,setChartData] = useState<any[]>([])
+  const [recentTx,setRecentTx] = useState<RecentTxRow[]>([])
+  const [chartData,setChartData] = useState<ChartPoint[]>([])
   const [walletValue,setWalletValue] = useState(0)
   const [lastRun,setLastRun] = useState<string | null>(null)
+  const [isSyncing,setIsSyncing] = useState(false)
+  const [syncError,setSyncError] = useState<string | null>(null)
 
-  useEffect(()=>{
+  const callOverviewApi = useCallback(async (sync: boolean) => {
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
 
-    async function loadStats(){
-
-      const { data:{ user } } = await supabase.auth.getUser()
-
-      if(!user){
-        router.push("/signup")
-        return
-      }
-
-      /* =========================
-         LOAD TRANSACTIONS
-      ========================= */
-
-      const { data: tx } = await supabase
-        .from("transactions")
-        .select(`
-          id,
-          status,
-          network,
-          created_at,
-          payments (
-            subtotal_amount
-          )
-        `)
-        .eq("merchant_id", user.id)
-        .order("created_at",{ ascending:false })
-
-      if(tx){
-
-        const totalTx = tx.length
-
-        const successTx = tx.filter(
-          (t:any)=>t.status === "CONFIRMED"
-        )
-
-        const totalVolume = tx.reduce((sum:number,t:any)=>{
-
-          const payment = Array.isArray(t.payments)
-            ? t.payments[0]
-            : t.payments
-
-          return sum + Number(payment?.subtotal_amount ?? 0)
-
-        },0)
-
-        setTxCount(totalTx)
-        setVolume(totalVolume)
-
-        setSuccessRate(
-          totalTx > 0
-            ? Math.round((successTx.length / totalTx) * 100)
-            : 0
-        )
-
-        setRecentTx(tx.slice(0,10))
-
-        const map:any = {}
-
-        tx.forEach((t:any)=>{
-
-          const payment = Array.isArray(t.payments)
-            ? t.payments[0]
-            : t.payments
-
-          const date =
-            new Date(t.created_at).toLocaleDateString()
-
-          if(!map[date]) map[date] = 0
-
-          map[date] += Number(payment?.subtotal_amount ?? 0)
-
-        })
-
-        const formatted =
-          Object.keys(map).map((date)=>({
-            date,
-            volume: map[date]
-          }))
-
-        setChartData(formatted.reverse())
-      }
-
-      /* CONNECTED PROVIDERS */
-
-      const { count } = await supabase
-        .from("merchant_providers")
-        .select("*",{ count:"exact", head:true })
-        .eq("merchant_id", user.id)
-        .eq("status","connected")
-
-      setProviders(count ?? 0)
-
-      /* WALLET BALANCES */
-
-      const { data: balances } = await supabase
-        .from("wallet_balances")
-        .select("asset, balance")
-        .eq("merchant_id", user.id)
-
-      if(balances && balances.length > 0){
-
-        let total = 0
-
-        balances.forEach((b:any)=>{
-
-          const asset = String(b.asset || "").toUpperCase()
-          const value = Number(b.balance ?? 0) || 0
-
-          if(asset === "SOL" || asset === "SOLANA"){
-            total += value * 150
-          }
-
-          if(
-            asset === "ETH" ||
-            asset === "ETHEREUM" ||
-            asset === "BASE"
-          ){
-            total += value * 3000
-          }
-
-        })
-
-        setWalletValue(total)
-
-      } else {
-        setWalletValue(0)
-      }
-
-      /* CRON STATUS (SAFE) */
-
-      const { data: system } = await supabase
-        .from("system_status")
-        .select("*")
-        .maybeSingle()
-
-      if(system){
-        setLastRun(system.last_run)
-      } else {
-        setLastRun(null)
-      }
-
+    if (!token) {
+      throw new Error("No active auth session")
     }
 
-    loadStats()
+    const endpoint = sync ? "/api/dashboard/overview?sync=1" : "/api/dashboard/overview"
+    const res = await fetch(endpoint, {
+      headers: {
+        Authorization: `Bearer ${token}`
+      },
+      cache: "no-store"
+    })
 
-    const interval = setInterval(loadStats,15000)
+    const payload = (await res.json().catch(() => null)) as DashboardOverviewResponse | null
+
+    if (!res.ok) {
+      throw new Error(payload?.error || "Failed to load dashboard overview")
+    }
+
+    return payload || {}
+  }, [])
+
+  const applyOverviewPayload = useCallback((payload: DashboardOverviewResponse) => {
+    setVolume(Number(payload.volume ?? 0))
+    setTxCount(Number(payload.txCount ?? 0))
+    setSuccessRate(Number(payload.successRate ?? 0))
+    setProviders(Number(payload.providers ?? 0))
+    setRecentTx(payload.recentTx || [])
+    setChartData(payload.chartData || [])
+    setWalletValue(Number(payload.walletValue ?? 0))
+    setLastRun(payload.lastRun || null)
+  }, [])
+
+  const loadOverview = useCallback(async () => {
+    const payload = await callOverviewApi(false)
+    applyOverviewPayload(payload)
+  }, [applyOverviewPayload, callOverviewApi])
+
+  async function syncNow() {
+    setIsSyncing(true)
+    setSyncError(null)
+    try {
+      const payload = await callOverviewApi(true)
+      applyOverviewPayload(payload)
+    } catch (err) {
+      console.error("Manual sync failed:", err)
+      setSyncError(err instanceof Error ? err.message : "Sync failed")
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
+  useEffect(()=>{
+    void loadOverview().catch((err) => {
+      console.error("Dashboard load failed:", err)
+    })
+
+    const interval = setInterval(() => {
+      void loadOverview().catch((err) => {
+        console.error("Dashboard poll failed:", err)
+      })
+    },15000)
+
     return () => clearInterval(interval)
-
-  },[router])
+  },[loadOverview])
 
 
 
   return (
-    <div className="p-8 bg-gray-100 min-h-screen">
+    <div className="p-3 sm:p-4 md:p-8 bg-gray-100 min-h-screen">
 
       <h1 className="text-2xl font-semibold text-gray-900 mb-2">
         Overview
       </h1>
 
-      <p className="text-sm text-gray-500 mb-6">
-        Last system update: {lastRun ? new Date(lastRun).toLocaleString() : "—"}
-      </p>
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <p className="text-sm text-gray-500">
+          Last system update: {lastRun ? new Date(lastRun).toLocaleString() : "—"}
+          <span className="text-gray-400 ml-2">({Intl.DateTimeFormat().resolvedOptions().timeZone})</span>
+        </p>
 
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm mb-10 flex justify-between items-center">
+        <button
+          onClick={syncNow}
+          disabled={isSyncing}
+          className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isSyncing ? "Syncing..." : "Sync Now"}
+        </button>
+      </div>
+
+      {syncError && (
+        <p className="text-sm text-red-600 mb-4">Sync error: {syncError}</p>
+      )}
+
+      <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6 shadow-sm mb-6 md:mb-10 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
 
         <div>
           <p className="text-sm text-gray-500 mb-1">
@@ -216,9 +180,9 @@ export default function DashboardPage() {
 
       </div>
 
-      <div className="grid grid-cols-4 gap-6 mb-10">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6 mb-6 md:mb-10">
 
-        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
           <p className="text-sm text-gray-500 mb-1">Total Volume</p>
           <p className="text-3xl font-semibold text-gray-900">
             ${volume.toFixed(2)}
@@ -248,7 +212,7 @@ export default function DashboardPage() {
 
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm mb-10">
+      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm mb-6 md:mb-10">
 
         <h2 className="text-lg font-semibold text-gray-900 mb-6">
           Transaction Volume
@@ -289,7 +253,7 @@ export default function DashboardPage() {
 
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
 
         <h2 className="text-lg font-semibold text-gray-900 mb-4">
           Recent Activity

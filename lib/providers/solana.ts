@@ -7,7 +7,7 @@
 
 import { ProviderAdapter } from "@/types/provider"
 import { registerProvider } from "../engine/providerRegistry"
-import { getMerchantCredential } from "@/lib/database/merchants"
+import { getBestWalletForNetwork } from "@/lib/database/merchantWallets"
 import { getReturnPath } from "../engine/config"
 
 /**
@@ -30,12 +30,9 @@ export const solanaAdapter: ProviderAdapter = {
   -------------------------------- */
 
   async getMerchantWallet(merchantId: string) {
-    const walletAddress = await getMerchantCredential(
-      merchantId,
-      "solana_wallet"
-    )
+    const wallet = await getBestWalletForNetwork(merchantId, "solana")
 
-    if (!walletAddress) {
+    if (!wallet) {
       // Fallback to environment variable
       const envWallet = process.env.SOLANA_WALLET
       if (!envWallet) {
@@ -48,8 +45,8 @@ export const solanaAdapter: ProviderAdapter = {
     }
 
     return {
-      address: walletAddress,
-      network: "solana"
+      address: wallet.wallet_address,
+      network: wallet.network
     }
   },
 
@@ -66,14 +63,15 @@ export const solanaAdapter: ProviderAdapter = {
   }) {
     try {
       // Get merchant wallet directly
-      let recipient = await getMerchantCredential(
-        input.merchantId,
-        "solana_wallet"
-      )
-
-      if (!recipient) {
+      const wallet = await getBestWalletForNetwork(input.merchantId, "solana")
+      
+      let recipient: string
+      
+      if (wallet) {
+        recipient = wallet.wallet_address
+      } else {
         // Fallback to environment variable
-        recipient = process.env.SOLANA_WALLET
+        recipient = process.env.SOLANA_WALLET!
         if (!recipient) {
           throw new Error("Solana wallet not configured")
         }

@@ -4,11 +4,42 @@ export type MerchantWallet = {
   id: string
   merchant_id: string
   network: string
-  address: string
-  priority: number
-  status: "connected" | "disconnected"
+  wallet_address: string
+  asset: string
+  is_primary?: boolean
+  status?: string | null
+  wallet_type?: string | null
   created_at: string
-  updated_at: string
+}
+
+function providerToNetworks(provider: string): string[] {
+  const value = String(provider || "").toLowerCase().trim()
+  if (value === "solana") return ["solana"]
+  if (value === "coinbase" || value === "base") return ["base"]
+  if (value === "shift4") return ["ethereum"]
+  return []
+}
+
+async function getAuthoritativeConnectedNetworks(merchantId: string): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("merchant_providers")
+    .select("provider,status,enabled")
+    .eq("merchant_id", merchantId)
+    .eq("enabled", true)
+    .in("status", ["connected", "active"])
+
+  if (error || !data) {
+    return new Set<string>()
+  }
+
+  const networks = new Set<string>()
+  for (const row of data as Array<{ provider?: string | null }>) {
+    for (const n of providerToNetworks(String(row.provider || ""))) {
+      networks.add(n)
+    }
+  }
+
+  return networks
 }
 
 /**
@@ -16,18 +47,30 @@ export type MerchantWallet = {
  * Ordered by priority (highest first)
  */
 export async function getMerchantWallets(merchantId: string) {
+  const connectedNetworks = await getAuthoritativeConnectedNetworks(merchantId)
+  if (connectedNetworks.size === 0) {
+    return []
+  }
+
   const { data, error } = await supabase
     .from("merchant_wallets")
     .select("*")
     .eq("merchant_id", merchantId)
-    .eq("status", "connected")
-    .order("priority", { ascending: false })
+    .not("wallet_address", "is", null)
 
-  if (error) {
+  if (error || !data) {
     return []
   }
 
-  return data as MerchantWallet[]
+  const wallets = (data as MerchantWallet[])
+    .filter((wallet) => {
+      const network = String(wallet.network || "").toLowerCase().trim()
+      const address = String(wallet.wallet_address || "").trim()
+      return Boolean(address) && connectedNetworks.has(network)
+    })
+    .sort((a, b) => Number(Boolean(b.is_primary)) - Number(Boolean(a.is_primary)))
+
+  return wallets
 }
 
 /**
@@ -37,21 +80,9 @@ export async function getBestWalletForNetwork(
   merchantId: string,
   network: string
 ) {
-  const { data, error } = await supabase
-    .from("merchant_wallets")
-    .select("*")
-    .eq("merchant_id", merchantId)
-    .eq("network", network.toLowerCase())
-    .eq("status", "connected")
-    .order("priority", { ascending: false })
-    .limit(1)
-    .single()
-
-  if (error) {
-    return null
-  }
-
-  return data as MerchantWallet | null
+  const wallets = await getMerchantWallets(merchantId)
+  const target = network.toLowerCase()
+  return wallets.find((wallet) => String(wallet.network || "").toLowerCase() === target) || null
 }
 
 /**

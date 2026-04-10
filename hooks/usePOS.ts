@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useMemo, useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/database/supabase"
 
 type Status =
@@ -25,61 +25,39 @@ export function usePOS() {
   const [taxEnabled, setTaxEnabled] = useState(false)
   const [taxRate, setTaxRate] = useState(0)
 
-  const [taxAmount, setTaxAmount] = useState(0)
-  const [total, setTotal] = useState(0)
+  const numericAmount = Number(amount || 0)
+
+  const taxAmount = useMemo(() => {
+    if (!taxEnabled) return 0
+    return numericAmount * (taxRate / 100)
+  }, [numericAmount, taxEnabled, taxRate])
+
+  const total = useMemo(() => numericAmount + taxAmount, [numericAmount, taxAmount])
 
   /* LOAD TAX SETTINGS */
 
-  async function loadTaxSettings() {
-
+  const loadTaxSettings = useCallback(async () => {
     try {
-
-      const { data: { user } } = await supabase.auth.getUser()
+      const {
+        data: { user }
+      } = await supabase.auth.getUser()
 
       if (!user) return
 
-      const { data } = await supabase
-        .from("merchant_tax_settings")
-        .select("*")
-        .eq("merchant_id", user.id)
-        .single()
+      const qs = new URLSearchParams({ merchantId: user.id })
+      const res = await fetch(`/api/pos/payment?${qs.toString()}`, {
+        cache: "no-store"
+      })
+      const payload = await res.json().catch(() => null)
 
-      if (data) {
-
-        setTaxEnabled(data.tax_enabled)
-        setTaxRate(Number(data.tax_rate))
-
+      if (res.ok && payload?.tax) {
+        setTaxEnabled(Boolean(payload.tax.taxEnabled))
+        setTaxRate(Number(payload.tax.taxRate || 0))
       }
-
     } catch (err) {
-
       console.error("Failed to load tax settings:", err)
-
     }
-
-  }
-
-  /* CALCULATE TAX */
-
-  useEffect(() => {
-
-    const numericAmount = Number(amount || 0)
-
-    if (!taxEnabled) {
-
-      setTaxAmount(0)
-      setTotal(numericAmount)
-
-      return
-
-    }
-
-    const tax = numericAmount * (taxRate / 100)
-
-    setTaxAmount(tax)
-    setTotal(numericAmount + tax)
-
-  }, [amount, taxRate, taxEnabled])
+  }, [])
 
   /* CONFIRM AMOUNT */
 
@@ -101,30 +79,40 @@ export function usePOS() {
 
       setStatus("creating")
 
-      const res = await fetch("/api/payments/create", {
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      if (!user) {
+        setStatus("error")
+        return
+      }
+
+      const res = await fetch("/api/pos/payment", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          amount: total,   // CHARGE TOTAL INCLUDING TAX
+          amount: numericAmount,
           currency: "USD",
-          merchantId: "demo-merchant"
+          terminal: {
+            merchantId: user.id,
+            provider: "solana"
+          }
         })
       })
 
       const data = await res.json()
 
-      if (data?.payment) {
+      if (data?.paymentId) {
 
-        setPaymentId(data.payment.id)
+        setPaymentId(data.paymentId)
 
-        if (data.payment.qrCode) {
-          setQrUrl(data.payment.qrCode)
+        if (data.qrCodeUrl) {
+          setQrUrl(data.qrCodeUrl)
         }
 
-        if (data.payment.paymentUrl) {
-          setQrUrl(data.payment.paymentUrl)
+        if (data.paymentUrl) {
+          setQrUrl(data.paymentUrl)
         }
 
         setStatus("pending")
@@ -152,9 +140,6 @@ export function usePOS() {
     setQrUrl(null)
     setPaymentId(null)
 
-    setTaxAmount(0)
-    setTotal(0)
-
     setStatus("idle")
 
   }
@@ -164,46 +149,57 @@ export function usePOS() {
   useEffect(() => {
 
     if (!paymentId) return
+    if (status !== "pending") return
 
-    const channel = supabase
-      .channel("payment-status")
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "payments",
-          filter: `id=eq.${paymentId}`
-        },
-        payload => {
+    let stopped = false
 
-          const newStatus = payload.new.status
+    async function pollPaymentStatus() {
+      try {
+        const qs = new URLSearchParams({ mode: "status", paymentId })
+        const res = await fetch(`/api/pos/payment?${qs.toString()}`, {
+          cache: "no-store"
+        })
+        const payload = await res.json().catch(() => null)
+        if (!res.ok || !payload || stopped) return
 
-          if (newStatus === "confirmed") {
-            setStatus("confirmed")
-          }
-
-          if (newStatus === "failed") {
-            setStatus("error")
-          }
-
+        const remoteStatus = String(payload.status || "").toUpperCase()
+        if (remoteStatus === "CREATED" || remoteStatus === "PENDING") {
+          return
         }
-      )
-      .subscribe()
 
-    return () => {
-      supabase.removeChannel(channel)
+        if (remoteStatus === "CONFIRMED") {
+          setStatus("confirmed")
+        }
+
+        if (
+          remoteStatus === "FAILED" ||
+          remoteStatus === "EXPIRED" ||
+          remoteStatus === "INCOMPLETE"
+        ) {
+          setStatus("error")
+        }
+      } catch {
+        // ignore transient polling errors
+      }
     }
 
-  }, [paymentId])
+    pollPaymentStatus()
+    const interval = setInterval(pollPaymentStatus, 2000)
+
+    return () => {
+      stopped = true
+      clearInterval(interval)
+    }
+
+  }, [paymentId, status])
 
   /* LOAD TAX SETTINGS ON START */
 
   useEffect(() => {
-
-    loadTaxSettings()
-
-  }, [])
+    queueMicrotask(() => {
+      void loadTaxSettings()
+    })
+  }, [loadTaxSettings])
 
   return {
 

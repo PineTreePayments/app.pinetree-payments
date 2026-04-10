@@ -5,7 +5,13 @@
  * unhealthy providers as unavailable for routing.
  */
 
-import { setProviderHealth, getProviderHealthStatus, getAllProviders } from "./providerRegistry"
+import { 
+  setProviderHealth, 
+  getProviderHealthStatus, 
+  getAllProviders,
+  isProviderHealthy
+} from "./providerRegistry"
+
 import { HEALTH_CHECK_CONFIG } from "./config"
 
 /**

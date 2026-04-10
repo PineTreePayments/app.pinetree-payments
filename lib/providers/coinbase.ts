@@ -7,7 +7,7 @@
 
 import { ProviderAdapter } from "@/types/provider"
 import { registerProvider } from "../engine/providerRegistry"
-import { setProviderHealth } from "../engine/providerHealth"
+import { setProviderHealth } from "../engine/providerRegistry"
 import { getMerchantCredential } from "@/lib/database/merchants"
 
 /**

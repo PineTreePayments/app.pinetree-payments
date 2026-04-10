@@ -24,3 +24,6 @@ export * from "./walletBalances"
 
 // Merchant Wallets
 export * from "./merchantWallets"
+
+// Wallet Overview
+export * from "./walletOverview"

@@ -6,10 +6,12 @@
  */
 
 export type PaymentStatus =
+  | "CREATED"
   | "PENDING"
   | "PROCESSING"
   | "CONFIRMED"
   | "FAILED"
+  | "INCOMPLETE"
   | "EXPIRED"
   | "REFUNDED"
 
@@ -20,17 +22,21 @@ export type PaymentStatus =
  * This ensures payments follow a valid lifecycle.
  */
 const validTransitions: Record<PaymentStatus, PaymentStatus[]> = {
+  // Payment exists but has not yet been presented to customer
+  CREATED: ["PENDING", "FAILED", "INCOMPLETE"],
+
   // Initial state - can move to processing, fail, or expire
-  PENDING: ["PROCESSING", "FAILED", "EXPIRED"],
+  PENDING: ["PROCESSING", "FAILED", "INCOMPLETE", "EXPIRED"],
 
   // Payment detected on chain - can confirm, fail, or expire
-  PROCESSING: ["CONFIRMED", "FAILED", "EXPIRED"],
+  PROCESSING: ["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED"],
 
   // Payment complete - can only be refunded
   CONFIRMED: ["REFUNDED"],
 
   // Terminal states - no further transitions
   FAILED: [],
+  INCOMPLETE: [],
   EXPIRED: [],
   REFUNDED: []
 }
@@ -92,5 +98,5 @@ export function isTerminalStatus(status: PaymentStatus): boolean {
  * Get the initial status for a new payment
  */
 export function getInitialStatus(): PaymentStatus {
-  return "PENDING"
+  return "CREATED"
 }

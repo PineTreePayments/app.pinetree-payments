@@ -1,6 +1,14 @@
-import { supabase, supabaseAdmin } from "./supabase"
+import { supabase } from "./supabase"
 
-export type PaymentStatus = "PENDING" | "PROCESSING" | "CONFIRMED" | "FAILED" | "EXPIRED" | "REFUNDED"
+export type PaymentStatus =
+  | "CREATED"
+  | "PENDING"
+  | "PROCESSING"
+  | "CONFIRMED"
+  | "FAILED"
+  | "INCOMPLETE"
+  | "EXPIRED"
+  | "REFUNDED"
 
 export type Payment = {
   id: string
@@ -15,7 +23,7 @@ export type Payment = {
   network?: string
   payment_url?: string
   qr_code_url?: string
-  metadata?: any
+  metadata?: unknown
   created_at: string
   updated_at: string
 }
@@ -31,7 +39,8 @@ export type CreatePaymentInput = {
   network?: string
   payment_url?: string
   qr_code_url?: string
-  metadata?: any
+  metadata?: unknown
+  status?: PaymentStatus
 }
 
 /**
@@ -52,7 +61,7 @@ export async function createPayment(input: CreatePaymentInput) {
       payment_url: input.payment_url,
       qr_code_url: input.qr_code_url,
       metadata: input.metadata,
-      status: "PENDING"
+      status: input.status || "CREATED"
     })
     .select()
     .single()
@@ -194,7 +203,9 @@ export async function getMerchantPaymentStats(merchantId: string) {
     totalFees: 0
   }
 
-  data.forEach((payment: any) => {
+  type PaymentStatsRow = { status?: string | null; gross_amount?: number | string | null; pinetree_fee?: number | string | null }
+
+  data.forEach((payment: PaymentStatsRow) => {
     const amount = Number(payment.gross_amount || 0)
     const fee = Number(payment.pinetree_fee || 0)
 
@@ -203,9 +214,13 @@ export async function getMerchantPaymentStats(merchantId: string) {
 
     if (payment.status === "CONFIRMED") {
       stats.confirmedTransactions++
-    } else if (payment.status === "FAILED") {
+    } else if (payment.status === "FAILED" || payment.status === "INCOMPLETE") {
       stats.failedTransactions++
-    } else if (payment.status === "PENDING" || payment.status === "PROCESSING") {
+    } else if (
+      payment.status === "CREATED" ||
+      payment.status === "PENDING" ||
+      payment.status === "PROCESSING"
+    ) {
       stats.pendingTransactions++
     }
   })
@@ -235,7 +250,9 @@ export async function getMerchantDailyVolume(
   // Group by date
   const dailyVolume: Record<string, number> = {}
 
-  data.forEach((payment: any) => {
+  type PaymentDailyVolumeRow = { created_at?: string | null; gross_amount?: number | string | null }
+
+  data.forEach((payment: PaymentDailyVolumeRow) => {
     const date = new Date(payment.created_at).toLocaleDateString()
     dailyVolume[date] = (dailyVolume[date] || 0) + Number(payment.gross_amount || 0)
   })

@@ -25,7 +25,7 @@ export async function updatePaymentStatus(
   nextStatus: PaymentStatus,
   metadata?: {
     providerEvent?: string
-    rawPayload?: any
+    rawPayload?: unknown
   }
 ) {
   // Get current payment to validate transition
@@ -71,10 +71,12 @@ export async function updatePaymentStatus(
  */
 function statusToEventType(status: PaymentStatus): PaymentEventType {
   const mapping: Record<PaymentStatus, PaymentEventType> = {
+    CREATED: "payment.created",
     PENDING: "payment.pending",
     PROCESSING: "payment.processing",
     CONFIRMED: "payment.confirmed",
     FAILED: "payment.failed",
+    INCOMPLETE: "payment.cancelled",
     EXPIRED: "payment.expired",
     REFUNDED: "payment.refunded"
   }
@@ -87,7 +89,7 @@ function statusToEventType(status: PaymentStatus): PaymentEventType {
  */
 export async function confirmPayment(
   paymentId: string,
-  metadata?: { providerEvent?: string; rawPayload?: any }
+  metadata?: { providerEvent?: string; rawPayload?: unknown }
 ) {
   return updatePaymentStatus(paymentId, "CONFIRMED", metadata)
 }
@@ -97,7 +99,7 @@ export async function confirmPayment(
  */
 export async function failPayment(
   paymentId: string,
-  metadata?: { providerEvent?: string; rawPayload?: any }
+  metadata?: { providerEvent?: string; rawPayload?: unknown }
 ) {
   return updatePaymentStatus(paymentId, "FAILED", metadata)
 }
@@ -107,7 +109,7 @@ export async function failPayment(
  */
 export async function startProcessingPayment(
   paymentId: string,
-  metadata?: { providerEvent?: string; rawPayload?: any }
+  metadata?: { providerEvent?: string; rawPayload?: unknown }
 ) {
   return updatePaymentStatus(paymentId, "PROCESSING", metadata)
 }
@@ -117,7 +119,17 @@ export async function startProcessingPayment(
  */
 export async function expirePayment(
   paymentId: string,
-  metadata?: { providerEvent?: string; rawPayload?: any }
+  metadata?: { providerEvent?: string; rawPayload?: unknown }
 ) {
-  return updatePaymentStatus(paymentId, "EXPIRED", metadata)
+  return updatePaymentStatus(paymentId, "INCOMPLETE", metadata)
+}
+
+/**
+ * Mark a payment as incomplete/abandoned
+ */
+export async function markPaymentIncomplete(
+  paymentId: string,
+  metadata?: { providerEvent?: string; rawPayload?: unknown }
+) {
+  return updatePaymentStatus(paymentId, "INCOMPLETE", metadata)
 }

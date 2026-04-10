@@ -1,6 +1,5 @@
-import { getProvider } from "./providerRegistry"
+import { getProvider, isProviderHealthy } from "./providerRegistry"
 import { loadProviders } from "./loadProviders"
-import { isProviderHealthy } from "./providerHealth"
 
 let providersLoaded = false
 

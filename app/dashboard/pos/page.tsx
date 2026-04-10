@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Eye, EyeOff } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
@@ -12,6 +12,14 @@ type Terminal = {
   pin: string
   autolock: string
   merchant_id?: string
+  created_at?: string
+}
+
+function formatAutoLock(value: string) {
+  if (value === "never") return "Never"
+  const minutes = Number(value)
+  if (!Number.isFinite(minutes) || minutes <= 0) return "-"
+  return `${minutes} min`
 }
 
 export default function POSPage() {
@@ -21,44 +29,61 @@ export default function POSPage() {
 
   const [name,setName] = useState("")
   const [pin,setPin] = useState("")
+  const [recoveryPhrase,setRecoveryPhrase] = useState("")
   const [autoLock,setAutoLock] = useState("5")
 
   const [showPin,setShowPin] = useState(false)
 
   const [confirmDelete,setConfirmDelete] = useState(false)
   const [terminalToDelete,setTerminalToDelete] = useState<string | null>(null)
+  const [expandedTerminalId, setExpandedTerminalId] = useState<string | null>(null)
 
   const formRef = useRef<HTMLDivElement | null>(null)
+  const detailsRef = useRef<HTMLDivElement | null>(null)
+
+  const callPosTerminalsApi = useCallback(async (method: "GET" | "POST" | "DELETE", body?: unknown) => {
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+
+    if (!token) {
+      throw new Error("Please sign in again")
+    }
+
+    const res = await fetch("/api/pos/terminals", {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: method === "GET" ? undefined : JSON.stringify(body || {}),
+      cache: "no-store"
+    })
+
+    const payload = await res.json().catch(() => null)
+    if (!res.ok) {
+      throw new Error(payload?.error || "Terminal request failed")
+    }
+
+    return payload
+  }, [])
+
+  const loadTerminals = useCallback(async () => {
+    try {
+      const payload = await callPosTerminalsApi("GET") as { terminals?: Terminal[] }
+      setTerminals(payload.terminals || [])
+    } catch (error) {
+      console.error(error)
+      toast.error(error instanceof Error ? error.message : "Failed to load terminals")
+    }
+  }, [callPosTerminalsApi])
 
   /* LOAD TERMINALS */
 
   useEffect(()=>{
-
-    async function loadTerminals(){
-
-      const { data:{ user } } = await supabase.auth.getUser()
-
-      if(!user) return
-
-      const { data,error } = await supabase
-      .from("terminals")
-      .select("*")
-      .eq("merchant_id",user.id)
-
-      if(error){
-        toast.error("Failed to load terminals")
-        return
-      }
-
-      if(data){
-        setTerminals(data)
-      }
-
-    }
-
-    loadTerminals()
-
-  },[])
+    queueMicrotask(() => {
+      void loadTerminals()
+    })
+  },[loadTerminals])
 
   /* SCROLL TO FORM */
 
@@ -67,6 +92,31 @@ export default function POSPage() {
       formRef.current.scrollIntoView({ behavior:"smooth" })
     }
   },[creating])
+
+  useEffect(() => {
+    if (!expandedTerminalId) return
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node | null
+      if (!target) return
+      if (detailsRef.current?.contains(target)) return
+      setExpandedTerminalId(null)
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setExpandedTerminalId(null)
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown)
+    document.addEventListener("keydown", handleEscape)
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown)
+      document.removeEventListener("keydown", handleEscape)
+    }
+  }, [expandedTerminalId])
 
   /* CREATE TERMINAL */
 
@@ -82,56 +132,53 @@ export default function POSPage() {
       return
     }
 
-    const { data:{ user } } = await supabase.auth.getUser()
-
-    if(!user) return
-
-    const { data,error } = await supabase
-      .from("terminals")
-      .insert({
-        merchant_id:user.id,
-        name:name,
-        pin:pin,
-        autolock:autoLock
-      })
-      .select()
-      .single()
-
-    if(error){
-      toast.error("Failed to create terminal")
+    if (recoveryPhrase.trim().length < 4) {
+      toast.error("Recovery phrase must be at least 4 characters")
       return
     }
 
-    setTerminals(prev => [...prev,data])
+    try {
+      const payload = await callPosTerminalsApi("POST", {
+        name,
+        pin,
+        recoveryPhrase,
+        autolock: autoLock
+      }) as { terminal?: Terminal }
 
-    setName("")
-    setPin("")
-    setAutoLock("5")
+      if (payload.terminal) {
+        setTerminals(prev => [payload.terminal as Terminal, ...prev])
+      }
 
-    setCreating(false)
+      setName("")
+      setPin("")
+      setRecoveryPhrase("")
+      setAutoLock("5")
 
-    toast.success("Terminal created")
+      setCreating(false)
+      toast.success("Terminal created")
+    } catch (error) {
+      console.error(error)
+      toast.error(error instanceof Error ? error.message : "Failed to create terminal")
+    }
 
   }
 
   /* DELETE TERMINAL */
 
   async function deleteTerminal(id:string){
-
-    const { error } = await supabase
-      .from("terminals")
-      .delete()
-      .eq("id",id)
-
-    if(error){
-      toast.error("Failed to delete terminal")
-      return
+    try {
+      await callPosTerminalsApi("DELETE", { id })
+      setTerminals(prev => prev.filter(t=>t.id !== id))
+      toast.success("Terminal deleted")
+    } catch (error) {
+      console.error(error)
+      toast.error(error instanceof Error ? error.message : "Failed to delete terminal")
     }
 
-    setTerminals(prev => prev.filter(t=>t.id !== id))
+  }
 
-    toast.success("Terminal deleted")
-
+  function toggleTerminalDetails(id: string) {
+    setExpandedTerminalId((prev) => (prev === id ? null : id))
   }
 
   return (
@@ -221,6 +268,25 @@ export default function POSPage() {
                 placeholder="Front Register"
                 className="w-full border border-gray-300 rounded-md px-3 py-2 text-black"
               />
+
+            </div>
+
+            <div>
+
+              <label className="block text-sm text-gray-700 mb-2 font-medium">
+                Recovery Phrase
+              </label>
+
+              <input
+                value={recoveryPhrase}
+                onChange={(e)=>setRecoveryPhrase(e.target.value)}
+                placeholder="Set a terminal recovery phrase"
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-black"
+              />
+
+              <p className="text-xs text-gray-500 mt-1">
+                Used to reset this terminal PIN if forgotten.
+              </p>
 
             </div>
 
@@ -330,7 +396,8 @@ export default function POSPage() {
 
             <div
               key={t.id}
-              className="border border-gray-200 rounded-lg p-4 flex justify-between items-center"
+              ref={expandedTerminalId === t.id ? detailsRef : null}
+              className="border border-gray-200 rounded-lg p-4 flex justify-between items-center relative"
             >
 
               <div>
@@ -349,7 +416,14 @@ export default function POSPage() {
 
               </div>
 
-              <div className="flex gap-3">
+              <div className="flex gap-3 items-center">
+
+                <button
+                  onClick={() => toggleTerminalDetails(t.id)}
+                  className="px-3 py-1.5 bg-white border border-gray-300 text-gray-700 text-sm rounded-md hover:bg-gray-50"
+                >
+                  {expandedTerminalId === t.id ? "Hide details" : "Details"}
+                </button>
 
                 <Link
                   href={`/terminal?tid=${t.id}`}
@@ -369,6 +443,17 @@ export default function POSPage() {
                 </button>
 
               </div>
+
+              {expandedTerminalId === t.id && (
+                <div className="absolute right-4 top-14 z-20 w-72 bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs text-gray-600 space-y-1">
+                  <div><span className="font-medium text-gray-800">Auto-lock:</span> {formatAutoLock(t.autolock)}</div>
+                  <div><span className="font-medium text-gray-800">Merchant:</span> {t.merchant_id || "-"}</div>
+                  <div>
+                    <span className="font-medium text-gray-800">Created:</span>{" "}
+                    {t.created_at ? new Date(t.created_at).toLocaleString() : "-"}
+                  </div>
+                </div>
+              )}
 
             </div>
 

@@ -18,16 +18,23 @@ import {
 import { generateSplitPayment } from "./generateSplitPayment"
 import { watchPayment } from "./paymentWatcher"
 import { calculateGrossAmount } from "./fees"
-import { getMerchantDefaultProvider } from "@/lib/database/merchants"
-import { selectBestWallet, hasAnyWalletConnected } from "@/lib/database/merchantWallets"
+import { selectBestWallet } from "@/lib/database/merchantWallets"
+import { updatePaymentStatus } from "./updatePaymentStatus"
+
+type PaymentMetadata = {
+  merchantAmount?: number
+  pinetreeFee?: number
+  [key: string]: unknown
+}
 
 type CreatePaymentInput = {
   amount: number
   currency: string
   provider?: PaymentProvider
   merchantId: string
+  preferredNetwork?: string
   channel?: "pos" | "online" | "api" | "invoice"
-  metadata?: any
+  metadata?: PaymentMetadata
   idempotencyKey?: string
   pinetreeFee?: number
 }
@@ -77,7 +84,8 @@ export async function createPayment(
   let providerName = input.provider
 
   if (!providerName) {
-    providerName = await chooseBestProvider(input.merchantId)
+    const selectedProvider = await chooseBestProvider(input.merchantId)
+    providerName = selectedProvider as PaymentProvider
   }
 
   if (!providerName) {
@@ -106,19 +114,33 @@ export async function createPayment(
     throw new Error("Provider does not support wallet rails")
   }
 
-  const merchantWalletData = await provider.getMerchantWallet(input.merchantId)
-  const merchantWallet = merchantWalletData.address
-  const network = merchantWalletData.network
+  const preferredNetwork =
+    input.preferredNetwork ||
+    (providerName === "solana"
+      ? "solana"
+      : providerName === "coinbase"
+        ? "base"
+        : providerName === "shift4"
+          ? "ethereum"
+          : undefined)
+
+  const merchantWallet = await selectBestWallet(input.merchantId, preferredNetwork)
+  
+  if (!merchantWallet) {
+    throw new Error("No wallet configured for merchant")
+  }
+  
+  const merchantWalletAddress = merchantWallet.wallet_address
+  const network = merchantWallet.network
 
   /* ---------------------------
      PINETREE TREASURY WALLET
   --------------------------- */
 
-  const pinetreeWallet = process.env.PINETREE_TREASURY_WALLET || ""
-
-  if (!pinetreeWallet) {
-    throw new Error("PineTree treasury wallet not configured")
-  }
+  // TEMPORARY FALLBACK FOR LOCAL DEVELOPMENT
+  // Use merchant wallet directly for local testing
+  // PineTree treasury wallet will be used in production
+  const pinetreeWallet = process.env.PINETREE_TREASURY_WALLET || merchantWalletAddress
 
   /* ---------------------------
      CREATE PAYMENT ID
@@ -131,7 +153,7 @@ export async function createPayment(
   --------------------------- */
 
   const splitPayment = await generateSplitPayment({
-    merchantWallet,
+    merchantWallet: merchantWalletAddress,
     merchantAmount,
     pinetreeWallet,
     pinetreeFee,
@@ -143,7 +165,7 @@ export async function createPayment(
      INSERT PAYMENT RECORD
   --------------------------- */
 
-  const payment = await createPaymentRecord({
+  await createPaymentRecord({
     id: paymentId,
     merchant_id: input.merchantId,
     merchant_amount: merchantAmount,
@@ -154,7 +176,8 @@ export async function createPayment(
     network: network,
     payment_url: splitPayment.paymentUrl,
     qr_code_url: splitPayment.qrCodeUrl,
-    metadata: input.metadata
+    metadata: input.metadata,
+    status: "CREATED"
   })
 
   /* ---------------------------
@@ -178,6 +201,13 @@ export async function createPayment(
     channel: channel
   })
 
+  await updatePaymentStatus(paymentId, "PENDING", {
+    providerEvent: "payment.presented",
+    rawPayload: {
+      source: "createPayment"
+    }
+  })
+
   /* ---------------------------
      STORE IDEMPOTENCY KEY
   --------------------------- */
@@ -191,7 +221,7 @@ export async function createPayment(
   --------------------------- */
 
   watchPayment({
-    merchantWallet,
+    merchantWallet: merchantWalletAddress,
     pinetreeWallet,
     merchantAmount,
     pinetreeFee,

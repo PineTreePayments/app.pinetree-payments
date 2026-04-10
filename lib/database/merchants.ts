@@ -1,4 +1,6 @@
-import { supabase } from "./supabase"
+import { supabase, supabaseAdmin } from "./supabase"
+
+const db = supabaseAdmin || supabase
 
 export type Merchant = {
   id: string
@@ -23,8 +25,9 @@ export type MerchantSettings = {
 export type MerchantProvider = {
   merchant_id: string
   provider: string
-  status: "connected" | "disconnected"
-  credentials?: any
+  status: "connected" | "active" | "disconnected"
+  enabled?: boolean
+  credentials?: unknown
   created_at: string
 }
 
@@ -32,7 +35,7 @@ export type MerchantProvider = {
  * Get merchant by ID
  */
 export async function getMerchantById(merchantId: string) {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from("merchants")
     .select("*")
     .eq("id", merchantId)
@@ -49,7 +52,7 @@ export async function getMerchantById(merchantId: string) {
  * Get merchant settings
  */
 export async function getMerchantSettings(merchantId: string) {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from("merchant_settings")
     .select("*")
     .eq("merchant_id", merchantId)
@@ -69,7 +72,7 @@ export async function updateMerchantSettings(
   merchantId: string,
   settings: Partial<MerchantSettings>
 ) {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from("merchant_settings")
     .update({
       ...settings,
@@ -90,11 +93,12 @@ export async function updateMerchantSettings(
  * Get merchant's connected providers
  */
 export async function getMerchantProviders(merchantId: string) {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from("merchant_providers")
     .select("*")
     .eq("merchant_id", merchantId)
-    .eq("status", "connected")
+    .eq("enabled", true)
+    .in("status", ["connected", "active"])
 
   if (error) {
     return []
@@ -118,12 +122,13 @@ export async function hasProviderConnected(
   merchantId: string,
   provider: string
 ) {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from("merchant_providers")
     .select("id")
     .eq("merchant_id", merchantId)
     .eq("provider", provider)
-    .eq("status", "connected")
+    .eq("enabled", true)
+    .in("status", ["connected", "active"])
     .maybeSingle()
 
   if (error || !data) {
@@ -137,8 +142,20 @@ export async function hasProviderConnected(
  * Get merchant tax settings
  */
 export async function getMerchantTaxSettings(merchantId: string) {
+  const { data, error } = await db
+    .from("merchant_tax_settings")
+    .select("tax_enabled,tax_rate")
+    .eq("merchant_id", merchantId)
+    .maybeSingle()
+
+  if (!error && data) {
+    return {
+      taxEnabled: Boolean(data.tax_enabled),
+      taxRate: Number(data.tax_rate || 0)
+    }
+  }
+
   const settings = await getMerchantSettings(merchantId)
-  
   if (!settings) {
     return {
       taxEnabled: false,
@@ -147,8 +164,8 @@ export async function getMerchantTaxSettings(merchantId: string) {
   }
 
   return {
-    taxEnabled: settings.tax_enabled,
-    taxRate: settings.tax_rate
+    taxEnabled: Boolean(settings.tax_enabled),
+    taxRate: Number(settings.tax_rate || 0)
   }
 }
 
@@ -159,7 +176,7 @@ export async function getMerchantCredential(
   merchantId: string,
   credentialKey: string
 ) {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from("merchant_credentials")
     .select("value")
     .eq("merchant_id", merchantId)
@@ -181,7 +198,7 @@ export async function storeMerchantCredential(
   credentialKey: string,
   value: string
 ) {
-  const { error } = await supabase
+  const { error } = await db
     .from("merchant_credentials")
     .upsert({
       merchant_id: merchantId,

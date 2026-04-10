@@ -1,13 +1,18 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { supabase } from "@/lib/database/supabase"
+import Image from "next/image"
 import { Loader2, CheckCircle, XCircle } from "lucide-react"
 import AmountDisplay from "./AmountDisplay"
 import Keypad from "./Keypad"
 
 type Props = {
   locked: boolean
+  terminalContext?: {
+    merchantId: string
+    terminalId?: string
+    provider?: string
+  } | null
 }
 
 type Status =
@@ -16,134 +21,146 @@ type Status =
   | "waiting"
   | "processing"
   | "confirmed"
+  | "incomplete"
   | "failed"
 
-export default function POSLayout({ locked }: Props) {
+export default function POSLayout({ locked, terminalContext: terminalContextProp = null }: Props) {
 
   const [digits,setDigits] = useState("")
   const [connected,setConnected] = useState(false)
+  const [connectionReason, setConnectionReason] = useState("")
+  const [contextMerchantId, setContextMerchantId] = useState("")
   const [status,setStatus] = useState<Status>("ready")
-  const [paymentUrl,setPaymentUrl] = useState("")
   const [qrCodeUrl,setQrCodeUrl] = useState("")
-  const [channel,setChannel] = useState<any>(null)
+  const [paymentId, setPaymentId] = useState("")
+  const [terminalContext, setTerminalContext] = useState<{
+    merchantId: string
+    terminalId?: string
+    provider?: string
+  } | null>(terminalContextProp)
+
+  useEffect(() => {
+    setTerminalContext(terminalContextProp)
+  }, [terminalContextProp])
 
   /* TAX SETTINGS */
 
   const [taxEnabled,setTaxEnabled] = useState(false)
   const [taxRate,setTaxRate] = useState(0)
 
-  const amount = (Number(digits || "0") / 100).toFixed(2)
+  const subtotal = (Number(digits || "0") / 100).toFixed(2)
 
   const taxAmount = taxEnabled
-    ? (Number(amount) * (taxRate / 100)).toFixed(2)
+    ? (Number(subtotal) * (taxRate / 100)).toFixed(2)
     : "0.00"
 
+  const serviceFee = 0.15
+
   const total = (
-    Number(amount) +
-    Number(taxAmount)
+    Number(subtotal) +
+    Number(taxAmount) +
+    serviceFee
   ).toFixed(2)
 
-  /* LOAD TAX SETTINGS */
+  useEffect(() => {
+    if (!terminalContext?.merchantId) return
+    const merchantId = terminalContext.merchantId
 
-  useEffect(()=>{
+    async function loadPosData() {
+      try {
+        const qs = new URLSearchParams({ merchantId })
+        if (terminalContext?.provider) {
+          qs.set("provider", terminalContext.provider)
+        }
+        const res = await fetch(`/api/pos/payment?${qs.toString()}`, { cache: "no-store" })
+        const data = await res.json().catch(() => null)
 
-    const providerStatus =
-      localStorage.getItem("pinetree_provider_connected")
+        if (!res.ok || !data) return
 
-    setConnected(providerStatus === "true")
-
-    loadTaxSettings()
-
-  },[])
-
-  async function loadTaxSettings(){
-
-    try{
-
-      const { data:{ user } } = await supabase.auth.getUser()
-
-      if(!user) return
-
-      const { data } = await supabase
-        .from("merchant_tax_settings")
-        .select("*")
-        .eq("merchant_id",user.id)
-        .single()
-
-      if(data){
-
-        setTaxEnabled(data.tax_enabled)
-        setTaxRate(Number(data.tax_rate))
-
+        setConnected(Boolean(data.connected))
+        setConnectionReason(String(data.reason || ""))
+        setContextMerchantId(String(data.context?.merchantId || ""))
+        setTaxEnabled(Boolean(data.tax?.taxEnabled))
+        setTaxRate(Number(data.tax?.taxRate || 0))
+      } catch (err) {
+        console.error("Failed loading POS payment metadata:", err)
       }
-
-    }catch(err){
-
-      console.error("Failed loading tax settings:",err)
-
     }
 
-  }
+    loadPosData()
+    const interval = setInterval(loadPosData, 30000)
+
+    return () => clearInterval(interval)
+  }, [terminalContext])
 
   function resetSale(){
 
     setDigits("")
     setStatus("ready")
-    setPaymentUrl("")
     setQrCodeUrl("")
+    setPaymentId("")
 
-    if(channel){
-      supabase.removeChannel(channel)
-      setChannel(null)
+  }
+
+  useEffect(() => {
+    if (!paymentId) return
+    if (status !== "waiting" && status !== "processing") return
+
+    let stopped = false
+
+    async function pollStatus() {
+      try {
+        const qs = new URLSearchParams({ mode: "status", paymentId })
+        const res = await fetch(`/api/pos/payment?${qs.toString()}`, { cache: "no-store" })
+        const data = await res.json().catch(() => null)
+        if (!res.ok || !data || stopped) return
+
+        const remote = String(data.status || "").toUpperCase()
+
+        if (remote === "CREATED" || remote === "PENDING") {
+          setStatus("waiting")
+          return
+        }
+
+        if (remote === "PROCESSING") {
+          setStatus("processing")
+          return
+        }
+
+        if (remote === "CONFIRMED") {
+          setStatus("confirmed")
+          setTimeout(() => {
+            if (!stopped) resetSale()
+          }, 3500)
+          return
+        }
+
+        if (remote === "FAILED") {
+          setStatus("failed")
+          return
+        }
+
+        if (remote === "INCOMPLETE" || remote === "EXPIRED") {
+          setStatus("incomplete")
+          return
+        }
+      } catch {
+        // ignore transient poll errors
+      }
     }
 
-  }
+    pollStatus()
+    const interval = setInterval(pollStatus, 2000)
 
-  function listenForPayment(paymentId:string){
-
-    const realtimeChannel = supabase
-      .channel(`payment-${paymentId}`)
-      .on(
-        "postgres_changes",
-        {
-          event:"UPDATE",
-          schema:"public",
-          table:"payments",
-          filter:`id=eq.${paymentId}`
-        },
-        (payload:any)=>{
-
-          const newStatus = payload.new.status
-
-          if(newStatus === "PROCESSING"){
-            setStatus("processing")
-          }
-
-          if(newStatus === "CONFIRMED"){
-
-            setStatus("confirmed")
-
-            setTimeout(()=>{
-              resetSale()
-            },3500)
-
-          }
-
-          if(newStatus === "FAILED"){
-            setStatus("failed")
-          }
-
-        }
-      )
-      .subscribe()
-
-    setChannel(realtimeChannel)
-
-  }
+    return () => {
+      stopped = true
+      clearInterval(interval)
+    }
+  }, [paymentId, status])
 
   async function createPayment(){
 
-    if(!digits || Number(amount) <= 0){
+    if(!digits || Number(subtotal) <= 0){
       return
     }
 
@@ -153,29 +170,21 @@ export default function POSLayout({ locked }: Props) {
 
       const idempotencyKey = crypto.randomUUID()
 
-      const terminal = JSON.parse(
-        localStorage.getItem("pinetree_terminal") || "{}"
-      )
-
-      if(!terminal.provider){
+      if(!terminalContext?.merchantId){
         setStatus("failed")
         return
       }
 
-      const res = await fetch("/api/payments/create",{
+      const res = await fetch("/api/pos/payment",{
         method:"POST",
         headers:{
           "Content-Type":"application/json",
           "idempotency-key": idempotencyKey
         },
         body:JSON.stringify({
-          amount: total,   // TOTAL INCLUDING TAX
+          amount: Number(subtotal),
           currency:"USD",
-          provider: terminal.provider,
-          merchantId: terminal.merchantId,
-          terminalId: terminal.terminalId,
-          subtotal: amount,
-          tax: taxAmount
+          terminal: terminalContext
         })
       })
 
@@ -186,15 +195,11 @@ export default function POSLayout({ locked }: Props) {
         return
       }
 
-      if(data.paymentUrl){
-        setPaymentUrl(data.paymentUrl)
-      }
-
       if(data.qrCodeUrl){
         setQrCodeUrl(data.qrCodeUrl)
       }
 
-      listenForPayment(data.paymentId)
+      setPaymentId(String(data.paymentId || ""))
 
     }catch(err){
 
@@ -216,10 +221,23 @@ export default function POSLayout({ locked }: Props) {
             Connected
           </span>
         ) : (
-          <span className="text-red-600 text-sm font-medium">
-            Disconnected
-          </span>
+          <div className="space-y-1">
+            <span className="text-red-600 text-sm font-medium block">
+              Disconnected
+            </span>
+            {connectionReason ? (
+              <span className="text-xs text-red-500 block">
+                {connectionReason}
+              </span>
+            ) : null}
+          </div>
         )}
+
+        {contextMerchantId ? (
+          <div className="text-[11px] text-gray-500 mt-1">
+            MID: {contextMerchantId}
+          </div>
+        ) : null}
 
       </div>
 
@@ -231,27 +249,32 @@ export default function POSLayout({ locked }: Props) {
 
           <div className="text-center">
 
-            <h2 className="text-lg font-semibold mb-6">
+            <h2 className="text-lg font-semibold text-black mb-6">
               Confirm Payment
             </h2>
 
-            <div className="space-y-2 text-gray-700 mb-6">
+            <div className="space-y-3 text-black mb-6">
 
-              <div className="flex justify-between">
+              <div className="flex justify-between text-lg">
                 <span>Subtotal</span>
-                <span>${amount}</span>
+                <span className="font-medium">${subtotal}</span>
               </div>
 
-              {taxEnabled && (
-                <div className="flex justify-between">
-                  <span>Tax</span>
-                  <span>${taxAmount}</span>
-                </div>
-              )}
+              <div className="flex justify-between text-lg">
+                <span>
+                  Tax {taxEnabled ? `(${taxRate.toFixed(2)}%)` : "(disabled)"}
+                </span>
+                <span className="font-medium">${taxAmount}</span>
+              </div>
 
-              <div className="border-t my-2"></div>
+              <div className="flex justify-between text-lg">
+                <span>Service Fee</span>
+                <span className="font-medium">${serviceFee.toFixed(2)}</span>
+              </div>
 
-              <div className="flex justify-between font-semibold text-lg">
+              <div className="border-t my-3 border-gray-300"></div>
+
+              <div className="flex justify-between font-semibold text-2xl text-black">
                 <span>Total</span>
                 <span>${total}</span>
               </div>
@@ -262,7 +285,7 @@ export default function POSLayout({ locked }: Props) {
 
               <button
                 onClick={()=>setStatus("ready")}
-                className="px-6 py-3 bg-gray-200 rounded-md"
+                className="px-6 py-3 bg-gray-200 text-black rounded-md"
               >
                 Back
               </button>
@@ -292,11 +315,12 @@ export default function POSLayout({ locked }: Props) {
 
             <div className="bg-white p-4 rounded-xl shadow">
 
-              <img
+              <Image
                 src={qrCodeUrl}
                 width={220}
                 height={220}
                 alt="Payment QR"
+                unoptimized
               />
 
             </div>
@@ -362,13 +386,32 @@ export default function POSLayout({ locked }: Props) {
 
         )}
 
+        {/* INCOMPLETE */}
+
+        {status === "incomplete" && (
+
+          <div className="flex flex-col items-center py-10">
+
+            <XCircle
+              size={70}
+              className="text-orange-500"
+            />
+
+            <div className="mt-4 text-lg font-semibold text-orange-500">
+              Payment Incomplete
+            </div>
+
+          </div>
+
+        )}
+
         {/* AMOUNT ENTRY */}
 
         {status === "ready" && (
 
           <>
             <div className="mb-8 text-center">
-              <AmountDisplay amount={amount} />
+              <AmountDisplay amount={subtotal} />
             </div>
 
             {!locked ? (

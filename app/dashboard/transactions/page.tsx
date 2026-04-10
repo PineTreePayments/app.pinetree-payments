@@ -1,8 +1,8 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { supabase } from "@/lib/database/supabase"
+import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
+import { supabase } from "@/lib/database/supabase"
 
 import {
   ResponsiveContainer,
@@ -41,6 +41,21 @@ type ChartRow = {
   shift4: number
 }
 
+type TransactionsDashboardResponse = {
+  success?: boolean
+  transactions?: Transaction[]
+  todayVolume?: number
+  todayTransactions?: number
+  confirmedRate?: number
+  error?: string
+}
+
+type TransactionsChartResponse = {
+  success?: boolean
+  chartData?: ChartRow[]
+  error?: string
+}
+
 export default function TransactionsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
 
@@ -67,73 +82,43 @@ export default function TransactionsPage() {
   const [onlinePercent, setOnlinePercent] = useState(0)
   const [aiInsight, setAiInsight] = useState("No insights yet.")
 
-  async function loadTransactions() {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+  const callTransactionsApi = useCallback(async (method: "GET" | "POST", body?: unknown) => {
+    const {
+      data: { session }
+    } = await supabase.auth.getSession()
 
-    const { data, error } = await supabase
-      .from("transactions")
-      .select(`
-        id,
-        provider,
-        status,
-        provider_transaction_id,
-        network,
-        channel,
-        created_at,
-        payments(
-          created_at,
-          total_amount,
-          currency,
-          status
-        )
-      `)
-      .eq("merchant_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(100)
-
-    if (error) {
-      toast.error("Failed to load transactions")
-      return
+    const token = session?.access_token
+    if (!token) {
+      throw new Error("Please sign in again")
     }
 
-    if (data) {
-      const typed = data as Transaction[]
-      setTransactions(typed)
-      calculateInsights(typed)
-    }
-  }
+    const authRes = await fetch("/api/transactions", {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: method === "POST" ? JSON.stringify(body || {}) : undefined,
+      cache: "no-store"
+    })
 
-  async function loadAnalytics() {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
-    const startOfDay = new Date()
-    startOfDay.setHours(0, 0, 0, 0)
-
-    const { data, error } = await supabase
-      .from("payments")
-      .select("total_amount,status")
-      .eq("merchant_id", user.id)
-      .gte("created_at", startOfDay.toISOString())
-
-    if (error) {
-      toast.error("Failed to load analytics")
-      return
+    const payload = await authRes.json().catch(() => null)
+    if (!authRes.ok) {
+      throw new Error(payload?.error || "Transactions API request failed")
     }
 
-    if (!data) return
+    return payload
+  }, [])
 
-    const volume = data.reduce((sum, p) => sum + Number(p.total_amount), 0)
-    const count = data.length
-    const confirmed = data.filter((p) => p.status === "CONFIRMED").length
+  const providerName = useCallback((provider: string) => {
+    if (provider === "coinbase") return "Coinbase Business"
+    if (provider === "solana") return "Solana Pay"
+    if (provider === "shift4") return "Shift4"
+    if (provider === "base") return "Base Pay"
+    return provider || "-"
+  }, [])
 
-    setTodayVolume(volume)
-    setTodayTransactions(count)
-    setConfirmedRate(count ? Math.round((confirmed / count) * 100) : 0)
-  }
-
-  function calculateInsights(data: Transaction[]) {
+  const calculateInsights = useCallback((data: Transaction[]) => {
     const hourMap: Record<string, number> = {}
     const dayMap: Record<string, number> = {}
     const providerMap: Record<string, number> = {}
@@ -186,145 +171,51 @@ export default function TransactionsPage() {
         `Your busiest hour is ${peakH}:00. ${providerName(topP)} is your most used provider, and ${topN} is your most used network.`
       )
     }
-  }
+  }, [providerName])
 
-  async function loadChartData(range: string) {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+  const loadDashboardData = useCallback(async () => {
+    try {
+      const payload = (await callTransactionsApi("GET")) as TransactionsDashboardResponse
+      const tx = payload.transactions || []
 
-    const buckets: Record<string, ChartRow> = {}
-    const start = new Date()
-
-    function bucket(label: string): ChartRow {
-      return {
-        time: label,
-        solana: 0,
-        base: 0,
-        coinbase: 0,
-        shift4: 0
-      }
+      setTransactions(tx)
+      setTodayVolume(Number(payload.todayVolume || 0))
+      setTodayTransactions(Number(payload.todayTransactions || 0))
+      setConfirmedRate(Number(payload.confirmedRate || 0))
+      calculateInsights(tx)
+    } catch (error) {
+      console.error(error)
+      toast.error(error instanceof Error ? error.message : "Failed to load transactions")
     }
+  }, [callTransactionsApi, calculateInsights])
 
-    if (range === "24h") {
-      for (let i = 23; i >= 0; i--) {
-        const d = new Date()
-        d.setHours(d.getHours() - i)
-        const label = `${d.getHours()}:00`
-        buckets[label] = bucket(label)
-      }
-      start.setHours(start.getHours() - 24)
+  const loadChartData = useCallback(async (range: string) => {
+    try {
+      const payload = (await callTransactionsApi("POST", {
+        action: "chart",
+        range,
+        mode: chartMode
+      })) as TransactionsChartResponse
+
+      setChartData(payload.chartData || [])
+      toast.success("Chart updated")
+    } catch (error) {
+      console.error(error)
+      toast.error(error instanceof Error ? error.message : "Failed to load chart data")
     }
-
-    if (range === "7d") {
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date()
-        d.setDate(d.getDate() - i)
-        const label = d.toLocaleDateString()
-        buckets[label] = bucket(label)
-      }
-      start.setDate(start.getDate() - 7)
-    }
-
-    if (range === "1m") {
-      for (let i = 29; i >= 0; i--) {
-        const d = new Date()
-        d.setDate(d.getDate() - i)
-        const label = d.toLocaleDateString()
-        buckets[label] = bucket(label)
-      }
-      start.setMonth(start.getMonth() - 1)
-    }
-
-    if (range === "3m") {
-      for (let i = 89; i >= 0; i--) {
-        const d = new Date()
-        d.setDate(d.getDate() - i)
-        const label = d.toLocaleDateString()
-        buckets[label] = bucket(label)
-      }
-      start.setMonth(start.getMonth() - 3)
-    }
-
-    if (range === "6m") {
-      for (let i = 179; i >= 0; i--) {
-        const d = new Date()
-        d.setDate(d.getDate() - i)
-        const label = d.toLocaleDateString()
-        buckets[label] = bucket(label)
-      }
-      start.setMonth(start.getMonth() - 6)
-    }
-
-    if (range === "1y") {
-      for (let i = 11; i >= 0; i--) {
-        const d = new Date()
-        d.setMonth(d.getMonth() - i)
-        const label = d.toLocaleString("default", { month: "short" })
-        buckets[label] = bucket(label)
-      }
-      start.setFullYear(start.getFullYear() - 1)
-    }
-
-    const { data, error } = await supabase
-      .from("transactions")
-      .select(`
-        provider,
-        channel,
-        created_at,
-        payments(total_amount)
-      `)
-      .eq("merchant_id", user.id)
-      .gte("created_at", start.toISOString())
-
-    if (error) {
-      toast.error("Failed to load chart data")
-      return
-    }
-
-    if (data) {
-      data.forEach((tx: any) => {
-        if (chartMode === "pos" && tx.channel !== "pos") return
-        if (chartMode === "online" && tx.channel !== "online") return
-
-        const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
-        const amount = Number(payment?.total_amount || 0)
-
-        let label = ""
-        const d = new Date(tx.created_at)
-
-        if (range === "24h") label = `${d.getHours()}:00`
-        if (range === "7d" || range === "1m" || range === "3m" || range === "6m") {
-          label = d.toLocaleDateString()
-        }
-        if (range === "1y") {
-          label = d.toLocaleString("default", { month: "short" })
-        }
-
-        if (!buckets[label]) return
-
-        if (tx.provider === "solana") buckets[label].solana += amount
-        if (tx.provider === "base") buckets[label].base += amount
-        if (tx.provider === "coinbase") buckets[label].coinbase += amount
-        if (tx.provider === "shift4") buckets[label].shift4 += amount
-      })
-    }
-
-    setChartData(Object.values(buckets))
-    toast.success("Chart updated")
-  }
+  }, [callTransactionsApi, chartMode])
 
   useEffect(() => {
-    loadTransactions()
-    loadAnalytics()
-  }, [])
+    let active = true
+    ;(async () => {
+      if (!active) return
+      await loadDashboardData()
+    })()
 
-  function providerName(provider: string) {
-    if (provider === "coinbase") return "Coinbase Business"
-    if (provider === "solana") return "Solana Pay"
-    if (provider === "shift4") return "Shift4"
-    if (provider === "base") return "Base Pay"
-    return provider || "-"
-  }
+    return () => {
+      active = false
+    }
+  }, [loadDashboardData])
 
   function statusStyle(status: string) {
     if (status === "CONFIRMED") return "bg-green-100 text-green-700"
@@ -347,7 +238,7 @@ export default function TransactionsPage() {
 
       {/* SUMMARY */}
 
-      <div className="grid grid-cols-3 gap-6 mb-10">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
         <div
           className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm cursor-pointer hover:bg-gray-50"
           onClick={() => {
@@ -356,7 +247,7 @@ export default function TransactionsPage() {
             loadChartData(chartRange)
           }}
         >
-          <div className="text-sm text-gray-600">Today's Volume</div>
+          <div className="text-sm text-gray-600">Today&apos;s Volume</div>
           <div className="text-xl font-semibold text-gray-900 mt-1">
             ${todayVolume.toFixed(2)}
           </div>
@@ -365,14 +256,14 @@ export default function TransactionsPage() {
         <AnalyticsCard title="Transactions" value={todayTransactions.toString()} />
 
         <AnalyticsCard
-          title="Active Networks"
-          value={Array.from(new Set(transactions.map(t => t.network).filter(Boolean))).length.toString()}
+          title="Confirmed Rate"
+          value={`${confirmedRate}%`}
         />
       </div>
 
       {/* INSIGHTS */}
 
-      <div className="grid grid-cols-4 gap-6 mb-10">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
         <AnalyticsCard title="Peak Hour" value={peakHour} />
         <AnalyticsCard title="Peak Day" value={peakDay} />
         <AnalyticsCard title="Top Provider" value={topProvider} />
@@ -381,7 +272,7 @@ export default function TransactionsPage() {
 
       {/* CHANNEL MIX */}
 
-      <div className="grid grid-cols-2 gap-6 mb-10">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
 
         <div
           className="cursor-pointer"
@@ -421,7 +312,7 @@ export default function TransactionsPage() {
 
       {/* FILTERS */}
 
-      <div className="flex gap-4 mb-6">
+      <div className="flex flex-wrap gap-4 mb-6">
         <select
           className="border border-gray-300 rounded px-3 py-2 text-sm bg-white text-gray-900"
           value={walletFilter}
@@ -519,7 +410,7 @@ export default function TransactionsPage() {
 
       {showChart && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white w-[900px] p-6 rounded-lg shadow-lg">
+          <div className="bg-white w-[90vw] max-w-[900px] p-6 rounded-lg shadow-lg">
             <div className="flex justify-between mb-6">
               <h2 className="text-lg font-semibold text-gray-900">
                 {chartMode === "pos"

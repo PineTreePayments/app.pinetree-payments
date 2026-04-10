@@ -7,7 +7,7 @@
 
 import { ProviderAdapter } from "@/types/provider"
 import { registerProvider } from "../engine/providerRegistry"
-import { setProviderHealth } from "../engine/providerHealth"
+import { setProviderHealth } from "../engine/providerRegistry"
 import { getMerchantCredential } from "@/lib/database/merchants"
 
 /**
@@ -50,13 +50,7 @@ export const shift4Adapter: ProviderAdapter = {
       )
 
       if (!apiKey) {
-        // For development/testing, use a placeholder
-        console.warn("Shift4 API key not configured, using placeholder")
-        return {
-          providerReference: `shift4_${input.paymentId}`,
-          paymentUrl: undefined,
-          qrCode: undefined
-        }
+        throw new Error("Shift4 API key not configured")
       }
 
       const response = await fetch(`${SHIFT4_API_BASE}/payments`, {
@@ -90,13 +84,7 @@ export const shift4Adapter: ProviderAdapter = {
     } catch (error) {
       console.error("Shift4 payment error:", error)
       setProviderHealth("shift4", false)
-      
-      // Return placeholder for development
-      return {
-        providerReference: `shift4_${input.paymentId}`,
-        paymentUrl: undefined,
-        qrCode: undefined
-      }
+      throw error
     }
   },
 
@@ -138,7 +126,7 @@ export const shift4Adapter: ProviderAdapter = {
      Validates Shift4 webhook signature
   -------------------------------- */
 
-  verifyWebhook(payload: any, signature?: string) {
+  verifyWebhook() {
     // TODO: Implement proper Shift4 webhook verification
     // For now, accept all webhooks
     return true
@@ -149,7 +137,7 @@ export const shift4Adapter: ProviderAdapter = {
      Converts Shift4 events to PineTree events
   -------------------------------- */
 
-  translateEvent(payload: any) {
+  translateEvent(payload: { type?: string; metadata?: { paymentId?: string }; payment?: { id?: string } }) {
     const event = payload?.type || ""
     const paymentId = payload?.metadata?.paymentId || payload?.payment?.id || ""
 
