@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import Image from "next/image"
 import { Loader2, CheckCircle, XCircle } from "lucide-react"
+import QRCode from "qrcode"
 import AmountDisplay from "./AmountDisplay"
 import Keypad from "./Keypad"
 
@@ -33,6 +34,7 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
   const [status,setStatus] = useState<Status>("ready")
   const [qrCodeUrl,setQrCodeUrl] = useState("")
   const [paymentId, setPaymentId] = useState("")
+  const [paymentError, setPaymentError] = useState("")
   const [terminalContext, setTerminalContext] = useState<{
     merchantId: string
     terminalId?: string
@@ -99,6 +101,7 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
     setStatus("ready")
     setQrCodeUrl("")
     setPaymentId("")
+    setPaymentError("")
 
   }
 
@@ -166,11 +169,13 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
 
     try{
 
+      setPaymentError("")
       setStatus("waiting")
 
       const idempotencyKey = crypto.randomUUID()
 
       if(!terminalContext?.merchantId){
+        setPaymentError("Missing terminal merchant context")
         setStatus("failed")
         return
       }
@@ -188,15 +193,29 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
         })
       })
 
-      const data = await res.json()
+      const data = await res.json().catch(() => null)
+
+      if(!res.ok || !data){
+        setPaymentError(String(data?.error || "Failed to create payment"))
+        setStatus("failed")
+        return
+      }
 
       if(!data.paymentId){
+        setPaymentError("Payment response missing payment id")
         setStatus("failed")
         return
       }
 
       if(data.qrCodeUrl){
         setQrCodeUrl(data.qrCodeUrl)
+      } else if (data.paymentUrl) {
+        const generatedQr = await QRCode.toDataURL(String(data.paymentUrl))
+        setQrCodeUrl(generatedQr)
+      } else {
+        setPaymentError("Payment response missing QR data")
+        setStatus("failed")
+        return
       }
 
       setPaymentId(String(data.paymentId || ""))
@@ -204,6 +223,7 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
     }catch(err){
 
       console.error("Payment error:",err)
+      setPaymentError(err instanceof Error ? err.message : "Payment creation failed")
       setStatus("failed")
 
     }
@@ -305,25 +325,29 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
 
         {/* QR SCREEN */}
 
-        {status === "waiting" && qrCodeUrl && (
+        {status === "waiting" && (
 
           <div className="flex flex-col items-center py-8">
 
             <div className="text-sm text-gray-500 mb-3">
-              Scan to Pay
+              {qrCodeUrl ? "Scan to Pay" : "Preparing QR..."}
             </div>
 
-            <div className="bg-white p-4 rounded-xl shadow">
-
-              <Image
-                src={qrCodeUrl}
-                width={220}
-                height={220}
-                alt="Payment QR"
-                unoptimized
-              />
-
-            </div>
+            {qrCodeUrl ? (
+              <div className="bg-white p-4 rounded-xl shadow">
+                <Image
+                  src={qrCodeUrl}
+                  width={220}
+                  height={220}
+                  alt="Payment QR"
+                  unoptimized
+                />
+              </div>
+            ) : (
+              <div className="flex flex-col items-center py-6">
+                <Loader2 size={40} className="text-[#0052FF] animate-spin" />
+              </div>
+            )}
 
           </div>
 
@@ -381,6 +405,12 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
             <div className="mt-4 text-lg font-semibold text-red-600">
               Payment Failed
             </div>
+
+            {paymentError ? (
+              <div className="mt-2 text-sm text-red-500 text-center max-w-[320px]">
+                {paymentError}
+              </div>
+            ) : null}
 
           </div>
 
