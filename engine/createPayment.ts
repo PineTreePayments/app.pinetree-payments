@@ -217,17 +217,22 @@ export async function createPayment(
   }
 
   /* ---------------------------
-     START PAYMENT WATCHER
+     START PAYMENT WATCHER (BACKGROUND)
   --------------------------- */
 
-  watchPayment({
-    merchantWallet: merchantWalletAddress,
-    pinetreeWallet,
-    merchantAmount,
-    pinetreeFee,
-    network,
-    paymentId
-  }).catch(console.error)
+  // Detach watcher to run asynchronously
+  // Never block payment creation response
+  // Watcher will handle timeout and status updates independently
+  setImmediate(() => {
+    void watchPayment({
+      merchantWallet: merchantWalletAddress,
+      pinetreeWallet,
+      merchantAmount,
+      pinetreeFee,
+      network,
+      paymentId
+    }).catch(console.error)
+  })
 
   /* ---------------------------
      RETURN RESULT
