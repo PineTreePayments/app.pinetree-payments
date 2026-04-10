@@ -20,6 +20,7 @@ import { watchPayment } from "./paymentWatcher"
 import { calculateGrossAmount } from "./fees"
 import { selectBestWallet } from "@/database/merchantWallets"
 import { updatePaymentStatus } from "./updatePaymentStatus"
+import { loadProviders } from "./loadProviders"
 
 type PaymentMetadata = {
   merchantAmount?: number
@@ -55,6 +56,9 @@ type CreatePaymentResult = {
 export async function createPayment(
   input: CreatePaymentInput
 ): Promise<CreatePaymentResult> {
+
+  // Ensure adapter side-effects have registered all providers before selection
+  await loadProviders()
 
   /* ---------------------------
      IDEMPOTENCY PROTECTION
