@@ -193,7 +193,7 @@ export default function POSPage() {
 
           <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-lg">
 
-            <h2 className="text-lg font-semibold mb-2">
+            <h2 className="text-lg font-semibold mb-2 text-gray-900">
               Delete Terminal
             </h2>
 

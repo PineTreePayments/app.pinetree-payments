@@ -241,3 +241,322 @@ If a feature requires breaking these rules:
 DO NOT implement it.
 
 Refactor the architecture instead.
+
+
+
+# 💰 PineTree Fee Model (STRICT)
+
+## PURPOSE
+
+Define how PineTree captures fees across ALL crypto payment rails while:
+
+* Keeping frontend experience identical
+* Enforcing fee capture at payment time
+* Preventing post-payment collection
+* Maintaining a non-custodial architecture (by default)
+
+---
+
+# 🔒 CORE RULE
+
+```txt
+PineTree MUST collect its fee at the time of payment.
+```
+
+❌ Post-payment fee collection is strictly prohibited
+❌ Debiting merchant wallets after settlement is strictly prohibited
+
+---
+
+# 💵 PAYMENT AMOUNTS (MANDATORY)
+
+Every payment MUST include:
+
+```txt
+merchant_amount
+pinetree_fee
+gross_amount = merchant_amount + pinetree_fee
+```
+
+Rules:
+
+* MUST be calculated in engine
+* MUST be stored in database
+* MUST be immutable after creation
+* MUST be used by all adapters
+
+---
+
+# 🖥️ FRONTEND STANDARD (LOCKED)
+
+UI MUST ALWAYS display:
+
+```txt
+Subtotal
+PineTree Fee
+Total
+```
+
+Rules:
+
+* Must look identical across all rails
+* Must not vary by provider
+* Must not hide or alter fee logic
+
+---
+
+# ⚙️ ENGINE AUTHORITY
+
+ONLY the engine can:
+
+* Calculate fees
+* Define gross_amount
+* Enforce fee rules
+* Validate payment completion
+
+UI MUST NOT:
+
+* Calculate fees
+* Override fee values
+
+Providers MUST NOT:
+
+* Calculate fees
+* Override fee values
+
+---
+
+# 🔁 FEE EXECUTION MODES (STRICT ENUM)
+
+All crypto rails MUST map to ONE of the following:
+
+```ts
+type FeeCaptureMethod =
+  | "atomic_split"
+  | "contract_split"
+  | "invoice_split"
+  | "collection_then_settle"
+```
+
+No other execution methods are allowed.
+
+---
+
+# 🌐 RAIL-SPECIFIC FEE STRUCTURE
+
+## SOLANA
+
+Execution Mode:
+
+```txt
+atomic_split
+```
+
+Implementation:
+
+* Single transaction MUST include:
+
+  * transfer → merchant_wallet
+  * transfer → pinetree_wallet
+
+Rules:
+
+* One payment flow
+* One signature
+* No post-payment logic
+
+Failure:
+
+```txt
+Missing PineTree transfer → FAILED
+Underpayment → FAILED
+```
+
+---
+
+## ETHEREUM / BASE (EVM)
+
+Execution Mode:
+
+```txt
+contract_split
+```
+
+Implementation:
+
+* Payment MUST go through PineTree split contract
+* Contract MUST distribute:
+
+  * merchant_amount → merchant_wallet
+  * pinetree_fee → pinetree_wallet
+
+Rules:
+
+* Direct wallet transfer is NOT valid
+* Fee must be enforced inside contract
+
+Failure:
+
+```txt
+Direct transfer → FAILED
+Missing fee distribution → FAILED
+Underpayment → FAILED
+```
+
+---
+
+## BITCOIN (L1)
+
+Execution Mode:
+
+```txt
+atomic_split
+```
+
+Implementation:
+
+* Transaction MUST include:
+
+  * output → merchant_wallet
+  * output → pinetree_wallet
+
+Rules:
+
+* Both outputs must exist in same transaction
+
+Failure:
+
+```txt
+Single-output transaction → FAILED
+Missing fee output → FAILED
+```
+
+---
+
+## LIGHTNING NETWORK
+
+Execution Mode:
+
+```txt
+invoice_split
+```
+
+Implementation:
+
+* Invoice MUST equal gross_amount
+* Fee embedded in invoice amount
+
+Rules:
+
+* No post-payment fee logic
+* Fee must be included upfront
+
+Failure:
+
+```txt
+Underpayment → FAILED
+Fee not satisfied → FAILED
+```
+
+---
+
+## COLLECTION MODE (DISABLED BY DEFAULT)
+
+Execution Mode:
+
+```txt
+collection_then_settle
+```
+
+Implementation:
+
+```txt
+Customer → PineTree wallet (gross_amount)
+PineTree → merchant wallet (merchant_amount)
+```
+
+Rules:
+
+* Must be explicitly enabled
+* Not default behavior
+* Introduces custodial exposure
+
+Default:
+
+```txt
+DISABLED
+```
+
+---
+
+# ✅ CONFIRMATION RULE (CRITICAL)
+
+A payment MUST NOT be marked CONFIRMED unless:
+
+```txt
+gross_amount received
+AND
+pinetree_fee captured
+```
+
+If NOT:
+
+```txt
+→ status = FAILED
+```
+
+---
+
+# 🔍 FEE VALIDATION RULE
+
+Engine MUST:
+
+* Validate fee capture before confirmation
+* Reject underpayments
+* Reject missing fee transfers
+* Enforce execution mode requirements
+
+---
+
+# 🚫 PROHIBITED BEHAVIOR
+
+❌ Charging fee after payment
+❌ Pulling funds from merchant wallets
+❌ Allowing fee-less transactions
+❌ Confirming partial payments
+❌ Letting providers bypass fee enforcement
+❌ Using different fee models per rail
+
+---
+
+# 🧠 DESIGN PRINCIPLE
+
+PineTree standardizes:
+
+* Fee calculation
+* Payment intent
+* Confirmation rules
+* Ledger structure
+
+Adapters handle:
+
+* Rail-specific execution mechanics
+
+---
+
+# 🔥 FINAL RULE
+
+```txt
+A PineTree payment is ONLY valid if:
+- merchant_amount is delivered
+- pinetree_fee is captured
+- both occur in the same payment flow
+```
+
+Otherwise:
+
+```txt
+→ Payment is NOT complete
+```
+
+---

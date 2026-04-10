@@ -158,7 +158,7 @@ export const solanaAdapter: ProviderAdapter = {
  * @param params - Payment parameters
  * @returns Solana Pay URI string
  */
-function buildSolanaPayUri(params: SolanaPayParams): string {
+export function buildSolanaPayUri(params: SolanaPayParams): string {
   const baseUrl = `solana:${params.recipient}`
   const queryParams: string[] = []
 

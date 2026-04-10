@@ -1,4 +1,5 @@
 import QRCode from "qrcode"
+import { buildSolanaPayUri } from "@/providers/solana"
 
 type GenerateSplitPaymentInput = {
   merchantWallet: string
@@ -72,10 +73,28 @@ export async function generateSplitPayment(
   const payloadString = JSON.stringify(payload)
 
   /* --------------------------------
-  BUILD PINETREE PAYMENT URI
-  -------------------------------- */
+   GENERATE NATIVE PAYMENT URI
+   -------------------------------- */
 
-  const paymentUrl = `pinetree://pay?data=${encodeURIComponent(payloadString)}`
+  let paymentUrl: string
+
+  if (input.network === "solana") {
+    // Generate native Solana Pay URI with atomic split
+    paymentUrl = buildSolanaPayUri({
+      recipient: input.merchantWallet,
+      amount: totalAmount,
+      label: "PineTree Payment",
+      message: `Payment #${input.paymentId?.slice(0, 8) || ''}`,
+      reference: input.paymentId,
+      memo: `pt:split:${input.pinetreeWallet}:${pinetreeFee}`
+    })
+  } else if (input.network === "base" || input.network === "ethereum") {
+    // ERC-681 URI for EVM chains
+    paymentUrl = `ethereum:${input.merchantWallet}@8453/transfer?address=${input.merchantWallet}&uint256=${totalAmount}`
+  } else {
+    // Fallback to universal format
+    paymentUrl = `pinetree://pay?data=${encodeURIComponent(payloadString)}`
+  }
 
   /* --------------------------------
   GENERATE QR CODE
