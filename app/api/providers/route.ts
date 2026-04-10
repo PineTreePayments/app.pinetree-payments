@@ -5,7 +5,7 @@ import {
   toggleProviderEngine,
   disconnectProviderEngine,
   saveProviderEngine
-} from "@/lib/engine/providersDashboard"
+} from "@/engine/providersDashboard"
 import {
   getRouteErrorStatus,
   requireMerchantIdFromRequest

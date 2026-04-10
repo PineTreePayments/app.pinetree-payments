@@ -4,7 +4,7 @@ import {
   upsertMerchantAssetBalances,
   setSystemLastRun,
   getSystemLastRun
-} from "@/lib/database"
+} from "@/database"
 import { getMarketPricesUSD } from "./marketPrices"
 
 type WalletNetwork = "solana" | "base" | "ethereum"

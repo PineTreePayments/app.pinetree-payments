@@ -21,6 +21,7 @@ type WalletRow = {
   asset: string
   wallet_address: string
   wallet_type?: string | null
+  status?: string | null
 }
 
 export type ProvidersDashboardData = {
