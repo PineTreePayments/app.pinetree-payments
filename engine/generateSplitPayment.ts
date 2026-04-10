@@ -88,22 +88,30 @@ export async function generateSplitPayment(
       reference: input.paymentId,
       memo: `pt:split:${input.pinetreeWallet}:${pinetreeFee}`
     })
-  } else if (input.network === "base" || input.network === "ethereum") {
+  } else if (input.network === "base" || input.network === "base_pay" || input.network === "ethereum") {
     // ERC-681 URI for EVM chains
-    paymentUrl = `ethereum:${input.merchantWallet}@8453/transfer?address=${input.merchantWallet}&uint256=${totalAmount}`
+    const chainId = input.network === "ethereum" ? "1" : "8453"
+    paymentUrl = `ethereum:${input.merchantWallet}@${chainId}/transfer?address=${input.merchantWallet}&uint256=${totalAmount}`
   } else {
     // Fallback to universal format
     paymentUrl = `pinetree://pay?data=${encodeURIComponent(payloadString)}`
   }
 
   /* --------------------------------
+   GENERATE CAMERA-SCANNABLE UNIVERSAL LINK
+   -------------------------------- */
+
+  const universalUrl = `${BASE_URL}/pay?data=${encodeURIComponent(payloadString)}`
+
+  /* --------------------------------
   GENERATE QR CODE
   -------------------------------- */
 
-  const qrCodeUrl = await QRCode.toDataURL(paymentUrl)
+  const qrCodeUrl = await QRCode.toDataURL(universalUrl)
 
   return {
     paymentUrl,
+    universalUrl,
     qrCodeUrl,
     totalAmount
   }

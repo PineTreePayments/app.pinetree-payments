@@ -1,4 +1,5 @@
 import QRCode from "qrcode"
+import { buildSolanaPayUri } from "@/providers/solana"
 
 type GenerateSplitPaymentInput = {
   merchantWallet: string
@@ -72,19 +73,42 @@ export async function generateSplitPayment(
   const payloadString = JSON.stringify(payload)
 
   /* --------------------------------
-  BUILD PINETREE PAYMENT URI
-  -------------------------------- */
+   GENERATE NATIVE PAYMENT URI
+   -------------------------------- */
 
-  const paymentUrl = `pinetree://pay?data=${encodeURIComponent(payloadString)}`
+  let paymentUrl: string
+
+  if (input.network === "solana") {
+    paymentUrl = buildSolanaPayUri({
+      recipient: input.merchantWallet,
+      amount: totalAmount,
+      label: "PineTree Payment",
+      message: `Payment #${input.paymentId?.slice(0, 8) || ""}`,
+      reference: input.paymentId,
+      memo: `pt:split:${input.pinetreeWallet}:${pinetreeFee}`
+    })
+  } else if (input.network === "base" || input.network === "base_pay" || input.network === "ethereum") {
+    const chainId = input.network === "ethereum" ? "1" : "8453"
+    paymentUrl = `ethereum:${input.merchantWallet}@${chainId}/transfer?address=${input.merchantWallet}&uint256=${totalAmount}`
+  } else {
+    paymentUrl = `pinetree://pay?data=${encodeURIComponent(payloadString)}`
+  }
+
+  /* --------------------------------
+   GENERATE CAMERA-SCANNABLE UNIVERSAL LINK
+   -------------------------------- */
+
+  const universalUrl = `${BASE_URL}/pay?data=${encodeURIComponent(payloadString)}`
 
   /* --------------------------------
   GENERATE QR CODE
   -------------------------------- */
 
-  const qrCodeUrl = await QRCode.toDataURL(paymentUrl)
+  const qrCodeUrl = await QRCode.toDataURL(universalUrl)
 
   return {
     paymentUrl,
+    universalUrl,
     qrCodeUrl,
     totalAmount
   }
