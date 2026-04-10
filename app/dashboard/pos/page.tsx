@@ -189,9 +189,9 @@ export default function POSPage() {
 
       {confirmDelete && (
 
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
 
-          <div className="bg-white rounded-xl p-6 w-96 shadow-lg">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-lg">
 
             <h2 className="text-lg font-semibold mb-2">
               Delete Terminal
@@ -254,7 +254,7 @@ export default function POSPage() {
             Create Terminal
           </h2>
 
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
 
             <div>
 
@@ -341,7 +341,7 @@ export default function POSPage() {
 
           </div>
 
-          <div className="flex gap-3 mt-6">
+          <div className="flex flex-col sm:flex-row gap-3 mt-6">
 
             <button
               onClick={createTerminal}
@@ -367,7 +367,7 @@ export default function POSPage() {
 
       <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
 
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
 
           <h2 className="text-lg font-semibold text-gray-900">
             Active Terminals
@@ -397,7 +397,7 @@ export default function POSPage() {
             <div
               key={t.id}
               ref={expandedTerminalId === t.id ? detailsRef : null}
-              className="border border-gray-200 rounded-lg p-4 flex justify-between items-center relative"
+              className="border border-gray-200 rounded-lg p-4 flex flex-col md:flex-row md:justify-between md:items-center gap-4 relative"
             >
 
               <div>
@@ -416,7 +416,7 @@ export default function POSPage() {
 
               </div>
 
-              <div className="flex gap-3 items-center">
+              <div className="flex flex-wrap gap-2 items-center md:justify-end">
 
                 <button
                   onClick={() => toggleTerminalDetails(t.id)}
@@ -445,7 +445,7 @@ export default function POSPage() {
               </div>
 
               {expandedTerminalId === t.id && (
-                <div className="absolute right-4 top-14 z-20 w-72 bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs text-gray-600 space-y-1">
+                <div className="md:absolute md:right-4 md:top-14 z-20 w-full md:w-72 bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs text-gray-600 space-y-1">
                   <div><span className="font-medium text-gray-800">Auto-lock:</span> {formatAutoLock(t.autolock)}</div>
                   <div><span className="font-medium text-gray-800">Merchant:</span> {t.merchant_id || "-"}</div>
                   <div>

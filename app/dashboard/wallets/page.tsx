@@ -92,10 +92,27 @@ export default function WalletsPage() {
     }
   }
 
+  function formatChicagoDateTime(value: string | null) {
+    if (!value) return "—"
+    const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(value)
+    const parsed = new Date(hasTimezone ? value : `${value}Z`)
+    if (Number.isNaN(parsed.getTime())) return "—"
+
+    return parsed.toLocaleString("en-US", {
+      timeZone: "America/Chicago",
+      month: "numeric",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit"
+    })
+  }
+
   return (
     <div className="w-full px-4 md:px-8 py-6 md:py-10">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-semibold text-black">Wallets</h1>
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-8">
+        <h1 className="text-2xl md:text-3xl font-semibold text-black">Wallets</h1>
 
         <button
           onClick={() => loadOverview(true)}
@@ -112,7 +129,7 @@ export default function WalletsPage() {
 
       {lastRefreshAt && !refreshError && (
         <p className="text-xs text-gray-500 mb-4">
-          Last wallet sync: {new Date(lastRefreshAt).toLocaleString()}
+          Last wallet sync: {formatChicagoDateTime(lastRefreshAt)} (America/Chicago)
         </p>
       )}
 

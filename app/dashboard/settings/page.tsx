@@ -194,13 +194,13 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-8 md:space-y-10">
       <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
 
       <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-gray-900 mb-6">Account</h2>
 
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="text-sm text-gray-700">Business Name</label>
             <input
@@ -293,7 +293,7 @@ export default function SettingsPage() {
       <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-gray-900 mb-6">Tax Configuration</h2>
 
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="flex items-center gap-3">
             <input
               type="checkbox"
@@ -327,10 +327,10 @@ export default function SettingsPage() {
       <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-gray-900 mb-6">Reporting</h2>
 
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="text-sm text-gray-700">Business Day Closeout Time</label>
-            <div className="mt-2 flex items-center gap-3">
+            <div className="mt-2 flex flex-wrap items-center gap-3">
               <select
                 value={closeHour}
                 onChange={(e) => setCloseHour(e.target.value)}
@@ -384,7 +384,7 @@ export default function SettingsPage() {
         <button
           onClick={saveSettings}
           disabled={saving}
-          className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-60"
+          className="w-full sm:w-auto bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-60"
         >
           {saving ? "Saving..." : "Save Settings"}
         </button>

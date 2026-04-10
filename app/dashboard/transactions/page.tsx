@@ -231,7 +231,7 @@ export default function TransactionsPage() {
   })
 
   return (
-    <div>
+    <div className="space-y-6">
       <h1 className="text-2xl font-semibold text-gray-900 mb-6">
         Transactions
       </h1>
@@ -263,7 +263,7 @@ export default function TransactionsPage() {
 
       {/* INSIGHTS */}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-10">
         <AnalyticsCard title="Peak Hour" value={peakHour} />
         <AnalyticsCard title="Peak Day" value={peakDay} />
         <AnalyticsCard title="Top Provider" value={topProvider} />
@@ -339,8 +339,8 @@ export default function TransactionsPage() {
 
       {/* TABLE */}
 
-      <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
-        <table className="w-full">
+      <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-x-auto">
+        <table className="w-full min-w-[860px]">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr className="text-left text-sm text-gray-700">
               <th className="px-6 py-3 font-medium">Date</th>
@@ -409,9 +409,9 @@ export default function TransactionsPage() {
       {/* CHART */}
 
       {showChart && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white w-[90vw] max-w-[900px] p-6 rounded-lg shadow-lg">
-            <div className="flex justify-between mb-6">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-3">
+          <div className="bg-white w-full max-w-[900px] max-h-[90vh] overflow-y-auto p-4 sm:p-6 rounded-lg shadow-lg">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-6">
               <h2 className="text-lg font-semibold text-gray-900">
                 {chartMode === "pos"
                   ? "POS Payment Volume"
@@ -428,7 +428,7 @@ export default function TransactionsPage() {
               </button>
             </div>
 
-            <div className="flex gap-2 mb-6">
+            <div className="flex flex-wrap gap-2 mb-6">
               {["24h", "7d", "1m", "3m", "6m", "1y"].map((r) => (
                 <button
                   key={r}

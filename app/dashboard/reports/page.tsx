@@ -58,13 +58,13 @@ setLoading(false)
 
 return(
 
-<div className="space-y-10">
+<div className="space-y-8 md:space-y-10">
 
 {/* PAGE TITLE */}
 
-<div className="flex items-center justify-between">
+<div className="flex items-center justify-between gap-3">
 
-<h1 className="text-3xl font-semibold text-gray-900">
+<h1 className="text-2xl md:text-3xl font-semibold text-gray-900">
 Reports
 </h1>
 
@@ -72,7 +72,7 @@ Reports
 
 {/* SUMMARY CARDS */}
 
-<div className="grid grid-cols-4 gap-6">
+<div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 md:gap-6">
 
 <SummaryCard
 title="Gross Volume"
@@ -104,7 +104,7 @@ value="$0.00"
 Financial Reports
 </h2>
 
-<div className="grid grid-cols-3 gap-6">
+<div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6">
 
 <ReportCard
 title="Today's Report"
@@ -139,7 +139,7 @@ action={()=>generateReport("month")}
 Tax & Compliance
 </h2>
 
-<div className="grid grid-cols-3 gap-6">
+<div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6">
 
 <ReportCard
 title="Tax Report"
@@ -182,7 +182,7 @@ value:string
 
 return(
 
-<div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
+<div className="bg-white border border-gray-200 rounded-lg p-4 md:p-5 shadow-sm min-w-0">
 
 <div className="text-sm text-gray-500">
 {title}
@@ -212,7 +212,7 @@ loading:boolean
 
 return(
 
-<div className="border border-gray-200 rounded-lg p-6 bg-white shadow-sm space-y-4">
+<div className="border border-gray-200 rounded-lg p-4 md:p-6 bg-white shadow-sm space-y-4 min-w-0">
 
 <div className="text-lg font-semibold text-gray-900">
 {title}
@@ -225,7 +225,7 @@ return(
 <button
 onClick={action}
 disabled={loading}
-className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition disabled:opacity-50"
+className="w-full sm:w-auto bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition disabled:opacity-50"
 >
 
 {loading ? "Generating..." : "Generate PDF"}

@@ -741,7 +741,7 @@ export default function ProvidersPage() {
 
     return (
       <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm min-h-[240px]">
-        <div className="flex justify-between items-center mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
           <h2 className="text-lg font-semibold text-black">{name}</h2>
           <span className={`text-sm ${statusClass(status)}`}>{status}</span>
         </div>
@@ -760,8 +760,8 @@ export default function ProvidersPage() {
           )}
         </div>
 
-        <div className="flex items-center justify-between mt-auto">
-          <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-auto">
+          <div className="flex flex-wrap gap-2">
             {connected ? (
               <button
                 onClick={() => disconnect(provider)}
@@ -796,14 +796,14 @@ export default function ProvidersPage() {
   const connectedAndEnabledProvidersCount = getConnectedAndEnabledProvidersCount(providers)
 
   return (
-    <div>
+    <div className="space-y-6">
       <h1 className="text-2xl font-semibold text-black mb-8">Providers</h1>
 
       <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm mb-8">
         <h2 className="text-lg font-semibold mb-4 text-black">PineTree Engine Settings</h2>
 
         <div className="space-y-4">
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <p className="font-medium text-black">Smart Routing</p>
               <p className="text-sm text-black">Automatically select the best payment provider</p>
@@ -823,7 +823,7 @@ export default function ProvidersPage() {
             />
           </div>
 
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <p className="font-medium text-black">Auto Convert to Fiat</p>
               <p className="text-sm text-black">Convert payments routed through Shift4 to fiat</p>
@@ -884,8 +884,8 @@ export default function ProvidersPage() {
       </div>
 
       {activeProvider && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg w-[90vw] max-w-[520px] shadow-lg">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-3">
+          <div className="bg-white p-4 sm:p-6 rounded-lg w-full max-w-[520px] max-h-[90vh] overflow-y-auto shadow-lg">
             <h2 className="text-lg font-semibold mb-2 text-black">
               {activeProvider === "solana"
                 ? "Connect Wallet to Solana Pay"
@@ -1061,7 +1061,7 @@ export default function ProvidersPage() {
                 />
               )}
 
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
               <button
                 onClick={() => {
                   setActiveProvider(null)
@@ -1078,7 +1078,7 @@ export default function ProvidersPage() {
                     pollerRef.current = null
                   }
                 }}
-                className="px-3 py-1.5 text-sm border rounded bg-white text-black"
+                className="w-full sm:w-auto px-3 py-1.5 text-sm border rounded bg-white text-black"
               >
                 Cancel
               </button>
@@ -1086,7 +1086,7 @@ export default function ProvidersPage() {
               <button
                 onClick={() => saveProvider(activeProvider)}
                 disabled={loading}
-                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded"
+                className="w-full sm:w-auto px-3 py-1.5 text-sm bg-blue-600 text-white rounded"
               >
                 {loading ? "Saving..." : "Save Wallet"}
               </button>

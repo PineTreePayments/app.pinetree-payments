@@ -2,25 +2,13 @@
 
 export default function RoutingPage() {
   return (
-    <div>
+    <div className="space-y-6">
 
-      <h1
-        style={{
-          fontSize:"26px",
-          marginBottom:"20px"
-        }}
-      >
+      <h1 className="text-2xl md:text-[26px] font-semibold text-gray-900">
         Routing Engine
       </h1>
 
-      <div
-        style={{
-          background:"#111827",
-          borderRadius:"12px",
-          border:"1px solid #1e2636",
-          padding:"30px"
-        }}
-      >
+      <div className="bg-[#111827] rounded-xl border border-[#1e2636] p-5 md:p-8 text-white">
         Configure PineTree smart routing here.
       </div>
 

@@ -241,7 +241,7 @@ export default function TerminalInner() {
 
       {unlockMode && (
 
-        <div className="bg-white shadow-xl rounded-2xl p-12 w-[420px]">
+        <div className="bg-white shadow-xl rounded-2xl p-6 sm:p-12 w-[92vw] max-w-[420px]">
 
           <div className="text-center mb-8">
 
@@ -249,7 +249,7 @@ export default function TerminalInner() {
               Enter PIN
             </div>
 
-            <div className="text-4xl tracking-[0.35em] mt-2 text-gray-900 font-semibold">
+            <div className="text-3xl sm:text-4xl tracking-[0.35em] mt-2 text-gray-900 font-semibold">
               {"•".repeat(digits.length)}
             </div>
 
@@ -289,7 +289,7 @@ export default function TerminalInner() {
                 placeholder="New 4-digit PIN"
                 className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-black text-center tracking-widest"
               />
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <button
                   onClick={recoverPin}
                   disabled={recoveryBusy}

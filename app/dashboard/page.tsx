@@ -43,6 +43,27 @@ type ChartPoint = {
   volume: number
 }
 
+function parseTimestamp(value: string) {
+  const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(value)
+  return new Date(hasTimezone ? value : `${value}Z`)
+}
+
+function formatChicagoDateTime(value: string | null) {
+  if (!value) return "—"
+  const date = parseTimestamp(value)
+  if (Number.isNaN(date.getTime())) return "—"
+
+  return date.toLocaleString("en-US", {
+    timeZone: "America/Chicago",
+    month: "numeric",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit"
+  })
+}
+
 export default function DashboardPage() {
 
   const router = useRouter()
@@ -138,8 +159,8 @@ export default function DashboardPage() {
 
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <p className="text-sm text-gray-500">
-          Last system update: {lastRun ? new Date(lastRun).toLocaleString() : "—"}
-          <span className="text-gray-400 ml-2">({Intl.DateTimeFormat().resolvedOptions().timeZone})</span>
+          Last system update: {formatChicagoDateTime(lastRun)}
+          <span className="text-gray-400 ml-2">(America/Chicago)</span>
         </p>
 
         <button
@@ -180,30 +201,30 @@ export default function DashboardPage() {
 
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6 mb-6 md:mb-10">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-6 mb-6 md:mb-10">
 
-        <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm min-w-0">
           <p className="text-sm text-gray-500 mb-1">Total Volume</p>
           <p className="text-3xl font-semibold text-gray-900">
             ${volume.toFixed(2)}
           </p>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6 shadow-sm min-w-0">
           <p className="text-sm text-gray-500 mb-1">Transactions</p>
           <p className="text-3xl font-semibold text-gray-900">
             {txCount}
           </p>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6 shadow-sm min-w-0">
           <p className="text-sm text-gray-500 mb-1">Success Rate</p>
           <p className="text-3xl font-semibold text-gray-900">
             {successRate}%
           </p>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6 shadow-sm min-w-0">
           <p className="text-sm text-gray-500 mb-1">Active Providers</p>
           <p className="text-3xl font-semibold text-gray-900">
             {providers}
@@ -268,7 +289,7 @@ export default function DashboardPage() {
         {recentTx.length > 0 && (
           <div className="overflow-x-auto">
 
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[720px] text-sm">
 
               <thead className="text-left text-gray-500 border-b">
                 <tr>
@@ -316,7 +337,7 @@ export default function DashboardPage() {
                       </td>
 
                       <td className="py-3 text-gray-500 text-xs">
-                        {new Date(tx.created_at).toLocaleString()}
+                        {formatChicagoDateTime(tx.created_at)}
                       </td>
 
                     </tr>
