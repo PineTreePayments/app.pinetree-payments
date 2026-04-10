@@ -60,50 +60,64 @@ export async function watchPayment(input: WatchInput) {
      WATCH LOOP
   --------------------------- */
 
-  while (attempts < WATCHER_CONFIG.maxAttempts) {
+    while (attempts < WATCHER_CONFIG.maxAttempts) {
     try {
-      const latestBlock = await getCurrentBlockHeight(rpcUrl)
+      let transactions: any[] = []
 
-      // Check each block since last check
-      for (
-        let blockNumber = lastCheckedBlock;
-        blockNumber <= latestBlock;
-        blockNumber++
-      ) {
-        const block = await getBlockByNumber(rpcUrl, blockNumber)
-        const transactions = block?.transactions || []
+      if (input.network === "solana") {
+        // Solana transaction monitoring
+        transactions = await getSolanaTransactions(rpcUrl, merchantWallet, lastCheckedBlock)
+      } else {
+        // EVM transaction monitoring
+        const latestBlock = await getCurrentBlockHeight(rpcUrl)
+        
+        // Check each block since last check
+        for (
+          let blockNumber = lastCheckedBlock;
+          blockNumber <= latestBlock;
+          blockNumber++
+        ) {
+          const block = await getBlockByNumber(rpcUrl, blockNumber)
+          transactions = block?.transactions || []
 
-        for (const tx of transactions) {
-          if (!tx.to) continue
-
-          const to = tx.to.toLowerCase()
-
-          // Check if transaction is to our wallets
-          if (
-            to !== merchantWallet &&
-            to !== pinetreeWallet
-          ) {
-            continue
-          }
-
-          const valueEth = weiToEth(tx.value)
-
-          // Check if amount matches (allowing some tolerance)
-          if (valueEth >= input.merchantAmount * 0.95) {
-            // Found a matching transaction
-            const confirmed = await handleMatchingTransaction(
-              input.paymentId,
-              tx
-            )
-
-            if (confirmed) {
-              return true
-            }
-          }
+          lastCheckedBlock = latestBlock + 1
         }
       }
 
-      lastCheckedBlock = latestBlock + 1
+      for (const tx of transactions) {
+        let toAddress: string
+        let value: number
+
+        if (input.network === "solana") {
+          toAddress = tx.destination
+          value = tx.lamports / 1e9
+        } else {
+          if (!tx.to) continue
+          toAddress = tx.to.toLowerCase()
+          value = weiToEth(tx.value)
+        }
+
+        // Check if transaction is to merchant wallet
+        if (toAddress.toLowerCase() !== merchantWallet) {
+          continue
+        }
+
+        const grossRequired = input.merchantAmount + input.pinetreeFee
+
+        // Check if full gross amount was received (99.5% tolerance for network fees)
+        if (value >= grossRequired * 0.995) {
+          // ✅ Full gross amount received
+          // Fee has been successfully collected at payment time
+          const confirmed = await handleMatchingTransaction(
+            input.paymentId,
+            tx
+          )
+
+          if (confirmed) {
+            return true
+          }
+        }
+      }
 
     } catch (error) {
       console.error("Watcher error:", error)
@@ -227,6 +241,43 @@ async function getBlockByNumber(
  */
 function weiToEth(wei: string): number {
   return Number(wei) / 1e18
+}
+
+/**
+ * Get Solana transactions for address since specified slot
+ */
+async function getSolanaTransactions(rpcUrl: string, address: string, sinceSlot: number): Promise<any[]> {
+  const response = await fetch(rpcUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      method: "getSignaturesForAddress",
+      params: [
+        address,
+        {
+          minContextSlot: sinceSlot,
+          limit: 100
+        }
+      ],
+      id: 1
+    })
+  })
+
+  const data = await response.json()
+  
+  if (!data.result) {
+    return []
+  }
+
+  return data.result.map((sig: any) => ({
+    hash: sig.signature,
+    destination: address,
+    lamports: sig.lamports || 0,
+    from: sig.memo || ""
+  }))
 }
 
 /**
