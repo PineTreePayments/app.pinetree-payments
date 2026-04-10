@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { processWebhook } from "@/lib/engine/webhookProcessor"
+import { processWebhook } from "@/engine/webhookProcessor"
 
 export async function POST(req: NextRequest) {
 

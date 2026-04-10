@@ -6,9 +6,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server"
-import { createPayment } from "@/lib/engine/createPayment"
+import { createPayment } from "@/engine/createPayment"
 import { PaymentProvider } from "@/types/payment"
-import { calculateGrossAmount, calculateTax } from "@/lib/engine/fees"
+import { calculateGrossAmount, calculateTax } from "@/engine/fees"
 import { getMerchantTaxSettings } from "@/lib/database/merchants"
 
 type CreatePaymentBody = {

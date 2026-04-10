@@ -1,4 +1,4 @@
-import { createPayment } from "@/lib/engine/createPayment"
+import { createPayment } from "@/engine/createPayment"
 import { getMerchantTaxSettings, getMerchantProviders } from "@/lib/database/merchants"
 import { hasAnyWalletConnected, selectBestWallet } from "@/lib/database/merchantWallets"
 import { getPaymentById } from "@/lib/database/payments"

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getPosTerminalSessionEngine } from "@/lib/engine/posTerminalSession"
-import { resetPosTerminalPinWithRecoveryEngine } from "@/lib/engine/posTerminals"
+import { getPosTerminalSessionEngine } from "@/engine/posTerminalSession"
+import { resetPosTerminalPinWithRecoveryEngine } from "@/engine/posTerminals"
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback

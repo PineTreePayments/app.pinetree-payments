@@ -4,7 +4,7 @@ import {
   getPosTaxSettingsEngine,
   getPosPaymentStatusEngine,
   checkPosReadinessEngine
-} from "@/lib/engine/posPayments"
+} from "@/engine/posPayments"
 
 type ErrorWithStatus = Error & { status?: number }
 

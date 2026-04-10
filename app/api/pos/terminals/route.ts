@@ -3,7 +3,7 @@ import {
   createPosTerminalEngine,
   deletePosTerminalEngine,
   getPosTerminalsEngine
-} from "@/lib/engine/posTerminals"
+} from "@/engine/posTerminals"
 import {
   getRouteErrorStatus,
   requireMerchantIdFromRequest

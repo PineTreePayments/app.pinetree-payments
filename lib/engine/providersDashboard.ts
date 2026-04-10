@@ -225,8 +225,7 @@ export async function saveProviderEngine(args: {
         .update({
           asset,
           wallet_address: address,
-          wallet_type: walletType || null,
-          status: "connected"
+          wallet_type: walletType || null
         })
         .eq("id", existing.id)
 
@@ -241,8 +240,7 @@ export async function saveProviderEngine(args: {
           network: provider,
           asset,
           wallet_address: address,
-          wallet_type: walletType || null,
-          status: "connected"
+          wallet_type: walletType || null
         })
 
       if (error) {

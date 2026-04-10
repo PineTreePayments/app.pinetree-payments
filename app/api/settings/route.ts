@@ -4,7 +4,7 @@ import {
   saveSettingsDashboardEngine,
   type MerchantSettingsPayload,
   type MerchantTaxSettingsPayload
-} from "@/lib/engine/settingsDashboard"
+} from "@/engine/settingsDashboard"
 import {
   getRouteErrorStatus,
   requireMerchantIdFromRequest

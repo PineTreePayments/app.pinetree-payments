@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getWalletOverviewEngine } from "@/lib/engine/walletOverview"
+import { getWalletOverviewEngine } from "@/engine/walletOverview"
 import {
   getRouteErrorStatus,
   requireMerchantIdFromRequest

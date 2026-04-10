@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import {
   getTransactionsDashboardEngine,
   getTransactionsChartEngine
-} from "@/lib/engine/transactionsDashboard"
+} from "@/engine/transactionsDashboard"
 import {
   getRouteErrorStatus,
   requireMerchantIdFromRequest

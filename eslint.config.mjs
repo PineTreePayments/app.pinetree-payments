@@ -5,6 +5,26 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  {
+    files: ["**/*.ts", "**/*.tsx"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/lib/engine", "@/lib/engine/*"],
+              message: "Use canonical engine imports from @/engine/*"
+            },
+            {
+              group: ["@/lib/providers", "@/lib/providers/*"],
+              message: "Use canonical provider imports from @/providers/*"
+            }
+          ]
+        }
+      ]
+    }
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
