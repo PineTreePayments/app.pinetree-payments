@@ -1,4 +1,4 @@
-im0.3699*port { supabase } from "./supabase"
+import { supabase } from "./supabase"
 
 export type PaymentStatus =
   | "CREATED"

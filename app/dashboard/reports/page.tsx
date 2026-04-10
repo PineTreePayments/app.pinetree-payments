@@ -46,7 +46,7 @@ window.open(url,"_blank")
 
 toast.success("Report opened in new tab")
 
-}catch(e){
+}catch{
 
 toast.error("Failed to generate report")
 
