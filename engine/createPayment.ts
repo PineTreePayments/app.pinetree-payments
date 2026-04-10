@@ -14,11 +14,11 @@ import {
   getIdempotencyKey,
   storeIdempotencyKey,
   getPaymentById
-} from "@/lib/database"
+} from "@/database"
 import { generateSplitPayment } from "./generateSplitPayment"
 import { watchPayment } from "./paymentWatcher"
 import { calculateGrossAmount } from "./fees"
-import { selectBestWallet } from "@/lib/database/merchantWallets"
+import { selectBestWallet } from "@/database/merchantWallets"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 
 type PaymentMetadata = {
