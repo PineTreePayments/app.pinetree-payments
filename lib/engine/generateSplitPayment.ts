@@ -1,5 +1,6 @@
 import QRCode from "qrcode"
 import { buildSolanaPayUri } from "@/providers/solana"
+import { getMarketPricesUSD } from "./marketPrices"
 
 type GenerateSplitPaymentInput = {
   merchantWallet: string
@@ -10,12 +11,47 @@ type GenerateSplitPaymentInput = {
   paymentId?: string
 }
 
+function roundAmount(value: number, decimals: number): number {
+  const factor = Math.pow(10, decimals)
+  return Math.round(value * factor) / factor
+}
+
+function toWeiString(amountEth: number): string {
+  const safe = Number.isFinite(amountEth) && amountEth > 0 ? amountEth : 0
+  const [whole, fraction = ""] = safe.toFixed(18).split(".")
+  const normalized = `${whole}${fraction.padEnd(18, "0").slice(0, 18)}`.replace(/^0+/, "")
+  return normalized || "0"
+}
+
 export async function generateSplitPayment(
   input: GenerateSplitPaymentInput
 ) {
   const merchantAmount = Number(input.merchantAmount)
   const pinetreeFee = Number(input.pinetreeFee)
-  const totalAmount = merchantAmount + pinetreeFee
+  const usdTotalAmount = merchantAmount + pinetreeFee
+
+  let nativeAmount = usdTotalAmount
+  let nativeSymbol = "USD"
+  let quotePriceUsd: number | null = null
+
+  if (
+    input.network === "solana" ||
+    input.network === "base" ||
+    input.network === "base_pay" ||
+    input.network === "ethereum"
+  ) {
+    const prices = await getMarketPricesUSD()
+
+    if (input.network === "solana") {
+      nativeSymbol = "SOL"
+      quotePriceUsd = prices.SOL
+      nativeAmount = roundAmount(usdTotalAmount / prices.SOL, 9)
+    } else {
+      nativeSymbol = "ETH"
+      quotePriceUsd = prices.ETH
+      nativeAmount = roundAmount(usdTotalAmount / prices.ETH, 18)
+    }
+  }
 
   /* --------------------------------
   BASE URL (PRODUCTION SAFE)
@@ -65,7 +101,11 @@ export async function generateSplitPayment(
       }
     ],
 
-    totalAmount,
+    totalAmount: usdTotalAmount,
+    usdTotalAmount,
+    nativeAmount,
+    nativeSymbol,
+    quotePriceUsd,
 
     redirect: returnUrl
   }
@@ -81,7 +121,7 @@ export async function generateSplitPayment(
   if (input.network === "solana") {
     paymentUrl = buildSolanaPayUri({
       recipient: input.merchantWallet,
-      amount: totalAmount,
+      amount: nativeAmount,
       label: "PineTree Payment",
       message: `Payment #${input.paymentId?.slice(0, 8) || ""}`,
       reference: input.paymentId,
@@ -89,7 +129,7 @@ export async function generateSplitPayment(
     })
   } else if (input.network === "base" || input.network === "base_pay" || input.network === "ethereum") {
     const chainId = input.network === "ethereum" ? "1" : "8453"
-    paymentUrl = `ethereum:${input.merchantWallet}@${chainId}/transfer?address=${input.merchantWallet}&uint256=${totalAmount}`
+    paymentUrl = `ethereum:${input.merchantWallet}@${chainId}?value=${toWeiString(nativeAmount)}`
   } else {
     paymentUrl = `pinetree://pay?data=${encodeURIComponent(payloadString)}`
   }
@@ -110,6 +150,9 @@ export async function generateSplitPayment(
     paymentUrl,
     universalUrl,
     qrCodeUrl,
-    totalAmount
+    totalAmount: usdTotalAmount,
+    usdTotalAmount,
+    nativeAmount,
+    nativeSymbol
   }
 }

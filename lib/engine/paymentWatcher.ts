@@ -15,6 +15,7 @@ type WatchInput = {
   pinetreeWallet: string
   merchantAmount: number
   pinetreeFee: number
+  expectedAmountNative?: number
   network: string
   paymentId: string
 }
@@ -120,7 +121,10 @@ export async function watchPayment(input: WatchInput) {
           continue
         }
 
-        const grossRequired = input.merchantAmount + input.pinetreeFee
+        const grossRequired =
+          typeof input.expectedAmountNative === "number" && Number.isFinite(input.expectedAmountNative)
+            ? input.expectedAmountNative
+            : input.merchantAmount + input.pinetreeFee
 
         // Check if full gross amount was received (99.5% tolerance for network fees)
         if (value >= grossRequired * 0.995) {

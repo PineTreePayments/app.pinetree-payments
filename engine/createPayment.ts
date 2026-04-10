@@ -229,6 +229,7 @@ export async function createPayment(
       pinetreeWallet,
       merchantAmount,
       pinetreeFee,
+      expectedAmountNative: splitPayment.nativeAmount,
       network,
       paymentId
     }).catch(console.error)
