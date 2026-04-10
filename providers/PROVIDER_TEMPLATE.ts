@@ -9,6 +9,7 @@
 
 import { BaseProviderAdapter } from "./base"
 import { registerProvider } from "@/engine/providerRegistry"
+import type { PaymentStatus } from "@/types/provider"
 
 class ProviderNameAdapter extends BaseProviderAdapter {
   readonly providerId = "provider-id"
@@ -51,10 +52,10 @@ class ProviderNameAdapter extends BaseProviderAdapter {
   /**
    * Get payment status from provider
    */
-  async getPaymentStatus(providerReference: string) {
+  async getPaymentStatus(providerReference: string): Promise<{ status: PaymentStatus }> {
     // Implement status check
     return {
-      status: "PROCESSING"
+      status: "PROCESSING" as PaymentStatus
     }
   }
 
@@ -73,7 +74,7 @@ class ProviderNameAdapter extends BaseProviderAdapter {
     // Map provider webhook payload to standard event
     return {
       paymentId: payload.id,
-      event: "payment.confirmed"
+      event: "payment.confirmed" as const
     }
   }
 }
