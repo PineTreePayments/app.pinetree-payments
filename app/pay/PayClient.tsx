@@ -176,11 +176,13 @@ export default function PayClient() {
   const [paymentPayload, setPaymentPayload] = useState<SplitPayload | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const payload = useMemo(() => parsePayload(rawData), [rawData])
+  const activePayload = paymentPayload || payload
+  
   const walletUrl = useMemo(
-    () => (rawData && payload ? buildWalletUrl(payload, rawData) : ""),
-    [payload, rawData]
+    () => (activePayload ? buildWalletUrl(activePayload, rawData) : ""),
+    [activePayload, rawData]
   )
-  const walletOptions = useMemo(() => (payload && selectedNetwork ? buildWalletOptions(selectedNetwork, walletUrl) : []), [payload, walletUrl, selectedNetwork])
+  const walletOptions = useMemo(() => (activePayload && selectedNetwork ? buildWalletOptions(selectedNetwork, walletUrl) : []), [activePayload, walletUrl, selectedNetwork])
 
   const [selectedWalletId, setSelectedWalletId] = useState("")
 
@@ -323,7 +325,7 @@ export default function PayClient() {
               onClick={() => window.close()}
               className="w-full text-sm text-red-600 hover:text-red-700 mt-2"
             >
-              ← Cancel and go back
+              Cancel
             </button>
           </div>
         </div>
@@ -410,10 +412,11 @@ export default function PayClient() {
           onClick={() => {
             setSelectedNetwork(null)
             setSelectedWalletId("")
+            setPaymentPayload(null)
           }}
           className="w-full text-sm text-red-600 hover:text-red-700 text-center"
         >
-          ← Go back and choose different network
+          Cancel
         </button>
       </div>
     </main>
