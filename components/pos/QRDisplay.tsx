@@ -3,11 +3,13 @@
 type Props = {
   qrCodeUrl?: string
   paymentUrl?: string
+  onCancel?: () => void
 }
 
 export default function QRDisplay({
   qrCodeUrl,
-  paymentUrl
+  paymentUrl,
+  onCancel
 }: Props) {
 
   if(!qrCodeUrl){
@@ -53,6 +55,15 @@ export default function QRDisplay({
           Open Wallet
         </button>
 
+      )}
+
+      {onCancel && (
+        <button
+          onClick={onCancel}
+          className="mt-5 text-sm text-red-600 hover:text-red-700 font-medium"
+        >
+          Cancel Payment
+        </button>
       )}
 
     </div>

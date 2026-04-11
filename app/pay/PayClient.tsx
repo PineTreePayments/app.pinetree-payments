@@ -335,10 +335,10 @@ export default function PayClient() {
 
 
 
-  const network = String(payload?.network || selectedNetwork || "unknown").toUpperCase()
-  const usdTotalAmount = Number(payload?.usdTotalAmount ?? payload?.totalAmount ?? 0)
-  const nativeAmount = Number(payload?.nativeAmount ?? 0)
-  const nativeSymbol = String(payload?.nativeSymbol || "").toUpperCase()
+  const network = String(activePayload?.network || selectedNetwork || "unknown").toUpperCase()
+  const usdTotalAmount = Number(activePayload?.usdTotalAmount ?? activePayload?.totalAmount ?? 0)
+  const nativeAmount = Number(activePayload?.nativeAmount ?? 0)
+  const nativeSymbol = String(activePayload?.nativeSymbol || "").toUpperCase()
 
   return (
     <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-slate-100 via-slate-50 to-white">
