@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { ALLOWED_ASSETS, getAvailableAssetsForNetworks } from "@/engine/providerMappings"
+import { ALLOWED_ASSETS, getAvailableAssetsFromValues } from "@/engine/providerMappings"
 
 type SplitOutput = {
   address: string
@@ -198,6 +198,13 @@ export default function PayClient() {
     [walletOptions, resolvedSelectedWalletId]
   )
 
+  useEffect(() => {
+    if (!selectedNetwork) {
+      setSelectedWalletId("")
+      setPaymentPayload(null)
+    }
+  }, [selectedNetwork])
+
   async function copyWalletUrl() {
     if (!walletUrl) return
     try {
@@ -246,13 +253,6 @@ export default function PayClient() {
 
       setSelectedNetwork(network)
 
-      // Attempt to open wallet automatically if universalUrl is present
-      if (result.universalUrl || result.paymentUrl) {
-        try {
-          window.location.href = result.universalUrl || result.paymentUrl
-        } catch {}
-      }
-
     } finally {
       setIsLoading(false)
     }
@@ -300,14 +300,6 @@ export default function PayClient() {
     )
   }
 
-  // Clear state when going back
-  useEffect(() => {
-    if (!selectedNetwork) {
-      setSelectedWalletId("")
-      setPaymentPayload(null)
-    }
-  }, [selectedNetwork])
-
   if (isIntentMode && !selectedNetwork) {
     return (
       <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-slate-100 via-slate-50 to-white">
@@ -328,7 +320,7 @@ export default function PayClient() {
             <p className="text-sm font-medium text-slate-700">Choose how you want to pay:</p>
 
           <div className="space-y-2">
-            {getAvailableAssetsForNetworks((intentPayload?.availableNetworks || []) as any).map((assetId) => {
+            {getAvailableAssetsFromValues(intentPayload?.availableNetworks || []).map((assetId) => {
                 const asset = ALLOWED_ASSETS[assetId]
                 return (
                   <button

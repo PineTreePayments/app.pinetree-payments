@@ -53,3 +53,11 @@ export function getAvailableAssetsForNetworks(networks: WalletNetwork[]): Wallet
     .filter(([, asset]) => networks.includes(asset.network))
     .map(([id]) => id as WalletAsset)
 }
+
+export function getAvailableAssetsFromValues(values: string[]): WalletAsset[] {
+  const normalizedNetworks = values
+    .map((value) => normalizeWalletNetwork(value))
+    .filter((value): value is WalletNetwork => Boolean(value))
+
+  return getAvailableAssetsForNetworks(normalizedNetworks)
+}

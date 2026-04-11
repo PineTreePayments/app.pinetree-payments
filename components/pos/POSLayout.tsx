@@ -105,6 +105,12 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
 
   }
 
+  function requestCancelSale() {
+    const confirmed = window.confirm("Are you sure you want to cancel this payment and go back?")
+    if (!confirmed) return
+    resetSale()
+  }
+
   useEffect(() => {
     if (!paymentId) return
     if (status !== "waiting" && status !== "processing") return
@@ -348,6 +354,13 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
                 <Loader2 size={40} className="text-[#0052FF] animate-spin" />
               </div>
             )}
+
+            <button
+              onClick={requestCancelSale}
+              className="mt-5 text-sm text-red-600 hover:text-red-700 font-medium"
+            >
+              Cancel Payment
+            </button>
 
           </div>
 
