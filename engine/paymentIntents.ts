@@ -2,7 +2,8 @@ import {
   createPaymentIntent as createPaymentIntentRecord,
   getPaymentIntentById,
   markPaymentIntentSelected,
-  getMerchantWallets
+  getMerchantWallets,
+  getPaymentById
 } from "@/database"
 import QRCode from "qrcode"
 import { createPayment } from "./createPayment"
@@ -105,15 +106,17 @@ export async function selectPaymentIntentNetworkEngine(input: {
   if (!intent) throw new Error("Payment intent not found")
 
   if (intent.status === "SELECTED" && intent.payment_id) {
+    const existingPayment = await getPaymentById(intent.payment_id)
+
     return {
       intentId: intent.id,
       paymentId: intent.payment_id,
       selectedNetwork: intent.selected_network,
       alreadySelected: true,
       universalUrl: undefined,
-      paymentUrl: undefined,
-      qrCodeUrl: undefined,
-      provider: undefined
+      paymentUrl: existingPayment?.payment_url || undefined,
+      qrCodeUrl: existingPayment?.qr_code_url || undefined,
+      provider: existingPayment?.provider || undefined
     }
   }
 

@@ -14,6 +14,9 @@ type SplitPayload = {
   network?: string
   reference?: string
   outputs?: SplitOutput[]
+  paymentUrl?: string
+  qrCodeUrl?: string
+  universalUrl?: string
   totalAmount?: number
   usdTotalAmount?: number
   nativeAmount?: number
@@ -172,7 +175,9 @@ export default function PayClient() {
   const rawData = searchParams.get("data")
   const intentId = searchParams.get("intent")
   const [copiedLink, setCopiedLink] = useState(false)
+  const [copiedAddress, setCopiedAddress] = useState(false)
   const [selectedNetwork, setSelectedNetwork] = useState<string | null>(null)
+  const [selectedAssetId, setSelectedAssetId] = useState<string>("")
   const [intentPayload, setIntentPayload] = useState<IntentPayload | null>(null)
   const [paymentPayload, setPaymentPayload] = useState<SplitPayload | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -198,6 +203,12 @@ export default function PayClient() {
     [walletOptions, resolvedSelectedWalletId]
   )
 
+  const recipientAddress = String(activePayload?.outputs?.[0]?.address || "")
+  const paymentQrUrl = String(activePayload?.qrCodeUrl || "")
+  const primaryOpenUrl =
+    selectedWallet?.href ||
+    String(activePayload?.universalUrl || activePayload?.paymentUrl || walletUrl || "")
+
   useEffect(() => {
     if (!selectedNetwork) {
       setSelectedWalletId("")
@@ -216,6 +227,17 @@ export default function PayClient() {
     }
   }
 
+  async function copyAddress() {
+    if (!recipientAddress) return
+    try {
+      await navigator.clipboard.writeText(recipientAddress)
+      setCopiedAddress(true)
+      setTimeout(() => setCopiedAddress(false), 1500)
+    } catch {
+      // ignore clipboard errors
+    }
+  }
+
   async function loadIntent() {
     if (!intentId) return
     try {
@@ -228,8 +250,12 @@ export default function PayClient() {
     }
   }
 
-  async function selectNetwork(network: string) {
+  async function selectAsset(assetId: string) {
     if (!intentId) return
+    const asset = ALLOWED_ASSETS[assetId as keyof typeof ALLOWED_ASSETS]
+    if (!asset) return
+
+    setSelectedAssetId(assetId)
     setIsLoading(true)
 
     try {
@@ -238,7 +264,7 @@ export default function PayClient() {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ network })
+        body: JSON.stringify({ network: asset.network })
       })
 
       if (!res.ok) return
@@ -246,12 +272,17 @@ export default function PayClient() {
 
       // Update state with actual payment data from API response
       setPaymentPayload({
-        network: result.selectedNetwork,
+        network: result.selectedNetwork || asset.network,
         usdTotalAmount: Number(intentPayload?.amount || 0) + Number(intentPayload?.pinetreeFee || 0),
+        nativeAmount: Number(result.nativeAmount || 0),
+        nativeSymbol: String(result.nativeSymbol || asset.symbol || "").toUpperCase(),
+        paymentUrl: String(result.paymentUrl || ""),
+        qrCodeUrl: String(result.qrCodeUrl || ""),
+        universalUrl: String(result.universalUrl || result.paymentUrl || ""),
         outputs: result.address ? [{ address: result.address, amount: result.nativeAmount || 0 }] : []
       })
 
-      setSelectedNetwork(network)
+      setSelectedNetwork(result.selectedNetwork || asset.network)
 
     } finally {
       setIsLoading(false)
@@ -302,11 +333,11 @@ export default function PayClient() {
 
   if (isIntentMode && !selectedNetwork) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-slate-100 via-slate-50 to-white">
-        <div className="max-w-md w-full rounded-[2rem] border border-white/70 bg-white/80 backdrop-blur-xl shadow-2xl p-6 space-y-5">
+      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#e0ecff] via-[#f5f8ff] to-white">
+        <div className="max-w-md w-full rounded-[2rem] border border-blue-100 bg-white shadow-2xl p-6 space-y-5">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500 mb-1">PineTree</p>
-            <h1 className="text-2xl font-semibold text-slate-900">Complete Payment</h1>
+            <p className="text-xs uppercase tracking-[0.2em] text-blue-500 mb-1">PineTree Checkout</p>
+            <h1 className="text-2xl font-semibold text-slate-900">Choose Payment Asset</h1>
           </div>
 
           <div className="rounded-2xl border border-slate-200/70 bg-gradient-to-b from-white to-slate-50 p-4 space-y-2 text-sm text-slate-800">
@@ -317,7 +348,7 @@ export default function PayClient() {
           </div>
 
           <div className="space-y-3">
-            <p className="text-sm font-medium text-slate-700">Choose how you want to pay:</p>
+            <p className="text-sm font-medium text-slate-700">Select an asset to continue:</p>
 
           <div className="space-y-2">
             {getAvailableAssetsFromValues(intentPayload?.availableNetworks || []).map((assetId) => {
@@ -325,9 +356,13 @@ export default function PayClient() {
                 return (
                   <button
                     key={assetId}
-                    onClick={() => selectNetwork(asset.network)}
+                    onClick={() => selectAsset(assetId)}
                     disabled={isLoading}
-                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-4 text-left hover:bg-blue-50 hover:border-blue-400 transition disabled:opacity-50"
+                    className={`w-full rounded-xl border px-4 py-4 text-left transition disabled:opacity-50 ${
+                      selectedAssetId === assetId
+                        ? "border-blue-500 bg-blue-50"
+                        : "border-slate-300 bg-white hover:bg-blue-50 hover:border-blue-400"
+                    }`}
                   >
                     <span className="font-medium text-slate-900">Pay with {asset.label}</span>
                     <p className="text-xs text-slate-600 mt-1">Opens your {asset.symbol} wallet directly</p>
@@ -357,7 +392,7 @@ export default function PayClient() {
 
   return (
     <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-slate-100 via-slate-50 to-white">
-      <div className="max-w-md w-full rounded-[2rem] border border-white/70 bg-white/80 backdrop-blur-xl shadow-2xl p-6 space-y-5">
+      <div className="max-w-md w-full rounded-[2rem] border border-blue-100 bg-white shadow-2xl p-6 space-y-5">
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-slate-500 mb-1">PineTree</p>
           <h1 className="text-2xl font-semibold text-slate-900">Complete Payment</h1>
@@ -373,6 +408,28 @@ export default function PayClient() {
             </div>
           ) : null}
         </div>
+
+        {paymentQrUrl ? (
+          <div className="flex flex-col items-center rounded-2xl border border-blue-100 bg-blue-50/40 p-4">
+            <p className="text-xs uppercase tracking-wider text-blue-600 mb-3">Scan QR to Pay</p>
+            <img src={paymentQrUrl} alt="Payment QR" className="h-52 w-52 rounded-xl bg-white p-2" />
+          </div>
+        ) : null}
+
+        {recipientAddress ? (
+          <div className="space-y-2">
+            <label className="text-xs uppercase tracking-wider text-slate-500">Payment Address</label>
+            <div className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-800 break-all font-mono">
+              {recipientAddress}
+            </div>
+            <button
+              onClick={copyAddress}
+              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              {copiedAddress ? "Address Copied" : "Copy Address"}
+            </button>
+          </div>
+        ) : null}
 
         <div className="space-y-3">
           <label className="text-sm font-medium text-slate-700">Select your wallet:</label>
@@ -392,8 +449,11 @@ export default function PayClient() {
           </select>
 
           {selectedWalletId && selectedWalletId !== "manual" ? (
-            <a
-              href={selectedWallet?.href || "#"}
+            <button
+              onClick={() => {
+                if (!selectedWallet?.href) return
+                window.location.href = selectedWallet.href
+              }}
               className={`block w-full text-center rounded-xl py-3 font-medium transition ${
                 selectedWallet
                   ? "bg-[#0A84FF] text-white shadow hover:brightness-110"
@@ -401,7 +461,7 @@ export default function PayClient() {
               }`}
             >
               Open {selectedWallet?.label}
-            </a>
+            </button>
           ) : null}
 
           {selectedWalletId === "manual" ? (
@@ -420,6 +480,17 @@ export default function PayClient() {
             className="w-full text-center border border-slate-300 rounded-xl py-2 text-sm text-slate-700"
           >
             {copiedLink ? "Copied" : "Copy Wallet Address"}
+          </button>
+        ) : null}
+
+        {primaryOpenUrl ? (
+          <button
+            onClick={() => {
+              window.location.href = primaryOpenUrl
+            }}
+            className="w-full rounded-xl bg-blue-600 text-white px-4 py-3 font-medium shadow hover:brightness-110 transition"
+          >
+            Open in Wallet App
           </button>
         ) : null}
 
