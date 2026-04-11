@@ -41,6 +41,16 @@ export const PINETREE_TREASURY_WALLETS = {
     ""
 } as const
 
+function isEvmAddress(value: string): boolean {
+  return /^0x[a-fA-F0-9]{40}$/.test(String(value || "").trim())
+}
+
+function isLikelySolanaAddress(value: string): boolean {
+  // Base58-ish, common Solana length range
+  const normalized = String(value || "").trim()
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(normalized)
+}
+
 function normalizeTreasuryNetwork(network: string): "solana" | "base" | "ethereum" {
   const value = String(network || "").toLowerCase().trim()
   if (value === "solana") return "solana"
@@ -51,7 +61,7 @@ function normalizeTreasuryNetwork(network: string): "solana" | "base" | "ethereu
 
 export function getPineTreeTreasuryWallet(network: string): string {
   const normalized = normalizeTreasuryNetwork(network)
-  const wallet = PINETREE_TREASURY_WALLETS[normalized]
+  const wallet = String(PINETREE_TREASURY_WALLETS[normalized] || "").trim()
 
   if (wallet) return wallet
   if (PINETREE_TREASURY_WALLET) return PINETREE_TREASURY_WALLET
@@ -59,6 +69,26 @@ export function getPineTreeTreasuryWallet(network: string): string {
   throw new Error(
     `Missing PineTree treasury wallet for network: ${normalized}. Configure PINETREE_TREASURY_WALLET_${normalized.toUpperCase()}.`
   )
+}
+
+export function assertTreasuryWalletFormat(network: string): void {
+  const normalized = normalizeTreasuryNetwork(network)
+  const wallet = getPineTreeTreasuryWallet(normalized)
+
+  if (normalized === "solana") {
+    if (!isLikelySolanaAddress(wallet)) {
+      throw new Error(
+        "Invalid PINETREE treasury wallet format for Solana. Expected a valid Solana address in PINETREE_TREASURY_WALLET_SOLANA."
+      )
+    }
+    return
+  }
+
+  if (!isEvmAddress(wallet)) {
+    throw new Error(
+      `Invalid PINETREE treasury wallet format for ${normalized}. Expected 0x... EVM address in PINETREE_TREASURY_WALLET_${normalized.toUpperCase()}.`
+    )
+  }
 }
 
 /**
@@ -163,4 +193,12 @@ export function validateConfig(): void {
       `Missing required environment variables: ${missing.join(", ")}`
     )
   }
+}
+
+let configValidated = false
+
+export function validateConfigOnce(): void {
+  if (configValidated) return
+  validateConfig()
+  configValidated = true
 }

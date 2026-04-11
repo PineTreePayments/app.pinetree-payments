@@ -22,7 +22,11 @@ import { selectBestWallet } from "@/database/merchantWallets"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 import { loadProviders } from "./loadProviders"
 import { providerToPreferredNetwork } from "./providerMappings"
-import { getPineTreeTreasuryWallet } from "./config"
+import {
+  getPineTreeTreasuryWallet,
+  assertTreasuryWalletFormat,
+  validateConfigOnce
+} from "./config"
 
 type PaymentMetadata = {
   merchantAmount?: number
@@ -173,6 +177,9 @@ export async function createPayment(
   input: CreatePaymentInput
 ): Promise<CreatePaymentResult> {
 
+  // Fail fast for missing required env configuration
+  validateConfigOnce()
+
   // Ensure all provider adapters are registered before selection/use
   await loadProviders()
 
@@ -252,6 +259,7 @@ export async function createPayment(
      PINETREE TREASURY WALLET
   --------------------------- */
 
+  assertTreasuryWalletFormat(network)
   const pinetreeWallet = getPineTreeTreasuryWallet(network)
 
   /* ---------------------------
