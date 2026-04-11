@@ -5,11 +5,13 @@
 import "./coinbase"
 import "./solana"
 import "./shift4"
+import "./basePay"
 
 // Export adapter instances for direct use if needed
 export { coinbaseAdapter } from "./coinbase"
 export { solanaAdapter } from "./solana"
 export { shift4Adapter } from "./shift4"
+export { basePayAdapter } from "./basePay"
 
 // Re-export provider registry functions
 export { getProvider, registerProvider } from "../engine/providerRegistry"
