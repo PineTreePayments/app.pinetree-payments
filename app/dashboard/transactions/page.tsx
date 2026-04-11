@@ -110,13 +110,21 @@ export default function TransactionsPage() {
     return payload
   }, [])
 
-  const providerName = useCallback((provider: string) => {
-    if (provider === "coinbase") return "Coinbase Business"
-    if (provider === "solana") return "Solana Pay"
-    if (provider === "shift4") return "Shift4"
-    if (provider === "base") return "Base Pay"
-    return provider || "-"
-  }, [])
+   const providerName = useCallback((provider: string) => {
+     if (provider === "coinbase") return "Coinbase Business"
+     if (provider === "solana") return "Solana Pay"
+     if (provider === "shift4") return "Shift4"
+     if (provider === "base") return "Base Pay"
+     return provider || "-"
+   }, [])
+
+   const networkName = useCallback((network: string | null) => {
+     if (!network) return "-"
+     if (network.toLowerCase() === "solana") return "Solana"
+     if (network.toLowerCase() === "base") return "Base"
+     if (network.toLowerCase() === "ethereum") return "Ethereum"
+     return network.charAt(0).toUpperCase() + network.slice(1).toLowerCase()
+   }, [])
 
   const calculateInsights = useCallback((data: Transaction[]) => {
     const hourMap: Record<string, number> = {}
@@ -150,12 +158,12 @@ export default function TransactionsPage() {
     const peakH = maxKey(hourMap)
     const peakD = maxKey(dayMap)
     const topP = maxKey(providerMap)
-    const topN = maxKey(networkMap)
+     const topN = maxKey(networkMap)
 
-    setPeakHour(peakH === "-" ? "-" : `${peakH}:00`)
-    setPeakDay(peakD)
-    setTopProvider(providerName(topP))
-    setTopNetwork(topN)
+     setPeakHour(peakH === "-" ? "-" : `${peakH}:00`)
+     setPeakDay(peakD)
+     setTopProvider(providerName(topP))
+     setTopNetwork(networkName(topN))
 
     const pos = channelMap["pos"] || 0
     const online = channelMap["online"] || 0
@@ -167,9 +175,9 @@ export default function TransactionsPage() {
     if (topP === "-" || topN === "-") {
       setAiInsight("No insights yet.")
     } else {
-      setAiInsight(
-        `Your busiest hour is ${peakH}:00. ${providerName(topP)} is your most used provider, and ${topN} is your most used network.`
-      )
+       setAiInsight(
+         `Your busiest hour is ${peakH}:00. ${providerName(topP)} is your most used provider, and ${networkName(topN)} is your most used network.`
+       )
     }
   }, [providerName])
 
@@ -382,9 +390,9 @@ export default function TransactionsPage() {
                     {payment?.currency || "—"}
                   </td>
 
-                  <td className="px-6 py-4 text-gray-700">
-                    {tx.network || "—"}
-                  </td>
+                   <td className="px-6 py-4 text-gray-700">
+                     {networkName(tx.network)}
+                   </td>
 
                   <td className="px-6 py-4 text-gray-900">
                     {providerName(tx.provider)}
