@@ -234,17 +234,22 @@ export default function PayClient() {
       if (!res.ok) return
       const result = await res.json()
 
-      if (result.universalUrl) {
-        window.location.href = result.universalUrl
-        return
-      }
-
-      if (result.paymentUrl) {
-        window.location.href = result.paymentUrl
-        return
-      }
+      // Update state with actual payment data from API response
+      setPaymentPayload({
+        network: result.selectedNetwork,
+        usdTotalAmount: Number(intentPayload?.amount || 0) + Number(intentPayload?.pinetreeFee || 0),
+        outputs: result.address ? [{ address: result.address, amount: result.nativeAmount || 0 }] : []
+      })
 
       setSelectedNetwork(network)
+
+      // Attempt to open wallet automatically if universalUrl is present
+      if (result.universalUrl || result.paymentUrl) {
+        try {
+          window.location.href = result.universalUrl || result.paymentUrl
+        } catch {}
+      }
+
     } finally {
       setIsLoading(false)
     }
