@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
+import { ALLOWED_ASSETS, getAvailableAssetsForNetworks } from "@/engine/providerMappings"
 
 type SplitOutput = {
   address: string
@@ -288,6 +289,14 @@ export default function PayClient() {
     ? Number(intentPayload?.amount || 0) + Number(intentPayload?.pinetreeFee || 0)
     : Number(payload?.usdTotalAmount ?? payload?.totalAmount ?? 0)
 
+  // Clear state when going back
+  useEffect(() => {
+    if (!selectedNetwork) {
+      setSelectedWalletId("")
+      setPaymentPayload(null)
+    }
+  }, [selectedNetwork])
+
   if (isIntentMode && !selectedNetwork) {
     return (
       <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-slate-100 via-slate-50 to-white">
@@ -307,18 +316,21 @@ export default function PayClient() {
           <div className="space-y-3">
             <p className="text-sm font-medium text-slate-700">Choose how you want to pay:</p>
 
-            <div className="space-y-2">
-              {intentPayload?.availableNetworks.map((network) => (
-                <button
-                  key={network}
-                  onClick={() => selectNetwork(network)}
-                  disabled={isLoading}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-4 text-left hover:bg-blue-50 hover:border-blue-400 transition disabled:opacity-50"
-                >
-                  <span className="font-medium text-slate-900">Pay with {String(network).toUpperCase()}</span>
-                  <p className="text-xs text-slate-600 mt-1">Opens your {String(network)} wallet app directly</p>
-                </button>
-              ))}
+          <div className="space-y-2">
+            {getAvailableAssetsForNetworks((intentPayload?.availableNetworks || []) as any).map((assetId) => {
+                const asset = ALLOWED_ASSETS[assetId]
+                return (
+                  <button
+                    key={assetId}
+                    onClick={() => selectNetwork(asset.network)}
+                    disabled={isLoading}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-4 text-left hover:bg-blue-50 hover:border-blue-400 transition disabled:opacity-50"
+                  >
+                    <span className="font-medium text-slate-900">Pay with {asset.label}</span>
+                    <p className="text-xs text-slate-600 mt-1">Opens your {asset.symbol} wallet directly</p>
+                  </button>
+                )
+              })}
             </div>
 
             <button
