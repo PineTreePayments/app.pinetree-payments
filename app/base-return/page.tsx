@@ -76,12 +76,12 @@ export default function BaseReturnPage() {
 
         console.log("✅ Session updated successfully")
 
-        /* =========================
-           REDIRECT BACK
-        ========================= */
+         /* =========================
+            DO NOT REDIRECT
+            Session will be picked up by dashboard automatically
+         ========================= */
 
-        window.location.href = returnTo || "/dashboard/providers"
-
+         window.close()
       } catch (err) {
         console.error("❌ BASE RETURN ERROR:", err)
         alert("Wallet connection failed")
