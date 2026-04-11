@@ -11,6 +11,26 @@ import { buildCreatePaymentRequest } from "./createPayment"
 import { networkToProvider, normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 
 const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base"]
+const PAYMENT_DETAILS_TIMEOUT_MS = Number(process.env.PAYMENT_DETAILS_TIMEOUT_MS || 12000)
+
+async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`))
+        }, timeoutMs)
+      })
+    ])
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle)
+    }
+  }
+}
 
 function uniqueNetworks(networks: WalletNetwork[]) {
   return [...new Set(networks)]
@@ -102,6 +122,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
   network: string
   idempotencyKey?: string
 }) {
+  const startedAt = Date.now()
   const intent = await getPaymentIntentById(input.intentId)
   if (!intent) throw new Error("Payment intent not found")
 
@@ -135,40 +156,78 @@ export async function selectPaymentIntentNetworkEngine(input: {
 
   const provider = networkToProvider(normalizedNetwork)
 
-  const { createPaymentInput } = await buildCreatePaymentRequest({
-    amount: Number(intent.amount),
-    currency: intent.currency,
-    provider,
-    merchantId: intent.merchant_id,
-    terminalId: intent.terminal_id || undefined,
-    pinetreeFee: Number(intent.pinetree_fee || 0.15),
-    metadata: {
-      ...(intent.metadata || {}),
-      paymentIntentId: intent.id,
-      selectedNetwork: normalizedNetwork
+  try {
+    console.info("[payment-intent] select-network:start", {
+      intentId: intent.id,
+      network: normalizedNetwork,
+      provider
+    })
+
+    const { createPaymentInput } = await withTimeout(
+      buildCreatePaymentRequest({
+        amount: Number(intent.amount),
+        currency: intent.currency,
+        provider,
+        merchantId: intent.merchant_id,
+        terminalId: intent.terminal_id || undefined,
+        pinetreeFee: Number(intent.pinetree_fee || 0.15),
+        metadata: {
+          ...(intent.metadata || {}),
+          paymentIntentId: intent.id,
+          selectedNetwork: normalizedNetwork
+        }
+      }),
+      PAYMENT_DETAILS_TIMEOUT_MS,
+      "Payment preparation"
+    )
+
+    const payment = await withTimeout(
+      createPayment({
+        ...createPaymentInput,
+        preferredNetwork: normalizedNetwork,
+        idempotencyKey: input.idempotencyKey || `payment-intent:${intent.id}:${normalizedNetwork}`
+      }),
+      PAYMENT_DETAILS_TIMEOUT_MS,
+      "Payment creation"
+    )
+
+    await markPaymentIntentSelected({
+      id: intent.id,
+      selected_network: normalizedNetwork,
+      payment_id: payment.id
+    })
+
+    console.info("[payment-intent] select-network:success", {
+      intentId: intent.id,
+      network: normalizedNetwork,
+      durationMs: Date.now() - startedAt,
+      paymentId: payment.id
+    })
+
+    return {
+      intentId: intent.id,
+      paymentId: payment.id,
+      selectedNetwork: normalizedNetwork,
+      provider: payment.provider,
+      paymentUrl: payment.paymentUrl,
+      qrCodeUrl: payment.qrCodeUrl,
+      universalUrl: payment.universalUrl,
+      alreadySelected: false
     }
-  })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to prepare payment details"
 
-  const payment = await createPayment({
-    ...createPaymentInput,
-    preferredNetwork: normalizedNetwork,
-    idempotencyKey: input.idempotencyKey
-  })
+    console.error("[payment-intent] select-network:error", {
+      intentId: intent.id,
+      network: normalizedNetwork,
+      durationMs: Date.now() - startedAt,
+      error: message
+    })
 
-  await markPaymentIntentSelected({
-    id: intent.id,
-    selected_network: normalizedNetwork,
-    payment_id: payment.id
-  })
+    if (message.toLowerCase().includes("timed out")) {
+      throw new Error("Payment details timed out, please retry")
+    }
 
-  return {
-    intentId: intent.id,
-    paymentId: payment.id,
-    selectedNetwork: normalizedNetwork,
-    provider: payment.provider,
-    paymentUrl: payment.paymentUrl,
-    qrCodeUrl: payment.qrCodeUrl,
-    universalUrl: payment.universalUrl,
-    alreadySelected: false
+    throw error
   }
 }

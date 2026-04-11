@@ -25,6 +25,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to select payment network"
     const status =
+      message.toLowerCase().includes("timed out")
+        ? 504
+        :
       message.includes("not found") ||
       message.includes("Unsupported") ||
       message.includes("not enabled")

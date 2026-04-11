@@ -195,6 +195,8 @@ export default function PayClient() {
   const [copiedAddress, setCopiedAddress] = useState(false)
   const [selectedNetwork, setSelectedNetwork] = useState<string | null>(null)
   const [selectedAssetId, setSelectedAssetId] = useState<string>("")
+  const [loadingAssetId, setLoadingAssetId] = useState<string>("")
+  const [selectionError, setSelectionError] = useState<string>("")
   const [intentPayload, setIntentPayload] = useState<IntentPayload | null>(null)
   const [paymentPayload, setPaymentPayload] = useState<SplitPayload | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -273,18 +275,30 @@ export default function PayClient() {
     if (!asset) return
 
     setSelectedAssetId(assetId)
+    setLoadingAssetId(assetId)
+    setSelectionError("")
+    setPaymentPayload(null)
     setIsLoading(true)
 
+    let timeout: ReturnType<typeof setTimeout> | undefined
+
     try {
+      const controller = new AbortController()
+      timeout = setTimeout(() => controller.abort(), 15000)
+
       const res = await fetch(`/api/payment-intents/${encodeURIComponent(intentId)}/select-network`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ network: asset.network })
+        body: JSON.stringify({ network: asset.network }),
+        signal: controller.signal
       })
 
-      if (!res.ok) return
+      if (!res.ok) {
+        const errorPayload = await res.json().catch(() => null)
+        throw new Error(String(errorPayload?.error || "Failed to prepare payment details"))
+      }
       const result = await res.json()
       const paymentUrl = String(result.paymentUrl || "")
       const derivedAddress = String(result.address || extractAddressFromPaymentUrl(paymentUrl))
@@ -303,8 +317,26 @@ export default function PayClient() {
 
       setSelectedNetwork(result.selectedNetwork || asset.network)
 
+      if (!paymentUrl && !result.qrCodeUrl && !derivedAddress) {
+        setSelectionError("No wallet address found for this payment method. Please try another asset.")
+      }
+
+    } catch (error) {
+      const message =
+        error instanceof DOMException && error.name === "AbortError"
+          ? "Loading payment details timed out. Please try again."
+          : error instanceof Error
+            ? error.message
+            : "Unable to load payment details"
+
+      setSelectionError(message)
+
     } finally {
+      if (timeout) {
+        clearTimeout(timeout)
+      }
       setIsLoading(false)
+      setLoadingAssetId("")
     }
   }
 
@@ -373,6 +405,7 @@ export default function PayClient() {
             {getAvailableAssetsFromValues(intentPayload?.availableNetworks || []).map((assetId) => {
                 const asset = ALLOWED_ASSETS[assetId]
                 const isActive = selectedAssetId === assetId
+                const isLoadingCard = loadingAssetId === assetId
                 return (
                   <div key={assetId} className="rounded-xl border border-slate-200 overflow-hidden">
                     <button
@@ -388,19 +421,25 @@ export default function PayClient() {
                       <p className="text-xs text-slate-600 mt-1">Tap to reveal payment details</p>
                     </button>
 
-                    {isActive && isLoading ? (
-                      <div className="px-4 py-3 text-xs text-slate-500 border-t border-slate-200">Loading payment details…</div>
+                    {isActive && isLoadingCard ? (
+                      <div className="px-4 py-3 text-xs text-slate-500 border-t border-slate-200">Loading payment details from merchant provider…</div>
                     ) : null}
 
-                    {isActive && !isLoading && paymentPayload ? (
+                    {isActive && !isLoadingCard ? (
                       <div className="px-4 py-4 border-t border-slate-200 bg-white space-y-3">
-                        {paymentQrUrl ? (
+                        {selectionError ? (
+                          <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                            {selectionError}
+                          </div>
+                        ) : null}
+
+                        {paymentPayload && paymentQrUrl ? (
                           <div className="flex justify-center">
                             <img src={paymentQrUrl} alt="Payment QR" className="h-44 w-44 rounded-lg bg-white p-2 border border-slate-200" />
                           </div>
                         ) : null}
 
-                        {recipientAddress ? (
+                        {paymentPayload && recipientAddress ? (
                           <>
                             <div className="text-[11px] uppercase tracking-wider text-slate-500">Payment Address</div>
                             <div className="text-xs font-mono break-all bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-slate-700">
@@ -415,7 +454,26 @@ export default function PayClient() {
                           </>
                         ) : null}
 
-                        {primaryOpenUrl ? (
+                        {paymentPayload && walletOptions.length > 0 ? (
+                          <div className="space-y-2">
+                            <div className="text-[11px] uppercase tracking-wider text-slate-500">Wallet Apps</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {walletOptions.map((option) => (
+                                <button
+                                  key={option.id}
+                                  onClick={() => {
+                                    window.location.href = option.href
+                                  }}
+                                  className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                                >
+                                  {option.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {paymentPayload && primaryOpenUrl ? (
                           <button
                             onClick={() => {
                               window.location.href = primaryOpenUrl
@@ -424,6 +482,10 @@ export default function PayClient() {
                           >
                             Open Wallet (Optional)
                           </button>
+                        ) : null}
+
+                        {!selectionError && !paymentPayload ? (
+                          <div className="text-xs text-slate-500">Tap the asset again to retry loading payment details.</div>
                         ) : null}
                       </div>
                     ) : null}
