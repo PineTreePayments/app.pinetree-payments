@@ -157,46 +157,40 @@ function buildWalletOptions(payload: SplitPayload, walletUrl: string): WalletOpt
     ]
   }
 
-  if (network === "base" || network === "base_pay" || network === "ethereum") {
-    const metamaskHref = buildMetaMaskHref(payload)
-
-    return [
-      {
-        id: "base",
-        label: "Base Wallet",
-        description: "Open with Base-compatible wallet handler",
-        href: walletUrl
-      },
-      ...(metamaskHref
-        ? [
-            {
-              id: "metamask",
-              label: "MetaMask",
-              description: "Open directly in MetaMask",
-              href: metamaskHref
-            }
-          ]
-        : []),
-      {
-        id: "coinbase",
-        label: "Coinbase Wallet",
-        description: "Open in Coinbase Wallet",
-        href: `https://go.cb-w.com/dapp?cb_url=${encodedWalletUrl}`
-      },
-      {
-        id: "trust",
-        label: "Trust Wallet",
-        description: "Open using Trust deep link",
-        href: `https://link.trustwallet.com/open_url?url=${encodedWalletUrl}`
-      },
-      {
-        id: "other",
-        label: "Other EVM Wallet",
-        description: "Use raw ethereum URI",
-        href: walletUrl
-      }
-    ]
-  }
+   if (network === "base" || network === "base_pay" || network === "ethereum") {
+     return [
+       {
+         id: "basewallet",
+         label: "Base Wallet",
+         description: "Open directly in Base Wallet app",
+         href: `cbwallet://dapp?url=${encodedWalletUrl}`
+       },
+       {
+         id: "metamask",
+         label: "MetaMask",
+         description: "Open directly in MetaMask app",
+         href: `metamask://dapp?url=${encodedWalletUrl}`
+       },
+       {
+         id: "trust",
+         label: "Trust Wallet",
+         description: "Open directly in Trust Wallet app",
+         href: `trust://dapp?url=${encodedWalletUrl}`
+       },
+       {
+         id: "coinbase",
+         label: "Coinbase Wallet",
+         description: "Open in Coinbase Wallet",
+         href: `https://go.cb-w.com/dapp?cb_url=${encodedWalletUrl}`
+       },
+       {
+         id: "other",
+         label: "Other EVM Wallet",
+         description: "Use raw ethereum URI",
+         href: walletUrl
+       }
+     ]
+   }
 
   return [
     {
