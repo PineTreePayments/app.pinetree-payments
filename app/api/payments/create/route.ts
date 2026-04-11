@@ -6,19 +6,16 @@
  */
 
 import { NextRequest, NextResponse } from "next/server"
-import { createPayment } from "@/engine/createPayment"
-import { PaymentProvider } from "@/types/payment"
-import { calculateGrossAmount, calculateTax } from "@/engine/fees"
-import { getMerchantTaxSettings } from "@/lib/database/merchants"
+import { buildCreatePaymentRequest, createPayment } from "@/engine/createPayment"
 
 type CreatePaymentBody = {
   amount: number
   currency: string
-  provider?: PaymentProvider
+  provider?: "solana" | "coinbase" | "shift4"
   merchantId: string
   terminalId?: string
   pinetreeFee?: number
-  metadata?: any
+  metadata?: Record<string, unknown>
 }
 
 export async function POST(req: NextRequest) {
@@ -28,85 +25,18 @@ export async function POST(req: NextRequest) {
     const idempotencyKey =
       req.headers.get("idempotency-key") || undefined
 
-    /* ---------------------------
-       BASIC VALIDATION
-    --------------------------- */
-
-    if (
-      body.amount === undefined ||
-      !body.currency ||
-      !body.merchantId
-    ) {
-      return NextResponse.json(
-        { error: "Missing required payment fields" },
-        { status: 400 }
-      )
-    }
-
-    const merchantAmount = Number(body.amount)
-
-    if (isNaN(merchantAmount) || merchantAmount <= 0) {
-      return NextResponse.json(
-        { error: "Invalid payment amount" },
-        { status: 400 }
-      )
-    }
-
-    /* ---------------------------
-       PROVIDER VALIDATION
-    --------------------------- */
-
-    if (!body.provider) {
-      return NextResponse.json(
-        { error: "No payment provider connected" },
-        { status: 400 }
-      )
-    }
-
-    /* ---------------------------
-       TAX CALCULATION
-    --------------------------- */
-
-    let totalAmount = merchantAmount
-    let taxAmount = 0
-
-    // Get merchant tax settings if available
-    try {
-      const taxSettings = await getMerchantTaxSettings(body.merchantId)
-      
-      if (taxSettings.taxEnabled && taxSettings.taxRate > 0) {
-        taxAmount = calculateTax(merchantAmount, taxSettings.taxRate)
-        totalAmount = merchantAmount + taxAmount
-      }
-    } catch (err) {
-      // Tax settings not configured, continue without tax
-      console.warn("Tax settings not available:", err)
-    }
-
-    /* ---------------------------
-       PINETREE FEE CALCULATION
-    --------------------------- */
-
-    const pinetreeFee = body.pinetreeFee ?? 0.15
-    const grossAmount = calculateGrossAmount(totalAmount, pinetreeFee)
-
-    /* ---------------------------
-       CREATE PAYMENT
-    --------------------------- */
-
-    const payment = await createPayment({
-      amount: grossAmount,
+    const { createPaymentInput, breakdown } = await buildCreatePaymentRequest({
+      amount: body.amount,
       currency: body.currency,
       provider: body.provider,
       merchantId: body.merchantId,
-      metadata: {
-        ...body.metadata,
-        terminalId: body.terminalId,
-        merchantAmount,
-        taxAmount,
-        pinetreeFee,
-        totalAmount
-      },
+      terminalId: body.terminalId,
+      pinetreeFee: body.pinetreeFee,
+      metadata: body.metadata
+    })
+
+    const payment = await createPayment({
+      ...createPaymentInput,
       idempotencyKey
     })
 
@@ -119,20 +49,23 @@ export async function POST(req: NextRequest) {
       provider: payment.provider,
       paymentUrl: payment.paymentUrl,
       qrCodeUrl: payment.qrCodeUrl,
-      breakdown: {
-        merchantAmount,
-        taxAmount,
-        pinetreeFee,
-        grossAmount
-      }
+      breakdown
     })
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Payment creation error:", error)
 
+    const message = error instanceof Error ? error.message : "Payment creation failed"
+    const status =
+      message === "Missing required payment fields" ||
+      message === "Invalid payment amount" ||
+      message === "No payment provider connected"
+        ? 400
+        : 500
+
     return NextResponse.json(
-      { error: "Payment creation failed", details: error.message },
-      { status: 500 }
+      { error: "Payment creation failed", details: message },
+      { status }
     )
   }
 }

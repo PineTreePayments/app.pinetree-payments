@@ -1,13 +1,8 @@
 import { getProvider, isProviderHealthy } from "./providerRegistry"
 import { loadProviders } from "./loadProviders"
 
-let providersLoaded = false
-
 async function ensureProvidersLoaded() {
-  if (!providersLoaded) {
-    await loadProviders()
-    providersLoaded = true
-  }
+  await loadProviders()
 }
 
 type PaymentRouterInput = {

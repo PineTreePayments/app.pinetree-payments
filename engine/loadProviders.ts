@@ -1,8 +1,8 @@
+let providersLoaded = false
+
 export async function loadProviders() {
+  if (providersLoaded) return
 
-  await import("../providers/coinbase")
-  await import("../providers/shift4")
-  await import("../providers/solana")
-
-
+  await import("../providers")
+  providersLoaded = true
 }

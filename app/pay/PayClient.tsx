@@ -22,9 +22,10 @@ type SplitPayload = {
 }
 
 type WalletOption = {
+  id: string
   label: string
   href: string
-  tone?: "primary" | "secondary"
+  description?: string
 }
 
 function parsePayload(raw: string | null): SplitPayload | null {
@@ -94,35 +95,106 @@ function buildWalletUrl(payload: SplitPayload, rawData: string) {
   return `pinetree://pay?data=${encodeURIComponent(rawData)}`
 }
 
+function buildMetaMaskHref(payload: SplitPayload): string | null {
+  const recipient = String(payload.outputs?.[0]?.address || "")
+  const network = String(payload.network || "").toLowerCase()
+  const usdTotal = Number(payload.usdTotalAmount ?? payload.totalAmount ?? 0)
+  const nativeAmountRaw = Number(payload.nativeAmount ?? 0)
+  const nativeAmount = Number.isFinite(nativeAmountRaw) && nativeAmountRaw > 0 ? nativeAmountRaw : usdTotal
+
+  if (!recipient || nativeAmount <= 0) return null
+
+  const chainId = network === "ethereum" ? "1" : "8453"
+  const value = toWeiString(nativeAmount)
+  return `https://metamask.app.link/send/${recipient}@${chainId}?value=${value}`
+}
+
 function buildWalletOptions(payload: SplitPayload, walletUrl: string): WalletOption[] {
   const network = String(payload.network || "").toLowerCase()
   if (!walletUrl) return []
 
+  const encodedWalletUrl = encodeURIComponent(walletUrl)
+
   if (network === "solana") {
-    const encodedWalletUrl = encodeURIComponent(walletUrl)
     const encodedRef = encodeURIComponent("https://app.pinetree-payments.com")
 
     return [
-      { label: "Open in Installed Solana Wallet", href: walletUrl, tone: "primary" },
       {
-        label: "Open in Phantom",
-        href: `https://phantom.app/ul/v1/browse/${encodedWalletUrl}?ref=${encodedRef}`,
-        tone: "secondary"
+        id: "phantom",
+        label: "Phantom",
+        description: "Recommended for Solana Pay",
+        href: `https://phantom.app/ul/v1/browse/${encodedWalletUrl}?ref=${encodedRef}`
       },
       {
-        label: "Open in Solflare",
-        href: `https://solflare.com/ul/v1/browse/${encodedWalletUrl}?ref=${encodedRef}`,
-        tone: "secondary"
+        id: "solflare",
+        label: "Solflare",
+        description: "Open with Solflare app",
+        href: `https://solflare.com/ul/v1/browse/${encodedWalletUrl}?ref=${encodedRef}`
       },
       {
-        label: "Open in Trust Wallet",
-        href: `https://link.trustwallet.com/open_url?url=${encodedWalletUrl}`,
-        tone: "secondary"
+        id: "trust",
+        label: "Trust Wallet",
+        description: "Open using Trust deep link",
+        href: `https://link.trustwallet.com/open_url?url=${encodedWalletUrl}`
+      },
+      {
+        id: "other",
+        label: "Other Solana Wallet",
+        description: "Use raw Solana URI",
+        href: walletUrl
       }
     ]
   }
 
-  return [{ label: "Open Wallet", href: walletUrl, tone: "primary" }]
+  if (network === "base" || network === "base_pay" || network === "ethereum") {
+    const metamaskHref = buildMetaMaskHref(payload)
+
+    return [
+      {
+        id: "base",
+        label: "Base Wallet",
+        description: "Open with Base-compatible wallet handler",
+        href: walletUrl
+      },
+      ...(metamaskHref
+        ? [
+            {
+              id: "metamask",
+              label: "MetaMask",
+              description: "Open directly in MetaMask",
+              href: metamaskHref
+            }
+          ]
+        : []),
+      {
+        id: "coinbase",
+        label: "Coinbase Wallet",
+        description: "Open in Coinbase Wallet",
+        href: `https://go.cb-w.com/dapp?cb_url=${encodedWalletUrl}`
+      },
+      {
+        id: "trust",
+        label: "Trust Wallet",
+        description: "Open using Trust deep link",
+        href: `https://link.trustwallet.com/open_url?url=${encodedWalletUrl}`
+      },
+      {
+        id: "other",
+        label: "Other EVM Wallet",
+        description: "Use raw ethereum URI",
+        href: walletUrl
+      }
+    ]
+  }
+
+  return [
+    {
+      id: "default",
+      label: "Wallet",
+      description: "Open wallet link",
+      href: walletUrl
+    }
+  ]
 }
 
 function formatUsd(amount: number) {
@@ -135,7 +207,9 @@ function formatUsd(amount: number) {
 export default function PayClient() {
   const searchParams = useSearchParams()
   const rawData = searchParams.get("data")
-  const [copied, setCopied] = useState(false)
+  const [copiedLink, setCopiedLink] = useState(false)
+  const [copiedRef, setCopiedRef] = useState(false)
+  const [selectedWalletId, setSelectedWalletId] = useState("")
 
   const payload = useMemo(() => parsePayload(rawData), [rawData])
   const walletUrl = useMemo(
@@ -143,13 +217,30 @@ export default function PayClient() {
     [payload, rawData]
   )
   const walletOptions = useMemo(() => (payload ? buildWalletOptions(payload, walletUrl) : []), [payload, walletUrl])
+  const resolvedSelectedWalletId = walletOptions.some((option) => option.id === selectedWalletId)
+    ? selectedWalletId
+    : ""
+  const selectedWallet = useMemo(
+    () => walletOptions.find((option) => option.id === resolvedSelectedWalletId) || null,
+    [walletOptions, resolvedSelectedWalletId]
+  )
 
   async function copyWalletUrl() {
     if (!walletUrl) return
     try {
       await navigator.clipboard.writeText(walletUrl)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
+      setCopiedLink(true)
+      setTimeout(() => setCopiedLink(false), 1500)
+    } catch {
+      // ignore clipboard errors
+    }
+  }
+
+  async function copyReference(reference: string) {
+    try {
+      await navigator.clipboard.writeText(reference)
+      setCopiedRef(true)
+      setTimeout(() => setCopiedRef(false), 1500)
     } catch {
       // ignore clipboard errors
     }
@@ -157,10 +248,10 @@ export default function PayClient() {
 
   if (!rawData || !payload) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-6 bg-gray-100">
-        <div className="max-w-md w-full bg-white rounded-xl shadow p-6 text-center">
-          <h1 className="text-xl font-semibold mb-2 text-gray-900">Invalid payment QR</h1>
-          <p className="text-sm text-gray-800">This QR code payload is missing or malformed.</p>
+      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-slate-100 via-slate-50 to-white">
+        <div className="max-w-md w-full bg-white/90 backdrop-blur rounded-3xl shadow-xl border border-white p-7 text-center">
+          <h1 className="text-xl font-semibold mb-2 text-slate-900">Invalid payment QR</h1>
+          <p className="text-sm text-slate-700">This QR code payload is missing or malformed.</p>
         </div>
       </main>
     )
@@ -171,46 +262,74 @@ export default function PayClient() {
   const nativeAmount = Number(payload.nativeAmount ?? 0)
   const nativeSymbol = String(payload.nativeSymbol || "").toUpperCase()
   const quotePriceUsd = Number(payload.quotePriceUsd ?? 0)
+  const reference = String(payload.reference || "")
+  const shortRef = reference ? `${reference.slice(0, 10)}...${reference.slice(-6)}` : ""
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-6 bg-gray-100">
-      <div className="max-w-md w-full bg-white rounded-xl shadow p-6 space-y-4">
-        <h1 className="text-xl font-semibold text-gray-900">PineTree Payment</h1>
+    <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-slate-100 via-slate-50 to-white">
+      <div className="max-w-md w-full rounded-[2rem] border border-white/70 bg-white/80 backdrop-blur-xl shadow-2xl p-6 space-y-5">
+        <div>
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-500 mb-1">PineTree</p>
+          <h1 className="text-2xl font-semibold text-slate-900">Complete Payment</h1>
+        </div>
 
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-1 text-sm text-gray-900">
-          <div><span className="font-semibold">Network:</span> {network}</div>
-          <div><span className="font-semibold">Total (USD):</span> {formatUsd(usdTotalAmount)}</div>
+        <div className="rounded-2xl border border-slate-200/70 bg-gradient-to-b from-white to-slate-50 p-4 space-y-2 text-sm text-slate-800">
+          <div className="flex items-center justify-between"><span className="font-medium text-slate-600">Network</span><span className="font-semibold">{network}</span></div>
+          <div className="flex items-center justify-between"><span className="font-medium text-slate-600">Total</span><span className="font-semibold">{formatUsd(usdTotalAmount)}</span></div>
           {nativeSymbol ? (
-            <div>
-              <span className="font-semibold">Pay Amount:</span>{" "}
-              {Number.isFinite(nativeAmount) ? nativeAmount : 0} {nativeSymbol}
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-slate-600">Pay Amount</span>
+              <span className="font-semibold">{Number.isFinite(nativeAmount) ? nativeAmount : 0} {nativeSymbol}</span>
             </div>
           ) : null}
           {quotePriceUsd > 0 ? (
-            <div className="text-xs text-gray-700">Quote: 1 {nativeSymbol} ≈ {formatUsd(quotePriceUsd)}</div>
+            <div className="text-xs text-slate-600">Quote: 1 {nativeSymbol} ≈ {formatUsd(quotePriceUsd)}</div>
           ) : null}
-          {payload.reference ? (
-            <div className="text-xs text-gray-700">
-              <span className="font-semibold">Reference:</span> {String(payload.reference).slice(0, 16)}...
+          {reference ? (
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <span className="text-xs text-slate-600">Ref {shortRef}</span>
+              <button
+                onClick={() => copyReference(reference)}
+                className="text-xs rounded-full border border-slate-300 px-2 py-1 text-slate-700"
+              >
+                {copiedRef ? "Copied" : "Copy Ref"}
+              </button>
             </div>
           ) : null}
         </div>
 
         {walletOptions.length > 0 ? (
-          <div className="space-y-2">
-            {walletOptions.map((option) => (
-              <a
-                key={`${option.label}-${option.href}`}
-                href={option.href}
-                className={
-                  option.tone === "primary"
-                    ? "block w-full text-center bg-[#0052FF] text-white rounded-md py-3 font-medium"
-                    : "block w-full text-center border border-gray-300 rounded-md py-2 text-sm text-gray-900"
-                }
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-slate-700">Choose wallet</label>
+              <select
+                value={resolvedSelectedWalletId}
+                onChange={(e) => setSelectedWalletId(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-slate-900"
               >
-                {option.label}
-              </a>
-            ))}
+                <option value="">Select a wallet…</option>
+                {walletOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              {selectedWallet?.description ? (
+                <p className="text-xs text-slate-600">{selectedWallet.description}</p>
+              ) : null}
+            </div>
+
+            <a
+              href={selectedWallet?.href || "#"}
+              aria-disabled={!selectedWallet}
+              className={`block w-full text-center rounded-xl py-3 font-medium transition ${
+                selectedWallet
+                  ? "bg-[#0A84FF] text-white shadow hover:brightness-110"
+                  : "bg-slate-200 text-slate-500 pointer-events-none"
+              }`}
+            >
+              {selectedWallet ? `Open in ${selectedWallet.label}` : "Select a wallet first"}
+            </a>
           </div>
         ) : (
           <div className="text-sm text-red-700">Could not generate wallet deep link.</div>
@@ -219,14 +338,14 @@ export default function PayClient() {
         {walletUrl ? (
           <button
             onClick={copyWalletUrl}
-            className="w-full text-center border border-gray-300 rounded-md py-2 text-sm text-gray-900"
+            className="w-full text-center border border-slate-300 rounded-xl py-2 text-sm text-slate-700"
           >
-            {copied ? "Copied" : "Copy Wallet Link"}
+            {copiedLink ? "Copied" : "Copy Wallet Link"}
           </button>
         ) : null}
 
         {payload.redirect ? (
-          <a href={payload.redirect} className="block text-center text-sm text-gray-800 underline">
+          <a href={payload.redirect} className="block text-center text-sm text-slate-600 underline">
             Return to merchant
           </a>
         ) : null}

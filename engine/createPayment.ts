@@ -20,6 +20,8 @@ import { watchPayment } from "./paymentWatcher"
 import { calculateGrossAmount } from "./fees"
 import { selectBestWallet } from "@/database/merchantWallets"
 import { updatePaymentStatus } from "./updatePaymentStatus"
+import { loadProviders } from "./loadProviders"
+import { providerToPreferredNetwork } from "./providerMappings"
 
 type PaymentMetadata = {
   merchantAmount?: number
@@ -46,6 +48,119 @@ type CreatePaymentResult = {
   qrCodeUrl: string
 }
 
+export type BuildCreatePaymentRequestInput = {
+  amount: number
+  currency: string
+  merchantId: string
+  provider?: PaymentProvider
+  terminalId?: string
+  pinetreeFee?: number
+  metadata?: Record<string, unknown>
+}
+
+export type BuildCreatePaymentRequestResult = {
+  createPaymentInput: CreatePaymentInput
+  breakdown: {
+    merchantAmount: number
+    taxAmount: number
+    pinetreeFee: number
+    grossAmount: number
+  }
+}
+
+export async function buildCreatePaymentRequest(
+  input: BuildCreatePaymentRequestInput
+): Promise<BuildCreatePaymentRequestResult> {
+  const merchantAmount = Number(input.amount)
+
+  if (isNaN(merchantAmount) || merchantAmount <= 0) {
+    throw new Error("Invalid payment amount")
+  }
+
+  const currency = String(input.currency || "").trim()
+  const merchantId = String(input.merchantId || "").trim()
+
+  if (!currency || !merchantId) {
+    throw new Error("Missing required payment fields")
+  }
+
+  if (!input.provider) {
+    throw new Error("No payment provider connected")
+  }
+
+  let taxAmount = 0
+
+  try {
+    const { getMerchantTaxSettings } = await import("@/database/merchants")
+    const { calculateTax, calculateGrossAmount } = await import("./fees")
+    const taxSettings = await getMerchantTaxSettings(merchantId)
+
+    if (taxSettings.taxEnabled && taxSettings.taxRate > 0) {
+      taxAmount = calculateTax(merchantAmount, taxSettings.taxRate)
+    }
+
+    const totalAmount = merchantAmount + taxAmount
+    const pinetreeFee = input.pinetreeFee ?? 0.15
+    const grossAmount = calculateGrossAmount(totalAmount, pinetreeFee)
+
+    return {
+      createPaymentInput: {
+        amount: grossAmount,
+        currency,
+        provider: input.provider,
+        merchantId,
+        metadata: {
+          ...(input.metadata || {}),
+          terminalId: input.terminalId,
+          merchantAmount,
+          taxAmount,
+          pinetreeFee,
+          totalAmount
+        }
+      },
+      breakdown: {
+        merchantAmount,
+        taxAmount,
+        pinetreeFee,
+        grossAmount
+      }
+    }
+  } catch (error) {
+    // If tax settings are unavailable, continue with default tax=0 behavior
+    const { calculateGrossAmount } = await import("./fees")
+    const totalAmount = merchantAmount
+    const pinetreeFee = input.pinetreeFee ?? 0.15
+    const grossAmount = calculateGrossAmount(totalAmount, pinetreeFee)
+
+    if (error instanceof Error) {
+      console.warn("Tax settings not available:", error)
+    }
+
+    return {
+      createPaymentInput: {
+        amount: grossAmount,
+        currency,
+        provider: input.provider,
+        merchantId,
+        metadata: {
+          ...(input.metadata || {}),
+          terminalId: input.terminalId,
+          merchantAmount,
+          taxAmount: 0,
+          pinetreeFee,
+          totalAmount
+        }
+      },
+      breakdown: {
+        merchantAmount,
+        taxAmount: 0,
+        pinetreeFee,
+        grossAmount
+      }
+    }
+  }
+}
+
 /**
  * Create a new payment
  * 
@@ -55,6 +170,9 @@ type CreatePaymentResult = {
 export async function createPayment(
   input: CreatePaymentInput
 ): Promise<CreatePaymentResult> {
+
+  // Ensure all provider adapters are registered before selection/use
+  await loadProviders()
 
   /* ---------------------------
      IDEMPOTENCY PROTECTION
@@ -116,13 +234,7 @@ export async function createPayment(
 
   const preferredNetwork =
     input.preferredNetwork ||
-    (providerName === "solana"
-      ? "solana"
-      : providerName === "coinbase"
-        ? "base"
-        : providerName === "shift4"
-          ? "ethereum"
-          : undefined)
+    providerToPreferredNetwork(providerName)
 
   const merchantWallet = await selectBestWallet(input.merchantId, preferredNetwork)
   
