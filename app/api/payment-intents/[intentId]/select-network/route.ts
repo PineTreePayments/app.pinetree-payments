@@ -3,6 +3,34 @@ import { selectPaymentIntentNetworkEngine } from "@/engine/paymentIntents"
 
 type Params = { params: Promise<{ intentId: string }> }
 
+function classifySelectNetworkError(message: string) {
+  const normalized = message.toLowerCase()
+
+  if (normalized.includes("timed out")) {
+    return { status: 504, code: "PAYMENT_DETAILS_TIMEOUT" }
+  }
+
+  if (
+    normalized.includes("missing pinetree treasury wallet") ||
+    normalized.includes("missing required environment variables") ||
+    normalized.includes("invalid pinetree treasury wallet format")
+  ) {
+    return { status: 500, code: "TREASURY_CONFIG_ERROR" }
+  }
+
+  if (
+    normalized.includes("payment intent not found") ||
+    normalized.includes("unsupported") ||
+    normalized.includes("not enabled") ||
+    normalized.includes("no wallet configured for merchant") ||
+    normalized.includes("no payment provider connected")
+  ) {
+    return { status: 400, code: "PAYMENT_SETUP_ERROR" }
+  }
+
+  return { status: 500, code: "SELECT_NETWORK_FAILED" }
+}
+
 export async function POST(req: NextRequest, { params }: Params) {
   try {
     const { intentId } = await params
@@ -24,16 +52,8 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json(result)
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to select payment network"
-    const status =
-      message.toLowerCase().includes("timed out")
-        ? 504
-        :
-      message.includes("not found") ||
-      message.includes("Unsupported") ||
-      message.includes("not enabled")
-        ? 400
-        : 500
+    const { status, code } = classifySelectNetworkError(message)
 
-    return NextResponse.json({ error: message }, { status })
+    return NextResponse.json({ error: message, code }, { status })
   }
 }

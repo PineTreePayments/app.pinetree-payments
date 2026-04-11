@@ -23,6 +23,23 @@ function toWeiString(amountEth: number): string {
   return normalized || "0"
 }
 
+function isEvmAddress(value: string): boolean {
+  return /^0x[a-fA-F0-9]{40}$/.test(String(value || "").trim())
+}
+
+function getEvmSplitMode(): "direct" | "contract" {
+  const mode = String(process.env.PINETREE_EVM_SPLIT_MODE || "direct").toLowerCase().trim()
+  return mode === "contract" ? "contract" : "direct"
+}
+
+function getEvmSplitContract(network: string): string {
+  if (network === "ethereum") {
+    return String(process.env.PINETREE_EVM_SPLIT_CONTRACT_ETHEREUM || "").trim()
+  }
+
+  return String(process.env.PINETREE_EVM_SPLIT_CONTRACT_BASE || "").trim()
+}
+
 export async function generateSplitPayment(
   input: GenerateSplitPaymentInput
 ) {
@@ -31,6 +48,8 @@ export async function generateSplitPayment(
   const usdTotalAmount = merchantAmount + pinetreeFee
 
   let nativeAmount = usdTotalAmount
+  let merchantNativeAmount = Number(input.merchantAmount)
+  let feeNativeAmount = Number(input.pinetreeFee)
   let nativeSymbol = "USD"
   let quotePriceUsd: number | null = null
 
@@ -46,10 +65,14 @@ export async function generateSplitPayment(
       nativeSymbol = "SOL"
       quotePriceUsd = prices.SOL
       nativeAmount = roundAmount(usdTotalAmount / prices.SOL, 9)
+      merchantNativeAmount = roundAmount(merchantAmount / prices.SOL, 9)
+      feeNativeAmount = roundAmount(pinetreeFee / prices.SOL, 9)
     } else {
       nativeSymbol = "ETH"
       quotePriceUsd = prices.ETH
       nativeAmount = roundAmount(usdTotalAmount / prices.ETH, 18)
+      merchantNativeAmount = roundAmount(merchantAmount / prices.ETH, 18)
+      feeNativeAmount = roundAmount(pinetreeFee / prices.ETH, 18)
     }
   }
 
@@ -129,9 +152,26 @@ export async function generateSplitPayment(
       memo: `pt:split:${input.pinetreeWallet}:${pinetreeFee}`
     })
   } else if (input.network === "base" || input.network === "base_pay" || input.network === "ethereum") {
-    // ERC-681 URI for EVM chains
+    // EVM chains: contract-based split (if configured) with safe fallback to direct transfer URI
     const chainId = input.network === "ethereum" ? "1" : "8453"
-    paymentUrl = `ethereum:${input.merchantWallet}@${chainId}?value=${toWeiString(nativeAmount)}`
+
+    const splitMode = getEvmSplitMode()
+    const splitContract = getEvmSplitContract(input.network)
+
+    if (splitMode === "contract" && isEvmAddress(splitContract)) {
+      // EIP-681 style contract invocation URI for split execution
+      const query = new URLSearchParams({
+        merchant: input.merchantWallet,
+        treasury: input.pinetreeWallet,
+        merchantAmountWei: toWeiString(merchantNativeAmount),
+        feeAmountWei: toWeiString(feeNativeAmount),
+        reference: String(input.paymentId || "")
+      })
+
+      paymentUrl = `ethereum:${splitContract}@${chainId}/split?${query.toString()}`
+    } else {
+      paymentUrl = `ethereum:${input.merchantWallet}@${chainId}?value=${toWeiString(nativeAmount)}`
+    }
   } else {
     // Fallback to universal format
     paymentUrl = `pinetree://pay?data=${encodeURIComponent(payloadString)}`
