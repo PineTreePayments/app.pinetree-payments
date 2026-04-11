@@ -106,8 +106,7 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
   }
 
   function requestCancelSale() {
-    const confirmed = window.confirm("Are you sure you want to cancel this payment and go back?")
-    if (!confirmed) return
+    // Toggle the native browser confirm off - always cancel immediately
     resetSale()
   }
 

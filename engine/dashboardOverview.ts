@@ -70,12 +70,18 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
     .eq("merchant_id", merchantId)
     .eq("status", "connected")
 
+  // Normalize network names with proper capitalization
+  const normalizedRecentTx = rows.slice(0, 10).map(tx => ({
+    ...tx,
+    network: tx.network ? tx.network.charAt(0).toUpperCase() + tx.network.slice(1).toLowerCase() : tx.network
+  }))
+
   return {
     volume: totalVolume,
     txCount: totalTx,
     successRate: totalTx > 0 ? Math.round((successTx.length / totalTx) * 100) : 0,
     providers: count ?? 0,
-    recentTx: rows.slice(0, 10),
+    recentTx: normalizedRecentTx,
     chartData,
     walletValue: walletOverview.totalUsd,
     lastRun: walletOverview.lastRun
