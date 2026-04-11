@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 
 type SplitOutput = {
@@ -19,6 +19,17 @@ type SplitPayload = {
   nativeSymbol?: string
   quotePriceUsd?: number | null
   redirect?: string
+}
+
+type IntentPayload = {
+  intentId: string
+  amount: number
+  currency: string
+  pinetreeFee: number
+  availableNetworks: string[]
+  selectedNetwork?: string | null
+  paymentId?: string | null
+  checkoutUrl?: string
 }
 
 type WalletOption = {
@@ -207,9 +218,13 @@ function formatUsd(amount: number) {
 export default function PayClient() {
   const searchParams = useSearchParams()
   const rawData = searchParams.get("data")
+  const intentId = searchParams.get("intent")
   const [copiedLink, setCopiedLink] = useState(false)
   const [copiedRef, setCopiedRef] = useState(false)
   const [selectedWalletId, setSelectedWalletId] = useState("")
+  const [selectedNetwork, setSelectedNetwork] = useState("")
+  const [intentPayload, setIntentPayload] = useState<IntentPayload | null>(null)
+  const [isSubmittingIntent, setIsSubmittingIntent] = useState(false)
 
   const payload = useMemo(() => parsePayload(rawData), [rawData])
   const walletUrl = useMemo(
@@ -244,6 +259,118 @@ export default function PayClient() {
     } catch {
       // ignore clipboard errors
     }
+  }
+
+  const isIntentMode = Boolean(intentId)
+
+  async function loadIntent() {
+    if (!intentId) return
+    try {
+      const res = await fetch(`/api/payment-intents/${encodeURIComponent(intentId)}`, { cache: "no-store" })
+      const payload = (await res.json()) as IntentPayload | { error?: string }
+      if (!res.ok || ("error" in payload && payload.error)) return
+      setIntentPayload(payload as IntentPayload)
+    } catch {
+      // ignore
+    }
+  }
+
+  async function selectIntentNetwork() {
+    if (!intentId || !selectedNetwork) return
+    try {
+      setIsSubmittingIntent(true)
+      const res = await fetch(`/api/payment-intents/${encodeURIComponent(intentId)}/select-network`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ network: selectedNetwork })
+      })
+
+      if (!res.ok) return
+      const payload = await res.json()
+      if (payload?.universalUrl) {
+        window.location.href = payload.universalUrl
+        return
+      }
+      if (payload?.paymentUrl) {
+        window.location.href = payload.paymentUrl
+        return
+      }
+      await loadIntent()
+    } finally {
+      setIsSubmittingIntent(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!isIntentMode) return
+    void loadIntent()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isIntentMode, intentId])
+
+  if (isIntentMode && intentPayload) {
+    const available = intentPayload.availableNetworks || []
+    const hasSelected = Boolean(intentPayload.selectedNetwork && intentPayload.paymentId)
+
+    return (
+      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-slate-100 via-slate-50 to-white">
+        <div className="max-w-md w-full rounded-[2rem] border border-white/70 bg-white/80 backdrop-blur-xl shadow-2xl p-6 space-y-5">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500 mb-1">PineTree</p>
+            <h1 className="text-2xl font-semibold text-slate-900">Choose payment network</h1>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200/70 bg-gradient-to-b from-white to-slate-50 p-4 space-y-2 text-sm text-slate-800">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-slate-600">Total</span>
+              <span className="font-semibold">{formatUsd(Number(intentPayload.amount || 0) + Number(intentPayload.pinetreeFee || 0))}</span>
+            </div>
+            <div className="text-xs text-slate-600">Intent: {intentPayload.intentId.slice(0, 10)}...{intentPayload.intentId.slice(-6)}</div>
+          </div>
+
+          {hasSelected ? (
+            <div className="text-sm text-emerald-700">Network already selected. Continue in wallet.</div>
+          ) : (
+            <div className="space-y-3">
+              <label className="text-sm font-medium text-slate-700">Available networks</label>
+              <select
+                value={selectedNetwork}
+                onChange={(e) => setSelectedNetwork(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-slate-900"
+              >
+                <option value="">Select network…</option>
+                {available.map((n) => (
+                  <option key={n} value={n}>{String(n).toUpperCase()}</option>
+                ))}
+              </select>
+
+              <button
+                onClick={selectIntentNetwork}
+                disabled={!selectedNetwork || isSubmittingIntent}
+                className={`block w-full text-center rounded-xl py-3 font-medium transition ${
+                  selectedNetwork && !isSubmittingIntent
+                    ? "bg-[#0A84FF] text-white shadow hover:brightness-110"
+                    : "bg-slate-200 text-slate-500"
+                }`}
+              >
+                {isSubmittingIntent ? "Starting payment..." : "Continue"}
+              </button>
+            </div>
+          )}
+        </div>
+      </main>
+    )
+  }
+
+  if (isIntentMode) {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-slate-100 via-slate-50 to-white">
+        <div className="max-w-md w-full bg-white/90 backdrop-blur rounded-3xl shadow-xl border border-white p-7 text-center">
+          <h1 className="text-xl font-semibold mb-2 text-slate-900">Loading payment options…</h1>
+        </div>
+      </main>
+    )
   }
 
   if (!rawData || !payload) {

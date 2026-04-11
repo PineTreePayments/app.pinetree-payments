@@ -22,6 +22,7 @@ import { selectBestWallet } from "@/database/merchantWallets"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 import { loadProviders } from "./loadProviders"
 import { providerToPreferredNetwork } from "./providerMappings"
+import { getPineTreeTreasuryWallet } from "./config"
 
 type PaymentMetadata = {
   merchantAmount?: number
@@ -46,6 +47,7 @@ type CreatePaymentResult = {
   provider: string
   paymentUrl: string
   qrCodeUrl: string
+  universalUrl?: string
 }
 
 export type BuildCreatePaymentRequestInput = {
@@ -189,7 +191,8 @@ export async function createPayment(
           id: existingPayment.id,
           provider: existingPayment.provider,
           paymentUrl: existingPayment.payment_url || "",
-          qrCodeUrl: existingPayment.qr_code_url || ""
+          qrCodeUrl: existingPayment.qr_code_url || "",
+          universalUrl: undefined
         }
       }
     }
@@ -249,10 +252,7 @@ export async function createPayment(
      PINETREE TREASURY WALLET
   --------------------------- */
 
-  // TEMPORARY FALLBACK FOR LOCAL DEVELOPMENT
-  // Use merchant wallet directly for local testing
-  // PineTree treasury wallet will be used in production
-  const pinetreeWallet = process.env.PINETREE_TREASURY_WALLET || merchantWalletAddress
+  const pinetreeWallet = getPineTreeTreasuryWallet(network)
 
   /* ---------------------------
      CREATE PAYMENT ID
@@ -355,6 +355,7 @@ export async function createPayment(
     id: paymentId,
     provider: providerName,
     paymentUrl: splitPayment.paymentUrl,
-    qrCodeUrl: splitPayment.qrCodeUrl
+    qrCodeUrl: splitPayment.qrCodeUrl,
+    universalUrl: splitPayment.universalUrl
   }
 }

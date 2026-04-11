@@ -27,3 +27,6 @@ export * from "./merchantWallets"
 
 // Wallet Overview
 export * from "./walletOverview"
+
+// Payment Intents
+export * from "./paymentIntents"

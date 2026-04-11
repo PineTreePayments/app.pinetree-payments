@@ -19,6 +19,49 @@ export const PINETREE_TREASURY_WALLET =
   process.env.PINETREE_TREASURY_WALLET || ""
 
 /**
+ * Network-specific PineTree treasury wallets
+ *
+ * Notes:
+ * - Solana uses its own address format
+ * - Base/Ethereum are EVM and can share the same 0x address
+ */
+export const PINETREE_TREASURY_WALLETS = {
+  solana:
+    process.env.PINETREE_TREASURY_WALLET_SOLANA ||
+    process.env.PINETREE_TREASURY_WALLET ||
+    "",
+  base:
+    process.env.PINETREE_TREASURY_WALLET_BASE ||
+    process.env.PINETREE_TREASURY_WALLET ||
+    "",
+  ethereum:
+    process.env.PINETREE_TREASURY_WALLET_ETHEREUM ||
+    process.env.PINETREE_TREASURY_WALLET_BASE ||
+    process.env.PINETREE_TREASURY_WALLET ||
+    ""
+} as const
+
+function normalizeTreasuryNetwork(network: string): "solana" | "base" | "ethereum" {
+  const value = String(network || "").toLowerCase().trim()
+  if (value === "solana") return "solana"
+  if (value === "base" || value === "base_pay") return "base"
+  if (value === "ethereum") return "ethereum"
+  throw new Error(`Unsupported treasury network: ${network}`)
+}
+
+export function getPineTreeTreasuryWallet(network: string): string {
+  const normalized = normalizeTreasuryNetwork(network)
+  const wallet = PINETREE_TREASURY_WALLETS[normalized]
+
+  if (wallet) return wallet
+  if (PINETREE_TREASURY_WALLET) return PINETREE_TREASURY_WALLET
+
+  throw new Error(
+    `Missing PineTree treasury wallet for network: ${normalized}. Configure PINETREE_TREASURY_WALLET_${normalized.toUpperCase()}.`
+  )
+}
+
+/**
  * Base Application URL
  */
 export const BASE_URL = 
@@ -101,6 +144,18 @@ export function validateConfig(): void {
   
   if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
     missing.push("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+  }
+
+  if (!PINETREE_TREASURY_WALLETS.solana) {
+    missing.push("PINETREE_TREASURY_WALLET_SOLANA (or PINETREE_TREASURY_WALLET)")
+  }
+
+  if (!PINETREE_TREASURY_WALLETS.base) {
+    missing.push("PINETREE_TREASURY_WALLET_BASE (or PINETREE_TREASURY_WALLET)")
+  }
+
+  if (!PINETREE_TREASURY_WALLETS.ethereum) {
+    missing.push("PINETREE_TREASURY_WALLET_ETHEREUM (or PINETREE_TREASURY_WALLET_BASE)")
   }
   
   if (missing.length > 0) {

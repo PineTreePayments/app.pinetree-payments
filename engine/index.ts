@@ -5,9 +5,11 @@
 export {
   PINETREE_FEE,
   PINETREE_TREASURY_WALLET,
+  PINETREE_TREASURY_WALLETS,
   BASE_URL,
   RPC_URLS,
   NETWORK_RETURN_PATHS,
+  getPineTreeTreasuryWallet,
   getReturnPath,
   getRpcUrl,
   WATCHER_CONFIG,

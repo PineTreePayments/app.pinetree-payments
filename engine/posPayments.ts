@@ -2,7 +2,9 @@ import { createPayment } from "@/engine/createPayment"
 import { getMerchantTaxSettings, getMerchantProviders } from "@/lib/database/merchants"
 import { hasAnyWalletConnected, selectBestWallet } from "@/lib/database/merchantWallets"
 import { getPaymentById } from "@/lib/database/payments"
+import { getPaymentIntentById } from "@/database/paymentIntents"
 import { PaymentProvider } from "@/types/payment"
+import { createPaymentIntentEngine } from "./paymentIntents"
 import {
   normalizeWalletNetwork,
   providerToPreferredNetwork,
@@ -30,11 +32,13 @@ export type CreatePosPaymentInput = {
 
 export type CreatePosPaymentResult = {
   paymentId: string
+  intentId?: string
   provider: string
   state: "CREATED" | "PENDING" | "PROCESSING" | "CONFIRMED" | "FAILED" | "INCOMPLETE"
   paymentUrl: string
   qrCodeUrl: string
-  routing: {
+  availableNetworks?: string[]
+  routing?: {
     network: string
     walletId: string
     walletAddress: string
@@ -189,11 +193,91 @@ export async function createPosPaymentEngine(
   }
 }
 
+export async function createPosPaymentIntentEngine(input: CreatePosPaymentInput) {
+  const subtotalAmount = Number(input.amount || 0)
+  if (!subtotalAmount || subtotalAmount <= 0) {
+    const err = new Error("Invalid payment amount") as Error & { status?: number }
+    err.status = 400
+    throw err
+  }
+
+  const merchantId = String(input.terminal.merchantId || "").trim()
+  if (!merchantId) {
+    const err = new Error("Missing merchant id") as Error & { status?: number }
+    err.status = 400
+    throw err
+  }
+
+  const tax = await getPosTaxSettingsEngine(merchantId)
+  const taxAmount = tax.taxEnabled ? subtotalAmount * (tax.taxRate / 100) : 0
+  const merchantAmount = subtotalAmount + taxAmount
+  const serviceFee = 0.15
+
+  const intent = await createPaymentIntentEngine({
+    merchantId,
+    amount: merchantAmount,
+    currency: input.currency || "USD",
+    terminalId: input.terminal.terminalId,
+    pinetreeFee: serviceFee,
+    metadata: {
+      subtotalAmount,
+      taxAmount,
+      serviceFee,
+      totalAmount: merchantAmount + serviceFee,
+      channel: "pos"
+    }
+  })
+
+  return {
+    paymentId: intent.intentId,
+    intentId: intent.intentId,
+    provider: "multi",
+    state: "PENDING" as const,
+    paymentUrl: intent.checkoutUrl,
+    qrCodeUrl: intent.qrCodeUrl,
+    availableNetworks: intent.availableNetworks,
+    breakdown: {
+      subtotalAmount,
+      taxAmount,
+      serviceFee,
+      grossAmount: merchantAmount + serviceFee,
+      totalAmount: merchantAmount + serviceFee
+    }
+  }
+}
+
 export async function getPosPaymentStatusEngine(paymentId: string) {
   if (!paymentId) {
     const err = new Error("Missing paymentId") as Error & { status?: number }
     err.status = 400
     throw err
+  }
+
+  const intent = await getPaymentIntentById(paymentId)
+  if (intent) {
+    if (!intent.payment_id) {
+      return {
+        status: "PENDING",
+        paymentId: intent.id
+      }
+    }
+
+    const selectedPayment = await getPaymentById(intent.payment_id)
+    if (!selectedPayment) {
+      return {
+        status: "PENDING",
+        paymentId: intent.id
+      }
+    }
+
+    const selectedStatus = String(selectedPayment.status || "").toUpperCase()
+    return {
+      status:
+        selectedStatus === "EXPIRED"
+          ? "INCOMPLETE"
+          : selectedStatus,
+      paymentId: selectedPayment.id
+    }
   }
 
   const payment = await getPaymentById(paymentId)
