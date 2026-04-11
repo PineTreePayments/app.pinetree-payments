@@ -356,21 +356,43 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
                     <Loader2 size={40} className="text-[#0052FF] animate-spin" />
                   </div>
                 )}
+
+                <div className="mt-4 flex items-center gap-2">
+                  <Loader2 size={16} className="text-[#0052FF] animate-spin" />
+                  <div className="text-sm text-gray-600 font-medium">
+                    Waiting for payment
+                  </div>
+                </div>
               </>
             )}
 
             {status === "processing" && (
               <>
-                <Loader2
-                  size={56}
-                  className="text-yellow-500 animate-spin"
-                />
-
-                <div className="mt-4 text-gray-600 font-medium">
-                  Processing Payment
+                <div className="bg-white p-4 rounded-xl shadow">
+                  <Image
+                    src={qrCodeUrl}
+                    width={220}
+                    height={220}
+                    alt="Payment QR"
+                    unoptimized
+                    style={{ opacity: 0.5 }}
+                  />
                 </div>
-                <div className="mt-1 text-xs text-gray-500">
-                  Transaction detected on network
+
+                <div className="mt-4 flex items-center gap-3">
+                  <Loader2
+                    size={24}
+                    className="text-yellow-500 animate-spin"
+                  />
+
+                  <div>
+                    <div className="text-gray-600 font-medium">
+                      Processing Payment
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">
+                      Transaction detected on network
+                    </div>
+                  </div>
                 </div>
               </>
             )}
