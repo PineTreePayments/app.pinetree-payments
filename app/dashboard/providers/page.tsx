@@ -539,20 +539,10 @@ export default function ProvidersPage() {
 
       const returnUrl = buildMobileBridgeUrl("base", selectedWalletType, sessionId)
 
-      let deeplink = ""
+      console.log("DEEPLINK:", returnUrl)
 
-      if (selectedWalletType === "METAMASK") {
-        const dapp = returnUrl.replace(/^https?:\/\//, "")
-        deeplink = `https://link.metamask.io/dapp/${dapp}`
-      } else if (selectedWalletType === "TRUST") {
-        deeplink = `https://link.trustwallet.com/open_url?coin_id=60&url=${encodeURIComponent(returnUrl)}`
-      } else if (selectedWalletType === "BASEAPP") {
-        deeplink = `https://go.cb-w.com/dapp?cb_url=${encodeURIComponent(returnUrl)}`
-      }
-
-      console.log("DEEPLINK:", deeplink)
-
-      const qr = await QRCode.toDataURL(deeplink)
+      setWalletMobileDeeplink(returnUrl)
+      const qr = await QRCode.toDataURL(returnUrl)
 
       console.log("QR GENERATED")
 
