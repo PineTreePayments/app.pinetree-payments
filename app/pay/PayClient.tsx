@@ -95,8 +95,8 @@ function buildWalletUrl(payload: SplitPayload, rawData: string) {
       query.set("amount", String(roundAmount(nativeAmount, 9)))
     }
     if (reference) query.set("reference", reference)
-    query.set("label", "PineTree Payment")
-    query.set("message", reference ? `Payment #${reference.slice(0, 8)}` : "PineTree Payment")
+    query.set("label", "PineTree Payments")
+    query.set("message", reference ? `PineTree Checkout #${reference.slice(0, 8)}` : "Pay securely with PineTree")
 
     const qs = query.toString()
     return qs ? `solana:${recipient}?${qs}` : `solana:${recipient}`
@@ -163,6 +163,23 @@ function buildWalletOptions(network: string, walletUrl: string): WalletOption[] 
   return []
 }
 
+function extractAddressFromPaymentUrl(paymentUrl?: string): string {
+  const raw = String(paymentUrl || "")
+  if (!raw) return ""
+
+  if (raw.startsWith("solana:")) {
+    const value = raw.slice("solana:".length)
+    return value.split("?")[0] || ""
+  }
+
+  if (raw.startsWith("ethereum:")) {
+    const value = raw.slice("ethereum:".length)
+    return value.split("@")[0] || ""
+  }
+
+  return ""
+}
+
 function formatUsd(amount: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -210,11 +227,11 @@ export default function PayClient() {
     String(activePayload?.universalUrl || activePayload?.paymentUrl || walletUrl || "")
 
   useEffect(() => {
-    if (!selectedNetwork) {
+    if (!selectedAssetId) {
       setSelectedWalletId("")
       setPaymentPayload(null)
     }
-  }, [selectedNetwork])
+  }, [selectedAssetId])
 
   async function copyWalletUrl() {
     if (!walletUrl) return
@@ -269,6 +286,8 @@ export default function PayClient() {
 
       if (!res.ok) return
       const result = await res.json()
+      const paymentUrl = String(result.paymentUrl || "")
+      const derivedAddress = String(result.address || extractAddressFromPaymentUrl(paymentUrl))
 
       // Update state with actual payment data from API response
       setPaymentPayload({
@@ -276,10 +295,10 @@ export default function PayClient() {
         usdTotalAmount: Number(intentPayload?.amount || 0) + Number(intentPayload?.pinetreeFee || 0),
         nativeAmount: Number(result.nativeAmount || 0),
         nativeSymbol: String(result.nativeSymbol || asset.symbol || "").toUpperCase(),
-        paymentUrl: String(result.paymentUrl || ""),
+        paymentUrl,
         qrCodeUrl: String(result.qrCodeUrl || ""),
-        universalUrl: String(result.universalUrl || result.paymentUrl || ""),
-        outputs: result.address ? [{ address: result.address, amount: result.nativeAmount || 0 }] : []
+        universalUrl: String(result.universalUrl || paymentUrl || ""),
+        outputs: derivedAddress ? [{ address: derivedAddress, amount: result.nativeAmount || 0 }] : []
       })
 
       setSelectedNetwork(result.selectedNetwork || asset.network)
@@ -331,7 +350,7 @@ export default function PayClient() {
     )
   }
 
-  if (isIntentMode && !selectedNetwork) {
+  if (isIntentMode) {
     return (
       <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#e0ecff] via-[#f5f8ff] to-white">
         <div className="max-w-md w-full rounded-[2rem] border border-blue-100 bg-white shadow-2xl p-6 space-y-5">
@@ -353,20 +372,62 @@ export default function PayClient() {
           <div className="space-y-2">
             {getAvailableAssetsFromValues(intentPayload?.availableNetworks || []).map((assetId) => {
                 const asset = ALLOWED_ASSETS[assetId]
+                const isActive = selectedAssetId === assetId
                 return (
-                  <button
-                    key={assetId}
-                    onClick={() => selectAsset(assetId)}
-                    disabled={isLoading}
-                    className={`w-full rounded-xl border px-4 py-4 text-left transition disabled:opacity-50 ${
-                      selectedAssetId === assetId
-                        ? "border-blue-500 bg-blue-50"
-                        : "border-slate-300 bg-white hover:bg-blue-50 hover:border-blue-400"
-                    }`}
-                  >
-                    <span className="font-medium text-slate-900">Pay with {asset.label}</span>
-                    <p className="text-xs text-slate-600 mt-1">Opens your {asset.symbol} wallet directly</p>
-                  </button>
+                  <div key={assetId} className="rounded-xl border border-slate-200 overflow-hidden">
+                    <button
+                      onClick={() => selectAsset(assetId)}
+                      disabled={isLoading}
+                      className={`w-full px-4 py-4 text-left transition disabled:opacity-50 ${
+                        isActive
+                          ? "bg-blue-50"
+                          : "bg-white hover:bg-blue-50"
+                      }`}
+                    >
+                      <span className="font-medium text-slate-900">Pay with {asset.label}</span>
+                      <p className="text-xs text-slate-600 mt-1">Tap to reveal payment details</p>
+                    </button>
+
+                    {isActive && isLoading ? (
+                      <div className="px-4 py-3 text-xs text-slate-500 border-t border-slate-200">Loading payment details…</div>
+                    ) : null}
+
+                    {isActive && !isLoading && paymentPayload ? (
+                      <div className="px-4 py-4 border-t border-slate-200 bg-white space-y-3">
+                        {paymentQrUrl ? (
+                          <div className="flex justify-center">
+                            <img src={paymentQrUrl} alt="Payment QR" className="h-44 w-44 rounded-lg bg-white p-2 border border-slate-200" />
+                          </div>
+                        ) : null}
+
+                        {recipientAddress ? (
+                          <>
+                            <div className="text-[11px] uppercase tracking-wider text-slate-500">Payment Address</div>
+                            <div className="text-xs font-mono break-all bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-slate-700">
+                              {recipientAddress}
+                            </div>
+                            <button
+                              onClick={copyAddress}
+                              className="w-full rounded-lg bg-blue-600 text-white py-2 text-sm font-medium"
+                            >
+                              {copiedAddress ? "Address Copied" : "Copy Address"}
+                            </button>
+                          </>
+                        ) : null}
+
+                        {primaryOpenUrl ? (
+                          <button
+                            onClick={() => {
+                              window.location.href = primaryOpenUrl
+                            }}
+                            className="w-full rounded-lg border border-blue-200 text-blue-700 py-2 text-sm font-medium bg-blue-50"
+                          >
+                            Open Wallet (Optional)
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
                 )
               })}
             </div>
