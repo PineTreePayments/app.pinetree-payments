@@ -448,12 +448,6 @@ export default function PayClient() {
               <span className="font-medium text-slate-600">Total</span>
               <span className="font-semibold text-lg">{formatUsd(displayAmount)}</span>
             </div>
-            {normalizedPaymentStatus ? (
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-slate-600">Status</span>
-                <span className="font-semibold text-slate-900">{normalizedPaymentStatus}</span>
-              </div>
-            ) : null}
           </div>
 
           <div className="space-y-3" ref={intentCardsRef}>

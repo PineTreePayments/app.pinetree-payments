@@ -329,30 +329,50 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
 
         )}
 
-        {/* QR SCREEN */}
+        {/* QR + STATUS SCREEN */}
 
-        {status === "waiting" && (
+        {(status === "waiting" || status === "processing") && (
 
           <div className="flex flex-col items-center py-8">
 
-            <div className="text-sm text-gray-500 mb-3">
-              {qrCodeUrl ? "Scan to Pay" : "Preparing QR..."}
-            </div>
+            {status === "waiting" && (
+              <>
+                <div className="text-sm text-gray-500 mb-3">
+                  {qrCodeUrl ? "Scan to Pay" : "Preparing QR..."}
+                </div>
 
-            {qrCodeUrl ? (
-              <div className="bg-white p-4 rounded-xl shadow">
-                <Image
-                  src={qrCodeUrl}
-                  width={220}
-                  height={220}
-                  alt="Payment QR"
-                  unoptimized
+                {qrCodeUrl ? (
+                  <div className="bg-white p-4 rounded-xl shadow">
+                    <Image
+                      src={qrCodeUrl}
+                      width={220}
+                      height={220}
+                      alt="Payment QR"
+                      unoptimized
+                    />
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center py-6">
+                    <Loader2 size={40} className="text-[#0052FF] animate-spin" />
+                  </div>
+                )}
+              </>
+            )}
+
+            {status === "processing" && (
+              <>
+                <Loader2
+                  size={56}
+                  className="text-yellow-500 animate-spin"
                 />
-              </div>
-            ) : (
-              <div className="flex flex-col items-center py-6">
-                <Loader2 size={40} className="text-[#0052FF] animate-spin" />
-              </div>
+
+                <div className="mt-4 text-gray-600 font-medium">
+                  Processing Payment
+                </div>
+                <div className="mt-1 text-xs text-gray-500">
+                  Transaction detected on network
+                </div>
+              </>
             )}
 
             <button
@@ -366,24 +386,7 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
 
         )}
 
-        {/* PROCESSING */}
 
-        {status === "processing" && (
-
-          <div className="flex flex-col items-center py-12">
-
-            <Loader2
-              size={56}
-              className="text-yellow-500 animate-spin"
-            />
-
-            <div className="mt-4 text-gray-600 font-medium">
-              Processing Payment
-            </div>
-
-          </div>
-
-        )}
 
         {/* SUCCESS */}
 
