@@ -313,22 +313,20 @@ export default function PayClient() {
                 </button>
               ))}
             </div>
+
+            <button
+              onClick={() => window.close()}
+              className="w-full text-sm text-red-600 hover:text-red-700 mt-2"
+            >
+              ← Cancel and go back
+            </button>
           </div>
         </div>
       </main>
     )
   }
 
-  if (selectedNetwork && isIntentMode && !paymentPayload) {
-    return (
-      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-slate-100 via-slate-50 to-white">
-        <div className="max-w-md w-full rounded-[2rem] border border-white/70 bg-white/80 backdrop-blur-xl shadow-2xl p-6 space-y-5">
-          <h2 className="text-lg font-semibold text-slate-900">Starting payment...</h2>
-          <p className="text-sm text-slate-600">Opening wallet</p>
-        </div>
-      </main>
-    )
-  }
+
 
   const network = String(payload?.network || selectedNetwork || "unknown").toUpperCase()
   const usdTotalAmount = Number(payload?.usdTotalAmount ?? payload?.totalAmount ?? 0)
@@ -402,6 +400,16 @@ export default function PayClient() {
             {copiedLink ? "Copied" : "Copy Wallet Address"}
           </button>
         ) : null}
+
+        <button
+          onClick={() => {
+            setSelectedNetwork(null)
+            setSelectedWalletId("")
+          }}
+          className="w-full text-sm text-red-600 hover:text-red-700 text-center"
+        >
+          ← Go back and choose different network
+        </button>
       </div>
     </main>
   )
