@@ -179,7 +179,7 @@ export default function PayClient() {
   const activePayload = paymentPayload || payload
   
   const walletUrl = useMemo(
-    () => (activePayload ? buildWalletUrl(activePayload, rawData) : ""),
+    () => (activePayload ? buildWalletUrl(activePayload, rawData || "") : ""),
     [activePayload, rawData]
   )
   const walletOptions = useMemo(() => (activePayload && selectedNetwork ? buildWalletOptions(selectedNetwork, walletUrl) : []), [activePayload, walletUrl, selectedNetwork])
