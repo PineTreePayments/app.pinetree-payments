@@ -234,7 +234,7 @@ export async function createPayment(
 
   const preferredNetwork =
     input.preferredNetwork ||
-    providerToPreferredNetwork(providerName)
+    providerToPreferredNetwork(providerName) || undefined
 
   const merchantWallet = await selectBestWallet(input.merchantId, preferredNetwork)
   
