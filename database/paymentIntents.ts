@@ -1,4 +1,6 @@
-import { supabase } from "./supabase"
+import { supabase, supabaseAdmin } from "./supabase"
+
+const db = supabaseAdmin || supabase
 
 export type PaymentIntentStatus = "CREATED" | "SELECTED" | "EXPIRED"
 
@@ -34,7 +36,7 @@ export async function createPaymentIntent(input: {
     input.expires_at ||
     new Date(Date.now() + 15 * 60 * 1000).toISOString()
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from("payment_intents")
     .insert({
       id: input.id,
@@ -59,7 +61,7 @@ export async function createPaymentIntent(input: {
 }
 
 export async function getPaymentIntentById(intentId: string) {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from("payment_intents")
     .select("*")
     .eq("id", intentId)
@@ -74,7 +76,7 @@ export async function markPaymentIntentSelected(input: {
   selected_network: string
   payment_id: string
 }) {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from("payment_intents")
     .update({
       selected_network: input.selected_network,
