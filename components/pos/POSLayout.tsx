@@ -113,10 +113,10 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
 
   useEffect(() => {
     if (!paymentId) return
-
     let stopped = false
 
     async function pollStatus() {
+      if (stopped) return
       try {
         const qs = new URLSearchParams({ mode: "status", paymentId })
         const res = await fetch(`/api/pos/payment?${qs.toString()}`, { cache: "no-store" })
@@ -124,6 +124,8 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
         if (!res.ok || !data || stopped) return
 
         const remote = String(data.status || "").toUpperCase()
+
+        console.log(`[POS PAYMENT STATUS] Got: ${remote}`)
 
         if (remote === "CREATED" || remote === "PENDING") {
           setStatus("waiting")
@@ -152,13 +154,14 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
           setStatus("incomplete")
           return
         }
-      } catch {
-        // ignore transient poll errors
+      } catch (e) {
+        console.error("[POS PAYMENT STATUS] Poll error", e)
       }
     }
 
-    pollStatus()
-    const interval = setInterval(pollStatus, 2000)
+    // Keep interval alive no matter what
+    const interval = setInterval(pollStatus, 1500)
+    void pollStatus()
 
     return () => {
       stopped = true
