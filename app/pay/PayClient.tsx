@@ -175,13 +175,25 @@ export default function PayClient() {
   const [intentPayload, setIntentPayload] = useState<IntentPayload | null>(null)
   const [paymentPayload, setPaymentPayload] = useState<SplitPayload | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-
   const payload = useMemo(() => parsePayload(rawData), [rawData])
   const walletUrl = useMemo(
     () => (rawData && payload ? buildWalletUrl(payload, rawData) : ""),
     [payload, rawData]
   )
   const walletOptions = useMemo(() => (payload && selectedNetwork ? buildWalletOptions(selectedNetwork, walletUrl) : []), [payload, walletUrl, selectedNetwork])
+
+  const [selectedWalletId, setSelectedWalletId] = useState("")
+
+  const resolvedSelectedWalletId = useMemo(() => {
+    return walletOptions.some((option) => option.id === selectedWalletId)
+      ? selectedWalletId
+      : ""
+  }, [walletOptions, selectedWalletId])
+
+  const selectedWallet = useMemo(
+    () => walletOptions.find((option) => option.id === resolvedSelectedWalletId) || null,
+    [walletOptions, resolvedSelectedWalletId]
+  )
 
   async function copyWalletUrl() {
     if (!walletUrl) return
@@ -343,19 +355,43 @@ export default function PayClient() {
         </div>
 
         <div className="space-y-3">
-          <p className="text-sm font-medium text-slate-700">Open in your wallet:</p>
+          <label className="text-sm font-medium text-slate-700">Select your wallet:</label>
 
-          <div className="space-y-2">
+          <select
+            value={selectedWalletId}
+            onChange={(e) => setSelectedWalletId(e.target.value)}
+            className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-slate-900"
+          >
+            <option value="">Choose a wallet…</option>
             {walletOptions.map((option) => (
-              <a
-                key={option.id}
-                href={option.href}
-                className="block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-center font-medium hover:bg-blue-50 hover:border-blue-400 transition"
-              >
+              <option key={option.id} value={option.id}>
                 {option.label}
-              </a>
+              </option>
             ))}
-          </div>
+            <option value="manual">Manual / Other Wallet</option>
+          </select>
+
+          {selectedWalletId && selectedWalletId !== "manual" ? (
+            <a
+              href={selectedWallet?.href || "#"}
+              className={`block w-full text-center rounded-xl py-3 font-medium transition ${
+                selectedWallet
+                  ? "bg-[#0A84FF] text-white shadow hover:brightness-110"
+                  : "bg-slate-200 text-slate-500 pointer-events-none"
+              }`}
+            >
+              Open {selectedWallet?.label}
+            </a>
+          ) : null}
+
+          {selectedWalletId === "manual" ? (
+            <button
+              onClick={copyWalletUrl}
+              className="w-full rounded-xl bg-[#0A84FF] text-white px-4 py-3 font-medium shadow hover:brightness-110 transition"
+            >
+              {copiedLink ? "Copied ✓" : "Copy Payment Address"}
+            </button>
+          ) : null}
         </div>
 
         {walletUrl ? (
