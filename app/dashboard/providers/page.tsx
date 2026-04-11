@@ -224,7 +224,7 @@ export default function ProvidersPage() {
     let lastPollAt = 0
     let animationFrameId: number | null = null
 
-    const poll = useCallback(async () => {
+    const poll = async () => {
       if (!walletSessionId || pollStopAtRef.current === null) return
       if (Date.now() > pollStopAtRef.current) return
 
@@ -286,7 +286,7 @@ export default function ProvidersPage() {
         console.error("Polling session failed:", err)
         animationFrameId = requestAnimationFrame(poll)
       }
-    }, [walletSessionId, activeProvider, loadAll])
+    }
 
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible" && walletSessionId && pollStopAtRef.current) {
