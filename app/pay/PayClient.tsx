@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { ALLOWED_ASSETS, getAvailableAssetsFromValues } from "@/engine/providerMappings"
 
@@ -110,57 +110,44 @@ function buildWalletUrl(payload: SplitPayload, rawData: string) {
   return `pinetree://pay?data=${encodeURIComponent(rawData)}`
 }
 
-function buildWalletOptions(network: string, walletUrl: string): WalletOption[] {
+function buildWalletOptions(walletUrl: string): WalletOption[] {
   if (!walletUrl) return []
 
   const encodedWalletUrl = encodeURIComponent(walletUrl)
 
-  if (network === "solana") {
-    return [
-      {
-        id: "phantom",
-        label: "Phantom",
-        href: `https://phantom.app/ul/browse/${encodedWalletUrl}`
-      },
-      {
-        id: "solflare",
-        label: "Solflare",
-        href: `https://solflare.com/ul/v1/browse/${encodedWalletUrl}`
-      },
-      {
-        id: "trust",
-        label: "Trust Wallet",
-        href: `https://link.trustwallet.com/open_url?url=${encodedWalletUrl}`
-      }
-    ]
-  }
-
-  if (network === "base" || network === "ethereum") {
-    return [
-      {
-        id: "basewallet",
-        label: "Base Wallet",
-        href: `cbwallet://dapp?url=${encodedWalletUrl}`
-      },
-      {
-        id: "metamask",
-        label: "MetaMask",
-        href: `metamask://dapp?url=${encodedWalletUrl}`
-      },
-      {
-        id: "trust",
-        label: "Trust Wallet",
-        href: `trust://dapp?url=${encodedWalletUrl}`
-      },
-      {
-        id: "coinbase",
-        label: "Coinbase Wallet",
-        href: `https://go.cb-w.com/dapp?cb_url=${encodedWalletUrl}`
-      }
-    ]
-  }
-
-  return []
+  // Unified wallet app list for all networks (multi-chain wallet support)
+  return [
+    {
+      id: "phantom",
+      label: "Phantom",
+      href: `https://phantom.app/ul/browse/${encodedWalletUrl}`
+    },
+    {
+      id: "solflare",
+      label: "Solflare",
+      href: `https://solflare.com/ul/v1/browse/${encodedWalletUrl}`
+    },
+    {
+      id: "metamask",
+      label: "MetaMask",
+      href: `metamask://dapp?url=${encodedWalletUrl}`
+    },
+    {
+      id: "basewallet",
+      label: "Base Wallet",
+      href: `cbwallet://dapp?url=${encodedWalletUrl}`
+    },
+    {
+      id: "coinbase",
+      label: "Coinbase Wallet",
+      href: `https://go.cb-w.com/dapp?cb_url=${encodedWalletUrl}`
+    },
+    {
+      id: "trust",
+      label: "Trust Wallet",
+      href: `https://link.trustwallet.com/open_url?url=${encodedWalletUrl}`
+    }
+  ]
 }
 
 function extractAddressFromPaymentUrl(paymentUrl?: string): string {
@@ -207,9 +194,13 @@ export default function PayClient() {
     () => (activePayload ? buildWalletUrl(activePayload, rawData || "") : ""),
     [activePayload, rawData]
   )
-  const walletOptions = useMemo(() => (activePayload && selectedNetwork ? buildWalletOptions(selectedNetwork, walletUrl) : []), [activePayload, walletUrl, selectedNetwork])
+  const walletOptions = useMemo(
+    () => (activePayload ? buildWalletOptions(walletUrl) : []),
+    [activePayload, walletUrl]
+  )
 
   const [selectedWalletId, setSelectedWalletId] = useState("")
+  const intentCardsRef = useRef<HTMLDivElement | null>(null)
 
   const resolvedSelectedWalletId = useMemo(() => {
     return walletOptions.some((option) => option.id === selectedWalletId)
@@ -233,6 +224,26 @@ export default function PayClient() {
       setSelectedWalletId("")
       setPaymentPayload(null)
     }
+  }, [selectedAssetId])
+
+  useEffect(() => {
+    if (!selectedAssetId) return
+
+    function handleOutsideClick(event: MouseEvent) {
+      const target = event.target as Node | null
+      if (!target) return
+
+      if (intentCardsRef.current && !intentCardsRef.current.contains(target)) {
+        setSelectedAssetId("")
+        setLoadingAssetId("")
+        setSelectionError("")
+        setPaymentPayload(null)
+        setSelectedNetwork(null)
+      }
+    }
+
+    document.addEventListener("mousedown", handleOutsideClick)
+    return () => document.removeEventListener("mousedown", handleOutsideClick)
   }, [selectedAssetId])
 
   async function copyWalletUrl() {
@@ -273,6 +284,15 @@ export default function PayClient() {
     if (!intentId) return
     const asset = ALLOWED_ASSETS[assetId as keyof typeof ALLOWED_ASSETS]
     if (!asset) return
+
+    if (selectedAssetId === assetId && !isLoading) {
+      setSelectedAssetId("")
+      setLoadingAssetId("")
+      setSelectionError("")
+      setPaymentPayload(null)
+      setSelectedNetwork(null)
+      return
+    }
 
     setSelectedAssetId(assetId)
     setLoadingAssetId(assetId)
@@ -398,7 +418,7 @@ export default function PayClient() {
             </div>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-3" ref={intentCardsRef}>
             <p className="text-sm font-medium text-slate-700">Select an asset to continue:</p>
 
           <div className="space-y-2">
@@ -430,12 +450,6 @@ export default function PayClient() {
                         {selectionError ? (
                           <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
                             {selectionError}
-                          </div>
-                        ) : null}
-
-                        {paymentPayload && paymentQrUrl ? (
-                          <div className="flex justify-center">
-                            <img src={paymentQrUrl} alt="Payment QR" className="h-44 w-44 rounded-lg bg-white p-2 border border-slate-200" />
                           </div>
                         ) : null}
 
@@ -471,17 +485,6 @@ export default function PayClient() {
                               ))}
                             </div>
                           </div>
-                        ) : null}
-
-                        {paymentPayload && primaryOpenUrl ? (
-                          <button
-                            onClick={() => {
-                              window.location.href = primaryOpenUrl
-                            }}
-                            className="w-full rounded-lg border border-blue-200 text-blue-700 py-2 text-sm font-medium bg-blue-50"
-                          >
-                            Open Wallet (Optional)
-                          </button>
                         ) : null}
 
                         {!selectionError && !paymentPayload ? (
