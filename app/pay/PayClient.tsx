@@ -289,6 +289,17 @@ export default function PayClient() {
     ? Number(intentPayload?.amount || 0) + Number(intentPayload?.pinetreeFee || 0)
     : Number(payload?.usdTotalAmount ?? payload?.totalAmount ?? 0)
 
+  if (isIntentMode && !selectedNetwork && !intentPayload?.availableNetworks?.length) {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-slate-100 via-slate-50 to-white">
+        <div className="max-w-md w-full bg-white/90 backdrop-blur rounded-3xl shadow-xl border border-white p-7 text-center">
+          <h1 className="text-xl font-semibold mb-2 text-slate-900">No payment methods available</h1>
+          <p className="text-sm text-slate-700">This merchant has no payment methods enabled.</p>
+        </div>
+      </main>
+    )
+  }
+
   // Clear state when going back
   useEffect(() => {
     if (!selectedNetwork) {
