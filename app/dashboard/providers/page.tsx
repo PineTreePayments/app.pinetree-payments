@@ -161,6 +161,7 @@ export default function ProvidersPage() {
 
   const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const didToastSyncRef = useRef(false)
+  const pollStopAtRef = useRef<number | null>(null)
 
   const callProvidersApi = useCallback(async (method: "GET" | "POST", body?: unknown) => {
     const { data: { session } } = await supabase.auth.getSession()
@@ -219,19 +220,38 @@ export default function ProvidersPage() {
   useEffect(() => {
     if (!walletSessionId || !activeProvider || !showQr) return
 
-    if (pollerRef.current) clearInterval(pollerRef.current)
+    pollStopAtRef.current = Date.now() + 15 * 60 * 1000
+    let lastPollAt = 0
+    let animationFrameId: number | null = null
 
-    pollerRef.current = setInterval(async () => {
+    const poll = useCallback(async () => {
+      if (!walletSessionId || pollStopAtRef.current === null) return
+      if (Date.now() > pollStopAtRef.current) return
+
+      const now = Date.now()
+      if (now - lastPollAt < 1200) {
+        animationFrameId = requestAnimationFrame(poll)
+        return
+      }
+
+      lastPollAt = now
+
       try {
         const res = await fetch(
           `/api/wallet-connect-session?session_id=${encodeURIComponent(walletSessionId)}`,
           { cache: "no-store" }
         )
 
-        if (!res.ok) return
+        if (!res.ok) {
+          animationFrameId = requestAnimationFrame(poll)
+          return
+        }
 
         const session: WalletConnectSession | null = await res.json()
-        if (!session) return
+        if (!session) {
+          animationFrameId = requestAnimationFrame(poll)
+          return
+        }
 
         setWalletSessionStatus(session.status)
 
@@ -256,21 +276,34 @@ export default function ProvidersPage() {
           }
 
           setShowQr(false)
-
+          pollStopAtRef.current = null
           await loadAll()
-
-          if (pollerRef.current) {
-            clearInterval(pollerRef.current)
-            pollerRef.current = null
-          }
+          return
         }
+
+        animationFrameId = requestAnimationFrame(poll)
       } catch (err) {
         console.error("Polling session failed:", err)
+        animationFrameId = requestAnimationFrame(poll)
       }
-    }, 1200)
+    }, [walletSessionId, activeProvider, loadAll])
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible" && walletSessionId && pollStopAtRef.current) {
+        lastPollAt = 0
+        if (animationFrameId === null) {
+          animationFrameId = requestAnimationFrame(poll)
+        }
+      }
+    }
+
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    animationFrameId = requestAnimationFrame(poll)
 
     return () => {
-      if (pollerRef.current) clearInterval(pollerRef.current)
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+      if (animationFrameId !== null) cancelAnimationFrame(animationFrameId)
+      pollStopAtRef.current = null
     }
   }, [walletSessionId, activeProvider, showQr, loadAll])
 
