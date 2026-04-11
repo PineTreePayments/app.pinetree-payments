@@ -335,13 +335,7 @@ export default function PayClient() {
       }
       const result = await res.json()
       const paymentUrl = String(result.paymentUrl || "")
-      const isSolanaTxRequest =
-        String(result.selectedNetwork || asset.network).toLowerCase() === "solana" &&
-        (paymentUrl.startsWith("http://") || paymentUrl.startsWith("https://"))
-
-      const derivedAddress = isSolanaTxRequest
-        ? ""
-        : String(result.address || extractAddressFromPaymentUrl(paymentUrl))
+      const derivedAddress = String(result.address || extractAddressFromPaymentUrl(paymentUrl))
 
       // Update state with actual payment data from API response
       setPaymentPayload({
