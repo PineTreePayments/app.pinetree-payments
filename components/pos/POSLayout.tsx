@@ -113,7 +113,6 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
 
   useEffect(() => {
     if (!paymentId) return
-    if (status !== "waiting" && status !== "processing") return
 
     let stopped = false
 
@@ -165,7 +164,7 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
       stopped = true
       clearInterval(interval)
     }
-  }, [paymentId, status])
+  }, [paymentId])
 
   async function createPayment(){
 
@@ -357,8 +356,8 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
                   </div>
                 )}
 
-                <div className="mt-4 flex items-center gap-2">
-                  <Loader2 size={16} className="text-[#0052FF] animate-spin" />
+                <div className="mt-4 flex items-center gap-3">
+                  <div className="h-3 w-3 rounded-full bg-[#0052FF] animate-pulse shadow-lg shadow-[#0052FF]/60" />
                   <div className="text-sm text-gray-600 font-medium">
                     Waiting for payment
                   </div>
@@ -380,10 +379,7 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
                 </div>
 
                 <div className="mt-4 flex items-center gap-3">
-                  <Loader2
-                    size={24}
-                    className="text-yellow-500 animate-spin"
-                  />
+                  <div className="h-4 w-4 rounded-full bg-amber-500 animate-pulse shadow-lg shadow-amber-500/60" />
 
                   <div>
                     <div className="text-gray-600 font-medium">
