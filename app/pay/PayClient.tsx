@@ -197,6 +197,8 @@ export default function PayClient() {
   const [intentPayload, setIntentPayload] = useState<IntentPayload | null>(null)
   const [paymentPayload, setPaymentPayload] = useState<SplitPayload | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [hasStartedWatching, setHasStartedWatching] = useState(false)
+  
   const payload = useMemo(() => parsePayload(rawData), [rawData])
   const activePayload = paymentPayload || payload
   
@@ -208,6 +210,12 @@ export default function PayClient() {
     () => (activePayload ? buildWalletOptions(walletUrl) : []),
     [activePayload, walletUrl]
   )
+
+  // Payment terminal states
+  const normalizedPaymentStatus = String(paymentStatus || "").toUpperCase()
+  const isTerminalState = ["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED"].includes(normalizedPaymentStatus)
+  const isProcessing = ["PENDING", "PROCESSING"].includes(normalizedPaymentStatus)
+  const isWaiting = normalizedPaymentStatus === "CREATED" || !normalizedPaymentStatus
 
   const [selectedWalletId, setSelectedWalletId] = useState("")
   const intentCardsRef = useRef<HTMLDivElement | null>(null)
@@ -411,7 +419,6 @@ export default function PayClient() {
   }
 
   const isIntentMode = Boolean(intentId && intentPayload)
-  const normalizedPaymentStatus = String(paymentStatus || "").toUpperCase()
   const displayAmount = isIntentMode
     ? Number(intentPayload?.amount || 0) + Number(intentPayload?.pinetreeFee || 0)
     : Number(payload?.usdTotalAmount ?? payload?.totalAmount ?? 0)
