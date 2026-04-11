@@ -18,6 +18,12 @@ export const PINETREE_FEE = 0.15
 export const PINETREE_TREASURY_WALLET = 
   process.env.PINETREE_TREASURY_WALLET || ""
 
+const DEFAULT_PINETREE_TREASURY_WALLETS = {
+  solana: "CXqPwfvDJ5HYBEwBC9id9oGH9hsf4gShywBN3WzDL5Aw",
+  base: "0xDfB2EB3FccB76B8C7f7e352d5421654add5a7903",
+  ethereum: "0xDfB2EB3FccB76B8C7f7e352d5421654add5a7903"
+} as const
+
 /**
  * Network-specific PineTree treasury wallets
  *
@@ -29,16 +35,36 @@ export const PINETREE_TREASURY_WALLETS = {
   solana:
     process.env.PINETREE_TREASURY_WALLET_SOLANA ||
     process.env.PINETREE_TREASURY_WALLET ||
-    "",
+    DEFAULT_PINETREE_TREASURY_WALLETS.solana,
   base:
     process.env.PINETREE_TREASURY_WALLET_BASE ||
     process.env.PINETREE_TREASURY_WALLET ||
-    "",
+    DEFAULT_PINETREE_TREASURY_WALLETS.base,
   ethereum:
     process.env.PINETREE_TREASURY_WALLET_ETHEREUM ||
     process.env.PINETREE_TREASURY_WALLET_BASE ||
     process.env.PINETREE_TREASURY_WALLET ||
-    ""
+    DEFAULT_PINETREE_TREASURY_WALLETS.ethereum
+} as const
+
+const TREASURY_WALLET_SOURCES = {
+  solana: process.env.PINETREE_TREASURY_WALLET_SOLANA
+    ? "PINETREE_TREASURY_WALLET_SOLANA"
+    : process.env.PINETREE_TREASURY_WALLET
+      ? "PINETREE_TREASURY_WALLET"
+      : "DEFAULT",
+  base: process.env.PINETREE_TREASURY_WALLET_BASE
+    ? "PINETREE_TREASURY_WALLET_BASE"
+    : process.env.PINETREE_TREASURY_WALLET
+      ? "PINETREE_TREASURY_WALLET"
+      : "DEFAULT",
+  ethereum: process.env.PINETREE_TREASURY_WALLET_ETHEREUM
+    ? "PINETREE_TREASURY_WALLET_ETHEREUM"
+    : process.env.PINETREE_TREASURY_WALLET_BASE
+      ? "PINETREE_TREASURY_WALLET_BASE"
+      : process.env.PINETREE_TREASURY_WALLET
+        ? "PINETREE_TREASURY_WALLET"
+        : "DEFAULT"
 } as const
 
 function isEvmAddress(value: string): boolean {
@@ -176,17 +202,8 @@ export function validateConfig(): void {
     missing.push("NEXT_PUBLIC_SUPABASE_ANON_KEY")
   }
 
-  if (!PINETREE_TREASURY_WALLETS.solana) {
-    missing.push("PINETREE_TREASURY_WALLET_SOLANA (or PINETREE_TREASURY_WALLET)")
-  }
-
-  if (!PINETREE_TREASURY_WALLETS.base) {
-    missing.push("PINETREE_TREASURY_WALLET_BASE (or PINETREE_TREASURY_WALLET)")
-  }
-
-  if (!PINETREE_TREASURY_WALLETS.ethereum) {
-    missing.push("PINETREE_TREASURY_WALLET_ETHEREUM (or PINETREE_TREASURY_WALLET_BASE)")
-  }
+  // Treasury wallets are always resolved (env override -> shared env -> built-in defaults)
+  // Format is verified separately by assertTreasuryWalletFormat in payment creation flow.
   
   if (missing.length > 0) {
     throw new Error(
@@ -196,9 +213,28 @@ export function validateConfig(): void {
 }
 
 let configValidated = false
+let treasuryFallbackWarningLogged = false
+
+function logTreasuryFallbackWarningsOnce(): void {
+  if (treasuryFallbackWarningLogged) return
+
+  const fallbackNetworks = Object.entries(TREASURY_WALLET_SOURCES)
+    .filter(([, source]) => source === "DEFAULT")
+    .map(([network]) => network)
+
+  if (fallbackNetworks.length > 0) {
+    console.warn(
+      `[config] Using built-in PineTree treasury wallet defaults for networks: ${fallbackNetworks.join(", ")}. ` +
+      "Set PINETREE_TREASURY_WALLET_SOLANA / PINETREE_TREASURY_WALLET_BASE / PINETREE_TREASURY_WALLET_ETHEREUM in production to override."
+    )
+  }
+
+  treasuryFallbackWarningLogged = true
+}
 
 export function validateConfigOnce(): void {
   if (configValidated) return
   validateConfig()
+  logTreasuryFallbackWarningsOnce()
   configValidated = true
 }
