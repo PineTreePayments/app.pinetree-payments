@@ -539,10 +539,20 @@ export default function ProvidersPage() {
 
       const returnUrl = buildMobileBridgeUrl("base", selectedWalletType, sessionId)
 
-      console.log("DEEPLINK:", returnUrl)
+      let deeplink = ""
 
-      setWalletMobileDeeplink(returnUrl)
-      const qr = await QRCode.toDataURL(returnUrl)
+      if (selectedWalletType === "METAMASK") {
+        deeplink = `metamask://dapp?url=${encodeURIComponent(returnUrl)}`
+      } else if (selectedWalletType === "TRUST") {
+        deeplink = `trust://dapp?url=${encodeURIComponent(returnUrl)}`
+      } else if (selectedWalletType === "BASEAPP") {
+        deeplink = `cbwallet://dapp?url=${encodeURIComponent(returnUrl)}`
+      }
+
+      console.log("DEEPLINK:", deeplink)
+
+      setWalletMobileDeeplink(deeplink)
+      const qr = await QRCode.toDataURL(deeplink)
 
       console.log("QR GENERATED")
 
