@@ -8,7 +8,12 @@
 import { supabase } from "@/lib/database"
 import { getRpcUrl, WATCHER_CONFIG } from "./config"
 import { updatePaymentStatus } from "./updatePaymentStatus"
-import { updateTransactionProviderReference } from "@/lib/database/transactions"
+import { type PaymentStatus } from "./paymentStateMachine"
+import {
+  getTransactionByPaymentId,
+  updateTransactionProviderReference,
+  updateTransactionStatus
+} from "@/lib/database/transactions"
 
 type WatchInput = {
   merchantWallet: string
@@ -16,8 +21,44 @@ type WatchInput = {
   merchantAmount: number
   pinetreeFee: number
   expectedAmountNative?: number
+  expectedMerchantAtomic?: string | number
+  expectedFeeAtomic?: string | number
   network: string
   paymentId: string
+}
+
+type EvmTransaction = {
+  hash: string
+  from: string
+  to: string | null
+  value: string
+}
+
+type EvmBlock = {
+  transactions: EvmTransaction[]
+}
+
+type SolanaRpcSignatureRow = {
+  signature?: string
+}
+
+type SolanaParsedInstruction = {
+  parsed?: {
+    type?: string
+    info?: {
+      destination?: string
+      lamports?: number | string
+      source?: string
+    }
+  }
+}
+
+type SolanaParsedTransaction = {
+  transaction?: {
+    message?: {
+      instructions?: SolanaParsedInstruction[]
+    }
+  }
 }
 
 /**
@@ -39,7 +80,7 @@ export async function watchPayment(input: WatchInput) {
 
   try {
     rpcUrl = getRpcUrl(input.network)
-  } catch (error) {
+  } catch {
     console.error(`No RPC configured for network: ${input.network}`)
     return false
   }
@@ -81,14 +122,40 @@ export async function watchPayment(input: WatchInput) {
 
     while (attempts < WATCHER_CONFIG.maxAttempts) {
     try {
-      let transactions: any[] = []
+      let transactions: EvmTransaction[] = []
 
       if (input.network === "solana") {
-        // Solana transaction monitoring
-        transactions = await getSolanaTransactions(rpcUrl, merchantWallet, lastCheckedBlock)
+        const expectedMerchantLamports = Number(input.expectedMerchantAtomic || 0)
+        const expectedFeeLamports = Number(input.expectedFeeAtomic || 0)
+
+        const splitTx = await findMatchingSolanaSplitTransaction({
+          rpcUrl,
+          merchantWallet,
+          pinetreeWallet,
+          sinceSlot: lastCheckedBlock,
+          expectedMerchantLamports,
+          expectedFeeLamports
+        })
+
+        if (splitTx) {
+          const confirmed = await handleMatchingTransaction(input.paymentId, {
+            hash: splitTx.hash,
+            value: String(splitTx.totalLamports / 1e9),
+            from: splitTx.from
+          })
+
+          if (confirmed) {
+            return true
+          }
+        }
+
+        attempts++
+        await sleep(WATCHER_CONFIG.pollInterval)
+        continue
       } else {
         // EVM transaction monitoring
         const latestBlock = await getCurrentBlockHeight(rpcUrl)
+        const collectedTransactions: EvmTransaction[] = []
         
         // Check each block since last check
         for (
@@ -97,24 +164,19 @@ export async function watchPayment(input: WatchInput) {
           blockNumber++
         ) {
           const block = await getBlockByNumber(rpcUrl, blockNumber)
-          transactions = block?.transactions || []
-
-          lastCheckedBlock = latestBlock + 1
+          if (block?.transactions?.length) {
+            collectedTransactions.push(...block.transactions)
+          }
         }
+
+        transactions = collectedTransactions
+        lastCheckedBlock = latestBlock + 1
       }
 
       for (const tx of transactions) {
-        let toAddress: string
-        let value: number
-
-        if (input.network === "solana") {
-          toAddress = tx.destination
-          value = tx.lamports / 1e9
-        } else {
-          if (!tx.to) continue
-          toAddress = tx.to.toLowerCase()
-          value = weiToEth(tx.value)
-        }
+        if (!tx.to) continue
+        const toAddress = tx.to.toLowerCase()
+        const value = weiToEth(tx.value)
 
         // Check if transaction is to merchant wallet
         if (toAddress.toLowerCase() !== merchantWallet) {
@@ -156,9 +218,27 @@ export async function watchPayment(input: WatchInput) {
   --------------------------- */
 
   try {
-    await updatePaymentStatus(input.paymentId, "FAILED", {
-      providerEvent: "watcher_timeout"
-    })
+    const currentStatus = await getPaymentStatus(input.paymentId)
+
+    if (currentStatus === "PROCESSING") {
+      await updatePaymentStatus(input.paymentId, "FAILED", {
+        providerEvent: "watcher_timeout"
+      })
+
+      const transaction = await getTransactionByPaymentId(input.paymentId)
+      if (transaction) {
+        await updateTransactionStatus(transaction.id, "FAILED")
+      }
+    } else if (currentStatus === "PENDING" || currentStatus === "CREATED") {
+      await updatePaymentStatus(input.paymentId, "INCOMPLETE", {
+        providerEvent: "watcher_timeout"
+      })
+
+      const transaction = await getTransactionByPaymentId(input.paymentId)
+      if (transaction) {
+        await updateTransactionStatus(transaction.id, "EXPIRED")
+      }
+    }
   } catch (error) {
     console.error("Failed to mark payment as failed:", error)
   }
@@ -173,42 +253,85 @@ async function handleMatchingTransaction(
   paymentId: string,
   tx: { hash: string; value: string; from: string }
 ) {
-  // Check if already confirmed
-  const { data: existing } = await supabase
-    .from("payments")
-    .select("status")
-    .eq("id", paymentId)
-    .single()
+  const transaction = await getTransactionByPaymentId(paymentId)
 
-  if (existing?.status === "CONFIRMED") {
+  // Keep provider transaction hash in sync as soon as we detect on-chain match
+  if (transaction && tx.hash) {
+    try {
+      await updateTransactionProviderReference(transaction.id, tx.hash)
+    } catch (error) {
+      console.warn("Failed to update transaction reference:", error)
+    }
+  }
+
+  let status = await getPaymentStatus(paymentId)
+  if (!status) return false
+
+  if (status === "CONFIRMED") {
+    if (transaction) {
+      await updateTransactionStatus(transaction.id, "CONFIRMED")
+    }
     return true
   }
 
-  // Update payment status
-  try {
-    await updatePaymentStatus(paymentId, "CONFIRMED", {
-      providerEvent: "blockchain_confirmation",
+  // Advance lifecycle in strict order: CREATED -> PENDING -> PROCESSING -> CONFIRMED
+  if (status === "CREATED") {
+    await updatePaymentStatus(paymentId, "PENDING", {
+      providerEvent: "watcher.detected",
+      rawPayload: { txHash: tx.hash }
+    })
+    status = await getPaymentStatus(paymentId)
+  }
+
+  if (status === "PENDING") {
+    await updatePaymentStatus(paymentId, "PROCESSING", {
+      providerEvent: "watcher.detected",
       rawPayload: {
         txHash: tx.hash,
         value: tx.value,
         from: tx.from
       }
     })
-  } catch (error: any) {
-    // Ignore if already confirmed
-    if (!error.message.includes("Invalid payment transition")) {
-      throw error
+
+    if (transaction) {
+      await updateTransactionStatus(transaction.id, "PROCESSING")
     }
+
+    status = await getPaymentStatus(paymentId)
   }
 
-  // Update transaction record
-  try {
-    await updateTransactionProviderReference(paymentId, tx.hash)
-  } catch (error) {
-    console.warn("Failed to update transaction reference:", error)
+  if (status !== "PROCESSING") {
+    return false
+  }
+
+  await updatePaymentStatus(paymentId, "CONFIRMED", {
+    providerEvent: "blockchain_confirmation",
+    rawPayload: {
+      txHash: tx.hash,
+      value: tx.value,
+      from: tx.from
+    }
+  })
+
+  if (transaction) {
+    await updateTransactionStatus(transaction.id, "CONFIRMED")
   }
 
   return true
+}
+
+async function getPaymentStatus(paymentId: string): Promise<PaymentStatus | null> {
+  const { data, error } = await supabase
+    .from("payments")
+    .select("status")
+    .eq("id", paymentId)
+    .single()
+
+  if (error || !data?.status) {
+    return null
+  }
+
+  return data.status as PaymentStatus
 }
 
 /**
@@ -238,7 +361,7 @@ async function getCurrentBlockHeight(rpcUrl: string): Promise<number> {
 async function getBlockByNumber(
   rpcUrl: string,
   blockNumber: number
-): Promise<any> {
+): Promise<EvmBlock | null> {
   const blockHex = "0x" + blockNumber.toString(16)
 
   const response = await fetch(rpcUrl, {
@@ -255,7 +378,7 @@ async function getBlockByNumber(
   })
 
   const data = await response.json()
-  return data.result
+  return (data?.result || null) as EvmBlock | null
 }
 
 /**
@@ -265,10 +388,7 @@ function weiToEth(wei: string): number {
   return Number(wei) / 1e18
 }
 
-/**
- * Get Solana transactions for address since specified slot
- */
-async function getSolanaTransactions(rpcUrl: string, address: string, sinceSlot: number): Promise<any[]> {
+async function getSolanaSignatures(rpcUrl: string, address: string, sinceSlot: number): Promise<string[]> {
   const response = await fetch(rpcUrl, {
     method: "POST",
     headers: {
@@ -289,17 +409,98 @@ async function getSolanaTransactions(rpcUrl: string, address: string, sinceSlot:
   })
 
   const data = await response.json()
-  
-  if (!data.result) {
-    return []
+  if (!Array.isArray(data?.result)) return []
+  return data.result
+    .map((row: SolanaRpcSignatureRow) => String(row.signature || ""))
+    .filter(Boolean)
+}
+
+async function getSolanaParsedTransaction(rpcUrl: string, signature: string): Promise<SolanaParsedTransaction | null> {
+  const response = await fetch(rpcUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      method: "getTransaction",
+      params: [
+        signature,
+        {
+          encoding: "jsonParsed",
+          maxSupportedTransactionVersion: 0
+        }
+      ],
+      id: 1
+    })
+  })
+
+  const data = await response.json()
+  return (data?.result || null) as SolanaParsedTransaction | null
+}
+
+async function findMatchingSolanaSplitTransaction(input: {
+  rpcUrl: string
+  merchantWallet: string
+  pinetreeWallet: string
+  sinceSlot: number
+  expectedMerchantLamports: number
+  expectedFeeLamports: number
+}): Promise<{ hash: string; from: string; totalLamports: number } | null> {
+  const [merchantSignatures, treasurySignatures] = await Promise.all([
+    getSolanaSignatures(input.rpcUrl, input.merchantWallet, input.sinceSlot),
+    getSolanaSignatures(input.rpcUrl, input.pinetreeWallet, input.sinceSlot)
+  ])
+
+  if (!merchantSignatures.length || !treasurySignatures.length) {
+    return null
   }
 
-  return data.result.map((sig: any) => ({
-    hash: sig.signature,
-    destination: address,
-    lamports: sig.lamports || 0,
-    from: sig.memo || ""
-  }))
+  const treasurySet = new Set(treasurySignatures)
+  const candidateSignatures = merchantSignatures.filter((sig) => treasurySet.has(sig))
+
+  for (const signature of candidateSignatures) {
+    const tx = await getSolanaParsedTransaction(input.rpcUrl, signature)
+    const instructions = tx?.transaction?.message?.instructions
+    if (!Array.isArray(instructions)) continue
+
+    let merchantLamports = 0
+    let feeLamports = 0
+    let source = ""
+
+    for (const ix of instructions) {
+      const parsed = ix?.parsed
+      if (!parsed || parsed.type !== "transfer") continue
+
+      const info = parsed.info || {}
+      const destination = String(info.destination || "").toLowerCase()
+      const lamports = Number(info.lamports || 0)
+      const from = String(info.source || "")
+
+      if (!source && from) source = from
+
+      if (destination === input.merchantWallet.toLowerCase()) {
+        merchantLamports += lamports
+      }
+
+      if (destination === input.pinetreeWallet.toLowerCase()) {
+        feeLamports += lamports
+      }
+    }
+
+    const merchantThreshold = input.expectedMerchantLamports > 0 ? input.expectedMerchantLamports * 0.995 : 0
+    const feeThreshold = input.expectedFeeLamports > 0 ? input.expectedFeeLamports * 0.995 : 0
+
+    if (merchantLamports >= merchantThreshold && feeLamports >= feeThreshold) {
+      return {
+        hash: signature,
+        from: source,
+        totalLamports: merchantLamports + feeLamports
+      }
+    }
+  }
+
+  return null
 }
 
 /**

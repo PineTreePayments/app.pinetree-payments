@@ -1,5 +1,4 @@
 import QRCode from "qrcode"
-import { buildSolanaPayUri } from "@/providers/solana"
 import { getMarketPricesUSD } from "./marketPrices"
 
 type GenerateSplitPaymentInput = {
@@ -9,6 +8,11 @@ type GenerateSplitPaymentInput = {
   pinetreeFee: number
   network: string
   paymentId?: string
+}
+
+function toLamports(amountSol: number): number {
+  const safe = Number.isFinite(amountSol) && amountSol > 0 ? amountSol : 0
+  return Math.round(safe * 1_000_000_000)
 }
 
 function roundAmount(value: number, decimals: number): number {
@@ -142,15 +146,12 @@ export async function generateSplitPayment(
   let paymentUrl: string
 
   if (input.network === "solana") {
-    // Generate native Solana Pay URI with atomic split
-    paymentUrl = buildSolanaPayUri({
-      recipient: input.merchantWallet,
-      amount: nativeAmount,
-      label: "PineTree Payment",
-      message: `Payment #${input.paymentId?.slice(0, 8) || ''}`,
-      reference: input.paymentId,
-      memo: `pt:split:${input.pinetreeWallet}:${pinetreeFee}`
-    })
+    const txRequestUrl = `${BASE_URL}/api/solana-pay/transaction?paymentId=${encodeURIComponent(
+      String(input.paymentId || "")
+    )}`
+
+    // Solana Pay transaction-request URL (wallet requests unsigned tx with split transfers)
+    paymentUrl = txRequestUrl
   } else if (input.network === "base" || input.network === "base_pay" || input.network === "ethereum") {
     // EVM chains: contract-based split (if configured) with safe fallback to direct transfer URI
     const chainId = input.network === "ethereum" ? "1" : "8453"
@@ -196,6 +197,10 @@ export async function generateSplitPayment(
     totalAmount: usdTotalAmount,
     usdTotalAmount,
     nativeAmount,
-    nativeSymbol
+    nativeSymbol,
+    merchantNativeAmount,
+    feeNativeAmount,
+    merchantNativeAmountAtomic: input.network === "solana" ? toLamports(merchantNativeAmount) : toWeiString(merchantNativeAmount),
+    feeNativeAmountAtomic: input.network === "solana" ? toLamports(feeNativeAmount) : toWeiString(feeNativeAmount)
   }
 }

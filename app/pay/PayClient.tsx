@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { ALLOWED_ASSETS, getAvailableAssetsFromValues } from "@/engine/providerMappings"
 
@@ -33,6 +33,7 @@ type IntentPayload = {
   availableNetworks: string[]
   selectedNetwork?: string | null
   paymentId?: string | null
+  paymentStatus?: string | null
   checkoutUrl?: string
 }
 
@@ -81,15 +82,22 @@ function toWeiString(amountEth: number): string {
 
 function buildWalletUrl(payload: SplitPayload, rawData: string) {
   const network = String(payload.network || "").toLowerCase()
+  const explicitPaymentUrl = String(payload.paymentUrl || "").trim()
   const recipient = String(payload.outputs?.[0]?.address || "")
   const usdTotal = Number(payload.usdTotalAmount ?? payload.totalAmount ?? 0)
   const nativeAmountRaw = Number(payload.nativeAmount ?? 0)
   const nativeAmount = Number.isFinite(nativeAmountRaw) && nativeAmountRaw > 0 ? nativeAmountRaw : usdTotal
   const reference = String(payload.reference || "")
 
-  if (!recipient) return ""
-
   if (network === "solana") {
+    // For Solana split payments, prefer transaction-request URL so wallets execute
+    // the server-generated split transaction instead of a direct merchant transfer.
+    if (explicitPaymentUrl.startsWith("http://") || explicitPaymentUrl.startsWith("https://")) {
+      return explicitPaymentUrl
+    }
+
+    if (!recipient) return ""
+
     const query = new URLSearchParams()
     if (Number.isFinite(nativeAmount) && nativeAmount > 0) {
       query.set("amount", String(roundAmount(nativeAmount, 9)))
@@ -103,6 +111,7 @@ function buildWalletUrl(payload: SplitPayload, rawData: string) {
   }
 
   if (network === "base" || network === "base_pay" || network === "ethereum") {
+    if (!recipient) return ""
     const chainId = network === "ethereum" ? "1" : "8453"
     return `ethereum:${recipient}@${chainId}?value=${toWeiString(nativeAmount)}`
   }
@@ -139,7 +148,7 @@ function buildWalletOptions(walletUrl: string): WalletOption[] {
     },
     {
       id: "coinbase",
-      label: "Coinbase Wallet",
+      label: "Coinbase App",
       href: `https://go.cb-w.com/dapp?cb_url=${encodedWalletUrl}`
     },
     {
@@ -184,6 +193,7 @@ export default function PayClient() {
   const [selectedAssetId, setSelectedAssetId] = useState<string>("")
   const [loadingAssetId, setLoadingAssetId] = useState<string>("")
   const [selectionError, setSelectionError] = useState<string>("")
+  const [paymentStatus, setPaymentStatus] = useState<string>("")
   const [intentPayload, setIntentPayload] = useState<IntentPayload | null>(null)
   const [paymentPayload, setPaymentPayload] = useState<SplitPayload | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -274,11 +284,15 @@ export default function PayClient() {
       const res = await fetch(`/api/payment-intents/${encodeURIComponent(intentId)}`, { cache: "no-store" })
       const payload = (await res.json()) as IntentPayload | { error?: string }
       if (!res.ok || ("error" in payload && payload.error)) return
-      setIntentPayload(payload as IntentPayload)
+      const intent = payload as IntentPayload
+      setIntentPayload(intent)
+      setPaymentStatus(String(intent.paymentStatus || ""))
     } catch {
       // ignore
     }
   }
+
+  const loadIntentCallback = useCallback(loadIntent, [intentId])
 
   async function selectAsset(assetId: string) {
     if (!intentId) return
@@ -321,7 +335,13 @@ export default function PayClient() {
       }
       const result = await res.json()
       const paymentUrl = String(result.paymentUrl || "")
-      const derivedAddress = String(result.address || extractAddressFromPaymentUrl(paymentUrl))
+      const isSolanaTxRequest =
+        String(result.selectedNetwork || asset.network).toLowerCase() === "solana" &&
+        (paymentUrl.startsWith("http://") || paymentUrl.startsWith("https://"))
+
+      const derivedAddress = isSolanaTxRequest
+        ? ""
+        : String(result.address || extractAddressFromPaymentUrl(paymentUrl))
 
       // Update state with actual payment data from API response
       setPaymentPayload({
@@ -362,8 +382,18 @@ export default function PayClient() {
 
   useEffect(() => {
     if (!intentId) return
-    void loadIntent()
-  }, [intentId])
+    void loadIntentCallback()
+  }, [intentId, loadIntentCallback])
+
+  useEffect(() => {
+    if (!intentId) return
+
+    const interval = setInterval(() => {
+      void loadIntentCallback()
+    }, 3000)
+
+    return () => clearInterval(interval)
+  }, [intentId, loadIntentCallback])
 
   if (intentId && !intentPayload) {
     return (
@@ -387,6 +417,7 @@ export default function PayClient() {
   }
 
   const isIntentMode = Boolean(intentId && intentPayload)
+  const normalizedPaymentStatus = String(paymentStatus || "").toUpperCase()
   const displayAmount = isIntentMode
     ? Number(intentPayload?.amount || 0) + Number(intentPayload?.pinetreeFee || 0)
     : Number(payload?.usdTotalAmount ?? payload?.totalAmount ?? 0)
@@ -416,6 +447,12 @@ export default function PayClient() {
               <span className="font-medium text-slate-600">Total</span>
               <span className="font-semibold text-lg">{formatUsd(displayAmount)}</span>
             </div>
+            {normalizedPaymentStatus ? (
+              <div className="flex items-center justify-between">
+                <span className="font-medium text-slate-600">Status</span>
+                <span className="font-semibold text-slate-900">{normalizedPaymentStatus}</span>
+              </div>
+            ) : null}
           </div>
 
           <div className="space-y-3" ref={intentCardsRef}>

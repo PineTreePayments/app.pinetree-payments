@@ -99,6 +99,8 @@ export async function getPaymentIntentEngine(intentId: string) {
   const intent = await getPaymentIntentById(intentId)
   if (!intent) return null
 
+  const selectedPayment = intent.payment_id ? await getPaymentById(intent.payment_id) : null
+
   return {
     intentId: intent.id,
     amount: Number(intent.amount),
@@ -111,6 +113,8 @@ export async function getPaymentIntentEngine(intentId: string) {
     selectedNetwork: intent.selected_network || null,
     paymentId: intent.payment_id || null,
     status: intent.status,
+    paymentStatus: selectedPayment?.status || null,
+    paymentProviderReference: selectedPayment?.provider_reference || null,
     expiresAt: intent.expires_at,
     metadata: (intent.metadata || undefined) as Record<string, unknown> | undefined,
     checkoutUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.pinetree-payments.com"}/pay?intent=${encodeURIComponent(intent.id)}`
@@ -211,6 +215,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
       provider: payment.provider,
       paymentUrl: payment.paymentUrl,
       qrCodeUrl: payment.qrCodeUrl,
+      address: payment.address,
       universalUrl: payment.universalUrl,
       alreadySelected: false
     }

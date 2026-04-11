@@ -34,6 +34,12 @@ type PaymentMetadata = {
   [key: string]: unknown
 }
 
+type StoredPaymentSplitMetadata = {
+  split?: {
+    merchantWallet?: string
+  }
+}
+
 type CreatePaymentInput = {
   amount: number
   currency: string
@@ -51,6 +57,7 @@ type CreatePaymentResult = {
   provider: string
   paymentUrl: string
   qrCodeUrl: string
+  address?: string
   universalUrl?: string
 }
 
@@ -194,11 +201,13 @@ export async function createPayment(
       const existingPayment = await getPaymentById(existingPaymentId)
       
       if (existingPayment) {
+        const existingMetadata = (existingPayment.metadata || null) as StoredPaymentSplitMetadata | null
         return {
           id: existingPayment.id,
           provider: existingPayment.provider,
           paymentUrl: existingPayment.payment_url || "",
           qrCodeUrl: existingPayment.qr_code_url || "",
+          address: String(existingMetadata?.split?.merchantWallet || ""),
           universalUrl: undefined
         }
       }
@@ -296,7 +305,18 @@ export async function createPayment(
     network: network,
     payment_url: splitPayment.paymentUrl,
     qr_code_url: splitPayment.qrCodeUrl,
-    metadata: input.metadata,
+    metadata: {
+      ...(input.metadata || {}),
+      split: {
+        merchantWallet: merchantWalletAddress,
+        pinetreeWallet,
+        expectedAmountNative: splitPayment.nativeAmount,
+        merchantNativeAmount: splitPayment.merchantNativeAmount,
+        feeNativeAmount: splitPayment.feeNativeAmount,
+        merchantNativeAmountAtomic: splitPayment.merchantNativeAmountAtomic,
+        feeNativeAmountAtomic: splitPayment.feeNativeAmountAtomic
+      }
+    },
     status: "CREATED"
   })
 
@@ -350,6 +370,8 @@ export async function createPayment(
       merchantAmount,
       pinetreeFee,
       expectedAmountNative: splitPayment.nativeAmount,
+      expectedMerchantAtomic: splitPayment.merchantNativeAmountAtomic,
+      expectedFeeAtomic: splitPayment.feeNativeAmountAtomic,
       network,
       paymentId
     }).catch(console.error)
@@ -364,6 +386,7 @@ export async function createPayment(
     provider: providerName,
     paymentUrl: splitPayment.paymentUrl,
     qrCodeUrl: splitPayment.qrCodeUrl,
+    address: merchantWalletAddress,
     universalUrl: splitPayment.universalUrl
   }
 }
