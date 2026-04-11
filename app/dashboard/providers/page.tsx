@@ -157,6 +157,7 @@ export default function ProvidersPage() {
 
   const [walletSessionId, setWalletSessionId] = useState<string | null>(null)
   const [walletSessionStatus, setWalletSessionStatus] = useState<string | null>(null)
+  const [walletMobileDeeplink, setWalletMobileDeeplink] = useState<string | null>(null)
 
   const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const didToastSyncRef = useRef(false)
@@ -478,6 +479,7 @@ export default function ProvidersPage() {
 
       console.log("DEEPLINK:", deeplink)
 
+      setWalletMobileDeeplink(deeplink)
       const qr = await QRCode.toDataURL(deeplink)
 
       console.log("QR GENERATED")
@@ -553,6 +555,7 @@ export default function ProvidersPage() {
     setSelectedWalletType(null)
     setWalletSessionId(null)
     setWalletSessionStatus(null)
+    setWalletMobileDeeplink(null)
     didToastSyncRef.current = false
 
     if (pollerRef.current) {
@@ -649,6 +652,7 @@ export default function ProvidersPage() {
       setSelectedWalletType(null)
       setWalletSessionId(null)
       setWalletSessionStatus(null)
+      setWalletMobileDeeplink(null)
       didToastSyncRef.current = false
 
       if (pollerRef.current) {
@@ -1021,7 +1025,7 @@ export default function ProvidersPage() {
                     <Image src={qrCode} alt="Wallet QR" width={208} height={208} className="w-52 h-52" />
                     {walletSessionStatus === "pending" && (
                       <p className="text-xs text-black">
-                        Waiting for mobile wallet connection...
+            Waiting for mobile wallet approval...
                       </p>
                     )}
                     {walletSessionStatus === "connected" && (
@@ -1029,6 +1033,16 @@ export default function ProvidersPage() {
                         Mobile wallet connected. Review and save.
                       </p>
                     )}
+        {activeProvider === "base" && walletMobileDeeplink ? (
+          <a
+            href={walletMobileDeeplink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-blue-600 underline"
+          >
+            Open wallet manually
+          </a>
+        ) : null}
                   </div>
                 )}
 
@@ -1071,6 +1085,7 @@ export default function ProvidersPage() {
                   setSelectedWalletType(null)
                   setWalletSessionId(null)
                   setWalletSessionStatus(null)
+      setWalletMobileDeeplink(null)
                   didToastSyncRef.current = false
 
                   if (pollerRef.current) {
