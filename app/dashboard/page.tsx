@@ -318,16 +318,16 @@ export default function DashboardPage() {
                     ? "EXPIRED"
                     : tx.status
                   
-                  const statusColor =
+                  const statusClasses =
                     effectiveStatus === "CONFIRMED"
-                      ? "text-green-700"
+                      ? "bg-green-100 text-green-800"
                       : effectiveStatus === "FAILED"
-                      ? "text-red-700"
+                      ? "bg-red-100 text-red-800"
                       : effectiveStatus === "EXPIRED"
-                      ? "text-gray-600"
+                      ? "bg-gray-100 text-gray-700"
                       : effectiveStatus === "PROCESSING"
-                      ? "text-blue-700"
-                      : "text-amber-700"
+                      ? "bg-blue-100 text-blue-800"
+                      : "bg-amber-100 text-amber-800"
 
                   return(
 
@@ -337,16 +337,18 @@ export default function DashboardPage() {
                         {tx.id.slice(0,12)}...
                       </td>
 
-                      <td className="py-3">
+                      <td className="py-3 text-gray-800 font-medium">
                         ${Number(payment?.subtotal_amount ?? 0).toFixed(2)}
                       </td>
 
-                      <td className="py-3">
+                      <td className="py-3 text-gray-700">
                         {tx.network ?? "-"}
                       </td>
 
-                      <td className={`py-3 font-medium ${statusColor}`}>
-                        {effectiveStatus}
+                      <td className="py-3">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusClasses}`}>
+                          {effectiveStatus}
+                        </span>
                       </td>
 
                       <td className="py-3 text-gray-500 text-xs">

@@ -185,6 +185,23 @@ export async function watchPayment(input: WatchInput) {
           matchRatio
         })
 
+        // Update last checked slot for next iteration
+        const currentSlotResponse = await fetch(rpcUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            method: "getSlot",
+            params: [],
+            id: 1
+          })
+        })
+
+        const currentSlotData = await currentSlotResponse.json()
+        lastCheckedBlock = Number(currentSlotData.result || lastCheckedBlock)
+
         if (splitTx) {
           const confirmed = await handleMatchingTransaction(input.paymentId, {
             hash: splitTx.hash,

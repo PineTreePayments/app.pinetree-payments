@@ -114,7 +114,7 @@ export default function DashboardLayout({
             fixed inset-y-0 left-0 z-40 w-64 bg-white border-r border-gray-200
             transform transition-transform duration-300 ease-in-out
             ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
-            lg:translate-x-0 lg:static lg:flex lg:flex-col
+            lg:translate-x-0 lg:flex lg:flex-col
             min-h-screen
           `}
         >
@@ -147,7 +147,7 @@ export default function DashboardLayout({
         </aside>
 
         {/* MAIN */}
-        <div className="flex min-w-0 flex-1 flex-col lg:ml-0">
+        <div className="flex min-w-0 flex-1 flex-col lg:ml-64">
           {/* TOP BAR */}
           <header className="sticky top-0 z-20 h-16 bg-blue-600 flex items-center justify-between px-4 lg:px-8 shadow-sm relative">
             <div className="flex items-center gap-3">
