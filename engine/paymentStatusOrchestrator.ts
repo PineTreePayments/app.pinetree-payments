@@ -45,7 +45,7 @@ function canWatchStatus(status: string) {
   return status === "CREATED" || status === "PENDING" || status === "PROCESSING"
 }
 
-export function queueSingleWatcherIteration(payment: WatchablePayment, source: string) {
+export async function queueSingleWatcherIteration(payment: WatchablePayment, source: string) {
   const status = normalizePaymentStatus(payment.status)
   if (!canWatchStatus(status)) {
     console.info("[payment-status] watcher:skip", {
@@ -75,15 +75,15 @@ export function queueSingleWatcherIteration(payment: WatchablePayment, source: s
     return
   }
 
-  console.info("[payment-status] watcher:queue", {
+  console.info("[payment-status] watcher:run", {
     source,
     paymentId: payment.id,
     network,
     status
   })
 
-  setTimeout(() => {
-    void watchPayment({
+  try {
+    await watchPayment({
       merchantWallet,
       pinetreeWallet,
       merchantAmount: Number(payment.merchant_amount || 0),
@@ -97,21 +97,19 @@ export function queueSingleWatcherIteration(payment: WatchablePayment, source: s
       paymentId: payment.id,
       singleIteration: true
     })
-      .then((matched) => {
-        console.info("[payment-status] watcher:completed", {
-          source,
-          paymentId: payment.id,
-          matched
-        })
-      })
-      .catch((error) => {
-        console.error("[payment-status] watcher:error", {
-          source,
-          paymentId: payment.id,
-          error: error instanceof Error ? error.message : String(error)
-        })
-      })
-  }, 0)
+
+    console.info("[payment-status] watcher:completed", {
+      source,
+      paymentId: payment.id
+    })
+
+  } catch (error) {
+    console.error("[payment-status] watcher:error", {
+      source,
+      paymentId: payment.id,
+      error: error instanceof Error ? error.message : String(error)
+    })
+  }
 }
 
 export async function getUnifiedPaymentStatusEngine(referenceId: string, source = "unknown") {
@@ -154,7 +152,7 @@ export async function getUnifiedPaymentStatusEngine(referenceId: string, source 
       }
     }
 
-    queueSingleWatcherIteration(selectedPayment, `${source}:intent`)
+    await queueSingleWatcherIteration(selectedPayment, `${source}:intent`)
 
     return {
       status: normalizePaymentStatus(selectedPayment.status),
@@ -172,7 +170,7 @@ export async function getUnifiedPaymentStatusEngine(referenceId: string, source 
     throw err
   }
 
-  queueSingleWatcherIteration(payment, `${source}:payment`)
+  await queueSingleWatcherIteration(payment, `${source}:payment`)
 
   return {
     status: normalizePaymentStatus(payment.status),
