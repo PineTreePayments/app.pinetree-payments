@@ -189,6 +189,7 @@ export default function PayClient() {
   const intentId = searchParams.get("intent")
   const [copiedLink, setCopiedLink] = useState(false)
   const [copiedAddress, setCopiedAddress] = useState(false)
+  const [copiedAmount, setCopiedAmount] = useState(false)
   const [selectedNetwork, setSelectedNetwork] = useState<string | null>(null)
   const [selectedAssetId, setSelectedAssetId] = useState<string>("")
   const [loadingAssetId, setLoadingAssetId] = useState<string>("")
@@ -276,6 +277,19 @@ export default function PayClient() {
       await navigator.clipboard.writeText(recipientAddress)
       setCopiedAddress(true)
       setTimeout(() => setCopiedAddress(false), 1500)
+    } catch {
+      // ignore clipboard errors
+    }
+  }
+
+  async function copyAmount(amount?: number) {
+    const nativeAmount = Number(amount || 0)
+    if (!Number.isFinite(nativeAmount) || nativeAmount <= 0) return
+
+    try {
+      await navigator.clipboard.writeText(String(nativeAmount))
+      setCopiedAmount(true)
+      setTimeout(() => setCopiedAmount(false), 1500)
     } catch {
       // ignore clipboard errors
     }
@@ -515,12 +529,20 @@ export default function PayClient() {
                             <div className="text-xs font-mono break-all bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-slate-700">
                               {recipientAddress}
                             </div>
-                            <button
-                              onClick={copyAddress}
-                              className="w-full rounded-lg bg-blue-600 text-white py-2 text-sm font-medium"
-                            >
-                              {copiedAddress ? "Address Copied" : "Copy Address"}
-                            </button>
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                onClick={copyAddress}
+                                className="w-full rounded-lg bg-blue-600 text-white py-2 text-sm font-medium"
+                              >
+                                {copiedAddress ? "Address Copied" : "Copy Address"}
+                              </button>
+                              <button
+                                onClick={() => copyAmount(Number(paymentPayload.nativeAmount || 0))}
+                                className="w-full rounded-lg border border-blue-200 bg-blue-50 text-blue-700 py-2 text-sm font-medium"
+                              >
+                                {copiedAmount ? "Amount Copied" : "Copy Amount"}
+                              </button>
+                            </div>
                           </>
                         ) : null}
 
@@ -609,12 +631,20 @@ export default function PayClient() {
             <div className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-800 break-all font-mono">
               {recipientAddress}
             </div>
-            <button
-              onClick={copyAddress}
-              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              {copiedAddress ? "Address Copied" : "Copy Address"}
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={copyAddress}
+                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                {copiedAddress ? "Address Copied" : "Copy Address"}
+              </button>
+              <button
+                onClick={() => copyAmount(nativeAmount)}
+                className="w-full rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
+              >
+                {copiedAmount ? "Amount Copied" : "Copy Amount"}
+              </button>
+            </div>
           </div>
         ) : null}
 

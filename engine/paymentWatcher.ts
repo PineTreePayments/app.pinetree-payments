@@ -76,6 +76,21 @@ function getAmountMatchRatio(network: string): number {
   return ratio
 }
 
+function getSingleIterationLookback(network: string): number {
+  const normalized = String(network || "").toLowerCase().trim()
+  const defaultValue = normalized === "solana" ? 500 : 40
+  const raw =
+    normalized === "solana"
+      ? Number(process.env.PAYMENT_WATCHER_SINGLE_LOOKBACK_SOLANA || defaultValue)
+      : Number(process.env.PAYMENT_WATCHER_SINGLE_LOOKBACK_EVM || defaultValue)
+
+  if (!Number.isFinite(raw) || raw < 0) {
+    return defaultValue
+  }
+
+  return Math.floor(raw)
+}
+
 /**
  * Watch a payment for blockchain confirmation
  * 
@@ -124,9 +139,20 @@ export async function watchPayment(input: WatchInput) {
       })
 
       const data = await response.json()
-      lastCheckedBlock = data.result
+      lastCheckedBlock = Number(data.result || 0)
+
+      if (input.singleIteration) {
+        const lookback = getSingleIterationLookback(input.network)
+        lastCheckedBlock = Math.max(0, lastCheckedBlock - lookback)
+      }
     } else {
-      lastCheckedBlock = await getCurrentBlockHeight(rpcUrl)
+      const currentBlock = await getCurrentBlockHeight(rpcUrl)
+      if (input.singleIteration) {
+        const lookback = getSingleIterationLookback(input.network)
+        lastCheckedBlock = Math.max(0, currentBlock - lookback)
+      } else {
+        lastCheckedBlock = currentBlock
+      }
     }
   } catch (error) {
     console.error("Failed to get current block height:", error)
