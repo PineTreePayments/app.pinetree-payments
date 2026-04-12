@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/database/supabase"
+import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 
 import {
   ResponsiveContainer,
@@ -225,12 +226,6 @@ export default function TransactionsPage() {
     }
   }, [loadDashboardData])
 
-  function statusStyle(status: string) {
-    if (status === "CONFIRMED") return "bg-green-100 text-green-700"
-    if (status === "FAILED") return "bg-red-100 text-red-700"
-    if (status === "PENDING") return "bg-yellow-100 text-yellow-700"
-    return "bg-gray-100 text-gray-700"
-  }
 
   const filteredTransactions = transactions.filter((tx) => {
     if (walletFilter !== "all" && tx.provider !== walletFilter) return false
@@ -370,10 +365,13 @@ export default function TransactionsPage() {
               </tr>
             )}
 
-            {filteredTransactions.map((tx) => {
-              const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
+             {filteredTransactions.map((tx) => {
+               const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
+               const displayStatus = payment
+                 ? getPaymentDisplayStatus(tx.status, payment.created_at)
+                 : { status: tx.status, classes: "bg-gray-100 text-gray-700" }
 
-              return (
+               return (
                 <tr
                   key={tx.id}
                   className="border-b border-gray-100 text-sm hover:bg-gray-50"
@@ -398,11 +396,11 @@ export default function TransactionsPage() {
                     {providerName(tx.provider)}
                   </td>
 
-                  <td className="px-6 py-4">
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${statusStyle(tx.status)}`}>
-                      {tx.status}
-                    </span>
-                  </td>
+                   <td className="px-6 py-4">
+                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${displayStatus.classes}`}>
+                       {displayStatus.status}
+                     </span>
+                   </td>
 
                   <td className="px-6 py-4 text-gray-700 font-mono text-xs">
                     {tx.provider_transaction_id}
