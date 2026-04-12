@@ -25,6 +25,7 @@ type WatchInput = {
   expectedFeeAtomic?: string | number
   network: string
   paymentId: string
+  singleIteration?: boolean
 }
 
 type EvmTransaction = {
@@ -120,7 +121,7 @@ export async function watchPayment(input: WatchInput) {
      WATCH LOOP
   --------------------------- */
 
-    while (attempts < WATCHER_CONFIG.maxAttempts) {
+    do {
     try {
       let transactions: EvmTransaction[] = []
 
@@ -209,9 +210,13 @@ export async function watchPayment(input: WatchInput) {
 
     attempts++
 
+    if (input.singleIteration) {
+      return false
+    }
+
     // Wait before next poll
     await sleep(WATCHER_CONFIG.pollInterval)
-  }
+  } while (attempts < WATCHER_CONFIG.maxAttempts)
 
   /* ---------------------------
      MARK FAILED AFTER TIMEOUT

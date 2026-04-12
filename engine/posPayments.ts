@@ -317,7 +317,8 @@ export async function getPosPaymentStatusEngine(paymentId: string) {
           expectedMerchantAtomic: meta.split.merchantNativeAmountAtomic,
           expectedFeeAtomic: meta.split.feeNativeAmountAtomic,
           network: String(payment.network),
-          paymentId: payment.id
+          paymentId: payment.id,
+          singleIteration: true
         }).catch(console.error)
       }, 0)
     }
