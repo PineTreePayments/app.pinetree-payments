@@ -356,26 +356,6 @@ export async function createPayment(
     await storeIdempotencyKey(input.idempotencyKey, paymentId)
   }
 
-  /* ---------------------------
-     START PAYMENT WATCHER (BACKGROUND)
-  --------------------------- */
-
-  // Detach watcher to run asynchronously
-  // Never block payment creation response
-  // Watcher will handle timeout and status updates independently
-  setTimeout(() => {
-    void watchPayment({
-      merchantWallet: merchantWalletAddress,
-      pinetreeWallet,
-      merchantAmount,
-      pinetreeFee,
-      expectedAmountNative: splitPayment.nativeAmount,
-      expectedMerchantAtomic: splitPayment.merchantNativeAmountAtomic,
-      expectedFeeAtomic: splitPayment.feeNativeAmountAtomic,
-      network,
-      paymentId
-    }).catch(console.error)
-  }, 0)
 
   /* ---------------------------
      RETURN RESULT

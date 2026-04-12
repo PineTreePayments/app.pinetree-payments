@@ -5,6 +5,7 @@ import { getPaymentById } from "@/lib/database/payments"
 import { getPaymentIntentById } from "@/database/paymentIntents"
 import { PaymentProvider } from "@/types/payment"
 import { createPaymentIntentEngine } from "./paymentIntents"
+import { watchPayment } from "./paymentWatcher"
 import {
   normalizeWalletNetwork,
   providerToPreferredNetwork,
@@ -299,6 +300,28 @@ export async function getPosPaymentStatusEngine(paymentId: string) {
           normalized === "CREATED"
         ? normalized
         : "PENDING"
+
+  // Run watcher check if payment is still active
+  if (state === "CREATED" || state === "PENDING" || state === "PROCESSING") {
+    // Extract watcher parameters from payment metadata
+    const meta = payment.metadata as any
+    if (meta?.split) {
+      // Run one single watcher iteration in background, don't wait
+      setTimeout(() => {
+        void watchPayment({
+          merchantWallet: meta.split.merchantWallet,
+          pinetreeWallet: meta.split.pinetreeWallet,
+          merchantAmount: payment.merchant_amount,
+          pinetreeFee: payment.pinetree_fee,
+          expectedAmountNative: meta.split.expectedAmountNative,
+          expectedMerchantAtomic: meta.split.merchantNativeAmountAtomic,
+          expectedFeeAtomic: meta.split.feeNativeAmountAtomic,
+          network: payment.network,
+          paymentId: payment.id
+        }).catch(console.error)
+      }, 0)
+    }
+  }
 
   return {
     status: state,
