@@ -649,11 +649,11 @@ async function findMatchingSolanaSplitTransaction(input: {
 
       if (!source && from) source = from
 
-      if (destination === input.merchantWallet.toLowerCase()) {
+      if (destination === input.merchantWallet.toLowerCase() || destination === input.merchantWallet) {
         merchantLamports += lamports
       }
 
-      if (destination === input.pinetreeWallet.toLowerCase()) {
+      if (destination === input.pinetreeWallet.toLowerCase() || destination === input.pinetreeWallet) {
         feeLamports += lamports
       }
     }
