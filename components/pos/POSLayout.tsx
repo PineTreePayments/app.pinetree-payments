@@ -126,12 +126,12 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
 
         console.log(`[POS PAYMENT STATUS] Got: ${remote}`)
 
-        if (remote === "CREATED") {
+        if (remote === "CREATED" || remote === "PENDING") {
           setStatus("waiting")
           return
         }
 
-        if (remote === "PENDING" || remote === "PROCESSING") {
+        if (remote === "PROCESSING") {
           setStatus("processing")
           return
         }
