@@ -62,6 +62,20 @@ type SolanaParsedTransaction = {
   }
 }
 
+function getAmountMatchRatio(network: string): number {
+  const normalized = String(network || "").toLowerCase().trim()
+  const baseDefault = Number(process.env.PAYMENT_MATCH_RATIO_DEFAULT || 0.98)
+  const solanaDefault = Number(process.env.PAYMENT_MATCH_RATIO_SOLANA || baseDefault)
+  const evmDefault = Number(process.env.PAYMENT_MATCH_RATIO_EVM || baseDefault)
+
+  const ratio = normalized === "solana" ? solanaDefault : evmDefault
+  if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1) {
+    return 0.98
+  }
+
+  return ratio
+}
+
 /**
  * Watch a payment for blockchain confirmation
  * 
@@ -69,6 +83,7 @@ type SolanaParsedTransaction = {
  */
 export async function watchPayment(input: WatchInput) {
   let attempts = 0
+  const matchRatio = getAmountMatchRatio(input.network)
 
   const merchantWallet = String(input.merchantWallet || "").trim()
   const pinetreeWallet = String(input.pinetreeWallet || "").trim()
@@ -136,7 +151,8 @@ export async function watchPayment(input: WatchInput) {
           pinetreeWallet,
           sinceSlot: lastCheckedBlock,
           expectedMerchantLamports,
-          expectedFeeLamports
+          expectedFeeLamports,
+          matchRatio
         })
 
         if (splitTx) {
@@ -194,8 +210,10 @@ export async function watchPayment(input: WatchInput) {
             ? input.expectedAmountNative
             : input.merchantAmount + input.pinetreeFee
 
-        // Check if full gross amount was received (99.5% tolerance for network fees)
-        if (value >= grossRequired * 0.995) {
+        const threshold = grossRequired * matchRatio
+
+        // Check if full gross amount was received within tolerance window
+        if (value >= threshold) {
           // ✅ Full gross amount received
           // Fee has been successfully collected at payment time
           const confirmed = await handleMatchingTransaction(
@@ -206,6 +224,16 @@ export async function watchPayment(input: WatchInput) {
           if (confirmed) {
             return true
           }
+        } else {
+          console.info("[watcher:evm] transaction below threshold", {
+            paymentId: input.paymentId,
+            txHash: tx.hash,
+            network: input.network,
+            receivedNative: value,
+            expectedNative: grossRequired,
+            matchRatio,
+            thresholdNative: threshold
+          })
         }
       }
 
@@ -505,6 +533,7 @@ async function findMatchingSolanaSplitTransaction(input: {
   sinceSlot: number
   expectedMerchantLamports: number
   expectedFeeLamports: number
+  matchRatio: number
 }): Promise<{ hash: string; from: string; totalLamports: number } | null> {
   const [merchantSignatures, treasurySignatures] = await Promise.all([
     getSolanaSignatures(input.rpcUrl, input.merchantWallet, input.sinceSlot),
@@ -565,8 +594,8 @@ async function findMatchingSolanaSplitTransaction(input: {
       }
     }
 
-    const merchantThreshold = input.expectedMerchantLamports > 0 ? input.expectedMerchantLamports * 0.995 : 0
-    const feeThreshold = input.expectedFeeLamports > 0 ? input.expectedFeeLamports * 0.995 : 0
+    const merchantThreshold = input.expectedMerchantLamports > 0 ? input.expectedMerchantLamports * input.matchRatio : 0
+    const feeThreshold = input.expectedFeeLamports > 0 ? input.expectedFeeLamports * input.matchRatio : 0
 
     if (merchantLamports >= merchantThreshold && feeLamports >= feeThreshold) {
       return {
@@ -574,6 +603,18 @@ async function findMatchingSolanaSplitTransaction(input: {
         from: source,
         totalLamports: merchantLamports + feeLamports
       }
+    } else {
+      console.info("[watcher:solana] signature below threshold", {
+        signature,
+        source,
+        receivedMerchantLamports: merchantLamports,
+        expectedMerchantLamports: input.expectedMerchantLamports,
+        merchantThreshold,
+        receivedFeeLamports: feeLamports,
+        expectedFeeLamports: input.expectedFeeLamports,
+        feeThreshold,
+        matchRatio: input.matchRatio
+      })
     }
   }
 

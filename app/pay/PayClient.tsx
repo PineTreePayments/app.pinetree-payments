@@ -197,7 +197,6 @@ export default function PayClient() {
   const [intentPayload, setIntentPayload] = useState<IntentPayload | null>(null)
   const [paymentPayload, setPaymentPayload] = useState<SplitPayload | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const [hasStartedWatching, setHasStartedWatching] = useState(false)
   
   const payload = useMemo(() => parsePayload(rawData), [rawData])
   const activePayload = paymentPayload || payload
@@ -211,11 +210,7 @@ export default function PayClient() {
     [activePayload, walletUrl]
   )
 
-  // Payment terminal states
   const normalizedPaymentStatus = String(paymentStatus || "").toUpperCase()
-  const isTerminalState = ["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED"].includes(normalizedPaymentStatus)
-  const isProcessing = ["PENDING", "PROCESSING"].includes(normalizedPaymentStatus)
-  const isWaiting = normalizedPaymentStatus === "CREATED" || !normalizedPaymentStatus
 
   const [selectedWalletId, setSelectedWalletId] = useState("")
   const intentCardsRef = useRef<HTMLDivElement | null>(null)
@@ -510,6 +505,12 @@ export default function PayClient() {
 
                         {paymentPayload && recipientAddress ? (
                           <>
+                            {String(paymentPayload.nativeSymbol || "").toUpperCase() && Number.isFinite(Number(paymentPayload.nativeAmount || 0)) && Number(paymentPayload.nativeAmount || 0) > 0 ? (
+                              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                                Send exactly <span className="font-semibold">{Number(paymentPayload.nativeAmount || 0)} {String(paymentPayload.nativeSymbol || "").toUpperCase()}</span>.
+                                Do not send only a USD estimate from wallet conversion.
+                              </div>
+                            ) : null}
                             <div className="text-[11px] uppercase tracking-wider text-slate-500">Payment Address</div>
                             <div className="text-xs font-mono break-all bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-slate-700">
                               {recipientAddress}
@@ -586,6 +587,11 @@ export default function PayClient() {
             <div className="flex items-center justify-between">
               <span className="font-medium text-slate-600">Pay Amount</span>
               <span className="font-semibold">{Number.isFinite(nativeAmount) ? nativeAmount : 0} {nativeSymbol}</span>
+            </div>
+          ) : null}
+          {nativeSymbol && Number.isFinite(nativeAmount) && nativeAmount > 0 ? (
+            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-2">
+              Send the exact crypto amount shown. Wallet USD conversion can underpay and prevent confirmation.
             </div>
           ) : null}
         </div>

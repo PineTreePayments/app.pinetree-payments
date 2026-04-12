@@ -37,6 +37,34 @@ function uniqueNetworks(networks: WalletNetwork[]) {
   return [...new Set(networks)]
 }
 
+type StoredPaymentSplitMetadata = {
+  split?: {
+    expectedAmountNative?: number
+    merchantNativeAmount?: number
+    feeNativeAmount?: number
+  }
+}
+
+function inferNativeSymbolFromNetwork(network?: string): string | undefined {
+  const normalized = String(network || "").toLowerCase().trim()
+  if (normalized === "solana") return "SOL"
+  if (normalized === "base" || normalized === "base_pay" || normalized === "ethereum") return "ETH"
+  return undefined
+}
+
+function inferNativeAmountFromPayment(payment: { metadata?: unknown } | null | undefined): number | undefined {
+  const metadata = (payment?.metadata || null) as StoredPaymentSplitMetadata | null
+  const split = metadata?.split
+
+  const expectedAmountNative = Number(split?.expectedAmountNative || 0)
+  if (expectedAmountNative > 0) return expectedAmountNative
+
+  const merchantNativeAmount = Number(split?.merchantNativeAmount || 0)
+  const feeNativeAmount = Number(split?.feeNativeAmount || 0)
+  const total = merchantNativeAmount + feeNativeAmount
+  return total > 0 ? total : undefined
+}
+
 export async function getMerchantAvailableNetworks(merchantId: string): Promise<WalletNetwork[]> {
   const wallets = await getMerchantWallets(merchantId)
   const networks = wallets
@@ -145,7 +173,9 @@ export async function selectPaymentIntentNetworkEngine(input: {
       universalUrl: undefined,
       paymentUrl: existingPayment?.payment_url || undefined,
       qrCodeUrl: existingPayment?.qr_code_url || undefined,
-      provider: existingPayment?.provider || undefined
+      provider: existingPayment?.provider || undefined,
+      nativeAmount: inferNativeAmountFromPayment(existingPayment),
+      nativeSymbol: inferNativeSymbolFromNetwork(existingPayment?.network)
     }
   }
 
@@ -228,6 +258,8 @@ export async function selectPaymentIntentNetworkEngine(input: {
       qrCodeUrl: payment.qrCodeUrl,
       address: payment.address,
       universalUrl: payment.universalUrl,
+      nativeAmount: payment.nativeAmount,
+      nativeSymbol: payment.nativeSymbol,
       alreadySelected: false
     }
   } catch (error) {

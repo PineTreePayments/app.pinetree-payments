@@ -16,7 +16,6 @@ import {
   getPaymentById
 } from "@/database"
 import { generateSplitPayment } from "./generateSplitPayment"
-import { watchPayment } from "./paymentWatcher"
 import { calculateGrossAmount } from "./fees"
 import { selectBestWallet } from "@/database/merchantWallets"
 import { updatePaymentStatus } from "./updatePaymentStatus"
@@ -37,7 +36,17 @@ type PaymentMetadata = {
 type StoredPaymentSplitMetadata = {
   split?: {
     merchantWallet?: string
+    expectedAmountNative?: number
+    merchantNativeAmount?: number
+    feeNativeAmount?: number
   }
+}
+
+function inferNativeSymbolFromNetwork(network?: string): string | undefined {
+  const normalized = String(network || "").toLowerCase().trim()
+  if (normalized === "solana") return "SOL"
+  if (normalized === "base" || normalized === "base_pay" || normalized === "ethereum") return "ETH"
+  return undefined
 }
 
 type CreatePaymentInput = {
@@ -59,6 +68,8 @@ type CreatePaymentResult = {
   qrCodeUrl: string
   address?: string
   universalUrl?: string
+  nativeAmount?: number
+  nativeSymbol?: string
 }
 
 export type BuildCreatePaymentRequestInput = {
@@ -202,13 +213,25 @@ export async function createPayment(
       
       if (existingPayment) {
         const existingMetadata = (existingPayment.metadata || null) as StoredPaymentSplitMetadata | null
+        const split = existingMetadata?.split
+        const expectedAmountNative = Number(split?.expectedAmountNative || 0)
+        const merchantNativeAmount = Number(split?.merchantNativeAmount || 0)
+        const feeNativeAmount = Number(split?.feeNativeAmount || 0)
+
+        const inferredNativeAmount =
+          expectedAmountNative > 0
+            ? expectedAmountNative
+            : merchantNativeAmount + feeNativeAmount
+
         return {
           id: existingPayment.id,
           provider: existingPayment.provider,
           paymentUrl: existingPayment.payment_url || "",
           qrCodeUrl: existingPayment.qr_code_url || "",
           address: String(existingMetadata?.split?.merchantWallet || ""),
-          universalUrl: undefined
+          universalUrl: undefined,
+          nativeAmount: inferredNativeAmount > 0 ? inferredNativeAmount : undefined,
+          nativeSymbol: inferNativeSymbolFromNetwork(existingPayment.network)
         }
       }
     }
@@ -367,6 +390,8 @@ export async function createPayment(
     paymentUrl: splitPayment.paymentUrl,
     qrCodeUrl: splitPayment.qrCodeUrl,
     address: merchantWalletAddress,
-    universalUrl: splitPayment.universalUrl
+    universalUrl: splitPayment.universalUrl,
+    nativeAmount: Number(splitPayment.nativeAmount || 0),
+    nativeSymbol: String(splitPayment.nativeSymbol || "").toUpperCase() || undefined
   }
 }
