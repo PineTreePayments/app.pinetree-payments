@@ -305,12 +305,12 @@ export async function getPosPaymentStatusEngine(paymentId: string) {
   if (state === "CREATED" || state === "PENDING" || state === "PROCESSING") {
     // Extract watcher parameters from payment metadata
     const meta = payment.metadata as any
-    if (meta?.split) {
+    if (meta?.split && payment.network) {
       // Run one single watcher iteration in background, don't wait
       setTimeout(() => {
         void watchPayment({
-          merchantWallet: meta.split.merchantWallet,
-          pinetreeWallet: meta.split.pinetreeWallet,
+          merchantWallet: String(meta.split.merchantWallet || ""),
+          pinetreeWallet: String(meta.split.pinetreeWallet || ""),
           merchantAmount: payment.merchant_amount,
           pinetreeFee: payment.pinetree_fee,
           expectedAmountNative: meta.split.expectedAmountNative,
