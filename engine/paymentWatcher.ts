@@ -275,49 +275,55 @@ async function handleMatchingTransaction(
   }
 
   // Advance lifecycle in strict order: CREATED -> PENDING -> PROCESSING -> CONFIRMED
-  if (status === "CREATED") {
-    await updatePaymentStatus(paymentId, "PENDING", {
-      providerEvent: "watcher.detected",
-      rawPayload: { txHash: tx.hash }
-    })
-    status = await getPaymentStatus(paymentId)
-  }
-
-  if (status === "PENDING") {
-    await updatePaymentStatus(paymentId, "PROCESSING", {
-      providerEvent: "watcher.detected",
-      rawPayload: {
-        txHash: tx.hash,
-        value: tx.value,
-        from: tx.from
-      }
-    })
-
-    if (transaction) {
-      await updateTransactionStatus(transaction.id, "PROCESSING")
+  // Do NOT read status between transitions - avoids read-after-write consistency issues
+  try {
+    if (status === "CREATED") {
+      await updatePaymentStatus(paymentId, "PENDING", {
+        providerEvent: "watcher.detected",
+        rawPayload: { txHash: tx.hash }
+      })
+      status = "PENDING"
     }
 
-    status = await getPaymentStatus(paymentId)
-  }
+    if (status === "PENDING") {
+      await updatePaymentStatus(paymentId, "PROCESSING", {
+        providerEvent: "watcher.detected",
+        rawPayload: {
+          txHash: tx.hash,
+          value: tx.value,
+          from: tx.from
+        }
+      })
 
-  if (status !== "PROCESSING") {
+      if (transaction) {
+        await updateTransactionStatus(transaction.id, "PROCESSING")
+      }
+
+      status = "PROCESSING"
+    }
+
+    if (status === "PROCESSING") {
+      await updatePaymentStatus(paymentId, "CONFIRMED", {
+        providerEvent: "blockchain_confirmation",
+        rawPayload: {
+          txHash: tx.hash,
+          value: tx.value,
+          from: tx.from
+        }
+      })
+
+      if (transaction) {
+        await updateTransactionStatus(transaction.id, "CONFIRMED")
+      }
+
+      return true
+    }
+  } catch (error) {
+    console.error("State transition failed for payment", paymentId, error)
     return false
   }
 
-  await updatePaymentStatus(paymentId, "CONFIRMED", {
-    providerEvent: "blockchain_confirmation",
-    rawPayload: {
-      txHash: tx.hash,
-      value: tx.value,
-      from: tx.from
-    }
-  })
-
-  if (transaction) {
-    await updateTransactionStatus(transaction.id, "CONFIRMED")
-  }
-
-  return true
+  return false
 }
 
 async function getPaymentStatus(paymentId: string): Promise<PaymentStatus | null> {
