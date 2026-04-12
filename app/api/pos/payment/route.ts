@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import {
   createPosPaymentIntentEngine,
+  createPosPaymentEngine,
   getPosTaxSettingsEngine,
   getPosPaymentStatusEngine,
   checkPosReadinessEngine
@@ -72,7 +73,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const data = await createPosPaymentIntentEngine({
+    const data = await createPosPaymentEngine({
       amount: Number(body.amount || 0),
       currency: body.currency || "USD",
       idempotencyKey,
