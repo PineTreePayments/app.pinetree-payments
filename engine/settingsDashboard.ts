@@ -1,4 +1,4 @@
-import { supabaseAdmin, supabase } from "@/lib/database"
+import { supabaseAdmin, supabase } from "@/database"
 
 const db = supabaseAdmin || supabase
 

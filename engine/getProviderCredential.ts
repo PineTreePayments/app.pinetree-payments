@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/database/supabase"
+import { supabase } from "@/database/supabase"
 
 export async function getProviderCredential(
   merchantId: string,

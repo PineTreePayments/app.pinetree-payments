@@ -6,8 +6,6 @@
  */
 
 import { onEvent } from "./eventBus"
-import { getMerchantPaymentStats } from "@/lib/database/payments"
-import { updateWalletBalance } from "@/lib/database/walletBalances"
 
 /**
  * Register all payment event handlers
@@ -81,21 +79,3 @@ export function registerPaymentEvents() {
     // - Update analytics
   })
 }
-
-/**
- * Get event handler statistics
- */
-export function getEventStats() {
-  return {
-    registeredEvents: Object.keys(handlers).length,
-    handlers: Object.fromEntries(
-      Object.entries(handlers).map(([event, handlers]) => [
-        event,
-        handlers.length
-      ])
-    )
-  }
-}
-
-// Internal handler storage for stats
-const handlers: Record<string, Array<(payload: any) => void>> = {}

@@ -1,4 +1,5 @@
 import {
+  getAllMerchantWalletRows,
   getMerchantWalletRows,
   getMerchantAssetBalances,
   upsertMerchantAssetBalances,
@@ -162,6 +163,48 @@ export async function refreshWalletBalancesEngine(merchantId: string) {
     timestamp: now,
     perWallet,
     totalsByAsset
+  }
+}
+
+export async function refreshAllWalletBalancesEngine() {
+  const walletRows = await getAllMerchantWalletRows()
+  const now = new Date().toISOString()
+
+  const walletsByMerchant = new Map<string, Array<{ id: string; network: string; wallet_address: string }>>()
+
+  for (const wallet of walletRows) {
+    const merchantId = String(wallet.merchant_id || "").trim()
+    if (!merchantId) continue
+
+    const existing = walletsByMerchant.get(merchantId) || []
+    existing.push({
+      id: wallet.id,
+      network: wallet.network,
+      wallet_address: wallet.wallet_address
+    })
+    walletsByMerchant.set(merchantId, existing)
+  }
+
+  for (const [merchantId, merchantWallets] of walletsByMerchant.entries()) {
+    const { totalsByAsset } = await scanWalletBalances(merchantWallets)
+
+    await upsertMerchantAssetBalances(
+      merchantId,
+      [
+        { asset: "SOL", balance: totalsByAsset.SOL },
+        { asset: "ETH", balance: totalsByAsset.ETH }
+      ],
+      now
+    )
+  }
+
+  await setSystemLastRun(now)
+
+  return {
+    success: true,
+    timestamp: now,
+    merchantCount: walletsByMerchant.size,
+    walletCount: walletRows.length
   }
 }
 

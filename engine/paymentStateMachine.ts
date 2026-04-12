@@ -12,8 +12,26 @@ export type PaymentStatus =
   | "CONFIRMED"
   | "FAILED"
   | "INCOMPLETE"
-  | "EXPIRED"
-  | "REFUNDED"
+
+export function normalizeToStrictPaymentStatus(status: unknown): PaymentStatus {
+  const normalized = String(status || "").toUpperCase().trim()
+
+  if (normalized === "EXPIRED") return "INCOMPLETE"
+  if (normalized === "REFUNDED") return "CONFIRMED"
+
+  if (
+    normalized === "CREATED" ||
+    normalized === "PENDING" ||
+    normalized === "PROCESSING" ||
+    normalized === "CONFIRMED" ||
+    normalized === "FAILED" ||
+    normalized === "INCOMPLETE"
+  ) {
+    return normalized
+  }
+
+  throw new Error(`Unknown payment status: ${String(status || "")}`)
+}
 
 /**
  * Valid state transitions for payments
@@ -22,23 +40,21 @@ export type PaymentStatus =
  * This ensures payments follow a valid lifecycle.
  */
 const validTransitions: Record<PaymentStatus, PaymentStatus[]> = {
-  // Payment exists but has not yet been presented to customer
-  CREATED: ["PENDING", "FAILED", "INCOMPLETE"],
+  // Strict lifecycle: CREATED -> PENDING -> PROCESSING -> CONFIRMED
+  CREATED: ["PENDING"],
 
-  // Initial state - can move to processing, fail, or expire
-  PENDING: ["PROCESSING", "FAILED", "INCOMPLETE", "EXPIRED"],
+  // Allowed alternative path: PENDING -> INCOMPLETE
+  PENDING: ["PROCESSING", "INCOMPLETE"],
 
-  // Payment detected on chain - can confirm, fail, or expire
-  PROCESSING: ["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED"],
+  // Allowed alternative path: PROCESSING -> FAILED
+  PROCESSING: ["CONFIRMED", "FAILED"],
 
-  // Payment complete - can only be refunded
-  CONFIRMED: ["REFUNDED"],
+  // Terminal state
+  CONFIRMED: [],
 
   // Terminal states - no further transitions
   FAILED: [],
-  INCOMPLETE: [],
-  EXPIRED: [],
-  REFUNDED: []
+  INCOMPLETE: []
 }
 
 /**

@@ -1,6 +1,6 @@
 import { createPayment } from "@/engine/createPayment"
-import { getMerchantTaxSettings, getMerchantProviders } from "@/lib/database/merchants"
-import { hasAnyWalletConnected, selectBestWallet } from "@/lib/database/merchantWallets"
+import { getMerchantTaxSettings, getMerchantProviders } from "@/database/merchants"
+import { hasAnyWalletConnected, selectBestWallet } from "@/database/merchantWallets"
 import { createPaymentIntentEngine } from "./paymentIntents"
 import { getUnifiedPaymentStatusEngine } from "./paymentStatusOrchestrator"
 import {

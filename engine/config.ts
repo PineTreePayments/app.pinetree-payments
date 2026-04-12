@@ -71,6 +71,18 @@ function isEvmAddress(value: string): boolean {
   return /^0x[a-fA-F0-9]{40}$/.test(String(value || "").trim())
 }
 
+function getEvmSplitMode(): string {
+  return String(process.env.PINETREE_EVM_SPLIT_MODE || "").toLowerCase().trim()
+}
+
+function getEvmSplitContract(network: "base" | "ethereum"): string {
+  if (network === "ethereum") {
+    return String(process.env.PINETREE_EVM_SPLIT_CONTRACT_ETHEREUM || "").trim()
+  }
+
+  return String(process.env.PINETREE_EVM_SPLIT_CONTRACT_BASE || "").trim()
+}
+
 function isLikelySolanaAddress(value: string): boolean {
   // Base58-ish, common Solana length range
   const normalized = String(value || "").trim()
@@ -113,6 +125,41 @@ export function assertTreasuryWalletFormat(network: string): void {
   if (!isEvmAddress(wallet)) {
     throw new Error(
       `Invalid PINETREE treasury wallet format for ${normalized}. Expected 0x... EVM address in PINETREE_TREASURY_WALLET_${normalized.toUpperCase()}.`
+    )
+  }
+}
+
+/**
+ * Enforce runtime config required for successful split processing by rail.
+ *
+ * - Solana: treasury wallet format must be valid.
+ * - EVM (Base/Ethereum): contract_split mode + valid split contract address.
+ */
+export function assertSplitRailConfig(network: string): void {
+  const normalized = normalizeTreasuryNetwork(network)
+
+  // Always validate treasury format first
+  assertTreasuryWalletFormat(normalized)
+
+  if (normalized === "solana") {
+    return
+  }
+
+  const splitMode = getEvmSplitMode()
+  if (splitMode !== "contract") {
+    throw new Error(
+      "EVM split processing requires PINETREE_EVM_SPLIT_MODE=contract"
+    )
+  }
+
+  const splitContract = getEvmSplitContract(normalized)
+  if (!isEvmAddress(splitContract)) {
+    throw new Error(
+      `Missing or invalid EVM split contract for ${normalized}. Configure ${
+        normalized === "ethereum"
+          ? "PINETREE_EVM_SPLIT_CONTRACT_ETHEREUM"
+          : "PINETREE_EVM_SPLIT_CONTRACT_BASE"
+      } with a valid 0x address.`
     )
   }
 }

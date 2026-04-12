@@ -1,5 +1,6 @@
 import { getProvider, isProviderHealthy } from "./providerRegistry"
 import { loadProviders } from "./loadProviders"
+import type { ProviderAdapter } from "@/types/provider"
 
 async function ensureProvidersLoaded() {
   await loadProviders()
@@ -26,7 +27,7 @@ export async function paymentRouter(input: PaymentRouterInput) {
 
   }
 
-  const provider: any = getProvider(providerName)
+  const provider: ProviderAdapter = getProvider(providerName)
 
   if (!provider) {
     throw new Error(`Provider not found: ${providerName}`)
@@ -37,6 +38,10 @@ export async function paymentRouter(input: PaymentRouterInput) {
     amount: input.amount,
     currency: input.currency,
     merchantId: input.merchantId
+  }
+
+  if (!provider.createPayment) {
+    throw new Error(`Provider does not support createPayment: ${providerName}`)
   }
 
   return await provider.createPayment(paymentInput)

@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState, useEffect, useCallback } from "react"
-import { supabase } from "@/lib/database/supabase"
+import { supabase } from "@/database/supabase"
 
 type Status =
   | "idle"

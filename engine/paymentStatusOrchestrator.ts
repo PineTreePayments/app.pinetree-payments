@@ -5,6 +5,8 @@ type PaymentWatchSplitMetadata = {
   split?: {
     merchantWallet?: string
     pinetreeWallet?: string
+    feeCaptureMethod?: string
+    splitContract?: string
     expectedAmountNative?: number
     merchantNativeAmountAtomic?: string | number
     feeNativeAmountAtomic?: string | number
@@ -89,6 +91,8 @@ export function queueSingleWatcherIteration(payment: WatchablePayment, source: s
       expectedAmountNative: split?.expectedAmountNative,
       expectedMerchantAtomic: split?.merchantNativeAmountAtomic,
       expectedFeeAtomic: split?.feeNativeAmountAtomic,
+      feeCaptureMethod: split?.feeCaptureMethod,
+      splitContract: split?.splitContract,
       network,
       paymentId: payment.id,
       singleIteration: true

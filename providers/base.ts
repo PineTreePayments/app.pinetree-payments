@@ -8,6 +8,10 @@
 
 import type { ProviderAdapter, PaymentStatus } from "@/types/provider"
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object"
+}
+
 export abstract class BaseProviderAdapter implements ProviderAdapter {
   /**
    * Provider identifier (lowercase, no spaces)
@@ -39,6 +43,7 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     paymentUrl?: string
     qrCodeUrl?: string
   }> {
+    void input
     throw new Error(`createPayment not implemented for ${this.providerName}`)
   }
 
@@ -49,6 +54,7 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     address: string
     network: string
   }> {
+    void merchantId
     throw new Error(`getMerchantWallet not implemented for ${this.providerName}`)
   }
 
@@ -58,20 +64,24 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
   async getPaymentStatus(providerReference: string): Promise<{
     status: PaymentStatus
   }> {
+    void providerReference
     return { status: "PROCESSING" }
   }
 
   /**
    * Verify webhook signature authenticity
    */
-  verifyWebhook(payload: any, signature?: string): boolean {
+  verifyWebhook(payload: unknown, signature?: string, rawBody?: string): boolean {
+    void payload
+    void signature
+    void rawBody
     return true
   }
 
   /**
    * Translate provider event to standard PineTree event
    */
-  translateEvent(payload: any): {
+  translateEvent(payload: unknown): {
     paymentId: string
     event:
       | "payment.created"
@@ -79,13 +89,12 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
       | "payment.processing"
       | "payment.confirmed"
       | "payment.failed"
-      | "payment.cancelled"
-      | "payment.incomplete"
-      | "payment.expired"
-      | "payment.refunded"
   } {
+    const source = isRecord(payload) ? payload : {}
+    const paymentId = String(source.paymentId || source.reference || "")
+
     return {
-      paymentId: payload.paymentId || payload.reference || "",
+      paymentId,
       event: "payment.pending"
     }
   }

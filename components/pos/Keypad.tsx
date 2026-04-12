@@ -11,6 +11,7 @@ export default function Keypad({
   setDigits,
   maxLength = 11,
 }: Props) {
+  void digits
 
   function press(num: string) {
 

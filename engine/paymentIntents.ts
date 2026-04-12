@@ -39,10 +39,57 @@ function uniqueNetworks(networks: WalletNetwork[]) {
 
 type StoredPaymentSplitMetadata = {
   split?: {
+    merchantWallet?: string
     expectedAmountNative?: number
     merchantNativeAmount?: number
     feeNativeAmount?: number
   }
+}
+
+type WalletOption = {
+  id: string
+  label: string
+  href: string
+}
+
+function buildWalletOptions(walletUrl: string): WalletOption[] {
+  const normalizedUrl = String(walletUrl || "").trim()
+  if (!normalizedUrl) return []
+
+  const encodedWalletUrl = encodeURIComponent(normalizedUrl)
+
+  return [
+    {
+      id: "phantom",
+      label: "Phantom",
+      href: `https://phantom.app/ul/browse/${encodedWalletUrl}`
+    },
+    {
+      id: "solflare",
+      label: "Solflare",
+      href: `https://solflare.com/ul/v1/browse/${encodedWalletUrl}`
+    },
+    {
+      id: "metamask",
+      label: "MetaMask",
+      href: `metamask://dapp?url=${encodedWalletUrl}`
+    },
+    {
+      id: "basewallet",
+      label: "Base Wallet",
+      href: `cbwallet://dapp?url=${encodedWalletUrl}`
+    },
+    {
+      id: "coinbase",
+      label: "Coinbase App",
+      href: `https://go.cb-w.com/dapp?cb_url=${encodedWalletUrl}`
+    },
+    {
+      id: "trust",
+      label: "Trust Wallet",
+      href: `https://link.trustwallet.com/open_url?url=${encodedWalletUrl}`
+    }
+  ]
 }
 
 function inferNativeSymbolFromNetwork(network?: string): string | undefined {
@@ -63,6 +110,12 @@ function inferNativeAmountFromPayment(payment: { metadata?: unknown } | null | u
   const feeNativeAmount = Number(split?.feeNativeAmount || 0)
   const total = merchantNativeAmount + feeNativeAmount
   return total > 0 ? total : undefined
+}
+
+function inferRecipientAddressFromPayment(payment: { metadata?: unknown } | null | undefined): string | undefined {
+  const metadata = (payment?.metadata || null) as StoredPaymentSplitMetadata | null
+  const recipient = String(metadata?.split?.merchantWallet || "").trim()
+  return recipient || undefined
 }
 
 export async function getMerchantAvailableNetworks(merchantId: string): Promise<WalletNetwork[]> {
@@ -164,6 +217,8 @@ export async function selectPaymentIntentNetworkEngine(input: {
 
   if (intent.status === "SELECTED" && intent.payment_id) {
     const existingPayment = await getPaymentById(intent.payment_id)
+    const walletUrl = String(existingPayment?.payment_url || "")
+    const recipientAddress = inferRecipientAddressFromPayment(existingPayment)
 
     return {
       intentId: intent.id,
@@ -173,6 +228,9 @@ export async function selectPaymentIntentNetworkEngine(input: {
       universalUrl: undefined,
       paymentUrl: existingPayment?.payment_url || undefined,
       qrCodeUrl: existingPayment?.qr_code_url || undefined,
+      address: recipientAddress,
+      walletUrl: walletUrl || undefined,
+      walletOptions: buildWalletOptions(walletUrl),
       provider: existingPayment?.provider || undefined,
       nativeAmount: inferNativeAmountFromPayment(existingPayment),
       nativeSymbol: inferNativeSymbolFromNetwork(existingPayment?.network)
@@ -249,6 +307,8 @@ export async function selectPaymentIntentNetworkEngine(input: {
       paymentId: payment.id
     })
 
+    const walletUrl = String(payment.universalUrl || payment.paymentUrl || "")
+
     return {
       intentId: intent.id,
       paymentId: payment.id,
@@ -257,6 +317,8 @@ export async function selectPaymentIntentNetworkEngine(input: {
       paymentUrl: payment.paymentUrl,
       qrCodeUrl: payment.qrCodeUrl,
       address: payment.address,
+      walletUrl: walletUrl || undefined,
+      walletOptions: buildWalletOptions(walletUrl),
       universalUrl: payment.universalUrl,
       nativeAmount: payment.nativeAmount,
       nativeSymbol: payment.nativeSymbol,

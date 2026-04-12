@@ -8,7 +8,8 @@
 import { ProviderAdapter } from "@/types/provider"
 import { registerProvider } from "../engine/providerRegistry"
 import { setProviderHealth } from "../engine/providerRegistry"
-import { getMerchantCredential } from "@/lib/database/merchants"
+import { getMerchantCredential } from "@/database/merchants"
+import crypto from "crypto"
 
 /**
  * Coinbase Commerce API base URL
@@ -29,6 +30,17 @@ type CoinbaseEventType =
  * Coinbase Charge Status
  */
 type CoinbaseStatus = "NEW" | "PENDING" | "COMPLETED" | "RESOLVED" | "EXPIRED" | "CANCELED"
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object"
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(String(a || ""))
+  const right = Buffer.from(String(b || ""))
+  if (left.length !== right.length) return false
+  return crypto.timingSafeEqual(left, right)
+}
 
 export const coinbaseAdapter: ProviderAdapter = {
 
@@ -153,10 +165,25 @@ export const coinbaseAdapter: ProviderAdapter = {
      Validates webhook signature (basic implementation)
   -------------------------------- */
 
-  verifyWebhook(payload: any, signature?: string) {
-    // TODO: Implement proper signature verification
-    // For now, accept all webhooks
-    return true
+  verifyWebhook(payload: unknown, signature?: string, rawBody?: string) {
+    const secret = String(process.env.COINBASE_WEBHOOK_SHARED_SECRET || "").trim()
+    const provided = String(signature || "").trim()
+
+    if (!secret || !provided) {
+      return false
+    }
+
+    const body =
+      typeof rawBody === "string"
+        ? rawBody
+        : JSON.stringify(payload || {})
+
+    const expected = crypto
+      .createHmac("sha256", secret)
+      .update(body)
+      .digest("hex")
+
+    return safeEqual(expected, provided)
   },
 
   /* --------------------------------
@@ -164,11 +191,16 @@ export const coinbaseAdapter: ProviderAdapter = {
      Converts Coinbase events to PineTree standardized events
   -------------------------------- */
 
-  translateEvent(payload: any) {
-    const event = payload?.event?.type as CoinbaseEventType
+  translateEvent(payload: unknown) {
+    const source = isRecord(payload) ? payload : {}
+    const eventObj = isRecord(source.event) ? source.event : {}
+    const eventData = isRecord(eventObj.data) ? eventObj.data : {}
+    const metadata = isRecord(eventData.metadata) ? eventData.metadata : {}
+
+    const event = String(eventObj.type || "") as CoinbaseEventType
 
     // Extract payment ID from metadata
-    const paymentId = payload?.event?.data?.metadata?.paymentId || ""
+    const paymentId = String(metadata.paymentId || "")
 
     // Translate Coinbase events to PineTree events
     switch (event) {

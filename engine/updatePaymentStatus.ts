@@ -4,13 +4,17 @@
  * Handles payment status transitions with proper state machine validation.
  */
 
-import { assertValidTransition, PaymentStatus } from "./paymentStateMachine"
+import {
+  assertValidTransition,
+  PaymentStatus,
+  normalizeToStrictPaymentStatus
+} from "./paymentStateMachine"
 import {
   updatePaymentStatus as updatePaymentStatusInDb,
   getPaymentById,
   createPaymentEvent,
   PaymentEventType
-} from "@/lib/database"
+} from "@/database"
 import { emitEvent } from "./eventBus"
 
 /**
@@ -35,7 +39,24 @@ export async function updatePaymentStatus(
     throw new Error("Payment not found")
   }
 
-  const currentStatus = payment.status
+  const currentStatus = normalizeToStrictPaymentStatus(payment.status)
+
+  if (nextStatus === "CONFIRMED") {
+    const split = (payment.metadata as { split?: Record<string, unknown> } | null)?.split
+    const feeCaptureMethod = String(split?.feeCaptureMethod || "").trim()
+    const hasSplitMetadata = Boolean(
+      String(split?.merchantWallet || "").trim() &&
+      String(split?.pinetreeWallet || "").trim()
+    )
+
+    const feeCaptureValidated = Boolean(
+      (metadata?.rawPayload as { feeCaptureValidated?: boolean } | undefined)?.feeCaptureValidated
+    )
+
+    if (!hasSplitMetadata || !feeCaptureMethod || !feeCaptureValidated) {
+      throw new Error("Fee capture validation failed: payment cannot be confirmed")
+    }
+  }
 
   // Validate the transition is allowed
   assertValidTransition(currentStatus, nextStatus)
@@ -76,12 +97,10 @@ function statusToEventType(status: PaymentStatus): PaymentEventType {
     PROCESSING: "payment.processing",
     CONFIRMED: "payment.confirmed",
     FAILED: "payment.failed",
-    INCOMPLETE: "payment.cancelled",
-    EXPIRED: "payment.expired",
-    REFUNDED: "payment.refunded"
+    INCOMPLETE: "payment.cancelled"
   }
 
-  return mapping[status] || "payment.pending"
+  return mapping[status]
 }
 
 /**

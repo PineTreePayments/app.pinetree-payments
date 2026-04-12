@@ -1,4 +1,4 @@
-import { supabaseAdmin, supabase } from "@/lib/database"
+import { supabaseAdmin, supabase } from "@/database"
 import { getWalletOverviewEngine } from "./walletOverview"
 
 const db = supabaseAdmin || supabase

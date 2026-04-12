@@ -8,12 +8,24 @@
 import { ProviderAdapter } from "@/types/provider"
 import { registerProvider } from "../engine/providerRegistry"
 import { setProviderHealth } from "../engine/providerRegistry"
-import { getMerchantCredential } from "@/lib/database/merchants"
+import { getMerchantCredential } from "@/database/merchants"
+import crypto from "crypto"
 
 /**
  * Shift4 API base URL
  */
 const SHIFT4_API_BASE = "https://api.shift4.com"
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object"
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(String(a || ""))
+  const right = Buffer.from(String(b || ""))
+  if (left.length !== right.length) return false
+  return crypto.timingSafeEqual(left, right)
+}
 
 export const shift4Adapter: ProviderAdapter = {
 
@@ -126,10 +138,25 @@ export const shift4Adapter: ProviderAdapter = {
      Validates Shift4 webhook signature
   -------------------------------- */
 
-  verifyWebhook() {
-    // TODO: Implement proper Shift4 webhook verification
-    // For now, accept all webhooks
-    return true
+  verifyWebhook(payload: unknown, signature?: string, rawBody?: string) {
+    const secret = String(process.env.SHIFT4_WEBHOOK_SHARED_SECRET || "").trim()
+    const provided = String(signature || "").trim()
+
+    if (!secret || !provided) {
+      return false
+    }
+
+    const body =
+      typeof rawBody === "string"
+        ? rawBody
+        : JSON.stringify(payload || {})
+
+    const expected = crypto
+      .createHmac("sha256", secret)
+      .update(body)
+      .digest("hex")
+
+    return safeEqual(expected, provided)
   },
 
   /* --------------------------------
@@ -137,9 +164,13 @@ export const shift4Adapter: ProviderAdapter = {
      Converts Shift4 events to PineTree events
   -------------------------------- */
 
-  translateEvent(payload: { type?: string; metadata?: { paymentId?: string }; payment?: { id?: string } }) {
-    const event = payload?.type || ""
-    const paymentId = payload?.metadata?.paymentId || payload?.payment?.id || ""
+  translateEvent(payload: unknown) {
+    const source = isRecord(payload) ? payload : {}
+    const metadata = isRecord(source.metadata) ? source.metadata : {}
+    const payment = isRecord(source.payment) ? source.payment : {}
+
+    const event = String(source.type || "")
+    const paymentId = String(metadata.paymentId || payment.id || "")
 
     // Translate Shift4 events to PineTree events
     switch (event) {

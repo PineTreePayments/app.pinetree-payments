@@ -49,9 +49,9 @@ export interface ProviderAdapter {
   WEBHOOK SUPPORT
   -------------------------------- */
 
-  verifyWebhook?(payload: any, signature?: string): boolean
+  verifyWebhook?(payload: unknown, signature?: string, rawBody?: string): boolean
 
-  translateEvent?(payload: any): {
+  translateEvent?(payload: unknown): {
     paymentId: string
     event:
       | "payment.created"
@@ -59,10 +59,6 @@ export interface ProviderAdapter {
       | "payment.processing"
       | "payment.confirmed"
       | "payment.failed"
-      | "payment.cancelled"
-      | "payment.incomplete"
-      | "payment.expired"
-      | "payment.refunded"
   }
 
   /**

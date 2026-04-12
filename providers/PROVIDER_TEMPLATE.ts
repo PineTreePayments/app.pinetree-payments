@@ -42,6 +42,7 @@ class ProviderNameAdapter extends BaseProviderAdapter {
    * Get merchant wallet address for this provider
    */
   async getMerchantWallet(merchantId: string) {
+    void merchantId
     // Implement merchant wallet retrieval
     return {
       address: "wallet_address_here",
@@ -53,6 +54,7 @@ class ProviderNameAdapter extends BaseProviderAdapter {
    * Get payment status from provider
    */
   async getPaymentStatus(providerReference: string): Promise<{ status: PaymentStatus }> {
+    void providerReference
     // Implement status check
     return {
       status: "PROCESSING" as PaymentStatus
@@ -62,7 +64,9 @@ class ProviderNameAdapter extends BaseProviderAdapter {
   /**
    * Verify webhook signature
    */
-  verifyWebhook(payload: any, signature?: string): boolean {
+  verifyWebhook(payload: unknown, signature?: string): boolean {
+    void payload
+    void signature
     // Implement signature verification
     return true
   }
@@ -70,10 +74,11 @@ class ProviderNameAdapter extends BaseProviderAdapter {
   /**
    * Translate provider event to standard PineTree event
    */
-  translateEvent(payload: any) {
+  translateEvent(payload: unknown) {
+    const source = (payload && typeof payload === "object") ? payload as Record<string, unknown> : {}
     // Map provider webhook payload to standard event
     return {
-      paymentId: payload.id,
+      paymentId: String(source.id || ""),
       event: "payment.confirmed" as const
     }
   }

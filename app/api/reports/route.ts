@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { generateReport } from "@/lib/reporting/generateReport"
-import { supabase } from "@/lib/database/supabase"
+import { generateReportEngine } from "@/engine/reports"
+import { supabase } from "@/database/supabase"
 
 export async function GET(req: NextRequest) {
 
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
     GENERATE REPORT
     --------------------------- */
 
-    const report = await generateReport({
+    const report = await generateReportEngine({
       merchantId: user.id,
       startDate,
       endDate
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(report)
 
-  } catch (error: any) {
+  } catch (error: unknown) {
 
     console.error("Report error:", error)
 

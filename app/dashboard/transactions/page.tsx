@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
-import { supabase } from "@/lib/database/supabase"
+import { supabase } from "@/database/supabase"
 
 import {
   ResponsiveContainer,
@@ -179,7 +179,7 @@ export default function TransactionsPage() {
          `Your busiest hour is ${peakH}:00. ${providerName(topP)} is your most used provider, and ${networkName(topN)} is your most used network.`
        )
     }
-  }, [providerName])
+  }, [providerName, networkName])
 
   const loadDashboardData = useCallback(async () => {
     try {

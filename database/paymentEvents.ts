@@ -16,7 +16,7 @@ export type PaymentEvent = {
   payment_id: string
   event_type: PaymentEventType
   provider_event?: string
-  raw_payload?: any
+  raw_payload?: unknown
   created_at: string
 }
 
@@ -25,7 +25,13 @@ export type CreatePaymentEventInput = {
   payment_id: string
   event_type: PaymentEventType
   provider_event?: string
-  raw_payload?: any
+  raw_payload?: unknown
+}
+
+type EventWithPaymentMerchant = PaymentEvent & {
+  payments?: {
+    merchant_id?: string | null
+  } | null
 }
 
 /**
@@ -110,5 +116,5 @@ export async function getEventsByType(
     throw new Error(`Failed to fetch events: ${error.message}`)
   }
 
-  return data as (PaymentEvent & { payments?: any })[]
+  return data as EventWithPaymentMerchant[]
 }

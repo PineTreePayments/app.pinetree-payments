@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { supabase } from "@/lib/database/supabase"
+import { supabase } from "@/database/supabase"
 
 type WalletItem = {
   id: string

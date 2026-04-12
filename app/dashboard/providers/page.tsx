@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import Image from "next/image"
-import { supabase } from "@/lib/supabaseClient"
+import { supabase } from "@/database/supabase"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
 import { toast } from "sonner"
 import QRCode from "qrcode"

@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
-import { supabase } from "@/lib/supabaseClient"
+import { supabase } from "@/database/supabase"
 import { Toaster } from "sonner"
 
 export default function DashboardLayout({

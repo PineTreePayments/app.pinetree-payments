@@ -1,6 +1,6 @@
 import { ProviderAdapter } from "@/types/provider"
 import { registerProvider } from "../engine/providerRegistry"
-import { getBestWalletForNetwork } from "@/lib/database/merchantWallets"
+import { getBestWalletForNetwork } from "@/database/merchantWallets"
 
 /**
  * Base Pay adapter

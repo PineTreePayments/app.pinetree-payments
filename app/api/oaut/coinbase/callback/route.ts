@@ -24,7 +24,11 @@ redirect_uri:`${process.env.APP_URL}/api/oauth/coinbase/callback`
 })
 })
 
-const tokenData = await tokenRes.json()
+const tokenData = await tokenRes.json() as { access_token?: string }
+
+if(!tokenRes.ok || !tokenData?.access_token){
+return NextResponse.redirect("/dashboard/providers?error=coinbase_oauth_failed")
+}
 
 /*
 store tokenData.access_token

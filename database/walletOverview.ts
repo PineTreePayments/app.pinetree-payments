@@ -24,6 +24,18 @@ export async function getMerchantWalletRows(merchantId: string) {
   return (data || []) as MerchantWalletRow[]
 }
 
+export async function getAllMerchantWalletRows() {
+  const { data, error } = await db
+    .from("merchant_wallets")
+    .select("id, merchant_id, network, wallet_address, wallet_type, provider")
+
+  if (error) {
+    throw new Error(`Failed to load merchant wallets: ${error.message}`)
+  }
+
+  return (data || []) as MerchantWalletRow[]
+}
+
 export async function getMerchantAssetBalances(merchantId: string) {
   const { data, error } = await db
     .from("wallet_balances")

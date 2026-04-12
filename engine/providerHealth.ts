@@ -7,9 +7,7 @@
 
 import { 
   setProviderHealth, 
-  getProviderHealthStatus, 
-  getAllProviders,
-  isProviderHealthy
+  getAllProviders
 } from "./providerRegistry"
 
 import { HEALTH_CHECK_CONFIG } from "./config"
@@ -27,7 +25,7 @@ export async function runProviderHealthChecks() {
     if (adapter.healthCheck) {
       try {
         healthy = await adapter.healthCheck()
-      } catch (error) {
+      } catch {
         healthy = false
       }
     }

@@ -18,7 +18,7 @@ export default function SolanaReturnPage() {
           return
         }
 
-        const provider = (window as any).solana
+        const provider = window.solana
 
         if (!provider) {
           alert("No Solana wallet found (Phantom / Solflare)")

@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { supabase } from "@/lib/database/supabase"
+import { supabase } from "@/database/supabase"
 import { toast } from "sonner"
 
 type MerchantSettingsPayload = {

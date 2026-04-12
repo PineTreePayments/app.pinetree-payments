@@ -56,7 +56,7 @@ export {
 export { onEvent, emitEvent } from "./eventBus"
 
 // Webhook Processing
-export { processWebhook } from "./webhookProcessor"
+export { processWebhook } from "./eventProcessor"
 
 // Provider Management
 export { 

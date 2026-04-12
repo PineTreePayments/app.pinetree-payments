@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useState, useEffect, useRef, useCallback } from "react"
 import { Eye, EyeOff } from "lucide-react"
-import { supabase } from "@/lib/supabaseClient"
+import { supabase } from "@/database/supabase"
 import { toast } from "sonner"
 
 type Terminal = {

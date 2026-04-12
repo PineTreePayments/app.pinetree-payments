@@ -1,35 +1,19 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { NextResponse } from "next/server"
+import { applyShift4OnboardingEngine } from "@/engine/shift4Onboarding"
 
 export async function POST(req: Request) {
   try {
-    const { email } = await req.json();
+    const body = (await req.json()) as { email?: string }
+    const result = await applyShift4OnboardingEngine({
+      email: String(body?.email || "")
+    })
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
-    );
-
-    const { error } = await supabase
-      .from("merchants")
-      .update({
-        application_started: true,
-        application_status: "pending"
-      })
-      .eq("email", email);
-
-    if (error) {
-      return NextResponse.json({ error }, { status: 500 });
-    }
-
-    return NextResponse.json({
-      url: "https://www.shift4.com/" // placeholder until they send embed URL
-    });
-
+    return NextResponse.json(result)
   } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to start Shift4 onboarding"
     return NextResponse.json(
-      { error: "Failed to start Shift4 onboarding" },
+      { error: message },
       { status: 500 }
-    );
+    )
   }
 }

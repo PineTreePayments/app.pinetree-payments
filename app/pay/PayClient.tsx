@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
+import Image from "next/image"
 import { ALLOWED_ASSETS, getAvailableAssetsFromValues } from "@/engine/providerMappings"
 
 type SplitOutput = {
@@ -15,8 +16,10 @@ type SplitPayload = {
   reference?: string
   outputs?: SplitOutput[]
   paymentUrl?: string
+  walletUrl?: string
   qrCodeUrl?: string
   universalUrl?: string
+  walletOptions?: WalletOption[]
   totalAmount?: number
   usdTotalAmount?: number
   nativeAmount?: number
@@ -41,7 +44,6 @@ type WalletOption = {
   id: string
   label: string
   href: string
-  icon?: string
 }
 
 function parsePayload(raw: string | null): SplitPayload | null {
@@ -66,114 +68,6 @@ function parsePayload(raw: string | null): SplitPayload | null {
   }
 
   return null
-}
-
-function roundAmount(value: number, decimals: number): number {
-  const factor = Math.pow(10, decimals)
-  return Math.round(value * factor) / factor
-}
-
-function toWeiString(amountEth: number): string {
-  const safe = Number.isFinite(amountEth) && amountEth > 0 ? amountEth : 0
-  const [whole, fraction = ""] = safe.toFixed(18).split(".")
-  const normalized = `${whole}${fraction.padEnd(18, "0").slice(0, 18)}`.replace(/^0+/, "")
-  return normalized || "0"
-}
-
-function buildWalletUrl(payload: SplitPayload, rawData: string) {
-  const network = String(payload.network || "").toLowerCase()
-  const explicitPaymentUrl = String(payload.paymentUrl || "").trim()
-  const recipient = String(payload.outputs?.[0]?.address || "")
-  const usdTotal = Number(payload.usdTotalAmount ?? payload.totalAmount ?? 0)
-  const nativeAmountRaw = Number(payload.nativeAmount ?? 0)
-  const nativeAmount = Number.isFinite(nativeAmountRaw) && nativeAmountRaw > 0 ? nativeAmountRaw : usdTotal
-  const reference = String(payload.reference || "")
-
-  if (network === "solana") {
-    // For Solana split payments, prefer transaction-request URL so wallets execute
-    // the server-generated split transaction instead of a direct merchant transfer.
-    if (explicitPaymentUrl.startsWith("http://") || explicitPaymentUrl.startsWith("https://")) {
-      return explicitPaymentUrl
-    }
-
-    if (!recipient) return ""
-
-    const query = new URLSearchParams()
-    if (Number.isFinite(nativeAmount) && nativeAmount > 0) {
-      query.set("amount", String(roundAmount(nativeAmount, 9)))
-    }
-    if (reference) query.set("reference", reference)
-    query.set("label", "PineTree Payments")
-    query.set("message", reference ? `PineTree Checkout #${reference.slice(0, 8)}` : "Pay securely with PineTree")
-
-    const qs = query.toString()
-    return qs ? `solana:${recipient}?${qs}` : `solana:${recipient}`
-  }
-
-  if (network === "base" || network === "base_pay" || network === "ethereum") {
-    if (!recipient) return ""
-    const chainId = network === "ethereum" ? "1" : "8453"
-    return `ethereum:${recipient}@${chainId}?value=${toWeiString(nativeAmount)}`
-  }
-
-  return `pinetree://pay?data=${encodeURIComponent(rawData)}`
-}
-
-function buildWalletOptions(walletUrl: string): WalletOption[] {
-  if (!walletUrl) return []
-
-  const encodedWalletUrl = encodeURIComponent(walletUrl)
-
-  // Unified wallet app list for all networks (multi-chain wallet support)
-  return [
-    {
-      id: "phantom",
-      label: "Phantom",
-      href: `https://phantom.app/ul/browse/${encodedWalletUrl}`
-    },
-    {
-      id: "solflare",
-      label: "Solflare",
-      href: `https://solflare.com/ul/v1/browse/${encodedWalletUrl}`
-    },
-    {
-      id: "metamask",
-      label: "MetaMask",
-      href: `metamask://dapp?url=${encodedWalletUrl}`
-    },
-    {
-      id: "basewallet",
-      label: "Base Wallet",
-      href: `cbwallet://dapp?url=${encodedWalletUrl}`
-    },
-    {
-      id: "coinbase",
-      label: "Coinbase App",
-      href: `https://go.cb-w.com/dapp?cb_url=${encodedWalletUrl}`
-    },
-    {
-      id: "trust",
-      label: "Trust Wallet",
-      href: `https://link.trustwallet.com/open_url?url=${encodedWalletUrl}`
-    }
-  ]
-}
-
-function extractAddressFromPaymentUrl(paymentUrl?: string): string {
-  const raw = String(paymentUrl || "")
-  if (!raw) return ""
-
-  if (raw.startsWith("solana:")) {
-    const value = raw.slice("solana:".length)
-    return value.split("?")[0] || ""
-  }
-
-  if (raw.startsWith("ethereum:")) {
-    const value = raw.slice("ethereum:".length)
-    return value.split("@")[0] || ""
-  }
-
-  return ""
 }
 
 function formatUsd(amount: number) {
@@ -202,13 +96,15 @@ export default function PayClient() {
   const payload = useMemo(() => parsePayload(rawData), [rawData])
   const activePayload = paymentPayload || payload
   
-  const walletUrl = useMemo(
-    () => (activePayload ? buildWalletUrl(activePayload, rawData || "") : ""),
-    [activePayload, rawData]
+  const walletUrl = String(
+    activePayload?.walletUrl ||
+      activePayload?.universalUrl ||
+      activePayload?.paymentUrl ||
+      ""
   )
   const walletOptions = useMemo(
-    () => (activePayload ? buildWalletOptions(walletUrl) : []),
-    [activePayload, walletUrl]
+    () => (Array.isArray(activePayload?.walletOptions) ? activePayload.walletOptions : []),
+    [activePayload]
   )
 
   const normalizedPaymentStatus = String(paymentStatus || "").toUpperCase()
@@ -352,7 +248,7 @@ export default function PayClient() {
       }
       const result = await res.json()
       const paymentUrl = String(result.paymentUrl || "")
-      const derivedAddress = String(result.address || extractAddressFromPaymentUrl(paymentUrl))
+      const derivedAddress = String(result.address || "")
 
       // Update state with actual payment data from API response
       setPaymentPayload({
@@ -361,6 +257,8 @@ export default function PayClient() {
         nativeAmount: Number(result.nativeAmount || 0),
         nativeSymbol: String(result.nativeSymbol || asset.symbol || "").toUpperCase(),
         paymentUrl,
+        walletUrl: String(result.walletUrl || result.universalUrl || paymentUrl || ""),
+        walletOptions: Array.isArray(result.walletOptions) ? result.walletOptions : [],
         qrCodeUrl: String(result.qrCodeUrl || ""),
         universalUrl: String(result.universalUrl || paymentUrl || ""),
         outputs: derivedAddress ? [{ address: derivedAddress, amount: result.nativeAmount || 0 }] : []
@@ -621,7 +519,7 @@ export default function PayClient() {
         {paymentQrUrl ? (
           <div className="flex flex-col items-center rounded-2xl border border-blue-100 bg-blue-50/40 p-4">
             <p className="text-xs uppercase tracking-wider text-blue-600 mb-3">Scan QR to Pay</p>
-            <img src={paymentQrUrl} alt="Payment QR" className="h-52 w-52 rounded-xl bg-white p-2" />
+            <Image src={paymentQrUrl} alt="Payment QR" width={208} height={208} className="h-52 w-52 rounded-xl bg-white p-2" />
           </div>
         ) : null}
 

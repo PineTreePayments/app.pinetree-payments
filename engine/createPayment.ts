@@ -24,6 +24,7 @@ import { providerToPreferredNetwork } from "./providerMappings"
 import {
   getPineTreeTreasuryWallet,
   assertTreasuryWalletFormat,
+  assertSplitRailConfig,
   validateConfigOnce
 } from "./config"
 
@@ -47,6 +48,17 @@ function inferNativeSymbolFromNetwork(network?: string): string | undefined {
   if (normalized === "solana") return "SOL"
   if (normalized === "base" || normalized === "base_pay" || normalized === "ethereum") return "ETH"
   return undefined
+}
+
+function extractEvmSplitContractFromPaymentUrl(paymentUrl?: string): string | undefined {
+  const raw = String(paymentUrl || "").trim()
+  if (!raw.startsWith("ethereum:")) return undefined
+
+  const withoutScheme = raw.slice("ethereum:".length)
+  const contract = withoutScheme.split("@")[0]?.trim()
+  if (!contract) return undefined
+
+  return contract
 }
 
 type CreatePaymentInput = {
@@ -292,6 +304,7 @@ export async function createPayment(
   --------------------------- */
 
   assertTreasuryWalletFormat(network)
+  assertSplitRailConfig(network)
   const pinetreeWallet = getPineTreeTreasuryWallet(network)
 
   /* ---------------------------
@@ -333,6 +346,8 @@ export async function createPayment(
       split: {
         merchantWallet: merchantWalletAddress,
         pinetreeWallet,
+        feeCaptureMethod: splitPayment.feeCaptureMethod,
+        splitContract: extractEvmSplitContractFromPaymentUrl(splitPayment.paymentUrl),
         expectedAmountNative: splitPayment.nativeAmount,
         merchantNativeAmount: splitPayment.merchantNativeAmount,
         feeNativeAmount: splitPayment.feeNativeAmount,

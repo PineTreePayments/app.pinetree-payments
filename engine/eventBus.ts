@@ -1,4 +1,5 @@
-type EventHandler = (payload: any) => Promise<void> | void
+type EventPayload = Record<string, unknown>
+type EventHandler = (payload: EventPayload) => Promise<void> | void
 
 const handlers: Record<string, EventHandler[]> = {}
 
@@ -10,7 +11,7 @@ export function onEvent(event: string, handler: EventHandler) {
   handlers[event].push(handler)
 }
 
-export async function emitEvent(event: string, payload: any) {
+export async function emitEvent(event: string, payload: EventPayload) {
 
   const eventHandlers = handlers[event]
 

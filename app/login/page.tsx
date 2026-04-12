@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import Image from "next/image"
-import { supabase } from "@/lib/supabaseClient"
+import { supabase } from "@/database/supabase"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
@@ -160,9 +160,10 @@ export default function LoginPage() {
               onClick={googleLogin}
               className="w-full border border-gray-300 rounded-md py-2.5 flex items-center justify-center gap-3 hover:bg-gray-50 transition"
             >
-              <img
+              <Image
                 src="https://www.svgrepo.com/show/475656/google-color.svg"
-                width="20"
+                width={20}
+                height={20}
                 alt="Google"
               />
 

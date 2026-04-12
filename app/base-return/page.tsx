@@ -4,12 +4,6 @@ export const dynamic = "force-dynamic"
 
 import { useEffect } from "react"
 
-declare global {
-  interface Window {
-    ethereum?: any
-  }
-}
-
 export default function BaseReturnPage() {
   useEffect(() => {
     async function handleConnection() {
@@ -19,7 +13,6 @@ export default function BaseReturnPage() {
         const provider = params.get("provider")
         const walletType = params.get("wallet_type")
         const sessionId = params.get("session_id")
-        const returnTo = params.get("return_to")
 
         if (!sessionId) {
           console.error("❌ Missing session_id")
@@ -35,9 +28,13 @@ export default function BaseReturnPage() {
            CONNECT WALLET
         ========================= */
 
-        const accounts = await window.ethereum.request({
+        const accountsResponse = await window.ethereum.request({
           method: "eth_requestAccounts",
         })
+
+        const accounts = Array.isArray(accountsResponse)
+          ? accountsResponse.map((value) => String(value))
+          : []
 
         if (!accounts?.[0]) {
           console.error("❌ No wallet account returned")

@@ -1,5 +1,7 @@
 "use client"
 
+import Image from "next/image"
+
 type Props = {
   qrCodeUrl?: string
   paymentUrl?: string
@@ -37,7 +39,7 @@ export default function QRDisplay({
         onClick={openWallet}
       >
 
-        <img
+        <Image
           src={qrCodeUrl}
           width={220}
           height={220}

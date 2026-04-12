@@ -1,22 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { Connection, PublicKey, SystemProgram, Transaction } from "@solana/web3.js"
-import { getPaymentById } from "@/database/payments"
-
-function getRequiredEnv(name: string): string {
-  const value = String(process.env[name] || "").trim()
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`)
-  }
-  return value
-}
-
-function toLamportsFromAtomic(value: unknown): number {
-  const n = Number(value)
-  if (!Number.isFinite(n) || n <= 0) {
-    throw new Error("Invalid lamport amount in payment split metadata")
-  }
-  return Math.round(n)
-}
+import { buildSolanaSplitTransactionEngine } from "@/engine/solanaSplitTransaction"
 
 export async function POST(req: NextRequest) {
   try {
@@ -34,59 +17,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing sender account" }, { status: 400 })
     }
 
-    const payment = await getPaymentById(paymentId)
-    if (!payment) {
-      return NextResponse.json({ error: "Payment not found" }, { status: 404 })
-    }
-
-    const network = String(payment.network || "").toLowerCase()
-    if (network !== "solana") {
-      return NextResponse.json({ error: "Payment is not Solana network" }, { status: 400 })
-    }
-
-    const metadata = (payment.metadata || {}) as {
-      split?: {
-        merchantWallet?: string
-        pinetreeWallet?: string
-        merchantNativeAmountAtomic?: number
-        feeNativeAmountAtomic?: number
-      }
-    }
-
-    const split = metadata.split
-    const merchantWallet = String(split?.merchantWallet || "").trim()
-    const pinetreeWallet = String(split?.pinetreeWallet || "").trim()
-
-    if (!merchantWallet || !pinetreeWallet) {
-      return NextResponse.json({ error: "Missing split wallet metadata" }, { status: 500 })
-    }
-
-    const merchantLamports = toLamportsFromAtomic(split?.merchantNativeAmountAtomic)
-    const feeLamports = toLamportsFromAtomic(split?.feeNativeAmountAtomic)
-
-    const rpcUrl = getRequiredEnv("SOLANA_RPC_URL")
-    const connection = new Connection(rpcUrl, "confirmed")
-    const { blockhash } = await connection.getLatestBlockhash("confirmed")
-
-    const tx = new Transaction({
-      feePayer: new PublicKey(senderAccount),
-      recentBlockhash: blockhash
+    const serialized = await buildSolanaSplitTransactionEngine({
+      paymentId,
+      senderAccount
     })
-
-    tx.add(
-      SystemProgram.transfer({
-        fromPubkey: new PublicKey(senderAccount),
-        toPubkey: new PublicKey(merchantWallet),
-        lamports: merchantLamports
-      }),
-      SystemProgram.transfer({
-        fromPubkey: new PublicKey(senderAccount),
-        toPubkey: new PublicKey(pinetreeWallet),
-        lamports: feeLamports
-      })
-    )
-
-    const serialized = tx.serialize({ requireAllSignatures: false }).toString("base64")
 
     return NextResponse.json({
       transaction: serialized,
@@ -94,6 +28,28 @@ export async function POST(req: NextRequest) {
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to build Solana split transaction"
+    const lower = message.toLowerCase()
+
+    if (lower.includes("missing paymentid") || lower.includes("missing sender account")) {
+      return NextResponse.json({ error: message }, { status: 400 })
+    }
+
+    if (lower.includes("payment not found")) {
+      return NextResponse.json({ error: message }, { status: 404 })
+    }
+
+    if (lower.includes("not solana network")) {
+      return NextResponse.json({ error: message }, { status: 400 })
+    }
+
+    if (lower.includes("missing split wallet metadata")) {
+      return NextResponse.json({ error: message }, { status: 500 })
+    }
+
+    if (lower.includes("invalid lamport amount")) {
+      return NextResponse.json({ error: message }, { status: 422 })
+    }
+
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

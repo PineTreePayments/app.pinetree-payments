@@ -5,7 +5,7 @@
  * Polls the network for transactions to merchant/treasury wallets.
  */
 
-import { supabase } from "@/lib/database"
+import { supabase } from "@/database"
 import { getRpcUrl, WATCHER_CONFIG } from "./config"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 import { type PaymentStatus } from "./paymentStateMachine"
@@ -13,7 +13,7 @@ import {
   getTransactionByPaymentId,
   updateTransactionProviderReference,
   updateTransactionStatus
-} from "@/lib/database/transactions"
+} from "@/database/transactions"
 
 type WatchInput = {
   merchantWallet: string
@@ -23,6 +23,8 @@ type WatchInput = {
   expectedAmountNative?: number
   expectedMerchantAtomic?: string | number
   expectedFeeAtomic?: string | number
+  feeCaptureMethod?: string
+  splitContract?: string
   network: string
   paymentId: string
   singleIteration?: boolean
@@ -103,6 +105,8 @@ export async function watchPayment(input: WatchInput) {
   const merchantWallet = String(input.merchantWallet || "").trim()
   const pinetreeWallet = String(input.pinetreeWallet || "").trim()
   const merchantWalletEvm = merchantWallet.toLowerCase()
+  const splitContractEvm = String(input.splitContract || "").trim().toLowerCase()
+  const feeCaptureMethod = String(input.feeCaptureMethod || "").trim().toLowerCase()
 
   /* ---------------------------
      SELECT RPC BASED ON NETWORK
@@ -186,7 +190,7 @@ export async function watchPayment(input: WatchInput) {
             hash: splitTx.hash,
             value: String(splitTx.totalLamports / 1e9),
             from: splitTx.from
-          })
+          }, true)
 
           if (confirmed) {
             return true
@@ -226,11 +230,6 @@ export async function watchPayment(input: WatchInput) {
         const toAddress = tx.to.toLowerCase()
         const value = weiToEth(tx.value)
 
-        // Check if transaction is to merchant wallet
-        if (toAddress.toLowerCase() !== merchantWalletEvm) {
-          continue
-        }
-
         const grossRequired =
           typeof input.expectedAmountNative === "number" && Number.isFinite(input.expectedAmountNative)
             ? input.expectedAmountNative
@@ -238,13 +237,33 @@ export async function watchPayment(input: WatchInput) {
 
         const threshold = grossRequired * matchRatio
 
+        if (feeCaptureMethod === "contract_split") {
+          if (!splitContractEvm) {
+            console.warn("[watcher:evm] missing split contract for contract_split payment", {
+              paymentId: input.paymentId
+            })
+            continue
+          }
+
+          // For contract split, payment must be sent to the configured split contract.
+          if (toAddress !== splitContractEvm) {
+            continue
+          }
+        } else {
+          // Legacy non-contract fallback: direct transfer to merchant wallet.
+          if (toAddress !== merchantWalletEvm) {
+            continue
+          }
+        }
+
         // Check if full gross amount was received within tolerance window
         if (value >= threshold) {
           // ✅ Full gross amount received
           // Fee has been successfully collected at payment time
           const confirmed = await handleMatchingTransaction(
             input.paymentId,
-            tx
+            tx,
+            feeCaptureMethod === "contract_split"
           )
 
           if (confirmed) {
@@ -315,7 +334,8 @@ export async function watchPayment(input: WatchInput) {
  */
 async function handleMatchingTransaction(
   paymentId: string,
-  tx: { hash: string; value: string; from: string }
+  tx: { hash: string; value: string; from: string },
+  feeCaptureValidated: boolean
 ) {
   const transaction = await getTransactionByPaymentId(paymentId)
 
@@ -372,7 +392,8 @@ async function handleMatchingTransaction(
         rawPayload: {
           txHash: tx.hash,
           value: tx.value,
-          from: tx.from
+          from: tx.from,
+          feeCaptureValidated
         }
       })
 

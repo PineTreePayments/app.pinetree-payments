@@ -7,8 +7,7 @@
 
 import { ProviderAdapter } from "@/types/provider"
 import { registerProvider } from "../engine/providerRegistry"
-import { getBestWalletForNetwork } from "@/lib/database/merchantWallets"
-import { getReturnPath } from "../engine/config"
+import { getBestWalletForNetwork } from "@/database/merchantWallets"
 
 /**
  * Solana Pay URI parameters
@@ -22,6 +21,25 @@ interface SolanaPayParams {
   reference?: string
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object"
+}
+
+async function resolveSolanaRecipientAddress(merchantId: string): Promise<string> {
+  const wallet = await getBestWalletForNetwork(merchantId, "solana")
+
+  if (wallet?.wallet_address) {
+    return wallet.wallet_address
+  }
+
+  const envWallet = String(process.env.SOLANA_WALLET || "").trim()
+  if (!envWallet) {
+    throw new Error("Merchant Solana wallet not configured")
+  }
+
+  return envWallet
+}
+
 export const solanaAdapter: ProviderAdapter = {
 
   /* --------------------------------
@@ -30,23 +48,11 @@ export const solanaAdapter: ProviderAdapter = {
   -------------------------------- */
 
   async getMerchantWallet(merchantId: string) {
-    const wallet = await getBestWalletForNetwork(merchantId, "solana")
-
-    if (!wallet) {
-      // Fallback to environment variable
-      const envWallet = process.env.SOLANA_WALLET
-      if (!envWallet) {
-        throw new Error("Merchant Solana wallet not configured")
-      }
-      return {
-        address: envWallet,
-        network: "solana"
-      }
-    }
+    const address = await resolveSolanaRecipientAddress(merchantId)
 
     return {
-      address: wallet.wallet_address,
-      network: wallet.network
+      address,
+      network: "solana"
     }
   },
 
@@ -62,20 +68,7 @@ export const solanaAdapter: ProviderAdapter = {
     merchantId: string
   }) {
     try {
-      // Get merchant wallet directly
-      const wallet = await getBestWalletForNetwork(input.merchantId, "solana")
-      
-      let recipient: string
-      
-      if (wallet) {
-        recipient = wallet.wallet_address
-      } else {
-        // Fallback to environment variable
-        recipient = process.env.SOLANA_WALLET!
-        if (!recipient) {
-          throw new Error("Solana wallet not configured")
-        }
-      }
+      const recipient = await resolveSolanaRecipientAddress(input.merchantId)
 
       // Build Solana Pay URI
       const uri = buildSolanaPayUri({
@@ -88,7 +81,7 @@ export const solanaAdapter: ProviderAdapter = {
 
       return {
         providerReference: input.paymentId,
-        qrCode: uri,
+        qrCodeUrl: uri,
         paymentUrl: uri
       }
 
@@ -104,7 +97,7 @@ export const solanaAdapter: ProviderAdapter = {
      This returns PROCESSING as a placeholder
   -------------------------------- */
 
-  async getPaymentStatus(providerReference: string) {
+  async getPaymentStatus() {
     // Solana payments are monitored via blockchain
     // This is a placeholder - actual status comes from paymentWatcher
     return {
@@ -118,7 +111,10 @@ export const solanaAdapter: ProviderAdapter = {
      Returns true by default
   -------------------------------- */
 
-  verifyWebhook(payload: any, signature?: string) {
+  verifyWebhook(payload: unknown, signature?: string, rawBody?: string) {
+    void payload
+    void signature
+    void rawBody
     // Solana Pay uses blockchain confirmations, not webhooks
     return true
   },
@@ -128,17 +124,20 @@ export const solanaAdapter: ProviderAdapter = {
      Converts Solana payment events to PineTree events
   -------------------------------- */
 
-  translateEvent(payload: any) {
-    const reference = payload.reference || payload.paymentId || ""
+  translateEvent(payload: unknown) {
+    const source = isRecord(payload) ? payload : {}
+    const reference = String(source.reference || source.paymentId || "")
+    const confirmed = Boolean(source.confirmed)
+    const detected = Boolean(source.detected)
 
-    if (payload.confirmed) {
+    if (confirmed) {
       return {
         paymentId: reference,
         event: "payment.confirmed" as const
       }
     }
 
-    if (payload.detected) {
+    if (detected) {
       return {
         paymentId: reference,
         event: "payment.processing" as const

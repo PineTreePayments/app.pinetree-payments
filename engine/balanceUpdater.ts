@@ -5,8 +5,8 @@
  * automatically for all connected merchant wallets.
  */
 
-import { getMerchantWallets, updateWalletBalance } from "@/lib/database"
-import { RPC_URLS, getRpcUrl } from "./config"
+import { getMerchantWallets, updateWalletBalance } from "@/database"
+import { getRpcUrl } from "./config"
 
 /**
  * Update balance for a single wallet
