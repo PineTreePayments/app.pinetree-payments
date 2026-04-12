@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { supabase } from "@/lib/database/supabase"
+import { getUnifiedPaymentStatusEngine } from "@/engine/paymentStatusOrchestrator"
 
 export async function GET(req: NextRequest) {
-
   const { searchParams } = new URL(req.url)
-
   const paymentId = searchParams.get("paymentId")
 
   if (!paymentId) {
@@ -14,21 +12,27 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const { data } = await supabase
-    .from("payments")
-    .select("status")
-    .eq("id", paymentId)
-    .single()
+  try {
+    const resolved = await getUnifiedPaymentStatusEngine(paymentId, "api:payments-status")
 
-  if (!data) {
+    return NextResponse.json({
+      status: resolved.status,
+      paymentId: resolved.paymentId,
+      intentId: resolved.intentId
+    })
+  } catch (error) {
+    const status =
+      typeof error === "object" &&
+      error !== null &&
+      "status" in error &&
+      typeof (error as { status?: unknown }).status === "number"
+        ? ((error as { status: number }).status)
+        : 500
+
     return NextResponse.json(
-      { error: "Payment not found" },
-      { status: 404 }
+      { error: error instanceof Error ? error.message : "Failed to resolve payment status" },
+      { status }
     )
   }
-
-  return NextResponse.json({
-    status: data.status
-  })
 
 }

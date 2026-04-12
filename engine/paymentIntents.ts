@@ -8,7 +8,7 @@ import {
 import QRCode from "qrcode"
 import { createPayment } from "./createPayment"
 import { buildCreatePaymentRequest } from "./createPayment"
-import { watchPayment } from "./paymentWatcher"
+import { getUnifiedPaymentStatusEngine, queueSingleWatcherIteration } from "./paymentStatusOrchestrator"
 import { networkToProvider, normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 
 const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base"]
@@ -35,61 +35,6 @@ async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, label: s
 
 function uniqueNetworks(networks: WalletNetwork[]) {
   return [...new Set(networks)]
-}
-
-type PaymentWatchSplitMetadata = {
-  split?: {
-    merchantWallet?: string
-    pinetreeWallet?: string
-    expectedAmountNative?: number
-    merchantNativeAmountAtomic?: string | number
-    feeNativeAmountAtomic?: string | number
-  }
-}
-
-function normalizeIntentPaymentStatus(status: unknown) {
-  const normalized = String(status || "").toUpperCase()
-  return normalized === "EXPIRED" ? "INCOMPLETE" : normalized
-}
-
-function queueIntentWatcherIteration(payment: {
-  id: string
-  status?: string
-  network?: string
-  merchant_amount: number
-  pinetree_fee: number
-  metadata?: unknown
-}) {
-  const activeStatus = String(payment.status || "").toUpperCase()
-  if (activeStatus !== "CREATED" && activeStatus !== "PENDING" && activeStatus !== "PROCESSING") {
-    return
-  }
-
-  const metadata = (payment.metadata || null) as PaymentWatchSplitMetadata | null
-  const split = metadata?.split
-
-  const merchantWallet = String(split?.merchantWallet || "").trim()
-  const pinetreeWallet = String(split?.pinetreeWallet || "").trim()
-  const network = String(payment.network || "").trim()
-
-  if (!merchantWallet || !pinetreeWallet || !network) {
-    return
-  }
-
-  setTimeout(() => {
-    void watchPayment({
-      merchantWallet,
-      pinetreeWallet,
-      merchantAmount: Number(payment.merchant_amount || 0),
-      pinetreeFee: Number(payment.pinetree_fee || 0),
-      expectedAmountNative: split?.expectedAmountNative,
-      expectedMerchantAtomic: split?.merchantNativeAmountAtomic,
-      expectedFeeAtomic: split?.feeNativeAmountAtomic,
-      network,
-      paymentId: payment.id,
-      singleIteration: true
-    }).catch(console.error)
-  }, 0)
 }
 
 export async function getMerchantAvailableNetworks(merchantId: string): Promise<WalletNetwork[]> {
@@ -155,10 +100,10 @@ export async function getPaymentIntentEngine(intentId: string) {
   const intent = await getPaymentIntentById(intentId)
   if (!intent) return null
 
-  const selectedPayment = intent.payment_id ? await getPaymentById(intent.payment_id) : null
-  if (selectedPayment) {
-    queueIntentWatcherIteration(selectedPayment)
-  }
+  const statusResolution = await getUnifiedPaymentStatusEngine(intent.id, "payment-intents:get")
+  const selectedPayment = statusResolution.hasSelectedPayment
+    ? await getPaymentById(statusResolution.paymentId)
+    : null
 
   return {
     intentId: intent.id,
@@ -170,9 +115,9 @@ export async function getPaymentIntentEngine(intentId: string) {
       ? intent.available_networks.map((n) => String(n))
       : [],
     selectedNetwork: intent.selected_network || null,
-    paymentId: intent.payment_id || null,
+    paymentId: statusResolution.hasSelectedPayment ? statusResolution.paymentId : null,
     status: intent.status,
-    paymentStatus: selectedPayment ? normalizeIntentPaymentStatus(selectedPayment.status) : null,
+    paymentStatus: statusResolution.status,
     paymentProviderReference: selectedPayment?.provider_reference || null,
     expiresAt: intent.expires_at,
     metadata: (intent.metadata || undefined) as Record<string, unknown> | undefined,
@@ -259,6 +204,13 @@ export async function selectPaymentIntentNetworkEngine(input: {
       selected_network: normalizedNetwork,
       payment_id: payment.id
     })
+
+    const persistedPayment = await getPaymentById(payment.id)
+    if (!persistedPayment) {
+      throw new Error("Payment was created but could not be loaded")
+    }
+
+    queueSingleWatcherIteration(persistedPayment, "payment-intents:select-network")
 
     console.info("[payment-intent] select-network:success", {
       intentId: intent.id,

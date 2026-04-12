@@ -1,25 +1,13 @@
 import { createPayment } from "@/engine/createPayment"
 import { getMerchantTaxSettings, getMerchantProviders } from "@/lib/database/merchants"
 import { hasAnyWalletConnected, selectBestWallet } from "@/lib/database/merchantWallets"
-import { getPaymentById } from "@/lib/database/payments"
-import { getPaymentIntentById } from "@/database/paymentIntents"
 import { createPaymentIntentEngine } from "./paymentIntents"
-import { watchPayment } from "./paymentWatcher"
+import { getUnifiedPaymentStatusEngine } from "./paymentStatusOrchestrator"
 import {
   normalizeWalletNetwork,
   providerToPreferredNetwork,
   networkToProvider
 } from "./providerMappings"
-
-type PaymentWatchSplitMetadata = {
-  split?: {
-    merchantWallet?: string
-    pinetreeWallet?: string
-    expectedAmountNative?: number
-    merchantNativeAmountAtomic?: string | number
-    feeNativeAmountAtomic?: string | number
-  }
-}
 
 export type PosTaxSettings = {
   taxEnabled: boolean
@@ -255,118 +243,11 @@ export async function createPosPaymentIntentEngine(input: CreatePosPaymentInput)
   }
 }
 
-function normalizePosStatus(status: unknown) {
-  const normalized = String(status || "").toUpperCase()
-
-  if (normalized === "EXPIRED") {
-    return "INCOMPLETE"
-  }
-
-  if (
-    normalized === "PENDING" ||
-    normalized === "PROCESSING" ||
-    normalized === "CONFIRMED" ||
-    normalized === "FAILED" ||
-    normalized === "INCOMPLETE" ||
-    normalized === "CREATED"
-  ) {
-    return normalized
-  }
-
-  return "PENDING"
-}
-
-function queueSingleWatcherIteration(payment: {
-  id: string
-  status?: string
-  network?: string
-  merchant_amount: number
-  pinetree_fee: number
-  metadata?: unknown
-}) {
-  const state = normalizePosStatus(payment.status)
-  if (state !== "CREATED" && state !== "PENDING" && state !== "PROCESSING") {
-    return
-  }
-
-  const metadata = (payment.metadata || null) as PaymentWatchSplitMetadata | null
-  const split = metadata?.split
-
-  const merchantWallet = String(split?.merchantWallet || "").trim()
-  const pinetreeWallet = String(split?.pinetreeWallet || "").trim()
-  const network = String(payment.network || "").trim()
-
-  if (!merchantWallet || !pinetreeWallet || !network) {
-    return
-  }
-
-  setTimeout(() => {
-    void watchPayment({
-      merchantWallet,
-      pinetreeWallet,
-      merchantAmount: Number(payment.merchant_amount || 0),
-      pinetreeFee: Number(payment.pinetree_fee || 0),
-      expectedAmountNative: split?.expectedAmountNative,
-      expectedMerchantAtomic: split?.merchantNativeAmountAtomic,
-      expectedFeeAtomic: split?.feeNativeAmountAtomic,
-      network,
-      paymentId: payment.id,
-      singleIteration: true
-    }).catch(console.error)
-  }, 0)
-}
-
 export async function getPosPaymentStatusEngine(paymentId: string) {
-  if (!paymentId) {
-    const err = new Error("Missing paymentId") as Error & { status?: number }
-    err.status = 400
-    throw err
-  }
-
-  const intent = await getPaymentIntentById(paymentId)
-  if (intent) {
-    if (!intent.payment_id) {
-      return {
-        status: "PENDING",
-        paymentId: intent.id
-      }
-    }
-
-    const selectedPayment = await getPaymentById(intent.payment_id)
-    if (!selectedPayment) {
-      return {
-        status: "PENDING",
-        paymentId: intent.id
-      }
-    }
-
-    const selectedStatus = String(selectedPayment.status || "").toUpperCase()
-
-    queueSingleWatcherIteration(selectedPayment)
-
-    return {
-      status:
-        selectedStatus === "EXPIRED"
-          ? "INCOMPLETE"
-          : selectedStatus,
-      paymentId: selectedPayment.id
-    }
-  }
-
-  const payment = await getPaymentById(paymentId)
-  if (!payment) {
-    const err = new Error("Payment not found") as Error & { status?: number }
-    err.status = 404
-    throw err
-  }
-
-  const normalized = String(payment.status || "").toUpperCase()
-  const state = normalizePosStatus(normalized)
-
-  queueSingleWatcherIteration(payment)
+  const resolved = await getUnifiedPaymentStatusEngine(paymentId, "pos:get-status")
 
   return {
-    status: state,
-    paymentId: payment.id
+    status: resolved.status,
+    paymentId: resolved.paymentId
   }
 }
