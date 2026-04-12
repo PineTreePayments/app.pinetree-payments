@@ -309,12 +309,25 @@ export default function DashboardPage() {
                     ? tx.payments[0]
                     : tx.payments
 
+                  const txDate = parseTimestamp(tx.created_at)
+                  const now = new Date()
+                  const ageMinutes = (now.getTime() - txDate.getTime()) / (1000 * 60)
+                  
+                  // Only expire PENDING status after 5 minutes. PROCESSING never expires.
+                  const effectiveStatus = tx.status === "PENDING" && ageMinutes > 5
+                    ? "EXPIRED"
+                    : tx.status
+                  
                   const statusColor =
-                    tx.status === "CONFIRMED"
-                      ? "text-green-600"
-                      : tx.status === "FAILED"
-                      ? "text-red-600"
-                      : "text-yellow-600"
+                    effectiveStatus === "CONFIRMED"
+                      ? "text-green-700"
+                      : effectiveStatus === "FAILED"
+                      ? "text-red-700"
+                      : effectiveStatus === "EXPIRED"
+                      ? "text-gray-600"
+                      : effectiveStatus === "PROCESSING"
+                      ? "text-blue-700"
+                      : "text-amber-700"
 
                   return(
 
@@ -333,7 +346,7 @@ export default function DashboardPage() {
                       </td>
 
                       <td className={`py-3 font-medium ${statusColor}`}>
-                        {tx.status}
+                        {effectiveStatus}
                       </td>
 
                       <td className="py-3 text-gray-500 text-xs">
