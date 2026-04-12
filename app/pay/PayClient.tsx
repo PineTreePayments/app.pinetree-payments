@@ -358,6 +358,7 @@ export default function PayClient() {
       })
 
       setSelectedNetwork(result.selectedNetwork || asset.network)
+      setPaymentStatus((prev) => (String(prev || "").toUpperCase() ? prev : "PENDING"))
 
       if (!paymentUrl && !result.qrCodeUrl && !derivedAddress) {
         setSelectionError("No wallet address found for this payment method. Please try another asset.")
@@ -435,6 +436,24 @@ export default function PayClient() {
   }
 
   if (isIntentMode) {
+    const statusText = (() => {
+      if (!normalizedPaymentStatus) return "Waiting for payment to start"
+      if (normalizedPaymentStatus === "CREATED") return "Payment created, waiting for on-chain transaction"
+      if (normalizedPaymentStatus === "PENDING") return "Waiting for blockchain confirmation"
+      if (normalizedPaymentStatus === "PROCESSING") return "Payment detected, processing confirmation"
+      if (normalizedPaymentStatus === "CONFIRMED") return "Payment confirmed"
+      if (normalizedPaymentStatus === "FAILED") return "Payment failed"
+      if (normalizedPaymentStatus === "INCOMPLETE" || normalizedPaymentStatus === "EXPIRED") return "Payment incomplete or expired"
+      return `Payment status: ${normalizedPaymentStatus}`
+    })()
+
+    const statusTone =
+      normalizedPaymentStatus === "CONFIRMED"
+        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+        : normalizedPaymentStatus === "FAILED" || normalizedPaymentStatus === "INCOMPLETE" || normalizedPaymentStatus === "EXPIRED"
+          ? "border-red-200 bg-red-50 text-red-700"
+          : "border-blue-200 bg-blue-50 text-blue-700"
+
     return (
       <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#e0ecff] via-[#f5f8ff] to-white">
         <div className="max-w-md w-full rounded-[2rem] border border-blue-100 bg-white shadow-2xl p-6 space-y-5">
@@ -448,6 +467,10 @@ export default function PayClient() {
               <span className="font-medium text-slate-600">Total</span>
               <span className="font-semibold text-lg">{formatUsd(displayAmount)}</span>
             </div>
+          </div>
+
+          <div className={`rounded-xl border px-3 py-2 text-sm font-medium ${statusTone}`}>
+            {statusText}
           </div>
 
           <div className="space-y-3" ref={intentCardsRef}>
