@@ -3,15 +3,23 @@ import { getMerchantTaxSettings, getMerchantProviders } from "@/lib/database/mer
 import { hasAnyWalletConnected, selectBestWallet } from "@/lib/database/merchantWallets"
 import { getPaymentById } from "@/lib/database/payments"
 import { getPaymentIntentById } from "@/database/paymentIntents"
-import { PaymentProvider } from "@/types/payment"
 import { createPaymentIntentEngine } from "./paymentIntents"
 import { watchPayment } from "./paymentWatcher"
 import {
   normalizeWalletNetwork,
   providerToPreferredNetwork,
-  networkToProvider,
-  type WalletNetwork
+  networkToProvider
 } from "./providerMappings"
+
+type PaymentWatchSplitMetadata = {
+  split?: {
+    merchantWallet?: string
+    pinetreeWallet?: string
+    expectedAmountNative?: number
+    merchantNativeAmountAtomic?: string | number
+    feeNativeAmountAtomic?: string | number
+  }
+}
 
 export type PosTaxSettings = {
   taxEnabled: boolean
@@ -247,6 +255,67 @@ export async function createPosPaymentIntentEngine(input: CreatePosPaymentInput)
   }
 }
 
+function normalizePosStatus(status: unknown) {
+  const normalized = String(status || "").toUpperCase()
+
+  if (normalized === "EXPIRED") {
+    return "INCOMPLETE"
+  }
+
+  if (
+    normalized === "PENDING" ||
+    normalized === "PROCESSING" ||
+    normalized === "CONFIRMED" ||
+    normalized === "FAILED" ||
+    normalized === "INCOMPLETE" ||
+    normalized === "CREATED"
+  ) {
+    return normalized
+  }
+
+  return "PENDING"
+}
+
+function queueSingleWatcherIteration(payment: {
+  id: string
+  status?: string
+  network?: string
+  merchant_amount: number
+  pinetree_fee: number
+  metadata?: unknown
+}) {
+  const state = normalizePosStatus(payment.status)
+  if (state !== "CREATED" && state !== "PENDING" && state !== "PROCESSING") {
+    return
+  }
+
+  const metadata = (payment.metadata || null) as PaymentWatchSplitMetadata | null
+  const split = metadata?.split
+
+  const merchantWallet = String(split?.merchantWallet || "").trim()
+  const pinetreeWallet = String(split?.pinetreeWallet || "").trim()
+  const network = String(payment.network || "").trim()
+
+  if (!merchantWallet || !pinetreeWallet || !network) {
+    return
+  }
+
+  setTimeout(() => {
+    void watchPayment({
+      merchantWallet,
+      pinetreeWallet,
+      merchantAmount: Number(payment.merchant_amount || 0),
+      pinetreeFee: Number(payment.pinetree_fee || 0),
+      expectedAmountNative: split?.expectedAmountNative,
+      expectedMerchantAtomic: split?.merchantNativeAmountAtomic,
+      expectedFeeAtomic: split?.feeNativeAmountAtomic,
+      network,
+      paymentId: payment.id,
+      singleIteration: true
+    }).catch(console.error)
+  }, 0)
+}
+
 export async function getPosPaymentStatusEngine(paymentId: string) {
   if (!paymentId) {
     const err = new Error("Missing paymentId") as Error & { status?: number }
@@ -272,6 +341,9 @@ export async function getPosPaymentStatusEngine(paymentId: string) {
     }
 
     const selectedStatus = String(selectedPayment.status || "").toUpperCase()
+
+    queueSingleWatcherIteration(selectedPayment)
+
     return {
       status:
         selectedStatus === "EXPIRED"
@@ -289,40 +361,9 @@ export async function getPosPaymentStatusEngine(paymentId: string) {
   }
 
   const normalized = String(payment.status || "").toUpperCase()
-  const state =
-    normalized === "EXPIRED"
-      ? "INCOMPLETE"
-      : normalized === "PENDING" ||
-          normalized === "PROCESSING" ||
-          normalized === "CONFIRMED" ||
-          normalized === "FAILED" ||
-          normalized === "INCOMPLETE" ||
-          normalized === "CREATED"
-        ? normalized
-        : "PENDING"
+  const state = normalizePosStatus(normalized)
 
-  // Run watcher check if payment is still active
-  if (state === "CREATED" || state === "PENDING" || state === "PROCESSING") {
-    // Extract watcher parameters from payment metadata
-    const meta = payment.metadata as any
-    if (meta?.split && payment.network) {
-      // Run one single watcher iteration in background, don't wait
-      setTimeout(() => {
-        void watchPayment({
-          merchantWallet: String(meta.split.merchantWallet || ""),
-          pinetreeWallet: String(meta.split.pinetreeWallet || ""),
-          merchantAmount: payment.merchant_amount,
-          pinetreeFee: payment.pinetree_fee,
-          expectedAmountNative: meta.split.expectedAmountNative,
-          expectedMerchantAtomic: meta.split.merchantNativeAmountAtomic,
-          expectedFeeAtomic: meta.split.feeNativeAmountAtomic,
-          network: String(payment.network),
-          paymentId: payment.id,
-          singleIteration: true
-        }).catch(console.error)
-      }, 0)
-    }
-  }
+  queueSingleWatcherIteration(payment)
 
   return {
     status: state,
