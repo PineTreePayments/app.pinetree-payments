@@ -86,6 +86,26 @@ export async function getTransactionByPaymentId(paymentId: string) {
 }
 
 /**
+ * Get transaction by provider transaction ID
+ */
+export async function getTransactionByProviderReference(providerTransactionId: string) {
+  const normalized = String(providerTransactionId || "").trim()
+  if (!normalized) return null
+
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("*")
+    .eq("provider_transaction_id", normalized)
+    .single()
+
+  if (error) {
+    return null
+  }
+
+  return data as Transaction | null
+}
+
+/**
  * Update transaction status
  */
 export async function updateTransactionStatus(
@@ -159,7 +179,7 @@ export async function getTransactionsByMerchant(
     throw new Error(`Failed to fetch transactions: ${error.message}`)
   }
 
-  return data as (Transaction & { payments?: any })[]
+  return data as (Transaction & { payments?: Record<string, unknown> | null })[]
 }
 
 /**
@@ -212,7 +232,9 @@ export async function getTransactionStats(merchantId: string) {
     networks: {} as Record<string, number>
   }
 
-  data.forEach((tx: any) => {
+  type TransactionStatsRow = { status?: string | null; network?: string | null }
+
+  data.forEach((tx: TransactionStatsRow) => {
     if (tx.status === "CONFIRMED") {
       stats.confirmedTransactions++
     } else if (tx.status === "FAILED") {

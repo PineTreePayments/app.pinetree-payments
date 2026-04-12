@@ -70,8 +70,9 @@ type SolanaParsedTransaction = {
 export async function watchPayment(input: WatchInput) {
   let attempts = 0
 
-  const merchantWallet = input.merchantWallet.toLowerCase()
-  const pinetreeWallet = input.pinetreeWallet.toLowerCase()
+  const merchantWallet = String(input.merchantWallet || "").trim()
+  const pinetreeWallet = String(input.pinetreeWallet || "").trim()
+  const merchantWalletEvm = merchantWallet.toLowerCase()
 
   /* ---------------------------
      SELECT RPC BASED ON NETWORK
@@ -150,6 +151,10 @@ export async function watchPayment(input: WatchInput) {
           }
         }
 
+        if (input.singleIteration) {
+          return false
+        }
+
         attempts++
         await sleep(WATCHER_CONFIG.pollInterval)
         continue
@@ -180,7 +185,7 @@ export async function watchPayment(input: WatchInput) {
         const value = weiToEth(tx.value)
 
         // Check if transaction is to merchant wallet
-        if (toAddress.toLowerCase() !== merchantWallet) {
+        if (toAddress.toLowerCase() !== merchantWalletEvm) {
           continue
         }
 
@@ -400,54 +405,97 @@ function weiToEth(wei: string): number {
 }
 
 async function getSolanaSignatures(rpcUrl: string, address: string, sinceSlot: number): Promise<string[]> {
-  const response = await fetch(rpcUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      method: "getSignaturesForAddress",
-      params: [
-        address,
-        {
-          minContextSlot: sinceSlot,
-          limit: 100
-        }
-      ],
-      id: 1
+  try {
+    const response = await fetch(rpcUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "getSignaturesForAddress",
+        params: [
+          address,
+          {
+            minContextSlot: sinceSlot,
+            limit: 100
+          }
+        ],
+        id: 1
+      })
     })
-  })
 
-  const data = await response.json()
-  if (!Array.isArray(data?.result)) return []
-  return data.result
-    .map((row: SolanaRpcSignatureRow) => String(row.signature || ""))
-    .filter(Boolean)
+    const data = await response.json()
+
+    if (data?.error) {
+      console.warn("[watcher:solana] getSignaturesForAddress rpc error", {
+        address,
+        sinceSlot,
+        rpcError: data.error
+      })
+      return []
+    }
+
+    if (!Array.isArray(data?.result)) {
+      console.warn("[watcher:solana] getSignaturesForAddress unexpected result", {
+        address,
+        sinceSlot,
+        hasResult: data?.result !== undefined
+      })
+      return []
+    }
+
+    return data.result
+      .map((row: SolanaRpcSignatureRow) => String(row.signature || ""))
+      .filter(Boolean)
+  } catch (error) {
+    console.error("[watcher:solana] getSignaturesForAddress request failed", {
+      address,
+      sinceSlot,
+      error: error instanceof Error ? error.message : String(error)
+    })
+    return []
+  }
 }
 
 async function getSolanaParsedTransaction(rpcUrl: string, signature: string): Promise<SolanaParsedTransaction | null> {
-  const response = await fetch(rpcUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      method: "getTransaction",
-      params: [
-        signature,
-        {
-          encoding: "jsonParsed",
-          maxSupportedTransactionVersion: 0
-        }
-      ],
-      id: 1
+  try {
+    const response = await fetch(rpcUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "getTransaction",
+        params: [
+          signature,
+          {
+            encoding: "jsonParsed",
+            maxSupportedTransactionVersion: 0
+          }
+        ],
+        id: 1
+      })
     })
-  })
 
-  const data = await response.json()
-  return (data?.result || null) as SolanaParsedTransaction | null
+    const data = await response.json()
+    if (data?.error) {
+      console.warn("[watcher:solana] getTransaction rpc error", {
+        signature,
+        rpcError: data.error
+      })
+      return null
+    }
+
+    return (data?.result || null) as SolanaParsedTransaction | null
+  } catch (error) {
+    console.error("[watcher:solana] getTransaction request failed", {
+      signature,
+      error: error instanceof Error ? error.message : String(error)
+    })
+    return null
+  }
 }
 
 async function findMatchingSolanaSplitTransaction(input: {
@@ -464,11 +512,29 @@ async function findMatchingSolanaSplitTransaction(input: {
   ])
 
   if (!merchantSignatures.length || !treasurySignatures.length) {
+    console.info("[watcher:solana] no signatures found for split detection", {
+      merchantAddress: input.merchantWallet,
+      treasuryAddress: input.pinetreeWallet,
+      merchantCount: merchantSignatures.length,
+      treasuryCount: treasurySignatures.length,
+      sinceSlot: input.sinceSlot
+    })
     return null
   }
 
   const treasurySet = new Set(treasurySignatures)
   const candidateSignatures = merchantSignatures.filter((sig) => treasurySet.has(sig))
+
+  if (!candidateSignatures.length) {
+    console.info("[watcher:solana] no overlapping signatures for split detection", {
+      merchantAddress: input.merchantWallet,
+      treasuryAddress: input.pinetreeWallet,
+      merchantCount: merchantSignatures.length,
+      treasuryCount: treasurySignatures.length,
+      sinceSlot: input.sinceSlot
+    })
+    return null
+  }
 
   for (const signature of candidateSignatures) {
     const tx = await getSolanaParsedTransaction(input.rpcUrl, signature)
@@ -510,6 +576,14 @@ async function findMatchingSolanaSplitTransaction(input: {
       }
     }
   }
+
+  console.info("[watcher:solana] candidate signatures did not meet split thresholds", {
+    merchantAddress: input.merchantWallet,
+    treasuryAddress: input.pinetreeWallet,
+    candidateCount: candidateSignatures.length,
+    expectedMerchantLamports: input.expectedMerchantLamports,
+    expectedFeeLamports: input.expectedFeeLamports
+  })
 
   return null
 }

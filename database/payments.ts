@@ -102,6 +102,26 @@ export async function getPaymentById(paymentId: string) {
 }
 
 /**
+ * Get a payment by provider reference
+ */
+export async function getPaymentByProviderReference(providerReference: string) {
+  const normalized = String(providerReference || "").trim()
+  if (!normalized) return null
+
+  const { data, error } = await supabase
+    .from("payments")
+    .select("*")
+    .eq("provider_reference", normalized)
+    .single()
+
+  if (error) {
+    return null
+  }
+
+  return data as Payment | null
+}
+
+/**
  * Update payment status
  */
 export async function updatePaymentStatus(
