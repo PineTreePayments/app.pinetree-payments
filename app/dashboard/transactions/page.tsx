@@ -18,7 +18,9 @@ import {
 
 type Payment = {
   created_at: string
-  total_amount: number
+  gross_amount: number
+  merchant_amount: number
+  pinetree_fee: number
   currency: string
   status: string
 }
@@ -381,7 +383,7 @@ export default function TransactionsPage() {
                   </td>
 
                   <td className="px-6 py-4 font-medium text-gray-900">
-                    {payment ? `$${Number(payment.total_amount).toFixed(2)}` : "—"}
+                    {payment ? `$${Number(payment.gross_amount || 0).toFixed(2)}` : "—"}
                   </td>
 
                   <td className="px-6 py-4 text-gray-900">
