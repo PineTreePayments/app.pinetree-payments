@@ -35,8 +35,12 @@ export async function paymentRouter(input: PaymentRouterInput) {
 
   const paymentInput = {
     paymentId: crypto.randomUUID(),
-    amount: input.amount,
+    merchantAmount: input.amount,
+    pinetreeFee: 0.15,
+    grossAmount: input.amount + 0.15,
     currency: input.currency,
+    merchantWallet: "",
+    pinetreeWallet: "",
     merchantId: input.merchantId
   }
 

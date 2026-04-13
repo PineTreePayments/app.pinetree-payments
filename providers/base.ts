@@ -34,14 +34,19 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
    */
   async createPayment(input: {
     paymentId: string
-    amount: number
+    merchantAmount: number
+    pinetreeFee: number
+    grossAmount: number
     currency: string
-    merchantId: string
+    merchantWallet: string
+    pinetreeWallet: string
+    merchantId?: string
     network?: string
   }): Promise<{
     providerReference: string
     paymentUrl?: string
     qrCodeUrl?: string
+    feeCaptureMethod?: string
   }> {
     void input
     throw new Error(`createPayment not implemented for ${this.providerName}`)

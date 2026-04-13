@@ -8,6 +8,7 @@ type GenerateSplitPaymentInput = {
   pinetreeFee: number
   network: string
   paymentId?: string
+  providerPayment?: unknown
 }
 
 function toLamports(amountSol: number): number {
