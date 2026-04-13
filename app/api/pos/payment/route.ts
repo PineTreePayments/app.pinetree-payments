@@ -1,93 +1,71 @@
 import { NextRequest, NextResponse } from "next/server"
-import {
-  createPosPaymentIntentEngine,
-  getPosTaxSettingsEngine,
-  getPosPaymentStatusEngine,
-  checkPosReadinessEngine
-} from "@/engine/posPayments"
-
-type ErrorWithStatus = Error & { status?: number }
-
-function getErrorStatus(error: unknown, fallback = 500) {
-  if (typeof error === "object" && error !== null && "status" in error) {
-    const status = (error as ErrorWithStatus).status
-    if (typeof status === "number") return status
-  }
-  return fallback
-}
-
-function getErrorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback
-}
-
-export async function GET(req: NextRequest) {
-  try {
-    const mode = req.nextUrl.searchParams.get("mode") || ""
-
-    if (mode === "status") {
-      const paymentId = req.nextUrl.searchParams.get("paymentId") || ""
-      const data = await getPosPaymentStatusEngine(paymentId)
-      return NextResponse.json({ success: true, ...data })
-    }
-
-    const merchantId = req.nextUrl.searchParams.get("merchantId") || ""
-    const network = req.nextUrl.searchParams.get("network") || ""
-    if (!merchantId) {
-      return NextResponse.json({ error: "Missing merchantId" }, { status: 400 })
-    }
-
-    const [tax, readiness] = await Promise.all([
-      getPosTaxSettingsEngine(merchantId),
-      checkPosReadinessEngine(merchantId, network)
-    ])
-
-    return NextResponse.json({
-      success: true,
-      tax,
-      connected: readiness.connected,
-      reason: readiness.reason,
-      context: {
-        merchantId,
-        network: network || null
-      }
-    })
-  } catch (error: unknown) {
-    return NextResponse.json(
-      { error: getErrorMessage(error, "Failed to load POS payment data") },
-      { status: getErrorStatus(error) }
-    )
-  }
-}
+import { createClient } from "@supabase/supabase-js"
 
 export async function POST(req: NextRequest) {
   try {
-    const idempotencyKey = req.headers.get("idempotency-key") || undefined
-    const body = (await req.json()) as {
-      amount?: number
-      currency?: string
-      terminal?: {
-        merchantId?: string
-        terminalId?: string
-        preferredNetwork?: string
-      }
+    const body = await req.json()
+
+    const { amount, currency, terminal } = body
+
+    if (!amount || !terminal?.merchantId) {
+      return NextResponse.json(
+        { error: "Missing required fields" },
+        { status: 400 }
+      )
     }
 
-    const data = await createPosPaymentIntentEngine({
-      amount: Number(body.amount || 0),
-      currency: body.currency || "USD",
-      idempotencyKey,
-      terminal: {
-        merchantId: String(body.terminal?.merchantId || ""),
-        terminalId: body.terminal?.terminalId,
-        preferredNetwork: body.terminal?.preferredNetwork
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+
+    /* =========================
+       CREATE PAYMENT RECORD
+    ========================= */
+
+    const { data, error } = await supabase
+      .from("payments")
+      .insert({
+        merchant_id: terminal.merchantId,
+        merchant_amount: amount,
+        pinetree_fee: 0.15,
+        gross_amount: amount + 0.15,
+        currency: currency || "USD",
+        status: "CREATED",
+        provider: terminal.provider || "SOLANA"
+      })
+      .select()
+      .single()
+
+    if (error || !data) {
+      return NextResponse.json(
+        { error: error?.message || "Failed to create payment" },
+        { status: 500 }
+      )
+    }
+
+    /* =========================
+       MOCK QR (TEMP)
+    ========================= */
+
+    const paymentUrl = `pinetree://pay/${data.id}`
+
+    return NextResponse.json({
+      paymentId: data.id,
+      paymentUrl,
+      breakdown: {
+        subtotalAmount: amount,
+        taxAmount: 0,
+        serviceFee: 0.15,
+        grossAmount: amount + 0.15,
+        totalAmount: amount + 0.15
       }
     })
 
-    return NextResponse.json(data)
-  } catch (error: unknown) {
+  } catch (err) {
     return NextResponse.json(
-      { error: getErrorMessage(error, "Failed to create POS payment") },
-      { status: getErrorStatus(error) }
+      { error: "Internal server error" },
+      { status: 500 }
     )
   }
 }
