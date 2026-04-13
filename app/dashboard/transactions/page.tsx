@@ -59,6 +59,27 @@ type TransactionsChartResponse = {
   error?: string
 }
 
+function parseTimestamp(value: string) {
+  const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(value)
+  return new Date(hasTimezone ? value : `${value}Z`)
+}
+
+function formatChicagoDateTime(value: string | null | undefined) {
+  if (!value) return "—"
+  const date = parseTimestamp(value)
+  if (Number.isNaN(date.getTime())) return "—"
+
+  return date.toLocaleString("en-US", {
+    timeZone: "America/Chicago",
+    month: "numeric",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit"
+  })
+}
+
 export default function TransactionsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
 
@@ -113,21 +134,21 @@ export default function TransactionsPage() {
     return payload
   }, [])
 
-   const providerName = useCallback((provider: string) => {
-     if (provider === "coinbase") return "Coinbase Business"
-     if (provider === "solana") return "Solana Pay"
-     if (provider === "shift4") return "Shift4"
-     if (provider === "base") return "Base Pay"
-     return provider || "-"
-   }, [])
+  const providerName = useCallback((provider: string) => {
+    if (provider === "coinbase") return "Coinbase Business"
+    if (provider === "solana") return "Solana Pay"
+    if (provider === "shift4") return "Shift4"
+    if (provider === "base") return "Base Pay"
+    return provider || "-"
+  }, [])
 
-   const networkName = useCallback((network: string | null) => {
-     if (!network) return "-"
-     if (network.toLowerCase() === "solana") return "Solana"
-     if (network.toLowerCase() === "base") return "Base"
-     if (network.toLowerCase() === "ethereum") return "Ethereum"
-     return network.charAt(0).toUpperCase() + network.slice(1).toLowerCase()
-   }, [])
+  const networkName = useCallback((network: string | null) => {
+    if (!network) return "-"
+    if (network.toLowerCase() === "solana") return "Solana"
+    if (network.toLowerCase() === "base") return "Base"
+    if (network.toLowerCase() === "ethereum") return "Ethereum"
+    return network.charAt(0).toUpperCase() + network.slice(1).toLowerCase()
+  }, [])
 
   const calculateInsights = useCallback((data: Transaction[]) => {
     const hourMap: Record<string, number> = {}
@@ -140,7 +161,12 @@ export default function TransactionsPage() {
       const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
       if (!payment) return
 
-      const d = new Date(payment.created_at)
+      const sourceTime = tx.created_at || payment.created_at
+      if (!sourceTime) return
+
+      const d = parseTimestamp(sourceTime)
+      if (Number.isNaN(d.getTime())) return
+
       const hour = String(d.getHours())
       const day = d.toLocaleDateString("default", { weekday: "long" })
 
@@ -161,12 +187,12 @@ export default function TransactionsPage() {
     const peakH = maxKey(hourMap)
     const peakD = maxKey(dayMap)
     const topP = maxKey(providerMap)
-     const topN = maxKey(networkMap)
+    const topN = maxKey(networkMap)
 
-     setPeakHour(peakH === "-" ? "-" : `${peakH}:00`)
-     setPeakDay(peakD)
-     setTopProvider(providerName(topP))
-     setTopNetwork(networkName(topN))
+    setPeakHour(peakH === "-" ? "-" : `${peakH}:00`)
+    setPeakDay(peakD)
+    setTopProvider(providerName(topP))
+    setTopNetwork(networkName(topN))
 
     const pos = channelMap["pos"] || 0
     const online = channelMap["online"] || 0
@@ -178,9 +204,9 @@ export default function TransactionsPage() {
     if (topP === "-" || topN === "-") {
       setAiInsight("No insights yet.")
     } else {
-       setAiInsight(
-         `Your busiest hour is ${peakH}:00. ${providerName(topP)} is your most used provider, and ${networkName(topN)} is your most used network.`
-       )
+      setAiInsight(
+        `Your busiest hour is ${peakH}:00. ${providerName(topP)} is your most used provider, and ${networkName(topN)} is your most used network.`
+      )
     }
   }, [providerName, networkName])
 
@@ -228,7 +254,6 @@ export default function TransactionsPage() {
     }
   }, [loadDashboardData])
 
-
   const filteredTransactions = transactions.filter((tx) => {
     if (walletFilter !== "all" && tx.provider !== walletFilter) return false
     if (networkFilter !== "all" && tx.network !== networkFilter) return false
@@ -244,19 +269,15 @@ export default function TransactionsPage() {
       {/* SUMMARY */}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
-        <div
-          className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm cursor-pointer hover:bg-gray-50"
+        <InteractiveAnalyticsCard
+          title="Today&apos;s Volume"
+          value={`$${todayVolume.toFixed(2)}`}
           onClick={() => {
             setChartMode("all")
             setShowChart(true)
-            loadChartData(chartRange)
+            void loadChartData(chartRange)
           }}
-        >
-          <div className="text-sm text-gray-600">Today&apos;s Volume</div>
-          <div className="text-xl font-semibold text-gray-900 mt-1">
-            ${todayVolume.toFixed(2)}
-          </div>
-        </div>
+        />
 
         <AnalyticsCard title="Transactions" value={todayTransactions.toString()} />
 
@@ -278,29 +299,25 @@ export default function TransactionsPage() {
       {/* CHANNEL MIX */}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
-
-        <div
-          className="cursor-pointer"
+        <InteractiveAnalyticsCard
+          title="POS Payments"
+          value={`${posPercent}%`}
           onClick={() => {
             setChartMode("pos")
             setShowChart(true)
-            loadChartData(chartRange)
+            void loadChartData(chartRange)
           }}
-        >
-          <AnalyticsCard title="POS Payments" value={`${posPercent}%`} />
-        </div>
+        />
 
-        <div
-          className="cursor-pointer"
+        <InteractiveAnalyticsCard
+          title="Online Payments"
+          value={`${onlinePercent}%`}
           onClick={() => {
             setChartMode("online")
             setShowChart(true)
-            loadChartData(chartRange)
+            void loadChartData(chartRange)
           }}
-        >
-          <AnalyticsCard title="Online Payments" value={`${onlinePercent}%`} />
-        </div>
-
+        />
       </div>
 
       {/* AI INSIGHT */}
@@ -367,45 +384,46 @@ export default function TransactionsPage() {
               </tr>
             )}
 
-             {filteredTransactions.map((tx) => {
-               const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
-               const displayStatus = payment
-                 ? getPaymentDisplayStatus(tx.status, payment.created_at)
-                 : { status: tx.status, classes: "bg-gray-100 text-gray-700" }
+            {filteredTransactions.map((tx) => {
+              const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
 
-               return (
+              const statusTime = tx.created_at || payment?.created_at || null
+              const displayStatus = getPaymentDisplayStatus(tx.status, statusTime || "")
+              const amount = Number(payment?.gross_amount ?? 0)
+
+              return (
                 <tr
                   key={tx.id}
                   className="border-b border-gray-100 text-sm hover:bg-gray-50"
                 >
                   <td className="px-6 py-4 text-gray-900">
-                    {payment ? new Date(payment.created_at).toLocaleString() : "—"}
+                    {formatChicagoDateTime(statusTime)}
                   </td>
 
                   <td className="px-6 py-4 font-medium text-gray-900">
-                    {payment ? `$${Number(payment.gross_amount || 0).toFixed(2)}` : "—"}
+                    {payment ? `$${amount.toFixed(2)}` : "—"}
                   </td>
 
                   <td className="px-6 py-4 text-gray-900">
                     {payment?.currency || "—"}
                   </td>
 
-                   <td className="px-6 py-4 text-gray-700">
-                     {networkName(tx.network)}
-                   </td>
+                  <td className="px-6 py-4 text-gray-700">
+                    {networkName(tx.network)}
+                  </td>
 
                   <td className="px-6 py-4 text-gray-900">
                     {providerName(tx.provider)}
                   </td>
 
-                   <td className="px-6 py-4">
-                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${displayStatus.classes}`}>
-                       {displayStatus.status}
-                     </span>
-                   </td>
+                  <td className="px-6 py-4">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${displayStatus.classes}`}>
+                      {displayStatus.status}
+                    </span>
+                  </td>
 
                   <td className="px-6 py-4 text-gray-700 font-mono text-xs">
-                    {tx.provider_transaction_id}
+                    {tx.provider_transaction_id || "—"}
                   </td>
                 </tr>
               )
@@ -442,7 +460,7 @@ export default function TransactionsPage() {
                   key={r}
                   onClick={() => {
                     setChartRange(r)
-                    loadChartData(r)
+                    void loadChartData(r)
                   }}
                   className={`px-3 py-1 rounded border ${chartRange === r ? "bg-blue-600 text-white" : "bg-white text-gray-700"}`}
                 >
@@ -505,5 +523,26 @@ function AnalyticsCard({ title, value }: { title: string, value: string }) {
       <div className="text-sm text-gray-600">{title}</div>
       <div className="text-xl font-semibold text-gray-900 mt-1">{value}</div>
     </div>
+  )
+}
+
+function InteractiveAnalyticsCard({
+  title,
+  value,
+  onClick
+}: {
+  title: string
+  value: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="text-left bg-white border border-gray-200 rounded-lg p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_18px_44px_rgba(37,99,235,0.14),0_0_26px_rgba(125,63,224,0.16)] focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+    >
+      <div className="text-sm text-gray-600">{title}</div>
+      <div className="text-xl font-semibold text-gray-900 mt-1">{value}</div>
+    </button>
   )
 }
