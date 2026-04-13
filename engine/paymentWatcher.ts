@@ -373,14 +373,7 @@ async function handleMatchingTransaction(
         await updateTransactionStatus(transaction.id, "CONFIRMED")
         const payment = await getPaymentById(paymentId)
         
-        await supabase
-          .from("transactions")
-          .update({
-            total_amount: Math.round((payment?.gross_amount || 0) * 100),
-            platform_fee: Math.round((payment?.pinetree_fee || 0) * 100),
-            subtotal_amount: Math.round((payment?.merchant_amount || 0) * 100)
-          })
-          .eq("id", transaction.id)
+        await updateTransactionStatus(transaction.id, "CONFIRMED")
 
       }
     return true
@@ -432,8 +425,11 @@ async function handleMatchingTransaction(
         await supabase
           .from("transactions")
           .update({
-            amount: payment?.gross_amount || 0,
-            native_amount: tx.value
+            total_amount: Math.round((payment?.gross_amount || 0) * 100),
+            platform_fee: Math.round((payment?.pinetree_fee || 0) * 100),
+            subtotal_amount: Math.round((payment?.merchant_amount || 0) * 100),
+            provider_transaction_id: tx.hash,
+            completed_at: new Date().toISOString()
           })
           .eq("id", transaction.id)
       }
