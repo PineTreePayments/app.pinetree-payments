@@ -28,14 +28,14 @@ export function getPaymentDisplayStatus(status: string, createdAt: string): Paym
     PROCESSING: { status: "PROCESSING", classes: "bg-blue-100 text-blue-800", label: "Confirming" },
     CONFIRMED: { status: "CONFIRMED", classes: "bg-green-100 text-green-800", label: "Confirmed" },
     FAILED: { status: "FAILED", classes: "bg-red-100 text-red-800", label: "Failed" },
-    EXPIRED: { status: "EXPIRED", classes: "bg-gray-100 text-gray-700", label: "Expired" },
+    EXPIRED: { status: "EXPIRED", classes: "bg-orange-100 text-orange-700", label: "Expired" },
     INCOMPLETE: { status: "INCOMPLETE", classes: "bg-orange-100 text-orange-800", label: "Incomplete" },
     CANCELED: { status: "CANCELED", classes: "bg-red-100 text-red-700", label: "Canceled" },
   }
 
   return statusMappings[effectiveStatus] || {
     status: effectiveStatus,
-    classes: "bg-gray-100 text-gray-700",
+    classes: "bg-amber-100 text-amber-700",
     label: effectiveStatus
   }
 }
