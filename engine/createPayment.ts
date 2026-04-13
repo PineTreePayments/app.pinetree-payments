@@ -271,6 +271,10 @@ export async function createPayment(
     throw new Error(`Provider ${providerName} not registered`)
   }
 
+  if (!provider.createPayment) {
+    throw new Error(`Provider ${providerName} does not implement createPayment`)
+  }
+
   /* ---------------------------
      EXTRACT PINETREE FEE DATA
   --------------------------- */
