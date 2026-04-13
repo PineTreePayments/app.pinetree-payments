@@ -318,13 +318,26 @@ export async function createPayment(
      GENERATE SPLIT PAYMENT
   --------------------------- */
 
+  // ✅ ENGINE NOW PASSES FULL SPLIT DATA TO PROVIDER
+  // No more single amount, provider receives exact split values
+  const providerPayment = await provider.createPayment({
+    paymentId: paymentId,
+    merchantAmount,
+    pinetreeFee,
+    grossAmount,
+    currency: input.currency,
+    merchantWallet: merchantWalletAddress,
+    pinetreeWallet
+  })
+
   const splitPayment = await generateSplitPayment({
     merchantWallet: merchantWalletAddress,
     merchantAmount,
     pinetreeWallet,
     pinetreeFee,
     network,
-    paymentId
+    paymentId,
+    providerPayment
   })
 
   /* ---------------------------
