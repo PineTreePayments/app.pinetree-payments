@@ -23,6 +23,8 @@ export type CreateTransactionInput = {
   network?: string
   channel?: "pos" | "online" | "api" | "invoice"
   provider_transaction_id?: string
+  amount?: number
+  status?: TransactionStatus
 }
 
 /**
@@ -39,7 +41,8 @@ export async function createTransaction(input: CreateTransactionInput) {
       network: input.network,
       channel: input.channel || "pos",
       provider_transaction_id: input.provider_transaction_id,
-      status: "PENDING"
+      amount: input.amount,
+      status: input.status || "PENDING"
     })
     .select()
     .single()

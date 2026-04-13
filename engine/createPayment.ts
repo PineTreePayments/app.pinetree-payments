@@ -376,7 +376,9 @@ export async function createPayment(
     merchant_id: input.merchantId,
     provider: providerName,
     network: network,
-    channel: channel
+    channel: channel,
+    amount: grossAmount,
+    status: "PENDING"
   })
 
   await updatePaymentStatus(paymentId, "PENDING", {

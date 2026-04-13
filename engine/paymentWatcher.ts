@@ -369,18 +369,26 @@ async function handleMatchingTransaction(
   if (!status) return false
 
   if (status === "CONFIRMED") {
-    if (transaction) {
-      await updateTransactionStatus(transaction.id, "CONFIRMED")
-      const payment = await getPaymentById(paymentId)
-      
-      await supabase
-        .from("transactions")
-        .update({
-          amount: payment?.gross_amount || 0,
-          native_amount: tx.value
-        })
-        .eq("id", transaction.id)
-    }
+      if (transaction) {
+        await updateTransactionStatus(transaction.id, "CONFIRMED")
+        const payment = await getPaymentById(paymentId)
+        
+        await supabase
+          .from("transactions")
+          .update({
+            amount: payment?.gross_amount || 0,
+            native_amount: tx.value
+          })
+          .eq("id", transaction.id)
+
+        // Update merchant wallet balance after successful confirmation
+        try {
+          const { updateWalletBalancesForPayment } = await import("./balanceUpdater")
+          await updateWalletBalancesForPayment(paymentId)
+        } catch (balanceError) {
+          console.warn("[watcher] balance update failed", balanceError)
+        }
+      }
     return true
   }
 
