@@ -381,13 +381,6 @@ async function handleMatchingTransaction(
           })
           .eq("id", transaction.id)
 
-        // Update merchant wallet balance after successful confirmation
-        try {
-          const { updateWalletBalancesForPayment } = await import("./balanceUpdater")
-          await updateWalletBalancesForPayment(paymentId)
-        } catch (balanceError) {
-          console.warn("[watcher] balance update failed", balanceError)
-        }
       }
     return true
   }
