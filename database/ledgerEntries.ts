@@ -1,9 +1,23 @@
 import { supabase } from './supabase'
-import type { Database } from '@/types/database'
 
-type LedgerEntry = Database['public']['Tables']['ledger_entries']['Row']
-type LedgerEntryInsert = Database['public']['Tables']['ledger_entries']['Insert']
-type LedgerEntryUpdate = Database['public']['Tables']['ledger_entries']['Update']
+export interface LedgerEntry {
+  id: string
+  merchant_id?: string
+  payment_id?: string
+  transaction_id?: string
+  provider?: string
+  network?: string
+  asset?: string
+  amount?: number
+  usd_value?: number
+  wallet_address?: string
+  direction?: string
+  status?: string
+  created_at?: Date
+}
+
+export type LedgerEntryInsert = Omit<LedgerEntry, 'id' | 'created_at'>
+export type LedgerEntryUpdate = Partial<LedgerEntry>
 
 export async function createLedgerEntry(input: LedgerEntryInsert): Promise<LedgerEntry> {
   const { data, error } = await supabase
