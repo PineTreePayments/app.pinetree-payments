@@ -24,6 +24,7 @@ import { normalizeWalletNetwork } from "./providerMappings"
 import { watchPayment } from "./paymentWatcher"
 import {
   PINETREE_FEE,
+  AUTO_POLLING_ENABLED,
   getPineTreeTreasuryWallet,
   assertTreasuryWalletFormat,
   assertSplitRailConfig,
@@ -426,28 +427,34 @@ export async function createPayment(
     }
   })
 
-  // ✅ START PAYMENT WATCHER - THIS IS THE FINAL MISSING PIECE
-  // Start background watcher to monitor blockchain for this payment
-  setImmediate(async () => {
-    try {
-      await watchPayment({
-        merchantWallet: merchantWalletAddress,
-        pinetreeWallet,
-        merchantAmount: merchantAmount,
-        pinetreeFee: pinetreeFee,
-        expectedAmountNative: Number(splitPayment.nativeAmount || 0),
-        expectedMerchantAtomic: splitPayment.merchantNativeAmountAtomic,
-        expectedFeeAtomic: splitPayment.feeNativeAmountAtomic,
-        feeCaptureMethod: splitPayment.feeCaptureMethod,
-        splitContract,
+  if (AUTO_POLLING_ENABLED) {
+    // Start background watcher to monitor blockchain for this payment
+    setImmediate(async () => {
+      try {
+        await watchPayment({
+          merchantWallet: merchantWalletAddress,
+          pinetreeWallet,
+          merchantAmount: merchantAmount,
+          pinetreeFee: pinetreeFee,
+          expectedAmountNative: Number(splitPayment.nativeAmount || 0),
+          expectedMerchantAtomic: splitPayment.merchantNativeAmountAtomic,
+          expectedFeeAtomic: splitPayment.feeNativeAmountAtomic,
+          feeCaptureMethod: splitPayment.feeCaptureMethod,
+          splitContract,
 
-        network: network,
-        paymentId: paymentId
-      })
-    } catch (error) {
-      console.error("Payment watcher failed to start:", error)
-    }
-  })
+          network: network,
+          paymentId: paymentId
+        })
+      } catch (error) {
+        console.error("Payment watcher failed to start:", error)
+      }
+    })
+  } else {
+    console.info("[createPayment] auto polling disabled; watcher not started", {
+      paymentId,
+      network
+    })
+  }
 
   /* ---------------------------
      RETURN RESULT

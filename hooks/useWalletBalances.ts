@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { supabase } from "@/database/supabase"
+import { AUTO_POLLING_ENABLED } from "@/lib/utils/polling"
 
 interface WalletBalance {
   id: string
@@ -48,6 +49,10 @@ export function useWalletBalances() {
 
   useEffect(() => {
     fetchBalances()
+
+    if (!AUTO_POLLING_ENABLED) {
+      return
+    }
 
     // Auto refresh balances every 30 seconds
     const interval = setInterval(fetchBalances, 30000)

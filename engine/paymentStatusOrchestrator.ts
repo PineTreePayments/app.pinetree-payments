@@ -1,5 +1,6 @@
 import { getPaymentById, getPaymentIntentById } from "@/database"
 import { watchPayment } from "./paymentWatcher"
+import { AUTO_POLLING_ENABLED } from "./config"
 
 type PaymentWatchSplitMetadata = {
   split?: {
@@ -46,6 +47,14 @@ function canWatchStatus(status: string) {
 }
 
 export async function queueSingleWatcherIteration(payment: WatchablePayment, source: string) {
+  if (!AUTO_POLLING_ENABLED) {
+    console.info("[payment-status] watcher:disabled", {
+      source,
+      paymentId: payment.id
+    })
+    return
+  }
+
   const status = normalizePaymentStatus(payment.status)
   if (!canWatchStatus(status)) {
     console.info("[payment-status] watcher:skip", {

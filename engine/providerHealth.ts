@@ -10,7 +10,7 @@ import {
   getAllProviders
 } from "./providerRegistry"
 
-import { HEALTH_CHECK_CONFIG } from "./config"
+import { AUTO_POLLING_ENABLED, HEALTH_CHECK_CONFIG } from "./config"
 
 /**
  * Run health check for all providers
@@ -41,6 +41,11 @@ export async function runProviderHealthChecks() {
  * Start periodic health check daemon
  */
 export function startHealthCheckDaemon() {
+  if (!AUTO_POLLING_ENABLED) {
+    console.info("[provider-health] auto polling disabled; daemon not started")
+    return
+  }
+
   setInterval(async () => {
     await runProviderHealthChecks()
   }, HEALTH_CHECK_CONFIG.checkInterval)

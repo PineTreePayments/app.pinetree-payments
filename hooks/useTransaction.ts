@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { AUTO_POLLING_ENABLED } from "@/lib/utils/polling";
 
 export function useTransaction(chargeId: string | null) {
 
@@ -7,6 +8,7 @@ export function useTransaction(chargeId: string | null) {
   useEffect(() => {
 
     if (!chargeId) return;
+    if (!AUTO_POLLING_ENABLED) return;
 
     const interval = setInterval(async () => {
 

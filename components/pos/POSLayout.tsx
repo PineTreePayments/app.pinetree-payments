@@ -49,20 +49,19 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
 
   const [taxEnabled,setTaxEnabled] = useState(false)
   const [taxRate,setTaxRate] = useState(0)
+  const [breakdown, setBreakdown] = useState<{
+    subtotalAmount: number
+    taxAmount: number
+    serviceFee: number
+    grossAmount: number
+    totalAmount: number
+  } | null>(null)
 
   const subtotal = (Number(digits || "0") / 100).toFixed(2)
 
-  const taxAmount = taxEnabled
-    ? (Number(subtotal) * (taxRate / 100)).toFixed(2)
-    : "0.00"
-
-  const serviceFee = 0.15
-
-  const total = (
-    Number(subtotal) +
-    Number(taxAmount) +
-    serviceFee
-  ).toFixed(2)
+  const taxAmount = breakdown?.taxAmount.toFixed(2) ?? "0.00"
+  const serviceFee = breakdown?.serviceFee ?? 0
+  const total = breakdown?.grossAmount.toFixed(2) ?? subtotal
 
   useEffect(() => {
     if (!terminalContext?.merchantId) return
@@ -90,9 +89,6 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
     }
 
     loadPosData()
-    const interval = setInterval(loadPosData, 30000)
-
-    return () => clearInterval(interval)
   }, [terminalContext])
 
   function resetSale(){
@@ -112,13 +108,23 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
 
   useEffect(() => {
     if (!paymentId) return
+    if (status !== "waiting" && status !== "processing") return
+
     let stopped = false
+    let interval: ReturnType<typeof setInterval> | null = null
+
+    function stopPolling() {
+      stopped = true
+      if (interval) {
+        clearInterval(interval)
+        interval = null
+      }
+    }
 
     async function pollStatus() {
       if (stopped) return
       try {
-        const qs = new URLSearchParams({ mode: "status", paymentId })
-        const res = await fetch(`/api/pos/payment?${qs.toString()}`, { cache: "no-store" })
+        const res = await fetch(`/api/payments/${encodeURIComponent(paymentId)}`, { cache: "no-store" })
         const data = await res.json().catch(() => null)
         if (!res.ok || !data || stopped) return
 
@@ -138,6 +144,7 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
 
         if (remote === "CONFIRMED") {
           setStatus("confirmed")
+          stopPolling()
           setTimeout(() => {
             if (!stopped) resetSale()
           }, 3500)
@@ -145,11 +152,13 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
         }
 
         if (remote === "FAILED") {
+          stopPolling()
           setStatus("failed")
           return
         }
 
         if (remote === "INCOMPLETE" || remote === "EXPIRED") {
+          stopPolling()
           setStatus("incomplete")
           return
         }
@@ -158,15 +167,13 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
       }
     }
 
-    // Keep interval alive no matter what
-    const interval = setInterval(pollStatus, 1500)
+    interval = setInterval(pollStatus, 3000)
     void pollStatus()
 
     return () => {
-      stopped = true
-      clearInterval(interval)
+      stopPolling()
     }
-  }, [paymentId])
+  }, [paymentId, status])
 
   async function createPayment(){
 
@@ -223,6 +230,17 @@ export default function POSLayout({ locked, terminalContext: terminalContextProp
         setPaymentError("Payment response missing QR data")
         setStatus("failed")
         return
+      }
+
+      // Store breakdown from API response
+      if (data.breakdown) {
+        setBreakdown({
+          subtotalAmount: Number(data.breakdown.subtotalAmount || 0),
+          taxAmount: Number(data.breakdown.taxAmount || 0),
+          serviceFee: Number(data.breakdown.serviceFee || 0),
+          grossAmount: Number(data.breakdown.grossAmount || 0),
+          totalAmount: Number(data.breakdown.totalAmount || 0)
+        })
       }
 
       setPaymentId(String(data.paymentId || ""))

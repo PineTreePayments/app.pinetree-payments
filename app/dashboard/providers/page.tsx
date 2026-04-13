@@ -6,6 +6,7 @@ import { supabase } from "@/database/supabase"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
 import { toast } from "sonner"
 import QRCode from "qrcode"
+import { AUTO_POLLING_ENABLED } from "@/lib/utils/polling"
 
 type ProviderCredentials = {
   api_key?: string
@@ -219,6 +220,7 @@ export default function ProvidersPage() {
 
   useEffect(() => {
     if (!walletSessionId || !activeProvider || !showQr) return
+    if (!AUTO_POLLING_ENABLED) return
 
     pollStopAtRef.current = Date.now() + 15 * 60 * 1000
     let lastPollAt = 0

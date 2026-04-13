@@ -223,6 +223,17 @@ export const WATCHER_CONFIG = {
 }
 
 /**
+ * Auto polling master switch (default OFF)
+ *
+ * - Server-side watcher loops
+ * - Any periodic polling tied to payment lifecycle
+ *
+ * Set PINETREE_ENABLE_AUTO_POLLING=true to re-enable.
+ */
+export const AUTO_POLLING_ENABLED =
+  String(process.env.PINETREE_ENABLE_AUTO_POLLING || "").toLowerCase().trim() === "true"
+
+/**
  * Provider health check configuration
  */
 export const HEALTH_CHECK_CONFIG = {

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useEffect, useCallback } from "react"
 import { supabase } from "@/database/supabase"
+import { AUTO_POLLING_ENABLED } from "@/lib/utils/polling"
 
 type Status =
   | "idle"
@@ -24,15 +25,15 @@ export function usePOS() {
 
   const [taxEnabled, setTaxEnabled] = useState(false)
   const [taxRate, setTaxRate] = useState(0)
+  const [breakdown, setBreakdown] = useState<{
+    subtotalAmount: number
+    taxAmount: number
+    serviceFee: number
+    grossAmount: number
+    totalAmount: number
+  } | null>(null)
 
   const numericAmount = Number(amount || 0)
-
-  const taxAmount = useMemo(() => {
-    if (!taxEnabled) return 0
-    return numericAmount * (taxRate / 100)
-  }, [numericAmount, taxEnabled, taxRate])
-
-  const total = useMemo(() => numericAmount + taxAmount, [numericAmount, taxAmount])
 
   /* LOAD TAX SETTINGS */
 
@@ -115,6 +116,17 @@ export function usePOS() {
           setQrUrl(data.paymentUrl)
         }
 
+        // Store breakdown from API response
+        if (data.breakdown) {
+          setBreakdown({
+            subtotalAmount: Number(data.breakdown.subtotalAmount || 0),
+            taxAmount: Number(data.breakdown.taxAmount || 0),
+            serviceFee: Number(data.breakdown.serviceFee || 0),
+            grossAmount: Number(data.breakdown.grossAmount || 0),
+            totalAmount: Number(data.breakdown.totalAmount || 0)
+          })
+        }
+
         setStatus("pending")
 
       } else {
@@ -144,54 +156,61 @@ export function usePOS() {
 
   }
 
-  /* REALTIME PAYMENT STATUS */
+/* REALTIME PAYMENT STATUS */
 
-  useEffect(() => {
+useEffect(() => {
 
-    if (!paymentId) return
-    if (status !== "pending") return
+  if (!paymentId) return
+  if (status !== "pending") return
+  if (!AUTO_POLLING_ENABLED) return
 
-    let stopped = false
+  let stopped = false
+  let pollingInterval: NodeJS.Timeout
 
-    async function pollPaymentStatus() {
-      try {
-        const qs = new URLSearchParams({ mode: "status", paymentId: paymentId || "" })
-        const res = await fetch(`/api/pos/payment?${qs.toString()}`, {
-          cache: "no-store"
-        })
-        const payload = await res.json().catch(() => null)
-        if (!res.ok || !payload || stopped) return
+  async function pollPaymentStatus() {
+    try {
+      const res = await fetch(`/api/payments/${paymentId}`, {
+        cache: "no-store"
+      })
+      const payload = await res.json().catch(() => null)
+      if (!res.ok || !payload || stopped) return
 
-        const remoteStatus = String(payload.status || "").toUpperCase()
-        if (remoteStatus === "CREATED" || remoteStatus === "PENDING") {
-          return
-        }
-
-        if (remoteStatus === "CONFIRMED") {
-          setStatus("confirmed")
-        }
-
-        if (
-          remoteStatus === "FAILED" ||
-          remoteStatus === "EXPIRED" ||
-          remoteStatus === "INCOMPLETE"
-        ) {
-          setStatus("error")
-        }
-      } catch {
-        // ignore transient polling errors
+      const remoteStatus = String(payload.status || "").toUpperCase()
+      if (remoteStatus === "CREATED" || remoteStatus === "PENDING") {
+        return
       }
+
+      if (remoteStatus === "CONFIRMED") {
+        setStatus("confirmed")
+      }
+
+      if (
+        remoteStatus === "FAILED" ||
+        remoteStatus === "EXPIRED" ||
+        remoteStatus === "INCOMPLETE"
+      ) {
+        setStatus("error")
+      }
+
+      // Stop polling when payment reaches terminal state
+      if (["CONFIRMED", "FAILED", "INCOMPLETE"].includes(remoteStatus)) {
+        stopped = true
+        clearInterval(pollingInterval)
+      }
+    } catch {
+      // ignore transient polling errors
     }
+  }
 
-    pollPaymentStatus()
-    const interval = setInterval(pollPaymentStatus, 2000)
+  pollPaymentStatus()
+  pollingInterval = setInterval(pollPaymentStatus, 3000)
 
-    return () => {
-      stopped = true
-      clearInterval(interval)
-    }
+  return () => {
+    stopped = true
+    clearInterval(pollingInterval)
+  }
 
-  }, [paymentId, status])
+}, [paymentId, status])
 
   /* LOAD TAX SETTINGS ON START */
 
@@ -208,8 +227,9 @@ export function usePOS() {
 
     taxEnabled,
     taxRate,
-    taxAmount,
-    total,
+    taxAmount: breakdown?.taxAmount ?? 0,
+    total: breakdown?.grossAmount ?? 0,
+    breakdown,
 
     qrUrl,
     createCharge,

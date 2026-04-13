@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation"
 import Image from "next/image"
 import { ALLOWED_ASSETS, getAvailableAssetsFromValues } from "@/engine/providerMappings"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
+import { AUTO_POLLING_ENABLED } from "@/lib/utils/polling"
 
 type SplitOutput = {
   address: string
@@ -254,7 +255,7 @@ export default function PayClient() {
       // Update state with actual payment data from API response
       setPaymentPayload({
         network: result.selectedNetwork || asset.network,
-        usdTotalAmount: Number(intentPayload?.amount || 0) + Number(intentPayload?.pinetreeFee || 0),
+        usdTotalAmount: Number(result.grossAmount || intentPayload?.amount || 0),
         nativeAmount: Number(result.nativeAmount || 0),
         nativeSymbol: String(result.nativeSymbol || asset.symbol || "").toUpperCase(),
         paymentUrl,
@@ -298,6 +299,7 @@ export default function PayClient() {
 
   useEffect(() => {
     if (!intentId) return
+    if (!AUTO_POLLING_ENABLED) return
 
     const interval = setInterval(() => {
       void loadIntentCallback()

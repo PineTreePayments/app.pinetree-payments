@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/database/supabase"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
+import { AUTO_POLLING_ENABLED } from "@/lib/utils/polling"
 
 import {
   LineChart,
@@ -139,6 +140,10 @@ export default function DashboardPage() {
     void loadOverview().catch((err) => {
       console.error("Dashboard load failed:", err)
     })
+
+    if (!AUTO_POLLING_ENABLED) {
+      return
+    }
 
     const interval = setInterval(() => {
       void loadOverview().catch((err) => {
