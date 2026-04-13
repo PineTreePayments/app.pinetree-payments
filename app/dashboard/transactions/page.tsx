@@ -213,12 +213,30 @@ export default function TransactionsPage() {
   const loadDashboardData = useCallback(async () => {
     try {
       const payload = (await callTransactionsApi("GET")) as TransactionsDashboardResponse
-      const tx = payload.transactions || []
 
-      setTransactions(tx)
       setTodayVolume(Number(payload.todayVolume || 0))
       setTodayTransactions(Number(payload.todayTransactions || 0))
       setConfirmedRate(Number(payload.confirmedRate || 0))
+
+      const { data, error } = await supabase
+        .from("transactions")
+        .select(`
+          *,
+          payments (*)
+        `)
+        .order("created_at", { ascending: false })
+
+      if (error) {
+        console.error("Transactions query error:", error)
+
+        const fallbackTx = payload.transactions || []
+        setTransactions(fallbackTx)
+        calculateInsights(fallbackTx)
+        return
+      }
+
+      const tx = (data || []) as Transaction[]
+      setTransactions(tx)
       calculateInsights(tx)
     } catch (error) {
       console.error(error)
@@ -386,10 +404,11 @@ export default function TransactionsPage() {
 
             {filteredTransactions.map((tx) => {
               const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
-
               const statusTime = tx.created_at || payment?.created_at || null
-              const displayStatus = getPaymentDisplayStatus(tx.status, statusTime || "")
-              const amount = Number(payment?.gross_amount ?? 0)
+
+              const displayStatus = payment
+                ? getPaymentDisplayStatus(payment.status || tx.status, statusTime || "")
+                : { status: tx.status, classes: "bg-gray-100 text-gray-700" }
 
               return (
                 <tr
@@ -401,7 +420,7 @@ export default function TransactionsPage() {
                   </td>
 
                   <td className="px-6 py-4 font-medium text-gray-900">
-                    {payment ? `$${amount.toFixed(2)}` : "—"}
+                    {payment ? `$${Number(payment.gross_amount || 0).toFixed(2)}` : "—"}
                   </td>
 
                   <td className="px-6 py-4 text-gray-900">
@@ -539,7 +558,7 @@ function InteractiveAnalyticsCard({
     <button
       type="button"
       onClick={onClick}
-      className="text-left bg-white border border-gray-200 rounded-lg p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_18px_44px_rgba(37,99,235,0.14),0_0_26px_rgba(125,63,224,0.16)] focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+      className="text-left bg-white border border-gray-200 rounded-lg p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_20px_60px_rgba(0,0,0,0.12),0_0_40px_rgba(125,63,224,0.25)] focus:outline-none focus:ring-2 focus:ring-blue-500/30"
     >
       <div className="text-sm text-gray-600">{title}</div>
       <div className="text-xl font-semibold text-gray-900 mt-1">{value}</div>
