@@ -7,7 +7,6 @@
 
 import { ProviderAdapter } from "@/types/provider"
 import { registerProvider } from "../engine/providerRegistry"
-import { getBestWalletForNetwork } from "@/database/merchantWallets"
 
 /**
  * Solana Pay URI parameters
@@ -26,21 +25,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object"
 }
 
-async function resolveSolanaRecipientAddress(merchantId: string): Promise<string> {
-  const wallet = await getBestWalletForNetwork(merchantId, "solana")
-
-  if (wallet?.wallet_address) {
-    return wallet.wallet_address
-  }
-
-  const envWallet = String(process.env.SOLANA_WALLET || "").trim()
-  if (!envWallet) {
-    throw new Error("Merchant Solana wallet not configured")
-  }
-
-  return envWallet
-}
-
 export const solanaAdapter: ProviderAdapter = {
 
   /* --------------------------------
@@ -49,10 +33,10 @@ export const solanaAdapter: ProviderAdapter = {
   -------------------------------- */
 
   async getMerchantWallet(merchantId: string) {
-    const address = await resolveSolanaRecipientAddress(merchantId)
+    void merchantId
 
     return {
-      address,
+      address: "engine-managed-wallet",
       network: "solana"
     }
   },
@@ -70,12 +54,11 @@ export const solanaAdapter: ProviderAdapter = {
     currency: string
     merchantWallet: string
     pinetreeWallet: string
+    merchantId?: string
+    network?: string
+    providerApiKey?: string
   }) {
     try {
-      // ✅ ATOMIC SPLIT IMPLEMENTATION
-      // Single transaction with BOTH outputs: merchant + PineTree fee
-      // This follows Solana Fee Capture Method: atomic_split
-      
       const uri = buildSolanaPayUri({
         recipient: input.merchantWallet,
         amount: input.grossAmount,

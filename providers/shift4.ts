@@ -8,7 +8,6 @@
 import { ProviderAdapter } from "@/types/provider"
 import { registerProvider } from "../engine/providerRegistry"
 import { setProviderHealth } from "../engine/providerRegistry"
-import { getMerchantCredential } from "@/database/merchants"
 import crypto from "crypto"
 
 /**
@@ -51,15 +50,18 @@ export const shift4Adapter: ProviderAdapter = {
 
   async createPayment(input: {
     paymentId: string
-    amount: number
+    merchantAmount: number
+    pinetreeFee: number
+    grossAmount: number
     currency: string
-    merchantId: string
+    merchantWallet: string
+    pinetreeWallet: string
+    merchantId?: string
+    network?: string
+    providerApiKey?: string
   }) {
     try {
-      const apiKey = await getMerchantCredential(
-        input.merchantId,
-        "shift4_api_key"
-      )
+      const apiKey = String(input.providerApiKey || "").trim()
 
       if (!apiKey) {
         throw new Error("Shift4 API key not configured")
@@ -72,7 +74,7 @@ export const shift4Adapter: ProviderAdapter = {
           "Authorization": `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          amount: Math.round(input.amount * 100), // Amount in cents
+          amount: Math.round(input.grossAmount * 100), // Amount in cents
           currency: input.currency,
           metadata: {
             paymentId: input.paymentId

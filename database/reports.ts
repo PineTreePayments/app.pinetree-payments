@@ -4,9 +4,9 @@ const db = supabaseAdmin || supabase
 
 export type MerchantReportPaymentRow = {
   id: string
-  subtotal_amount?: number | null
-  platform_fee?: number | null
-  total_amount?: number | null
+  merchant_amount?: number | null
+  pinetree_fee?: number | null
+  gross_amount?: number | null
   currency?: string | null
   created_at: string
   transactions?: Array<{
@@ -34,9 +34,9 @@ export async function getMerchantPaymentsForReport(input: {
     .from("payments")
     .select(`
       id,
-      subtotal_amount,
-      platform_fee,
-      total_amount,
+      merchant_amount,
+      pinetree_fee,
+      gross_amount,
       currency,
       created_at,
       transactions (

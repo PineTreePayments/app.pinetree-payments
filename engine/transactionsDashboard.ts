@@ -4,7 +4,7 @@ const db = supabaseAdmin || supabase
 
 type PaymentRow = {
   created_at: string
-  total_amount: number
+  gross_amount: number
   currency: string
   status: string
 }
@@ -125,7 +125,7 @@ export async function getTransactionsDashboardEngine(merchantId: string): Promis
     created_at: entry.created_at?.toISOString(),
     payments: {
       created_at: entry.created_at?.toISOString(),
-      total_amount: entry.amount,
+      gross_amount: entry.amount,
       currency: entry.asset,
       status: entry.status
     }
@@ -136,7 +136,7 @@ export async function getTransactionsDashboardEngine(merchantId: string): Promis
 
   const { data: paymentRows, error: paymentError } = await db
     .from("payments")
-    .select("total_amount,status")
+    .select("gross_amount,status")
     .eq("merchant_id", merchantId)
     .gte("created_at", startOfDay.toISOString())
 
@@ -145,7 +145,7 @@ export async function getTransactionsDashboardEngine(merchantId: string): Promis
   }
 
   const safePayments = paymentRows || []
-  const todayVolume = safePayments.reduce((sum, p) => sum + Number(p.total_amount || 0), 0)
+  const todayVolume = safePayments.reduce((sum, p) => sum + Number(p.gross_amount || 0), 0)
   const todayTransactions = safePayments.length
   const confirmed = safePayments.filter((p) => p.status === "CONFIRMED").length
 
@@ -170,7 +170,7 @@ export async function getTransactionsChartEngine(
       provider,
       channel,
       created_at,
-      payments(total_amount)
+      payments(gross_amount)
     `)
     .eq("merchant_id", merchantId)
     .gte("created_at", start.toISOString())
@@ -183,7 +183,7 @@ export async function getTransactionsChartEngine(
     provider: string
     channel?: string | null
     created_at: string
-    payments?: { total_amount?: number | string | null } | Array<{ total_amount?: number | string | null }> | null
+    payments?: { gross_amount?: number | string | null } | Array<{ gross_amount?: number | string | null }> | null
   }>
 
   rows.forEach((tx) => {
@@ -191,7 +191,7 @@ export async function getTransactionsChartEngine(
     if (mode === "online" && tx.channel !== "online") return
 
     const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
-    const amount = Number(payment?.total_amount || 0)
+    const amount = Number(payment?.gross_amount || 0)
 
     const d = new Date(tx.created_at)
     let label = ""

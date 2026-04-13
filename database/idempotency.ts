@@ -1,3 +1,4 @@
+import crypto from "crypto"
 import { supabase } from "./supabase"
 
 export type IdempotencyKey = {
@@ -43,6 +44,66 @@ export async function storeIdempotencyKey(key: string, paymentId: string) {
   }
 
   return true
+}
+
+export async function claimIdempotencyKey(key: string, paymentId: string): Promise<
+  | { status: "claimed"; paymentId: string }
+  | { status: "existing"; paymentId: string }
+> {
+  const normalizedKey = String(key || "").trim()
+  const normalizedPaymentId = String(paymentId || "").trim()
+
+  if (!normalizedKey || !normalizedPaymentId) {
+    throw new Error("Invalid idempotency claim")
+  }
+
+  const { error } = await supabase
+    .from("idempotency_keys")
+    .insert({
+      id: crypto.randomUUID(),
+      key: normalizedKey,
+      payment_id: normalizedPaymentId
+    })
+
+  if (!error) {
+    return {
+      status: "claimed",
+      paymentId: normalizedPaymentId
+    }
+  }
+
+  if (error.code === "23505") {
+    const existingPaymentId = await getIdempotencyKey(normalizedKey)
+    if (!existingPaymentId) {
+      throw new Error("Idempotency key collision detected but existing payment was not found")
+    }
+
+    return {
+      status: "existing",
+      paymentId: existingPaymentId
+    }
+  }
+
+  throw new Error(`Failed to claim idempotency key: ${error.message}`)
+}
+
+export async function releaseIdempotencyKey(key: string, paymentId: string): Promise<void> {
+  const normalizedKey = String(key || "").trim()
+  const normalizedPaymentId = String(paymentId || "").trim()
+
+  if (!normalizedKey || !normalizedPaymentId) {
+    return
+  }
+
+  const { error } = await supabase
+    .from("idempotency_keys")
+    .delete()
+    .eq("key", normalizedKey)
+    .eq("payment_id", normalizedPaymentId)
+
+  if (error) {
+    throw new Error(`Failed to release idempotency key: ${error.message}`)
+  }
 }
 
 /**

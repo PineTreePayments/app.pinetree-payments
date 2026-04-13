@@ -8,6 +8,7 @@ import {
   providerToPreferredNetwork,
   networkToProvider
 } from "./providerMappings"
+import { PINETREE_FEE } from "./config"
 
 export type PosTaxSettings = {
   taxEnabled: boolean
@@ -141,7 +142,7 @@ export async function createPosPaymentEngine(
   const tax = await getPosTaxSettingsEngine(merchantId)
   const taxAmount = tax.taxEnabled ? subtotalAmount * (tax.taxRate / 100) : 0
   const merchantAmount = subtotalAmount + taxAmount
-  const serviceFee = 0.15
+  const serviceFee = PINETREE_FEE
   const totalAmount = merchantAmount + serviceFee
   const routing = await resolvePosRouting(merchantId, input.terminal.provider)
 
@@ -163,8 +164,7 @@ export async function createPosPaymentEngine(
       serviceFee,
       totalAmount
     },
-    idempotencyKey: input.idempotencyKey,
-    pinetreeFee: serviceFee
+    idempotencyKey: input.idempotencyKey
   })
 
   const grossAmount = totalAmount
@@ -208,14 +208,13 @@ export async function createPosPaymentIntentEngine(input: CreatePosPaymentInput)
   const tax = await getPosTaxSettingsEngine(merchantId)
   const taxAmount = tax.taxEnabled ? subtotalAmount * (tax.taxRate / 100) : 0
   const merchantAmount = subtotalAmount + taxAmount
-  const serviceFee = 0.15
+  const serviceFee = PINETREE_FEE
 
   const intent = await createPaymentIntentEngine({
     merchantId,
     amount: merchantAmount,
     currency: input.currency || "USD",
     terminalId: input.terminal.terminalId,
-    pinetreeFee: serviceFee,
     metadata: {
       subtotalAmount,
       taxAmount,

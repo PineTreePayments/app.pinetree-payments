@@ -10,6 +10,7 @@ import { createPayment } from "./createPayment"
 import { buildCreatePaymentRequest } from "./createPayment"
 import { getUnifiedPaymentStatusEngine, queueSingleWatcherIteration } from "./paymentStatusOrchestrator"
 import { networkToProvider, normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
+import { PINETREE_FEE } from "./config"
 
 const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base"]
 const PAYMENT_DETAILS_TIMEOUT_MS = Number(process.env.PAYMENT_DETAILS_TIMEOUT_MS || 12000)
@@ -132,7 +133,6 @@ export async function createPaymentIntentEngine(input: {
   amount: number
   currency: string
   terminalId?: string
-  pinetreeFee?: number
   metadata?: Record<string, unknown>
 }) {
   const merchantId = String(input.merchantId || "").trim()
@@ -148,7 +148,7 @@ export async function createPaymentIntentEngine(input: {
   }
 
   const intentId = crypto.randomUUID()
-  const pinetreeFee = Number(input.pinetreeFee ?? 0.15)
+  const pinetreeFee = PINETREE_FEE
 
   const intent = await createPaymentIntentRecord({
     id: intentId,
@@ -266,7 +266,6 @@ export async function selectPaymentIntentNetworkEngine(input: {
         provider,
         merchantId: intent.merchant_id,
         terminalId: intent.terminal_id || undefined,
-        pinetreeFee: Number(intent.pinetree_fee || 0.15),
         metadata: {
           ...(intent.metadata || {}),
           paymentIntentId: intent.id,

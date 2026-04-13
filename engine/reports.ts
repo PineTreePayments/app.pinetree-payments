@@ -35,8 +35,8 @@ export async function generateReportEngine(input: ReportInput) {
       continue
     }
 
-    const amount = Number(payment.total_amount || 0)
-    const fee = Number(payment.platform_fee || 0)
+    const amount = Number(payment.gross_amount || 0)
+    const fee = Number(payment.pinetree_fee || 0)
 
     transactionCount++
     totalVolume += amount

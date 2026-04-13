@@ -42,6 +42,7 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     pinetreeWallet: string
     merchantId?: string
     network?: string
+    providerApiKey?: string
   }): Promise<{
     providerReference: string
     paymentUrl?: string

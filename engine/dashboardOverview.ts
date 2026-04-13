@@ -4,7 +4,7 @@ import { getWalletOverviewEngine } from "./walletOverview"
 const db = supabaseAdmin || supabase
 
 type PaymentSummary = {
-  subtotal_amount?: number | string | null
+  gross_amount?: number | string | null
 }
 
 type TransactionRow = {
@@ -37,7 +37,7 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
       network,
       created_at,
       payments (
-        subtotal_amount
+        gross_amount
       )
     `)
     .eq("merchant_id", merchantId)
@@ -49,14 +49,14 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
 
   const totalVolume = rows.reduce((sum: number, t) => {
     const payment = Array.isArray(t.payments) ? t.payments[0] : t.payments
-    return sum + Number(payment?.subtotal_amount ?? 0)
+    return sum + Number(payment?.gross_amount ?? 0)
   }, 0)
 
   const byDate: Record<string, number> = {}
   rows.forEach((t) => {
     const payment = Array.isArray(t.payments) ? t.payments[0] : t.payments
     const date = new Date(t.created_at).toLocaleDateString()
-    byDate[date] = (byDate[date] || 0) + Number(payment?.subtotal_amount ?? 0)
+    byDate[date] = (byDate[date] || 0) + Number(payment?.gross_amount ?? 0)
   })
 
   const chartData = Object.keys(byDate).map((date) => ({

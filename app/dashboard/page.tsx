@@ -28,7 +28,7 @@ type DashboardOverviewResponse = {
 }
 
 type PaymentSummary = {
-  subtotal_amount?: number | string | null
+  gross_amount?: number | string | null
 }
 
 type RecentTxRow = {
@@ -321,7 +321,7 @@ export default function DashboardPage() {
                       </td>
 
                       <td className="py-3 text-gray-800 font-medium">
-                        ${Number(payment?.subtotal_amount ?? 0).toFixed(2)}
+                        ${Number(payment?.gross_amount ?? 0).toFixed(2)}
                       </td>
 
                       <td className="py-3 text-gray-700">

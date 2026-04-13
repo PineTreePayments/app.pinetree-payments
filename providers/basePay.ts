@@ -1,6 +1,5 @@
 import { ProviderAdapter } from "@/types/provider"
 import { registerProvider } from "../engine/providerRegistry"
-import { getBestWalletForNetwork } from "@/database/merchantWallets"
 
 /**
  * Base Pay adapter
@@ -11,28 +10,31 @@ import { getBestWalletForNetwork } from "@/database/merchantWallets"
  */
 export const basePayAdapter: ProviderAdapter = {
   async getMerchantWallet(merchantId: string) {
-    const wallet = await getBestWalletForNetwork(merchantId, "base")
-
-    if (!wallet?.wallet_address) {
-      throw new Error("Merchant Base wallet not configured")
-    }
+    void merchantId
 
     return {
-      address: wallet.wallet_address,
+      address: "engine-managed-wallet",
       network: "base"
     }
   },
 
   async createPayment(input: {
     paymentId: string
-    amount: number
+    merchantAmount: number
+    pinetreeFee: number
+    grossAmount: number
     currency: string
-    merchantId: string
+    merchantWallet: string
+    pinetreeWallet: string
+    merchantId?: string
+    network?: string
+    providerApiKey?: string
   }) {
     // Engine wallet-rail flow generates final URI/QR.
     // Return minimal reference for adapter interface compatibility.
     return {
-      providerReference: input.paymentId
+      providerReference: input.paymentId,
+      feeCaptureMethod: "contract_split"
     }
   },
 

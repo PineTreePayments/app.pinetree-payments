@@ -8,7 +8,6 @@
 import { ProviderAdapter } from "@/types/provider"
 import { registerProvider } from "../engine/providerRegistry"
 import { setProviderHealth } from "../engine/providerRegistry"
-import { getMerchantCredential } from "@/database/merchants"
 import crypto from "crypto"
 
 /**
@@ -50,17 +49,10 @@ export const coinbaseAdapter: ProviderAdapter = {
   -------------------------------- */
 
   async getMerchantWallet(merchantId: string) {
-    const walletAddress = await getMerchantCredential(
-      merchantId,
-      "coinbase_wallet"
-    )
-
-    if (!walletAddress) {
-      throw new Error("Merchant Coinbase wallet not configured")
-    }
+    void merchantId
 
     return {
-      address: walletAddress,
+      address: "engine-managed-wallet",
       network: "base"
     }
   },
@@ -72,19 +64,24 @@ export const coinbaseAdapter: ProviderAdapter = {
 
   async createPayment(input: {
     paymentId: string
-    amount: number
+    merchantAmount: number
+    pinetreeFee: number
+    grossAmount: number
     currency: string
-    merchantId: string
+    merchantWallet: string
+    pinetreeWallet: string
+    merchantId?: string
+    network?: string
+    providerApiKey?: string
   }) {
     try {
-      const apiKey = await getMerchantCredential(
-        input.merchantId,
-        "coinbase_api_key"
-      )
+      const apiKey = String(input.providerApiKey || "").trim()
 
       if (!apiKey) {
         throw new Error("Coinbase API key not configured")
       }
+
+      const { grossAmount, currency } = input
 
       const response = await fetch(`${COINBASE_API_BASE}/charges`, {
         method: "POST",
@@ -98,8 +95,8 @@ export const coinbaseAdapter: ProviderAdapter = {
           description: "Point of Sale Transaction",
           pricing_type: "fixed_price",
           local_price: {
-            amount: input.amount.toFixed(2),
-            currency: input.currency
+            amount: grossAmount.toFixed(2),
+            currency: currency
           },
           metadata: {
             paymentId: input.paymentId
@@ -122,7 +119,8 @@ export const coinbaseAdapter: ProviderAdapter = {
 
       return {
         providerReference: data.data.id,
-        paymentUrl: data.data.hosted_url
+        paymentUrl: data.data.hosted_url,
+        feeCaptureMethod: "invoice_split"
       }
 
     } catch (error) {

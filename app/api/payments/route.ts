@@ -14,7 +14,6 @@ type CreatePaymentBody = {
   provider?: "solana" | "coinbase" | "shift4"
   merchantId: string
   terminalId?: string
-  pinetreeFee?: number
   metadata?: Record<string, unknown>
 }
 
@@ -31,7 +30,6 @@ export async function POST(req: NextRequest) {
       provider: body.provider,
       merchantId: body.merchantId,
       terminalId: body.terminalId,
-      pinetreeFee: body.pinetreeFee,
       metadata: body.metadata
     })
 

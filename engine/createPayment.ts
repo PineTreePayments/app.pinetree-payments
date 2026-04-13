@@ -11,8 +11,8 @@ import { PaymentProvider } from "@/types/payment"
 import {
   createPayment as createPaymentRecord,
   createTransaction,
-  getIdempotencyKey,
-  storeIdempotencyKey,
+  claimIdempotencyKey,
+  releaseIdempotencyKey,
   getPaymentById
 } from "@/database"
 import { generateSplitPayment } from "./generateSplitPayment"
@@ -23,11 +23,13 @@ import { loadProviders } from "./loadProviders"
 import { providerToPreferredNetwork } from "./providerMappings"
 import { watchPayment } from "./paymentWatcher"
 import {
+  PINETREE_FEE,
   getPineTreeTreasuryWallet,
   assertTreasuryWalletFormat,
   assertSplitRailConfig,
   validateConfigOnce
 } from "./config"
+import { getMerchantCredential } from "@/database/merchants"
 
 type PaymentMetadata = {
   merchantAmount?: number
@@ -62,6 +64,21 @@ function extractEvmSplitContractFromPaymentUrl(paymentUrl?: string): string | un
   return contract
 }
 
+async function getProviderApiKey(
+  provider: PaymentProvider,
+  merchantId: string
+): Promise<string | undefined> {
+  if (provider === "coinbase") {
+    return (await getMerchantCredential(merchantId, "coinbase_api_key")) || undefined
+  }
+
+  if (provider === "shift4") {
+    return (await getMerchantCredential(merchantId, "shift4_api_key")) || undefined
+  }
+
+  return undefined
+}
+
 type CreatePaymentInput = {
   amount: number
   currency: string
@@ -71,7 +88,6 @@ type CreatePaymentInput = {
   channel?: "pos" | "online" | "api" | "invoice"
   metadata?: PaymentMetadata
   idempotencyKey?: string
-  pinetreeFee?: number
 }
 
 type CreatePaymentResult = {
@@ -91,7 +107,6 @@ export type BuildCreatePaymentRequestInput = {
   merchantId: string
   provider?: PaymentProvider
   terminalId?: string
-  pinetreeFee?: number
   metadata?: Record<string, unknown>
 }
 
@@ -137,7 +152,7 @@ export async function buildCreatePaymentRequest(
     }
 
     const totalAmount = merchantAmount + taxAmount
-    const pinetreeFee = input.pinetreeFee ?? 0.15
+    const pinetreeFee = PINETREE_FEE
     const grossAmount = calculateGrossAmount(totalAmount, pinetreeFee)
 
     return {
@@ -166,7 +181,7 @@ export async function buildCreatePaymentRequest(
     // If tax settings are unavailable, continue with default tax=0 behavior
     const { calculateGrossAmount } = await import("./fees")
     const totalAmount = merchantAmount
-    const pinetreeFee = input.pinetreeFee ?? 0.15
+    const pinetreeFee = PINETREE_FEE
     const grossAmount = calculateGrossAmount(totalAmount, pinetreeFee)
 
     if (error instanceof Error) {
@@ -214,41 +229,52 @@ export async function createPayment(
   // Ensure all provider adapters are registered before selection/use
   await loadProviders()
 
-  /* ---------------------------
-     IDEMPOTENCY PROTECTION
-  --------------------------- */
+  const resolveExistingPaymentResult = async (existingPaymentId: string): Promise<CreatePaymentResult | null> => {
+    const existingPayment = await getPaymentById(existingPaymentId)
 
-  if (input.idempotencyKey) {
-    const existingPaymentId = await getIdempotencyKey(input.idempotencyKey)
-    
-    if (existingPaymentId) {
-      const existingPayment = await getPaymentById(existingPaymentId)
-      
-      if (existingPayment) {
-        const existingMetadata = (existingPayment.metadata || null) as StoredPaymentSplitMetadata | null
-        const split = existingMetadata?.split
-        const expectedAmountNative = Number(split?.expectedAmountNative || 0)
-        const merchantNativeAmount = Number(split?.merchantNativeAmount || 0)
-        const feeNativeAmount = Number(split?.feeNativeAmount || 0)
+    if (!existingPayment) {
+      return null
+    }
 
-        const inferredNativeAmount =
-          expectedAmountNative > 0
-            ? expectedAmountNative
-            : merchantNativeAmount + feeNativeAmount
+    const existingMetadata = (existingPayment.metadata || null) as StoredPaymentSplitMetadata | null
+    const split = existingMetadata?.split
+    const expectedAmountNative = Number(split?.expectedAmountNative || 0)
+    const merchantNativeAmount = Number(split?.merchantNativeAmount || 0)
+    const feeNativeAmount = Number(split?.feeNativeAmount || 0)
 
-        return {
-          id: existingPayment.id,
-          provider: existingPayment.provider,
-          paymentUrl: existingPayment.payment_url || "",
-          qrCodeUrl: existingPayment.qr_code_url || "",
-          address: String(existingMetadata?.split?.merchantWallet || ""),
-          universalUrl: undefined,
-          nativeAmount: inferredNativeAmount > 0 ? inferredNativeAmount : undefined,
-          nativeSymbol: inferNativeSymbolFromNetwork(existingPayment.network)
-        }
-      }
+    const inferredNativeAmount =
+      expectedAmountNative > 0
+        ? expectedAmountNative
+        : merchantNativeAmount + feeNativeAmount
+
+    return {
+      id: existingPayment.id,
+      provider: existingPayment.provider,
+      paymentUrl: existingPayment.payment_url || "",
+      qrCodeUrl: existingPayment.qr_code_url || "",
+      address: String(existingMetadata?.split?.merchantWallet || ""),
+      universalUrl: undefined,
+      nativeAmount: inferredNativeAmount > 0 ? inferredNativeAmount : undefined,
+      nativeSymbol: inferNativeSymbolFromNetwork(existingPayment.network)
     }
   }
+
+  const paymentId = crypto.randomUUID()
+  let claimedIdempotencyKey = false
+
+  if (input.idempotencyKey) {
+    const claim = await claimIdempotencyKey(input.idempotencyKey, paymentId)
+    if (claim.status === "existing") {
+      const existingResult = await resolveExistingPaymentResult(claim.paymentId)
+      if (existingResult) {
+        return existingResult
+      }
+      throw new Error("Idempotency key exists but associated payment could not be loaded")
+    }
+    claimedIdempotencyKey = true
+  }
+
+  try {
 
   /* ---------------------------
      PROVIDER SELECTION
@@ -280,7 +306,7 @@ export async function createPayment(
   --------------------------- */
 
   const merchantAmount = input.metadata?.merchantAmount ?? input.amount
-  const pinetreeFee = input.pinetreeFee ?? input.metadata?.pinetreeFee ?? 0
+  const pinetreeFee = Number(input.metadata?.pinetreeFee ?? PINETREE_FEE)
   const grossAmount = calculateGrossAmount(merchantAmount, pinetreeFee)
 
   /* ---------------------------
@@ -316,14 +342,13 @@ export async function createPayment(
      CREATE PAYMENT ID
   --------------------------- */
 
-  const paymentId = crypto.randomUUID()
-
   /* ---------------------------
      GENERATE SPLIT PAYMENT
   --------------------------- */
 
   // ✅ ENGINE NOW PASSES FULL SPLIT DATA TO PROVIDER
   // No more single amount, provider receives exact split values
+  const providerApiKey = await getProviderApiKey(providerName, input.merchantId)
   const providerPayment = await provider.createPayment({
     paymentId: paymentId,
     merchantAmount,
@@ -331,7 +356,10 @@ export async function createPayment(
     grossAmount,
     currency: input.currency,
     merchantWallet: merchantWalletAddress,
-    pinetreeWallet
+    pinetreeWallet,
+    merchantId: input.merchantId,
+    network,
+    providerApiKey
   })
 
   const splitPayment = await generateSplitPayment({
@@ -356,6 +384,7 @@ export async function createPayment(
     gross_amount: grossAmount,
     currency: input.currency,
     provider: providerName,
+    provider_reference: providerPayment.providerReference,
     network: network,
     payment_url: splitPayment.paymentUrl,
     qr_code_url: splitPayment.qrCodeUrl,
@@ -406,14 +435,6 @@ export async function createPayment(
     }
   })
 
-  /* ---------------------------
-     STORE IDEMPOTENCY KEY
-  --------------------------- */
-
-  if (input.idempotencyKey) {
-    await storeIdempotencyKey(input.idempotencyKey, paymentId)
-  }
-
   // ✅ START PAYMENT WATCHER - THIS IS THE FINAL MISSING PIECE
   // Start background watcher to monitor blockchain for this payment
   setImmediate(async () => {
@@ -449,5 +470,16 @@ export async function createPayment(
     universalUrl: splitPayment.universalUrl,
     nativeAmount: Number(splitPayment.nativeAmount || 0),
     nativeSymbol: String(splitPayment.nativeSymbol || "").toUpperCase() || undefined
+  }
+  } catch (error) {
+    if (claimedIdempotencyKey && input.idempotencyKey) {
+      try {
+        await releaseIdempotencyKey(input.idempotencyKey, paymentId)
+      } catch (releaseError) {
+        console.error("Failed to release idempotency key after payment creation failure:", releaseError)
+      }
+    }
+
+    throw error
   }
 }

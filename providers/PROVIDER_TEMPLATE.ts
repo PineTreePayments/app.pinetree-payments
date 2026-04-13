@@ -21,10 +21,15 @@ class ProviderNameAdapter extends BaseProviderAdapter {
    */
   async createPayment(input: {
     paymentId: string
-    amount: number
+    merchantAmount: number
+    pinetreeFee: number
+    grossAmount: number
     currency: string
-    merchantId: string
+    merchantWallet: string
+    pinetreeWallet: string
+    merchantId?: string
     network?: string
+    providerApiKey?: string
   }) {
     // Implement provider payment creation here
     // ONLY communicate with external API

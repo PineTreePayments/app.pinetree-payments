@@ -36,6 +36,7 @@ export type CreatePaymentInput = {
   gross_amount: number
   currency: string
   provider: string
+  provider_reference?: string
   network?: string
   payment_url?: string
   qr_code_url?: string
@@ -68,6 +69,7 @@ export async function createPayment(input: CreatePaymentInput) {
       gross_amount: input.gross_amount,
       currency: input.currency,
       provider: input.provider,
+      provider_reference: input.provider_reference,
       network: input.network,
       payment_url: input.payment_url,
       qr_code_url: input.qr_code_url,

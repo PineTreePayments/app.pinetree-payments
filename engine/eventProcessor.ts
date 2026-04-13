@@ -120,6 +120,26 @@ async function advancePaymentToTargetStatus(
   }
 
   const currentStatus = normalizeToStrictPaymentStatus(payment.status)
+  const split = (payment.metadata as { split?: Record<string, unknown> } | null)?.split
+  const feeCaptureMethod = String(split?.feeCaptureMethod || "").trim().toLowerCase()
+  const resolvedMetadata =
+    targetStatus === "CONFIRMED"
+      ? {
+          ...metadata,
+          rawPayload: {
+            ...(metadata.rawPayload && typeof metadata.rawPayload === "object"
+              ? metadata.rawPayload as Record<string, unknown>
+              : {}),
+            feeCaptureValidated:
+              feeCaptureMethod === "invoice_split" ||
+              feeCaptureMethod === "collection_then_settle" ||
+              Boolean(
+                (metadata.rawPayload as { feeCaptureValidated?: boolean } | undefined)?.feeCaptureValidated
+              )
+          }
+        }
+      : metadata
+
   if (currentStatus === targetStatus) {
     return
   }
@@ -138,13 +158,13 @@ async function advancePaymentToTargetStatus(
 
     if (transitions.length) {
       for (const next of transitions) {
-        await updatePaymentStatus(paymentId, next, metadata)
+        await updatePaymentStatus(paymentId, next, resolvedMetadata)
       }
       return
     }
   }
 
-  await updatePaymentStatus(paymentId, targetStatus, metadata)
+  await updatePaymentStatus(paymentId, targetStatus, resolvedMetadata)
 }
 
 function toTransactionStatus(status: PaymentStatus): TransactionStatus {
