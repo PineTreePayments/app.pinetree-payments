@@ -3,9 +3,11 @@ import { createClient } from "@supabase/supabase-js"
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { paymentId: string } }
+  context: { params: Promise<{ paymentId: string }> }
 ) {
   try {
+    const { paymentId } = await context.params
+
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -14,7 +16,7 @@ export async function GET(
     const { data, error } = await supabase
       .from("payments")
       .select("*")
-      .eq("id", params.paymentId)
+      .eq("id", paymentId)
       .single()
 
     if (error) {
@@ -25,6 +27,7 @@ export async function GET(
     }
 
     return NextResponse.json({ payment: data })
+
   } catch (err) {
     return NextResponse.json(
       { error: "Internal server error" },
