@@ -215,7 +215,7 @@ export async function watchPayment(input: WatchInput) {
         }
 
         if (input.singleIteration) {
-          return false
+          continue
         }
 
         attempts++
