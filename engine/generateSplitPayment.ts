@@ -103,10 +103,6 @@ export async function generateSplitPayment(
     returnPath = "/base-return"
   }
 
-  if (input.network === "coinbase") {
-    returnPath = "/coinbase-return"
-  }
-
   const returnUrl = `${BASE_URL}${returnPath}`
 
   const feeCaptureMethod =

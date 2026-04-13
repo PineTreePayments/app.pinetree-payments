@@ -67,7 +67,7 @@ export {
   getProviderHealthStatus
 } from "./providerRegistry"
 
-export { chooseBestProvider } from "./providerSelector"
+export { chooseBestAdapter, getAvailableNetworks } from "./providerSelector"
 export { runProviderHealthChecks, startHealthCheckDaemon } from "./providerHealth"
 
 // Payment Monitoring

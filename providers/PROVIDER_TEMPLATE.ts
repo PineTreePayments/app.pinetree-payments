@@ -1,5 +1,5 @@
 /**
- * [PROVIDER NAME] Provider Adapter
+ * [ADAPTER NAME] Provider Adapter
  * 
  * Copy this template to create a new payment provider adapter.
  * Rename file to match provider id (lowercase.ts)
@@ -9,12 +9,20 @@
 
 import { BaseProviderAdapter } from "./base"
 import { registerProvider } from "@/engine/providerRegistry"
-import type { PaymentStatus } from "@/types/provider"
+import type { PaymentStatus, ProviderAdapterMetadata } from "@/types/provider"
 
 class ProviderNameAdapter extends BaseProviderAdapter {
   readonly providerId = "provider-id"
   readonly providerName = "Provider Display Name"
   readonly supportedNetworks = ["network1", "network2"]
+
+  override get metadata(): ProviderAdapterMetadata {
+    return {
+      adapterId: this.providerId,
+      displayName: this.providerName,
+      supportedNetworks: []
+    }
+  }
 
   /**
    * Create payment on provider

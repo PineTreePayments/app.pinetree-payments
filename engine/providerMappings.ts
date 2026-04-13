@@ -1,4 +1,12 @@
-import { PaymentProvider } from "@/types/payment"
+import {
+  type PaymentAdapterId,
+  type PaymentNetwork,
+  normalizePaymentAdapter,
+  normalizePaymentNetwork,
+  getSupportedNetworksForAdapter,
+  getAdapterCredentialKey,
+  adapterSupportsNetwork
+} from "@/types/payment"
 
 export type WalletAsset =
   | "sol"
@@ -8,26 +16,18 @@ export type WalletAsset =
   | "usdc-base"
   | "usdc-ethereum"
 
-export type WalletNetwork = "solana" | "base" | "ethereum"
+export type WalletNetwork = PaymentNetwork
 
-export function normalizeProvider(provider?: string): PaymentProvider | undefined {
-  const value = String(provider || "").toLowerCase().trim()
-  if (value === "solana" || value === "coinbase" || value === "shift4" || value === "base") {
-    return value as PaymentProvider
-  }
-  return undefined
+export function normalizeProvider(provider?: string): PaymentAdapterId | undefined {
+  return normalizePaymentAdapter(provider)
 }
 
 export function normalizeWalletNetwork(value?: string): WalletNetwork | null {
-  const network = String(value || "").toLowerCase().trim()
-  if (network === "solana" || network === "base" || network === "ethereum") return network
-  return null
+  return normalizePaymentNetwork(value)
 }
 
-export function networkToProvider(network: WalletNetwork): PaymentProvider {
-  if (network === "solana") return "solana"
-  if (network === "base") return "base"
-  return "shift4"
+export function getNetworksForAdapter(adapterId?: string): WalletNetwork[] {
+  return getSupportedNetworksForAdapter(adapterId)
 }
 
 export const ALLOWED_ASSETS: Readonly<Record<WalletAsset, { label: string; network: WalletNetwork; symbol: string }>> = {
@@ -39,13 +39,16 @@ export const ALLOWED_ASSETS: Readonly<Record<WalletAsset, { label: string; netwo
   "usdc-ethereum": { label: "USDC (Ethereum)", network: "ethereum", symbol: "USDC" },
 } as const
 
-export function providerToPreferredNetwork(provider?: string): WalletNetwork | null {
-  const p = normalizeProvider(provider)
-  if (p === "solana") return "solana"
-  if (p === "base") return "base"
-  if (p === "coinbase") return "base"
-  if (p === "shift4") return "ethereum"
-  return null
+export function getDefaultNetworkForAdapter(adapterId?: string): WalletNetwork | null {
+  return getNetworksForAdapter(adapterId)[0] || null
+}
+
+export function adapterCanProcessNetwork(adapterId: string, network: string): boolean {
+  return adapterSupportsNetwork(adapterId, network)
+}
+
+export function getCredentialKeyForAdapter(adapterId?: string): string | undefined {
+  return getAdapterCredentialKey(adapterId)
 }
 
 export function getAvailableAssetsForNetworks(networks: WalletNetwork[]): WalletAsset[] {

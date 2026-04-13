@@ -1,14 +1,13 @@
 import { createPayment } from "@/engine/createPayment"
-import { getMerchantTaxSettings, getMerchantProviders } from "@/database/merchants"
+import { getMerchantTaxSettings } from "@/database/merchants"
 import { hasAnyWalletConnected, selectBestWallet } from "@/database/merchantWallets"
 import { createPaymentIntentEngine } from "./paymentIntents"
 import { getUnifiedPaymentStatusEngine } from "./paymentStatusOrchestrator"
 import {
-  normalizeWalletNetwork,
-  providerToPreferredNetwork,
-  networkToProvider
+  normalizeWalletNetwork
 } from "./providerMappings"
 import { PINETREE_FEE } from "./config"
+import { chooseBestAdapter } from "./providerSelector"
 
 export type PosTaxSettings = {
   taxEnabled: boolean
@@ -18,7 +17,7 @@ export type PosTaxSettings = {
 export type PosTerminalContext = {
   merchantId: string
   terminalId?: string
-  provider?: string
+  preferredNetwork?: string
 }
 
 export type CreatePosPaymentInput = {
@@ -50,10 +49,8 @@ export type CreatePosPaymentResult = {
   }
 }
 
-async function resolvePosRouting(merchantId: string, terminalHint?: string) {
-  const hintedNetwork = normalizeWalletNetwork(terminalHint)
-  const hintedProviderNetwork = providerToPreferredNetwork(terminalHint)
-  const preferredNetwork = hintedNetwork || hintedProviderNetwork || undefined
+async function resolvePosRouting(merchantId: string, networkHint?: string) {
+  const preferredNetwork = normalizeWalletNetwork(networkHint) || undefined
 
   const wallet = await selectBestWallet(merchantId, preferredNetwork)
   if (!wallet) {
@@ -69,11 +66,12 @@ async function resolvePosRouting(merchantId: string, terminalHint?: string) {
     throw err
   }
 
-  const connectedProviders = await getMerchantProviders(merchantId)
-  const connected = new Set(connectedProviders.map((p) => String(p.provider || "").toLowerCase()))
+  const adapterId = await chooseBestAdapter({
+    merchantId,
+    network: walletNetwork
+  })
 
-  const provider = networkToProvider(walletNetwork)
-  if (!connected.has(provider)) {
+  if (!adapterId) {
     const err = new Error(`No compatible provider connected for wallet network: ${walletNetwork}`) as Error & {
       status?: number
     }
@@ -82,7 +80,7 @@ async function resolvePosRouting(merchantId: string, terminalHint?: string) {
   }
 
   return {
-    provider,
+    adapterId,
     wallet,
     network: walletNetwork
   }
@@ -100,7 +98,7 @@ export async function hasConnectedWalletForPosEngine(merchantId: string) {
   return hasAnyWalletConnected(merchantId)
 }
 
-export async function checkPosReadinessEngine(merchantId: string, providerHint?: string) {
+export async function checkPosReadinessEngine(merchantId: string, networkHint?: string) {
   if (!merchantId) {
     return {
       connected: false,
@@ -109,7 +107,7 @@ export async function checkPosReadinessEngine(merchantId: string, providerHint?:
   }
 
   try {
-    await resolvePosRouting(merchantId, providerHint)
+    await resolvePosRouting(merchantId, networkHint)
     return {
       connected: true,
       reason: null as string | null
@@ -144,12 +142,12 @@ export async function createPosPaymentEngine(
   const merchantAmount = subtotalAmount + taxAmount
   const serviceFee = PINETREE_FEE
   const totalAmount = merchantAmount + serviceFee
-  const routing = await resolvePosRouting(merchantId, input.terminal.provider)
+  const routing = await resolvePosRouting(merchantId, input.terminal.preferredNetwork)
 
   const payment = await createPayment({
     amount: totalAmount,
     currency: input.currency || "USD",
-    provider: routing.provider,
+    adapterId: routing.adapterId,
     merchantId,
     preferredNetwork: routing.network,
     channel: "pos",

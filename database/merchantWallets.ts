@@ -1,4 +1,5 @@
 import { supabase } from "./supabase"
+import { getSupportedNetworksForAdapter } from "@/types/payment"
 
 export type MerchantWallet = {
   id: string
@@ -13,11 +14,7 @@ export type MerchantWallet = {
 }
 
 function providerToNetworks(provider: string): string[] {
-  const value = String(provider || "").toLowerCase().trim()
-  if (value === "solana") return ["solana"]
-  if (value === "coinbase" || value === "base") return ["base"]
-  if (value === "shift4") return ["ethereum"]
-  return []
+  return getSupportedNetworksForAdapter(provider)
 }
 
 async function getAuthoritativeConnectedNetworks(merchantId: string): Promise<Set<string>> {

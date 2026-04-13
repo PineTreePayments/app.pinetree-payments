@@ -1,5 +1,5 @@
-// PineTree Provider Adapters - Central Export
-// Import from this file to access all provider adapters
+// PineTree payment adapters - central export
+// Import from this file to access all registered adapters
 
 // Import adapters to register them
 import "./coinbase"
@@ -13,5 +13,5 @@ export { solanaAdapter } from "./solana"
 export { shift4Adapter } from "./shift4"
 export { basePayAdapter } from "./basePay"
 
-// Re-export provider registry functions
+// Re-export registry functions
 export { getProvider, registerProvider } from "../engine/providerRegistry"

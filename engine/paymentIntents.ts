@@ -9,7 +9,7 @@ import QRCode from "qrcode"
 import { createPayment } from "./createPayment"
 import { buildCreatePaymentRequest } from "./createPayment"
 import { getUnifiedPaymentStatusEngine, queueSingleWatcherIteration } from "./paymentStatusOrchestrator"
-import { networkToProvider, normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
+import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 import { PINETREE_FEE } from "./config"
 
 const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base"]
@@ -250,21 +250,18 @@ export async function selectPaymentIntentNetworkEngine(input: {
     throw new Error("Selected network is not enabled for this merchant")
   }
 
-  const provider = networkToProvider(normalizedNetwork)
-
   try {
     console.info("[payment-intent] select-network:start", {
       intentId: intent.id,
-      network: normalizedNetwork,
-      provider
+      network: normalizedNetwork
     })
 
     const { createPaymentInput } = await withTimeout(
       buildCreatePaymentRequest({
         amount: Number(intent.amount),
         currency: intent.currency,
-        provider,
         merchantId: intent.merchant_id,
+        preferredNetwork: normalizedNetwork,
         terminalId: intent.terminal_id || undefined,
         metadata: {
           ...(intent.metadata || {}),

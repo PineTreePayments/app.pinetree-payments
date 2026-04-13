@@ -1,18 +1,24 @@
 import { getMerchantProviders } from "@/database/merchants"
 import { getMerchantWallets } from "@/database/merchantWallets"
 import {
+  normalizePaymentAdapter,
+  adapterSupportsNetwork,
+  type PaymentAdapterId
+} from "@/types/payment"
+import {
   assertTreasuryWalletFormat,
   getPineTreeTreasuryWallet
 } from "./config"
-import { normalizeWalletNetwork, networkToProvider, type WalletNetwork } from "./providerMappings"
+import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
+import { isProviderHealthy } from "./providerRegistry"
 
 type ReadinessNetwork = "solana" | "base" | "ethereum"
 
 type NetworkReadiness = {
   network: ReadinessNetwork
-  provider: {
-    required: string
-    connected: boolean
+  adapters: {
+    available: boolean
+    connected: string[]
   }
   wallet: {
     connected: boolean
@@ -44,9 +50,9 @@ export async function getPaymentReadinessEngine(input: { merchantId?: string }) 
   const networks: ReadinessNetwork[] = ["solana", "base", "ethereum"]
 
   const connectedProviders = merchantId ? await getMerchantProviders(merchantId) : []
-  const connectedProviderSet = new Set(
-    connectedProviders.map((row) => String(row.provider || "").toLowerCase())
-  )
+  const connectedAdapterIds = connectedProviders
+    .map((row) => normalizePaymentAdapter(String(row.provider || "")))
+    .filter((value): value is PaymentAdapterId => Boolean(value))
 
   const wallets = merchantId ? await getMerchantWallets(merchantId) : []
   const walletByNetwork = new Map<WalletNetwork, string>()
@@ -61,8 +67,11 @@ export async function getPaymentReadinessEngine(input: { merchantId?: string }) 
   }
 
   const details: NetworkReadiness[] = networks.map((network) => {
-    const requiredProvider = networkToProvider(network)
-    const providerConnected = merchantId ? connectedProviderSet.has(requiredProvider) : false
+    const connectedAdaptersForNetwork = merchantId
+      ? connectedAdapterIds.filter(
+          (adapterId) => adapterSupportsNetwork(adapterId, network) && isProviderHealthy(adapterId)
+        )
+      : []
     const walletAddress = merchantId ? walletByNetwork.get(network) : undefined
 
     let treasuryAddress = ""
@@ -82,9 +91,9 @@ export async function getPaymentReadinessEngine(input: { merchantId?: string }) 
 
     return {
       network,
-      provider: {
-        required: requiredProvider,
-        connected: providerConnected
+      adapters: {
+        available: connectedAdaptersForNetwork.length > 0,
+        connected: connectedAdaptersForNetwork
       },
       wallet: {
         connected: Boolean(walletAddress),
@@ -101,7 +110,7 @@ export async function getPaymentReadinessEngine(input: { merchantId?: string }) 
 
   const supportedIntentNetworks = details.filter((item) => item.network === "solana" || item.network === "base")
   const readyNetworks = supportedIntentNetworks.filter(
-    (item) => item.provider.connected && item.wallet.connected && item.treasury.configured && item.treasury.validFormat
+    (item) => item.adapters.available && item.wallet.connected && item.treasury.configured && item.treasury.validFormat
   )
 
   return {

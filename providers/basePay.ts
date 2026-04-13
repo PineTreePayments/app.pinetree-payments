@@ -9,6 +9,17 @@ import { registerProvider } from "../engine/providerRegistry"
  * network registration + wallet capability for provider validation.
  */
 export const basePayAdapter: ProviderAdapter = {
+  metadata: {
+    adapterId: "base",
+    displayName: "Base Pay",
+    supportedNetworks: ["base"],
+    feeCaptureMethods: ["contract_split"],
+    capabilities: {
+      hostedCheckout: false,
+      walletRails: true,
+      webhooks: false
+    }
+  },
   async getMerchantWallet(merchantId: string) {
     void merchantId
 

@@ -1,7 +1,7 @@
 /**
- * Solana Pay Provider Adapter
+ * Solana Pay Adapter
  * 
- * Implements the ProviderAdapter interface for Solana Pay integration.
+ * Implements the provider adapter interface for Solana Pay integration.
  * Handles payment URI generation, QR code creation, and transaction monitoring.
  */
 
@@ -26,6 +26,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export const solanaAdapter: ProviderAdapter = {
+  metadata: {
+    adapterId: "solana",
+    displayName: "Solana Pay",
+    supportedNetworks: ["solana"],
+    feeCaptureMethods: ["atomic_split"],
+    capabilities: {
+      hostedCheckout: false,
+      walletRails: true,
+      webhooks: false
+    }
+  },
 
   /* --------------------------------
      WALLET RAIL SUPPORT

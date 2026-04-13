@@ -11,8 +11,8 @@ import { buildCreatePaymentRequest, createPayment } from "@/engine/createPayment
 type CreatePaymentBody = {
   amount: number
   currency: string
-  provider?: "solana" | "coinbase" | "shift4"
   merchantId: string
+  preferredNetwork?: "solana" | "base" | "ethereum"
   terminalId?: string
   metadata?: Record<string, unknown>
 }
@@ -27,8 +27,8 @@ export async function POST(req: NextRequest) {
     const { createPaymentInput, breakdown } = await buildCreatePaymentRequest({
       amount: body.amount,
       currency: body.currency,
-      provider: body.provider,
       merchantId: body.merchantId,
+      preferredNetwork: body.preferredNetwork,
       terminalId: body.terminalId,
       metadata: body.metadata
     })
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
     const status =
       message === "Missing required payment fields" ||
       message === "Invalid payment amount" ||
-      message === "No payment provider connected"
+      message.includes("No healthy payment adapter available")
         ? 400
         : 500
 

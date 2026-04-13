@@ -7,31 +7,27 @@ async function ensureProvidersLoaded() {
 }
 
 type PaymentRouterInput = {
-  provider: string
   amount: number
   currency: string
   merchantId: string
+  preferredNetwork?: string
+  adapterId?: string
 }
 
 export async function paymentRouter(input: PaymentRouterInput) {
 
   await ensureProvidersLoaded()
 
-  let providerName = input.provider
-
-  if (!isProviderHealthy(providerName)) {
-
-    console.warn(`Provider ${providerName} unhealthy, switching to fallback`)
-
-    providerName = "coinbase"
-
+  if (input.adapterId && !isProviderHealthy(input.adapterId)) {
+    throw new Error(`Requested payment adapter is unhealthy: ${input.adapterId}`)
   }
 
   return createPayment({
     amount: input.amount,
     currency: input.currency,
     merchantId: input.merchantId,
-    provider: providerName as never,
+    adapterId: input.adapterId as never,
+    preferredNetwork: input.preferredNetwork,
     channel: "api"
   })
 

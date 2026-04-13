@@ -1,7 +1,7 @@
 /**
- * Coinbase Commerce Provider Adapter
+ * Coinbase Adapter
  * 
- * Implements the ProviderAdapter interface for Coinbase Commerce integration.
+ * Implements the provider adapter interface for Coinbase-backed hosted checkout.
  * Handles payment creation, status checking, webhook verification, and event translation.
  */
 
@@ -11,7 +11,7 @@ import { setProviderHealth } from "../engine/providerRegistry"
 import crypto from "crypto"
 
 /**
- * Coinbase Commerce API base URL
+ * Coinbase hosted checkout API base URL
  */
 const COINBASE_API_BASE = "https://api.commerce.coinbase.com"
 
@@ -42,6 +42,18 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 export const coinbaseAdapter: ProviderAdapter = {
+  metadata: {
+    adapterId: "coinbase",
+    displayName: "Coinbase Business",
+    supportedNetworks: ["base"],
+    credentialKey: "coinbase_api_key",
+    feeCaptureMethods: ["invoice_split"],
+    capabilities: {
+      hostedCheckout: true,
+      walletRails: true,
+      webhooks: true
+    }
+  },
 
   /* --------------------------------
      WALLET RAIL SUPPORT
@@ -59,7 +71,7 @@ export const coinbaseAdapter: ProviderAdapter = {
 
   /* --------------------------------
      CREATE PAYMENT
-     Creates a new charge via Coinbase Commerce API
+     Creates a new Coinbase-backed hosted payment session
   -------------------------------- */
 
   async createPayment(input: {
@@ -124,7 +136,7 @@ export const coinbaseAdapter: ProviderAdapter = {
       }
 
     } catch (error) {
-      console.error("Coinbase payment error:", error)
+      console.error("Coinbase adapter payment error:", error)
       setProviderHealth("coinbase", false)
       throw error
     }
@@ -153,7 +165,7 @@ export const coinbaseAdapter: ProviderAdapter = {
       return coinbaseStatusToPineTree(status)
 
     } catch (error) {
-      console.error("Coinbase status check error:", error)
+      console.error("Coinbase adapter status check error:", error)
       return { status: "PENDING" as const }
     }
   },

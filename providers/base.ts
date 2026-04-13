@@ -1,12 +1,18 @@
 /**
  * Base Provider Adapter Abstract Class
  * 
- * All payment providers MUST extend this base class.
+ * All payment adapters MUST extend this base class.
  * Implements the standard ProviderAdapter interface with default implementations.
  * Follows PineTree architecture rules strictly.
  */
 
-import type { ProviderAdapter, PaymentStatus } from "@/types/provider"
+import type {
+  ProviderAdapter,
+  PaymentStatus,
+  FeeCaptureMethod,
+  ProviderAdapterMetadata
+} from "@/types/provider"
+import type { PaymentNetwork } from "@/types/payment"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object"
@@ -28,6 +34,14 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
    */
   abstract readonly supportedNetworks: string[]
 
+  get metadata(): ProviderAdapterMetadata {
+    return {
+      adapterId: this.providerId,
+      displayName: this.providerName,
+      supportedNetworks: this.supportedNetworks as PaymentNetwork[]
+    }
+  }
+
   /**
    * Create payment on provider network
    * Override this method in concrete adapter implementations
@@ -47,7 +61,7 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     providerReference: string
     paymentUrl?: string
     qrCodeUrl?: string
-    feeCaptureMethod?: string
+    feeCaptureMethod?: FeeCaptureMethod
   }> {
     void input
     throw new Error(`createPayment not implemented for ${this.providerName}`)

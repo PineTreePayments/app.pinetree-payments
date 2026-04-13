@@ -1,3 +1,5 @@
+import type { PaymentAdapterId, PaymentNetwork } from "./payment"
+
 export type PaymentStatus =
   | "CREATED"
   | "PENDING"
@@ -8,7 +10,37 @@ export type PaymentStatus =
   | "EXPIRED"
   | "REFUNDED"
 
+export type FeeCaptureMethod =
+  | "atomic_split"
+  | "contract_split"
+  | "invoice_split"
+  | "collection_then_settle"
+
+export type StandardPaymentEvent = {
+  paymentId: string
+  event:
+    | "payment.created"
+    | "payment.pending"
+    | "payment.processing"
+    | "payment.confirmed"
+    | "payment.failed"
+}
+
+export interface ProviderAdapterMetadata {
+  adapterId: PaymentAdapterId | string
+  displayName: string
+  supportedNetworks: readonly PaymentNetwork[]
+  credentialKey?: string
+  feeCaptureMethods?: FeeCaptureMethod[]
+  capabilities?: {
+    hostedCheckout?: boolean
+    walletRails?: boolean
+    webhooks?: boolean
+  }
+}
+
 export interface ProviderAdapter {
+  metadata?: ProviderAdapterMetadata
 
   /* --------------------------------
   PROVIDER GENERATED PAYMENT
@@ -30,7 +62,7 @@ export interface ProviderAdapter {
     providerReference: string
     paymentUrl?: string
     qrCodeUrl?: string
-    feeCaptureMethod?: string
+    feeCaptureMethod?: FeeCaptureMethod
   }>
 
   /* --------------------------------
@@ -57,15 +89,7 @@ export interface ProviderAdapter {
 
   verifyWebhook?(payload: unknown, signature?: string, rawBody?: string): boolean
 
-  translateEvent?(payload: unknown): {
-    paymentId: string
-    event:
-      | "payment.created"
-      | "payment.pending"
-      | "payment.processing"
-      | "payment.confirmed"
-      | "payment.failed"
-  }
+  translateEvent?(payload: unknown): StandardPaymentEvent
 
   /**
    * Health check implementation

@@ -1,54 +1,76 @@
 /**
- * PineTree Provider Selector & Smart Routing
+ * PineTree Adapter Selector & Smart Routing
  * 
- * Automatically selects the best available provider and wallet
- * for a given merchant based on priority, health, and availability.
+ * Engine-owned selection of the best available adapter for a merchant
+ * based on network support, merchant configuration, and adapter health.
  */
 
-import { getMerchantProviders } from "@/database/merchants"
-import { selectBestWallet } from "@/database/merchantWallets"
-import { getProvider, isProviderHealthy } from "./providerRegistry"
+import { getMerchantDefaultProvider, getMerchantProviders } from "@/database/merchants"
+import type { PaymentAdapterId } from "@/types/payment"
+import { normalizeProvider, normalizeWalletNetwork } from "./providerMappings"
+import { getProviderMetadata, isProviderHealthy } from "./providerRegistry"
+
+function sortAdapterIds(
+  adapterIds: PaymentAdapterId[],
+  defaultAdapterId?: PaymentAdapterId | null
+): PaymentAdapterId[] {
+  const preferred = String(defaultAdapterId || "").toLowerCase().trim()
+  return [...adapterIds].sort((left, right) => {
+    if (left === preferred && right !== preferred) return -1
+    if (right === preferred && left !== preferred) return 1
+    return left.localeCompare(right)
+  })
+}
 
 /**
- * Choose the best available provider for a merchant
+ * Choose the best available adapter for a merchant network.
  */
-export async function chooseBestProvider(
-  merchantId: string,
-  preferredNetwork?: string
-) {
-  void preferredNetwork
-  // Get all connected providers for this merchant
-  const providers = await getMerchantProviders(merchantId)
+export async function chooseBestAdapter(input: {
+  merchantId: string
+  network: string
+  requestedAdapterId?: string
+}): Promise<PaymentAdapterId | null> {
+  const network = normalizeWalletNetwork(input.network)
+  if (!network) {
+    throw new Error("Unsupported payment network")
+  }
 
-  for (const provider of providers) {
-    const adapter = getProvider(provider.provider)
+  const merchantProviders = await getMerchantProviders(input.merchantId)
+  const connectedAdapterIds = merchantProviders
+    .map((provider) => normalizeProvider(provider.provider))
+    .filter((value): value is PaymentAdapterId => Boolean(value))
 
-    if (!adapter) {
-      continue
+  const defaultAdapterId = normalizeProvider(
+    String(await getMerchantDefaultProvider(input.merchantId) || "")
+  )
+
+  const requestedAdapterId = normalizeProvider(input.requestedAdapterId)
+
+  if (requestedAdapterId) {
+    const metadata = getProviderMetadata(requestedAdapterId)
+    if (!connectedAdapterIds.includes(requestedAdapterId)) {
+      throw new Error(`Requested payment adapter is not connected: ${requestedAdapterId}`)
     }
-
-    // Check if provider is healthy
-    if (!isProviderHealthy(provider.provider)) {
-      continue
+    if (!metadata || !metadata.supportedNetworks.includes(network)) {
+      throw new Error(`Requested payment adapter does not support ${network}`)
     }
+    if (!isProviderHealthy(requestedAdapterId)) {
+      throw new Error(`Requested payment adapter is unhealthy: ${requestedAdapterId}`)
+    }
+    return requestedAdapterId
+  }
 
-    // Check if merchant has wallet for this provider
-    const hasWallet = await selectBestWallet(
-      merchantId,
-      provider.provider
+  const candidates = connectedAdapterIds.filter((adapterId) => {
+    const metadata = getProviderMetadata(adapterId)
+    return Boolean(
+      metadata &&
+      metadata.supportedNetworks.includes(network) &&
+      isProviderHealthy(adapterId)
     )
+  })
 
-    if (hasWallet) {
-      return provider.provider
-    }
-  }
-
-  // Fallback to first connected provider
-  if (providers.length > 0) {
-    return providers[0].provider
-  }
-
-  return null
+  const sortedCandidates = sortAdapterIds(candidates, defaultAdapterId)
+  return sortedCandidates[0] || null
 }
 
 /**
@@ -56,14 +78,17 @@ export async function chooseBestProvider(
  */
 export async function getAvailableNetworks(merchantId: string) {
   const providers = await getMerchantProviders(merchantId)
-  
-  const networks = []
+
+  const networks = new Set<string>()
 
   for (const provider of providers) {
-    if (isProviderHealthy(provider.provider)) {
-      networks.push(provider.provider)
+    const adapterId = normalizeProvider(provider.provider)
+    const metadata = adapterId ? getProviderMetadata(adapterId) : null
+
+    if (adapterId && metadata && isProviderHealthy(adapterId)) {
+      metadata.supportedNetworks.forEach((network) => networks.add(network))
     }
   }
 
-  return networks
+  return [...networks]
 }

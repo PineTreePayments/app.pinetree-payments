@@ -1,7 +1,7 @@
 /**
- * Shift4 Crypto Provider Adapter
+ * Shift4 Adapter
  * 
- * Implements the ProviderAdapter interface for Shift4 crypto payment integration.
+ * Implements the provider adapter interface for Shift4-hosted payment sessions.
  * Handles payment session creation, status checking, and event translation.
  */
 
@@ -27,6 +27,18 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 export const shift4Adapter: ProviderAdapter = {
+  metadata: {
+    adapterId: "shift4",
+    displayName: "Shift4",
+    supportedNetworks: ["ethereum"],
+    credentialKey: "shift4_api_key",
+    feeCaptureMethods: ["contract_split"],
+    capabilities: {
+      hostedCheckout: true,
+      walletRails: false,
+      webhooks: true
+    }
+  },
 
   /* --------------------------------
      WALLET RAIL SUPPORT
@@ -96,7 +108,7 @@ export const shift4Adapter: ProviderAdapter = {
       }
 
     } catch (error) {
-      console.error("Shift4 payment error:", error)
+      console.error("Shift4 adapter payment error:", error)
       setProviderHealth("shift4", false)
       throw error
     }
@@ -130,7 +142,7 @@ export const shift4Adapter: ProviderAdapter = {
       return shift4StatusToPineTree(status)
 
     } catch (error) {
-      console.error("Shift4 status check error:", error)
+      console.error("Shift4 adapter status check error:", error)
       return { status: "PENDING" as const }
     }
   },

@@ -5,9 +5,9 @@
  * Handles the complete payment creation flow from validation to database storage.
  */
 
-import { chooseBestProvider } from "./providerSelector"
+import { chooseBestAdapter } from "./providerSelector"
 import { getProvider } from "./providerRegistry"
-import { PaymentProvider } from "@/types/payment"
+import { type PaymentAdapterId, getAdapterCredentialKey } from "@/types/payment"
 import {
   createPayment as createPaymentRecord,
   createTransaction,
@@ -20,7 +20,7 @@ import { calculateGrossAmount } from "./fees"
 import { selectBestWallet } from "@/database/merchantWallets"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 import { loadProviders } from "./loadProviders"
-import { providerToPreferredNetwork } from "./providerMappings"
+import { normalizeWalletNetwork } from "./providerMappings"
 import { watchPayment } from "./paymentWatcher"
 import {
   PINETREE_FEE,
@@ -65,15 +65,13 @@ function extractEvmSplitContractFromPaymentUrl(paymentUrl?: string): string | un
 }
 
 async function getProviderApiKey(
-  provider: PaymentProvider,
+  adapterId: string,
   merchantId: string
 ): Promise<string | undefined> {
-  if (provider === "coinbase") {
-    return (await getMerchantCredential(merchantId, "coinbase_api_key")) || undefined
-  }
+  const credentialKey = getAdapterCredentialKey(adapterId)
 
-  if (provider === "shift4") {
-    return (await getMerchantCredential(merchantId, "shift4_api_key")) || undefined
+  if (credentialKey) {
+    return (await getMerchantCredential(merchantId, credentialKey)) || undefined
   }
 
   return undefined
@@ -82,7 +80,7 @@ async function getProviderApiKey(
 type CreatePaymentInput = {
   amount: number
   currency: string
-  provider?: PaymentProvider
+  adapterId?: PaymentAdapterId
   merchantId: string
   preferredNetwork?: string
   channel?: "pos" | "online" | "api" | "invoice"
@@ -105,7 +103,8 @@ export type BuildCreatePaymentRequestInput = {
   amount: number
   currency: string
   merchantId: string
-  provider?: PaymentProvider
+  adapterId?: PaymentAdapterId
+  preferredNetwork?: string
   terminalId?: string
   metadata?: Record<string, unknown>
 }
@@ -136,10 +135,6 @@ export async function buildCreatePaymentRequest(
     throw new Error("Missing required payment fields")
   }
 
-  if (!input.provider) {
-    throw new Error("No payment provider connected")
-  }
-
   let taxAmount = 0
 
   try {
@@ -159,8 +154,9 @@ export async function buildCreatePaymentRequest(
       createPaymentInput: {
         amount: grossAmount,
         currency,
-        provider: input.provider,
+        adapterId: input.adapterId,
         merchantId,
+        preferredNetwork: input.preferredNetwork,
         metadata: {
           ...(input.metadata || {}),
           terminalId: input.terminalId,
@@ -192,8 +188,9 @@ export async function buildCreatePaymentRequest(
       createPaymentInput: {
         amount: grossAmount,
         currency,
-        provider: input.provider,
+        adapterId: input.adapterId,
         merchantId,
+        preferredNetwork: input.preferredNetwork,
         metadata: {
           ...(input.metadata || {}),
           terminalId: input.terminalId,
@@ -277,31 +274,6 @@ export async function createPayment(
   try {
 
   /* ---------------------------
-     PROVIDER SELECTION
-  --------------------------- */
-
-  let providerName = input.provider
-
-  if (!providerName) {
-    const selectedProvider = await chooseBestProvider(input.merchantId)
-    providerName = selectedProvider as PaymentProvider
-  }
-
-  if (!providerName) {
-    throw new Error("No payment provider connected")
-  }
-
-  const provider = getProvider(providerName)
-
-  if (!provider) {
-    throw new Error(`Provider ${providerName} not registered`)
-  }
-
-  if (!provider.createPayment) {
-    throw new Error(`Provider ${providerName} does not implement createPayment`)
-  }
-
-  /* ---------------------------
      EXTRACT PINETREE FEE DATA
   --------------------------- */
 
@@ -310,16 +282,13 @@ export async function createPayment(
   const grossAmount = calculateGrossAmount(merchantAmount, pinetreeFee)
 
   /* ---------------------------
-     GET MERCHANT WALLET
+     RESOLVE NETWORK + MERCHANT WALLET
   --------------------------- */
 
-  if (!provider.getMerchantWallet) {
-    throw new Error("Provider does not support wallet rails")
-  }
-
   const preferredNetwork =
-    input.preferredNetwork ||
-    providerToPreferredNetwork(providerName) || undefined
+    normalizeWalletNetwork(input.preferredNetwork) ||
+    normalizeWalletNetwork(String(input.metadata?.selectedNetwork || input.metadata?.network || "")) ||
+    undefined
 
   const merchantWallet = await selectBestWallet(input.merchantId, preferredNetwork)
   
@@ -329,6 +298,26 @@ export async function createPayment(
   
   const merchantWalletAddress = merchantWallet.wallet_address
   const network = merchantWallet.network
+
+  /* ---------------------------
+     ADAPTER SELECTION
+  --------------------------- */
+
+  const providerName = await chooseBestAdapter({
+    merchantId: input.merchantId,
+    network,
+    requestedAdapterId: input.adapterId
+  })
+
+  if (!providerName) {
+    throw new Error(`No healthy payment adapter available for network: ${network}`)
+  }
+
+  const provider = getProvider(providerName)
+
+  if (!provider.createPayment) {
+    throw new Error(`Adapter ${providerName} does not implement createPayment`)
+  }
 
   /* ---------------------------
      PINETREE TREASURY WALLET

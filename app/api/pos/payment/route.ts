@@ -31,14 +31,14 @@ export async function GET(req: NextRequest) {
     }
 
     const merchantId = req.nextUrl.searchParams.get("merchantId") || ""
-    const provider = req.nextUrl.searchParams.get("provider") || ""
+    const network = req.nextUrl.searchParams.get("network") || ""
     if (!merchantId) {
       return NextResponse.json({ error: "Missing merchantId" }, { status: 400 })
     }
 
     const [tax, readiness] = await Promise.all([
       getPosTaxSettingsEngine(merchantId),
-      checkPosReadinessEngine(merchantId, provider)
+      checkPosReadinessEngine(merchantId, network)
     ])
 
     return NextResponse.json({
@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
       reason: readiness.reason,
       context: {
         merchantId,
-        provider: provider || null
+        network: network || null
       }
     })
   } catch (error: unknown) {
@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
       terminal?: {
         merchantId?: string
         terminalId?: string
-        provider?: string
+        preferredNetwork?: string
       }
     }
 
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
       terminal: {
         merchantId: String(body.terminal?.merchantId || ""),
         terminalId: body.terminal?.terminalId,
-        provider: body.terminal?.provider
+        preferredNetwork: body.terminal?.preferredNetwork
       }
     })
 
