@@ -5,7 +5,7 @@
  * Polls the network for transactions to merchant/treasury wallets.
  */
 
-import { supabase } from "@/database"
+import { supabase, getPaymentById } from "@/database"
 import { getRpcUrl, WATCHER_CONFIG } from "./config"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 import { type PaymentStatus } from "./paymentStateMachine"
@@ -371,10 +371,12 @@ async function handleMatchingTransaction(
   if (status === "CONFIRMED") {
     if (transaction) {
       await updateTransactionStatus(transaction.id, "CONFIRMED")
+      const payment = await getPaymentById(paymentId)
+      
       await supabase
         .from("transactions")
         .update({
-          amount: tx.value,
+          amount: payment?.gross_amount || 0,
           native_amount: tx.value
         })
         .eq("id", transaction.id)
