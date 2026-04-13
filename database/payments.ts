@@ -1,4 +1,4 @@
-import { supabase } from "./supabase"
+ouimport { supabase } from "./supabase"
 
 export type PaymentStatus =
   | "CREATED"

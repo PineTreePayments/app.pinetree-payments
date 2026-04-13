@@ -1,243 +1,86 @@
 "use client"
 
-import { useMemo, useState, useEffect, useCallback } from "react"
-import { supabase } from "@/database/supabase"
-import { AUTO_POLLING_ENABLED } from "@/lib/utils/polling"
+import { useEffect, useState, useCallback } from "react"
 
-type Status =
-  | "idle"
-  | "confirm"
-  | "creating"
-  | "pending"
-  | "confirmed"
-  | "error"
-
-export function usePOS() {
-
-  const [amount, setAmount] = useState<string>("")
-
-  const [qrUrl, setQrUrl] = useState<string | null>(null)
-  const [paymentId, setPaymentId] = useState<string | null>(null)
-
-  const [status, setStatus] = useState<Status>("idle")
-
-  /* TAX SETTINGS */
-
-  const [taxEnabled, setTaxEnabled] = useState(false)
+export function usePOS(user: any) {
   const [taxRate, setTaxRate] = useState(0)
-  const [breakdown, setBreakdown] = useState<{
-    subtotalAmount: number
-    taxAmount: number
-    serviceFee: number
-    grossAmount: number
-    totalAmount: number
-  } | null>(null)
+  const [taxEnabled, setTaxEnabled] = useState(false)
+  const [loadingSettings, setLoadingSettings] = useState(true)
 
-  const numericAmount = Number(amount || 0)
+  const [paymentId, setPaymentId] = useState<string | null>(null)
+  const [paymentStatus, setPaymentStatus] = useState<string | null>(null)
 
-  /* LOAD TAX SETTINGS */
+  /* =========================
+     LOAD MERCHANT SETTINGS (ONCE)
+  ========================= */
 
-  const loadTaxSettings = useCallback(async () => {
-    try {
-      const {
-        data: { user }
-      } = await supabase.auth.getUser()
-
-      if (!user) return
-
-      const qs = new URLSearchParams({ merchantId: user.id })
-      const res = await fetch(`/api/pos/payment?${qs.toString()}`, {
-        cache: "no-store"
-      })
-      const payload = await res.json().catch(() => null)
-
-      if (res.ok && payload?.tax) {
-        setTaxEnabled(Boolean(payload.tax.taxEnabled))
-        setTaxRate(Number(payload.tax.taxRate || 0))
-      }
-    } catch (err) {
-      console.error("Failed to load tax settings:", err)
-    }
-  }, [])
-
-  /* CONFIRM AMOUNT */
-
-  function confirmAmount() {
-
-    if (!amount) return
-
-    setStatus("confirm")
-
-  }
-
-  /* CREATE PAYMENT */
-
-  async function createCharge() {
-
-    if (!amount) return
+  const loadSettings = useCallback(async () => {
+    if (!user?.id) return
 
     try {
-
-      setStatus("creating")
-
-      const { data: { user } } = await supabase.auth.getUser()
-      
-      if (!user) {
-        setStatus("error")
-        return
-      }
-
-      const res = await fetch("/api/pos/payment", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          amount: numericAmount,
-          currency: "USD",
-          terminal: {
-            merchantId: user.id,
-            provider: "solana"
-          }
-        })
-      })
+      const res = await fetch(
+        `/api/merchant/settings?merchantId=${user.id}`,
+        { cache: "no-store" }
+      )
 
       const data = await res.json()
 
-      if (data?.paymentId) {
-
-        setPaymentId(data.paymentId)
-
-        if (data.qrCodeUrl) {
-          setQrUrl(data.qrCodeUrl)
-        }
-
-        if (data.paymentUrl) {
-          setQrUrl(data.paymentUrl)
-        }
-
-        // Store breakdown from API response
-        if (data.breakdown) {
-          setBreakdown({
-            subtotalAmount: Number(data.breakdown.subtotalAmount || 0),
-            taxAmount: Number(data.breakdown.taxAmount || 0),
-            serviceFee: Number(data.breakdown.serviceFee || 0),
-            grossAmount: Number(data.breakdown.grossAmount || 0),
-            totalAmount: Number(data.breakdown.totalAmount || 0)
-          })
-        }
-
-        setStatus("pending")
-
-      } else {
-
-        setStatus("error")
-
+      if (data?.settings) {
+        setTaxRate(data.settings.tax_rate || 0)
+        setTaxEnabled(data.settings.tax_enabled || false)
       }
-
     } catch (err) {
-
-      console.error("Charge creation failed:", err)
-      setStatus("error")
-
+      console.error("Failed to load settings", err)
+    } finally {
+      setLoadingSettings(false)
     }
-
-  }
-
-  /* RESET POS */
-
-  function resetPOS() {
-
-    setAmount("")
-    setQrUrl(null)
-    setPaymentId(null)
-
-    setStatus("idle")
-
-  }
-
-/* REALTIME PAYMENT STATUS */
-
-useEffect(() => {
-
-  if (!paymentId) return
-  if (status !== "pending") return
-  if (!AUTO_POLLING_ENABLED) return
-
-  let stopped = false
-  let pollingInterval: NodeJS.Timeout
-
-  async function pollPaymentStatus() {
-    try {
-      const res = await fetch(`/api/payments/${paymentId}`, {
-        cache: "no-store"
-      })
-      const payload = await res.json().catch(() => null)
-      if (!res.ok || !payload || stopped) return
-
-      const remoteStatus = String(payload.status || "").toUpperCase()
-      if (remoteStatus === "CREATED" || remoteStatus === "PENDING") {
-        return
-      }
-
-      if (remoteStatus === "CONFIRMED") {
-        setStatus("confirmed")
-      }
-
-      if (
-        remoteStatus === "FAILED" ||
-        remoteStatus === "EXPIRED" ||
-        remoteStatus === "INCOMPLETE"
-      ) {
-        setStatus("error")
-      }
-
-      // Stop polling when payment reaches terminal state
-      if (["CONFIRMED", "FAILED", "INCOMPLETE"].includes(remoteStatus)) {
-        stopped = true
-        clearInterval(pollingInterval)
-      }
-    } catch {
-      // ignore transient polling errors
-    }
-  }
-
-  pollPaymentStatus()
-  pollingInterval = setInterval(pollPaymentStatus, 3000)
-
-  return () => {
-    stopped = true
-    clearInterval(pollingInterval)
-  }
-
-}, [paymentId, status])
-
-  /* LOAD TAX SETTINGS ON START */
+  }, [user?.id])
 
   useEffect(() => {
-    queueMicrotask(() => {
-      void loadTaxSettings()
-    })
-  }, [loadTaxSettings])
+    if (!user?.id) return
+    loadSettings()
+  }, [user?.id, loadSettings])
+
+  /* =========================
+     PAYMENT POLLING (CONTROLLED)
+  ========================= */
+
+  useEffect(() => {
+    if (!paymentId) return
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/payments/${paymentId}`, {
+          cache: "no-store"
+        })
+
+        const data = await res.json()
+
+        if (!data?.payment) return
+
+        setPaymentStatus(data.payment.status)
+
+        if (
+          data.payment.status === "CONFIRMED" ||
+          data.payment.status === "FAILED" ||
+          data.payment.status === "INCOMPLETE"
+        ) {
+          clearInterval(interval)
+        }
+      } catch (err) {
+        console.error("Polling error", err)
+      }
+    }, 3000)
+
+    return () => clearInterval(interval)
+  }, [paymentId])
 
   return {
-
-    amount,
-    setAmount,
-
-    taxEnabled,
     taxRate,
-    taxAmount: breakdown?.taxAmount ?? 0,
-    total: breakdown?.grossAmount ?? 0,
-    breakdown,
-
-    qrUrl,
-    createCharge,
-    confirmAmount,
-
-    status,
-    resetPOS
-
+    taxEnabled,
+    loadingSettings,
+    paymentId,
+    setPaymentId,
+    paymentStatus
   }
-
 }
