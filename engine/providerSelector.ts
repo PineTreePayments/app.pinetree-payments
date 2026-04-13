@@ -9,6 +9,7 @@ import { getMerchantDefaultProvider, getMerchantProviders } from "@/database/mer
 import type { PaymentAdapterId } from "@/types/payment"
 import { normalizeProvider, normalizeWalletNetwork } from "./providerMappings"
 import { getProviderMetadata, isProviderHealthy } from "./providerRegistry"
+import { loadProviders } from "./loadProviders"
 
 function sortAdapterIds(
   adapterIds: PaymentAdapterId[],
@@ -30,6 +31,8 @@ export async function chooseBestAdapter(input: {
   network: string
   requestedAdapterId?: string
 }): Promise<PaymentAdapterId | null> {
+  await loadProviders()
+
   const network = normalizeWalletNetwork(input.network)
   if (!network) {
     throw new Error("Unsupported payment network")
@@ -77,6 +80,8 @@ export async function chooseBestAdapter(input: {
  * Get available payment networks for a merchant
  */
 export async function getAvailableNetworks(merchantId: string) {
+  await loadProviders()
+
   const providers = await getMerchantProviders(merchantId)
 
   const networks = new Set<string>()

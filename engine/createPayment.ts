@@ -361,6 +361,8 @@ export async function createPayment(
     providerPayment
   })
 
+  const splitContract = extractEvmSplitContractFromPaymentUrl(splitPayment.paymentUrl)
+
   /* ---------------------------
      INSERT PAYMENT RECORD
   --------------------------- */
@@ -383,7 +385,7 @@ export async function createPayment(
         merchantWallet: merchantWalletAddress,
         pinetreeWallet,
         feeCaptureMethod: splitPayment.feeCaptureMethod,
-        splitContract: extractEvmSplitContractFromPaymentUrl(splitPayment.paymentUrl),
+        splitContract,
         expectedAmountNative: splitPayment.nativeAmount,
         merchantNativeAmount: splitPayment.merchantNativeAmount,
         feeNativeAmount: splitPayment.feeNativeAmount,
@@ -430,13 +432,14 @@ export async function createPayment(
     try {
       await watchPayment({
         merchantWallet: merchantWalletAddress,
-        pinetreeWallet: process.env.PINETREE_TREASURY_WALLET || "",
+        pinetreeWallet,
         merchantAmount: merchantAmount,
         pinetreeFee: pinetreeFee,
         expectedAmountNative: Number(splitPayment.nativeAmount || 0),
         expectedMerchantAtomic: splitPayment.merchantNativeAmountAtomic,
         expectedFeeAtomic: splitPayment.feeNativeAmountAtomic,
         feeCaptureMethod: splitPayment.feeCaptureMethod,
+        splitContract,
 
         network: network,
         paymentId: paymentId
