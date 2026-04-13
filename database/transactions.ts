@@ -23,7 +23,9 @@ export type CreateTransactionInput = {
   network?: string
   channel?: "pos" | "online" | "api" | "invoice"
   provider_transaction_id?: string
-  amount?: number
+  total_amount?: number
+  platform_fee?: number
+  subtotal_amount?: number
   status?: TransactionStatus
 }
 
@@ -41,7 +43,9 @@ export async function createTransaction(input: CreateTransactionInput) {
       network: input.network,
       channel: input.channel || "pos",
       provider_transaction_id: input.provider_transaction_id,
-      amount: input.amount,
+      total_amount: input.total_amount,
+      platform_fee: input.platform_fee,
+      subtotal_amount: input.subtotal_amount,
       status: input.status || "PENDING"
     })
     .select()

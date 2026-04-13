@@ -376,8 +376,9 @@ async function handleMatchingTransaction(
         await supabase
           .from("transactions")
           .update({
-            amount: payment?.gross_amount || 0,
-            native_amount: tx.value
+            total_amount: Math.round((payment?.gross_amount || 0) * 100),
+            platform_fee: Math.round((payment?.pinetree_fee || 0) * 100),
+            subtotal_amount: Math.round((payment?.merchant_amount || 0) * 100)
           })
           .eq("id", transaction.id)
 

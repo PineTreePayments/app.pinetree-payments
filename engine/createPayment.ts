@@ -377,7 +377,7 @@ export async function createPayment(
     provider: providerName,
     network: network,
     channel: channel,
-    amount: grossAmount,
+    total_amount: Math.round(grossAmount * 100),
     status: "PENDING"
   })
 
