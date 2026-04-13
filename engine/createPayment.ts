@@ -21,6 +21,7 @@ import { selectBestWallet } from "@/database/merchantWallets"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 import { loadProviders } from "./loadProviders"
 import { providerToPreferredNetwork } from "./providerMappings"
+import { watchPayment } from "./paymentWatcher"
 import {
   getPineTreeTreasuryWallet,
   assertTreasuryWalletFormat,
@@ -396,6 +397,27 @@ export async function createPayment(
     await storeIdempotencyKey(input.idempotencyKey, paymentId)
   }
 
+  // ✅ START PAYMENT WATCHER - THIS IS THE FINAL MISSING PIECE
+  // Start background watcher to monitor blockchain for this payment
+  setImmediate(async () => {
+    try {
+      await watchPayment({
+        merchantWallet: merchantWalletAddress,
+        pinetreeWallet: process.env.PINETREE_TREASURY_WALLET || "",
+        merchantAmount: merchantAmount,
+        pinetreeFee: pinetreeFee,
+        expectedAmountNative: Number(splitPayment.nativeAmount || 0),
+        expectedMerchantAtomic: splitPayment.merchantNativeAmountAtomic,
+        expectedFeeAtomic: splitPayment.feeNativeAmountAtomic,
+        feeCaptureMethod: splitPayment.feeCaptureMethod,
+
+        network: network,
+        paymentId: paymentId
+      })
+    } catch (error) {
+      console.error("Payment watcher failed to start:", error)
+    }
+  })
 
   /* ---------------------------
      RETURN RESULT
