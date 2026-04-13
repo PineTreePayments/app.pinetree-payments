@@ -425,6 +425,15 @@ async function handleMatchingTransaction(
 
       if (transaction) {
         await updateTransactionStatus(transaction.id, "CONFIRMED")
+        const payment = await getPaymentById(paymentId)
+        
+        await supabase
+          .from("transactions")
+          .update({
+            amount: payment?.gross_amount || 0,
+            native_amount: tx.value
+          })
+          .eq("id", transaction.id)
       }
 
       return true
