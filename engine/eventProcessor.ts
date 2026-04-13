@@ -8,7 +8,7 @@
 import { getProvider } from "./providerRegistry"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 import { emitEvent } from "./eventBus"
-import { getPaymentById, getPaymentByProviderReference, createPaymentEvent } from "@/database"
+import { getPaymentById, getPaymentByProviderReference, createPaymentEvent, createLedgerEntry } from "@/database"
 import { PaymentStatus, normalizeToStrictPaymentStatus } from "./paymentStateMachine"
 import {
   getTransactionByPaymentId,
@@ -244,6 +244,23 @@ export async function processWebhook({
   }
 
   const eventId = crypto.randomUUID()
+
+  // ✅ FIRST WRITE TO LEDGER - THIS IS THE SOURCE OF TRUTH
+  if (event.event === "payment.confirmed") {
+    await createLedgerEntry({
+      merchant_id: payment.merchant_id,
+      payment_id: paymentId,
+      transaction_id: transaction?.id,
+      provider: provider,
+      network: payment.network,
+      asset: payment.currency,
+      amount: payment.gross_amount,
+      usd_value: payment.gross_amount,
+      wallet_address: payment.payment_url,
+      direction: "INBOUND",
+      status: "CONFIRMED"
+    })
+  }
 
   await createPaymentEvent({
     id: eventId,

@@ -5,7 +5,7 @@
  * Polls the network for transactions to merchant/treasury wallets.
  */
 
-import { supabase, getPaymentById } from "@/database"
+import { supabase, getPaymentById, createLedgerEntry } from "@/database"
 import { getRpcUrl, WATCHER_CONFIG } from "./config"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 import { type PaymentStatus } from "./paymentStateMachine"
@@ -408,6 +408,23 @@ async function handleMatchingTransaction(
     }
 
     if (status === "PROCESSING") {
+      const payment = await getPaymentById(paymentId)
+      
+      // ✅ FIRST WRITE TO LEDGER - THIS IS THE SOURCE OF TRUTH
+      await createLedgerEntry({
+        merchant_id: payment.merchant_id,
+        payment_id: paymentId,
+        transaction_id: transaction?.id,
+        provider: payment.provider,
+        network: payment.network,
+        asset: payment.currency,
+        amount: payment.gross_amount,
+        usd_value: payment.gross_amount,
+        wallet_address: tx.from,
+        direction: "INBOUND",
+        status: "CONFIRMED"
+      })
+
       await updatePaymentStatus(paymentId, "CONFIRMED", {
         providerEvent: "blockchain_confirmation",
         rawPayload: {
