@@ -409,6 +409,7 @@ async function handleMatchingTransaction(
 
     if (status === "PROCESSING") {
       const payment = await getPaymentById(paymentId)
+      if (!payment) return false
       
       // ✅ FIRST WRITE TO LEDGER - THIS IS THE SOURCE OF TRUTH
       await createLedgerEntry({
