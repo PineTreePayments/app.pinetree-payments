@@ -5,7 +5,6 @@ import { useSearchParams } from "next/navigation"
 import Image from "next/image"
 import { ALLOWED_ASSETS, getAvailableAssetsFromValues } from "@/engine/providerMappings"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
-import { AUTO_POLLING_ENABLED } from "@/lib/utils/polling"
 
 type SplitOutput = {
   address: string
@@ -305,7 +304,6 @@ export default function PayClient() {
 
   useEffect(() => {
     if (!intentId) return
-    if (!AUTO_POLLING_ENABLED) return
 
     const interval = setInterval(() => {
       void loadIntentCallback()
@@ -366,6 +364,40 @@ export default function PayClient() {
           <p className="text-xs uppercase tracking-widest text-blue-500">PineTree Checkout</p>
           <h1 className="text-xl font-semibold text-slate-900">No Payment Methods Available</h1>
           <p className="text-sm text-slate-600">This merchant has no payment methods enabled.</p>
+        </div>
+      </main>
+    )
+  }
+
+  if (isIntentMode && normalizedPaymentStatus === "CONFIRMED") {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#e0ecff] via-[#f5f8ff] to-white">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl border border-green-100 p-8 text-center space-y-4">
+          <p className="text-xs uppercase tracking-widest text-blue-500">PineTree Checkout</p>
+          <div className="flex justify-center">
+            <svg className="w-16 h-16 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-semibold text-slate-900">Payment Confirmed</h1>
+          <p className="text-sm text-slate-500">Your payment was received successfully.</p>
+        </div>
+      </main>
+    )
+  }
+
+  if (isIntentMode && (normalizedPaymentStatus === "FAILED" || normalizedPaymentStatus === "INCOMPLETE")) {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#e0ecff] via-[#f5f8ff] to-white">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl border border-red-100 p-8 text-center space-y-4">
+          <p className="text-xs uppercase tracking-widest text-blue-500">PineTree Checkout</p>
+          <div className="flex justify-center">
+            <svg className="w-16 h-16 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-semibold text-slate-900">Payment Failed</h1>
+          <p className="text-sm text-slate-500">The payment was not received. Please try again or contact the merchant.</p>
         </div>
       </main>
     )

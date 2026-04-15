@@ -30,11 +30,17 @@ export async function GET(req: NextRequest) {
     }
 
     // Run watcher iterations in parallel — each does a single blockchain check
-    const results = await Promise.allSettled(
-      watchable.map((payment) =>
-        queueSingleWatcherIteration(payment, "cron:check-payments")
-      )
-    )
+    // Each check is raced against a 8s timeout so the function always returns
+    // within Vercel's free-tier 10s limit regardless of RPC latency.
+    const withTimeout = (payment: typeof watchable[number]) =>
+      Promise.race([
+        queueSingleWatcherIteration(payment, "cron:check-payments"),
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error("watcher_timeout")), 8000)
+        )
+      ])
+
+    const results = await Promise.allSettled(watchable.map(withTimeout))
 
     const succeeded = results.filter((r) => r.status === "fulfilled").length
     const failed = results.filter((r) => r.status === "rejected").length
