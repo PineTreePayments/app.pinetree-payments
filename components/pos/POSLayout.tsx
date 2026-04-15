@@ -59,23 +59,37 @@ function resolveUiStatus(dbStatus: string): Status | null {
   return null
 }
 
+// Parse digits → number (no decimal = whole dollars, e.g. "12" → 12.00)
+function digitsToNumber(d: string): number {
+  if (!d) return 0
+  if (d.includes(".")) return parseFloat(d) || 0
+  return Number(d) || 0
+}
+
+// Human-readable amount display during entry
+function digitsToDisplay(d: string): string {
+  if (!d) return "0.00"
+  if (d.includes(".")) return d              // show raw during decimal entry
+  return `${d}.00`                           // "12" → "12.00"
+}
+
 export default function POSLayout({ locked, terminalContext }: Props) {
 
   const [digits, setDigits] = useState("")
   const [status, setStatus] = useState<Status>("ready")
   const [qrCodeUrl, setQrCodeUrl] = useState("")
-  const [paymentId, setPaymentId] = useState("")   // may be intentId OR direct paymentId
-  const [intentId, setIntentId] = useState("")     // set only when intent flow is used
+  const [paymentId, setPaymentId] = useState("")
+  const [intentId, setIntentId] = useState("")
   const [paymentError, setPaymentError] = useState("")
   const [breakdown, setBreakdown] = useState<Breakdown | null>(null)
   const [breakdownLoading, setBreakdownLoading] = useState(false)
   const [availableMethods, setAvailableMethods] = useState<AvailableMethods>({ cash: true, crypto: true, card: false })
   const [cashDigits, setCashDigits] = useState("")
 
-  // Holds the resolved actual payment ID once the customer selects a network on intent
   const resolvedPaymentIdRef = useRef<string>("")
 
-  const subtotal = (Number(digits || "0") / 100).toFixed(2)
+  const subtotalNum = digitsToNumber(digits)
+  const displayAmount = digitsToDisplay(digits)
 
   function resetSale() {
     setDigits("")
@@ -92,11 +106,10 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
   /* =========================
      REALTIME: DIRECT PAYMENT
-     Watches payments table when we have a real paymentId (non-intent flow).
   ========================= */
 
   useEffect(() => {
-    if (!paymentId || intentId) return   // skip — intent handles its own subscription
+    if (!paymentId || intentId) return
 
     const channel = supabase
       .channel(`pos-payment-${paymentId}`)
@@ -123,11 +136,6 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
   /* =========================
      REALTIME: INTENT FLOW
-     1. Subscribe to payment_intents table — fires when customer selects a network
-        and payment_id is linked on the intent row.
-     2. Once payment_id is known, subscribe to payments table for that row.
-     Blockchain confirmation is handled server-side by the Vercel cron job
-     (/api/cron/check-payments) — no client-side polling needed.
   ========================= */
 
   useEffect(() => {
@@ -136,7 +144,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
     let paymentChannel: ReturnType<typeof supabase.channel> | null = null
 
     function subscribeToPayment(pid: string) {
-      if (resolvedPaymentIdRef.current === pid) return   // already subscribed
+      if (resolvedPaymentIdRef.current === pid) return
       resolvedPaymentIdRef.current = pid
 
       paymentChannel = supabase
@@ -159,7 +167,6 @@ export default function POSLayout({ locked, terminalContext }: Props) {
         .subscribe()
     }
 
-    // Watch the intent row so we notice when the customer selects a network
     const intentChannel = supabase
       .channel(`pos-intent-${intentId}`)
       .on(
@@ -185,16 +192,20 @@ export default function POSLayout({ locked, terminalContext }: Props) {
   }, [intentId])
 
   /* =========================
-     FETCH BREAKDOWN
+     FETCH BREAKDOWN (5s timeout)
   ========================= */
 
   async function fetchBreakdown(amount: number): Promise<Breakdown | null> {
     const merchantId = terminalContext?.merchantId
     if (!merchantId) return null
     try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 5000)
       const res = await fetch(
-        `/api/pos/breakdown?merchantId=${encodeURIComponent(merchantId)}&amount=${amount}`
+        `/api/pos/breakdown?merchantId=${encodeURIComponent(merchantId)}&amount=${amount}`,
+        { signal: controller.signal }
       )
+      clearTimeout(timer)
       if (!res.ok) return null
       return (await res.json()) as Breakdown
     } catch {
@@ -207,16 +218,18 @@ export default function POSLayout({ locked, terminalContext }: Props) {
   ========================= */
 
   async function goToConfirm() {
-    if (!digits || Number(subtotal) <= 0) return
+    if (!digits || subtotalNum <= 0) return
     setStatus("confirm")
     setBreakdown(null)
     setBreakdownLoading(true)
 
     const merchantId = terminalContext?.merchantId
     const [breakdownData, methodsData] = await Promise.all([
-      fetchBreakdown(Number(subtotal)),
+      fetchBreakdown(subtotalNum),
       merchantId
-        ? fetch(`/api/pos/methods?merchantId=${encodeURIComponent(merchantId)}`).then(r => r.ok ? r.json() : null).catch(() => null)
+        ? fetch(`/api/pos/methods?merchantId=${encodeURIComponent(merchantId)}`)
+            .then(r => r.ok ? r.json() : null)
+            .catch(() => null)
         : Promise.resolve(null)
     ])
 
@@ -240,8 +253,8 @@ export default function POSLayout({ locked, terminalContext }: Props) {
     setStatus("cash-tender")
   }
 
-  const cashTendered = (Number(cashDigits || "0") / 100)
-  const totalDue = breakdown ? breakdown.totalAmount : Number(subtotal)
+  const cashTendered = digitsToNumber(cashDigits)
+  const totalDue = breakdown ? breakdown.totalAmount : subtotalNum
   const changeDue = cashTendered - totalDue
 
   function confirmCashTender() {
@@ -254,7 +267,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
   ========================= */
 
   async function startCrypto() {
-    if (!digits || Number(subtotal) <= 0) return
+    if (!digits || subtotalNum <= 0) return
 
     try {
       setStatus("waiting")
@@ -263,7 +276,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          amount: Number(subtotal),
+          amount: subtotalNum,
           currency: "USD",
           terminal: terminalContext
         })
@@ -277,15 +290,10 @@ export default function POSLayout({ locked, terminalContext }: Props) {
         return
       }
 
-      // Store IDs — the API always returns intentId when using the intent flow.
-      // paymentId here is the intentId; we store intentId separately so
-      // the correct realtime path is taken.
       const returnedIntentId = String(data.intentId || "").trim()
       const returnedPaymentId = String(data.paymentId || "").trim()
 
-      if (returnedIntentId) {
-        setIntentId(returnedIntentId)
-      }
+      if (returnedIntentId) setIntentId(returnedIntentId)
       setPaymentId(returnedPaymentId)
 
       if (data.paymentUrl) {
@@ -300,7 +308,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
   const displayTotal = breakdown
     ? fmtUsd(breakdown.totalAmount)
-    : `$${subtotal}`
+    : fmtUsd(subtotalNum)
 
   return (
     <div className="flex flex-col items-center w-full px-4">
@@ -310,15 +318,17 @@ export default function POSLayout({ locked, terminalContext }: Props) {
         {/* ── READY ── */}
         {status === "ready" && (
           <div className="space-y-4">
-            <AmountDisplay amount={subtotal} />
-            <Keypad digits={digits} setDigits={setDigits} />
-            <button
-              onClick={goToConfirm}
-              disabled={Number(subtotal) <= 0}
-              className="w-full bg-[#0052FF] text-white mt-2 py-3 rounded-xl font-semibold disabled:opacity-40"
-            >
-              Charge
-            </button>
+            <AmountDisplay amount={displayAmount} />
+            <Keypad digits={digits} setDigits={setDigits} showDecimal />
+            <div className="flex justify-center mt-2">
+              <button
+                onClick={goToConfirm}
+                disabled={subtotalNum <= 0}
+                className="bg-[#0052FF] text-white py-3 px-12 rounded-xl font-semibold disabled:opacity-40"
+              >
+                Charge
+              </button>
+            </div>
           </div>
         )}
 
@@ -327,30 +337,33 @@ export default function POSLayout({ locked, terminalContext }: Props) {
           <div className="space-y-5">
 
             <div className="text-center">
-              <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">
-                Confirm Payment
+              <p className="text-xs uppercase tracking-widest text-gray-400 mb-1">
+                Total Due
               </p>
-              <p className="text-3xl font-bold text-gray-900">{displayTotal}</p>
+              <p className="text-4xl font-bold text-gray-900">{displayTotal}</p>
             </div>
 
             {breakdownLoading && (
-              <p className="text-sm text-center text-gray-500">Calculating breakdown…</p>
+              <div className="flex items-center justify-center gap-2 py-2">
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-[#0052FF] border-t-transparent" />
+                <p className="text-sm text-gray-400">Loading breakdown…</p>
+              </div>
             )}
 
             {!breakdownLoading && breakdown && (
               <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
-                <div className="flex justify-between text-gray-600">
+                <div className="flex justify-between text-gray-500">
                   <span>Subtotal</span>
                   <span>{fmtUsd(breakdown.subtotalAmount)}</span>
                 </div>
                 {breakdown.taxEnabled && (
-                  <div className="flex justify-between text-gray-600">
+                  <div className="flex justify-between text-gray-500">
                     <span>Tax ({breakdown.taxRate}%)</span>
                     <span>{fmtUsd(breakdown.taxAmount)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-gray-600">
-                  <span>PineTree Service Fee</span>
+                <div className="flex justify-between text-gray-500">
+                  <span>Service Fee</span>
                   <span>{fmtUsd(breakdown.serviceFee)}</span>
                 </div>
                 <div className="flex justify-between font-semibold text-gray-900 border-t border-gray-200 pt-2">
@@ -361,27 +374,27 @@ export default function POSLayout({ locked, terminalContext }: Props) {
             )}
 
             {!breakdownLoading && !breakdown && (
-              <div className="bg-gray-50 rounded-xl p-4 text-sm text-center text-gray-600">
-                Amount: ${subtotal}
+              <div className="bg-gray-50 rounded-xl p-4 text-sm text-center text-gray-500">
+                {fmtUsd(subtotalNum)}
               </div>
             )}
 
             {!breakdownLoading && (
               <div className="space-y-3">
-                <p className="text-xs uppercase tracking-widest text-gray-500 text-center">
-                  Select Payment Method
+                <p className="text-xs uppercase tracking-widest text-gray-400 text-center">
+                  Payment Method
                 </p>
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     onClick={startCash}
-                    className="flex flex-col items-center gap-1.5 py-4 rounded-xl bg-green-50 border border-green-200 text-green-800 font-semibold text-sm hover:bg-green-100 transition"
+                    className="flex flex-col items-center gap-1.5 py-4 rounded-xl border border-gray-200 bg-gray-50 text-gray-800 font-semibold text-sm hover:bg-gray-100 hover:border-gray-300 transition"
                   >
                     <span className="text-xl">💵</span>
                     Cash
                   </button>
                   <button
                     onClick={startCrypto}
-                    className="flex flex-col items-center gap-1.5 py-4 rounded-xl bg-blue-50 border border-blue-200 text-blue-800 font-semibold text-sm hover:bg-blue-100 transition"
+                    className="flex flex-col items-center gap-1.5 py-4 rounded-xl border border-gray-200 bg-gray-50 text-gray-800 font-semibold text-sm hover:bg-gray-100 hover:border-gray-300 transition"
                   >
                     <span className="text-xl">₿</span>
                     Crypto
@@ -389,7 +402,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
                   <button
                     disabled={!availableMethods.card}
                     title={!availableMethods.card ? "Card payments not connected" : undefined}
-                    className="flex flex-col items-center gap-1.5 py-4 rounded-xl bg-gray-50 border border-gray-200 text-gray-400 font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition"
+                    className="flex flex-col items-center gap-1.5 py-4 rounded-xl border border-gray-200 bg-gray-50 text-gray-400 font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed transition"
                   >
                     <span className="text-xl">💳</span>
                     Card
@@ -397,7 +410,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
                 </div>
                 <button
                   onClick={resetSale}
-                  className="w-full text-xs text-gray-400 hover:text-gray-600 py-1"
+                  className="w-full text-sm text-gray-400 hover:text-gray-600 py-1"
                 >
                   Cancel
                 </button>
@@ -409,21 +422,25 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
         {/* ── CASH TENDER ── */}
         {status === "cash-tender" && (
-          <div className="space-y-4">
+          <div className="space-y-5">
+
             <div className="text-center">
-              <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">Cash Payment</p>
-              <p className="text-3xl font-bold text-gray-900">{fmtUsd(totalDue)}</p>
-              <p className="text-sm text-gray-500 mt-1">Amount Due</p>
+              <p className="text-xs uppercase tracking-widest text-gray-400 mb-1">Cash Payment</p>
+              <p className="text-4xl font-bold text-gray-900">{fmtUsd(totalDue)}</p>
+              <p className="text-sm text-gray-400 mt-1">Amount Due</p>
             </div>
 
             <div className="bg-gray-50 rounded-xl p-4 text-center">
               <p className="text-xs uppercase tracking-widest text-gray-400 mb-1">Cash Tendered</p>
               <p className="text-2xl font-semibold text-gray-900">
-                {cashDigits ? fmtUsd(cashTendered) : <span className="text-gray-300">$0.00</span>}
+                {cashDigits
+                  ? fmtUsd(cashTendered)
+                  : <span className="text-gray-300">$0.00</span>
+                }
               </p>
             </div>
 
-            <Keypad digits={cashDigits} setDigits={setCashDigits} />
+            <Keypad digits={cashDigits} setDigits={setCashDigits} showDecimal />
 
             {cashDigits && cashTendered < totalDue && (
               <p className="text-center text-sm text-red-500">
@@ -434,49 +451,54 @@ export default function POSLayout({ locked, terminalContext }: Props) {
             <button
               onClick={confirmCashTender}
               disabled={!cashDigits || cashTendered < totalDue}
-              className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold disabled:opacity-40"
+              className="w-full bg-[#0052FF] text-white py-3 rounded-xl font-semibold disabled:opacity-40"
             >
-              Confirm Cash
+              Confirm
             </button>
+
             <button
               onClick={() => setStatus("confirm")}
-              className="w-full text-xs text-gray-400 hover:text-gray-600 py-1"
+              className="w-full text-sm text-gray-400 hover:text-gray-600 py-1"
             >
               Back
             </button>
+
           </div>
         )}
 
         {/* ── CASH CHANGE ── */}
         {status === "cash-change" && (
-          <div className="flex flex-col items-center gap-4 py-4">
-            <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center">
-              <span className="text-3xl">💵</span>
-            </div>
+          <div className="space-y-5">
+
             <div className="text-center">
-              <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">Change Due</p>
+              <p className="text-xs uppercase tracking-widest text-gray-400 mb-1">Sale Complete</p>
               {changeDue > 0.005 ? (
-                <p className="text-4xl font-bold text-green-600">{fmtUsd(changeDue)}</p>
+                <>
+                  <p className="text-sm text-gray-500 mb-1">Change Due</p>
+                  <p className="text-4xl font-bold text-gray-900">{fmtUsd(changeDue)}</p>
+                </>
               ) : (
-                <p className="text-xl font-semibold text-gray-700">No change due</p>
+                <p className="text-2xl font-bold text-gray-900 mt-2">No Change Due</p>
               )}
             </div>
-            <div className="w-full bg-gray-50 rounded-xl p-4 space-y-1.5 text-sm">
-              <div className="flex justify-between text-gray-600">
+
+            <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+              <div className="flex justify-between text-gray-500">
                 <span>Total Charged</span>
                 <span>{fmtUsd(totalDue)}</span>
               </div>
-              <div className="flex justify-between text-gray-600">
+              <div className="flex justify-between text-gray-500">
                 <span>Cash Tendered</span>
                 <span>{fmtUsd(cashTendered)}</span>
               </div>
               {changeDue > 0.005 && (
-                <div className="flex justify-between font-semibold text-green-700 border-t border-gray-200 pt-1.5">
+                <div className="flex justify-between font-semibold text-gray-900 border-t border-gray-200 pt-2">
                   <span>Change</span>
                   <span>{fmtUsd(changeDue)}</span>
                 </div>
               )}
             </div>
+
             <button
               onClick={async () => {
                 if (terminalContext?.terminalId && terminalContext?.merchantId) {
@@ -496,8 +518,9 @@ export default function POSLayout({ locked, terminalContext }: Props) {
               }}
               className="w-full bg-[#0052FF] text-white py-3 rounded-xl font-semibold"
             >
-              Complete Sale
+              New Sale
             </button>
+
           </div>
         )}
 
@@ -507,7 +530,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
             {qrCodeUrl ? (
               <div className="flex flex-col items-center">
-                <p className="text-xs uppercase tracking-widest text-gray-500 mb-3">
+                <p className="text-xs uppercase tracking-widest text-gray-400 mb-3">
                   Scan to Pay
                 </p>
                 <Image
@@ -521,24 +544,24 @@ export default function POSLayout({ locked, terminalContext }: Props) {
             ) : (
               <div className="text-center py-6">
                 <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0052FF] border-t-transparent mx-auto" />
-                <p className="text-sm text-gray-500 mt-3">Preparing payment…</p>
+                <p className="text-sm text-gray-400 mt-3">Preparing payment…</p>
               </div>
             )}
 
             {breakdown && (
               <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
-                <div className="flex justify-between text-gray-600">
+                <div className="flex justify-between text-gray-500">
                   <span>Subtotal</span>
                   <span>{fmtUsd(breakdown.subtotalAmount)}</span>
                 </div>
                 {breakdown.taxEnabled && (
-                  <div className="flex justify-between text-gray-600">
+                  <div className="flex justify-between text-gray-500">
                     <span>Tax ({breakdown.taxRate}%)</span>
                     <span>{fmtUsd(breakdown.taxAmount)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-gray-600">
-                  <span>PineTree Service Fee</span>
+                <div className="flex justify-between text-gray-500">
+                  <span>Service Fee</span>
                   <span>{fmtUsd(breakdown.serviceFee)}</span>
                 </div>
                 <div className="flex justify-between font-semibold text-gray-900 border-t border-gray-200 pt-2">
@@ -548,13 +571,13 @@ export default function POSLayout({ locked, terminalContext }: Props) {
               </div>
             )}
 
-            <p className="text-sm text-center text-gray-500">
+            <p className="text-sm text-center text-gray-400">
               {status === "waiting" ? "Waiting for payment…" : "Processing…"}
             </p>
 
             <button
               onClick={resetSale}
-              className="w-full text-xs text-gray-400 hover:text-gray-600 py-1"
+              className="w-full text-sm text-gray-400 hover:text-gray-600 py-1"
             >
               Cancel sale
             </button>
@@ -575,7 +598,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
           <div className="flex flex-col items-center gap-3 py-6">
             <XCircle size={60} className="text-amber-500" />
             <p className="text-lg font-semibold text-gray-900">Payment Incomplete</p>
-            <p className="text-sm text-gray-500 text-center">
+            <p className="text-sm text-gray-400 text-center">
               The payment was not fully received.
             </p>
             <button onClick={resetSale} className="mt-2 px-5 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm">
@@ -590,7 +613,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
             <XCircle size={60} className="text-red-500" />
             <p className="text-lg font-semibold text-gray-900">Payment Failed</p>
             {paymentError && (
-              <p className="text-sm text-gray-500 text-center">{paymentError}</p>
+              <p className="text-sm text-gray-400 text-center">{paymentError}</p>
             )}
             <button onClick={resetSale} className="mt-2 px-5 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm">
               Try Again
