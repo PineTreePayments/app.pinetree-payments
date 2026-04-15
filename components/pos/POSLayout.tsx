@@ -320,11 +320,11 @@ export default function POSLayout({ locked, terminalContext }: Props) {
           <div className="space-y-4">
             <AmountDisplay amount={displayAmount} />
             <Keypad digits={digits} setDigits={setDigits} showDecimal />
-            <div className="flex justify-center mt-2">
+            <div className="max-w-[300px] mx-auto mt-2">
               <button
                 onClick={goToConfirm}
                 disabled={subtotalNum <= 0}
-                className="bg-[#0052FF] text-white py-3 px-12 rounded-xl font-semibold disabled:opacity-40"
+                className="w-full bg-[#0052FF] text-white py-3 rounded-xl font-semibold disabled:bg-gray-200 disabled:text-gray-400"
               >
                 Charge
               </button>
@@ -337,7 +337,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
           <div className="space-y-5">
 
             <div className="text-center">
-              <p className="text-xs uppercase tracking-widest text-gray-400 mb-1">
+              <p className="text-xs uppercase tracking-widest text-gray-600 mb-1">
                 Total Due
               </p>
               <p className="text-4xl font-bold text-gray-900">{displayTotal}</p>
@@ -352,17 +352,17 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
             {!breakdownLoading && breakdown && (
               <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
-                <div className="flex justify-between text-gray-500">
+                <div className="flex justify-between text-gray-700">
                   <span>Subtotal</span>
                   <span>{fmtUsd(breakdown.subtotalAmount)}</span>
                 </div>
                 {breakdown.taxEnabled && (
-                  <div className="flex justify-between text-gray-500">
+                  <div className="flex justify-between text-gray-700">
                     <span>Tax ({breakdown.taxRate}%)</span>
                     <span>{fmtUsd(breakdown.taxAmount)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-gray-500">
+                <div className="flex justify-between text-gray-700">
                   <span>Service Fee</span>
                   <span>{fmtUsd(breakdown.serviceFee)}</span>
                 </div>
@@ -374,14 +374,14 @@ export default function POSLayout({ locked, terminalContext }: Props) {
             )}
 
             {!breakdownLoading && !breakdown && (
-              <div className="bg-gray-50 rounded-xl p-4 text-sm text-center text-gray-500">
+              <div className="bg-gray-50 rounded-xl p-4 text-sm text-center text-gray-700">
                 {fmtUsd(subtotalNum)}
               </div>
             )}
 
             {!breakdownLoading && (
               <div className="space-y-3">
-                <p className="text-xs uppercase tracking-widest text-gray-400 text-center">
+                <p className="text-xs uppercase tracking-widest text-gray-600 text-center">
                   Payment Method
                 </p>
                 <div className="grid grid-cols-3 gap-2">
@@ -410,9 +410,9 @@ export default function POSLayout({ locked, terminalContext }: Props) {
                 </div>
                 <button
                   onClick={resetSale}
-                  className="w-full text-sm text-gray-400 hover:text-gray-600 py-1"
+                  className="w-full text-sm text-red-500 hover:text-red-700 py-1 font-medium"
                 >
-                  Cancel
+                  Cancel Payment
                 </button>
               </div>
             )}
@@ -425,13 +425,13 @@ export default function POSLayout({ locked, terminalContext }: Props) {
           <div className="space-y-5">
 
             <div className="text-center">
-              <p className="text-xs uppercase tracking-widest text-gray-400 mb-1">Cash Payment</p>
+              <p className="text-xs uppercase tracking-widest text-gray-600 mb-1">Cash Payment</p>
               <p className="text-4xl font-bold text-gray-900">{fmtUsd(totalDue)}</p>
-              <p className="text-sm text-gray-400 mt-1">Amount Due</p>
+              <p className="text-sm text-gray-600 mt-1">Amount Due</p>
             </div>
 
             <div className="bg-gray-50 rounded-xl p-4 text-center">
-              <p className="text-xs uppercase tracking-widest text-gray-400 mb-1">Cash Tendered</p>
+              <p className="text-xs uppercase tracking-widest text-gray-600 mb-1">Cash Tendered</p>
               <p className="text-2xl font-semibold text-gray-900">
                 {cashDigits
                   ? fmtUsd(cashTendered)
@@ -451,14 +451,14 @@ export default function POSLayout({ locked, terminalContext }: Props) {
             <button
               onClick={confirmCashTender}
               disabled={!cashDigits || cashTendered < totalDue}
-              className="w-full bg-[#0052FF] text-white py-3 rounded-xl font-semibold disabled:opacity-40"
+              className="w-full bg-[#0052FF] text-white py-3 rounded-xl font-semibold disabled:bg-gray-200 disabled:text-gray-400"
             >
               Confirm
             </button>
 
             <button
               onClick={() => setStatus("confirm")}
-              className="w-full text-sm text-gray-400 hover:text-gray-600 py-1"
+              className="w-full text-sm text-red-500 hover:text-red-700 py-1 font-medium"
             >
               Back
             </button>
@@ -471,10 +471,10 @@ export default function POSLayout({ locked, terminalContext }: Props) {
           <div className="space-y-5">
 
             <div className="text-center">
-              <p className="text-xs uppercase tracking-widest text-gray-400 mb-1">Sale Complete</p>
+              <p className="text-xs uppercase tracking-widest text-gray-600 mb-1">Sale Complete</p>
               {changeDue > 0.005 ? (
                 <>
-                  <p className="text-sm text-gray-500 mb-1">Change Due</p>
+                  <p className="text-sm text-gray-600 mb-1">Change Due</p>
                   <p className="text-4xl font-bold text-gray-900">{fmtUsd(changeDue)}</p>
                 </>
               ) : (
@@ -483,11 +483,11 @@ export default function POSLayout({ locked, terminalContext }: Props) {
             </div>
 
             <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
-              <div className="flex justify-between text-gray-500">
+              <div className="flex justify-between text-gray-700">
                 <span>Total Charged</span>
                 <span>{fmtUsd(totalDue)}</span>
               </div>
-              <div className="flex justify-between text-gray-500">
+              <div className="flex justify-between text-gray-700">
                 <span>Cash Tendered</span>
                 <span>{fmtUsd(cashTendered)}</span>
               </div>
@@ -530,7 +530,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
             {qrCodeUrl ? (
               <div className="flex flex-col items-center">
-                <p className="text-xs uppercase tracking-widest text-gray-400 mb-3">
+                <p className="text-xs uppercase tracking-widest text-gray-600 mb-3">
                   Scan to Pay
                 </p>
                 <Image
@@ -544,23 +544,23 @@ export default function POSLayout({ locked, terminalContext }: Props) {
             ) : (
               <div className="text-center py-6">
                 <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0052FF] border-t-transparent mx-auto" />
-                <p className="text-sm text-gray-400 mt-3">Preparing payment…</p>
+                <p className="text-sm text-gray-600 mt-3">Preparing payment…</p>
               </div>
             )}
 
             {breakdown && (
               <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
-                <div className="flex justify-between text-gray-500">
+                <div className="flex justify-between text-gray-700">
                   <span>Subtotal</span>
                   <span>{fmtUsd(breakdown.subtotalAmount)}</span>
                 </div>
                 {breakdown.taxEnabled && (
-                  <div className="flex justify-between text-gray-500">
+                  <div className="flex justify-between text-gray-700">
                     <span>Tax ({breakdown.taxRate}%)</span>
                     <span>{fmtUsd(breakdown.taxAmount)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-gray-500">
+                <div className="flex justify-between text-gray-700">
                   <span>Service Fee</span>
                   <span>{fmtUsd(breakdown.serviceFee)}</span>
                 </div>
@@ -571,15 +571,20 @@ export default function POSLayout({ locked, terminalContext }: Props) {
               </div>
             )}
 
-            <p className="text-sm text-center text-gray-400">
-              {status === "waiting" ? "Waiting for payment…" : "Processing…"}
-            </p>
+            <div className="flex items-center justify-center gap-2">
+              <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${
+                status === "processing" ? "bg-green-500" : "bg-[#0052FF]"
+              }`} />
+              <p className="text-sm text-gray-800 font-medium">
+                {status === "waiting" ? "Waiting for payment…" : "Processing…"}
+              </p>
+            </div>
 
             <button
               onClick={resetSale}
-              className="w-full text-sm text-gray-400 hover:text-gray-600 py-1"
+              className="w-full text-sm text-red-500 hover:text-red-700 py-1 font-medium"
             >
-              Cancel sale
+              Cancel Sale
             </button>
 
           </div>
