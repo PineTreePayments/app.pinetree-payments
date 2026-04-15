@@ -9,6 +9,7 @@ export type TerminalSessionData = {
     pin: string
     autolock: string
     merchant_id: string
+    drawer_starting_amount: number
     created_at?: string
   }
   provider: string
@@ -17,7 +18,7 @@ export type TerminalSessionData = {
 export async function getPosTerminalSessionEngine(terminalId: string): Promise<TerminalSessionData> {
   const { data: terminal, error: terminalError } = await db
     .from("terminals")
-    .select("id,name,pin,autolock,merchant_id,created_at")
+    .select("id,name,pin,autolock,merchant_id,drawer_starting_amount,created_at")
     .eq("id", terminalId)
     .single()
 
@@ -39,6 +40,7 @@ export async function getPosTerminalSessionEngine(terminalId: string): Promise<T
       pin: terminal.pin,
       autolock: terminal.autolock,
       merchant_id: terminal.merchant_id,
+      drawer_starting_amount: Number(terminal.drawer_starting_amount ?? 0),
       created_at: terminal.created_at
     },
     provider: wallet?.network || "solana"

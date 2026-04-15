@@ -12,7 +12,33 @@ type Terminal = {
   pin: string
   autolock: string
   merchant_id?: string
+  drawer_starting_amount?: number
   created_at?: string
+}
+
+type DrawerEntry = {
+  id: string
+  type: string
+  amount: number
+  running_balance: number
+  sale_total?: number
+  cash_tendered?: number
+  change_given?: number
+  actual_amount?: number
+  notes?: string
+  created_at: string
+}
+
+type DrawerBalance = {
+  balance: number
+  lastEntry: DrawerEntry | null
+  log: DrawerEntry[]
+}
+
+function fmtUsd(n: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
+    Number.isFinite(n) ? n : 0
+  )
 }
 
 function formatAutoLock(value: string) {
@@ -31,6 +57,13 @@ export default function POSPage() {
   const [pin,setPin] = useState("")
   const [recoveryPhrase,setRecoveryPhrase] = useState("")
   const [autoLock,setAutoLock] = useState("5")
+  const [drawerStartingAmount, setDrawerStartingAmount] = useState("")
+
+  const [drawerBalances, setDrawerBalances] = useState<Record<string, DrawerBalance>>({})
+  const [closeoutTerminalId, setCloseoutTerminalId] = useState<string | null>(null)
+  const [closeoutAmount, setCloseoutAmount] = useState("")
+  const [closeoutResult, setCloseoutResult] = useState<{ expected: number; actual: number; discrepancy: number } | null>(null)
+  const [closeoutBusy, setCloseoutBusy] = useState(false)
 
   const [showPin,setShowPin] = useState(false)
 
@@ -70,12 +103,60 @@ export default function POSPage() {
   const loadTerminals = useCallback(async () => {
     try {
       const payload = await callPosTerminalsApi("GET") as { terminals?: Terminal[] }
-      setTerminals(payload.terminals || [])
+      const list = payload.terminals || []
+      setTerminals(list)
+      void loadDrawerBalances(list)
     } catch (error) {
       console.error(error)
       toast.error(error instanceof Error ? error.message : "Failed to load terminals")
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [callPosTerminalsApi])
+
+  async function loadDrawerBalances(terminalList: Terminal[]) {
+    const results = await Promise.allSettled(
+      terminalList.map(async (t) => {
+        const res = await fetch(`/api/pos/drawer/balance?terminalId=${encodeURIComponent(t.id)}`, { cache: "no-store" })
+        if (!res.ok) return null
+        const data = await res.json() as DrawerBalance
+        return { id: t.id, data }
+      })
+    )
+    const map: Record<string, DrawerBalance> = {}
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value) {
+        map[r.value.id] = r.value.data
+      }
+    }
+    setDrawerBalances(map)
+  }
+
+  async function submitCloseout() {
+    if (!closeoutTerminalId) return
+    const actual = Number(closeoutAmount)
+    if (!Number.isFinite(actual) || actual < 0) {
+      toast.error("Enter a valid amount")
+      return
+    }
+    setCloseoutBusy(true)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const terminal = terminals.find(t => t.id === closeoutTerminalId)
+      const res = await fetch("/api/pos/drawer/closeout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ terminalId: closeoutTerminalId, merchantId: terminal?.merchant_id, actualAmount: actual })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setCloseoutResult({ expected: data.expectedBalance, actual: data.actualAmount, discrepancy: data.discrepancy })
+      void loadDrawerBalances(terminals)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Closeout failed")
+    } finally {
+      setCloseoutBusy(false)
+    }
+  }
 
   /* LOAD TERMINALS */
 
@@ -142,7 +223,8 @@ export default function POSPage() {
         name,
         pin,
         recoveryPhrase,
-        autolock: autoLock
+        autolock: autoLock,
+        drawer_starting_amount: drawerStartingAmount ? Number(drawerStartingAmount) : 0
       }) as { terminal?: Terminal }
 
       if (payload.terminal) {
@@ -153,7 +235,7 @@ export default function POSPage() {
       setPin("")
       setRecoveryPhrase("")
       setAutoLock("5")
-
+      setDrawerStartingAmount("")
       setCreating(false)
       toast.success("Terminal created")
     } catch (error) {
@@ -339,6 +421,28 @@ export default function POSPage() {
 
             </div>
 
+            <div>
+
+              <label className="block text-sm text-gray-700 mb-2 font-medium">
+                Starting Cash Amount <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={drawerStartingAmount}
+                onChange={(e) => setDrawerStartingAmount(e.target.value)}
+                placeholder="e.g. 200.00"
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-black"
+              />
+
+              <p className="text-xs text-gray-500 mt-1">
+                The opening drawer balance cashiers confirm at the start of each shift.
+              </p>
+
+            </div>
+
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3 mt-6">
@@ -462,6 +566,138 @@ export default function POSPage() {
         </div>
 
       </div>
+
+      {/* DRAWER BALANCES */}
+
+      {terminals.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Drawer Balances</h2>
+
+          <div className="space-y-3">
+            {terminals.map((t) => {
+              const drawer = drawerBalances[t.id]
+              const balance = drawer?.balance ?? null
+              const lastEntry = drawer?.lastEntry
+              return (
+                <div key={t.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-gray-100 rounded-lg p-4">
+                  <div>
+                    <p className="font-medium text-gray-900">{t.name}</p>
+                    {lastEntry ? (
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Last activity: {new Date(lastEntry.created_at).toLocaleString()} · {lastEntry.type.replace("_", " ")}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-gray-400 mt-0.5">No activity yet</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="text-right">
+                      <p className="text-xs uppercase tracking-widest text-gray-400">Expected Balance</p>
+                      <p className={`text-xl font-bold ${balance !== null ? "text-gray-900" : "text-gray-300"}`}>
+                        {balance !== null ? fmtUsd(balance) : "—"}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => { setCloseoutTerminalId(t.id); setCloseoutAmount(""); setCloseoutResult(null) }}
+                      className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-md hover:bg-gray-200"
+                    >
+                      Closeout
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+        </div>
+      )}
+
+      {/* CLOSEOUT MODAL */}
+
+      {closeoutTerminalId && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-lg space-y-4">
+
+            <h2 className="text-lg font-semibold text-gray-900">
+              Closeout — {terminals.find(t => t.id === closeoutTerminalId)?.name}
+            </h2>
+
+            {!closeoutResult ? (
+              <>
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <p className="text-xs uppercase tracking-widest text-gray-400 mb-1">Expected Balance</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {drawerBalances[closeoutTerminalId] ? fmtUsd(drawerBalances[closeoutTerminalId].balance) : "—"}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Actual Cash Counted
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={closeoutAmount}
+                    onChange={(e) => setCloseoutAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-black text-lg"
+                    autoFocus
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={submitCloseout}
+                    disabled={closeoutBusy || !closeoutAmount}
+                    className="flex-1 bg-[#0052FF] text-white py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
+                  >
+                    {closeoutBusy ? "Submitting…" : "Submit Closeout"}
+                  </button>
+                  <button
+                    onClick={() => setCloseoutTerminalId(null)}
+                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Expected</span>
+                    <span className="font-semibold">{fmtUsd(closeoutResult.expected)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Counted</span>
+                    <span className="font-semibold">{fmtUsd(closeoutResult.actual)}</span>
+                  </div>
+                  <div className={`flex justify-between font-semibold border-t border-gray-200 pt-2 ${
+                    closeoutResult.discrepancy === 0 ? "text-green-600" :
+                    closeoutResult.discrepancy > 0 ? "text-blue-600" : "text-red-600"
+                  }`}>
+                    <span>
+                      {closeoutResult.discrepancy === 0 ? "Balanced" :
+                       closeoutResult.discrepancy > 0 ? "Overage" : "Short"}
+                    </span>
+                    <span>
+                      {closeoutResult.discrepancy === 0 ? "✓" : fmtUsd(Math.abs(closeoutResult.discrepancy))}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setCloseoutTerminalId(null)}
+                  className="w-full bg-gray-100 text-gray-700 py-2 rounded-lg text-sm"
+                >
+                  Done
+                </button>
+              </>
+            )}
+
+          </div>
+        </div>
+      )}
 
     </div>
 

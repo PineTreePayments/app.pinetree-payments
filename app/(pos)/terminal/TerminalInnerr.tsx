@@ -17,6 +17,7 @@ type Terminal = {
   pin: string
   autolock: string
   merchant_id?: string
+  drawer_starting_amount?: number
 }
 
 type TerminalContext = {
@@ -42,6 +43,8 @@ export default function TerminalInner() {
   const [recoveryPhrase, setRecoveryPhrase] = useState("")
   const [recoveryPin, setRecoveryPin] = useState("")
   const [recoveryBusy, setRecoveryBusy] = useState(false)
+  const [shiftStarted, setShiftStarted] = useState(false)
+  const [shiftStarting, setShiftStarting] = useState(false)
 
   function showToast(message:string,type:"success"|"error"){
 
@@ -137,6 +140,27 @@ export default function TerminalInner() {
     setShowRecovery(false)
     setRecoveryPhrase("")
     setRecoveryPin("")
+  }
+
+  async function confirmShiftStart() {
+    if (!terminal?.id || !terminal.merchant_id) return
+    setShiftStarting(true)
+    try {
+      await fetch("/api/pos/drawer/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          terminalId: terminal.id,
+          merchantId: terminal.merchant_id,
+          startingAmount: Number(terminal.drawer_starting_amount ?? 0)
+        })
+      })
+    } catch {
+      // Non-fatal — drawer logging failure should not block the cashier
+    } finally {
+      setShiftStarting(false)
+      setShiftStarted(true)
+    }
   }
 
   async function recoverPin() {
@@ -235,7 +259,40 @@ export default function TerminalInner() {
 
       </button>
 
-      {!unlockMode && (
+      {!unlockMode && terminal && !shiftStarted && Number(terminal.drawer_starting_amount ?? 0) > 0 && (
+        <div className="bg-white shadow-xl rounded-2xl p-8 w-[92vw] max-w-[420px] text-center space-y-5">
+          <div>
+            <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">{terminal.name}</p>
+            <h1 className="text-2xl font-bold text-gray-900">Start Shift</h1>
+          </div>
+          <div className="bg-gray-50 rounded-xl p-5">
+            <p className="text-xs uppercase tracking-widest text-gray-400 mb-1">Starting Cash Balance</p>
+            <p className="text-4xl font-bold text-gray-900">
+              {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
+                Number(terminal.drawer_starting_amount ?? 0)
+              )}
+            </p>
+          </div>
+          <p className="text-sm text-gray-500">
+            Confirm the starting cash in the drawer before beginning your shift.
+          </p>
+          <button
+            onClick={confirmShiftStart}
+            disabled={shiftStarting}
+            className="w-full bg-[#0052FF] text-white py-3 rounded-xl font-semibold disabled:opacity-50"
+          >
+            {shiftStarting ? "Starting…" : "Confirm & Start Shift"}
+          </button>
+          <button
+            onClick={() => setShiftStarted(true)}
+            className="w-full text-xs text-gray-400 hover:text-gray-600 py-1"
+          >
+            Skip (no drawer tracking)
+          </button>
+        </div>
+      )}
+
+      {!unlockMode && (terminal === null || shiftStarted || Number(terminal?.drawer_starting_amount ?? 0) === 0) && (
         <POSLayout locked={false} terminalContext={terminalContext} />
       )}
 

@@ -36,6 +36,7 @@ export async function POST(req: NextRequest) {
       pin?: string
       autolock?: string
       recoveryPhrase?: string
+      drawer_starting_amount?: number
     }
 
     if (!body.name?.trim()) {
@@ -57,7 +58,8 @@ export async function POST(req: NextRequest) {
       name: body.name.trim(),
       pin: body.pin,
       autolock: body.autolock || "5",
-      recoveryPhrase: body.recoveryPhrase.trim()
+      recoveryPhrase: body.recoveryPhrase.trim(),
+      drawer_starting_amount: Number(body.drawer_starting_amount ?? 0)
     })
 
     return NextResponse.json({ success: true, terminal })

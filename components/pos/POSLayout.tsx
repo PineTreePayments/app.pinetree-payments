@@ -20,11 +20,19 @@ type Props = {
 type Status =
   | "ready"
   | "confirm"
+  | "cash-tender"
+  | "cash-change"
   | "waiting"
   | "processing"
   | "confirmed"
   | "incomplete"
   | "failed"
+
+type AvailableMethods = {
+  cash: boolean
+  crypto: boolean
+  card: boolean
+}
 
 type Breakdown = {
   subtotalAmount: number
@@ -61,6 +69,8 @@ export default function POSLayout({ locked, terminalContext }: Props) {
   const [paymentError, setPaymentError] = useState("")
   const [breakdown, setBreakdown] = useState<Breakdown | null>(null)
   const [breakdownLoading, setBreakdownLoading] = useState(false)
+  const [availableMethods, setAvailableMethods] = useState<AvailableMethods>({ cash: true, crypto: true, card: false })
+  const [cashDigits, setCashDigits] = useState("")
 
   // Holds the resolved actual payment ID once the customer selects a network on intent
   const resolvedPaymentIdRef = useRef<string>("")
@@ -75,6 +85,8 @@ export default function POSLayout({ locked, terminalContext }: Props) {
     setIntentId("")
     setPaymentError("")
     setBreakdown(null)
+    setCashDigits("")
+    setAvailableMethods({ cash: true, crypto: true, card: false })
     resolvedPaymentIdRef.current = ""
   }
 
@@ -199,16 +211,49 @@ export default function POSLayout({ locked, terminalContext }: Props) {
     setStatus("confirm")
     setBreakdown(null)
     setBreakdownLoading(true)
-    const data = await fetchBreakdown(Number(subtotal))
-    setBreakdown(data)
+
+    const merchantId = terminalContext?.merchantId
+    const [breakdownData, methodsData] = await Promise.all([
+      fetchBreakdown(Number(subtotal)),
+      merchantId
+        ? fetch(`/api/pos/methods?merchantId=${encodeURIComponent(merchantId)}`).then(r => r.ok ? r.json() : null).catch(() => null)
+        : Promise.resolve(null)
+    ])
+
+    setBreakdown(breakdownData)
+    if (methodsData) {
+      setAvailableMethods({
+        cash: methodsData.cash ?? true,
+        crypto: methodsData.crypto ?? true,
+        card: methodsData.card ?? false
+      })
+    }
     setBreakdownLoading(false)
   }
 
   /* =========================
-     CREATE PAYMENT
+     CASH FLOW
   ========================= */
 
-  async function createPayment() {
+  function startCash() {
+    setCashDigits("")
+    setStatus("cash-tender")
+  }
+
+  const cashTendered = (Number(cashDigits || "0") / 100)
+  const totalDue = breakdown ? breakdown.totalAmount : Number(subtotal)
+  const changeDue = cashTendered - totalDue
+
+  function confirmCashTender() {
+    if (cashTendered < totalDue) return
+    setStatus("cash-change")
+  }
+
+  /* =========================
+     CRYPTO PAYMENT
+  ========================= */
+
+  async function startCrypto() {
     if (!digits || Number(subtotal) <= 0) return
 
     try {
@@ -321,22 +366,138 @@ export default function POSLayout({ locked, terminalContext }: Props) {
               </div>
             )}
 
-            <div className="flex gap-3">
-              <button
-                onClick={resetSale}
-                className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-xl text-sm font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={createPayment}
-                disabled={breakdownLoading}
-                className="flex-1 bg-[#0052FF] text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50"
-              >
-                Charge {displayTotal}
-              </button>
+            {!breakdownLoading && (
+              <div className="space-y-3">
+                <p className="text-xs uppercase tracking-widest text-gray-500 text-center">
+                  Select Payment Method
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    onClick={startCash}
+                    className="flex flex-col items-center gap-1.5 py-4 rounded-xl bg-green-50 border border-green-200 text-green-800 font-semibold text-sm hover:bg-green-100 transition"
+                  >
+                    <span className="text-xl">💵</span>
+                    Cash
+                  </button>
+                  <button
+                    onClick={startCrypto}
+                    className="flex flex-col items-center gap-1.5 py-4 rounded-xl bg-blue-50 border border-blue-200 text-blue-800 font-semibold text-sm hover:bg-blue-100 transition"
+                  >
+                    <span className="text-xl">₿</span>
+                    Crypto
+                  </button>
+                  <button
+                    disabled={!availableMethods.card}
+                    title={!availableMethods.card ? "Card payments not connected" : undefined}
+                    className="flex flex-col items-center gap-1.5 py-4 rounded-xl bg-gray-50 border border-gray-200 text-gray-400 font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition"
+                  >
+                    <span className="text-xl">💳</span>
+                    Card
+                  </button>
+                </div>
+                <button
+                  onClick={resetSale}
+                  className="w-full text-xs text-gray-400 hover:text-gray-600 py-1"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+          </div>
+        )}
+
+        {/* ── CASH TENDER ── */}
+        {status === "cash-tender" && (
+          <div className="space-y-4">
+            <div className="text-center">
+              <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">Cash Payment</p>
+              <p className="text-3xl font-bold text-gray-900">{fmtUsd(totalDue)}</p>
+              <p className="text-sm text-gray-500 mt-1">Amount Due</p>
             </div>
 
+            <div className="bg-gray-50 rounded-xl p-4 text-center">
+              <p className="text-xs uppercase tracking-widest text-gray-400 mb-1">Cash Tendered</p>
+              <p className="text-2xl font-semibold text-gray-900">
+                {cashDigits ? fmtUsd(cashTendered) : <span className="text-gray-300">$0.00</span>}
+              </p>
+            </div>
+
+            <Keypad digits={cashDigits} setDigits={setCashDigits} />
+
+            {cashDigits && cashTendered < totalDue && (
+              <p className="text-center text-sm text-red-500">
+                Amount is less than total due
+              </p>
+            )}
+
+            <button
+              onClick={confirmCashTender}
+              disabled={!cashDigits || cashTendered < totalDue}
+              className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold disabled:opacity-40"
+            >
+              Confirm Cash
+            </button>
+            <button
+              onClick={() => setStatus("confirm")}
+              className="w-full text-xs text-gray-400 hover:text-gray-600 py-1"
+            >
+              Back
+            </button>
+          </div>
+        )}
+
+        {/* ── CASH CHANGE ── */}
+        {status === "cash-change" && (
+          <div className="flex flex-col items-center gap-4 py-4">
+            <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center">
+              <span className="text-3xl">💵</span>
+            </div>
+            <div className="text-center">
+              <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">Change Due</p>
+              {changeDue > 0.005 ? (
+                <p className="text-4xl font-bold text-green-600">{fmtUsd(changeDue)}</p>
+              ) : (
+                <p className="text-xl font-semibold text-gray-700">No change due</p>
+              )}
+            </div>
+            <div className="w-full bg-gray-50 rounded-xl p-4 space-y-1.5 text-sm">
+              <div className="flex justify-between text-gray-600">
+                <span>Total Charged</span>
+                <span>{fmtUsd(totalDue)}</span>
+              </div>
+              <div className="flex justify-between text-gray-600">
+                <span>Cash Tendered</span>
+                <span>{fmtUsd(cashTendered)}</span>
+              </div>
+              {changeDue > 0.005 && (
+                <div className="flex justify-between font-semibold text-green-700 border-t border-gray-200 pt-1.5">
+                  <span>Change</span>
+                  <span>{fmtUsd(changeDue)}</span>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={async () => {
+                if (terminalContext?.terminalId && terminalContext?.merchantId) {
+                  fetch("/api/pos/drawer/sale", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      terminalId: terminalContext.terminalId,
+                      merchantId: terminalContext.merchantId,
+                      saleTotal: totalDue,
+                      cashTendered,
+                      changeGiven: Math.max(0, changeDue)
+                    })
+                  }).catch(() => {/* non-fatal */})
+                }
+                resetSale()
+              }}
+              className="w-full bg-[#0052FF] text-white py-3 rounded-xl font-semibold"
+            >
+              Complete Sale
+            </button>
           </div>
         )}
 

@@ -9,6 +9,7 @@ export type TerminalRecord = {
   pin: string
   autolock: string
   merchant_id: string
+  drawer_starting_amount: number
   created_at?: string
 }
 
@@ -17,6 +18,7 @@ export type CreateTerminalInput = {
   pin: string
   autolock: string
   recoveryPhrase: string
+  drawer_starting_amount?: number
 }
 
 type ErrorWithStatus = Error & { status?: number }
@@ -28,7 +30,7 @@ function hashRecoveryPhrase(phrase: string) {
 export async function getPosTerminalsEngine(merchantId: string): Promise<TerminalRecord[]> {
   const { data, error } = await db
     .from("terminals")
-    .select("id,name,pin,autolock,merchant_id,created_at")
+    .select("id,name,pin,autolock,merchant_id,drawer_starting_amount,created_at")
     .eq("merchant_id", merchantId)
     .order("created_at", { ascending: false })
 
@@ -49,9 +51,10 @@ export async function createPosTerminalEngine(
       merchant_id: merchantId,
       name: input.name,
       pin: input.pin,
-      autolock: input.autolock
+      autolock: input.autolock,
+      drawer_starting_amount: Number(input.drawer_starting_amount ?? 0)
     })
-    .select("id,name,pin,autolock,merchant_id,created_at")
+    .select("id,name,pin,autolock,merchant_id,drawer_starting_amount,created_at")
     .single()
 
   if (error) {
