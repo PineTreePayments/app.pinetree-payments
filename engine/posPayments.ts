@@ -1,6 +1,8 @@
 import { createPayment } from "@/engine/createPayment"
 import { getMerchantTaxSettings } from "@/database/merchants"
 import { hasAnyWalletConnected, selectBestWallet } from "@/database/merchantWallets"
+import { claimIdempotencyKey, getIdempotencyKey } from "@/database/idempotency"
+import { getPaymentIntentById } from "@/database"
 import { createPaymentIntentEngine } from "./paymentIntents"
 import { getUnifiedPaymentStatusEngine } from "./paymentStatusOrchestrator"
 import {
@@ -208,6 +210,39 @@ export async function createPosPaymentIntentEngine(input: CreatePosPaymentInput)
   const merchantAmount = subtotalAmount + taxAmount
   const serviceFee = PINETREE_FEE
 
+  // Idempotency: generate a deterministic key scoped to a 5-minute window.
+  // If the POS terminal retries (e.g. network timeout after intent was created),
+  // the same key is returned instead of creating a duplicate charge.
+  const terminalId = input.terminal.terminalId || "none"
+  const amountCents = Math.round(subtotalAmount * 100)
+  const timeBucket = Math.floor(Date.now() / (5 * 60 * 1000)) // changes every 5 min
+  const idempotencyKey = `pos-intent:${merchantId}:${amountCents}:${terminalId}:${timeBucket}`
+
+  const existingIntentId = await getIdempotencyKey(idempotencyKey)
+  if (existingIntentId) {
+    const existingIntent = await getPaymentIntentById(existingIntentId)
+    if (existingIntent) {
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://app.pinetree-payments.com"
+      const checkoutUrl = `${baseUrl}/pay?intent=${encodeURIComponent(existingIntent.id)}`
+      return {
+        paymentId: existingIntent.id,
+        intentId: existingIntent.id,
+        provider: "multi",
+        state: "PENDING" as const,
+        paymentUrl: checkoutUrl,
+        qrCodeUrl: "",
+        availableNetworks: existingIntent.available_networks || [],
+        breakdown: {
+          subtotalAmount,
+          taxAmount,
+          serviceFee,
+          grossAmount: merchantAmount + serviceFee,
+          totalAmount: merchantAmount + serviceFee
+        }
+      }
+    }
+  }
+
   const intent = await createPaymentIntentEngine({
     merchantId,
     amount: merchantAmount,
@@ -221,6 +256,9 @@ export async function createPosPaymentIntentEngine(input: CreatePosPaymentInput)
       channel: "pos"
     }
   })
+
+  // Claim the idempotency key against the new intent ID
+  await claimIdempotencyKey(idempotencyKey, intent.intentId)
 
   return {
     paymentId: intent.intentId,
@@ -246,5 +284,42 @@ export async function getPosPaymentStatusEngine(paymentId: string) {
   return {
     status: resolved.status,
     paymentId: resolved.paymentId
+  }
+}
+
+export type PosBreakdown = {
+  subtotalAmount: number
+  taxAmount: number
+  taxRate: number
+  taxEnabled: boolean
+  serviceFee: number
+  grossAmount: number
+  totalAmount: number
+}
+
+export async function previewPosBreakdownEngine(
+  merchantId: string,
+  subtotalAmount: number
+): Promise<PosBreakdown> {
+  if (!subtotalAmount || subtotalAmount <= 0) {
+    const err = new Error("Invalid amount") as Error & { status?: number }
+    err.status = 400
+    throw err
+  }
+
+  const tax = await getPosTaxSettingsEngine(merchantId)
+  const taxAmount = tax.taxEnabled ? subtotalAmount * (tax.taxRate / 100) : 0
+  const merchantAmount = subtotalAmount + taxAmount
+  const serviceFee = PINETREE_FEE
+  const grossAmount = merchantAmount + serviceFee
+
+  return {
+    subtotalAmount,
+    taxAmount,
+    taxRate: tax.taxRate,
+    taxEnabled: tax.taxEnabled,
+    serviceFee,
+    grossAmount,
+    totalAmount: grossAmount
   }
 }

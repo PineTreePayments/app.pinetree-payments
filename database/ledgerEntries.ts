@@ -30,6 +30,23 @@ export async function createLedgerEntry(input: LedgerEntryInsert): Promise<Ledge
   return data
 }
 
+/**
+ * Idempotent ledger write — safe to call from both webhook and watcher paths.
+ * If a ledger entry already exists for this payment_id, the insert is silently
+ * skipped (ON CONFLICT DO NOTHING enforced by the unique index in the DB).
+ * Returns null when the entry already existed.
+ */
+export async function upsertLedgerEntry(input: LedgerEntryInsert): Promise<LedgerEntry | null> {
+  const { data, error } = await supabase
+    .from('ledger_entries')
+    .upsert(input, { onConflict: 'payment_id', ignoreDuplicates: true })
+    .select()
+    .maybeSingle()
+
+  if (error) throw new Error(`Failed to upsert ledger entry: ${error.message}`)
+  return data
+}
+
 export async function getLedgerEntryById(id: string): Promise<LedgerEntry | null> {
   const { data, error } = await supabase
     .from('ledger_entries')

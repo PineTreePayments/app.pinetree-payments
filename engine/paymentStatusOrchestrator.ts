@@ -47,12 +47,16 @@ function canWatchStatus(status: string) {
 }
 
 export async function queueSingleWatcherIteration(payment: WatchablePayment, source: string) {
+  // A single-iteration check is always allowed even when continuous AUTO_POLLING is disabled.
+  // AUTO_POLLING_ENABLED only controls the background polling loop started at payment creation.
+  // On-demand checks (triggered by status API calls or intent resolution) must always run so
+  // that Solana / Base wallet-rail payments can be confirmed without a persistent watcher process.
   if (!AUTO_POLLING_ENABLED) {
-    console.info("[payment-status] watcher:disabled", {
+    console.info("[payment-status] watcher:single-iteration (auto-polling disabled)", {
       source,
       paymentId: payment.id
     })
-    return
+    // Allow single iteration to proceed — do NOT return early here.
   }
 
   const status = normalizePaymentStatus(payment.status)

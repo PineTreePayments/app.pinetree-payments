@@ -352,6 +352,13 @@ export async function createPayment(
     providerApiKey
   })
 
+  // Use the provider's declared feeCaptureMethod if available.
+  // This prevents network-based inference from overriding hosted-checkout providers
+  // (e.g. Coinbase on "base" network → invoice_split, NOT contract_split).
+  const providerDeclaredFeeMethod = String(
+    (providerPayment as { feeCaptureMethod?: string } | null)?.feeCaptureMethod || ""
+  ).trim() || undefined
+
   const splitPayment = await generateSplitPayment({
     merchantWallet: merchantWalletAddress,
     merchantAmount,
@@ -359,7 +366,8 @@ export async function createPayment(
     pinetreeFee,
     network,
     paymentId,
-    providerPayment
+    providerPayment,
+    feeCaptureMethodOverride: providerDeclaredFeeMethod
   })
 
   const splitContract = extractEvmSplitContractFromPaymentUrl(splitPayment.paymentUrl)
@@ -367,6 +375,20 @@ export async function createPayment(
   /* ---------------------------
      INSERT PAYMENT RECORD
   --------------------------- */
+
+  // For hosted-checkout providers (Coinbase), the provider's own payment URL
+  // (e.g. hosted Coinbase Commerce page) is the canonical payment URL.
+  // For wallet-rail providers (Solana, Base Pay), use the split payment URI.
+  const providerHostedUrl = String(
+    (providerPayment as { paymentUrl?: string; hosted_url?: string } | null)?.paymentUrl ||
+    (providerPayment as { hosted_url?: string } | null)?.hosted_url ||
+    ""
+  ).trim() || undefined
+
+  const canonicalPaymentUrl = providerHostedUrl || splitPayment.paymentUrl
+  const canonicalQrCodeUrl = providerHostedUrl
+    ? splitPayment.qrCodeUrl  // QR still points to universalUrl so merchant can scan
+    : splitPayment.qrCodeUrl
 
   await createPaymentRecord({
     id: paymentId,
@@ -378,8 +400,8 @@ export async function createPayment(
     provider: providerName,
     provider_reference: providerPayment.providerReference,
     network: network,
-    payment_url: splitPayment.paymentUrl,
-    qr_code_url: splitPayment.qrCodeUrl,
+    payment_url: canonicalPaymentUrl,
+    qr_code_url: canonicalQrCodeUrl,
     metadata: {
       ...(input.metadata || {}),
       split: {
@@ -463,8 +485,8 @@ export async function createPayment(
   return {
     id: paymentId,
     provider: providerName,
-    paymentUrl: splitPayment.paymentUrl,
-    qrCodeUrl: splitPayment.qrCodeUrl,
+    paymentUrl: canonicalPaymentUrl,
+    qrCodeUrl: canonicalQrCodeUrl,
     address: merchantWalletAddress,
     universalUrl: splitPayment.universalUrl,
     nativeAmount: Number(splitPayment.nativeAmount || 0),

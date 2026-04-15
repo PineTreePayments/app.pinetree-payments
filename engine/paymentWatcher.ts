@@ -5,7 +5,7 @@
  * Polls the network for transactions to merchant/treasury wallets.
  */
 
-import { supabase, getPaymentById, createLedgerEntry } from "@/database"
+import { supabase, getPaymentById, upsertLedgerEntry } from "@/database"
 import { getRpcUrl, WATCHER_CONFIG } from "./config"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 import { type PaymentStatus } from "./paymentStateMachine"
@@ -407,8 +407,9 @@ async function handleMatchingTransaction(
       const payment = await getPaymentById(paymentId)
       if (!payment) return false
       
-      // ✅ FIRST WRITE TO LEDGER - THIS IS THE SOURCE OF TRUTH
-      await createLedgerEntry({
+      // Upsert ledger entry — safe to call from both watcher and webhook paths.
+      // The unique DB constraint on payment_id ensures only the first write wins.
+      await upsertLedgerEntry({
         merchant_id: payment.merchant_id,
         payment_id: paymentId,
         transaction_id: transaction?.id,

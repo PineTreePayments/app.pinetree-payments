@@ -43,18 +43,31 @@ export async function updatePaymentStatus(
 
   if (nextStatus === "CONFIRMED") {
     const split = (payment.metadata as { split?: Record<string, unknown> } | null)?.split
-    const feeCaptureMethod = String(split?.feeCaptureMethod || "").trim()
+    const feeCaptureMethod = String(split?.feeCaptureMethod || "").trim().toLowerCase()
     const hasSplitMetadata = Boolean(
       String(split?.merchantWallet || "").trim() &&
       String(split?.pinetreeWallet || "").trim()
     )
 
-    const feeCaptureValidated = Boolean(
-      (metadata?.rawPayload as { feeCaptureValidated?: boolean } | undefined)?.feeCaptureValidated
-    )
+    // Fee capture is considered validated when:
+    //   invoice_split / collection_then_settle → the webhook itself IS the confirmation
+    //   atomic_split (Solana)                  → watcher verified both on-chain outputs
+    //   contract_split (EVM)                   → watcher verified tx to split contract
+    //
+    // In the watcher path (atomic_split / contract_split) the rawPayload always contains
+    // feeCaptureValidated=true once the on-chain checks pass.
+    // In the webhook path (invoice_split / collection_then_settle) we trust the provider.
+    const feeCaptureValidated =
+      feeCaptureMethod === "invoice_split" ||
+      feeCaptureMethod === "collection_then_settle" ||
+      Boolean(
+        (metadata?.rawPayload as { feeCaptureValidated?: boolean } | undefined)?.feeCaptureValidated
+      )
 
     if (!hasSplitMetadata || !feeCaptureMethod || !feeCaptureValidated) {
-      throw new Error("Fee capture validation failed: payment cannot be confirmed")
+      throw new Error(
+        `Fee capture validation failed for method "${feeCaptureMethod}": payment cannot be confirmed`
+      )
     }
   }
 

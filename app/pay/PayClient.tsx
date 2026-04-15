@@ -92,6 +92,7 @@ export default function PayClient() {
   const [selectionError, setSelectionError] = useState<string>("")
   const [paymentStatus, setPaymentStatus] = useState<string>("")
   const [intentPayload, setIntentPayload] = useState<IntentPayload | null>(null)
+  const [intentLoadError, setIntentLoadError] = useState<string>("")
   const [paymentPayload, setPaymentPayload] = useState<SplitPayload | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   
@@ -198,12 +199,17 @@ export default function PayClient() {
     try {
       const res = await fetch(`/api/payment-intents/${encodeURIComponent(intentId)}`, { cache: "no-store" })
       const payload = (await res.json()) as IntentPayload | { error?: string }
-      if (!res.ok || ("error" in payload && payload.error)) return
+      if (!res.ok || ("error" in payload && payload.error)) {
+        const msg = ("error" in payload && payload.error) ? String(payload.error) : "Payment not found"
+        setIntentLoadError(msg)
+        return
+      }
       const intent = payload as IntentPayload
       setIntentPayload(intent)
+      setIntentLoadError("")
       setPaymentStatus(String(intent.paymentStatus || ""))
     } catch {
-      // ignore
+      setIntentLoadError("Unable to load payment. Please try again.")
     }
   }
 
@@ -310,9 +316,27 @@ export default function PayClient() {
 
   if (intentId && !intentPayload) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-slate-100 via-slate-50 to-white">
-        <div className="max-w-md w-full bg-white/90 backdrop-blur rounded-3xl shadow-xl border border-white p-7 text-center">
-          <h1 className="text-xl font-semibold mb-2 text-slate-900">Loading payment…</h1>
+      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#e0ecff] via-[#f5f8ff] to-white">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl border border-blue-100 p-7 text-center space-y-3">
+          {intentLoadError ? (
+            <>
+              <p className="text-xs uppercase tracking-widest text-blue-500">PineTree Checkout</p>
+              <h1 className="text-xl font-semibold text-slate-900">Unable to Load Payment</h1>
+              <p className="text-sm text-slate-600">{intentLoadError}</p>
+              <button
+                onClick={() => { setIntentLoadError(""); void loadIntent() }}
+                className="mt-2 px-5 py-2 bg-[#0052FF] text-white rounded-xl text-sm font-medium"
+              >
+                Retry
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-xs uppercase tracking-widest text-blue-500">PineTree Checkout</p>
+              <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0052FF] border-t-transparent mx-auto" />
+              <h1 className="text-lg font-semibold text-slate-900">Loading payment…</h1>
+            </>
+          )}
         </div>
       </main>
     )
@@ -320,10 +344,11 @@ export default function PayClient() {
 
   if (!rawData && !intentPayload) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-slate-100 via-slate-50 to-white">
-        <div className="max-w-md w-full bg-white/90 backdrop-blur rounded-3xl shadow-xl border border-white p-7 text-center">
-          <h1 className="text-xl font-semibold mb-2 text-slate-900">Invalid payment QR</h1>
-          <p className="text-sm text-slate-700">This QR code payload is missing or malformed.</p>
+      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#e0ecff] via-[#f5f8ff] to-white">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl border border-blue-100 p-7 text-center space-y-2">
+          <p className="text-xs uppercase tracking-widest text-blue-500">PineTree Checkout</p>
+          <h1 className="text-xl font-semibold text-slate-900">Invalid Payment Link</h1>
+          <p className="text-sm text-slate-600">This QR code payload is missing or malformed.</p>
         </div>
       </main>
     )
@@ -336,10 +361,11 @@ export default function PayClient() {
 
   if (isIntentMode && !selectedNetwork && !intentPayload?.availableNetworks?.length) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-slate-100 via-slate-50 to-white">
-        <div className="max-w-md w-full bg-white/90 backdrop-blur rounded-3xl shadow-xl border border-white p-7 text-center">
-          <h1 className="text-xl font-semibold mb-2 text-slate-900">No payment methods available</h1>
-          <p className="text-sm text-slate-700">This merchant has no payment methods enabled.</p>
+      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#e0ecff] via-[#f5f8ff] to-white">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl border border-blue-100 p-7 text-center space-y-2">
+          <p className="text-xs uppercase tracking-widest text-blue-500">PineTree Checkout</p>
+          <h1 className="text-xl font-semibold text-slate-900">No Payment Methods Available</h1>
+          <p className="text-sm text-slate-600">This merchant has no payment methods enabled.</p>
         </div>
       </main>
     )
@@ -363,8 +389,16 @@ export default function PayClient() {
 
           <div className="rounded-2xl border border-slate-200/70 bg-gradient-to-b from-white to-slate-50 p-4 space-y-2 text-sm text-slate-800">
             <div className="flex items-center justify-between">
-              <span className="font-medium text-slate-600">Total</span>
-              <span className="font-semibold text-lg">{formatUsd(displayAmount)}</span>
+              <span className="font-medium text-slate-600">Subtotal</span>
+              <span className="font-semibold">{formatUsd(Number(intentPayload?.amount || 0))}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-slate-600">PineTree Service Fee</span>
+              <span className="font-semibold">{formatUsd(Number(intentPayload?.pinetreeFee || 0))}</span>
+            </div>
+            <div className="flex items-center justify-between border-t border-slate-200 pt-2">
+              <span className="font-semibold text-slate-900">Total</span>
+              <span className="font-bold text-lg text-slate-900">{formatUsd(displayAmount)}</span>
             </div>
           </div>
 

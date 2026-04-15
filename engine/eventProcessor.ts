@@ -8,7 +8,7 @@
 import { getProvider } from "./providerRegistry"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 import { emitEvent } from "./eventBus"
-import { getPaymentById, getPaymentByProviderReference, createPaymentEvent, createLedgerEntry } from "@/database"
+import { getPaymentById, getPaymentByProviderReference, createPaymentEvent, upsertLedgerEntry } from "@/database"
 import { PaymentStatus, normalizeToStrictPaymentStatus } from "./paymentStateMachine"
 import {
   getTransactionByPaymentId,
@@ -230,10 +230,25 @@ export async function processWebhook({
 
   const paymentId = resolution.paymentId
   const providerReferences = getProviderReferenceCandidates(payload)
+  const status = eventToStatus[event.event]
 
   const payment = await getPaymentById(paymentId)
   if (!payment) {
     console.warn("Payment not found for webhook:", paymentId)
+    return
+  }
+
+  // Idempotency guard — if the payment is already in a terminal state, a duplicate
+  // webhook has arrived. Log and return without writing anything to the database.
+  const TERMINAL_STATES = new Set<string>(["CONFIRMED", "FAILED", "INCOMPLETE"])
+  const currentStatus = normalizeToStrictPaymentStatus(payment.status)
+  if (TERMINAL_STATES.has(currentStatus)) {
+    console.info("[eventProcessor] idempotent:terminal_state_skip", {
+      provider,
+      paymentId,
+      currentStatus,
+      incomingEvent: event.event
+    })
     return
   }
 
@@ -265,23 +280,6 @@ export async function processWebhook({
 
   const eventId = crypto.randomUUID()
 
-  // ✅ FIRST WRITE TO LEDGER - THIS IS THE SOURCE OF TRUTH
-  if (event.event === "payment.confirmed") {
-    await createLedgerEntry({
-      merchant_id: payment.merchant_id,
-      payment_id: paymentId,
-      transaction_id: transaction?.id,
-      provider: provider,
-      network: payment.network,
-      asset: payment.currency,
-      amount: payment.gross_amount,
-      usd_value: payment.gross_amount,
-      wallet_address: payment.payment_url,
-      direction: "INBOUND",
-      status: "CONFIRMED"
-    })
-  }
-
   await createPaymentEvent({
     id: eventId,
     payment_id: paymentId,
@@ -289,8 +287,6 @@ export async function processWebhook({
     provider_event: getProviderEventType(payload),
     raw_payload: payload
   })
-
-  const status = eventToStatus[event.event]
 
   try {
     await advancePaymentToTargetStatus(paymentId, status, {
@@ -300,6 +296,25 @@ export async function processWebhook({
 
     if (transaction) {
       await updateTransactionStatus(transaction.id, toTransactionStatus(status))
+    }
+
+    // Write ledger entry after the state machine succeeds — upsert is safe to call
+    // from both the webhook and watcher paths; the unique DB constraint on payment_id
+    // ensures only the first write wins.
+    if (event.event === "payment.confirmed") {
+      await upsertLedgerEntry({
+        merchant_id: payment.merchant_id,
+        payment_id: paymentId,
+        transaction_id: transaction?.id,
+        provider,
+        network: payment.network,
+        asset: payment.currency,
+        amount: payment.gross_amount,
+        usd_value: payment.gross_amount,
+        wallet_address: payment.payment_url,
+        direction: "INBOUND",
+        status: "CONFIRMED"
+      })
     }
 
     console.info("[eventProcessor] status applied", {

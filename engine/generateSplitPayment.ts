@@ -9,6 +9,11 @@ type GenerateSplitPaymentInput = {
   network: string
   paymentId?: string
   providerPayment?: unknown
+  /**
+   * When provided by the adapter, always use this instead of deriving from network.
+   * Coinbase (invoice_split) lives on the "base" network but is NOT contract_split.
+   */
+  feeCaptureMethodOverride?: string
 }
 
 function toLamports(amountSol: number): number {
@@ -105,12 +110,16 @@ export async function generateSplitPayment(
 
   const returnUrl = `${BASE_URL}${returnPath}`
 
-  const feeCaptureMethod =
-    input.network === "solana"
+  // Provider-declared method takes precedence over network-derived guess.
+  // This is critical: Coinbase lives on "base" but uses invoice_split (hosted checkout),
+  // NOT contract_split. If the adapter returned a feeCaptureMethod, always trust it.
+  const feeCaptureMethod: string =
+    input.feeCaptureMethodOverride ||
+    (input.network === "solana"
       ? "atomic_split"
       : input.network === "base" || input.network === "base_pay" || input.network === "ethereum"
         ? "contract_split"
-        : "invoice_split"
+        : "invoice_split")
 
   /* --------------------------------
   BUILD STRUCTURED PAYMENT PAYLOAD
@@ -158,36 +167,44 @@ export async function generateSplitPayment(
     // Solana Pay transaction-request URL (wallet requests unsigned tx with split transfers)
     paymentUrl = txRequestUrl
   } else if (input.network === "base" || input.network === "base_pay" || input.network === "ethereum") {
-    // EVM chains MUST use contract-based split. Direct wallet transfer is not valid.
-    const chainId = input.network === "ethereum" ? "1" : "8453"
+    if (feeCaptureMethod === "invoice_split" || feeCaptureMethod === "collection_then_settle") {
+      // Hosted-checkout providers (e.g. Coinbase Commerce) collect the gross amount themselves.
+      // There is no on-chain split URI to generate — the provider's hosted_url IS the paymentUrl
+      // and will be set by the provider adapter's createPayment return value.
+      // Fall through to universalUrl-only mode.
+      paymentUrl = `pinetree://pay?data=${encodeURIComponent(payloadString)}`
+    } else {
+      // EVM wallet-rail: contract_split via EIP-681 URI.
+      const chainId = input.network === "ethereum" ? "1" : "8453"
 
-    const splitMode = getEvmSplitMode()
-    const splitContract = getEvmSplitContract(input.network)
+      const splitMode = getEvmSplitMode()
+      const splitContract = getEvmSplitContract(input.network)
 
-    if (splitMode !== "contract") {
-      throw new Error(
-        "EVM rails require contract_split fee execution mode. Set PINETREE_EVM_SPLIT_MODE=contract."
-      )
+      if (splitMode !== "contract") {
+        throw new Error(
+          "EVM rails require contract_split fee execution mode. Set PINETREE_EVM_SPLIT_MODE=contract."
+        )
+      }
+
+      if (!isEvmAddress(splitContract)) {
+        throw new Error(
+          `EVM rails require a valid split contract address for ${input.network}. Configure PINETREE_EVM_SPLIT_CONTRACT_${
+            input.network === "ethereum" ? "ETHEREUM" : "BASE"
+          }.`
+        )
+      }
+
+      // EIP-681 style contract invocation URI for split execution
+      const query = new URLSearchParams({
+        merchant: input.merchantWallet,
+        treasury: input.pinetreeWallet,
+        merchantAmountWei: toWeiString(merchantNativeAmount),
+        feeAmountWei: toWeiString(feeNativeAmount),
+        reference: String(input.paymentId || "")
+      })
+
+      paymentUrl = `ethereum:${splitContract}@${chainId}/split?${query.toString()}`
     }
-
-    if (!isEvmAddress(splitContract)) {
-      throw new Error(
-        `EVM rails require a valid split contract address for ${input.network}. Configure PINETREE_EVM_SPLIT_CONTRACT_${
-          input.network === "ethereum" ? "ETHEREUM" : "BASE"
-        }.`
-      )
-    }
-
-    // EIP-681 style contract invocation URI for split execution
-    const query = new URLSearchParams({
-      merchant: input.merchantWallet,
-      treasury: input.pinetreeWallet,
-      merchantAmountWei: toWeiString(merchantNativeAmount),
-      feeAmountWei: toWeiString(feeNativeAmount),
-      reference: String(input.paymentId || "")
-    })
-
-    paymentUrl = `ethereum:${splitContract}@${chainId}/split?${query.toString()}`
   } else {
     // Fallback to universal format
     paymentUrl = `pinetree://pay?data=${encodeURIComponent(payloadString)}`

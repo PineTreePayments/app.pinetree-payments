@@ -1,13 +1,6 @@
 import { Connection, PublicKey, SystemProgram, Transaction } from "@solana/web3.js"
 import { getPaymentById } from "@/database/payments"
-
-function getRequiredEnv(name: string): string {
-  const value = String(process.env[name] || "").trim()
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`)
-  }
-  return value
-}
+import { getRpcUrl } from "@/engine/config"
 
 function toLamportsFromAtomic(value: unknown): number {
   const n = Number(value)
@@ -62,7 +55,7 @@ export async function buildSolanaSplitTransactionEngine(input: {
   const merchantLamports = toLamportsFromAtomic(split?.merchantNativeAmountAtomic)
   const feeLamports = toLamportsFromAtomic(split?.feeNativeAmountAtomic)
 
-  const rpcUrl = getRequiredEnv("SOLANA_RPC_URL")
+  const rpcUrl = getRpcUrl("solana")
   const connection = new Connection(rpcUrl, "confirmed")
   const { blockhash } = await connection.getLatestBlockhash("confirmed")
 
