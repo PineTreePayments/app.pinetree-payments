@@ -193,8 +193,9 @@ export async function getUnifiedPaymentStatusEngine(referenceId: string, source 
 
     await queueSingleWatcherIteration(selectedPayment, `${source}:intent`)
 
+    const refreshedSelectedPayment = await getPaymentById(selectedPayment.id)
     return {
-      status: normalizePaymentStatus(selectedPayment.status),
+      status: normalizePaymentStatus(refreshedSelectedPayment?.status ?? selectedPayment.status),
       paymentId: selectedPayment.id,
       intentId: intent.id,
       resolvedFrom: "intent" as const,
@@ -211,8 +212,9 @@ export async function getUnifiedPaymentStatusEngine(referenceId: string, source 
 
   await queueSingleWatcherIteration(payment, `${source}:payment`)
 
+  const refreshedPayment = await getPaymentById(trimmedReferenceId)
   return {
-    status: normalizePaymentStatus(payment.status),
+    status: normalizePaymentStatus(refreshedPayment?.status ?? payment.status),
     paymentId: payment.id,
     intentId: null,
     resolvedFrom: "payment" as const,

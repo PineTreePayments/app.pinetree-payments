@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/database/supabase"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
+import StatusBadge from "@/components/ui/StatusBadge"
 
 import {
   ResponsiveContainer,
@@ -42,6 +43,7 @@ type ChartRow = {
   base: number
   coinbase: number
   shift4: number
+  cash: number
 }
 
 type TransactionsDashboardResponse = {
@@ -139,6 +141,7 @@ export default function TransactionsPage() {
     if (provider === "solana") return "Solana Pay"
     if (provider === "shift4") return "Shift4"
     if (provider === "base") return "Base Pay"
+    if (provider === "cash") return "Cash"
     return provider || "-"
   }, [])
 
@@ -340,7 +343,7 @@ export default function TransactionsPage() {
 
       {/* AI INSIGHT */}
 
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-10">
+      <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6 mb-10">
         <div className="text-sm text-blue-700 font-medium mb-1">
           PineTree Insights
         </div>
@@ -354,7 +357,7 @@ export default function TransactionsPage() {
 
       <div className="flex flex-wrap gap-4 mb-6">
         <select
-          className="border border-gray-300 rounded px-3 py-2 text-sm bg-white text-gray-900"
+          className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:border-blue-400"
           value={walletFilter}
           onChange={(e) => setWalletFilter(e.target.value)}
         >
@@ -363,10 +366,11 @@ export default function TransactionsPage() {
           <option value="coinbase">Coinbase Business</option>
           <option value="shift4">Shift4</option>
           <option value="base">Base Pay</option>
+          <option value="cash">Cash</option>
         </select>
 
         <select
-          className="border border-gray-300 rounded px-3 py-2 text-sm bg-white text-gray-900"
+          className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:border-blue-400"
           value={networkFilter}
           onChange={(e) => setNetworkFilter(e.target.value)}
         >
@@ -379,7 +383,7 @@ export default function TransactionsPage() {
 
       {/* TABLE */}
 
-      <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-x-auto">
+      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-x-auto">
         <table className="w-full min-w-[860px]">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr className="text-left text-sm text-gray-700">
@@ -436,9 +440,7 @@ export default function TransactionsPage() {
                   </td>
 
                   <td className="px-6 py-4">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${displayStatus.classes}`}>
-                      {displayStatus.status}
-                    </span>
+                    <StatusBadge label={displayStatus.status} classes={displayStatus.classes} />
                   </td>
 
                   <td className="px-6 py-4 text-gray-700 font-mono text-xs">
@@ -455,7 +457,7 @@ export default function TransactionsPage() {
 
       {showChart && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-3">
-          <div className="bg-white w-full max-w-[900px] max-h-[90vh] overflow-y-auto p-4 sm:p-6 rounded-lg shadow-lg">
+          <div className="bg-white w-full max-w-[900px] max-h-[90vh] overflow-y-auto p-4 sm:p-6 rounded-2xl shadow-xl">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-6">
               <h2 className="text-lg font-semibold text-gray-900">
                 {chartMode === "pos"
@@ -481,7 +483,7 @@ export default function TransactionsPage() {
                     setChartRange(r)
                     void loadChartData(r)
                   }}
-                  className={`px-3 py-1 rounded border ${chartRange === r ? "bg-blue-600 text-white" : "bg-white text-gray-700"}`}
+                  className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition ${chartRange === r ? "bg-[#0052FF] text-white border-[#0052FF]" : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"}`}
                 >
                   {r.toUpperCase()}
                 </button>
@@ -523,10 +525,11 @@ export default function TransactionsPage() {
 
                 <Legend wrapperStyle={{ fontSize: "12px" }} />
 
-                <Bar dataKey="solana" stackId="a" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="base" stackId="a" fill="#2563eb" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="coinbase" stackId="a" fill="#1e40af" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="shift4" stackId="a" fill="#14b8a6" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="solana" name="Solana Pay" stackId="a" fill="#8b5cf6" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="base" name="Base Pay" stackId="a" fill="#0052FF" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="coinbase" name="Coinbase" stackId="a" fill="#1e40af" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="shift4" name="Shift4" stackId="a" fill="#14b8a6" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="cash" name="Cash" stackId="a" fill="#22c55e" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -538,9 +541,9 @@ export default function TransactionsPage() {
 
 function AnalyticsCard({ title, value }: { title: string, value: string }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
-      <div className="text-sm text-gray-600">{title}</div>
-      <div className="text-xl font-semibold text-gray-900 mt-1">{value}</div>
+    <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
+      <div className="text-xs uppercase tracking-widest text-gray-500 mb-1">{title}</div>
+      <div className="text-xl font-bold text-gray-900">{value}</div>
     </div>
   )
 }
@@ -558,10 +561,10 @@ function InteractiveAnalyticsCard({
     <button
       type="button"
       onClick={onClick}
-      className="text-left bg-white border border-gray-200 rounded-lg p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_20px_60px_rgba(0,0,0,0.12),0_0_40px_rgba(125,63,224,0.25)] focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+      className="text-left bg-white border border-gray-200 rounded-2xl p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_20px_60px_rgba(0,0,0,0.12),0_0_40px_rgba(125,63,224,0.25)] focus:outline-none focus:ring-2 focus:ring-blue-500/30"
     >
-      <div className="text-sm text-gray-600">{title}</div>
-      <div className="text-xl font-semibold text-gray-900 mt-1">{value}</div>
+      <div className="text-xs uppercase tracking-widest text-gray-500 mb-1">{title}</div>
+      <div className="text-xl font-bold text-gray-900">{value}</div>
     </button>
   )
 }

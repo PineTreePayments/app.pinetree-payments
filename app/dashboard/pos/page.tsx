@@ -5,6 +5,8 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { Eye, EyeOff } from "lucide-react"
 import { supabase } from "@/database/supabase"
 import { toast } from "sonner"
+import Button from "@/components/ui/Button"
+import Card from "@/components/ui/Card"
 
 type Terminal = {
   id: string
@@ -273,24 +275,21 @@ export default function POSPage() {
 
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
 
-          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-lg">
+          <Card className="w-full max-w-md">
 
             <h2 className="text-lg font-semibold mb-2 text-gray-900">
               Delete Terminal
             </h2>
 
-            <p className="text-sm text-gray-600 mb-6">
+            <p className="text-sm text-gray-500 mb-6">
               Are you sure you want to delete this terminal?
             </p>
 
             <div className="flex justify-end gap-3">
 
-              <button
-                onClick={()=>setConfirmDelete(false)}
-                className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
+              <Button variant="secondary" onClick={()=>setConfirmDelete(false)}>
                 Cancel
-              </button>
+              </Button>
 
               <button
                 onClick={()=>{
@@ -299,14 +298,14 @@ export default function POSPage() {
                   }
                   setConfirmDelete(false)
                 }}
-                className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg"
+                className="px-4 py-2.5 text-sm bg-red-600 text-white rounded-xl font-medium hover:bg-red-700"
               >
                 Delete Terminal
               </button>
 
             </div>
 
-          </div>
+          </Card>
 
         </div>
 
@@ -330,7 +329,7 @@ export default function POSPage() {
 
       {creating && (
 
-        <div ref={formRef} className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+        <div ref={formRef} className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
 
           <h2 className="text-lg font-semibold text-gray-900 mb-6">
             Create Terminal
@@ -348,7 +347,7 @@ export default function POSPage() {
                 value={name}
                 onChange={(e)=>setName(e.target.value)}
                 placeholder="Front Register"
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-black"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-gray-900 focus:outline-none focus:border-blue-400"
               />
 
             </div>
@@ -363,7 +362,7 @@ export default function POSPage() {
                 value={recoveryPhrase}
                 onChange={(e)=>setRecoveryPhrase(e.target.value)}
                 placeholder="Set a terminal recovery phrase"
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-black"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-gray-900 focus:outline-none focus:border-blue-400"
               />
 
               <p className="text-xs text-gray-500 mt-1">
@@ -386,13 +385,13 @@ export default function POSPage() {
                   value={pin}
                   onChange={(e)=>setPin(e.target.value)}
                   placeholder="4 digit PIN"
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-center tracking-widest text-black"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-center tracking-widest text-gray-900 focus:outline-none focus:border-blue-400"
                 />
 
                 <button
                   type="button"
                   onClick={()=>setShowPin(!showPin)}
-                  className="absolute right-3 top-2 text-gray-500"
+                  className="absolute right-3 top-2.5 text-gray-400"
                 >
                   {showPin ? <EyeOff size={18}/> : <Eye size={18}/>}
                 </button>
@@ -410,7 +409,7 @@ export default function POSPage() {
               <select
                 value={autoLock}
                 onChange={(e)=>setAutoLock(e.target.value)}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-black"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-gray-900 focus:outline-none focus:border-blue-400"
               >
                 <option value="1">1 minute</option>
                 <option value="3">3 minutes</option>
@@ -434,7 +433,7 @@ export default function POSPage() {
                 value={drawerStartingAmount}
                 onChange={(e) => setDrawerStartingAmount(e.target.value)}
                 placeholder="e.g. 200.00"
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-black"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-gray-900 focus:outline-none focus:border-blue-400"
               />
 
               <p className="text-xs text-gray-500 mt-1">
@@ -447,19 +446,13 @@ export default function POSPage() {
 
           <div className="flex flex-col sm:flex-row gap-3 mt-6">
 
-            <button
-              onClick={createTerminal}
-              className="bg-[#0052FF] text-white px-5 py-2 rounded-md text-sm"
-            >
+            <Button onClick={createTerminal}>
               Create Terminal
-            </button>
+            </Button>
 
-            <button
-              onClick={()=>setCreating(false)}
-              className="bg-gray-200 text-gray-700 px-5 py-2 rounded-md text-sm"
-            >
+            <Button variant="secondary" onClick={()=>setCreating(false)}>
               Cancel
-            </button>
+            </Button>
 
           </div>
 
@@ -469,7 +462,7 @@ export default function POSPage() {
 
       {/* TERMINAL LIST */}
 
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+      <Card>
 
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
 
@@ -477,12 +470,9 @@ export default function POSPage() {
             Active Terminals
           </h2>
 
-          <button
-            onClick={()=>setCreating(true)}
-            className="bg-[#0052FF] text-white px-4 py-2 rounded-md text-sm hover:opacity-90"
-          >
+          <Button onClick={()=>setCreating(true)}>
             + New Terminal
-          </button>
+          </Button>
 
         </div>
 
@@ -501,7 +491,7 @@ export default function POSPage() {
             <div
               key={t.id}
               ref={expandedTerminalId === t.id ? detailsRef : null}
-              className="border border-gray-200 rounded-lg p-4 flex flex-col md:flex-row md:justify-between md:items-center gap-4 relative"
+              className="border border-gray-200 rounded-xl p-4 flex flex-col md:flex-row md:justify-between md:items-center gap-4 relative"
             >
 
               <div>
@@ -522,34 +512,32 @@ export default function POSPage() {
 
               <div className="flex flex-wrap gap-2 items-center md:justify-end">
 
-                <button
-                  onClick={() => toggleTerminalDetails(t.id)}
-                  className="px-3 py-1.5 bg-white border border-gray-300 text-gray-700 text-sm rounded-md hover:bg-gray-50"
-                >
+                <Button variant="secondary" onClick={() => toggleTerminalDetails(t.id)}>
                   {expandedTerminalId === t.id ? "Hide details" : "Details"}
-                </button>
+                </Button>
 
                 <Link
                   href={`/terminal?tid=${t.id}`}
-                  className="px-3 py-1.5 bg-[#0052FF] text-white text-sm rounded-md hover:opacity-90"
+                  className="inline-flex items-center justify-center font-semibold text-sm rounded-full h-[46px] px-6 transition-all active:scale-[0.98] text-white hover:brightness-110"
+                  style={{ background: "linear-gradient(135deg, #5cc8ff 0%, #7d3fe0 100%)" }}
                 >
                   Launch
                 </Link>
 
-                <button
+                <Button
+                  variant="secondary"
                   onClick={()=>{
                     setTerminalToDelete(t.id)
                     setConfirmDelete(true)
                   }}
-                  className="px-3 py-1.5 bg-gray-200 text-gray-700 text-sm rounded-md hover:bg-gray-300"
                 >
                   Delete
-                </button>
+                </Button>
 
               </div>
 
               {expandedTerminalId === t.id && (
-                <div className="md:absolute md:right-4 md:top-14 z-20 w-full md:w-72 bg-white border border-gray-200 rounded-lg shadow-xl p-3 text-xs text-gray-600 space-y-1">
+                <div className="md:absolute md:right-4 md:top-14 z-20 w-full md:w-72 bg-white border border-gray-200 rounded-xl shadow-xl p-3 text-xs text-gray-600 space-y-1">
                   <div><span className="font-medium text-gray-800">Auto-lock:</span> {formatAutoLock(t.autolock)}</div>
                   <div><span className="font-medium text-gray-800">Merchant:</span> {t.merchant_id || "-"}</div>
                   <div>
@@ -565,12 +553,12 @@ export default function POSPage() {
 
         </div>
 
-      </div>
+      </Card>
 
       {/* DRAWER BALANCES */}
 
       {terminals.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+        <Card>
 
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Drawer Balances</h2>
 
@@ -580,7 +568,7 @@ export default function POSPage() {
               const balance = drawer?.balance ?? null
               const lastEntry = drawer?.lastEntry
               return (
-                <div key={t.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-gray-100 rounded-lg p-4">
+                <div key={t.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-gray-200 rounded-xl p-4">
                   <div>
                     <p className="font-medium text-gray-900">{t.name}</p>
                     {lastEntry ? (
@@ -598,12 +586,12 @@ export default function POSPage() {
                         {balance !== null ? fmtUsd(balance) : "—"}
                       </p>
                     </div>
-                    <button
+                    <Button
+                      variant="secondary"
                       onClick={() => { setCloseoutTerminalId(t.id); setCloseoutAmount(""); setCloseoutResult(null) }}
-                      className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-md hover:bg-gray-200"
                     >
                       Closeout
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )
@@ -611,13 +599,14 @@ export default function POSPage() {
           </div>
 
         </div>
+      </Card>
       )}
 
       {/* CLOSEOUT MODAL */}
 
       {closeoutTerminalId && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-lg space-y-4">
+          <Card className="w-full max-w-md space-y-4">
 
             <h2 className="text-lg font-semibold text-gray-900">
               Closeout — {terminals.find(t => t.id === closeoutTerminalId)?.name}
@@ -625,8 +614,8 @@ export default function POSPage() {
 
             {!closeoutResult ? (
               <>
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <p className="text-xs uppercase tracking-widest text-gray-400 mb-1">Expected Balance</p>
+                <div className="bg-gray-50 rounded-xl p-4">
+                  <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">Expected Balance</p>
                   <p className="text-2xl font-bold text-gray-900">
                     {drawerBalances[closeoutTerminalId] ? fmtUsd(drawerBalances[closeoutTerminalId].balance) : "—"}
                   </p>
@@ -642,24 +631,21 @@ export default function POSPage() {
                     value={closeoutAmount}
                     onChange={(e) => setCloseoutAmount(e.target.value)}
                     placeholder="0.00"
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-black text-lg"
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-gray-900 text-lg focus:outline-none focus:border-blue-400"
                     autoFocus
                   />
                 </div>
                 <div className="flex gap-3">
-                  <button
-                    onClick={submitCloseout}
+                  <Button
+                    fullWidth
                     disabled={closeoutBusy || !closeoutAmount}
-                    className="flex-1 bg-[#0052FF] text-white py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
+                    onClick={submitCloseout}
                   >
                     {closeoutBusy ? "Submitting…" : "Submit Closeout"}
-                  </button>
-                  <button
-                    onClick={() => setCloseoutTerminalId(null)}
-                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm"
-                  >
+                  </Button>
+                  <Button variant="secondary" onClick={() => setCloseoutTerminalId(null)}>
                     Cancel
-                  </button>
+                  </Button>
                 </div>
               </>
             ) : (
@@ -686,16 +672,13 @@ export default function POSPage() {
                     </span>
                   </div>
                 </div>
-                <button
-                  onClick={() => setCloseoutTerminalId(null)}
-                  className="w-full bg-gray-100 text-gray-700 py-2 rounded-lg text-sm"
-                >
+                <Button variant="secondary" fullWidth onClick={() => setCloseoutTerminalId(null)}>
                   Done
-                </button>
+                </Button>
               </>
             )}
 
-          </div>
+          </Card>
         </div>
       )}
 

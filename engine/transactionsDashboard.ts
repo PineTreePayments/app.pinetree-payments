@@ -26,6 +26,7 @@ export type TransactionsChartRow = {
   base: number
   coinbase: number
   shift4: number
+  cash: number
 }
 
 export type TransactionsDashboardData = {
@@ -41,7 +42,8 @@ function bucket(label: string): TransactionsChartRow {
     solana: 0,
     base: 0,
     coinbase: 0,
-    shift4: 0
+    shift4: 0,
+    cash: 0
   }
 }
 
@@ -210,6 +212,7 @@ export async function getTransactionsChartEngine(
     if (tx.provider === "base") buckets[label].base += amount
     if (tx.provider === "coinbase") buckets[label].coinbase += amount
     if (tx.provider === "shift4") buckets[label].shift4 += amount
+    if (tx.provider === "cash") buckets[label].cash += amount
   })
 
   return Object.values(buckets)

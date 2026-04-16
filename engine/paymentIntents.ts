@@ -8,7 +8,7 @@ import {
 import QRCode from "qrcode"
 import { createPayment } from "./createPayment"
 import { buildCreatePaymentRequest } from "./createPayment"
-import { getUnifiedPaymentStatusEngine, queueSingleWatcherIteration } from "./paymentStatusOrchestrator"
+import { getUnifiedPaymentStatusEngine } from "./paymentStatusOrchestrator"
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 import { PINETREE_FEE } from "./config"
 
@@ -296,8 +296,6 @@ export async function selectPaymentIntentNetworkEngine(input: {
     if (!persistedPayment) {
       throw new Error("Payment was created but could not be loaded")
     }
-
-    queueSingleWatcherIteration(persistedPayment, "payment-intents:select-network")
 
     console.info("[payment-intent] select-network:success", {
       intentId: intent.id,

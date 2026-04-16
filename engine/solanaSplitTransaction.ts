@@ -1,6 +1,16 @@
-import { Connection, PublicKey, SystemProgram, Transaction } from "@solana/web3.js"
+import {
+  Connection,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  TransactionInstruction
+} from "@solana/web3.js"
 import { getPaymentById } from "@/database/payments"
 import { getRpcUrl } from "@/engine/config"
+
+// Solana Memo Program — used to attach a deterministic payment reference on-chain.
+// The watcher reads this back to guarantee payment identity before confirming.
+const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")
 
 function toLamportsFromAtomic(value: unknown): number {
   const n = Number(value)
@@ -74,6 +84,13 @@ export async function buildSolanaSplitTransactionEngine(input: {
       fromPubkey: new PublicKey(senderAccount),
       toPubkey: new PublicKey(pinetreeWallet),
       lamports: feeLamports
+    }),
+    // Attach the PineTree paymentId as an on-chain memo so the watcher can
+    // verify the reference deterministically rather than relying on amounts alone.
+    new TransactionInstruction({
+      keys: [],
+      programId: MEMO_PROGRAM_ID,
+      data: Buffer.from(paymentId, "utf8")
     })
   )
 

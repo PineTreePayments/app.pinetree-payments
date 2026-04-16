@@ -6,6 +6,8 @@
  * It contains:
  *   ✅ A single pass over a fixed lookback window of already-finalised blocks
  *   ✅ Immediate exit after the check — no waiting for future blocks
+ *   ✅ Solana: memo-based payment reference verification (deterministic match)
+ *   ✅ EVM: calldata reference check for contract_split payments
  *
  * It does NOT contain:
  *   ❌ do/while loops  — removed
@@ -33,6 +35,9 @@ import {
   updateTransactionStatus
 } from "@/database/transactions"
 
+// Solana Memo Program ID — same constant used in solanaSplitTransaction.ts
+const SOLANA_MEMO_PROGRAM_ID = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+
 // ─── Input / Output types ────────────────────────────────────────────────────
 
 export type WatchOnceInput = {
@@ -56,6 +61,7 @@ type EvmTransaction = {
   from: string
   to: string | null
   value: string
+  input?: string  // ABI-encoded calldata; present for contract calls, absent/0x for plain transfers
 }
 
 type EvmBlock = {
@@ -66,8 +72,10 @@ type SolanaRpcSignatureRow = {
   signature?: string
 }
 
+// parsed can be a string (memo program) or an object (system program transfer)
 type SolanaParsedInstruction = {
-  parsed?: {
+  programId?: string
+  parsed?: string | {
     type?: string
     info?: {
       destination?: string
@@ -185,7 +193,8 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
       sinceSlot,
       expectedMerchantLamports: Number(input.expectedMerchantAtomic || 0),
       expectedFeeLamports: Number(input.expectedFeeAtomic || 0),
-      matchRatio
+      matchRatio,
+      paymentId: input.paymentId
     })
 
     if (!splitTx) return false
@@ -243,6 +252,18 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
         continue
       }
       if (toAddress !== splitContractEvm) continue
+
+      // For contract_split, verify the payment reference is present in the calldata
+      // when calldata is available. This prevents false-positive matches on any
+      // transaction that happens to call the same contract with a similar value.
+      if (!verifyEvmPaymentReference(tx.input, input.paymentId)) {
+        console.info("[watcher:evm] contract_split tx calldata missing payment reference", {
+          paymentId: input.paymentId,
+          txHash: tx.hash,
+          calldataLength: tx.input?.length ?? 0
+        })
+        continue
+      }
     } else {
       if (toAddress !== merchantWalletEvm) continue
     }
@@ -268,6 +289,31 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
   }
 
   return false
+}
+
+// ─── EVM reference check ──────────────────────────────────────────────────────
+
+/**
+ * Check whether a paymentId reference appears in ABI-encoded EVM calldata.
+ *
+ * We check for the UTF-8 hex of the paymentId within the calldata hex string.
+ * This is intentionally a substring match rather than ABI decoding — it avoids
+ * requiring knowledge of the split contract's exact function signature while
+ * still catching cases where the reference was omitted entirely.
+ *
+ * Returns true if:
+ *   - calldata is absent or empty (plain ETH transfer — no reference expected)
+ *   - paymentId hex is found anywhere in the calldata
+ *
+ * Returns false if calldata is present but the paymentId is NOT in it.
+ */
+function verifyEvmPaymentReference(calldata: string | undefined, paymentId: string): boolean {
+  const data = String(calldata || "").trim()
+  // No calldata means a plain ETH transfer — reference check not applicable
+  if (!data || data === "0x" || data.length <= 10) return true
+
+  const referenceHex = Buffer.from(paymentId, "utf8").toString("hex")
+  return data.toLowerCase().includes(referenceHex.toLowerCase())
 }
 
 // ─── State machine ────────────────────────────────────────────────────────────
@@ -492,6 +538,19 @@ async function getSolanaParsedTransaction(
   }
 }
 
+/**
+ * Find a Solana transaction that splits to both the merchant and PineTree wallets
+ * AND contains a memo instruction matching the expected paymentId.
+ *
+ * Matching criteria (all must be satisfied):
+ *   1. Signature appears in BOTH merchant wallet AND treasury wallet history
+ *   2. Transfer to merchant wallet ≥ expectedMerchantLamports × matchRatio
+ *   3. Transfer to treasury wallet ≥ expectedFeeLamports × matchRatio
+ *   4. Memo instruction content === paymentId
+ *
+ * Criterion 4 prevents false positives where two concurrent unrelated payments
+ * happen to overlap on the same wallets within the lookback window.
+ */
 async function findMatchingSolanaSplitTransaction(input: {
   rpcUrl: string
   merchantWallet: string
@@ -500,6 +559,7 @@ async function findMatchingSolanaSplitTransaction(input: {
   expectedMerchantLamports: number
   expectedFeeLamports: number
   matchRatio: number
+  paymentId: string
 }): Promise<{ hash: string; from: string; totalLamports: number } | null> {
   const [merchantSignatures, treasurySignatures] = await Promise.all([
     getSolanaSignatures(input.rpcUrl, input.merchantWallet, input.sinceSlot),
@@ -539,10 +599,21 @@ async function findMatchingSolanaSplitTransaction(input: {
     let merchantLamports = 0
     let feeLamports = 0
     let source = ""
+    let memoMatches = false
 
     for (const ix of instructions) {
+      // Memo program instruction: programId matches and parsed is a plain string
+      if (
+        ix.programId === SOLANA_MEMO_PROGRAM_ID &&
+        typeof ix.parsed === "string"
+      ) {
+        memoMatches = ix.parsed === input.paymentId
+        continue
+      }
+
+      // System program transfer instruction: parsed is an object with type/info
       const parsed = ix?.parsed
-      if (!parsed || parsed.type !== "transfer") continue
+      if (!parsed || typeof parsed === "string" || parsed.type !== "transfer") continue
 
       const info = parsed.info || {}
       const destination = String(info.destination || "").toLowerCase()
@@ -564,6 +635,16 @@ async function findMatchingSolanaSplitTransaction(input: {
       ) {
         feeLamports += lamports
       }
+    }
+
+    // Require the on-chain memo to match the expected paymentId.
+    // This prevents false matches from amount-only coincidence.
+    if (!memoMatches) {
+      console.info("[watcher:solana] signature missing required payment reference memo", {
+        signature,
+        paymentId: input.paymentId
+      })
+      continue
     }
 
     const merchantThreshold =

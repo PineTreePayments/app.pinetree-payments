@@ -5,6 +5,10 @@ import { useSearchParams } from "next/navigation"
 import Image from "next/image"
 import { ALLOWED_ASSETS, getAvailableAssetsFromValues } from "@/engine/providerMappings"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
+import Button from "@/components/ui/Button"
+import Card from "@/components/ui/Card"
+import PageContainer from "@/components/ui/PageContainer"
+import StatusBadge from "@/components/ui/StatusBadge"
 
 type SplitOutput = {
   address: string
@@ -94,10 +98,10 @@ export default function PayClient() {
   const [intentLoadError, setIntentLoadError] = useState<string>("")
   const [paymentPayload, setPaymentPayload] = useState<SplitPayload | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  
+
   const payload = useMemo(() => parsePayload(rawData), [rawData])
   const activePayload = paymentPayload || payload
-  
+
   const walletUrl = String(
     activePayload?.walletUrl ||
       activePayload?.universalUrl ||
@@ -324,41 +328,38 @@ export default function PayClient() {
 
   if (intentId && !intentPayload) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#e0ecff] via-[#f5f8ff] to-white">
-        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl border border-blue-100 p-7 text-center space-y-3">
+      <PageContainer>
+        <Card className="max-w-md w-full text-center space-y-4">
           {intentLoadError ? (
             <>
-              <p className="text-xs uppercase tracking-widest text-blue-500">PineTree Checkout</p>
-              <h1 className="text-xl font-semibold text-slate-900">Unable to Load Payment</h1>
-              <p className="text-sm text-slate-600">{intentLoadError}</p>
-              <button
-                onClick={() => { setIntentLoadError(""); void loadIntent() }}
-                className="mt-2 px-5 py-2 bg-[#0052FF] text-white rounded-xl text-sm font-medium"
-              >
+              <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+              <h1 className="text-xl font-bold text-gray-900">Unable to Load Payment</h1>
+              <p className="text-sm text-gray-500">{intentLoadError}</p>
+              <Button onClick={() => { setIntentLoadError(""); void loadIntent() }} className="mt-2">
                 Retry
-              </button>
+              </Button>
             </>
           ) : (
             <>
-              <p className="text-xs uppercase tracking-widest text-blue-500">PineTree Checkout</p>
+              <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
               <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0052FF] border-t-transparent mx-auto" />
-              <h1 className="text-lg font-semibold text-slate-900">Loading payment…</h1>
+              <h1 className="text-lg font-bold text-gray-900">Loading payment…</h1>
             </>
           )}
-        </div>
-      </main>
+        </Card>
+      </PageContainer>
     )
   }
 
   if (!rawData && !intentPayload) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#e0ecff] via-[#f5f8ff] to-white">
-        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl border border-blue-100 p-7 text-center space-y-2">
-          <p className="text-xs uppercase tracking-widest text-blue-500">PineTree Checkout</p>
-          <h1 className="text-xl font-semibold text-slate-900">Invalid Payment Link</h1>
-          <p className="text-sm text-slate-600">This QR code payload is missing or malformed.</p>
-        </div>
-      </main>
+      <PageContainer>
+        <Card className="max-w-md w-full text-center space-y-3">
+          <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+          <h1 className="text-xl font-bold text-gray-900">Invalid Payment Link</h1>
+          <p className="text-sm text-gray-500">This QR code payload is missing or malformed.</p>
+        </Card>
+      </PageContainer>
     )
   }
 
@@ -369,47 +370,51 @@ export default function PayClient() {
 
   if (isIntentMode && !selectedNetwork && !intentPayload?.availableNetworks?.length) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#e0ecff] via-[#f5f8ff] to-white">
-        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl border border-blue-100 p-7 text-center space-y-2">
-          <p className="text-xs uppercase tracking-widest text-blue-500">PineTree Checkout</p>
-          <h1 className="text-xl font-semibold text-slate-900">No Payment Methods Available</h1>
-          <p className="text-sm text-slate-600">This merchant has no payment methods enabled.</p>
-        </div>
-      </main>
+      <PageContainer>
+        <Card className="max-w-md w-full text-center space-y-3">
+          <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+          <h1 className="text-xl font-bold text-gray-900">No Payment Methods Available</h1>
+          <p className="text-sm text-gray-500">This merchant has no payment methods enabled.</p>
+        </Card>
+      </PageContainer>
     )
   }
 
   if (isIntentMode && normalizedPaymentStatus === "CONFIRMED") {
     return (
-      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#e0ecff] via-[#f5f8ff] to-white">
-        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl border border-green-100 p-8 text-center space-y-4">
-          <p className="text-xs uppercase tracking-widest text-blue-500">PineTree Checkout</p>
-          <div className="flex justify-center">
-            <svg className="w-16 h-16 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+      <PageContainer>
+        <Card className="max-w-md w-full text-center space-y-4" padding={false}>
+          <div className="p-8 space-y-4">
+            <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+            <div className="flex justify-center">
+              <svg className="w-16 h-16 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900">Payment Confirmed</h1>
+            <p className="text-sm text-gray-500">Your payment was received successfully.</p>
           </div>
-          <h1 className="text-2xl font-semibold text-slate-900">Payment Confirmed</h1>
-          <p className="text-sm text-slate-500">Your payment was received successfully.</p>
-        </div>
-      </main>
+        </Card>
+      </PageContainer>
     )
   }
 
   if (isIntentMode && (normalizedPaymentStatus === "FAILED" || normalizedPaymentStatus === "INCOMPLETE")) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#e0ecff] via-[#f5f8ff] to-white">
-        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl border border-red-100 p-8 text-center space-y-4">
-          <p className="text-xs uppercase tracking-widest text-blue-500">PineTree Checkout</p>
-          <div className="flex justify-center">
-            <svg className="w-16 h-16 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+      <PageContainer>
+        <Card className="max-w-md w-full text-center space-y-4" padding={false}>
+          <div className="p-8 space-y-4">
+            <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+            <div className="flex justify-center">
+              <svg className="w-16 h-16 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900">Payment Failed</h1>
+            <p className="text-sm text-gray-500">The payment was not received. Please try again or contact the merchant.</p>
           </div>
-          <h1 className="text-2xl font-semibold text-slate-900">Payment Failed</h1>
-          <p className="text-sm text-slate-500">The payment was not received. Please try again or contact the merchant.</p>
-        </div>
-      </main>
+        </Card>
+      </PageContainer>
     )
   }
 
@@ -422,36 +427,34 @@ export default function PayClient() {
     const statusText = displayStatus.label
 
     return (
-      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#e0ecff] via-[#f5f8ff] to-white">
-        <div className="max-w-md w-full rounded-[2rem] border border-blue-100 bg-white shadow-2xl p-6 space-y-5">
+      <PageContainer>
+        <Card className="max-w-md w-full space-y-5">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-blue-500 mb-1">PineTree Checkout</p>
-            <h1 className="text-2xl font-semibold text-slate-900">Choose Payment Asset</h1>
+            <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">PineTree Checkout</p>
+            <h1 className="text-2xl font-bold text-gray-900">Choose Payment Asset</h1>
           </div>
 
-          <div className="rounded-2xl border border-slate-200/70 bg-gradient-to-b from-white to-slate-50 p-4 space-y-2 text-sm text-slate-800">
+          <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm text-gray-800">
             <div className="flex items-center justify-between">
-              <span className="font-medium text-slate-600">Subtotal</span>
+              <span className="text-gray-600">Subtotal</span>
               <span className="font-semibold">{formatUsd(Number(intentPayload?.amount || 0))}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="font-medium text-slate-600">PineTree Service Fee</span>
+              <span className="text-gray-600">PineTree Service Fee</span>
               <span className="font-semibold">{formatUsd(Number(intentPayload?.pinetreeFee || 0))}</span>
             </div>
-            <div className="flex items-center justify-between border-t border-slate-200 pt-2">
-              <span className="font-semibold text-slate-900">Total</span>
-              <span className="font-bold text-lg text-slate-900">{formatUsd(displayAmount)}</span>
+            <div className="flex items-center justify-between border-t border-gray-200 pt-2">
+              <span className="font-semibold text-gray-900">Total</span>
+              <span className="font-bold text-lg text-gray-900">{formatUsd(displayAmount)}</span>
             </div>
           </div>
 
           <div className="flex justify-center">
-            <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium ${displayStatus.classes}`}>
-              {statusText}
-            </span>
+            <StatusBadge label={statusText} classes={`${displayStatus.classes} px-3 py-1.5 text-sm`} />
           </div>
 
           <div className="space-y-3" ref={intentCardsRef}>
-            <p className="text-sm font-medium text-slate-700">Select an asset to continue:</p>
+            <p className="text-xs uppercase tracking-widest text-gray-500">Select an asset to continue:</p>
 
           <div className="space-y-2">
             {getAvailableAssetsFromValues(intentPayload?.availableNetworks || []).map((assetId) => {
@@ -459,28 +462,28 @@ export default function PayClient() {
                 const isActive = selectedAssetId === assetId
                 const isLoadingCard = loadingAssetId === assetId
                 return (
-                  <div key={assetId} className="rounded-xl border border-slate-200 overflow-hidden">
+                  <div key={assetId} className="rounded-xl border border-gray-200 overflow-hidden">
                     <button
                       onClick={() => selectAsset(assetId)}
                       disabled={isLoading}
                       className={`w-full px-4 py-4 text-left transition disabled:opacity-50 ${
                         isActive
                           ? "bg-blue-50"
-                          : "bg-white hover:bg-blue-50"
+                          : "bg-white hover:bg-gray-50"
                       }`}
                     >
-                      <span className="font-medium text-slate-900">Pay with {asset.label}</span>
-                      <p className="text-xs text-slate-600 mt-1">Tap to reveal payment details</p>
+                      <span className="font-medium text-gray-900">Pay with {asset.label}</span>
+                      <p className="text-xs text-gray-500 mt-1">Tap to reveal payment details</p>
                     </button>
 
                     {isActive && isLoadingCard ? (
-                      <div className="px-4 py-3 text-xs text-slate-500 border-t border-slate-200">Loading payment details from merchant provider…</div>
+                      <div className="px-4 py-3 text-xs text-gray-500 border-t border-gray-200">Loading payment details from merchant provider…</div>
                     ) : null}
 
                     {isActive && !isLoadingCard ? (
-                      <div className="px-4 py-4 border-t border-slate-200 bg-white space-y-3">
+                      <div className="px-4 py-4 border-t border-gray-200 bg-white space-y-3">
                         {selectionError ? (
-                          <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                          <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
                             {selectionError}
                           </div>
                         ) : null}
@@ -488,53 +491,45 @@ export default function PayClient() {
                         {paymentPayload && recipientAddress ? (
                           <>
                             {String(paymentPayload.nativeSymbol || "").toUpperCase() && Number.isFinite(Number(paymentPayload.nativeAmount || 0)) && Number(paymentPayload.nativeAmount || 0) > 0 ? (
-                              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
                                 Send exactly <span className="font-semibold">{Number(paymentPayload.nativeAmount || 0)} {String(paymentPayload.nativeSymbol || "").toUpperCase()}</span>.
                                 Do not send only a USD estimate from wallet conversion.
                               </div>
                             ) : null}
-                            <div className="text-[11px] uppercase tracking-wider text-slate-500">Payment Address</div>
-                            <div className="text-xs font-mono break-all bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-slate-700">
+                            <div className="text-xs uppercase tracking-widest text-gray-500">Payment Address</div>
+                            <div className="text-xs font-mono break-all bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-gray-700">
                               {recipientAddress}
                             </div>
                             <div className="grid grid-cols-2 gap-2">
-                              <button
-                                onClick={copyAddress}
-                                className="w-full rounded-lg bg-blue-600 text-white py-2 text-sm font-medium"
-                              >
+                              <Button onClick={copyAddress}>
                                 {copiedAddress ? "Address Copied" : "Copy Address"}
-                              </button>
-                              <button
-                                onClick={() => copyAmount(Number(paymentPayload.nativeAmount || 0))}
-                                className="w-full rounded-lg border border-blue-200 bg-blue-50 text-blue-700 py-2 text-sm font-medium"
-                              >
+                              </Button>
+                              <Button variant="secondary" onClick={() => copyAmount(Number(paymentPayload.nativeAmount || 0))}>
                                 {copiedAmount ? "Amount Copied" : "Copy Amount"}
-                              </button>
+                              </Button>
                             </div>
                           </>
                         ) : null}
 
                         {paymentPayload && walletOptions.length > 0 ? (
                           <div className="space-y-2">
-                            <div className="text-[11px] uppercase tracking-wider text-slate-500">Wallet Apps</div>
+                            <div className="text-xs uppercase tracking-widest text-gray-500">Wallet Apps</div>
                             <div className="grid grid-cols-2 gap-2">
                               {walletOptions.map((option) => (
-                                <button
+                                <Button
                                   key={option.id}
-                                  onClick={() => {
-                                    window.location.href = option.href
-                                  }}
-                                  className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                                  variant="secondary"
+                                  onClick={() => { window.location.href = option.href }}
                                 >
                                   {option.label}
-                                </button>
+                                </Button>
                               ))}
                             </div>
                           </div>
                         ) : null}
 
                         {!selectionError && !paymentPayload ? (
-                          <div className="text-xs text-slate-500">Tap the asset again to retry loading payment details.</div>
+                          <div className="text-xs text-gray-500">Tap the asset again to retry loading payment details.</div>
                         ) : null}
                       </div>
                     ) : null}
@@ -543,15 +538,12 @@ export default function PayClient() {
               })}
             </div>
 
-            <button
-              onClick={() => window.close()}
-              className="w-full text-sm text-red-600 hover:text-red-700 mt-2"
-            >
+            <Button variant="danger" fullWidth onClick={() => window.close()}>
               Cancel
-            </button>
+            </Button>
           </div>
-        </div>
-      </main>
+        </Card>
+      </PageContainer>
     )
   }
 
@@ -563,66 +555,66 @@ export default function PayClient() {
   const nativeSymbol = String(activePayload?.nativeSymbol || "").toUpperCase()
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-slate-100 via-slate-50 to-white">
-      <div className="max-w-md w-full rounded-[2rem] border border-blue-100 bg-white shadow-2xl p-6 space-y-5">
+    <PageContainer>
+      <Card className="max-w-md w-full space-y-5">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-500 mb-1">PineTree</p>
-          <h1 className="text-2xl font-semibold text-slate-900">Complete Payment</h1>
+          <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">PineTree</p>
+          <h1 className="text-2xl font-bold text-gray-900">Complete Payment</h1>
         </div>
 
-        <div className="rounded-2xl border border-slate-200/70 bg-gradient-to-b from-white to-slate-50 p-4 space-y-2 text-sm text-slate-800">
-          <div className="flex items-center justify-between"><span className="font-medium text-slate-600">Network</span><span className="font-semibold">{network}</span></div>
-          <div className="flex items-center justify-between"><span className="font-medium text-slate-600">Total</span><span className="font-semibold">{formatUsd(usdTotalAmount)}</span></div>
-          {nativeSymbol ? (
+        <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm text-gray-800">
+          <div className="flex items-center justify-between">
+            <span className="text-gray-600">Network</span>
+            <span className="font-semibold text-gray-900">{network}</span>
+          </div>
+          {nativeSymbol && Number.isFinite(nativeAmount) && nativeAmount > 0 ? (
             <div className="flex items-center justify-between">
-              <span className="font-medium text-slate-600">Pay Amount</span>
-              <span className="font-semibold">{Number.isFinite(nativeAmount) ? nativeAmount : 0} {nativeSymbol}</span>
+              <span className="text-gray-600">Pay Amount</span>
+              <span className="font-semibold text-gray-900">{nativeAmount} {nativeSymbol}</span>
             </div>
           ) : null}
+          <div className="flex items-center justify-between border-t border-gray-200 pt-2">
+            <span className="font-semibold text-gray-900">Total</span>
+            <span className="font-bold text-lg text-gray-900">{formatUsd(usdTotalAmount)}</span>
+          </div>
           {nativeSymbol && Number.isFinite(nativeAmount) && nativeAmount > 0 ? (
-            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-2">
+            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
               Send the exact crypto amount shown. Wallet USD conversion can underpay and prevent confirmation.
             </div>
           ) : null}
         </div>
 
         {paymentQrUrl ? (
-          <div className="flex flex-col items-center rounded-2xl border border-blue-100 bg-blue-50/40 p-4">
-            <p className="text-xs uppercase tracking-wider text-blue-600 mb-3">Scan QR to Pay</p>
+          <div className="flex flex-col items-center rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <p className="text-xs uppercase tracking-widest text-gray-500 mb-3">Scan QR to Pay</p>
             <Image src={paymentQrUrl} alt="Payment QR" width={208} height={208} className="h-52 w-52 rounded-xl bg-white p-2" />
           </div>
         ) : null}
 
         {recipientAddress ? (
           <div className="space-y-2">
-            <label className="text-xs uppercase tracking-wider text-slate-500">Payment Address</label>
-            <div className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-800 break-all font-mono">
+            <label className="text-xs uppercase tracking-widest text-gray-500">Payment Address</label>
+            <div className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800 break-all font-mono">
               {recipientAddress}
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={copyAddress}
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
+              <Button onClick={copyAddress}>
                 {copiedAddress ? "Address Copied" : "Copy Address"}
-              </button>
-              <button
-                onClick={() => copyAmount(nativeAmount)}
-                className="w-full rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
-              >
+              </Button>
+              <Button variant="secondary" onClick={() => copyAmount(nativeAmount)}>
                 {copiedAmount ? "Amount Copied" : "Copy Amount"}
-              </button>
+              </Button>
             </div>
           </div>
         ) : null}
 
         <div className="space-y-3">
-          <label className="text-sm font-medium text-slate-700">Select your wallet:</label>
+          <label className="text-xs uppercase tracking-widest text-gray-500">Select your wallet:</label>
 
           <select
             value={selectedWalletId}
             onChange={(e) => setSelectedWalletId(e.target.value)}
-            className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-slate-900"
+            className="w-full rounded-xl border border-gray-200 bg-white px-3 py-3 text-gray-900"
           >
             <option value="">Choose a wallet…</option>
             {walletOptions.map((option) => (
@@ -634,62 +626,49 @@ export default function PayClient() {
           </select>
 
           {selectedWalletId && selectedWalletId !== "manual" ? (
-            <button
+            <Button
+              fullWidth
+              disabled={!selectedWallet}
               onClick={() => {
                 if (!selectedWallet?.href) return
                 window.location.href = selectedWallet.href
               }}
-              className={`block w-full text-center rounded-xl py-3 font-medium transition ${
-                selectedWallet
-                  ? "bg-[#0A84FF] text-white shadow hover:brightness-110"
-                  : "bg-slate-200 text-slate-500 pointer-events-none"
-              }`}
             >
               Open {selectedWallet?.label}
-            </button>
+            </Button>
           ) : null}
 
           {selectedWalletId === "manual" ? (
-            <button
-              onClick={copyWalletUrl}
-              className="w-full rounded-xl bg-[#0A84FF] text-white px-4 py-3 font-medium shadow hover:brightness-110 transition"
-            >
+            <Button fullWidth onClick={copyWalletUrl}>
               {copiedLink ? "Copied ✓" : "Copy Payment Address"}
-            </button>
+            </Button>
           ) : null}
         </div>
 
         {walletUrl ? (
-          <button
-            onClick={copyWalletUrl}
-            className="w-full text-center border border-slate-300 rounded-xl py-2 text-sm text-slate-700"
-          >
+          <Button variant="secondary" fullWidth onClick={copyWalletUrl}>
             {copiedLink ? "Copied" : "Copy Wallet Address"}
-          </button>
+          </Button>
         ) : null}
 
         {primaryOpenUrl ? (
-          <button
-            onClick={() => {
-              window.location.href = primaryOpenUrl
-            }}
-            className="w-full rounded-xl bg-blue-600 text-white px-4 py-3 font-medium shadow hover:brightness-110 transition"
-          >
+          <Button fullWidth onClick={() => { window.location.href = primaryOpenUrl }}>
             Open in Wallet App
-          </button>
+          </Button>
         ) : null}
 
-        <button
+        <Button
+          variant="danger"
+          fullWidth
           onClick={() => {
             setSelectedNetwork(null)
             setSelectedWalletId("")
             setPaymentPayload(null)
           }}
-          className="w-full text-sm text-red-600 hover:text-red-700 text-center"
         >
           Cancel
-        </button>
-      </div>
-    </main>
+        </Button>
+      </Card>
+    </PageContainer>
   )
 }
