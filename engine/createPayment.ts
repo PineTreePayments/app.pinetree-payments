@@ -21,10 +21,8 @@ import { selectBestWallet } from "@/database/merchantWallets"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 import { loadProviders } from "./loadProviders"
 import { normalizeWalletNetwork } from "./providerMappings"
-import { watchPayment } from "./paymentWatcher"
 import {
   PINETREE_FEE,
-  AUTO_POLLING_ENABLED,
   getPineTreeTreasuryWallet,
   assertTreasuryWalletFormat,
   assertSplitRailConfig,
@@ -449,34 +447,10 @@ export async function createPayment(
     }
   })
 
-  if (AUTO_POLLING_ENABLED) {
-    // Start background watcher to monitor blockchain for this payment
-    setImmediate(async () => {
-      try {
-        await watchPayment({
-          merchantWallet: merchantWalletAddress,
-          pinetreeWallet,
-          merchantAmount: merchantAmount,
-          pinetreeFee: pinetreeFee,
-          expectedAmountNative: Number(splitPayment.nativeAmount || 0),
-          expectedMerchantAtomic: splitPayment.merchantNativeAmountAtomic,
-          expectedFeeAtomic: splitPayment.feeNativeAmountAtomic,
-          feeCaptureMethod: splitPayment.feeCaptureMethod,
-          splitContract,
-
-          network: network,
-          paymentId: paymentId
-        })
-      } catch (error) {
-        console.error("Payment watcher failed to start:", error)
-      }
-    })
-  } else {
-    console.info("[createPayment] auto polling disabled; watcher not started", {
-      paymentId,
-      network
-    })
-  }
+  // Payment status is updated exclusively by the engine in response to:
+  //   • Incoming webhooks  → app/api/webhooks/
+  //   • Cron single-checks → app/api/cron/check-payments (calls checkPaymentOnce)
+  // No background watcher is started here. Serverless functions must exit promptly.
 
   /* ---------------------------
      RETURN RESULT

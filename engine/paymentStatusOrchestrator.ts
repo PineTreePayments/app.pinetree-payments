@@ -1,6 +1,19 @@
+/**
+ * PineTree Payment Status Orchestrator
+ *
+ * Coordinates on-demand payment status checks. All checks are single-execution —
+ * no loops, no retries, no background tasks.
+ *
+ * Flow:
+ *   checkPaymentOnce / API route / cron
+ *     → queueSingleWatcherIteration  (validates, extracts metadata)
+ *       → watchPaymentOnce           (single blockchain check, updates DB)
+ */
+
 import { getPaymentById, getPaymentIntentById } from "@/database"
-import { watchPayment } from "./paymentWatcher"
-import { AUTO_POLLING_ENABLED } from "./config"
+import { watchPaymentOnce, type WatchOnceInput } from "./paymentWatcher"
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type PaymentWatchSplitMetadata = {
   split?: {
@@ -22,6 +35,8 @@ type WatchablePayment = {
   pinetree_fee: number
   metadata?: unknown
 }
+
+// ─── Status helpers ───────────────────────────────────────────────────────────
 
 export function normalizePaymentStatus(status: unknown) {
   const normalized = String(status || "").toUpperCase()
@@ -46,20 +61,23 @@ function canWatchStatus(status: string) {
   return status === "CREATED" || status === "PENDING" || status === "PROCESSING"
 }
 
-export async function queueSingleWatcherIteration(payment: WatchablePayment, source: string) {
-  // A single-iteration check is always allowed even when continuous AUTO_POLLING is disabled.
-  // AUTO_POLLING_ENABLED only controls the background polling loop started at payment creation.
-  // On-demand checks (triggered by status API calls or intent resolution) must always run so
-  // that Solana / Base wallet-rail payments can be confirmed without a persistent watcher process.
-  if (!AUTO_POLLING_ENABLED) {
-    console.info("[payment-status] watcher:single-iteration (auto-polling disabled)", {
-      source,
-      paymentId: payment.id
-    })
-    // Allow single iteration to proceed — do NOT return early here.
-  }
+// ─── Single-iteration check ───────────────────────────────────────────────────
 
+/**
+ * Validate the payment, extract split metadata, and run one blockchain check.
+ *
+ * This is a single execution — it calls watchPaymentOnce exactly once and returns.
+ * It does NOT schedule follow-up checks, does NOT call itself, and does NOT loop.
+ *
+ * @param payment  Watchable payment row (must include split metadata).
+ * @param source   Label for logging (e.g. "cron:check-payments").
+ */
+export async function queueSingleWatcherIteration(
+  payment: WatchablePayment,
+  source: string
+): Promise<void> {
   const status = normalizePaymentStatus(payment.status)
+
   if (!canWatchStatus(status)) {
     console.info("[payment-status] watcher:skip", {
       source,
@@ -95,27 +113,27 @@ export async function queueSingleWatcherIteration(payment: WatchablePayment, sou
     status
   })
 
+  const watchInput: WatchOnceInput = {
+    merchantWallet,
+    pinetreeWallet,
+    merchantAmount: Number(payment.merchant_amount || 0),
+    pinetreeFee: Number(payment.pinetree_fee || 0),
+    expectedAmountNative: split?.expectedAmountNative,
+    expectedMerchantAtomic: split?.merchantNativeAmountAtomic,
+    expectedFeeAtomic: split?.feeNativeAmountAtomic,
+    feeCaptureMethod: split?.feeCaptureMethod,
+    splitContract: split?.splitContract,
+    network,
+    paymentId: payment.id
+  }
+
   try {
-    await watchPayment({
-      merchantWallet,
-      pinetreeWallet,
-      merchantAmount: Number(payment.merchant_amount || 0),
-      pinetreeFee: Number(payment.pinetree_fee || 0),
-      expectedAmountNative: split?.expectedAmountNative,
-      expectedMerchantAtomic: split?.merchantNativeAmountAtomic,
-      expectedFeeAtomic: split?.feeNativeAmountAtomic,
-      feeCaptureMethod: split?.feeCaptureMethod,
-      splitContract: split?.splitContract,
-      network,
-      paymentId: payment.id,
-      singleIteration: true
-    })
+    await watchPaymentOnce(watchInput)
 
     console.info("[payment-status] watcher:completed", {
       source,
       paymentId: payment.id
     })
-
   } catch (error) {
     console.error("[payment-status] watcher:error", {
       source,
@@ -125,6 +143,14 @@ export async function queueSingleWatcherIteration(payment: WatchablePayment, sou
   }
 }
 
+// ─── Unified status resolver ──────────────────────────────────────────────────
+
+/**
+ * Resolve the current status for a paymentId or intentId.
+ *
+ * If the reference resolves to a watchable payment, runs one blockchain check
+ * before returning the status. Exits immediately after — no polling.
+ */
 export async function getUnifiedPaymentStatusEngine(referenceId: string, source = "unknown") {
   const trimmedReferenceId = String(referenceId || "").trim()
   if (!trimmedReferenceId) {

@@ -5,15 +5,22 @@
  * unhealthy providers as unavailable for routing.
  */
 
-import { 
-  setProviderHealth, 
+/**
+ * PineTree Provider Health Monitor
+ *
+ * Provides a single-execution health check for all registered providers.
+ * Called on-demand only (e.g. from the providers dashboard API route).
+ * Does NOT schedule repeated checks — no setInterval, no background tasks.
+ */
+
+import {
+  setProviderHealth,
   getAllProviders
 } from "./providerRegistry"
 
-import { AUTO_POLLING_ENABLED, HEALTH_CHECK_CONFIG } from "./config"
-
 /**
- * Run health check for all providers
+ * Run a health check for every registered provider and update the registry.
+ * Single execution — call this on demand, never in a loop.
  */
 export async function runProviderHealthChecks() {
   const providers = getAllProviders()
@@ -35,18 +42,4 @@ export async function runProviderHealthChecks() {
   }
 
   return results
-}
-
-/**
- * Start periodic health check daemon
- */
-export function startHealthCheckDaemon() {
-  if (!AUTO_POLLING_ENABLED) {
-    console.info("[provider-health] auto polling disabled; daemon not started")
-    return
-  }
-
-  setInterval(async () => {
-    await runProviderHealthChecks()
-  }, HEALTH_CHECK_CONFIG.checkInterval)
 }

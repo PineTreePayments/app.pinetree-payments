@@ -304,13 +304,23 @@ export default function PayClient() {
 
   useEffect(() => {
     if (!intentId) return
+    // Only poll once a payment has been initiated (network selected or intent already
+    // has a linked paymentId). Skip polling on the asset-selection screen to avoid
+    // unnecessary RPC/DB load before the customer has even chosen a network.
+    const hasActivePayment = Boolean(selectedNetwork || intentPayload?.paymentId)
+    if (!hasActivePayment) return
+    // Stop polling once a terminal status is reached — no further status changes possible.
+    const isTerminal = normalizedPaymentStatus === "CONFIRMED" ||
+      normalizedPaymentStatus === "FAILED" ||
+      normalizedPaymentStatus === "INCOMPLETE"
+    if (isTerminal) return
 
     const interval = setInterval(() => {
       void loadIntentCallback()
-    }, 3000)
+    }, 5000)
 
     return () => clearInterval(interval)
-  }, [intentId, loadIntentCallback])
+  }, [intentId, loadIntentCallback, selectedNetwork, intentPayload?.paymentId, normalizedPaymentStatus])
 
   if (intentId && !intentPayload) {
     return (

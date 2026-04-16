@@ -215,6 +215,38 @@ export async function getPaymentsByStatus(
 }
 
 /**
+ * Get active (watchable) payments for a specific network.
+ *
+ * Fetches only CREATED, PENDING, and PROCESSING payments whose network column
+ * matches the given value. This is used by network webhook processors so they
+ * check only the payments that belong to the network that just fired — avoiding
+ * the fan-out cost of fetching all active payments and filtering in memory.
+ *
+ * Recommended DB index: CREATE INDEX ON payments (status, network)
+ */
+export async function getActivePaymentsByNetwork(
+  network: string,
+  limit: number = 50
+): Promise<Payment[]> {
+  const normalized = String(network || "").toLowerCase().trim()
+  if (!normalized) return []
+
+  const { data, error } = await supabase
+    .from("payments")
+    .select("*")
+    .in("status", ["CREATED", "PENDING", "PROCESSING"])
+    .eq("network", normalized)
+    .limit(limit)
+    .order("created_at", { ascending: false })
+
+  if (error) {
+    throw new Error(`Failed to fetch active payments by network: ${error.message}`)
+  }
+
+  return data as Payment[]
+}
+
+/**
  * Get merchant payment statistics
  */
 export async function getMerchantPaymentStats(merchantId: string) {

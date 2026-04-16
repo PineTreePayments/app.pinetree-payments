@@ -12,7 +12,6 @@ export {
   getPineTreeTreasuryWallet,
   getReturnPath,
   getRpcUrl,
-  WATCHER_CONFIG,
   HEALTH_CHECK_CONFIG,
   PAYMENT_EXPIRATION_MINUTES,
   validateConfig
@@ -68,10 +67,11 @@ export {
 } from "./providerRegistry"
 
 export { chooseBestAdapter, getAvailableNetworks } from "./providerSelector"
-export { runProviderHealthChecks, startHealthCheckDaemon } from "./providerHealth"
+export { runProviderHealthChecks } from "./providerHealth"
 
-// Payment Monitoring
-export { watchPayment } from "./paymentWatcher"
+// Payment Monitoring — single-execution checks only (no polling loops)
+export { watchPaymentOnce } from "./paymentWatcher"
+export { checkPaymentOnce } from "./checkPaymentOnce"
 
 // Split Payments
 export { generateSplitPayment } from "./generateSplitPayment"
