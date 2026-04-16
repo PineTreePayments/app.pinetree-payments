@@ -161,7 +161,10 @@ export async function createPaymentIntentEngine(input: {
     available_networks: availableNetworks
   })
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://app.pinetree-payments.com"
+  const configuredUrl = process.env.NEXT_PUBLIC_APP_URL || ""
+  const baseUrl = configuredUrl && !configuredUrl.includes("localhost") && !configuredUrl.includes("127.0.0.1")
+    ? configuredUrl
+    : "https://app.pinetree-payments.com"
   const checkoutUrl = `${baseUrl}/pay?intent=${encodeURIComponent(intent.id)}`
   const qrCodeUrl = await QRCode.toDataURL(checkoutUrl)
 
@@ -202,7 +205,7 @@ export async function getPaymentIntentEngine(intentId: string) {
     paymentProviderReference: selectedPayment?.provider_reference || null,
     expiresAt: intent.expires_at,
     metadata: (intent.metadata || undefined) as Record<string, unknown> | undefined,
-    checkoutUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.pinetree-payments.com"}/pay?intent=${encodeURIComponent(intent.id)}`
+    checkoutUrl: `${(() => { const u = process.env.NEXT_PUBLIC_APP_URL || ""; return u && !u.includes("localhost") && !u.includes("127.0.0.1") ? u : "https://app.pinetree-payments.com" })()}/pay?intent=${encodeURIComponent(intent.id)}`
   }
 }
 

@@ -222,7 +222,10 @@ export async function createPosPaymentIntentEngine(input: CreatePosPaymentInput)
   if (existingIntentId) {
     const existingIntent = await getPaymentIntentById(existingIntentId)
     if (existingIntent) {
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://app.pinetree-payments.com"
+      const rawUrl = process.env.NEXT_PUBLIC_APP_URL || ""
+      const baseUrl = rawUrl && !rawUrl.includes("localhost") && !rawUrl.includes("127.0.0.1")
+        ? rawUrl
+        : "https://app.pinetree-payments.com"
       const checkoutUrl = `${baseUrl}/pay?intent=${encodeURIComponent(existingIntent.id)}`
       return {
         paymentId: existingIntent.id,
