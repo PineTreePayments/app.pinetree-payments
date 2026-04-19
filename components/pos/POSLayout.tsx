@@ -106,6 +106,35 @@ export default function POSLayout({ locked, terminalContext }: Props) {
   }
 
   /* =========================
+     POLLING FALLBACK
+     Triggers the blockchain watcher every 5s while waiting.
+     Realtime handles the UI update once the DB changes.
+  ========================= */
+
+  useEffect(() => {
+    if (!paymentId || (status !== "waiting" && status !== "processing")) return
+
+    const id = paymentId
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/payments/status?paymentId=${encodeURIComponent(id)}`)
+        if (!res.ok) return
+        const data = await res.json()
+        const next = resolveUiStatus(String(data?.status || ""))
+        if (next) {
+          setStatus(next)
+          if (next === "confirmed") setTimeout(resetSale, 3000)
+        }
+      } catch {
+        // non-fatal — realtime is the primary update path
+      }
+    }, 5000)
+
+    return () => clearInterval(interval)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentId, status])
+
+  /* =========================
      REALTIME: DIRECT PAYMENT
   ========================= */
 

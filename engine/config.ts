@@ -133,7 +133,8 @@ export function assertTreasuryWalletFormat(network: string): void {
  * Enforce runtime config required for successful split processing by rail.
  *
  * - Solana: treasury wallet format must be valid.
- * - EVM (Base/Ethereum): contract_split mode + valid split contract address.
+ * - EVM contract_split mode: requires PINETREE_EVM_SPLIT_MODE=contract + valid split contract.
+ * - EVM direct mode (default): no contract required — direct ETH to merchant wallet.
  */
 export function assertSplitRailConfig(network: string): void {
   const normalized = normalizeTreasuryNetwork(network)
@@ -145,23 +146,21 @@ export function assertSplitRailConfig(network: string): void {
     return
   }
 
+  // Only require split contract when contract_split mode is explicitly enabled
   const splitMode = getEvmSplitMode()
-  if (splitMode !== "contract") {
-    throw new Error(
-      "EVM split processing requires PINETREE_EVM_SPLIT_MODE=contract"
-    )
+  if (splitMode === "contract") {
+    const splitContract = getEvmSplitContract(normalized)
+    if (!isEvmAddress(splitContract)) {
+      throw new Error(
+        `Missing or invalid EVM split contract for ${normalized}. Configure ${
+          normalized === "ethereum"
+            ? "PINETREE_EVM_SPLIT_CONTRACT_ETHEREUM"
+            : "PINETREE_EVM_SPLIT_CONTRACT_BASE"
+        } with a valid 0x address.`
+      )
+    }
   }
-
-  const splitContract = getEvmSplitContract(normalized)
-  if (!isEvmAddress(splitContract)) {
-    throw new Error(
-      `Missing or invalid EVM split contract for ${normalized}. Configure ${
-        normalized === "ethereum"
-          ? "PINETREE_EVM_SPLIT_CONTRACT_ETHEREUM"
-          : "PINETREE_EVM_SPLIT_CONTRACT_BASE"
-      } with a valid 0x address.`
-    )
-  }
+  // Direct mode (PINETREE_EVM_SPLIT_MODE not set or "direct"): no contract required
 }
 
 /**

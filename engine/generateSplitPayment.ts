@@ -113,7 +113,7 @@ export async function generateSplitPayment(
   // Provider-declared method takes precedence over network-derived guess.
   // This is critical: Coinbase lives on "base" but uses invoice_split (hosted checkout),
   // NOT contract_split. If the adapter returned a feeCaptureMethod, always trust it.
-  const feeCaptureMethod: string =
+  let feeCaptureMethod: string =
     input.feeCaptureMethodOverride ||
     (input.network === "solana"
       ? "atomic_split"
@@ -175,36 +175,37 @@ export async function generateSplitPayment(
       // Fall through to universalUrl-only mode.
       paymentUrl = `pinetree://pay?data=${encodeURIComponent(payloadString)}`
     } else {
-      // EVM wallet-rail: contract_split via EIP-681 URI.
+      // EVM wallet-rail: direct ETH or contract_split depending on config.
       const chainId = input.network === "ethereum" ? "1" : "8453"
-
       const splitMode = getEvmSplitMode()
-      const splitContract = getEvmSplitContract(input.network)
 
-      if (splitMode !== "contract") {
-        throw new Error(
-          "EVM rails require contract_split fee execution mode. Set PINETREE_EVM_SPLIT_MODE=contract."
-        )
+      if (splitMode === "contract") {
+        const splitContract = getEvmSplitContract(input.network)
+
+        if (!isEvmAddress(splitContract)) {
+          throw new Error(
+            `EVM rails require a valid split contract address for ${input.network}. Configure PINETREE_EVM_SPLIT_CONTRACT_${
+              input.network === "ethereum" ? "ETHEREUM" : "BASE"
+            }.`
+          )
+        }
+
+        // EIP-681 style contract invocation URI for split execution
+        const query = new URLSearchParams({
+          merchant: input.merchantWallet,
+          treasury: input.pinetreeWallet,
+          merchantAmountWei: toWeiString(merchantNativeAmount),
+          feeAmountWei: toWeiString(feeNativeAmount),
+          reference: String(input.paymentId || "")
+        })
+
+        paymentUrl = `ethereum:${splitContract}@${chainId}/split?${query.toString()}`
+      } else {
+        // Direct ETH payment — full gross amount goes to merchant wallet.
+        // Fee is not split on-chain in this mode.
+        feeCaptureMethod = "direct"
+        paymentUrl = `ethereum:${input.merchantWallet}@${chainId}?value=${toWeiString(nativeAmount)}`
       }
-
-      if (!isEvmAddress(splitContract)) {
-        throw new Error(
-          `EVM rails require a valid split contract address for ${input.network}. Configure PINETREE_EVM_SPLIT_CONTRACT_${
-            input.network === "ethereum" ? "ETHEREUM" : "BASE"
-          }.`
-        )
-      }
-
-      // EIP-681 style contract invocation URI for split execution
-      const query = new URLSearchParams({
-        merchant: input.merchantWallet,
-        treasury: input.pinetreeWallet,
-        merchantAmountWei: toWeiString(merchantNativeAmount),
-        feeAmountWei: toWeiString(feeNativeAmount),
-        reference: String(input.paymentId || "")
-      })
-
-      paymentUrl = `ethereum:${splitContract}@${chainId}/split?${query.toString()}`
     }
   } else {
     // Fallback to universal format
