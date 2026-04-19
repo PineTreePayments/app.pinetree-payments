@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# contracts
+contracts/node_modules
+contracts/artifacts
+contracts/cache
+contracts/.env.deploy
+!contracts/.env.deploy.example

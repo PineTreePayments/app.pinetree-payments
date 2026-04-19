@@ -1,0 +1,13 @@
+{
+  "name": "pinetree-contracts",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "deploy:base": "hardhat run scripts/deploy.js --network base"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "dotenv": "^16.0.0",
+    "hardhat": "^2.22.0"
+  }
+}
