@@ -11,6 +11,12 @@ import { normalizeProvider, normalizeWalletNetwork } from "./providerMappings"
 import { getProviderMetadata, isProviderHealthy } from "./providerRegistry"
 import { loadProviders } from "./loadProviders"
 
+// Wallet-rail adapter per network — used when merchant_providers has no rows yet
+const NETWORK_DEFAULT_ADAPTER: Partial<Record<string, PaymentAdapterId>> = {
+  solana: "solana",
+  base: "base"
+}
+
 function sortAdapterIds(
   adapterIds: PaymentAdapterId[],
   defaultAdapterId?: PaymentAdapterId | null
@@ -73,7 +79,15 @@ export async function chooseBestAdapter(input: {
   })
 
   const sortedCandidates = sortAdapterIds(candidates, defaultAdapterId)
-  return sortedCandidates[0] || null
+  if (sortedCandidates[0]) return sortedCandidates[0]
+
+  // No merchant_providers rows yet — infer the wallet-rail adapter from network
+  const inferredAdapter = NETWORK_DEFAULT_ADAPTER[network]
+  if (inferredAdapter && isProviderHealthy(inferredAdapter)) {
+    return inferredAdapter
+  }
+
+  return null
 }
 
 /**

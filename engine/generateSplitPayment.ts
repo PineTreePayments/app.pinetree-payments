@@ -164,8 +164,9 @@ export async function generateSplitPayment(
       String(input.paymentId || "")
     )}`
 
-    // Solana Pay transaction-request URL (wallet requests unsigned tx with split transfers)
-    paymentUrl = txRequestUrl
+    // Solana Pay transaction-request URI — wallets recognise the "solana:" scheme
+    // and POST to txRequestUrl to get an unsigned transaction to sign.
+    paymentUrl = `solana:${txRequestUrl}`
   } else if (input.network === "base" || input.network === "base_pay" || input.network === "ethereum") {
     if (feeCaptureMethod === "invoice_split" || feeCaptureMethod === "collection_then_settle") {
       // Hosted-checkout providers (e.g. Coinbase Commerce) collect the gross amount themselves.

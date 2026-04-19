@@ -97,7 +97,6 @@ export async function getMerchantProviders(merchantId: string) {
     .from("merchant_providers")
     .select("*")
     .eq("merchant_id", merchantId)
-    .eq("enabled", true)
     .in("status", ["connected", "active"])
 
   if (error) {
@@ -127,7 +126,6 @@ export async function hasProviderConnected(
     .select("id")
     .eq("merchant_id", merchantId)
     .eq("provider", provider)
-    .eq("enabled", true)
     .in("status", ["connected", "active"])
     .maybeSingle()
 
