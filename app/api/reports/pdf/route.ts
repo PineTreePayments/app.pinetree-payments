@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { supabase } from "@/database/supabase"
+import { createClient } from "@supabase/supabase-js"
 import { generateReportPdfEngine } from "@/engine/reportsPdf"
 
 export async function GET(req: NextRequest) {
@@ -12,13 +12,28 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Missing date range" }, { status: 400 })
     }
 
-    const { data } = await supabase.auth.getUser()
-    if (!data.user) {
+    // Accept token from Authorization header OR ?token= query param
+    // (window.open cannot set headers, so query param is needed for PDF download)
+    const authHeader = req.headers.get("authorization") || ""
+    const accessToken = authHeader.startsWith("Bearer ")
+      ? authHeader.slice(7)
+      : String(searchParams.get("token") || "").trim()
+
+    if (!accessToken) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    const client = createClient(supabaseUrl, supabaseAnonKey)
+    const { data: authData, error: authError } = await client.auth.getUser(accessToken)
+
+    if (authError || !authData?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
     const pdfBytes = await generateReportPdfEngine({
-      merchantId: data.user.id,
+      merchantId: authData.user.id,
       startDate,
       endDate
     })

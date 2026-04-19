@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
 import { generateReportEngine } from "@/engine/reports"
-import { supabase } from "@/database/supabase"
+import {
+  requireMerchantIdFromRequest,
+  getRouteErrorStatus
+} from "@/lib/api/merchantAuth"
 
 export async function GET(req: NextRequest) {
-
   try {
+    const merchantId = await requireMerchantIdFromRequest(req)
 
     const { searchParams } = new URL(req.url)
-
     const startDate = searchParams.get("startDate")
     const endDate = searchParams.get("endDate")
 
@@ -18,41 +20,13 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    /* ---------------------------
-    GET AUTHENTICATED MERCHANT
-    --------------------------- */
-
-    const { data: { user } } =
-      await supabase.auth.getUser()
-
-    if (!user) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      )
-    }
-
-    /* ---------------------------
-    GENERATE REPORT
-    --------------------------- */
-
-    const report = await generateReportEngine({
-      merchantId: user.id,
-      startDate,
-      endDate
-    })
-
+    const report = await generateReportEngine({ merchantId, startDate, endDate })
     return NextResponse.json(report)
-
   } catch (error: unknown) {
-
     console.error("Report error:", error)
-
     return NextResponse.json(
-      { error: "Failed to generate report" },
-      { status: 500 }
+      { error: error instanceof Error ? error.message : "Failed to generate report" },
+      { status: getRouteErrorStatus(error) }
     )
-
   }
-
 }

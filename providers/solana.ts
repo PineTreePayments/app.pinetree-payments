@@ -69,30 +69,15 @@ export const solanaAdapter: ProviderAdapter = {
     network?: string
     providerApiKey?: string
   }) {
-    try {
-      const uri = buildSolanaPayUri({
-        recipient: input.merchantWallet,
-        amount: input.grossAmount,
-        label: "PineTree Payment",
-        message: `Payment #${input.paymentId.slice(0, 8)}`,
-        reference: input.paymentId,
-        // Split instructions are embedded in Solana Pay URI
-        splitter: {
-          [input.merchantWallet]: input.merchantAmount,
-          [input.pinetreeWallet]: input.pinetreeFee
-        }
-      })
-
-      return {
-        providerReference: input.paymentId,
-        qrCodeUrl: uri,
-        paymentUrl: uri,
-        feeCaptureMethod: "atomic_split"
-      }
-
-    } catch (error) {
-      console.error("Solana payment error:", error)
-      throw error
+    // The engine's generateSplitPayment builds the canonical Solana Pay Transaction
+    // Request URL (/api/solana-pay/transaction?paymentId=...) which includes both
+    // the merchant and PineTree split transfers + memo instruction.
+    // We must NOT return a paymentUrl here — if we did, it would override that URL
+    // with a simple single-recipient URI that doesn't enforce the fee split.
+    return {
+      providerReference: input.paymentId,
+      feeCaptureMethod: "atomic_split"
+      // paymentUrl intentionally omitted — engine uses Transaction Request URL
     }
   },
 

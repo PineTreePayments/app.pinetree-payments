@@ -1,2 +1,2 @@
-﻿export * from '@/providers/base'
+﻿export * from '@/providers/BaseAdapter'
 

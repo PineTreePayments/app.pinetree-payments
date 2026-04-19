@@ -13,6 +13,7 @@
 
 import { createPayment } from "@/database/payments"
 import { createTransaction } from "@/database/transactions"
+import { upsertLedgerEntry } from "@/database/ledgerEntries"
 import { logCashSale } from "./cashDrawer"
 import type { DrawerEntry } from "@/database/cashDrawer"
 
@@ -41,8 +42,8 @@ export async function recordCashSale(input: RecordCashSaleInput): Promise<Record
   const paymentId = crypto.randomUUID()
   const transactionId = crypto.randomUUID()
 
-  // Run all three inserts in parallel. The drawer log is the authoritative cash record;
-  // the payment + transaction records make the sale visible on the merchant dashboard.
+  // Run all inserts in parallel. The drawer log is the authoritative cash record;
+  // the payment + transaction + ledger records make the sale visible on the dashboard.
   const [entry] = await Promise.all([
     logCashSale(terminalId, merchantId, saleTotal, cashTendered, changeGiven),
     createPayment({
@@ -65,6 +66,19 @@ export async function recordCashSale(input: RecordCashSaleInput): Promise<Record
       total_amount: saleTotal,
       subtotal_amount: subtotalAmount,
       platform_fee: serviceFee,
+      status: "CONFIRMED"
+    }),
+    upsertLedgerEntry({
+      merchant_id: merchantId,
+      payment_id: paymentId,
+      transaction_id: transactionId,
+      provider: "cash",
+      network: "cash",
+      asset: "USD",
+      amount: saleTotal,
+      usd_value: saleTotal,
+      wallet_address: "cash",
+      direction: "INBOUND",
       status: "CONFIRMED"
     })
   ])

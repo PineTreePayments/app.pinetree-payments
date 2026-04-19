@@ -1,4 +1,6 @@
-import { supabase } from './supabase'
+import { supabaseAdmin, supabase } from './supabase'
+
+const db = supabaseAdmin || supabase
 
 export interface LedgerEntry {
   id: string
@@ -20,7 +22,7 @@ export type LedgerEntryInsert = Omit<LedgerEntry, 'id' | 'created_at'>
 export type LedgerEntryUpdate = Partial<LedgerEntry>
 
 export async function createLedgerEntry(input: LedgerEntryInsert): Promise<LedgerEntry> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('ledger_entries')
     .insert(input)
     .select()
@@ -37,7 +39,7 @@ export async function createLedgerEntry(input: LedgerEntryInsert): Promise<Ledge
  * Returns null when the entry already existed.
  */
 export async function upsertLedgerEntry(input: LedgerEntryInsert): Promise<LedgerEntry | null> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('ledger_entries')
     .upsert(input, { onConflict: 'payment_id', ignoreDuplicates: true })
     .select()
@@ -48,7 +50,7 @@ export async function upsertLedgerEntry(input: LedgerEntryInsert): Promise<Ledge
 }
 
 export async function getLedgerEntryById(id: string): Promise<LedgerEntry | null> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('ledger_entries')
     .select()
     .eq('id', id)
@@ -59,7 +61,7 @@ export async function getLedgerEntryById(id: string): Promise<LedgerEntry | null
 }
 
 export async function getLedgerEntriesByPaymentId(paymentId: string): Promise<LedgerEntry[]> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('ledger_entries')
     .select()
     .eq('payment_id', paymentId)
@@ -70,7 +72,7 @@ export async function getLedgerEntriesByPaymentId(paymentId: string): Promise<Le
 }
 
 export async function getLedgerEntriesByMerchantId(merchantId: string, limit = 100): Promise<LedgerEntry[]> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('ledger_entries')
     .select()
     .eq('merchant_id', merchantId)
@@ -82,7 +84,7 @@ export async function getLedgerEntriesByMerchantId(merchantId: string, limit = 1
 }
 
 export async function updateLedgerEntryStatus(id: string, status: string): Promise<LedgerEntry> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('ledger_entries')
     .update({ status })
     .eq('id', id)

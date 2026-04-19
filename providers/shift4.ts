@@ -154,11 +154,12 @@ export const shift4Adapter: ProviderAdapter = {
 
   verifyWebhook(payload: unknown, signature?: string, rawBody?: string) {
     const secret = String(process.env.SHIFT4_WEBHOOK_SHARED_SECRET || "").trim()
-    const provided = String(signature || "").trim()
 
-    if (!secret || !provided) {
-      return false
-    }
+    // Open in dev / if secret not configured
+    if (!secret) return true
+
+    const provided = String(signature || "").trim()
+    if (!provided) return false
 
     const body =
       typeof rawBody === "string"

@@ -7,7 +7,7 @@
  * Follows PineTree architecture standards 100%
  */
 
-import { BaseProviderAdapter } from "./base"
+import { BaseProviderAdapter } from "./BaseAdapter"
 import { registerProvider } from "@/engine/providerRegistry"
 import type { PaymentStatus, ProviderAdapterMetadata } from "@/types/provider"
 

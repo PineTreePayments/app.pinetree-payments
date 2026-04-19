@@ -1,10 +1,12 @@
-import { supabaseAdmin, supabase, getLedgerEntriesByMerchantId } from "@/database"
+import { supabaseAdmin, supabase } from "@/database"
 
 const db = supabaseAdmin || supabase
 
 type PaymentRow = {
   created_at: string
   gross_amount: number
+  merchant_amount: number
+  pinetree_fee: number
   currency: string
   status: string
 }
@@ -115,23 +117,33 @@ function buildBuckets(range: string) {
 }
 
 export async function getTransactionsDashboardEngine(merchantId: string): Promise<TransactionsDashboardData> {
-  const ledgerEntries = await getLedgerEntriesByMerchantId(merchantId, 100)
-  
-  const txRows = ledgerEntries.map(entry => ({
-    id: entry.id,
-    provider: entry.provider,
-    status: entry.status,
-    provider_transaction_id: entry.transaction_id,
-    network: entry.network,
-    channel: null,
-    created_at: entry.created_at?.toISOString(),
-    payments: {
-      created_at: entry.created_at?.toISOString(),
-      gross_amount: entry.amount,
-      currency: entry.asset,
-      status: entry.status
-    }
-  }))
+  // Use transactions table directly — includes cash, crypto, and all channels
+  const { data: txData, error: txError } = await db
+    .from("transactions")
+    .select(`
+      id,
+      provider,
+      status,
+      provider_transaction_id,
+      network,
+      channel,
+      created_at,
+      payments (
+        created_at,
+        gross_amount,
+        merchant_amount,
+        pinetree_fee,
+        currency,
+        status
+      )
+    `)
+    .eq("merchant_id", merchantId)
+    .order("created_at", { ascending: false })
+    .limit(100)
+
+  if (txError) {
+    throw new Error(`Failed to load transactions: ${txError.message}`)
+  }
 
   const startOfDay = new Date()
   startOfDay.setHours(0, 0, 0, 0)
@@ -152,7 +164,7 @@ export async function getTransactionsDashboardEngine(merchantId: string): Promis
   const confirmed = safePayments.filter((p) => p.status === "CONFIRMED").length
 
   return {
-    transactions: (txRows || []) as TransactionRow[],
+    transactions: (txData || []) as TransactionRow[],
     todayVolume,
     todayTransactions,
     confirmedRate: todayTransactions ? Math.round((confirmed / todayTransactions) * 100) : 0

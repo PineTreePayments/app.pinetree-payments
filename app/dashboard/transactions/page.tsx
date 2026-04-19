@@ -221,26 +221,31 @@ export default function TransactionsPage() {
       setTodayTransactions(Number(payload.todayTransactions || 0))
       setConfirmedRate(Number(payload.confirmedRate || 0))
 
-      const { data, error } = await supabase
-        .from("transactions")
-        .select(`
-          *,
-          payments (*)
-        `)
-        .order("created_at", { ascending: false })
+      // Use transactions from the API (already merchant-scoped via auth)
+      const apiTx = payload.transactions || []
 
-      if (error) {
-        console.error("Transactions query error:", error)
+      // Supplement with a direct Supabase query for real-time data if session available
+      const {
+        data: { session }
+      } = await supabase.auth.getSession()
 
-        const fallbackTx = payload.transactions || []
-        setTransactions(fallbackTx)
-        calculateInsights(fallbackTx)
-        return
+      if (session?.user?.id) {
+        const { data, error } = await supabase
+          .from("transactions")
+          .select(`*, payments (*)`)
+          .eq("merchant_id", session.user.id)
+          .order("created_at", { ascending: false })
+
+        if (!error && data) {
+          const tx = data as Transaction[]
+          setTransactions(tx)
+          calculateInsights(tx)
+          return
+        }
       }
 
-      const tx = (data || []) as Transaction[]
-      setTransactions(tx)
-      calculateInsights(tx)
+      setTransactions(apiTx)
+      calculateInsights(apiTx)
     } catch (error) {
       console.error(error)
       toast.error(error instanceof Error ? error.message : "Failed to load transactions")

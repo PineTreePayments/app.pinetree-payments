@@ -133,10 +133,34 @@ export async function processAlchemyWebhook(
   const authorized = verifyAlchemyWebhook(
     signatureHeader,
     rawBody,
-    process.env.ALCHEMY_WEBHOOK_SIGNING_KEY
+    process.env.ALCHEMY_WEBHOOK_SIGNING_KEY_BASE || process.env.ALCHEMY_WEBHOOK_SIGNING_KEY
   )
   if (!authorized) return { authorized: false }
 
   const result = await processNetworkWebhook("base")
+  return { authorized: true, ...result }
+}
+
+/**
+ * Entry point for Alchemy (Solana) webhook.
+ * Called from /api/webhooks/solana — verify first, then process.
+ */
+export async function processAlchemySolanaWebhook(
+  signatureHeader: string | null,
+  rawBody: string
+): Promise<{
+  authorized: boolean
+  checked?: number
+  succeeded?: number
+  failed?: number
+}> {
+  const authorized = verifyAlchemyWebhook(
+    signatureHeader,
+    rawBody,
+    process.env.ALCHEMY_WEBHOOK_SIGNING_KEY_SOLANA || process.env.ALCHEMY_WEBHOOK_SIGNING_KEY
+  )
+  if (!authorized) return { authorized: false }
+
+  const result = await processNetworkWebhook("solana")
   return { authorized: true, ...result }
 }

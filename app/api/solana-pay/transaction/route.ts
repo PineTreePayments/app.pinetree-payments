@@ -1,6 +1,19 @@
 import { NextRequest, NextResponse } from "next/server"
 import { buildSolanaSplitTransactionEngine } from "@/engine/solanaSplitTransaction"
 
+/**
+ * GET — Solana Pay Transaction Request metadata
+ *
+ * Solana Pay wallets perform a GET before POST to retrieve the label and icon.
+ * Without this handler, all Solana Pay QR scans fail immediately in the wallet.
+ */
+export async function GET(_req: NextRequest) {
+  return NextResponse.json({
+    label: "PineTree Payments",
+    icon: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.pinetree-payments.com"}/pinetree-icon.png`
+  })
+}
+
 export async function POST(req: NextRequest) {
   try {
     const paymentId = String(req.nextUrl.searchParams.get("paymentId") || "").trim()
