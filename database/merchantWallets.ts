@@ -20,9 +20,8 @@ function providerToNetworks(provider: string): string[] {
 async function getAuthoritativeConnectedNetworks(merchantId: string): Promise<Set<string>> {
   const { data, error } = await supabase
     .from("merchant_providers")
-    .select("provider,status,enabled")
+    .select("provider,status")
     .eq("merchant_id", merchantId)
-    .eq("enabled", true)
     .in("status", ["connected", "active"])
 
   if (error || !data) {
