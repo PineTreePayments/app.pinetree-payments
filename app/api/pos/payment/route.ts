@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createPosPaymentIntentEngine } from "@/engine/posPayments"
+import { createPosPaymentEngine } from "@/engine/posPayments"
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const result = await createPosPaymentIntentEngine({
+    const result = await createPosPaymentEngine({
       amount: Number(amount),
       currency: String(currency || "USD"),
       terminal: {
@@ -25,10 +25,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       paymentId: result.paymentId,
-      intentId: result.intentId,
       paymentUrl: result.paymentUrl,
       qrCodeUrl: result.qrCodeUrl,
-      availableNetworks: result.availableNetworks,
       breakdown: result.breakdown
     })
   } catch (err) {

@@ -17,15 +17,16 @@ function providerToNetworks(provider: string): string[] {
   return getSupportedNetworksForAdapter(provider)
 }
 
-async function getAuthoritativeConnectedNetworks(merchantId: string): Promise<Set<string>> {
+async function getConnectedProviderNetworks(merchantId: string): Promise<Set<string> | null> {
   const { data, error } = await supabase
     .from("merchant_providers")
     .select("provider,status")
     .eq("merchant_id", merchantId)
     .in("status", ["connected", "active"])
 
-  if (error || !data) {
-    return new Set<string>()
+  if (error || !data || data.length === 0) {
+    // No provider records — caller will use merchant_wallets directly
+    return null
   }
 
   const networks = new Set<string>()
@@ -39,34 +40,39 @@ async function getAuthoritativeConnectedNetworks(merchantId: string): Promise<Se
 }
 
 /**
- * Get all connected wallets for a merchant
- * Ordered by priority (highest first)
+ * Get all connected wallets for a merchant.
+ * If merchant_providers has entries, only wallets on those networks are returned.
+ * If merchant_providers is empty (not yet set up), all wallets with an address are returned.
  */
 export async function getMerchantWallets(merchantId: string) {
-  const connectedNetworks = await getAuthoritativeConnectedNetworks(merchantId)
-  if (connectedNetworks.size === 0) {
+  const [connectedNetworks, walletsRes] = await Promise.all([
+    getConnectedProviderNetworks(merchantId),
+    supabase
+      .from("merchant_wallets")
+      .select("*")
+      .eq("merchant_id", merchantId)
+      .not("wallet_address", "is", null)
+  ])
+
+  if (walletsRes.error || !walletsRes.data) {
     return []
   }
 
-  const { data, error } = await supabase
-    .from("merchant_wallets")
-    .select("*")
-    .eq("merchant_id", merchantId)
-    .not("wallet_address", "is", null)
+  const allWallets = (walletsRes.data as MerchantWallet[]).filter(
+    (w) => String(w.wallet_address || "").trim()
+  )
 
-  if (error || !data) {
-    return []
+  if (connectedNetworks === null) {
+    // No provider configuration found — use wallets directly
+    return allWallets.sort((a, b) => Number(Boolean(b.is_primary)) - Number(Boolean(a.is_primary)))
   }
 
-  const wallets = (data as MerchantWallet[])
+  return allWallets
     .filter((wallet) => {
       const network = String(wallet.network || "").toLowerCase().trim()
-      const address = String(wallet.wallet_address || "").trim()
-      return Boolean(address) && connectedNetworks.has(network)
+      return connectedNetworks.has(network)
     })
     .sort((a, b) => Number(Boolean(b.is_primary)) - Number(Boolean(a.is_primary)))
-
-  return wallets
 }
 
 /**

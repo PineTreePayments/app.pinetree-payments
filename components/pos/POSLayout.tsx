@@ -286,7 +286,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
       const data = await res.json()
 
       if (!res.ok || !data) {
-        setPaymentError("Payment failed to create")
+        setPaymentError(data?.error || "Payment failed to create")
         setStatus("failed")
         return
       }
