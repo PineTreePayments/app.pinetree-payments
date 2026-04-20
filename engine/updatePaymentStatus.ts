@@ -60,6 +60,7 @@ export async function updatePaymentStatus(
     const feeCaptureValidated =
       feeCaptureMethod === "invoice_split" ||
       feeCaptureMethod === "collection_then_settle" ||
+      feeCaptureMethod === "direct" ||
       Boolean(
         (metadata?.rawPayload as { feeCaptureValidated?: boolean } | undefined)?.feeCaptureValidated
       )

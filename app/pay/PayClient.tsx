@@ -510,6 +510,23 @@ export default function PayClient() {
                           </div>
                         ) : null}
 
+                        {paymentPayload?.outputs?.[0]?.address ? (
+                          <div className="space-y-2">
+                            <label className="text-xs uppercase tracking-widest text-gray-500">Payment Address</label>
+                            <div className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800 break-all font-mono">
+                              {paymentPayload.outputs[0].address}
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <Button onClick={copyAddress}>
+                                {copiedAddress ? "Address Copied" : "Copy Address"}
+                              </Button>
+                              <Button variant="secondary" onClick={() => copyAmount(paymentPayload.nativeAmount)}>
+                                {copiedAmount ? "Amount Copied" : "Copy Amount"}
+                              </Button>
+                            </div>
+                          </div>
+                        ) : null}
+
                         {paymentPayload && String(paymentPayload.paymentUrl || "").match(/^(solana:|ethereum:)/) ? (
                           <Button
                             fullWidth

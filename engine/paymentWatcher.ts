@@ -25,7 +25,8 @@
  *             Webhook handlers                    → via orchestrator
  */
 
-import { supabase, getPaymentById, upsertLedgerEntry } from "@/database"
+import { supabaseAdmin, supabase as supabaseAnon, getPaymentById, upsertLedgerEntry } from "@/database"
+const supabaseDb = supabaseAdmin || supabaseAnon
 import { getRpcUrl } from "./config"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 import { type PaymentStatus } from "./paymentStateMachine"
@@ -218,17 +219,19 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
   const lookback = getLookbackWindow(input.network)
   const startBlock = Math.max(0, currentBlock - lookback)
 
-  // Bounded iteration over already-finalised blocks in the lookback window.
-  // This is NOT polling — every block in the range already exists on chain.
+  // Fetch all blocks in the lookback window in parallel — sequential fetching
+  // would take 40+ RPC round-trips and exceed Vercel's execution limit.
+  const blockNumbers: number[] = []
+  for (let n = startBlock; n <= currentBlock; n++) blockNumbers.push(n)
+
+  const blocks = await Promise.all(
+    blockNumbers.map((n) => getBlockByNumber(rpcUrl, n).catch(() => null))
+  )
+
   const transactions: EvmTransaction[] = []
-  for (let blockNumber = startBlock; blockNumber <= currentBlock; blockNumber++) {
-    try {
-      const block = await getBlockByNumber(rpcUrl, blockNumber)
-      if (block?.transactions?.length) {
-        transactions.push(...block.transactions)
-      }
-    } catch {
-      // Skip unreadable blocks rather than aborting the whole check
+  for (const block of blocks) {
+    if (block?.transactions?.length) {
+      transactions.push(...block.transactions)
     }
   }
 
@@ -411,7 +414,7 @@ async function handleMatchingTransaction(
 // ─── RPC helpers ─────────────────────────────────────────────────────────────
 
 async function getPaymentStatus(paymentId: string): Promise<PaymentStatus | null> {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseDb
     .from("payments")
     .select("status")
     .eq("id", paymentId)
