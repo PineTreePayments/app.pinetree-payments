@@ -11,9 +11,9 @@ import { registerProvider } from "../engine/providerRegistry"
 export const basePayAdapter: ProviderAdapter = {
   metadata: {
     adapterId: "base",
-    displayName: "Base Pay",
-    supportedNetworks: ["base"],
-    feeCaptureMethods: ["contract_split"],
+    displayName: "Base / ETH Pay",
+    supportedNetworks: ["base", "ethereum"],
+    feeCaptureMethods: ["contract_split", "direct"],
     capabilities: {
       hostedCheckout: false,
       walletRails: true,
@@ -42,10 +42,9 @@ export const basePayAdapter: ProviderAdapter = {
     providerApiKey?: string
   }) {
     // Engine wallet-rail flow generates final URI/QR.
-    // Return minimal reference for adapter interface compatibility.
+    // feeCaptureMethod is determined by generateSplitPayment based on PINETREE_EVM_SPLIT_MODE.
     return {
-      providerReference: input.paymentId,
-      feeCaptureMethod: "contract_split"
+      providerReference: input.paymentId
     }
   },
 

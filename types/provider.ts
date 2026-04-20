@@ -13,6 +13,7 @@ export type PaymentStatus =
 export type FeeCaptureMethod =
   | "atomic_split"
   | "contract_split"
+  | "direct"
   | "invoice_split"
   | "collection_then_settle"
 

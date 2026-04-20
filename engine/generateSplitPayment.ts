@@ -169,17 +169,9 @@ export async function generateSplitPayment(
       const chainId = network === "ethereum" ? "1" : "8453"
       const splitMode = getEvmSplitMode()
 
-      if (splitMode === "contract") {
-        const splitContract = getEvmSplitContract(network)
+      const splitContract = splitMode === "contract" ? getEvmSplitContract(network) : ""
 
-        if (!isEvmAddress(splitContract)) {
-          throw new Error(
-            `EVM rails require a valid split contract address for ${network}. Configure PINETREE_EVM_SPLIT_CONTRACT_${
-              network === "ethereum" ? "ETHEREUM" : "BASE"
-            }.`
-          )
-        }
-
+      if (splitMode === "contract" && isEvmAddress(splitContract)) {
         const grossWei = toWeiString(nativeAmount)
         const query = new URLSearchParams({
           value: grossWei,
@@ -192,6 +184,7 @@ export async function generateSplitPayment(
 
         paymentUrl = `ethereum:${splitContract}@${chainId}/split?${query.toString()}`
       } else {
+        // Direct mode (default) or contract mode without an address configured
         feeCaptureMethod = "direct"
         paymentUrl = `ethereum:${input.merchantWallet}@${chainId}?value=${toWeiString(nativeAmount)}`
       }

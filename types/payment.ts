@@ -16,7 +16,7 @@ export type PaymentNetwork =
 
 export const PAYMENT_ADAPTER_NETWORKS: Readonly<Record<PaymentAdapterId, readonly PaymentNetwork[]>> = {
   solana: ["solana"],
-  base: ["base"],
+  base: ["base", "ethereum"],
   coinbase: ["base"],
   shift4: ["shift4"]
 } as const
