@@ -220,9 +220,20 @@ export async function generateSplitPayment(
 
   /* --------------------------------
   GENERATE QR CODE
+  Use the native wallet URI for Solana and EVM contract_split so that
+  wallet apps (Phantom, MetaMask) handle the transaction request directly.
+  Web cameras won't handle solana:/ethereum: schemes, but by the time this
+  QR is shown the customer is already on the hosted checkout page on their
+  phone — they should scan it with their wallet app's QR scanner.
   -------------------------------- */
 
-  const qrCodeUrl = await QRCode.toDataURL(universalUrl)
+  const isNativeWalletRail =
+    input.network === "solana" ||
+    ((input.network === "base" || input.network === "base_pay" || input.network === "ethereum") &&
+      feeCaptureMethod === "contract_split")
+
+  const qrSource = isNativeWalletRail ? paymentUrl : universalUrl
+  const qrCodeUrl = await QRCode.toDataURL(qrSource)
 
   return {
     paymentUrl,

@@ -481,51 +481,42 @@ export default function PayClient() {
                     ) : null}
 
                     {isActive && !isLoadingCard ? (
-                      <div className="px-4 py-4 border-t border-gray-200 bg-white space-y-3">
+                      <div className="px-4 py-4 border-t border-gray-200 bg-white space-y-4">
                         {selectionError ? (
                           <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
                             {selectionError}
                           </div>
                         ) : null}
 
-                        {paymentPayload && recipientAddress ? (
-                          <>
-                            {String(paymentPayload.nativeSymbol || "").toUpperCase() && Number.isFinite(Number(paymentPayload.nativeAmount || 0)) && Number(paymentPayload.nativeAmount || 0) > 0 ? (
-                              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                                Send exactly <span className="font-semibold">{Number(paymentPayload.nativeAmount || 0)} {String(paymentPayload.nativeSymbol || "").toUpperCase()}</span>.
-                                Do not send only a USD estimate from wallet conversion.
-                              </div>
-                            ) : null}
-                            <div className="text-xs uppercase tracking-widest text-gray-500">Payment Address</div>
-                            <div className="text-xs font-mono break-all bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-gray-700">
-                              {recipientAddress}
+                        {paymentPayload && paymentPayload.qrCodeUrl ? (
+                          <div className="flex flex-col items-center space-y-2">
+                            <div className="text-xs uppercase tracking-widest text-gray-500">
+                              {String(paymentPayload.network || "").toLowerCase() === "solana"
+                                ? "Open Phantom → Scanner → Scan"
+                                : "Open MetaMask or Coinbase Wallet → Scan"}
                             </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              <Button onClick={copyAddress}>
-                                {copiedAddress ? "Address Copied" : "Copy Address"}
-                              </Button>
-                              <Button variant="secondary" onClick={() => copyAmount(Number(paymentPayload.nativeAmount || 0))}>
-                                {copiedAmount ? "Amount Copied" : "Copy Amount"}
-                              </Button>
+                            <div className="bg-white border border-gray-200 rounded-xl p-2">
+                              <Image
+                                src={paymentPayload.qrCodeUrl}
+                                alt="Scan with wallet app"
+                                width={180}
+                                height={180}
+                                className="rounded-lg"
+                              />
                             </div>
-                          </>
+                            <p className="text-xs text-gray-500 text-center">
+                              {String(paymentPayload.nativeAmount || 0)} {String(paymentPayload.nativeSymbol || "").toUpperCase()} · {formatUsd(Number(paymentPayload.usdTotalAmount || 0))}
+                            </p>
+                          </div>
                         ) : null}
 
-                        {paymentPayload && walletOptions.length > 0 ? (
-                          <div className="space-y-2">
-                            <div className="text-xs uppercase tracking-widest text-gray-500">Wallet Apps</div>
-                            <div className="grid grid-cols-2 gap-2">
-                              {walletOptions.map((option) => (
-                                <Button
-                                  key={option.id}
-                                  variant="secondary"
-                                  onClick={() => { window.location.href = option.href }}
-                                >
-                                  {option.label}
-                                </Button>
-                              ))}
-                            </div>
-                          </div>
+                        {paymentPayload && String(paymentPayload.paymentUrl || "").match(/^(solana:|ethereum:)/) ? (
+                          <Button
+                            fullWidth
+                            onClick={() => { window.location.href = String(paymentPayload.paymentUrl || "") }}
+                          >
+                            Open in Wallet App
+                          </Button>
                         ) : null}
 
                         {!selectionError && !paymentPayload ? (
