@@ -1,4 +1,6 @@
-import { supabase } from "./supabase"
+import { supabaseAdmin, supabase as supabaseAnon } from "./supabase"
+
+const supabase = supabaseAdmin || supabaseAnon
 import { getSupportedNetworksForAdapter } from "@/types/payment"
 
 export type MerchantWallet = {
