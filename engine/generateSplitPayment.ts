@@ -190,8 +190,11 @@ export async function generateSplitPayment(
           )
         }
 
-        // EIP-681 style contract invocation URI for split execution
+        // EIP-681 contract invocation URI.
+        // value= is the gross ETH (msg.value) the wallet must send with the call.
+        const grossWei = toWeiString(nativeAmount)
         const query = new URLSearchParams({
+          value: grossWei,
           merchant: input.merchantWallet,
           treasury: input.pinetreeWallet,
           merchantAmountWei: toWeiString(merchantNativeAmount),
