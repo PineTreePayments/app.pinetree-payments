@@ -3,6 +3,7 @@ import {
   getPaymentIntentById,
   markPaymentIntentSelected,
   getMerchantWallets,
+  getConnectedHostedCheckoutNetworks,
   getPaymentById
 } from "@/database"
 import QRCode from "qrcode"
@@ -12,7 +13,7 @@ import { getUnifiedPaymentStatusEngine } from "./paymentStatusOrchestrator"
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 import { PINETREE_FEE } from "./config"
 
-const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base"]
+const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base", "shift4"]
 const PAYMENT_DETAILS_TIMEOUT_MS = Number(process.env.PAYMENT_DETAILS_TIMEOUT_MS || 12000)
 
 async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -96,7 +97,7 @@ function buildWalletOptions(walletUrl: string): WalletOption[] {
 function inferNativeSymbolFromNetwork(network?: string): string | undefined {
   const normalized = String(network || "").toLowerCase().trim()
   if (normalized === "solana") return "SOL"
-  if (normalized === "base" || normalized === "base_pay" || normalized === "ethereum") return "ETH"
+  if (normalized === "base" || normalized === "ethereum") return "ETH"
   return undefined
 }
 
@@ -120,12 +121,20 @@ function inferRecipientAddressFromPayment(payment: { metadata?: unknown } | null
 }
 
 export async function getMerchantAvailableNetworks(merchantId: string): Promise<WalletNetwork[]> {
-  const wallets = await getMerchantWallets(merchantId)
-  const networks = wallets
-    .map((wallet) => normalizeWalletNetwork(wallet.network))
-    .filter((network): network is WalletNetwork => Boolean(network && SUPPORTED_NETWORKS.includes(network)))
+  const [wallets, hostedNetworks] = await Promise.all([
+    getMerchantWallets(merchantId),
+    getConnectedHostedCheckoutNetworks(merchantId)
+  ])
 
-  return uniqueNetworks(networks)
+  const walletNetworks = wallets
+    .map((w) => normalizeWalletNetwork(w.network))
+    .filter((n): n is WalletNetwork => Boolean(n && SUPPORTED_NETWORKS.includes(n)))
+
+  const hostedCheckoutNetworks = hostedNetworks
+    .map((n) => normalizeWalletNetwork(n))
+    .filter((n): n is WalletNetwork => Boolean(n && SUPPORTED_NETWORKS.includes(n)))
+
+  return uniqueNetworks([...walletNetworks, ...hostedCheckoutNetworks])
 }
 
 export async function createPaymentIntentEngine(input: {

@@ -30,7 +30,7 @@ export const shift4Adapter: ProviderAdapter = {
   metadata: {
     adapterId: "shift4",
     displayName: "Shift4",
-    supportedNetworks: ["ethereum"],
+    supportedNetworks: ["shift4"],
     credentialKey: "shift4_api_key",
     feeCaptureMethods: ["invoice_split"],
     capabilities: {

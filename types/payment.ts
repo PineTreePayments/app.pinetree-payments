@@ -12,12 +12,13 @@ export type PaymentNetwork =
   | "solana"
   | "base"
   | "ethereum"
+  | "shift4"
 
 export const PAYMENT_ADAPTER_NETWORKS: Readonly<Record<PaymentAdapterId, readonly PaymentNetwork[]>> = {
   solana: ["solana"],
   base: ["base"],
   coinbase: ["base"],
-  shift4: ["ethereum"]
+  shift4: ["shift4"]
 } as const
 
 export const PAYMENT_ADAPTER_CREDENTIAL_KEYS: Readonly<Partial<Record<PaymentAdapterId, string>>> = {
@@ -43,7 +44,7 @@ export function normalizePaymentAdapter(value?: string): PaymentAdapterId | unde
 export function normalizePaymentNetwork(value?: string): PaymentNetwork | null {
   const normalized = String(value || "").toLowerCase().trim()
 
-  if (normalized === "solana" || normalized === "base" || normalized === "ethereum") {
+  if (normalized === "solana" || normalized === "base" || normalized === "ethereum" || normalized === "shift4") {
     return normalized as PaymentNetwork
   }
 

@@ -53,6 +53,9 @@ function getEvmSplitContract(network: string): string {
 export async function generateSplitPayment(
   input: GenerateSplitPaymentInput
 ) {
+  // Normalise network once — "base_pay" is a legacy alias for "base"
+  const network = input.network === "base_pay" ? "base" : input.network
+
   const merchantAmount = Number(input.merchantAmount)
   const pinetreeFee = Number(input.pinetreeFee)
   const usdTotalAmount = merchantAmount + pinetreeFee
@@ -64,14 +67,13 @@ export async function generateSplitPayment(
   let quotePriceUsd: number | null = null
 
   if (
-    input.network === "solana" ||
-    input.network === "base" ||
-    input.network === "base_pay" ||
-    input.network === "ethereum"
+    network === "solana" ||
+    network === "base" ||
+    network === "ethereum"
   ) {
     const prices = await getMarketPricesUSD()
 
-    if (input.network === "solana") {
+    if (network === "solana") {
       nativeSymbol = "SOL"
       quotePriceUsd = prices.SOL
       nativeAmount = roundAmount(usdTotalAmount / prices.SOL, 9)
@@ -100,11 +102,7 @@ export async function generateSplitPayment(
 
   let returnPath = "/solana-return"
 
-  if (
-    input.network === "base" ||
-    input.network === "base_pay" ||
-    input.network === "ethereum"
-  ) {
+  if (network === "base" || network === "ethereum") {
     returnPath = "/base-return"
   }
 
@@ -115,9 +113,9 @@ export async function generateSplitPayment(
   // NOT contract_split. If the adapter returned a feeCaptureMethod, always trust it.
   let feeCaptureMethod: string =
     input.feeCaptureMethodOverride ||
-    (input.network === "solana"
+    (network === "solana"
       ? "atomic_split"
-      : input.network === "base" || input.network === "base_pay" || input.network === "ethereum"
+      : network === "base" || network === "ethereum"
         ? "contract_split"
         : "invoice_split")
 
@@ -127,7 +125,7 @@ export async function generateSplitPayment(
 
   const payload = {
     type: "pinetree_split_payment",
-    network: input.network,
+    network,
     feeCaptureMethod,
     reference: input.paymentId || crypto.randomUUID(),
 
@@ -159,39 +157,29 @@ export async function generateSplitPayment(
 
   let paymentUrl: string
 
-  if (input.network === "solana") {
+  if (network === "solana") {
     const txRequestUrl = `${BASE_URL}/api/solana-pay/transaction?paymentId=${encodeURIComponent(
       String(input.paymentId || "")
     )}`
-
-    // Solana Pay transaction-request URI — wallets recognise the "solana:" scheme
-    // and POST to txRequestUrl to get an unsigned transaction to sign.
     paymentUrl = `solana:${txRequestUrl}`
-  } else if (input.network === "base" || input.network === "base_pay" || input.network === "ethereum") {
+  } else if (network === "base" || network === "ethereum") {
     if (feeCaptureMethod === "invoice_split" || feeCaptureMethod === "collection_then_settle") {
-      // Hosted-checkout providers (e.g. Coinbase Commerce) collect the gross amount themselves.
-      // There is no on-chain split URI to generate — the provider's hosted_url IS the paymentUrl
-      // and will be set by the provider adapter's createPayment return value.
-      // Fall through to universalUrl-only mode.
       paymentUrl = `pinetree://pay?data=${encodeURIComponent(payloadString)}`
     } else {
-      // EVM wallet-rail: direct ETH or contract_split depending on config.
-      const chainId = input.network === "ethereum" ? "1" : "8453"
+      const chainId = network === "ethereum" ? "1" : "8453"
       const splitMode = getEvmSplitMode()
 
       if (splitMode === "contract") {
-        const splitContract = getEvmSplitContract(input.network)
+        const splitContract = getEvmSplitContract(network)
 
         if (!isEvmAddress(splitContract)) {
           throw new Error(
-            `EVM rails require a valid split contract address for ${input.network}. Configure PINETREE_EVM_SPLIT_CONTRACT_${
-              input.network === "ethereum" ? "ETHEREUM" : "BASE"
+            `EVM rails require a valid split contract address for ${network}. Configure PINETREE_EVM_SPLIT_CONTRACT_${
+              network === "ethereum" ? "ETHEREUM" : "BASE"
             }.`
           )
         }
 
-        // EIP-681 contract invocation URI.
-        // value= is the gross ETH (msg.value) the wallet must send with the call.
         const grossWei = toWeiString(nativeAmount)
         const query = new URLSearchParams({
           value: grossWei,
@@ -204,36 +192,19 @@ export async function generateSplitPayment(
 
         paymentUrl = `ethereum:${splitContract}@${chainId}/split?${query.toString()}`
       } else {
-        // Direct ETH payment — full gross amount goes to merchant wallet.
-        // Fee is not split on-chain in this mode.
         feeCaptureMethod = "direct"
         paymentUrl = `ethereum:${input.merchantWallet}@${chainId}?value=${toWeiString(nativeAmount)}`
       }
     }
   } else {
-    // Fallback to universal format
     paymentUrl = `pinetree://pay?data=${encodeURIComponent(payloadString)}`
   }
 
-  /* --------------------------------
-   GENERATE CAMERA-SCANNABLE UNIVERSAL LINK
-   -------------------------------- */
-
   const universalUrl = `${BASE_URL}/pay?data=${encodeURIComponent(payloadString)}`
 
-  /* --------------------------------
-  GENERATE QR CODE
-  Use the native wallet URI for Solana and EVM contract_split so that
-  wallet apps (Phantom, MetaMask) handle the transaction request directly.
-  Web cameras won't handle solana:/ethereum: schemes, but by the time this
-  QR is shown the customer is already on the hosted checkout page on their
-  phone — they should scan it with their wallet app's QR scanner.
-  -------------------------------- */
-
   const isNativeWalletRail =
-    input.network === "solana" ||
-    ((input.network === "base" || input.network === "base_pay" || input.network === "ethereum") &&
-      feeCaptureMethod === "contract_split")
+    network === "solana" ||
+    ((network === "base" || network === "ethereum") && feeCaptureMethod === "contract_split")
 
   const qrSource = isNativeWalletRail ? paymentUrl : universalUrl
   const qrCodeUrl = await QRCode.toDataURL(qrSource)
@@ -249,7 +220,7 @@ export async function generateSplitPayment(
     nativeSymbol,
     merchantNativeAmount,
     feeNativeAmount,
-    merchantNativeAmountAtomic: input.network === "solana" ? toLamports(merchantNativeAmount) : toWeiString(merchantNativeAmount),
-    feeNativeAmountAtomic: input.network === "solana" ? toLamports(feeNativeAmount) : toWeiString(feeNativeAmount)
+    merchantNativeAmountAtomic: network === "solana" ? toLamports(merchantNativeAmount) : toWeiString(merchantNativeAmount),
+    feeNativeAmountAtomic: network === "solana" ? toLamports(feeNativeAmount) : toWeiString(feeNativeAmount)
   }
 }

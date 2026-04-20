@@ -118,6 +118,33 @@ export async function hasWalletForNetwork(
 }
 
 /**
+ * Returns networks served by hosted-checkout providers (e.g. shift4) that have
+ * no entry in merchant_wallets. Used alongside getMerchantWallets to build the
+ * full set of available payment options for a merchant.
+ */
+export async function getConnectedHostedCheckoutNetworks(merchantId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("merchant_providers")
+    .select("provider,status")
+    .eq("merchant_id", merchantId)
+    .in("status", ["connected", "active"])
+
+  if (error || !data || data.length === 0) return []
+
+  const hostedCheckoutProviders = new Set(["shift4"])
+  const networks: string[] = []
+
+  for (const row of data as Array<{ provider?: string | null }>) {
+    const provider = String(row.provider || "").toLowerCase().trim()
+    if (hostedCheckoutProviders.has(provider)) {
+      networks.push(provider)
+    }
+  }
+
+  return networks
+}
+
+/**
  * Smart routing - select best available wallet
  */
 export async function selectBestWallet(

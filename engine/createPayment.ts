@@ -48,7 +48,7 @@ type StoredPaymentSplitMetadata = {
 function inferNativeSymbolFromNetwork(network?: string): string | undefined {
   const normalized = String(network || "").toLowerCase().trim()
   if (normalized === "solana") return "SOL"
-  if (normalized === "base" || normalized === "base_pay" || normalized === "ethereum") return "ETH"
+  if (normalized === "base" || normalized === "ethereum") return "ETH"
   return undefined
 }
 
@@ -289,14 +289,26 @@ export async function createPayment(
     normalizeWalletNetwork(String(input.metadata?.selectedNetwork || input.metadata?.network || "")) ||
     undefined
 
-  const merchantWallet = await selectBestWallet(input.merchantId, preferredNetwork)
-  
-  if (!merchantWallet) {
-    throw new Error("No wallet configured for merchant")
+  // Hosted-checkout providers (Shift4) don't use a blockchain wallet address.
+  // Skip wallet lookup and treasury assertions — fee capture is handled by the provider.
+  const isHostedCheckout = preferredNetwork === "shift4"
+
+  let merchantWalletAddress: string
+  let network: string
+
+  if (isHostedCheckout) {
+    merchantWalletAddress = `shift4_${input.merchantId}`
+    network = "shift4"
+  } else {
+    const merchantWallet = await selectBestWallet(input.merchantId, preferredNetwork)
+
+    if (!merchantWallet) {
+      throw new Error("No wallet configured for merchant")
+    }
+
+    merchantWalletAddress = merchantWallet.wallet_address
+    network = merchantWallet.network
   }
-  
-  const merchantWalletAddress = merchantWallet.wallet_address
-  const network = merchantWallet.network
 
   /* ---------------------------
      ADAPTER SELECTION
@@ -322,9 +334,11 @@ export async function createPayment(
      PINETREE TREASURY WALLET
   --------------------------- */
 
-  assertTreasuryWalletFormat(network)
-  assertSplitRailConfig(network)
-  const pinetreeWallet = getPineTreeTreasuryWallet(network)
+  if (!isHostedCheckout) {
+    assertTreasuryWalletFormat(network)
+    assertSplitRailConfig(network)
+  }
+  const pinetreeWallet = isHostedCheckout ? "" : getPineTreeTreasuryWallet(network)
 
   /* ---------------------------
      CREATE PAYMENT ID
