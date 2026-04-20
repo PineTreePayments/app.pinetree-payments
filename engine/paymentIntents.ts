@@ -13,7 +13,7 @@ import { getUnifiedPaymentStatusEngine } from "./paymentStatusOrchestrator"
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 import { PINETREE_FEE } from "./config"
 
-const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base", "ethereum", "shift4"]
+const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base", "shift4"]
 const PAYMENT_DETAILS_TIMEOUT_MS = Number(process.env.PAYMENT_DETAILS_TIMEOUT_MS || 12000)
 
 async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, label: string): Promise<T> {

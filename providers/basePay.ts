@@ -12,7 +12,7 @@ export const basePayAdapter: ProviderAdapter = {
   metadata: {
     adapterId: "base",
     displayName: "Base / ETH Pay",
-    supportedNetworks: ["base", "ethereum"],
+    supportedNetworks: ["base"],
     feeCaptureMethods: ["contract_split", "direct"],
     capabilities: {
       hostedCheckout: false,

@@ -12,9 +12,7 @@ export type WalletAsset =
   | "sol"
   | "sol-usdc"
   | "eth-base"
-  | "eth-ethereum"
   | "usdc-base"
-  | "usdc-ethereum"
   | "shift4"
 
 export type WalletNetwork = PaymentNetwork
@@ -35,9 +33,7 @@ export const ALLOWED_ASSETS: Readonly<Record<WalletAsset, { label: string; netwo
   "sol": { label: "SOL", network: "solana", symbol: "SOL" },
   "sol-usdc": { label: "USDC (Solana)", network: "solana", symbol: "USDC" },
   "eth-base": { label: "ETH (Base)", network: "base", symbol: "ETH" },
-  "eth-ethereum": { label: "ETH (Ethereum)", network: "ethereum", symbol: "ETH" },
   "usdc-base": { label: "USDC (Base)", network: "base", symbol: "USDC" },
-  "usdc-ethereum": { label: "USDC (Ethereum)", network: "ethereum", symbol: "USDC" },
   "shift4": { label: "Card / Fiat (Shift4)", network: "shift4", symbol: "USD" },
 } as const
 

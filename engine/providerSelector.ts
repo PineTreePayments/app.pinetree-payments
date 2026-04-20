@@ -14,8 +14,7 @@ import { loadProviders } from "./loadProviders"
 // Wallet-rail adapter per network — used when merchant_providers has no rows yet
 const NETWORK_DEFAULT_ADAPTER: Partial<Record<string, PaymentAdapterId>> = {
   solana: "solana",
-  base: "base",
-  ethereum: "base"
+  base: "base"
 }
 
 function sortAdapterIds(

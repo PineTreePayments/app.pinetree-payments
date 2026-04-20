@@ -12,7 +12,7 @@ import {
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 import { isProviderHealthy } from "./providerRegistry"
 
-type ReadinessNetwork = "solana" | "base" | "ethereum"
+type ReadinessNetwork = "solana" | "base"
 
 type NetworkReadiness = {
   network: ReadinessNetwork
@@ -47,7 +47,7 @@ function maskAddress(address?: string | null): string | undefined {
 export async function getPaymentReadinessEngine(input: { merchantId?: string }) {
   const merchantId = String(input.merchantId || "").trim() || undefined
 
-  const networks: ReadinessNetwork[] = ["solana", "base", "ethereum"]
+  const networks: ReadinessNetwork[] = ["solana", "base"]
 
   const connectedProviders = merchantId ? await getMerchantProviders(merchantId) : []
   const connectedAdapterIds = connectedProviders
