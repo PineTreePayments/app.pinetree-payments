@@ -32,7 +32,7 @@ export const shift4Adapter: ProviderAdapter = {
     displayName: "Shift4",
     supportedNetworks: ["ethereum"],
     credentialKey: "shift4_api_key",
-    feeCaptureMethods: ["contract_split"],
+    feeCaptureMethods: ["invoice_split"],
     capabilities: {
       hostedCheckout: true,
       walletRails: false,
@@ -104,7 +104,8 @@ export const shift4Adapter: ProviderAdapter = {
 
       return {
         providerReference: data.id,
-        paymentUrl: data.hosted_payment_url
+        paymentUrl: data.hosted_payment_url,
+        feeCaptureMethod: "invoice_split"
       }
 
     } catch (error) {
