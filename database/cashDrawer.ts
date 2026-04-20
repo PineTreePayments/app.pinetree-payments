@@ -1,4 +1,5 @@
-import { supabase } from "./supabase"
+import { supabaseAdmin, supabase as supabaseAnon } from "./supabase"
+const supabase = supabaseAdmin || supabaseAnon
 
 export type DrawerEntryType = "opening_balance" | "cash_sale" | "closeout"
 

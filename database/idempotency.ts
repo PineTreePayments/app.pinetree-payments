@@ -1,5 +1,6 @@
 import crypto from "crypto"
-import { supabase } from "./supabase"
+import { supabaseAdmin, supabase as supabaseAnon } from "./supabase"
+const supabase = supabaseAdmin || supabaseAnon
 
 export type IdempotencyKey = {
   key: string
