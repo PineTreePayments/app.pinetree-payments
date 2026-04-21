@@ -48,7 +48,7 @@ Add these addresses to `wh_cgj3rsykmjnu24vf`:
 | PINETREE_TREASURY_WALLET_BASE       | 0xDfB2EB3FccB76B8C7f7e352d5421654add5a7903 | ✅ SET |
 | PINETREE_EVM_SPLIT_MODE             | contract                                | ✅ SET  |
 | PINETREE_EVM_SPLIT_CONTRACT_BASE    | 0x0f7BeC33846bAf0dC679Cc67Ed7ba34DD4210162 | ✅ SET |
-| ALCHEMY_WEBHOOK_SIGNING_KEY_BASE    | whsec_91ZeZlTa9b1VAQJ900cWnDFB         | ✅ SET  |
+| ALCHEMY_WEBHOOK_SIGNING_KEY_BASE    | (secret — stored in Vercel only)        | ✅ SET  |
 | BASE_RPC_URL                        | https://base-mainnet.g.alchemy.com/v2/lWNP6ao6bTqGId0r3h6lg | ✅ SET |
 
 ### Required — Solana
@@ -56,7 +56,7 @@ Add these addresses to `wh_cgj3rsykmjnu24vf`:
 | Variable                            | Value / Source                          | Set?    |
 |-------------------------------------|-----------------------------------------|---------|
 | PINETREE_TREASURY_WALLET_SOLANA     | CXqPwfvDJ5HYBEwBC9id9oGH9hsf4gShywBN3WzDL5Aw | ✅ SET |
-| ALCHEMY_WEBHOOK_SIGNING_KEY_SOLANA  | whsec_KpMFL4ChZEFm0ClQtzYYeWpG         | ✅ SET  |
+| ALCHEMY_WEBHOOK_SIGNING_KEY_SOLANA  | (secret — stored in Vercel only)        | ✅ SET  |
 | RPC_URL_SOLANA                      | Alchemy Solana mainnet RPC URL          | unknown |
 
 ### Required — General
