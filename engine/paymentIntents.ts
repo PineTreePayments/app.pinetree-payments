@@ -42,6 +42,8 @@ function uniqueNetworks(networks: WalletNetwork[]) {
 type StoredPaymentSplitMetadata = {
   split?: {
     merchantWallet?: string
+    feeCaptureMethod?: string
+    splitContract?: string
     expectedAmountNative?: number
     merchantNativeAmount?: number
     feeNativeAmount?: number
@@ -54,44 +56,30 @@ type WalletOption = {
   href: string
 }
 
-function buildWalletOptions(walletUrl: string): WalletOption[] {
+function buildWalletOptions(walletUrl: string, network?: string): WalletOption[] {
   const normalizedUrl = String(walletUrl || "").trim()
   if (!normalizedUrl) return []
 
   const encodedWalletUrl = encodeURIComponent(normalizedUrl)
+  const net = String(network || "").toLowerCase().trim()
+  const isSolana = net === "solana"
+  const isBase = net === "base"
 
-  return [
-    {
-      id: "phantom",
-      label: "Phantom",
-      href: `https://phantom.app/ul/browse/${encodedWalletUrl}`
-    },
-    {
-      id: "solflare",
-      label: "Solflare",
-      href: `https://solflare.com/ul/v1/browse/${encodedWalletUrl}`
-    },
-    {
-      id: "metamask",
-      label: "MetaMask",
-      href: `metamask://dapp?url=${encodedWalletUrl}`
-    },
-    {
-      id: "basewallet",
-      label: "Base Wallet",
-      href: `cbwallet://dapp?url=${encodedWalletUrl}`
-    },
-    {
-      id: "coinbase",
-      label: "Coinbase App",
-      href: `https://go.cb-w.com/dapp?cb_url=${encodedWalletUrl}`
-    },
-    {
-      id: "trust",
-      label: "Trust Wallet",
-      href: `https://link.trustwallet.com/open_url?url=${encodedWalletUrl}`
-    }
+  const solanaWallets: WalletOption[] = [
+    { id: "phantom", label: "Phantom", href: `https://phantom.app/ul/browse/${encodedWalletUrl}` },
+    { id: "solflare", label: "Solflare", href: `https://solflare.com/ul/v1/browse/${encodedWalletUrl}` }
   ]
+
+  const evmWallets: WalletOption[] = [
+    { id: "metamask", label: "MetaMask", href: `metamask://dapp?url=${encodedWalletUrl}` },
+    { id: "basewallet", label: "Base Wallet", href: `cbwallet://dapp?url=${encodedWalletUrl}` },
+    { id: "coinbase", label: "Coinbase App", href: `https://go.cb-w.com/dapp?cb_url=${encodedWalletUrl}` },
+    { id: "trust", label: "Trust Wallet", href: `https://link.trustwallet.com/open_url?url=${encodedWalletUrl}` }
+  ]
+
+  if (isSolana) return solanaWallets
+  if (isBase) return evmWallets
+  return [...solanaWallets, ...evmWallets]
 }
 
 function inferNativeSymbolFromNetwork(network?: string): string | undefined {
@@ -116,7 +104,12 @@ function inferNativeAmountFromPayment(payment: { metadata?: unknown } | null | u
 
 function inferRecipientAddressFromPayment(payment: { metadata?: unknown } | null | undefined): string | undefined {
   const metadata = (payment?.metadata || null) as StoredPaymentSplitMetadata | null
-  const recipient = String(metadata?.split?.merchantWallet || "").trim()
+  const split = metadata?.split
+  // For contract_split payments show the split contract address (where user must send)
+  if (String(split?.feeCaptureMethod || "").toLowerCase() === "contract_split" && split?.splitContract) {
+    return String(split.splitContract).trim() || undefined
+  }
+  const recipient = String(split?.merchantWallet || "").trim()
   return recipient || undefined
 }
 
@@ -242,7 +235,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
       qrCodeUrl: existingPayment?.qr_code_url || undefined,
       address: recipientAddress,
       walletUrl: walletUrl || undefined,
-      walletOptions: buildWalletOptions(walletUrl),
+      walletOptions: buildWalletOptions(walletUrl, existingPayment?.network || ""),
       provider: existingPayment?.provider || undefined,
       nativeAmount: inferNativeAmountFromPayment(existingPayment),
       nativeSymbol: inferNativeSymbolFromNetwork(existingPayment?.network)
@@ -324,7 +317,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
       qrCodeUrl: payment.qrCodeUrl,
       address: payment.address,
       walletUrl: walletUrl || undefined,
-      walletOptions: buildWalletOptions(walletUrl),
+      walletOptions: buildWalletOptions(walletUrl, normalizedNetwork),
       universalUrl: payment.universalUrl,
       nativeAmount: payment.nativeAmount,
       nativeSymbol: payment.nativeSymbol,

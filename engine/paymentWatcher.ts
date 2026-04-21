@@ -35,9 +35,16 @@ import {
   updateTransactionProviderReference,
   updateTransactionStatus
 } from "@/database/transactions"
+import { id as ethersId, AbiCoder } from "ethers"
 
 // Solana Memo Program ID — same constant used in solanaSplitTransaction.ts
 const SOLANA_MEMO_PROGRAM_ID = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+
+// PineTreeSplit contract event: PaymentSplit(address indexed merchant, address indexed treasury,
+//   uint256 merchantAmount, uint256 feeAmount, string paymentRef, address indexed payer, address token)
+const PAYMENT_SPLIT_TOPIC = ethersId(
+  "PaymentSplit(address,address,uint256,uint256,string,address,address)"
+)
 
 // ─── Input / Output types ────────────────────────────────────────────────────
 
@@ -218,9 +225,63 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
 
   const lookback = getLookbackWindow(input.network)
   const startBlock = Math.max(0, currentBlock - lookback)
+  const fromBlockHex = "0x" + startBlock.toString(16)
 
-  // Fetch all blocks in the lookback window in parallel — sequential fetching
-  // would take 40+ RPC round-trips and exceed Vercel's execution limit.
+  // ── contract_split: query PaymentSplit event logs (1 RPC call, fast) ─────────
+  if (feeCaptureMethod === "contract_split") {
+    if (!splitContractEvm) {
+      console.warn("[watcher:evm] missing split contract for contract_split payment", {
+        paymentId: input.paymentId
+      })
+      return false
+    }
+
+    const logs = await getContractEventLogs(rpcUrl, splitContractEvm, PAYMENT_SPLIT_TOPIC, fromBlockHex)
+
+    if (logs.length === 0) {
+      console.info("[watcher:evm] no PaymentSplit events in lookback window", {
+        paymentId: input.paymentId,
+        splitContract: splitContractEvm,
+        fromBlock: startBlock,
+        toBlock: currentBlock
+      })
+      return false
+    }
+
+    for (const log of logs) {
+      const decoded = decodePaymentSplitLog(log.data)
+      if (!decoded) continue
+
+      if (decoded.paymentRef !== input.paymentId) continue
+
+      // payer is topics[3] (indexed) — last 20 bytes = 40 hex chars
+      const payerTopic = String(log.topics[3] || "")
+      const payer = payerTopic.length >= 42 ? "0x" + payerTopic.slice(-40) : "unknown"
+
+      console.info("[watcher:evm] PaymentSplit event matched", {
+        paymentId: input.paymentId,
+        txHash: log.transactionHash,
+        payer,
+        token: decoded.token
+      })
+
+      const confirmed = await handleMatchingTransaction(
+        input.paymentId,
+        { hash: log.transactionHash, value: "0", from: payer },
+        true
+      )
+      if (confirmed) return true
+    }
+
+    console.info("[watcher:evm] no PaymentSplit event matched paymentId", {
+      paymentId: input.paymentId,
+      splitContract: splitContractEvm,
+      logsChecked: logs.length
+    })
+    return false
+  }
+
+  // ── direct payment: scan blocks for ETH transfer to merchant ─────────────────
   const blockNumbers: number[] = []
   for (let n = startBlock; n <= currentBlock; n++) blockNumbers.push(n)
 
@@ -235,90 +296,34 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
     }
   }
 
+  const grossRequired =
+    typeof input.expectedAmountNative === "number" && Number.isFinite(input.expectedAmountNative)
+      ? input.expectedAmountNative
+      : input.merchantAmount + input.pinetreeFee
+
+  const threshold = grossRequired * matchRatio
+
   for (const tx of transactions) {
     if (!tx.to) continue
     const toAddress = tx.to.toLowerCase()
-    const value = weiToEth(tx.value)
-
-    const grossRequired =
-      typeof input.expectedAmountNative === "number" && Number.isFinite(input.expectedAmountNative)
-        ? input.expectedAmountNative
-        : input.merchantAmount + input.pinetreeFee
-
-    const threshold = grossRequired * matchRatio
-
-    if (feeCaptureMethod === "contract_split") {
-      if (!splitContractEvm) {
-        console.warn("[watcher:evm] missing split contract for contract_split payment", {
-          paymentId: input.paymentId
-        })
-        continue
-      }
-      if (toAddress !== splitContractEvm) continue
-
-      // Verify the payment reference is present in calldata.
-      if (!verifyEvmPaymentReference(tx.input, input.paymentId)) {
-        console.info("[watcher:evm] contract_split tx calldata missing payment reference", {
-          paymentId: input.paymentId,
-          txHash: tx.hash,
-          calldataLength: tx.input?.length ?? 0
-        })
-        continue
-      }
-
-      // For contract_split the reference match is sufficient — the on-chain contract
-      // enforces amounts (reverted txs never appear in blocks). This also covers
-      // USDC splitToken() calls where tx.value is always 0.
-      const confirmed = await handleMatchingTransaction(input.paymentId, tx, true)
-      if (confirmed) return true
-      continue
-    }
-
-    // Direct (non-contract) payment: match on recipient address + ETH value.
     if (toAddress !== merchantWalletEvm) continue
 
+    const value = weiToEth(tx.value)
     if (value >= threshold) {
       const confirmed = await handleMatchingTransaction(input.paymentId, tx, false)
       if (confirmed) return true
     } else {
-      console.info("[watcher:evm] transaction below threshold", {
+      console.info("[watcher:evm] direct tx below threshold", {
         paymentId: input.paymentId,
         txHash: tx.hash,
-        network: input.network,
         receivedNative: value,
         expectedNative: grossRequired,
-        matchRatio,
         thresholdNative: threshold
       })
     }
   }
 
   return false
-}
-
-// ─── EVM reference check ──────────────────────────────────────────────────────
-
-/**
- * Check whether a paymentId reference appears in ABI-encoded EVM calldata.
- *
- * We check for the UTF-8 hex of the paymentId within the calldata hex string.
- * This is intentionally a substring match rather than ABI decoding — it avoids
- * requiring knowledge of the split contract's exact function signature while
- * still catching cases where the reference was omitted entirely.
- *
- * Returns true if:
- *   - calldata is absent or empty (plain ETH transfer — no reference expected)
- *   - paymentId hex is found anywhere in the calldata
- *
- * Returns false if calldata is present but the paymentId is NOT in it.
- */
-function verifyEvmPaymentReference(calldata: string | undefined, paymentId: string): boolean {
-  const data = String(calldata || "").trim()
-  // No calldata means a plain ETH transfer — reference check not applicable
-  if (!data || data === "0x" || data.length <= 10) return true
-
-  const referenceHex = Buffer.from(paymentId, "utf8").toString("hex")
-  return data.toLowerCase().includes(referenceHex.toLowerCase())
 }
 
 // ─── State machine ────────────────────────────────────────────────────────────
@@ -459,6 +464,74 @@ async function getBlockByNumber(rpcUrl: string, blockNumber: number): Promise<Ev
 
 function weiToEth(wei: string): number {
   return Number(wei) / 1e18
+}
+
+type EvmLog = {
+  data: string
+  topics: string[]
+  transactionHash: string
+}
+
+type DecodedPaymentSplitLog = {
+  merchantAmount: bigint
+  feeAmount: bigint
+  paymentRef: string
+  token: string
+}
+
+async function getContractEventLogs(
+  rpcUrl: string,
+  contractAddress: string,
+  topic: string,
+  fromBlock: string
+): Promise<EvmLog[]> {
+  try {
+    const response = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "eth_getLogs",
+        params: [{
+          address: contractAddress,
+          topics: [topic],
+          fromBlock,
+          toBlock: "latest"
+        }],
+        id: 1
+      })
+    })
+    const data = await response.json()
+    if (data?.error) {
+      console.warn("[watcher:evm] eth_getLogs rpc error", { rpcError: data.error })
+      return []
+    }
+    if (!Array.isArray(data?.result)) return []
+    return data.result as EvmLog[]
+  } catch (error) {
+    console.error("[watcher:evm] eth_getLogs request failed", {
+      error: error instanceof Error ? error.message : String(error)
+    })
+    return []
+  }
+}
+
+function decodePaymentSplitLog(data: string): DecodedPaymentSplitLog | null {
+  try {
+    // Non-indexed params order: uint256 merchantAmount, uint256 feeAmount, string paymentRef, address token
+    const decoded = AbiCoder.defaultAbiCoder().decode(
+      ["uint256", "uint256", "string", "address"],
+      data
+    )
+    return {
+      merchantAmount: decoded[0] as bigint,
+      feeAmount: decoded[1] as bigint,
+      paymentRef: decoded[2] as string,
+      token: decoded[3] as string
+    }
+  } catch {
+    return null
+  }
 }
 
 async function getSolanaSignatures(

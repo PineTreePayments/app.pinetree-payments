@@ -474,12 +474,19 @@ export async function createPayment(
      RETURN RESULT
   --------------------------- */
 
+  // For contract_split payments, the user must send to the split contract — show that address.
+  // For all other payment types, show the merchant's wallet address.
+  const displayAddress =
+    splitPayment.feeCaptureMethod === "contract_split" && splitContract
+      ? splitContract
+      : merchantWalletAddress
+
   return {
     id: paymentId,
     provider: providerName,
     paymentUrl: canonicalPaymentUrl,
     qrCodeUrl: canonicalQrCodeUrl,
-    address: merchantWalletAddress,
+    address: displayAddress,
     universalUrl: splitPayment.universalUrl,
     nativeAmount: Number(splitPayment.nativeAmount || 0),
     nativeSymbol: String(splitPayment.nativeSymbol || "").toUpperCase() || undefined

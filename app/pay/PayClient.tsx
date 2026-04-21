@@ -511,8 +511,8 @@ export default function PayClient() {
                               <div className="flex flex-col items-center space-y-2">
                                 <div className="text-xs uppercase tracking-widest text-gray-500">
                                   {String(paymentPayload.network || "").toLowerCase() === "solana"
-                                    ? "Open Phantom → Scanner → Scan"
-                                    : "Open MetaMask or Coinbase Wallet → Scan"}
+                                    ? "Open Phantom → Scanner → Scan QR"
+                                    : "Open MetaMask or Coinbase Wallet → Scan QR"}
                                 </div>
                                 <div className="bg-white border border-gray-200 rounded-xl p-2">
                                   <Image
