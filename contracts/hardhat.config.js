@@ -8,6 +8,9 @@ const BASE_RPC_URL = process.env.BASE_RPC_URL || "https://mainnet.base.org";
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
+  paths: {
+    sources: "./src"
+  },
   solidity: {
     version: "0.8.20",
     settings: {

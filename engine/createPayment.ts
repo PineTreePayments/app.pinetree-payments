@@ -296,6 +296,8 @@ export async function createPayment(
   let merchantWalletAddress: string
   let network: string
 
+  let walletAsset: string | undefined
+
   if (isHostedCheckout) {
     merchantWalletAddress = `shift4_${input.merchantId}`
     network = "shift4"
@@ -308,6 +310,7 @@ export async function createPayment(
 
     merchantWalletAddress = merchantWallet.wallet_address
     network = merchantWallet.network
+    walletAsset = merchantWallet.asset || undefined
   }
 
   /* ---------------------------
@@ -377,6 +380,7 @@ export async function createPayment(
     pinetreeWallet,
     pinetreeFee,
     network,
+    asset: walletAsset,
     paymentId,
     providerPayment,
     feeCaptureMethodOverride: providerDeclaredFeeMethod

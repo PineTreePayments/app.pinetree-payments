@@ -1,12 +1,17 @@
 import QRCode from "qrcode"
 import { getMarketPricesUSD } from "./marketPrices"
 
+// USDC contract address on Base mainnet
+const USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+
 type GenerateSplitPaymentInput = {
   merchantWallet: string
   merchantAmount: number
   pinetreeWallet: string
   pinetreeFee: number
   network: string
+  /** Wallet asset type — drives token selection on Base (e.g. "eth-base" vs "usdc-base") */
+  asset?: string
   paymentId?: string
   providerPayment?: unknown
   /**
@@ -31,6 +36,17 @@ function toWeiString(amountEth: number): string {
   const [whole, fraction = ""] = safe.toFixed(18).split(".")
   const normalized = `${whole}${fraction.padEnd(18, "0").slice(0, 18)}`.replace(/^0+/, "")
   return normalized || "0"
+}
+
+// USDC has 6 decimals; 1 USDC = 1 USD
+function toUSDCAtomicString(amountUsd: number): string {
+  const safe = Number.isFinite(amountUsd) && amountUsd > 0 ? amountUsd : 0
+  return String(Math.round(safe * 1_000_000))
+}
+
+function isUsdcAsset(asset?: string): boolean {
+  const a = String(asset || "").toLowerCase().trim()
+  return a === "usdc-base" || a === "sol-usdc"
 }
 
 function isEvmAddress(value: string): boolean {
@@ -60,32 +76,36 @@ export async function generateSplitPayment(
   const pinetreeFee = Number(input.pinetreeFee)
   const usdTotalAmount = merchantAmount + pinetreeFee
 
+  const isUsdc = isUsdcAsset(input.asset)
+
   let nativeAmount = usdTotalAmount
   let merchantNativeAmount = Number(input.merchantAmount)
   let feeNativeAmount = Number(input.pinetreeFee)
   let nativeSymbol = "USD"
   let quotePriceUsd: number | null = null
 
-  if (
-    network === "solana" ||
-    network === "base" ||
-    network === "ethereum"
-  ) {
+  if (network === "solana" && !isUsdc) {
     const prices = await getMarketPricesUSD()
-
-    if (network === "solana") {
-      nativeSymbol = "SOL"
-      quotePriceUsd = prices.SOL
-      nativeAmount = roundAmount(usdTotalAmount / prices.SOL, 9)
-      merchantNativeAmount = roundAmount(merchantAmount / prices.SOL, 9)
-      feeNativeAmount = roundAmount(pinetreeFee / prices.SOL, 9)
-    } else {
-      nativeSymbol = "ETH"
-      quotePriceUsd = prices.ETH
-      nativeAmount = roundAmount(usdTotalAmount / prices.ETH, 18)
-      merchantNativeAmount = roundAmount(merchantAmount / prices.ETH, 18)
-      feeNativeAmount = roundAmount(pinetreeFee / prices.ETH, 18)
-    }
+    nativeSymbol = "SOL"
+    quotePriceUsd = prices.SOL
+    nativeAmount = roundAmount(usdTotalAmount / prices.SOL, 9)
+    merchantNativeAmount = roundAmount(merchantAmount / prices.SOL, 9)
+    feeNativeAmount = roundAmount(pinetreeFee / prices.SOL, 9)
+  } else if (network === "solana" && isUsdc) {
+    // SOL-USDC: amounts stay in USD (1:1 with USDC)
+    nativeSymbol = "USDC"
+    quotePriceUsd = 1
+  } else if (network === "base" && !isUsdc) {
+    const prices = await getMarketPricesUSD()
+    nativeSymbol = "ETH"
+    quotePriceUsd = prices.ETH
+    nativeAmount = roundAmount(usdTotalAmount / prices.ETH, 18)
+    merchantNativeAmount = roundAmount(merchantAmount / prices.ETH, 18)
+    feeNativeAmount = roundAmount(pinetreeFee / prices.ETH, 18)
+  } else if (network === "base" && isUsdc) {
+    // USDC on Base: amounts stay in USD (1:1 with USDC)
+    nativeSymbol = "USDC"
+    quotePriceUsd = 1
   }
 
   /* --------------------------------
@@ -102,7 +122,7 @@ export async function generateSplitPayment(
 
   let returnPath = "/solana-return"
 
-  if (network === "base" || network === "ethereum") {
+  if (network === "base") {
     returnPath = "/base-return"
   }
 
@@ -115,7 +135,7 @@ export async function generateSplitPayment(
     input.feeCaptureMethodOverride ||
     (network === "solana"
       ? "atomic_split"
-      : network === "base" || network === "ethereum"
+      : network === "base"
         ? "contract_split"
         : "invoice_split")
 
@@ -162,31 +182,48 @@ export async function generateSplitPayment(
       String(input.paymentId || "")
     )}`
     paymentUrl = `solana:${txRequestUrl}`
-  } else if (network === "base" || network === "ethereum") {
+  } else if (network === "base") {
     if (feeCaptureMethod === "invoice_split" || feeCaptureMethod === "collection_then_settle") {
       paymentUrl = `pinetree://pay?data=${encodeURIComponent(payloadString)}`
     } else {
-      const chainId = network === "ethereum" ? "1" : "8453"
+      const chainId = "8453"
       const splitMode = getEvmSplitMode()
-
       const splitContract = splitMode === "contract" ? getEvmSplitContract(network) : ""
 
       if (splitMode === "contract" && isEvmAddress(splitContract)) {
-        const grossWei = toWeiString(nativeAmount)
-        const query = new URLSearchParams({
-          value: grossWei,
-          merchant: input.merchantWallet,
-          treasury: input.pinetreeWallet,
-          merchantAmountWei: toWeiString(merchantNativeAmount),
-          feeAmountWei: toWeiString(feeNativeAmount),
-          reference: String(input.paymentId || "")
-        })
-
-        paymentUrl = `ethereum:${splitContract}@${chainId}/split?${query.toString()}`
+        if (isUsdc) {
+          // USDC on Base: call splitToken() — amounts in USDC atomic units (6 decimals)
+          // Caller must approve the split contract before calling splitToken.
+          const query = new URLSearchParams({
+            address: input.merchantWallet,
+            address1: input.pinetreeWallet,
+            uint256: toUSDCAtomicString(merchantNativeAmount),
+            uint2561: toUSDCAtomicString(feeNativeAmount),
+            string: String(input.paymentId || ""),
+            address2: USDC_BASE
+          })
+          paymentUrl = `ethereum:${splitContract}@${chainId}/splitToken?${query.toString()}`
+        } else {
+          // ETH on Base: call split() — amounts in wei (18 decimals), send value
+          const query = new URLSearchParams({
+            value: toWeiString(nativeAmount),
+            address: input.merchantWallet,
+            address1: input.pinetreeWallet,
+            uint256: toWeiString(merchantNativeAmount),
+            uint2561: toWeiString(feeNativeAmount),
+            string: String(input.paymentId || "")
+          })
+          paymentUrl = `ethereum:${splitContract}@${chainId}/split?${query.toString()}`
+        }
       } else {
         // Direct mode (default) or contract mode without an address configured
         feeCaptureMethod = "direct"
-        paymentUrl = `ethereum:${input.merchantWallet}@${chainId}?value=${toWeiString(nativeAmount)}`
+        if (isUsdc) {
+          // Direct USDC transfer to merchant (fee capture skipped in direct mode)
+          paymentUrl = `ethereum:${USDC_BASE}@${chainId}/transfer?address=${input.merchantWallet}&uint256=${toUSDCAtomicString(nativeAmount)}`
+        } else {
+          paymentUrl = `ethereum:${input.merchantWallet}@${chainId}?value=${toWeiString(nativeAmount)}`
+        }
       }
     }
   } else {
@@ -197,10 +234,24 @@ export async function generateSplitPayment(
 
   const isNativeWalletRail =
     network === "solana" ||
-    ((network === "base" || network === "ethereum") && feeCaptureMethod === "contract_split")
+    (network === "base" && feeCaptureMethod === "contract_split")
 
   const qrSource = isNativeWalletRail ? paymentUrl : universalUrl
   const qrCodeUrl = await QRCode.toDataURL(qrSource)
+
+  let merchantNativeAmountAtomic: string | number
+  let feeNativeAmountAtomic: string | number
+
+  if (network === "solana" && !isUsdc) {
+    merchantNativeAmountAtomic = toLamports(merchantNativeAmount)
+    feeNativeAmountAtomic = toLamports(feeNativeAmount)
+  } else if (isUsdc) {
+    merchantNativeAmountAtomic = toUSDCAtomicString(merchantNativeAmount)
+    feeNativeAmountAtomic = toUSDCAtomicString(feeNativeAmount)
+  } else {
+    merchantNativeAmountAtomic = toWeiString(merchantNativeAmount)
+    feeNativeAmountAtomic = toWeiString(feeNativeAmount)
+  }
 
   return {
     paymentUrl,
@@ -213,7 +264,7 @@ export async function generateSplitPayment(
     nativeSymbol,
     merchantNativeAmount,
     feeNativeAmount,
-    merchantNativeAmountAtomic: network === "solana" ? toLamports(merchantNativeAmount) : toWeiString(merchantNativeAmount),
-    feeNativeAmountAtomic: network === "solana" ? toLamports(feeNativeAmount) : toWeiString(feeNativeAmount)
+    merchantNativeAmountAtomic,
+    feeNativeAmountAtomic
   }
 }

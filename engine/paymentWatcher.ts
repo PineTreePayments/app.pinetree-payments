@@ -256,9 +256,7 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
       }
       if (toAddress !== splitContractEvm) continue
 
-      // For contract_split, verify the payment reference is present in the calldata
-      // when calldata is available. This prevents false-positive matches on any
-      // transaction that happens to call the same contract with a similar value.
+      // Verify the payment reference is present in calldata.
       if (!verifyEvmPaymentReference(tx.input, input.paymentId)) {
         console.info("[watcher:evm] contract_split tx calldata missing payment reference", {
           paymentId: input.paymentId,
@@ -267,16 +265,20 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
         })
         continue
       }
-    } else {
-      if (toAddress !== merchantWalletEvm) continue
+
+      // For contract_split the reference match is sufficient — the on-chain contract
+      // enforces amounts (reverted txs never appear in blocks). This also covers
+      // USDC splitToken() calls where tx.value is always 0.
+      const confirmed = await handleMatchingTransaction(input.paymentId, tx, true)
+      if (confirmed) return true
+      continue
     }
 
+    // Direct (non-contract) payment: match on recipient address + ETH value.
+    if (toAddress !== merchantWalletEvm) continue
+
     if (value >= threshold) {
-      const confirmed = await handleMatchingTransaction(
-        input.paymentId,
-        tx,
-        feeCaptureMethod === "contract_split"
-      )
+      const confirmed = await handleMatchingTransaction(input.paymentId, tx, false)
       if (confirmed) return true
     } else {
       console.info("[watcher:evm] transaction below threshold", {
