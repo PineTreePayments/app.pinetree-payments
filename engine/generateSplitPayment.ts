@@ -1,8 +1,15 @@
 import QRCode from "qrcode"
+import { Interface } from "ethers"
 import { getMarketPricesUSD } from "./marketPrices"
 
 // USDC contract address on Base mainnet
 const USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+
+const SPLIT_ABI = [
+  "function split(address merchant, address treasury, uint256 merchantAmountWei, uint256 feeAmountWei, string paymentRef) payable",
+  "function splitToken(address merchant, address treasury, uint256 merchantAmount, uint256 feeAmount, string paymentRef, address token)"
+]
+const splitIface = new Interface(SPLIT_ABI)
 
 type GenerateSplitPaymentInput = {
   merchantWallet: string
@@ -192,28 +199,28 @@ export async function generateSplitPayment(
 
       if (splitMode === "contract" && isEvmAddress(splitContract)) {
         if (isUsdc) {
-          // USDC on Base: call splitToken() — amounts in USDC atomic units (6 decimals)
-          // Caller must approve the split contract before calling splitToken.
-          const query = new URLSearchParams({
-            address: input.merchantWallet,
-            address1: input.pinetreeWallet,
-            uint256: toUSDCAtomicString(merchantNativeAmount),
-            uint2561: toUSDCAtomicString(feeNativeAmount),
-            string: String(input.paymentId || ""),
-            address2: USDC_BASE
-          })
-          paymentUrl = `ethereum:${splitContract}@${chainId}/splitToken?${query.toString()}`
+          // USDC on Base: ABI-encode splitToken() calldata
+          // Caller must approve the split contract for (merchantAmount + feeAmount) USDC first.
+          const calldata = splitIface.encodeFunctionData("splitToken", [
+            input.merchantWallet,
+            input.pinetreeWallet,
+            BigInt(toUSDCAtomicString(merchantNativeAmount)),
+            BigInt(toUSDCAtomicString(feeNativeAmount)),
+            String(input.paymentId || ""),
+            USDC_BASE
+          ])
+          paymentUrl = `ethereum:${splitContract}@${chainId}?data=${calldata}`
         } else {
-          // ETH on Base: call split() — amounts in wei (18 decimals), send value
-          const query = new URLSearchParams({
-            value: toWeiString(nativeAmount),
-            address: input.merchantWallet,
-            address1: input.pinetreeWallet,
-            uint256: toWeiString(merchantNativeAmount),
-            uint2561: toWeiString(feeNativeAmount),
-            string: String(input.paymentId || "")
-          })
-          paymentUrl = `ethereum:${splitContract}@${chainId}/split?${query.toString()}`
+          // ETH on Base: ABI-encode split() calldata + embed total ETH value
+          const totalWei = toWeiString(nativeAmount)
+          const calldata = splitIface.encodeFunctionData("split", [
+            input.merchantWallet,
+            input.pinetreeWallet,
+            BigInt(toWeiString(merchantNativeAmount)),
+            BigInt(toWeiString(feeNativeAmount)),
+            String(input.paymentId || "")
+          ])
+          paymentUrl = `ethereum:${splitContract}@${chainId}?value=${totalWei}&data=${calldata}`
         }
       } else {
         // Direct mode (default) or contract mode without an address configured
