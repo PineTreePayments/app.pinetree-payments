@@ -174,7 +174,11 @@ export const BASE_URL =
  * RPC URLs for different networks
  */
 export const RPC_URLS: Record<string, string> = {
-  solana: process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com",
+  // Check both naming conventions — Vercel may have either RPC_URL_SOLANA or SOLANA_RPC_URL
+  solana:
+    process.env.RPC_URL_SOLANA ||
+    process.env.SOLANA_RPC_URL ||
+    "https://api.mainnet-beta.solana.com",
   base: process.env.BASE_RPC_URL || "https://mainnet.base.org",
   ethereum: process.env.ETH_RPC_URL || "https://cloudflare-eth.com",
   polygon: process.env.POLYGON_RPC_URL || "https://polygon-rpc.com"

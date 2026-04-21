@@ -48,6 +48,7 @@ function networkAsset(network: WalletNetwork): "SOL" | "ETH" {
 
 async function getSolanaBalance(address: string): Promise<number> {
   const rpcUrls = [
+    process.env.RPC_URL_SOLANA,
     process.env.SOLANA_RPC_URL,
     process.env.NEXT_PUBLIC_SOLANA_RPC_URL,
     "https://api.mainnet-beta.solana.com",

@@ -57,7 +57,7 @@ Add these addresses to `wh_cgj3rsykmjnu24vf`:
 |-------------------------------------|-----------------------------------------|---------|
 | PINETREE_TREASURY_WALLET_SOLANA     | CXqPwfvDJ5HYBEwBC9id9oGH9hsf4gShywBN3WzDL5Aw | ✅ SET |
 | ALCHEMY_WEBHOOK_SIGNING_KEY_SOLANA  | (secret — stored in Vercel only)        | ✅ SET  |
-| RPC_URL_SOLANA                      | Alchemy Solana mainnet RPC URL          | unknown |
+| RPC_URL_SOLANA                      | Alchemy Solana mainnet RPC URL          | **MUST SET** — code reads this first |
 
 ### Required — General
 
