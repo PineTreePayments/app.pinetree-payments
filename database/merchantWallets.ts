@@ -151,14 +151,10 @@ export async function selectBestWallet(
   merchantId: string,
   preferredNetwork?: string
 ) {
-  // If specific network requested, try to use it
   if (preferredNetwork) {
-    const wallet = await getBestWalletForNetwork(merchantId, preferredNetwork)
-    if (wallet) {
-      return wallet
-    }
+    // Never fall back to a different-network wallet — caller must handle null
+    return getBestWalletForNetwork(merchantId, preferredNetwork)
   }
 
-  // Fallback to highest priority wallet
   return getDefaultWallet(merchantId)
 }

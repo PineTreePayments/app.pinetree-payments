@@ -39,6 +39,8 @@ type PaymentMetadata = {
 type StoredPaymentSplitMetadata = {
   split?: {
     merchantWallet?: string
+    feeCaptureMethod?: string
+    splitContract?: string
     expectedAmountNative?: number
     merchantNativeAmount?: number
     feeNativeAmount?: number
@@ -243,12 +245,19 @@ export async function createPayment(
         ? expectedAmountNative
         : merchantNativeAmount + feeNativeAmount
 
+    const existingSplitContract = String(split?.splitContract || "").trim()
+    const existingFeeCaptureMethod = String(split?.feeCaptureMethod || "").toLowerCase()
+    const existingDisplayAddress =
+      existingFeeCaptureMethod === "contract_split" && existingSplitContract
+        ? existingSplitContract
+        : String(split?.merchantWallet || "")
+
     return {
       id: existingPayment.id,
       provider: existingPayment.provider,
       paymentUrl: existingPayment.payment_url || "",
       qrCodeUrl: existingPayment.qr_code_url || "",
-      address: String(existingMetadata?.split?.merchantWallet || ""),
+      address: existingDisplayAddress,
       universalUrl: undefined,
       nativeAmount: inferredNativeAmount > 0 ? inferredNativeAmount : undefined,
       nativeSymbol: inferNativeSymbolFromNetwork(existingPayment.network)
