@@ -51,9 +51,6 @@ export {
   getInitialStatus
 } from "./paymentStateMachine"
 
-// Event System
-export { onEvent, emitEvent } from "./eventBus"
-
 // Webhook Processing
 export { processWebhook } from "./eventProcessor"
 
@@ -71,7 +68,6 @@ export { runProviderHealthChecks } from "./providerHealth"
 
 // Payment Monitoring — single-execution checks only (no polling loops)
 export { watchPaymentOnce } from "./paymentWatcher"
-export { checkPaymentOnce } from "./checkPaymentOnce"
 
 // Split Payments
 export { generateSplitPayment } from "./generateSplitPayment"

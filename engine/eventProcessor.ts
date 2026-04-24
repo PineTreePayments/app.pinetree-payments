@@ -7,7 +7,6 @@
 
 import { getProvider } from "./providerRegistry"
 import { updatePaymentStatus } from "./updatePaymentStatus"
-import { emitEvent } from "./eventBus"
 import { getPaymentById, getPaymentByProviderReference, createPaymentEvent, upsertLedgerEntry } from "@/database"
 import { PaymentStatus, normalizeToStrictPaymentStatus } from "./paymentStateMachine"
 import {
@@ -355,11 +354,6 @@ export async function processWebhook({
     }
   }
 
-  await emitEvent(event.event, {
-    paymentId,
-    status,
-    provider
-  })
 }
 
 // ─── Watcher event ───────────────────────────────────────────────────────────

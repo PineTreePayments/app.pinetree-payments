@@ -9,7 +9,6 @@ import {
 import QRCode from "qrcode"
 import { createPayment } from "./createPayment"
 import { buildCreatePaymentRequest } from "./createPayment"
-import { getUnifiedPaymentStatusEngine } from "./paymentStatusOrchestrator"
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 import { PINETREE_FEE } from "./config"
 
@@ -186,10 +185,7 @@ export async function getPaymentIntentEngine(intentId: string) {
   const intent = await getPaymentIntentById(intentId)
   if (!intent) return null
 
-  const statusResolution = await getUnifiedPaymentStatusEngine(intent.id, "payment-intents:get")
-  const selectedPayment = statusResolution.hasSelectedPayment
-    ? await getPaymentById(statusResolution.paymentId)
-    : null
+  const selectedPayment = intent.payment_id ? await getPaymentById(intent.payment_id) : null
 
   return {
     intentId: intent.id,
@@ -201,9 +197,9 @@ export async function getPaymentIntentEngine(intentId: string) {
       ? intent.available_networks.map((n) => String(n))
       : [],
     selectedNetwork: intent.selected_network || null,
-    paymentId: statusResolution.hasSelectedPayment ? statusResolution.paymentId : null,
+    paymentId: intent.payment_id || null,
     status: intent.status,
-    paymentStatus: statusResolution.status,
+    paymentStatus: selectedPayment?.status || null,
     paymentProviderReference: selectedPayment?.provider_reference || null,
     expiresAt: intent.expires_at,
     metadata: (intent.metadata || undefined) as Record<string, unknown> | undefined,

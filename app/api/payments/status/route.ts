@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getUnifiedPaymentStatusEngine } from "@/engine/paymentStatusOrchestrator"
+import { getPaymentById, getPaymentIntentById } from "@/database"
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
 
-  // Accept either ?paymentId= or ?intentId= — both resolve through the unified engine
-  // which handles payment_intents and payments tables transparently.
+  // Accept either ?paymentId= or ?intentId=
   const id =
     (searchParams.get("paymentId") || searchParams.get("intentId") || "").trim()
 
@@ -17,25 +16,34 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const resolved = await getUnifiedPaymentStatusEngine(id, "api:payments-status")
+    // Try as a direct payment first, then fall back to payment intent
+    const payment = await getPaymentById(id)
+    if (payment) {
+      return NextResponse.json({
+        status: payment.status,
+        paymentId: payment.id,
+        intentId: null
+      })
+    }
 
-    return NextResponse.json({
-      status: resolved.status,
-      paymentId: resolved.paymentId,
-      intentId: resolved.intentId
-    })
-  } catch (error) {
-    const status =
-      typeof error === "object" &&
-      error !== null &&
-      "status" in error &&
-      typeof (error as { status?: unknown }).status === "number"
-        ? (error as { status: number }).status
-        : 500
+    const intent = await getPaymentIntentById(id)
+    if (intent) {
+      const selectedPayment = intent.payment_id ? await getPaymentById(intent.payment_id) : null
+      return NextResponse.json({
+        status: selectedPayment?.status ?? intent.status,
+        paymentId: intent.payment_id ?? null,
+        intentId: intent.id
+      })
+    }
 
     return NextResponse.json(
+      { error: "Payment or intent not found" },
+      { status: 404 }
+    )
+  } catch (error) {
+    return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to resolve payment status" },
-      { status }
+      { status: 500 }
     )
   }
 }

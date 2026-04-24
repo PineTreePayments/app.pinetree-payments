@@ -19,10 +19,8 @@
  *   ❌ background tasks — removed
  *
  * Entry point: watchPaymentOnce(input)
- * Callers   : engine/paymentStatusOrchestrator.ts → queueSingleWatcherIteration
- *             engine/checkPaymentOnce.ts          → checkPaymentOnce
- *             app/api/cron/check-payments         → via orchestrator
- *             Webhook handlers                    → via orchestrator
+ * Callers   : app/api/cron/check-payments/route.ts → direct call
+ *             engine/checkPaymentOnce.ts
  */
 
 import { getRpcUrl } from "./config"

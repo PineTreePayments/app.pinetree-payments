@@ -15,8 +15,6 @@ import {
   createPaymentEvent,
   PaymentEventType
 } from "@/database"
-import { emitEvent } from "./eventBus"
-
 /**
  * Update payment status with state machine validation
  * 
@@ -88,14 +86,6 @@ export async function updatePaymentStatus(
     event_type: eventType,
     provider_event: metadata?.providerEvent,
     raw_payload: metadata?.rawPayload
-  })
-
-  // Emit event to event bus for real-time updates
-  const pineTreeEvent = eventType
-  await emitEvent(pineTreeEvent, {
-    paymentId: paymentId,
-    status: nextStatus,
-    previousStatus: currentStatus
   })
 
   return updatedPayment

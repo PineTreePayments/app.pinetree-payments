@@ -2,9 +2,8 @@ import { createPayment } from "@/engine/createPayment"
 import { getMerchantTaxSettings } from "@/database/merchants"
 import { hasAnyWalletConnected, selectBestWallet } from "@/database/merchantWallets"
 import { claimIdempotencyKey, getIdempotencyKey } from "@/database/idempotency"
-import { getPaymentIntentById } from "@/database"
+import { getPaymentById, getPaymentIntentById } from "@/database"
 import { createPaymentIntentEngine } from "./paymentIntents"
-import { getUnifiedPaymentStatusEngine } from "./paymentStatusOrchestrator"
 import {
   normalizeWalletNetwork
 } from "./providerMappings"
@@ -282,11 +281,10 @@ export async function createPosPaymentIntentEngine(input: CreatePosPaymentInput)
 }
 
 export async function getPosPaymentStatusEngine(paymentId: string) {
-  const resolved = await getUnifiedPaymentStatusEngine(paymentId, "pos:get-status")
-
+  const payment = await getPaymentById(paymentId)
   return {
-    status: resolved.status,
-    paymentId: resolved.paymentId
+    status: payment?.status ?? null,
+    paymentId: payment?.id ?? paymentId
   }
 }
 
