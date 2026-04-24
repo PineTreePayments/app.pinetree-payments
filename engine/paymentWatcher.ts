@@ -25,16 +25,8 @@
  *             Webhook handlers                    → via orchestrator
  */
 
-import { supabaseAdmin, supabase as supabaseAnon, getPaymentById, upsertLedgerEntry } from "@/database"
-const supabaseDb = supabaseAdmin || supabaseAnon
 import { getRpcUrl } from "./config"
-import { updatePaymentStatus } from "./updatePaymentStatus"
-import { type PaymentStatus } from "./paymentStateMachine"
-import {
-  getTransactionByPaymentId,
-  updateTransactionProviderReference,
-  updateTransactionStatus
-} from "@/database/transactions"
+import { processPaymentEvent } from "./eventProcessor"
 import { id as ethersId, AbiCoder } from "ethers"
 
 // Solana Memo Program ID — same constant used in solanaSplitTransaction.ts
@@ -141,14 +133,14 @@ function getLookbackWindow(network: string): number {
  *   1. Resolve the RPC endpoint for the payment's network.
  *   2. Fetch the current block / slot number.
  *   3. Iterate backwards over a bounded lookback window of already-confirmed blocks.
- *   4. If a matching transaction is found, advance the payment through its state
- *      machine (CREATED → PENDING → PROCESSING → CONFIRMED) and return true.
+ *   4. If a matching transaction is found, emit a payment.processing event to the
+ *      engine and return true.
  *   5. If no match is found, return false immediately.
  *
  * The block-range iteration in step 3 is bounded and finite — it walks over
  * blocks that are already on chain. It does NOT poll for future blocks.
  *
- * @returns true  if the payment was confirmed during this check.
+ * @returns true  if a matching transaction was detected during this check.
  * @returns false if no matching transaction was found in the lookback window.
  */
 export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> {
@@ -254,23 +246,52 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
 
       if (decoded.paymentRef !== input.paymentId) continue
 
+      // Validate both legs against expected amounts before accepting this event.
+      // The contract emits amounts in the token's atomic unit (Wei for ETH).
+      // expectedMerchantAtomic / expectedFeeAtomic are stored in the same unit.
+      const merchantAmountNum = Number(decoded.merchantAmount)
+      const feeAmountNum = Number(decoded.feeAmount)
+      const expectedMerchantNum = Number(input.expectedMerchantAtomic || 0)
+      const expectedFeeNum = Number(input.expectedFeeAtomic || 0)
+      const merchantThreshold = expectedMerchantNum > 0 ? expectedMerchantNum * matchRatio : 0
+      const feeThreshold = expectedFeeNum > 0 ? expectedFeeNum * matchRatio : 0
+
+      if (merchantAmountNum < merchantThreshold || feeAmountNum < feeThreshold) {
+        console.info("[watcher:evm] PaymentSplit event amounts below threshold", {
+          paymentId: input.paymentId,
+          txHash: log.transactionHash,
+          merchantAmount: merchantAmountNum,
+          expectedMerchant: expectedMerchantNum,
+          merchantThreshold,
+          feeAmount: feeAmountNum,
+          expectedFee: expectedFeeNum,
+          feeThreshold
+        })
+        continue
+      }
+
       // payer is topics[3] (indexed) — last 20 bytes = 40 hex chars
       const payerTopic = String(log.topics[3] || "")
       const payer = payerTopic.length >= 42 ? "0x" + payerTopic.slice(-40) : "unknown"
 
-      console.info("[watcher:evm] PaymentSplit event matched", {
+      console.info("[watcher:evm] PaymentSplit event matched — both legs validated", {
         paymentId: input.paymentId,
         txHash: log.transactionHash,
         payer,
-        token: decoded.token
+        token: decoded.token,
+        merchantAmount: merchantAmountNum,
+        feeAmount: feeAmountNum
       })
 
-      const confirmed = await handleMatchingTransaction(
+      // Pass total atomic value (merchant + fee) for audit trail.
+      // feeCaptureValidated: true because both legs are on-chain and validated above.
+      const totalAtomic = String(merchantAmountNum + feeAmountNum)
+      const detected = await handleMatchingTransaction(
         input.paymentId,
-        { hash: log.transactionHash, value: "0", from: payer },
+        { hash: log.transactionHash, value: totalAtomic, from: payer },
         true
       )
-      if (confirmed) return true
+      if (detected) return true
     }
 
     console.info("[watcher:evm] no PaymentSplit event matched paymentId", {
@@ -310,8 +331,8 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
 
     const value = weiToEth(tx.value)
     if (value >= threshold) {
-      const confirmed = await handleMatchingTransaction(input.paymentId, tx, false)
-      if (confirmed) return true
+      const detected = await handleMatchingTransaction(input.paymentId, tx, false)
+      if (detected) return true
     } else {
       console.info("[watcher:evm] direct tx below threshold", {
         paymentId: input.paymentId,
@@ -326,110 +347,37 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
   return false
 }
 
-// ─── State machine ────────────────────────────────────────────────────────────
+// ─── Engine handoff ───────────────────────────────────────────────────────────
 
 /**
- * Advance a payment through its confirmation state machine.
+ * Hand a detected transaction off to the engine's event processor.
  *
- * Safe to call from both the watcher and webhook paths — the unique DB
- * constraint on payment_id in the ledger table ensures only the first
- * write wins if both paths race.
+ * The watcher's only responsibility is detection and matching. All state
+ * transitions and DB writes belong to the engine via processPaymentEvent.
+ *
+ * feeCaptureValidated: true  → both merchant and fee legs were verified on-chain
+ *                              → emit payment.confirmed so the engine can finalize
+ * feeCaptureValidated: false → only a single transfer was detected (direct payment)
+ *                              → emit payment.processing; engine awaits full confirmation
  */
 async function handleMatchingTransaction(
   paymentId: string,
   tx: { hash: string; value: string; from: string },
   feeCaptureValidated: boolean
 ): Promise<boolean> {
-  const transaction = await getTransactionByPaymentId(paymentId)
+  await processPaymentEvent({
+    type: feeCaptureValidated ? "payment.confirmed" : "payment.processing",
+    paymentId,
+    txHash: tx.hash,
+    value: tx.value,
+    from: tx.from,
+    feeCaptureValidated
+  })
 
-  if (transaction && tx.hash) {
-    try {
-      await updateTransactionProviderReference(transaction.id, tx.hash)
-    } catch (error) {
-      console.warn("[watcher] Failed to update transaction reference:", error)
-    }
-  }
-
-  let status = await getPaymentStatus(paymentId)
-  if (!status) return false
-
-  if (status === "CONFIRMED") {
-    if (transaction) {
-      await updateTransactionStatus(transaction.id, "CONFIRMED")
-    }
-    return true
-  }
-
-  // Advance lifecycle in strict order to avoid read-after-write issues
-  try {
-    if (status === "CREATED") {
-      await updatePaymentStatus(paymentId, "PENDING", {
-        providerEvent: "watcher.detected",
-        rawPayload: { txHash: tx.hash }
-      })
-      status = "PENDING"
-    }
-
-    if (status === "PENDING") {
-      await updatePaymentStatus(paymentId, "PROCESSING", {
-        providerEvent: "watcher.detected",
-        rawPayload: { txHash: tx.hash, value: tx.value, from: tx.from }
-      })
-      if (transaction) {
-        await updateTransactionStatus(transaction.id, "PROCESSING")
-      }
-      status = "PROCESSING"
-    }
-
-    if (status === "PROCESSING") {
-      const payment = await getPaymentById(paymentId)
-      if (!payment) return false
-
-      await upsertLedgerEntry({
-        merchant_id: payment.merchant_id,
-        payment_id: paymentId,
-        transaction_id: transaction?.id,
-        provider: payment.provider,
-        network: payment.network,
-        asset: payment.currency,
-        amount: payment.gross_amount,
-        usd_value: payment.gross_amount,
-        wallet_address: tx.from,
-        direction: "INBOUND",
-        status: "CONFIRMED"
-      })
-
-      await updatePaymentStatus(paymentId, "CONFIRMED", {
-        providerEvent: "blockchain_confirmation",
-        rawPayload: { txHash: tx.hash, value: tx.value, from: tx.from, feeCaptureValidated }
-      })
-
-      if (transaction) {
-        await updateTransactionStatus(transaction.id, "CONFIRMED")
-      }
-
-      return true
-    }
-  } catch (error) {
-    console.error("[watcher] State transition failed for payment", paymentId, error)
-    return false
-  }
-
-  return false
+  return true
 }
 
 // ─── RPC helpers ─────────────────────────────────────────────────────────────
-
-async function getPaymentStatus(paymentId: string): Promise<PaymentStatus | null> {
-  const { data, error } = await supabaseDb
-    .from("payments")
-    .select("status")
-    .eq("id", paymentId)
-    .single()
-
-  if (error || !data?.status) return null
-  return data.status as PaymentStatus
-}
 
 async function getCurrentBlockHeight(rpcUrl: string): Promise<number> {
   const response = await fetch(rpcUrl, {
