@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { Web3Provider } from "@/components/providers/Web3Provider"
+import { SolanaWalletProvider } from "@/components/providers/SolanaWalletProvider"
 
 export const metadata: Metadata = {
   title: {
@@ -49,7 +51,11 @@ export default function RootLayout({
         <link rel="icon" type="image/png" href="/favicon.png" />
       </head>
       <body className="font-sans antialiased">
-        {children}
+        <Web3Provider>
+          <SolanaWalletProvider>
+            {children}
+          </SolanaWalletProvider>
+        </Web3Provider>
       </body>
     </html>
   );

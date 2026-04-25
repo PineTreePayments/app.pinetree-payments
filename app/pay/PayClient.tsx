@@ -10,6 +10,7 @@ import Card from "@/components/ui/Card"
 import PageContainer from "@/components/ui/PageContainer"
 import StatusBadge from "@/components/ui/StatusBadge"
 import BaseWalletPayment from "@/components/payment/BaseWalletPayment"
+import SolanaWalletPayment from "@/components/payment/SolanaWalletPayment"
 
 type SplitOutput = {
   address: string
@@ -74,6 +75,12 @@ function parsePayload(raw: string | null): SplitPayload | null {
   }
 
   return null
+}
+
+function isSolanaPayment(payload: SplitPayload | null): boolean {
+  if (!payload) return false
+  const network = String(payload.network || "").toLowerCase()
+  return network === "solana" && String(payload.paymentUrl || "").startsWith("solana:")
 }
 
 function isBaseContractPayment(payload: SplitPayload | null): boolean {
@@ -517,12 +524,21 @@ export default function PayClient() {
                         {/* Crypto wallet rail */}
                         {paymentPayload && String(paymentPayload.network || "").toLowerCase() !== "shift4" ? (
                           <>
-                            {/* Base contract_split — in-page wallet execution (no QR) */}
+                            {/* Base contract_split — in-page wallet execution */}
                             {isBaseContractPayment(paymentPayload) ? (
                               <BaseWalletPayment
                                 paymentUrl={String(paymentPayload.paymentUrl || "")}
                                 nativeAmount={Number(paymentPayload.nativeAmount || 0)}
                                 usdAmount={Number(paymentPayload.usdTotalAmount || 0)}
+                                onSuccess={() => { void loadIntentCallback() }}
+                              />
+                            ) : isSolanaPayment(paymentPayload) ? (
+                              /* Solana — in-page wallet adapter + QR fallback */
+                              <SolanaWalletPayment
+                                paymentUrl={String(paymentPayload.paymentUrl || "")}
+                                nativeAmount={Number(paymentPayload.nativeAmount || 0)}
+                                usdAmount={Number(paymentPayload.usdTotalAmount || 0)}
+                                qrCodeUrl={String(paymentPayload.qrCodeUrl || "")}
                                 onSuccess={() => { void loadIntentCallback() }}
                               />
                             ) : (
@@ -531,9 +547,7 @@ export default function PayClient() {
                                 {paymentPayload.qrCodeUrl ? (
                                   <div className="flex flex-col items-center space-y-2">
                                     <div className="text-xs uppercase tracking-widest text-gray-500">
-                                      {String(paymentPayload.network || "").toLowerCase() === "solana"
-                                        ? "Open Phantom → Scanner → Scan QR"
-                                        : "Open wallet app → Scan QR"}
+                                      Open wallet app → Scan QR
                                     </div>
                                     <div className="bg-white border border-gray-200 rounded-xl p-2">
                                       <Image
@@ -567,7 +581,7 @@ export default function PayClient() {
                                   </div>
                                 ) : null}
 
-                                {String(paymentPayload?.paymentUrl || "").match(/^(solana:|ethereum:)/) ? (
+                                {String(paymentPayload?.paymentUrl || "").match(/^(ethereum:)/) ? (
                                   <Button
                                     fullWidth
                                     onClick={() => { window.location.href = String(paymentPayload.paymentUrl || "") }}
@@ -641,6 +655,13 @@ export default function PayClient() {
             paymentUrl={String(activePayload?.paymentUrl || "")}
             nativeAmount={nativeAmount}
             usdAmount={usdTotalAmount}
+          />
+        ) : isSolanaPayment(activePayload) ? (
+          <SolanaWalletPayment
+            paymentUrl={String(activePayload?.paymentUrl || "")}
+            nativeAmount={nativeAmount}
+            usdAmount={usdTotalAmount}
+            qrCodeUrl={paymentQrUrl}
           />
         ) : (
           <>

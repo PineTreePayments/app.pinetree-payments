@@ -5,7 +5,10 @@ import { watchPaymentOnce } from "@/engine/paymentWatcher"
 // Vercel cron secret — set CRON_SECRET in your Vercel env vars to secure this endpoint
 function isAuthorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET
-  if (!secret) return true // open if no secret configured (dev)
+  if (!secret) {
+    console.error("[cron:check-payments] Missing CRON_SECRET — rejecting request")
+    return false
+  }
   const auth = req.headers.get("authorization") || ""
   return auth === `Bearer ${secret}`
 }

@@ -28,7 +28,10 @@ function verifyAlchemySignature(
   rawBody: string,
   signingKey: string | undefined
 ): boolean {
-  if (!signingKey) return true
+  if (!signingKey) {
+    console.error("[webhook:solana] Missing signing key — rejecting request")
+    return false
+  }
   if (!signatureHeader) return false
   const expected = createHmac("sha256", signingKey).update(rawBody).digest("hex")
   return signatureHeader === expected
