@@ -46,3 +46,8 @@ contracts/artifacts
 contracts/cache
 contracts/.env.deploy
 !contracts/.env.deploy.example
+
+*.zip
+.zip files
+node_modules
+.next

@@ -9,6 +9,7 @@ import Button from "@/components/ui/Button"
 import Card from "@/components/ui/Card"
 import PageContainer from "@/components/ui/PageContainer"
 import StatusBadge from "@/components/ui/StatusBadge"
+import BaseWalletPayment from "@/components/payment/BaseWalletPayment"
 
 type SplitOutput = {
   address: string
@@ -73,6 +74,14 @@ function parsePayload(raw: string | null): SplitPayload | null {
   }
 
   return null
+}
+
+function isBaseContractPayment(payload: SplitPayload | null): boolean {
+  if (!payload) return false
+  const network = String(payload.network || "").toLowerCase()
+  const url = String(payload.paymentUrl || "")
+  // Base + calldata in URL means contract_split; plain ETH transfers have no data param
+  return network === "base" && url.startsWith("ethereum:") && url.includes("data=0x")
 }
 
 function formatUsd(amount: number) {
@@ -259,6 +268,7 @@ export default function PayClient() {
       }
       const result = await res.json()
       const paymentUrl = String(result.paymentUrl || "")
+      console.log("PAYMENT URL:", paymentUrl)
       const derivedAddress = String(result.address || "")
 
       // Update state with actual payment data from API response
@@ -504,56 +514,69 @@ export default function PayClient() {
                           </div>
                         ) : null}
 
-                        {/* Crypto wallet rail — QR + copy */}
+                        {/* Crypto wallet rail */}
                         {paymentPayload && String(paymentPayload.network || "").toLowerCase() !== "shift4" ? (
                           <>
-                            {paymentPayload.qrCodeUrl ? (
-                              <div className="flex flex-col items-center space-y-2">
-                                <div className="text-xs uppercase tracking-widest text-gray-500">
-                                  {String(paymentPayload.network || "").toLowerCase() === "solana"
-                                    ? "Open Phantom → Scanner → Scan QR"
-                                    : "Open MetaMask or Coinbase Wallet → Scan QR"}
-                                </div>
-                                <div className="bg-white border border-gray-200 rounded-xl p-2">
-                                  <Image
-                                    src={paymentPayload.qrCodeUrl}
-                                    alt="Scan with wallet app"
-                                    width={180}
-                                    height={180}
-                                    className="rounded-lg"
-                                  />
-                                </div>
-                                <p className="text-xs text-gray-500 text-center">
-                                  {String(paymentPayload.nativeAmount || 0)} {String(paymentPayload.nativeSymbol || "").toUpperCase()} · {formatUsd(Number(paymentPayload.usdTotalAmount || 0))}
-                                </p>
-                              </div>
-                            ) : null}
+                            {/* Base contract_split — in-page wallet execution (no QR) */}
+                            {isBaseContractPayment(paymentPayload) ? (
+                              <BaseWalletPayment
+                                paymentUrl={String(paymentPayload.paymentUrl || "")}
+                                nativeAmount={Number(paymentPayload.nativeAmount || 0)}
+                                usdAmount={Number(paymentPayload.usdTotalAmount || 0)}
+                                onSuccess={() => { void loadIntentCallback() }}
+                              />
+                            ) : (
+                              <>
+                                {/* All other crypto networks — QR + copy */}
+                                {paymentPayload.qrCodeUrl ? (
+                                  <div className="flex flex-col items-center space-y-2">
+                                    <div className="text-xs uppercase tracking-widest text-gray-500">
+                                      {String(paymentPayload.network || "").toLowerCase() === "solana"
+                                        ? "Open Phantom → Scanner → Scan QR"
+                                        : "Open wallet app → Scan QR"}
+                                    </div>
+                                    <div className="bg-white border border-gray-200 rounded-xl p-2">
+                                      <Image
+                                        src={paymentPayload.qrCodeUrl}
+                                        alt="Scan with wallet app"
+                                        width={180}
+                                        height={180}
+                                        className="rounded-lg"
+                                      />
+                                    </div>
+                                    <p className="text-xs text-gray-500 text-center">
+                                      {String(paymentPayload.nativeAmount || 0)} {String(paymentPayload.nativeSymbol || "").toUpperCase()} · {formatUsd(Number(paymentPayload.usdTotalAmount || 0))}
+                                    </p>
+                                  </div>
+                                ) : null}
 
-                            {paymentPayload?.outputs?.[0]?.address ? (
-                              <div className="space-y-2">
-                                <label className="text-xs uppercase tracking-widest text-gray-500">Payment Address</label>
-                                <div className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800 break-all font-mono">
-                                  {paymentPayload.outputs[0].address}
-                                </div>
-                                <div className="grid grid-cols-2 gap-2">
-                                  <Button onClick={copyAddress}>
-                                    {copiedAddress ? "Address Copied" : "Copy Address"}
-                                  </Button>
-                                  <Button variant="secondary" onClick={() => copyAmount(paymentPayload.nativeAmount)}>
-                                    {copiedAmount ? "Amount Copied" : "Copy Amount"}
-                                  </Button>
-                                </div>
-                              </div>
-                            ) : null}
+                                {paymentPayload?.outputs?.[0]?.address ? (
+                                  <div className="space-y-2">
+                                    <label className="text-xs uppercase tracking-widest text-gray-500">Payment Address</label>
+                                    <div className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800 break-all font-mono">
+                                      {paymentPayload.outputs[0].address}
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <Button onClick={copyAddress}>
+                                        {copiedAddress ? "Address Copied" : "Copy Address"}
+                                      </Button>
+                                      <Button variant="secondary" onClick={() => copyAmount(paymentPayload.nativeAmount)}>
+                                        {copiedAmount ? "Amount Copied" : "Copy Amount"}
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ) : null}
 
-                            {String(paymentPayload?.paymentUrl || "").match(/^(solana:|ethereum:)/) ? (
-                              <Button
-                                fullWidth
-                                onClick={() => { window.location.href = String(paymentPayload.paymentUrl || "") }}
-                              >
-                                Open in Wallet App
-                              </Button>
-                            ) : null}
+                                {String(paymentPayload?.paymentUrl || "").match(/^(solana:|ethereum:)/) ? (
+                                  <Button
+                                    fullWidth
+                                    onClick={() => { window.location.href = String(paymentPayload.paymentUrl || "") }}
+                                  >
+                                    Open in Wallet App
+                                  </Button>
+                                ) : null}
+                              </>
+                            )}
                           </>
                         ) : null}
 
@@ -613,14 +636,24 @@ export default function PayClient() {
           ) : null}
         </div>
 
-        {paymentQrUrl ? (
-          <div className="flex flex-col items-center rounded-xl border border-gray-200 bg-gray-50 p-4">
-            <p className="text-xs uppercase tracking-widest text-gray-500 mb-3">Scan QR to Pay</p>
-            <Image src={paymentQrUrl} alt="Payment QR" width={208} height={208} className="h-52 w-52 rounded-xl bg-white p-2" />
-          </div>
-        ) : null}
+        {isBaseContractPayment(activePayload) ? (
+          <BaseWalletPayment
+            paymentUrl={String(activePayload?.paymentUrl || "")}
+            nativeAmount={nativeAmount}
+            usdAmount={usdTotalAmount}
+          />
+        ) : (
+          <>
+            {paymentQrUrl ? (
+              <div className="flex flex-col items-center rounded-xl border border-gray-200 bg-gray-50 p-4">
+                <p className="text-xs uppercase tracking-widest text-gray-500 mb-3">Scan QR to Pay</p>
+                <Image src={paymentQrUrl} alt="Payment QR" width={208} height={208} className="h-52 w-52 rounded-xl bg-white p-2" />
+              </div>
+            ) : null}
+          </>
+        )}
 
-        {recipientAddress ? (
+        {recipientAddress && !isBaseContractPayment(activePayload) ? (
           <div className="space-y-2">
             <label className="text-xs uppercase tracking-widest text-gray-500">Payment Address</label>
             <div className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800 break-all font-mono">
