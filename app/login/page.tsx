@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import Image from "next/image"
 import { createBrowserClient } from "@supabase/ssr"
 import { toast } from "sonner"
+import { Eye, EyeOff } from "lucide-react"
 
 /* =============================
 TOGGLE GOOGLE LOGIN HERE
@@ -22,6 +23,9 @@ export default function LoginPage() {
   const [business, setBusiness] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [errorMsg, setErrorMsg] = useState("")
+  const [infoMsg, setInfoMsg] = useState("")
 
   /* -----------------------------
   AUTO REDIRECT IF LOGGED IN
@@ -52,8 +56,10 @@ export default function LoginPage() {
   LOGIN
   ----------------------------- */
 
-  async function login() {
+  async function handleLogin() {
     setLoading(true)
+    setErrorMsg("")
+    setInfoMsg("")
 
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
@@ -63,6 +69,7 @@ export default function LoginPage() {
     console.log("LOGIN RESULT:", { data, error })
 
     if (error) {
+      setErrorMsg("Invalid email or password")
       toast.error("Invalid email or password")
       setLoading(false)
       return
@@ -79,8 +86,12 @@ export default function LoginPage() {
   SIGNUP
   ----------------------------- */
 
-  async function signup() {
+  async function handleSignup() {
+    setErrorMsg("")
+    setInfoMsg("")
+
     if (!business) {
+      setErrorMsg("Please enter a business name")
       toast.error("Please enter a business name")
       return
     }
@@ -100,23 +111,34 @@ export default function LoginPage() {
     console.log("SIGNUP RESULT:", { data, error })
 
     if (error) {
+      setErrorMsg(error.message)
       toast.error(error.message)
       setLoading(false)
       return
     }
 
-    // If Supabase returned a session, the project has email confirmation
-    // disabled — redirect immediately.
     if (data.session) {
       toast.success("Account created. Welcome!")
       window.location.href = "/dashboard"
       return
     }
 
-    // Email confirmation is required — user must verify before signing in.
-    toast.success("Account created! Check your email to confirm your address, then sign in.")
-    setMode("login")
+    setInfoMsg("Check your email to confirm your account")
+    toast.success("Check your email to confirm your account")
     setLoading(false)
+  }
+
+  /* -----------------------------
+  FORM SUBMIT
+  ----------------------------- */
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (mode === "login") {
+      handleLogin()
+    } else {
+      handleSignup()
+    }
   }
 
   /* -----------------------------
@@ -194,49 +216,69 @@ export default function LoginPage() {
           </>
         )}
 
-        <input
-          type="email"
-          placeholder="Email"
-          className="border border-gray-300 p-2.5 rounded-md w-full mb-2 text-gray-900"
-          onChange={(e) => setEmail(e.target.value)}
-        />
-
-        {mode === "signup" && (
+        <form onSubmit={handleSubmit}>
           <input
-            type="text"
-            placeholder="Business name"
+            type="email"
+            placeholder="Email"
             className="border border-gray-300 p-2.5 rounded-md w-full mb-2 text-gray-900"
-            onChange={(e) => setBusiness(e.target.value)}
+            onChange={(e) => setEmail(e.target.value)}
           />
-        )}
 
-        <input
-          type="password"
-          placeholder="Password"
-          className="border border-gray-300 p-2.5 rounded-md w-full mb-3 text-gray-900"
-          onChange={(e) => setPassword(e.target.value)}
-        />
+          {mode === "signup" && (
+            <input
+              type="text"
+              placeholder="Business name"
+              className="border border-gray-300 p-2.5 rounded-md w-full mb-2 text-gray-900"
+              onChange={(e) => setBusiness(e.target.value)}
+            />
+          )}
 
-        <button
-          onClick={mode === "login" ? login : signup}
-          disabled={loading}
-          className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-md transition font-medium disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          {loading
-            ? mode === "login"
-              ? "Signing in..."
-              : "Creating account..."
-            : mode === "login"
-              ? "Sign in"
-              : "Create account"}
-        </button>
+          <div className="relative mb-3">
+            <input
+              type={showPassword ? "text" : "password"}
+              placeholder="Password"
+              className="border border-gray-300 p-2.5 rounded-md w-full pr-10 text-gray-900"
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              tabIndex={-1}
+            >
+              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+
+          {errorMsg && (
+            <p className="text-sm text-red-600 mb-3">{errorMsg}</p>
+          )}
+
+          {infoMsg && (
+            <p className="text-sm text-blue-600 mb-3">{infoMsg}</p>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-md transition font-medium disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {loading
+              ? mode === "login"
+                ? "Signing in..."
+                : "Creating account..."
+              : mode === "login"
+                ? "Sign in"
+                : "Create account"}
+          </button>
+        </form>
 
         <p className="text-xs text-gray-600 mt-4 text-center">
           {mode === "login" ? (
             <>
               New to PineTree?{" "}
               <button
-                onClick={() => setMode("signup")}
+                onClick={() => { setMode("signup"); setErrorMsg(""); setInfoMsg("") }}
                 className="text-blue-600 font-medium"
               >
                 Create account
@@ -246,7 +288,7 @@ export default function LoginPage() {
             <>
               Already have an account?{" "}
               <button
-                onClick={() => setMode("login")}
+                onClick={() => { setMode("login"); setErrorMsg(""); setInfoMsg("") }}
                 className="text-blue-600 font-medium"
               >
                 Sign in
