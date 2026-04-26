@@ -109,7 +109,9 @@ function getAmountMatchRatio(network: string): number {
 
 function getLookbackWindow(network: string): number {
   const normalized = String(network || "").toLowerCase().trim()
-  const defaultValue = normalized === "solana" ? 500 : 40
+  // Solana: 1500 slots ≈ 10 minutes — safely covers a 5-min cron interval with overlap.
+  // EVM: 40 blocks ≈ 8 minutes on Base (2-s block time).
+  const defaultValue = normalized === "solana" ? 1500 : 40
   const raw =
     normalized === "solana"
       ? Number(process.env.PAYMENT_WATCHER_SINGLE_LOOKBACK_SOLANA || defaultValue)
@@ -329,7 +331,11 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
 
     const value = weiToEth(tx.value)
     if (value >= threshold) {
-      const detected = await handleMatchingTransaction(input.paymentId, tx, false)
+      // Direct mode: a single full-amount transfer to the merchant wallet is the
+      // complete on-chain proof for this payment.  updatePaymentStatus auto-validates
+      // feeCaptureMethod === "direct", so we emit payment.confirmed immediately rather
+      // than stopping at payment.processing (which has no follow-up confirmation path).
+      const detected = await handleMatchingTransaction(input.paymentId, tx, true)
       if (detected) return true
     } else {
       console.info("[watcher:evm] direct tx below threshold", {
@@ -626,12 +632,13 @@ async function findMatchingSolanaSplitTransaction(input: {
     let memoMatches = false
 
     for (const ix of instructions) {
-      // Memo program instruction: programId matches and parsed is a plain string
+      // Memo program instruction: programId matches and parsed is a plain string.
+      // Trim both sides — some RPC providers pad the memo with whitespace.
       if (
         ix.programId === SOLANA_MEMO_PROGRAM_ID &&
         typeof ix.parsed === "string"
       ) {
-        memoMatches = ix.parsed === input.paymentId
+        memoMatches = ix.parsed.trim() === input.paymentId.trim()
         continue
       }
 

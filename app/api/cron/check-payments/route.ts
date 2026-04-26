@@ -17,6 +17,9 @@ type SplitMeta = {
   merchantWallet?: string
   pinetreeWallet?: string
   expectedAmountNative?: number
+  // createPayment stores these names — keep both for backwards compatibility
+  merchantNativeAmountAtomic?: string | number
+  feeNativeAmountAtomic?: string | number
   expectedMerchantAtomic?: string | number
   expectedFeeAtomic?: string | number
   feeCaptureMethod?: string
@@ -56,8 +59,9 @@ export async function GET(req: NextRequest) {
           merchantAmount: Number(payment.merchant_amount ?? 0),
           pinetreeFee: Number(payment.pinetree_fee ?? 0),
           expectedAmountNative: split?.expectedAmountNative,
-          expectedMerchantAtomic: split?.expectedMerchantAtomic,
-          expectedFeeAtomic: split?.expectedFeeAtomic,
+          // prefer the canonical field names written by createPayment; fall back to legacy aliases
+          expectedMerchantAtomic: split?.merchantNativeAmountAtomic ?? split?.expectedMerchantAtomic,
+          expectedFeeAtomic: split?.feeNativeAmountAtomic ?? split?.expectedFeeAtomic,
           feeCaptureMethod: split?.feeCaptureMethod,
           splitContract: split?.splitContract
         }),
