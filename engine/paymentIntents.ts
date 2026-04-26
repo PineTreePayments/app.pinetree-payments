@@ -280,13 +280,14 @@ export async function selectPaymentIntentNetworkEngine(input: {
     throw new Error("Selected network is not enabled for this merchant")
   }
 
-  if (
+  // Capture the old payment ID before entering the try block. markPaymentIncomplete is
+  // called only AFTER the new payment is successfully created and linked — if creation
+  // fails the intent must still point to the old PENDING payment so the user can retry.
+  const prevPaymentId = (
     intent.payment_id &&
     intent.selected_network &&
     intent.selected_network !== normalizedNetwork
-  ) {
-    await markPaymentIncomplete(intent.payment_id)
-  }
+  ) ? intent.payment_id : null
 
   try {
     console.info("[payment-intent] select-network:start", {
@@ -326,6 +327,11 @@ export async function selectPaymentIntentNetworkEngine(input: {
       selected_network: normalizedNetwork,
       payment_id: payment.id
     })
+
+    // New payment is safely linked — now it is safe to retire the previous payment.
+    if (prevPaymentId) {
+      await markPaymentIncomplete(prevPaymentId)
+    }
 
     const persistedPayment = await getPaymentById(payment.id)
     if (!persistedPayment) {

@@ -585,13 +585,12 @@ export default function PayClient() {
                           />
                         ) : null}
 
-                        {/* Solana — in-page wallet adapter + QR fallback */}
+                        {/* Solana — in-page wallet adapter */}
                         {paymentPayload && asset.network === "solana" ? (
                           <SolanaWalletPayment
                             paymentUrl={String(paymentPayload.paymentUrl || "")}
                             nativeAmount={Number(paymentPayload.nativeAmount || 0)}
                             usdAmount={Number(paymentPayload.usdTotalAmount || 0)}
-                            qrCodeUrl={String(paymentPayload.qrCodeUrl || "")}
                             onSuccess={() => { void loadIntentCallback() }}
                           />
                         ) : null}

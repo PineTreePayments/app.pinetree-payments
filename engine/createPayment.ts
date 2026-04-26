@@ -270,13 +270,30 @@ export async function createPayment(
   if (input.idempotencyKey) {
     const claim = await claimIdempotencyKey(input.idempotencyKey, paymentId)
     if (claim.status === "existing") {
-      const existingResult = await resolveExistingPaymentResult(claim.paymentId)
-      if (existingResult) {
-        return existingResult
+      const prevPayment = await getPaymentById(claim.paymentId)
+      const prevStatus = String(prevPayment?.status || "").toUpperCase()
+      if (prevStatus === "INCOMPLETE" || prevStatus === "FAILED") {
+        // The previously-idempotent payment reached a terminal state (e.g. the user
+        // switched networks: A→B→A). Release the stale claim so a fresh payment can
+        // be created under the same key instead of returning the defunct record.
+        await releaseIdempotencyKey(input.idempotencyKey, claim.paymentId)
+        const reClaim = await claimIdempotencyKey(input.idempotencyKey, paymentId)
+        if (reClaim.status === "existing") {
+          const concurrentResult = await resolveExistingPaymentResult(reClaim.paymentId)
+          if (concurrentResult) return concurrentResult
+          throw new Error("Idempotency key conflict after re-claim for terminal payment")
+        }
+        claimedIdempotencyKey = true
+      } else {
+        const existingResult = await resolveExistingPaymentResult(claim.paymentId)
+        if (existingResult) {
+          return existingResult
+        }
+        throw new Error("Idempotency key exists but associated payment could not be loaded")
       }
-      throw new Error("Idempotency key exists but associated payment could not be loaded")
+    } else {
+      claimedIdempotencyKey = true
     }
-    claimedIdempotencyKey = true
   }
 
   try {
