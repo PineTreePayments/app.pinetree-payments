@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { buildCreatePaymentRequest, createPayment } from "@/engine/createPayment"
+import { runPaymentWatcher } from "@/engine/checkPaymentOnce"
 
 type CreatePaymentBody = {
   amount: number
@@ -37,6 +38,11 @@ export async function POST(req: NextRequest) {
       ...createPaymentInput,
       idempotencyKey
     })
+
+    // Fire-and-forget: kick off an immediate blockchain check without blocking
+    // the response. Serverless functions must exit promptly; the cron handles
+    // subsequent periodic checks. runPaymentWatcher never throws.
+    void runPaymentWatcher(payment.id)
 
     return NextResponse.json({
       paymentId: payment.id,

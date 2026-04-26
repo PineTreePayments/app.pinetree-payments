@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import Image from "next/image"
+import { createBrowserClient } from "@supabase/ssr"
 import { ALLOWED_ASSETS, getAvailableAssetsFromValues } from "@/engine/providerMappings"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 import Button from "@/components/ui/Button"
@@ -11,6 +12,11 @@ import PageContainer from "@/components/ui/PageContainer"
 import StatusBadge from "@/components/ui/StatusBadge"
 import BaseWalletPayment from "@/components/payment/BaseWalletPayment"
 import SolanaWalletPayment from "@/components/payment/SolanaWalletPayment"
+
+const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
 type SplitOutput = {
   address: string
@@ -348,6 +354,44 @@ export default function PayClient() {
 
     return () => clearInterval(interval)
   }, [intentId, loadIntentCallback, selectedNetwork, intentPayload?.paymentId, normalizedPaymentStatus])
+
+  // Realtime subscription — instant status updates when the payments row changes.
+  // Activated once paymentId is known; torn down on terminal state or unmount.
+  useEffect(() => {
+    const paymentId = intentPayload?.paymentId
+    if (!paymentId) return
+
+    const isTerminal =
+      normalizedPaymentStatus === "CONFIRMED" ||
+      normalizedPaymentStatus === "FAILED" ||
+      normalizedPaymentStatus === "INCOMPLETE"
+    if (isTerminal) return
+
+    const channel = supabase
+      .channel("payments")
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "payments",
+          filter: `id=eq.${paymentId}`
+        },
+        (payload) => {
+          const newStatus = String(
+            (payload.new as Record<string, unknown>)?.status ?? ""
+          ).toUpperCase()
+          if (newStatus) {
+            setPaymentStatus(newStatus)
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      void channel.unsubscribe()
+    }
+  }, [intentPayload?.paymentId, normalizedPaymentStatus])
 
   if (intentId && !intentPayload) {
     return (
