@@ -133,6 +133,7 @@ export default function PayClient() {
 
   const [selectedWalletId, setSelectedWalletId] = useState("")
   const intentCardsRef = useRef<HTMLDivElement | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   const resolvedSelectedWalletId = useMemo(() => {
     return walletOptions.some((option) => option.id === selectedWalletId)
@@ -249,15 +250,19 @@ export default function PayClient() {
     }
 
     setSelectedAssetId(assetId)
+    setPaymentPayload(null)
     setLoadingAssetId(assetId)
     setSelectionError("")
-    setPaymentPayload(null)
     setIsLoading(true)
 
     let timeout: ReturnType<typeof setTimeout> | undefined
 
     try {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
       const controller = new AbortController()
+      abortControllerRef.current = controller
       timeout = setTimeout(() => controller.abort(), 15000)
 
       const res = await fetch(`/api/payment-intents/${encodeURIComponent(intentId)}/select-network`, {
@@ -274,6 +279,7 @@ export default function PayClient() {
         throw new Error(String(errorPayload?.error || "Failed to prepare payment details"))
       }
       const result = await res.json()
+      if (abortControllerRef.current !== controller) return
       const paymentUrl = String(result.paymentUrl || "")
       console.log("PAYMENT URL:", paymentUrl)
       const derivedAddress = String(result.address || "")
@@ -505,8 +511,17 @@ export default function PayClient() {
                           </div>
                         ) : null}
 
+                        {/* Network mismatch guard — safety net for stale responses */}
+                        {paymentPayload && ALLOWED_ASSETS[assetId]?.network &&
+                          String(paymentPayload.network || "").toLowerCase() !== String(ALLOWED_ASSETS[assetId].network).toLowerCase() ? (
+                          <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                            Payment mismatch — please retry.
+                          </div>
+                        ) : (
+                        <>
+
                         {/* Shift4 — hosted checkout redirect */}
-                        {paymentPayload && String(paymentPayload.network || "").toLowerCase() === "shift4" ? (
+                        {paymentPayload && asset.network === "shift4" ? (
                           <div className="space-y-3">
                             <p className="text-sm text-gray-700">You will be redirected to a secure checkout page to complete your payment.</p>
                             <Button
@@ -521,78 +536,80 @@ export default function PayClient() {
                           </div>
                         ) : null}
 
-                        {/* Crypto wallet rail */}
-                        {paymentPayload && String(paymentPayload.network || "").toLowerCase() !== "shift4" ? (
+                        {/* Base contract_split — in-page wallet execution */}
+                        {paymentPayload && asset.network === "base" ? (
+                          <BaseWalletPayment
+                            paymentUrl={String(paymentPayload.paymentUrl || "")}
+                            nativeAmount={Number(paymentPayload.nativeAmount || 0)}
+                            usdAmount={Number(paymentPayload.usdTotalAmount || 0)}
+                            onSuccess={() => { void loadIntentCallback() }}
+                          />
+                        ) : null}
+
+                        {/* Solana — in-page wallet adapter + QR fallback */}
+                        {paymentPayload && asset.network === "solana" ? (
+                          <SolanaWalletPayment
+                            paymentUrl={String(paymentPayload.paymentUrl || "")}
+                            nativeAmount={Number(paymentPayload.nativeAmount || 0)}
+                            usdAmount={Number(paymentPayload.usdTotalAmount || 0)}
+                            qrCodeUrl={String(paymentPayload.qrCodeUrl || "")}
+                            onSuccess={() => { void loadIntentCallback() }}
+                          />
+                        ) : null}
+
+                        {/* All other crypto networks — QR + copy */}
+                        {paymentPayload && asset.network !== "shift4" && asset.network !== "base" && asset.network !== "solana" ? (
                           <>
-                            {/* Base contract_split — in-page wallet execution */}
-                            {isBaseContractPayment(paymentPayload) ? (
-                              <BaseWalletPayment
-                                paymentUrl={String(paymentPayload.paymentUrl || "")}
-                                nativeAmount={Number(paymentPayload.nativeAmount || 0)}
-                                usdAmount={Number(paymentPayload.usdTotalAmount || 0)}
-                                onSuccess={() => { void loadIntentCallback() }}
-                              />
-                            ) : isSolanaPayment(paymentPayload) ? (
-                              /* Solana — in-page wallet adapter + QR fallback */
-                              <SolanaWalletPayment
-                                paymentUrl={String(paymentPayload.paymentUrl || "")}
-                                nativeAmount={Number(paymentPayload.nativeAmount || 0)}
-                                usdAmount={Number(paymentPayload.usdTotalAmount || 0)}
-                                qrCodeUrl={String(paymentPayload.qrCodeUrl || "")}
-                                onSuccess={() => { void loadIntentCallback() }}
-                              />
-                            ) : (
-                              <>
-                                {/* All other crypto networks — QR + copy */}
-                                {paymentPayload.qrCodeUrl ? (
-                                  <div className="flex flex-col items-center space-y-2">
-                                    <div className="text-xs uppercase tracking-widest text-gray-500">
-                                      Open wallet app → Scan QR
-                                    </div>
-                                    <div className="bg-white border border-gray-200 rounded-xl p-2">
-                                      <Image
-                                        src={paymentPayload.qrCodeUrl}
-                                        alt="Scan with wallet app"
-                                        width={180}
-                                        height={180}
-                                        className="rounded-lg"
-                                      />
-                                    </div>
-                                    <p className="text-xs text-gray-500 text-center">
-                                      {String(paymentPayload.nativeAmount || 0)} {String(paymentPayload.nativeSymbol || "").toUpperCase()} · {formatUsd(Number(paymentPayload.usdTotalAmount || 0))}
-                                    </p>
-                                  </div>
-                                ) : null}
+                            {paymentPayload.qrCodeUrl ? (
+                              <div className="flex flex-col items-center space-y-2">
+                                <div className="text-xs uppercase tracking-widest text-gray-500">
+                                  Open wallet app → Scan QR
+                                </div>
+                                <div className="bg-white border border-gray-200 rounded-xl p-2">
+                                  <Image
+                                    src={paymentPayload.qrCodeUrl}
+                                    alt="Scan with wallet app"
+                                    width={180}
+                                    height={180}
+                                    className="rounded-lg"
+                                  />
+                                </div>
+                                <p className="text-xs text-gray-500 text-center">
+                                  {String(paymentPayload.nativeAmount || 0)} {String(paymentPayload.nativeSymbol || "").toUpperCase()} · {formatUsd(Number(paymentPayload.usdTotalAmount || 0))}
+                                </p>
+                              </div>
+                            ) : null}
 
-                                {paymentPayload?.outputs?.[0]?.address ? (
-                                  <div className="space-y-2">
-                                    <label className="text-xs uppercase tracking-widest text-gray-500">Payment Address</label>
-                                    <div className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800 break-all font-mono">
-                                      {paymentPayload.outputs[0].address}
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-2">
-                                      <Button onClick={copyAddress}>
-                                        {copiedAddress ? "Address Copied" : "Copy Address"}
-                                      </Button>
-                                      <Button variant="secondary" onClick={() => copyAmount(paymentPayload.nativeAmount)}>
-                                        {copiedAmount ? "Amount Copied" : "Copy Amount"}
-                                      </Button>
-                                    </div>
-                                  </div>
-                                ) : null}
-
-                                {String(paymentPayload?.paymentUrl || "").match(/^(ethereum:)/) ? (
-                                  <Button
-                                    fullWidth
-                                    onClick={() => { window.location.href = String(paymentPayload.paymentUrl || "") }}
-                                  >
-                                    Open in Wallet App
+                            {paymentPayload?.outputs?.[0]?.address ? (
+                              <div className="space-y-2">
+                                <label className="text-xs uppercase tracking-widest text-gray-500">Payment Address</label>
+                                <div className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800 break-all font-mono">
+                                  {paymentPayload.outputs[0].address}
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <Button onClick={copyAddress}>
+                                    {copiedAddress ? "Address Copied" : "Copy Address"}
                                   </Button>
-                                ) : null}
-                              </>
-                            )}
+                                  <Button variant="secondary" onClick={() => copyAmount(paymentPayload.nativeAmount)}>
+                                    {copiedAmount ? "Amount Copied" : "Copy Amount"}
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {String(paymentPayload?.paymentUrl || "").match(/^(ethereum:)/) ? (
+                              <Button
+                                fullWidth
+                                onClick={() => { window.location.href = String(paymentPayload.paymentUrl || "") }}
+                              >
+                                Open in Wallet App
+                              </Button>
+                            ) : null}
                           </>
                         ) : null}
+
+                        </>
+                        )}
 
                         {!selectionError && !paymentPayload ? (
                           <div className="text-xs text-gray-500">Tap the asset again to retry loading payment details.</div>

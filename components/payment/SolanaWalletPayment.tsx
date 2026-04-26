@@ -169,12 +169,12 @@ export default function SolanaWalletPayment({
       </summary>
       <div className="mt-3 flex flex-col items-center space-y-2">
         <div className="text-xs uppercase tracking-widest text-gray-500">
-          Open Phantom → Scanner → Scan QR
+          Open your Solana wallet → Scanner → Scan QR
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-2">
           <Image
             src={qrCodeUrl}
-            alt="Scan with Phantom mobile"
+            alt="Scan with a Solana wallet"
             width={168}
             height={168}
             className="rounded-lg"
@@ -339,20 +339,20 @@ export default function SolanaWalletPayment({
       {qrCodeUrl ? (
         <div className="space-y-2">
           <div className="text-xs uppercase tracking-widest text-gray-500 text-center">
-            Or scan with Phantom mobile
+            Scan with your Solana wallet
           </div>
           <div className="flex flex-col items-center">
             <div className="bg-white border border-gray-200 rounded-xl p-2">
               <Image
                 src={qrCodeUrl}
-                alt="Scan with Phantom mobile"
+                alt="Scan with a Solana wallet"
                 width={168}
                 height={168}
                 className="rounded-lg"
               />
             </div>
             <p className="text-xs text-gray-400 mt-1">
-              Open Phantom → Scanner → Scan QR
+              Open your Solana wallet → Scanner → Scan QR
             </p>
           </div>
         </div>
