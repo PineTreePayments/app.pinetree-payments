@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from "react"
 import Image from "next/image"
-import { supabase } from "@/database/supabase"
-import { useRouter } from "next/navigation"
+import { createBrowserClient } from "@supabase/ssr"
 import { toast } from "sonner"
 
 /* =============================
@@ -12,6 +11,11 @@ TOGGLE GOOGLE LOGIN HERE
 
 const ENABLE_GOOGLE = false
 
+const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
+
 export default function LoginPage() {
   const [mode, setMode] = useState("login")
   const [email, setEmail] = useState("")
@@ -19,19 +23,15 @@ export default function LoginPage() {
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
 
-  const router = useRouter()
-
   /* -----------------------------
   AUTO REDIRECT IF LOGGED IN
-  + AUTH LISTENER (FIX)
   ----------------------------- */
 
   useEffect(() => {
     async function checkSession() {
       const { data } = await supabase.auth.getSession()
-
       if (data.session) {
-        router.replace("/dashboard")
+        window.location.href = "/dashboard"
       }
     }
 
@@ -41,24 +41,26 @@ export default function LoginPage() {
       data: { subscription }
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
-        router.replace("/dashboard")
+        window.location.href = "/dashboard"
       }
     })
 
     return () => subscription.unsubscribe()
-  }, [router])
+  }, [])
 
   /* -----------------------------
-  LOGIN (FIXED)
+  LOGIN
   ----------------------------- */
 
   async function login() {
     setLoading(true)
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password
     })
+
+    console.log("LOGIN RESULT:", { data, error })
 
     if (error) {
       toast.error("Invalid email or password")
@@ -66,10 +68,11 @@ export default function LoginPage() {
       return
     }
 
-    toast.success("Welcome back")
+    const { data: sessionCheck } = await supabase.auth.getSession()
+    console.log("SESSION AFTER LOGIN:", sessionCheck)
 
-    // 🔥 FORCE REDIRECT (DO NOT RELY ON session)
-    router.replace("/dashboard")
+    toast.success("Welcome back")
+    window.location.href = "/dashboard"
   }
 
   /* -----------------------------
@@ -84,7 +87,7 @@ export default function LoginPage() {
 
     setLoading(true)
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -94,13 +97,24 @@ export default function LoginPage() {
       }
     })
 
+    console.log("SIGNUP RESULT:", { data, error })
+
     if (error) {
       toast.error(error.message)
       setLoading(false)
       return
     }
 
-    toast.success("Account created. Please sign in.")
+    // If Supabase returned a session, the project has email confirmation
+    // disabled — redirect immediately.
+    if (data.session) {
+      toast.success("Account created. Welcome!")
+      window.location.href = "/dashboard"
+      return
+    }
+
+    // Email confirmation is required — user must verify before signing in.
+    toast.success("Account created! Check your email to confirm your address, then sign in.")
     setMode("login")
     setLoading(false)
   }
