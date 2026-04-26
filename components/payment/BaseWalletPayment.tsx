@@ -118,7 +118,7 @@ export default function BaseWalletPayment({
     setLocalError("")
     try {
       const { args } = decodeFunctionData({ abi: SPLIT_ABI, data: parsed.data })
-      const a = args as unknown[]
+      const a = [...args]
       console.log("[BaseWalletPayment] tx:pre-submit", {
         paymentId,
         contract: parsed.to,
