@@ -307,6 +307,8 @@ export default function PayClient() {
       setSelectedNetwork(result.selectedNetwork || asset.network)
       setPaymentStatus((prev) => (String(prev || "").toUpperCase() ? prev : "PENDING"))
 
+      await loadIntentCallback()
+
       if (!paymentUrl && !result.qrCodeUrl && !derivedAddress) {
         setSelectionError("No wallet address found for this payment method. Please try another asset.")
       }
@@ -555,14 +557,6 @@ export default function PayClient() {
                           </div>
                         ) : null}
 
-                        {/* Network mismatch guard — safety net for stale responses */}
-                        {paymentPayload && ALLOWED_ASSETS[assetId]?.network &&
-                          String(paymentPayload.network || "").toLowerCase() !== String(ALLOWED_ASSETS[assetId].network).toLowerCase() ? (
-                          <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
-                            Payment mismatch — please retry.
-                          </div>
-                        ) : (
-                        <>
 
                         {/* Shift4 — hosted checkout redirect */}
                         {paymentPayload && asset.network === "shift4" ? (
@@ -586,6 +580,7 @@ export default function PayClient() {
                             paymentUrl={String(paymentPayload.paymentUrl || "")}
                             nativeAmount={Number(paymentPayload.nativeAmount || 0)}
                             usdAmount={Number(paymentPayload.usdTotalAmount || 0)}
+                            paymentId={intentPayload?.paymentId ?? undefined}
                             onSuccess={() => { void loadIntentCallback() }}
                           />
                         ) : null}
@@ -652,8 +647,6 @@ export default function PayClient() {
                           </>
                         ) : null}
 
-                        </>
-                        )}
 
                         {!selectionError && !paymentPayload ? (
                           <div className="text-xs text-gray-500">Tap the asset again to retry loading payment details.</div>

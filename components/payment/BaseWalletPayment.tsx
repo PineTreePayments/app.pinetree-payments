@@ -21,6 +21,7 @@ type Props = {
   paymentUrl: string    // ethereum:0xContract@8453?value=<wei>&data=0x<calldata>
   nativeAmount: number  // display only
   usdAmount: number     // display only
+  paymentId?: string
   onSuccess?: (txHash: string) => void
   onError?: (error: string) => void
 }
@@ -56,6 +57,7 @@ export default function BaseWalletPayment({
   paymentUrl,
   nativeAmount,
   usdAmount,
+  paymentId,
   onSuccess,
   onError,
 }: Props) {
@@ -89,9 +91,10 @@ export default function BaseWalletPayment({
 
   useEffect(() => {
     if (isSubmitted && txHash) {
+      console.log("[BaseWalletPayment] tx:submitted", { paymentId, txHash })
       onSuccess?.(txHash)
     }
-  }, [isSubmitted, txHash, onSuccess])
+  }, [isSubmitted, txHash, onSuccess, paymentId])
 
   useEffect(() => {
     if (!writeError) return
@@ -115,6 +118,17 @@ export default function BaseWalletPayment({
     setLocalError("")
     try {
       const { args } = decodeFunctionData({ abi: SPLIT_ABI, data: parsed.data })
+      const a = args as unknown[]
+      console.log("[BaseWalletPayment] tx:pre-submit", {
+        paymentId,
+        contract: parsed.to,
+        totalValueWei: parsed.value.toString(),
+        merchantAddress: a[0],
+        treasuryAddress: a[1],
+        merchantAmountWei: String(a[2]),
+        feeAmountWei: String(a[3]),
+        paymentRef: a[4],
+      })
       writeContract({
         address: parsed.to,
         abi: SPLIT_ABI,

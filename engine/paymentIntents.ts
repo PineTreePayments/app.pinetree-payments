@@ -11,6 +11,7 @@ import { createPayment } from "./createPayment"
 import { buildCreatePaymentRequest } from "./createPayment"
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 import { PINETREE_FEE } from "./config"
+import { updatePaymentStatus } from "./updatePaymentStatus"
 
 const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base", "shift4"]
 const PAYMENT_DETAILS_TIMEOUT_MS = Number(process.env.PAYMENT_DETAILS_TIMEOUT_MS || 12000)
@@ -207,6 +208,31 @@ export async function getPaymentIntentEngine(intentId: string) {
   }
 }
 
+async function markPaymentIncomplete(paymentId: string): Promise<void> {
+  try {
+    const existing = await getPaymentById(paymentId)
+    if (!existing) return
+
+    const status = String(existing.status || "").toUpperCase()
+
+    // Skip terminal states
+    if (["CONFIRMED", "FAILED", "INCOMPLETE"].includes(status)) return
+
+    // Only transition if payment was actually presented to user
+    if (status === "PENDING") {
+      await updatePaymentStatus(paymentId, "INCOMPLETE", {
+        providerEvent: "network_switched",
+        rawPayload: { reason: "network_switched" }
+      })
+    }
+
+    // If status === CREATED → do nothing (no artificial transition)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (!message.includes("Invalid payment transition")) throw error
+  }
+}
+
 export async function selectPaymentIntentNetworkEngine(input: {
   intentId: string
   network: string
@@ -216,7 +242,15 @@ export async function selectPaymentIntentNetworkEngine(input: {
   const intent = await getPaymentIntentById(input.intentId)
   if (!intent) throw new Error("Payment intent not found")
 
-  if (intent.status === "SELECTED" && intent.payment_id) {
+  const normalizedNetwork = normalizeWalletNetwork(input.network)
+  if (!normalizedNetwork || !SUPPORTED_NETWORKS.includes(normalizedNetwork)) {
+    throw new Error("Unsupported network selection")
+  }
+
+  // Idempotency: only short-circuit if a payment already exists for the same network.
+  // A different network request must proceed to create a new payment.
+  if (intent.status === "SELECTED" && intent.payment_id &&
+      intent.selected_network === normalizedNetwork) {
     const existingPayment = await getPaymentById(intent.payment_id)
     const walletUrl = String(existingPayment?.payment_url || "")
     const recipientAddress = inferRecipientAddressFromPayment(existingPayment)
@@ -238,17 +272,20 @@ export async function selectPaymentIntentNetworkEngine(input: {
     }
   }
 
-  const normalizedNetwork = normalizeWalletNetwork(input.network)
-  if (!normalizedNetwork || !SUPPORTED_NETWORKS.includes(normalizedNetwork)) {
-    throw new Error("Unsupported network selection")
-  }
-
   const available = Array.isArray(intent.available_networks)
     ? intent.available_networks.map((n) => String(n).toLowerCase())
     : []
 
   if (!available.includes(normalizedNetwork)) {
     throw new Error("Selected network is not enabled for this merchant")
+  }
+
+  if (
+    intent.payment_id &&
+    intent.selected_network &&
+    intent.selected_network !== normalizedNetwork
+  ) {
+    await markPaymentIncomplete(intent.payment_id)
   }
 
   try {
