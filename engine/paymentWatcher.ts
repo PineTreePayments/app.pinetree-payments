@@ -50,6 +50,7 @@ export type WatchOnceInput = {
   splitContract?: string
   network: string
   paymentId: string
+  txHash?: string
 }
 
 // ─── Internal RPC types ──────────────────────────────────────────────────────
@@ -64,6 +65,18 @@ type EvmTransaction = {
 
 type EvmBlock = {
   transactions: EvmTransaction[]
+}
+
+type EvmReceiptLog = {
+  address: string
+  data: string
+  topics: string[]
+  transactionHash: string
+}
+
+type EvmTransactionReceipt = {
+  logs: EvmReceiptLog[]
+  status?: string
 }
 
 type SolanaRpcSignatureRow = {
@@ -219,7 +232,7 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
   const startBlock = Math.max(0, currentBlock - lookback)
   const fromBlockHex = "0x" + startBlock.toString(16)
 
-  // ── contract_split: query PaymentSplit event logs (1 RPC call, fast) ─────────
+  // ── contract_split: query PaymentSplit event logs ────────────────────────────
   if (feeCaptureMethod === "contract_split") {
     if (!splitContractEvm) {
       console.warn("[watcher:evm] missing split contract for contract_split payment", {
@@ -228,6 +241,87 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
       return false
     }
 
+    // txHash-first: check the exact transaction receipt instead of scanning all logs.
+    // This path is taken when detect is called after on-chain confirmation (receipt known).
+    if (input.txHash) {
+      const receipt = await getTransactionReceipt(rpcUrl, input.txHash)
+
+      if (!receipt) {
+        console.info("[watcher:evm] txHash receipt not yet available", {
+          paymentId: input.paymentId,
+          txHash: input.txHash
+        })
+        return false
+      }
+
+      const matchingLog = receipt.logs.find(
+        (log) =>
+          log.address.toLowerCase() === splitContractEvm &&
+          log.topics[0] === PAYMENT_SPLIT_TOPIC
+      )
+
+      if (!matchingLog) {
+        console.info("[watcher:evm] txHash receipt has no PaymentSplit log for this contract", {
+          paymentId: input.paymentId,
+          txHash: input.txHash,
+          contractAddress: splitContractEvm
+        })
+        return false
+      }
+
+      const decoded = decodePaymentSplitLog(matchingLog.data)
+      if (!decoded) return false
+
+      if (decoded.paymentRef !== input.paymentId) {
+        console.info("[watcher:evm] txHash receipt PaymentSplit log paymentRef mismatch", {
+          paymentId: input.paymentId,
+          paymentRef: decoded.paymentRef,
+          txHash: input.txHash
+        })
+        return false
+      }
+
+      const merchantAmountNum = Number(decoded.merchantAmount)
+      const feeAmountNum = Number(decoded.feeAmount)
+      const expectedMerchantNum = Number(input.expectedMerchantAtomic || 0)
+      const expectedFeeNum = Number(input.expectedFeeAtomic || 0)
+      const merchantThreshold = expectedMerchantNum > 0 ? expectedMerchantNum * matchRatio : 0
+      const feeThreshold = expectedFeeNum > 0 ? expectedFeeNum * matchRatio : 0
+
+      if (merchantAmountNum < merchantThreshold || feeAmountNum < feeThreshold) {
+        console.info("[watcher:evm] txHash receipt PaymentSplit amounts below threshold", {
+          paymentId: input.paymentId,
+          txHash: input.txHash,
+          merchantAmount: merchantAmountNum,
+          expectedMerchant: expectedMerchantNum,
+          merchantThreshold,
+          feeAmount: feeAmountNum,
+          expectedFee: expectedFeeNum,
+          feeThreshold
+        })
+        return false
+      }
+
+      const payerTopic = String(matchingLog.topics[3] || "")
+      const payer = payerTopic.length >= 42 ? "0x" + payerTopic.slice(-40) : "unknown"
+      const totalAtomic = String(merchantAmountNum + feeAmountNum)
+
+      console.info("[watcher:evm] txHash receipt PaymentSplit matched — both legs validated", {
+        paymentId: input.paymentId,
+        txHash: input.txHash,
+        payer,
+        merchantAmount: merchantAmountNum,
+        feeAmount: feeAmountNum
+      })
+
+      return handleMatchingTransaction(
+        input.paymentId,
+        { hash: input.txHash, value: totalAtomic, from: payer },
+        true
+      )
+    }
+
+    // fallback: broad eth_getLogs scan (cron / webhook paths, no txHash available)
     const logs = await getContractEventLogs(rpcUrl, splitContractEvm, PAYMENT_SPLIT_TOPIC, fromBlockHex)
 
     if (logs.length === 0) {
@@ -412,6 +506,33 @@ async function getBlockByNumber(rpcUrl: string, blockNumber: number): Promise<Ev
   })
   const data = await response.json()
   return (data?.result || null) as EvmBlock | null
+}
+
+async function getTransactionReceipt(rpcUrl: string, txHash: string): Promise<EvmTransactionReceipt | null> {
+  try {
+    const response = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "eth_getTransactionReceipt",
+        params: [txHash],
+        id: 1
+      })
+    })
+    const data = await response.json()
+    if (data?.error) {
+      console.warn("[watcher:evm] eth_getTransactionReceipt rpc error", { txHash, rpcError: data.error })
+      return null
+    }
+    return (data?.result || null) as EvmTransactionReceipt | null
+  } catch (error) {
+    console.error("[watcher:evm] eth_getTransactionReceipt request failed", {
+      txHash,
+      error: error instanceof Error ? error.message : String(error)
+    })
+    return null
+  }
 }
 
 function weiToEth(wei: string): number {

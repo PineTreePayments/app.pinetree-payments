@@ -33,7 +33,7 @@ export async function POST(
 
     console.info("[detect] triggered", { paymentId, txHash, network: payment.network })
 
-    const detected = await runPaymentWatcher(payment.id)
+    const detected = await runPaymentWatcher(payment.id, { txHash })
 
     console.info("[detect] result", { paymentId, detected })
 

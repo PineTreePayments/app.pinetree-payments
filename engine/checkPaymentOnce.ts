@@ -20,7 +20,7 @@ import { StoredPaymentSplitMetadata } from "@/types/payment"
  * Returns true if a matching on-chain transaction was found, false otherwise.
  * Never throws — all errors are caught and logged so callers can fire-and-forget.
  */
-export async function runPaymentWatcher(paymentId: string): Promise<boolean> {
+export async function runPaymentWatcher(paymentId: string, options?: { txHash?: string }): Promise<boolean> {
   let payment: Awaited<ReturnType<typeof getPaymentById>>
 
   try {
@@ -59,7 +59,8 @@ export async function runPaymentWatcher(paymentId: string): Promise<boolean> {
       expectedMerchantAtomic: split?.merchantNativeAmountAtomic ?? split?.expectedMerchantAtomic,
       expectedFeeAtomic: split?.feeNativeAmountAtomic ?? split?.expectedFeeAtomic,
       feeCaptureMethod: split?.feeCaptureMethod,
-      splitContract: split?.splitContract
+      splitContract: split?.splitContract,
+      txHash: options?.txHash
     })
   } catch (error) {
     console.error("[checkPaymentOnce] watcher error", {

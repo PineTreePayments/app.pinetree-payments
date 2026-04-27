@@ -121,11 +121,17 @@ export default function BaseWalletPayment({
   )
 
   useEffect(() => {
-    if (isSubmitted && txHash && paymentData?.paymentId !== undefined) {
-      console.log("[BaseWalletPayment] tx:submitted", { paymentId: paymentData.paymentId, txHash })
+    if (isSubmitted && txHash) {
+      console.log("[BaseWalletPayment] tx:submitted", { paymentId: paymentData?.paymentId, txHash })
+    }
+  }, [isSubmitted, txHash, paymentData])
+
+  useEffect(() => {
+    if (isConfirmed && txHash && paymentData?.paymentId !== undefined) {
+      console.log("[BaseWalletPayment] tx:receipt-confirmed", { paymentId: paymentData.paymentId, txHash })
       onSuccess?.(txHash, paymentData.paymentId)
     }
-  }, [isSubmitted, txHash, paymentData, onSuccess])
+  }, [isConfirmed, txHash, paymentData, onSuccess])
 
   useEffect(() => {
     if (!writeError) return
