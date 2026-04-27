@@ -151,6 +151,13 @@ export default function SolanaWalletPayment({
     .filter((w) => w.readyState !== WalletReadyState.Unsupported)
     .sort((a, b) => readyStateRank(a.readyState) - readyStateRank(b.readyState))
 
+  // Wallets that can be connected via the adapter (extension/in-app browser only).
+  // NotDetected wallets are excluded — on mobile Safari they are never injected,
+  // so calling connect() on them throws a "Wallet not found" error.
+  const connectableWallets = wallets
+    .filter((w) => w.readyState === WalletReadyState.Installed || w.readyState === WalletReadyState.Loadable)
+    .sort((a, b) => readyStateRank(a.readyState) - readyStateRank(b.readyState))
+
   // ── Amount display (shared) ────────────────────────────────────────────────
 
   const amountDisplay = (
@@ -226,17 +233,13 @@ export default function SolanaWalletPayment({
         <p className="text-xs uppercase tracking-widest text-gray-500 text-center">
           Connect a Solana wallet
         </p>
-        {availableWallets.length === 0 ? (
+        {connectableWallets.length === 0 ? (
           <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-            No Solana wallets detected. Install{" "}
-            <a href="https://phantom.app" target="_blank" rel="noopener noreferrer" className="underline">Phantom</a>
-            {" "}or{" "}
-            <a href="https://solflare.com" target="_blank" rel="noopener noreferrer" className="underline">Solflare</a>
-            {" "}in your browser, then refresh.
+            No wallet extension detected in this browser. Use the &ldquo;Open in Phantom&rdquo; or &ldquo;Open in Solflare&rdquo; buttons on the previous screen to pay from your mobile wallet.
           </div>
         ) : (
           <div className="space-y-2">
-            {availableWallets.map((w) => {
+            {connectableWallets.map((w) => {
               const icon = walletIcon(w.adapter.name, w.adapter.icon || null)
               const isImg = icon.startsWith("http") || icon.startsWith("data:")
               return (
@@ -313,7 +316,16 @@ export default function SolanaWalletPayment({
     )
   }
 
-  // ── Not connected — connect button + QR always visible ────────────────────
+  // ── Not connected — wallet deep links (mobile) + extension connect (desktop) ──
+
+  // Opens the current checkout URL inside the wallet's in-app browser where the
+  // Solana provider IS injected. The adapter connect flow then works normally.
+  const deepLinks = typeof window !== "undefined"
+    ? {
+        phantom: `https://phantom.app/ul/browse/${encodeURIComponent(window.location.href)}`,
+        solflare: `https://solflare.com/ul/v1/browse/${encodeURIComponent(window.location.href)}`
+      }
+    : null
 
   return (
     <div className="space-y-3">
@@ -326,37 +338,40 @@ export default function SolanaWalletPayment({
           {localError}
         </div>
       ) : null}
-      {connecting ? (
-        <Button fullWidth disabled>
-          <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
-          Connecting…
-        </Button>
-      ) : (
-        <Button fullWidth onClick={() => setShowPicker(true)}>
-          Connect Solana Wallet
-        </Button>
-      )}
-      {qrCodeUrl ? (
+      {/* Primary: open checkout inside wallet's in-app browser — works on iOS + Android */}
+      {deepLinks ? (
         <div className="space-y-2">
-          <div className="text-xs uppercase tracking-widest text-gray-500 text-center">
-            Scan with your Solana wallet
-          </div>
-          <div className="flex flex-col items-center">
-            <div className="bg-white border border-gray-200 rounded-xl p-2">
-              <Image
-                src={qrCodeUrl}
-                alt="Scan with a Solana wallet"
-                width={168}
-                height={168}
-                className="rounded-lg"
-              />
-            </div>
-            <p className="text-xs text-gray-400 mt-1">
-              Open your Solana wallet → Scanner → Scan QR
-            </p>
-          </div>
+          <p className="text-xs text-center text-gray-500">Open your wallet to pay:</p>
+          <a
+            href={deepLinks.phantom}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium transition"
+          >
+            <span className="text-base leading-none">👻</span>
+            Open in Phantom
+          </a>
+          <a
+            href={deepLinks.solflare}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition"
+          >
+            <span className="text-base leading-none">🔥</span>
+            Open in Solflare
+          </a>
         </div>
       ) : null}
+      {/* Secondary: adapter connect for installed wallet extensions (desktop / wallet browser) */}
+      {connectableWallets.length > 0 ? (
+        connecting ? (
+          <Button fullWidth disabled>
+            <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
+            Connecting…
+          </Button>
+        ) : (
+          <Button variant="secondary" fullWidth onClick={() => setShowPicker(true)}>
+            Connect wallet extension
+          </Button>
+        )
+      ) : null}
+      {qrFallback}
     </div>
   )
 }

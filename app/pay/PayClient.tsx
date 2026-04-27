@@ -383,7 +383,14 @@ export default function PayClient() {
           const newStatus = String(
             (payload.new as Record<string, unknown>)?.status ?? ""
           ).toUpperCase()
-          if (newStatus) {
+          if (!newStatus) return
+          if (newStatus === "INCOMPLETE" || newStatus === "FAILED") {
+            // Re-load the intent before accepting a terminal status.
+            // During a network switch the server marks the OLD payment INCOMPLETE
+            // before this subscription is torn down — the intent may already point
+            // to a new PENDING payment, so we must verify rather than flash "Failed."
+            void loadIntentCallback()
+          } else {
             setPaymentStatus(newStatus)
           }
         }
@@ -393,7 +400,7 @@ export default function PayClient() {
     return () => {
       void channel.unsubscribe()
     }
-  }, [intentPayload?.paymentId, normalizedPaymentStatus])
+  }, [intentPayload?.paymentId, normalizedPaymentStatus, loadIntentCallback])
 
   if (intentId && !intentPayload) {
     return (
@@ -581,7 +588,18 @@ export default function PayClient() {
                             nativeAmount={Number(paymentPayload.nativeAmount || 0)}
                             usdAmount={Number(paymentPayload.usdTotalAmount || 0)}
                             paymentId={intentPayload?.paymentId ?? undefined}
-                            onSuccess={() => { void loadIntentCallback() }}
+                            onSuccess={(txHash) => {
+                              const pid = intentPayload?.paymentId
+                              if (pid) {
+                                void fetch(`/api/payments/${encodeURIComponent(pid)}/detect`, {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ txHash })
+                                }).catch(() => null).then(() => loadIntentCallback())
+                              } else {
+                                void loadIntentCallback()
+                              }
+                            }}
                           />
                         ) : null}
 
@@ -591,7 +609,18 @@ export default function PayClient() {
                             paymentUrl={String(paymentPayload.paymentUrl || "")}
                             nativeAmount={Number(paymentPayload.nativeAmount || 0)}
                             usdAmount={Number(paymentPayload.usdTotalAmount || 0)}
-                            onSuccess={() => { void loadIntentCallback() }}
+                            onSuccess={(txHash) => {
+                              const pid = intentPayload?.paymentId
+                              if (pid) {
+                                void fetch(`/api/payments/${encodeURIComponent(pid)}/detect`, {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ txHash })
+                                }).catch(() => null).then(() => loadIntentCallback())
+                              } else {
+                                void loadIntentCallback()
+                              }
+                            }}
                           />
                         ) : null}
 

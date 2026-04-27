@@ -110,8 +110,8 @@ function getAmountMatchRatio(network: string): number {
 function getLookbackWindow(network: string): number {
   const normalized = String(network || "").toLowerCase().trim()
   // Solana: 1500 slots ≈ 10 minutes — safely covers a 5-min cron interval with overlap.
-  // EVM: 40 blocks ≈ 8 minutes on Base (2-s block time).
-  const defaultValue = normalized === "solana" ? 1500 : 40
+  // EVM: 300 blocks ≈ 10 minutes on Base (2-s block time) — covers 1-min cron with 10× overlap.
+  const defaultValue = normalized === "solana" ? 1500 : 300
   const raw =
     normalized === "solana"
       ? Number(process.env.PAYMENT_WATCHER_SINGLE_LOOKBACK_SOLANA || defaultValue)
