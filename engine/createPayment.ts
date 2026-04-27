@@ -7,7 +7,7 @@
 
 import { chooseBestAdapter } from "./providerSelector"
 import { getProvider } from "./providerRegistry"
-import { type PaymentAdapterId, getAdapterCredentialKey } from "@/types/payment"
+import { type PaymentAdapterId, getAdapterCredentialKey, StoredPaymentSplitMetadata } from "@/types/payment"
 import {
   createPayment as createPaymentRecord,
   createTransaction,
@@ -36,18 +36,7 @@ type PaymentMetadata = {
   [key: string]: unknown
 }
 
-type StoredPaymentSplitMetadata = {
-  split?: {
-    merchantWallet?: string
-    feeCaptureMethod?: string
-    splitContract?: string
-    expectedAmountNative?: number
-    merchantNativeAmount?: number
-    feeNativeAmount?: number
-  }
-}
-
-function inferNativeSymbolFromNetwork(network?: string): string | undefined {
+export function inferNativeSymbolFromNetwork(network?: string): string | undefined {
   const normalized = String(network || "").toLowerCase().trim()
   if (normalized === "solana") return "SOL"
   if (normalized === "base" || normalized === "ethereum") return "ETH"

@@ -18,8 +18,7 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createHmac } from "crypto"
-import { getActivePaymentsByNetwork } from "@/database/payments"
-import { processPaymentEvent } from "@/engine/eventProcessor"
+import { processAlchemyWebhook } from "@/engine/alchemyWebhookProcessor"
 
 // ─── Signature verification ───────────────────────────────────────────────────
 
@@ -39,28 +38,9 @@ function verifyAlchemySignature(
 
 // ─── Payload types ────────────────────────────────────────────────────────────
 
-type SolanaTransfer = {
-  fromUserAccount?: string
-  toUserAccount?: string
-  amount?: number
-}
-
-type SolanaActivity = {
-  signature?: string
-  nativeTransfers?: SolanaTransfer[]
-  tokenTransfers?: SolanaTransfer[]
-}
-
 type AlchemyPayload = {
   event?: {
-    activity?: SolanaActivity[]
-  }
-}
-
-type SplitMetadata = {
-  split?: {
-    merchantWallet?: string
-    pinetreeWallet?: string
+    activity?: unknown[]
   }
 }
 
@@ -79,59 +59,16 @@ export async function POST(req: NextRequest) {
     }
 
     const body = JSON.parse(rawBody) as AlchemyPayload
-    const activities = body?.event?.activity ?? []
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const activities = (body?.event?.activity ?? []) as any[]
 
     if (activities.length === 0) {
       return NextResponse.json({ received: true, checked: 0, matched: 0 })
     }
 
-    const active = await getActivePaymentsByNetwork("solana", 50)
+    const result = await processAlchemyWebhook({ network: "solana", activities })
 
-    // Build wallet address → payment map for O(1) lookup per transfer entry.
-    const walletToPayment = new Map<string, (typeof active)[0]>()
-    for (const payment of active) {
-      const split = ((payment.metadata ?? null) as SplitMetadata | null)?.split
-      if (split?.merchantWallet) {
-        walletToPayment.set(split.merchantWallet, payment)
-      }
-      if (split?.pinetreeWallet) {
-        walletToPayment.set(split.pinetreeWallet, payment)
-      }
-    }
-
-    const results = await Promise.allSettled(
-      activities.flatMap((activity) => {
-        const txHash = activity.signature
-        const transfers = [
-          ...(activity.nativeTransfers ?? []),
-          ...(activity.tokenTransfers ?? [])
-        ]
-
-        return transfers.map(async (transfer) => {
-          const toAccount = transfer.toUserAccount
-          if (!toAccount) return
-
-          const payment = walletToPayment.get(toAccount)
-          if (!payment) return
-
-          await processPaymentEvent({
-            type: "payment.confirmed",
-            paymentId: payment.id,
-            txHash,
-            value: transfer.amount !== undefined ? String(transfer.amount) : undefined,
-            from: transfer.fromUserAccount,
-            feeCaptureValidated: false
-          })
-        })
-      })
-    )
-
-    return NextResponse.json({
-      received: true,
-      checked: activities.length,
-      matched: results.filter((r) => r.status === "fulfilled").length,
-      failed: results.filter((r) => r.status === "rejected").length
-    })
+    return NextResponse.json({ received: true, ...result })
   } catch (err) {
     console.error("[webhook:solana] error", err)
     return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 })

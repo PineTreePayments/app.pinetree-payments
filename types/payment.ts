@@ -77,3 +77,21 @@ export type PaymentStatus =
   | "INCOMPLETE"
   | "EXPIRED"
   | "REFUNDED"
+
+export type PaymentSplitMetadata = {
+  merchantWallet?: string
+  pinetreeWallet?: string
+  expectedAmountNative?: number
+  merchantNativeAmount?: number
+  feeNativeAmount?: number
+  merchantNativeAmountAtomic?: string | number
+  feeNativeAmountAtomic?: string | number
+  expectedMerchantAtomic?: string | number
+  expectedFeeAtomic?: string | number
+  feeCaptureMethod?: string
+  splitContract?: string
+}
+
+export type StoredPaymentSplitMetadata = {
+  split?: PaymentSplitMetadata
+}

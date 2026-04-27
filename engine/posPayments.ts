@@ -8,6 +8,7 @@ import {
   normalizeWalletNetwork
 } from "./providerMappings"
 import { PINETREE_FEE } from "./config"
+import { calculateTax } from "./fees"
 import { chooseBestAdapter } from "./providerSelector"
 
 export type PosTaxSettings = {
@@ -139,7 +140,7 @@ export async function createPosPaymentEngine(
   }
 
   const tax = await getPosTaxSettingsEngine(merchantId)
-  const taxAmount = tax.taxEnabled ? subtotalAmount * (tax.taxRate / 100) : 0
+  const taxAmount = tax.taxEnabled ? calculateTax(subtotalAmount, tax.taxRate) : 0
   const merchantAmount = subtotalAmount + taxAmount
   const serviceFee = PINETREE_FEE
   const totalAmount = merchantAmount + serviceFee
@@ -205,7 +206,7 @@ export async function createPosPaymentIntentEngine(input: CreatePosPaymentInput)
   }
 
   const tax = await getPosTaxSettingsEngine(merchantId)
-  const taxAmount = tax.taxEnabled ? subtotalAmount * (tax.taxRate / 100) : 0
+  const taxAmount = tax.taxEnabled ? calculateTax(subtotalAmount, tax.taxRate) : 0
   const merchantAmount = subtotalAmount + taxAmount
   const serviceFee = PINETREE_FEE
 
@@ -309,7 +310,7 @@ export async function previewPosBreakdownEngine(
   }
 
   const tax = await getPosTaxSettingsEngine(merchantId)
-  const taxAmount = tax.taxEnabled ? subtotalAmount * (tax.taxRate / 100) : 0
+  const taxAmount = tax.taxEnabled ? calculateTax(subtotalAmount, tax.taxRate) : 0
   const merchantAmount = subtotalAmount + taxAmount
   const serviceFee = PINETREE_FEE
   const grossAmount = merchantAmount + serviceFee

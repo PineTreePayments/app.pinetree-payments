@@ -12,18 +12,7 @@
 
 import { getPaymentById } from "@/database"
 import { watchPaymentOnce } from "./paymentWatcher"
-
-type SplitMeta = {
-  merchantWallet?: string
-  pinetreeWallet?: string
-  expectedAmountNative?: number
-  merchantNativeAmountAtomic?: string | number
-  feeNativeAmountAtomic?: string | number
-  expectedMerchantAtomic?: string | number
-  expectedFeeAtomic?: string | number
-  feeCaptureMethod?: string
-  splitContract?: string
-}
+import { StoredPaymentSplitMetadata } from "@/types/payment"
 
 /**
  * Load a payment by ID and run a single blockchain check via watchPaymentOnce.
@@ -55,7 +44,7 @@ export async function runPaymentWatcher(paymentId: string): Promise<boolean> {
     return false
   }
 
-  const split = ((payment.metadata ?? null) as { split?: SplitMeta } | null)?.split
+  const split = ((payment.metadata ?? null) as StoredPaymentSplitMetadata | null)?.split
 
   try {
     return await watchPaymentOnce({

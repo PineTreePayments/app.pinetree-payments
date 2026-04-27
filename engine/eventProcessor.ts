@@ -9,6 +9,7 @@ import { getProvider } from "./providerRegistry"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 import { getPaymentById, getPaymentByProviderReference, createPaymentEvent, upsertLedgerEntry } from "@/database"
 import { PaymentStatus, normalizeToStrictPaymentStatus } from "./paymentStateMachine"
+import { StoredPaymentSplitMetadata } from "@/types/payment"
 import {
   getTransactionByPaymentId,
   getTransactionByProviderReference,
@@ -375,17 +376,6 @@ const watcherEventToStatus: Record<WatcherEvent["type"], PaymentStatus> = {
 
 // ─── Watcher confirmation validator ──────────────────────────────────────────
 
-type PaymentSplitMeta = {
-  feeCaptureMethod?: string
-  expectedAmountNative?: number
-  merchantWallet?: string
-  pinetreeWallet?: string
-  merchantNativeAmountAtomic?: string | number
-  feeNativeAmountAtomic?: string | number
-  expectedMerchantAtomic?: string | number
-  expectedFeeAtomic?: string | number
-}
-
 /**
  * Validates a watcher-detected transaction before allowing CONFIRMED advancement.
  * Called only when feeCaptureValidated is false (i.e. raw webhook data, not
@@ -404,7 +394,7 @@ function validateWatcherConfirmation(
   payment: { metadata?: unknown },
   event: Pick<WatcherEvent, "value" | "from">
 ): { valid: boolean; reason?: string } {
-  const split = ((payment.metadata ?? null) as { split?: PaymentSplitMeta } | null)?.split
+  const split = ((payment.metadata ?? null) as StoredPaymentSplitMetadata | null)?.split
   const feeCaptureMethod = String(split?.feeCaptureMethod || "").trim().toLowerCase()
 
   // These methods are confirmed by the provider webhook itself — no on-chain split to verify.

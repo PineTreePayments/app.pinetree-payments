@@ -1,18 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getPaymentById } from "@/database"
-import { watchPaymentOnce } from "@/engine/paymentWatcher"
-
-type SplitMeta = {
-  merchantWallet?: string
-  pinetreeWallet?: string
-  expectedAmountNative?: number
-  merchantNativeAmountAtomic?: string | number
-  feeNativeAmountAtomic?: string | number
-  expectedMerchantAtomic?: string | number
-  expectedFeeAtomic?: string | number
-  feeCaptureMethod?: string
-  splitContract?: string
-}
+import { runPaymentWatcher } from "@/engine/checkPaymentOnce"
 
 export async function POST(
   req: NextRequest,
@@ -45,21 +33,7 @@ export async function POST(
 
     console.info("[detect] triggered", { paymentId, txHash, network: payment.network })
 
-    const split = ((payment.metadata ?? null) as { split?: SplitMeta } | null)?.split
-
-    const detected = await watchPaymentOnce({
-      paymentId: payment.id,
-      network: payment.network ?? "",
-      merchantWallet: split?.merchantWallet ?? "",
-      pinetreeWallet: split?.pinetreeWallet ?? "",
-      merchantAmount: Number(payment.merchant_amount ?? 0),
-      pinetreeFee: Number(payment.pinetree_fee ?? 0),
-      expectedAmountNative: split?.expectedAmountNative,
-      expectedMerchantAtomic: split?.merchantNativeAmountAtomic ?? split?.expectedMerchantAtomic,
-      expectedFeeAtomic: split?.feeNativeAmountAtomic ?? split?.expectedFeeAtomic,
-      feeCaptureMethod: split?.feeCaptureMethod,
-      splitContract: split?.splitContract
-    })
+    const detected = await runPaymentWatcher(payment.id)
 
     console.info("[detect] result", { paymentId, detected })
 

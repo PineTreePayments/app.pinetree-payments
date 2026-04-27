@@ -147,12 +147,3 @@ export async function expirePayment(
   return updatePaymentStatus(paymentId, "INCOMPLETE", metadata)
 }
 
-/**
- * Mark a payment as incomplete/abandoned
- */
-export async function markPaymentIncomplete(
-  paymentId: string,
-  metadata?: { providerEvent?: string; rawPayload?: unknown }
-) {
-  return updatePaymentStatus(paymentId, "INCOMPLETE", metadata)
-}

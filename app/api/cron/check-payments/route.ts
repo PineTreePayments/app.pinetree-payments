@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getPaymentsByStatus } from "@/database"
-import { watchPaymentOnce } from "@/engine/paymentWatcher"
+import { runPaymentWatcher } from "@/engine/checkPaymentOnce"
 
 // Vercel cron secret — set CRON_SECRET in your Vercel env vars to secure this endpoint
 function isAuthorized(req: NextRequest): boolean {
@@ -11,19 +11,6 @@ function isAuthorized(req: NextRequest): boolean {
   }
   const auth = req.headers.get("authorization") || ""
   return auth === `Bearer ${secret}`
-}
-
-type SplitMeta = {
-  merchantWallet?: string
-  pinetreeWallet?: string
-  expectedAmountNative?: number
-  // createPayment stores these names — keep both for backwards compatibility
-  merchantNativeAmountAtomic?: string | number
-  feeNativeAmountAtomic?: string | number
-  expectedMerchantAtomic?: string | number
-  expectedFeeAtomic?: string | number
-  feeCaptureMethod?: string
-  splitContract?: string
 }
 
 export async function GET(req: NextRequest) {
@@ -48,28 +35,13 @@ export async function GET(req: NextRequest) {
     // Run watcher iterations in parallel — each does a single blockchain check.
     // Each check is raced against an 8s timeout so the function always returns
     // within Vercel's free-tier 10s limit regardless of RPC latency.
-    const runWatcher = (payment: typeof watchable[number]) => {
-      const split = ((payment.metadata ?? null) as { split?: SplitMeta } | null)?.split
-      return Promise.race([
-        watchPaymentOnce({
-          paymentId: payment.id,
-          network: payment.network ?? "",
-          merchantWallet: split?.merchantWallet ?? "",
-          pinetreeWallet: split?.pinetreeWallet ?? "",
-          merchantAmount: Number(payment.merchant_amount ?? 0),
-          pinetreeFee: Number(payment.pinetree_fee ?? 0),
-          expectedAmountNative: split?.expectedAmountNative,
-          // prefer the canonical field names written by createPayment; fall back to legacy aliases
-          expectedMerchantAtomic: split?.merchantNativeAmountAtomic ?? split?.expectedMerchantAtomic,
-          expectedFeeAtomic: split?.feeNativeAmountAtomic ?? split?.expectedFeeAtomic,
-          feeCaptureMethod: split?.feeCaptureMethod,
-          splitContract: split?.splitContract
-        }),
+    const runWatcher = (payment: typeof watchable[number]) =>
+      Promise.race([
+        runPaymentWatcher(payment.id),
         new Promise<boolean>((_, reject) =>
           setTimeout(() => reject(new Error("watcher_timeout")), 8000)
         )
       ])
-    }
 
     const results = await Promise.allSettled(watchable.map(runWatcher))
 

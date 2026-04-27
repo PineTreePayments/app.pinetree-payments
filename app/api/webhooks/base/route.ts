@@ -21,8 +21,7 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createHmac } from "crypto"
-import { getActivePaymentsByNetwork } from "@/database/payments"
-import { processPaymentEvent } from "@/engine/eventProcessor"
+import { processAlchemyWebhook } from "@/engine/alchemyWebhookProcessor"
 
 // ─── Signature verification ───────────────────────────────────────────────────
 
@@ -42,24 +41,9 @@ function verifyAlchemySignature(
 
 // ─── Payload types ────────────────────────────────────────────────────────────
 
-type AlchemyActivity = {
-  fromAddress?: string
-  toAddress?: string
-  hash?: string
-  value?: number
-  asset?: string
-}
-
 type AlchemyPayload = {
   event?: {
-    activity?: AlchemyActivity[]
-  }
-}
-
-type SplitMetadata = {
-  split?: {
-    merchantWallet?: string
-    pinetreeWallet?: string
+    activity?: unknown[]
   }
 }
 
@@ -78,51 +62,16 @@ export async function POST(req: NextRequest) {
     }
 
     const body = JSON.parse(rawBody) as AlchemyPayload
-    const activities = body?.event?.activity ?? []
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const activities = (body?.event?.activity ?? []) as any[]
 
     if (activities.length === 0) {
       return NextResponse.json({ received: true, checked: 0, matched: 0 })
     }
 
-    const active = await getActivePaymentsByNetwork("base", 50)
+    const result = await processAlchemyWebhook({ network: "base", activities })
 
-    // Build lowercase wallet address → payment map for O(1) lookup per activity entry.
-    const walletToPayment = new Map<string, (typeof active)[0]>()
-    for (const payment of active) {
-      const split = ((payment.metadata ?? null) as SplitMetadata | null)?.split
-      if (split?.merchantWallet) {
-        walletToPayment.set(split.merchantWallet.toLowerCase(), payment)
-      }
-      if (split?.pinetreeWallet) {
-        walletToPayment.set(split.pinetreeWallet.toLowerCase(), payment)
-      }
-    }
-
-    const results = await Promise.allSettled(
-      activities.map(async (activity) => {
-        const toAddress = activity.toAddress?.toLowerCase()
-        if (!toAddress) return
-
-        const payment = walletToPayment.get(toAddress)
-        if (!payment) return
-
-        await processPaymentEvent({
-          type: "payment.confirmed",
-          paymentId: payment.id,
-          txHash: activity.hash,
-          value: activity.value !== undefined ? String(activity.value) : undefined,
-          from: activity.fromAddress,
-          feeCaptureValidated: false
-        })
-      })
-    )
-
-    return NextResponse.json({
-      received: true,
-      checked: activities.length,
-      matched: results.filter((r) => r.status === "fulfilled").length,
-      failed: results.filter((r) => r.status === "rejected").length
-    })
+    return NextResponse.json({ received: true, ...result })
   } catch (err) {
     console.error("[webhook:base] error", err)
     return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 })

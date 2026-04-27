@@ -8,17 +8,24 @@ import { Transaction } from "@solana/web3.js"
 import Image from "next/image"
 import Button from "@/components/ui/Button"
 
+// Props support two modes:
+//   Intent mode  — provide `intentId`; payment is created when user clicks Pay / opens wallet.
+//   Direct mode  — provide `paymentUrl`; payment is already created (POS / legacy QR).
 type Props = {
-  paymentUrl: string    // solana:https://.../transaction?paymentId=<id>
-  nativeAmount: number  // display only
-  usdAmount: number     // display only
-  qrCodeUrl?: string    // fallback QR (always preserved)
-  onSuccess?: (signature: string) => void
+  intentId?: string
+  paymentUrl?: string
+  nativeAmount?: number
+  usdAmount: number
+  qrCodeUrl?: string
+  paymentId?: string
+  onPaymentCreated?: (paymentId: string) => void
+  onSuccess?: (txHash: string, paymentId: string) => void
   onError?: (error: string) => void
 }
 
 function parsePaymentId(paymentUrl: string): string | null {
   try {
+    // Handles: solana:https://app.../api/solana-pay/transaction?paymentId=<id>
     const txUrl = paymentUrl.replace(/^solana:/, "")
     return new URL(txUrl).searchParams.get("paymentId")
   } catch {
@@ -36,10 +43,13 @@ function walletIcon(name: string, icon: string | null): string {
 }
 
 export default function SolanaWalletPayment({
-  paymentUrl,
+  intentId,
+  paymentUrl: directPaymentUrl,
   nativeAmount,
   usdAmount,
   qrCodeUrl,
+  paymentId: directPaymentId,
+  onPaymentCreated,
   onSuccess,
   onError,
 }: Props) {
@@ -58,15 +68,16 @@ export default function SolanaWalletPayment({
 
   const [showPicker, setShowPicker] = useState(false)
   const [isPaying, setIsPaying] = useState(false)
+  const [isOpeningWallet, setIsOpeningWallet] = useState(false)
   const [txSignature, setTxSignature] = useState("")
   const [localError, setLocalError] = useState("")
+
+  const isIntentMode = Boolean(intentId)
 
   // Tracks a pending connect() after select() updates state
   const pendingConnectRef = useRef(false)
 
-  const paymentId = parsePaymentId(paymentUrl)
-
-  // Fire connect() once the wallet state is updated after select()
+  // Fire connect() once wallet state is updated after select()
   useEffect(() => {
     if (!pendingConnectRef.current || !wallet || connecting || connected) return
     pendingConnectRef.current = false
@@ -86,29 +97,113 @@ export default function SolanaWalletPayment({
     [select]
   )
 
+  // Creates payment and opens the wallet app via Solana Pay v1/pay deep link.
+  // Works for both Phantom and Solflare — they both support the v1/pay endpoint.
+  const handleDeepLink = useCallback(
+    async (walletType: "phantom" | "solflare") => {
+      setLocalError("")
+      setIsOpeningWallet(true)
+      try {
+        let resolvedPaymentUrl: string
+        let resolvedPaymentId: string
+
+        if (isIntentMode) {
+          const res = await fetch(
+            `/api/payment-intents/${encodeURIComponent(intentId!)}/select-network`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ network: "solana" }),
+            }
+          )
+          if (!res.ok) {
+            const err = (await res.json()) as { error?: string }
+            throw new Error(err.error || "Failed to create payment")
+          }
+          const result = (await res.json()) as { paymentId?: string; paymentUrl?: string }
+          resolvedPaymentId = String(result.paymentId || "")
+          resolvedPaymentUrl = String(result.paymentUrl || "")
+          if (!resolvedPaymentId || !resolvedPaymentUrl) {
+            throw new Error("Incomplete payment data returned from server")
+          }
+          onPaymentCreated?.(resolvedPaymentId)
+        } else {
+          resolvedPaymentUrl = directPaymentUrl || ""
+          resolvedPaymentId = directPaymentId || parsePaymentId(resolvedPaymentUrl) || ""
+          if (!resolvedPaymentUrl) throw new Error("No payment URL available")
+        }
+
+        // Phantom and Solflare's /ul/v1/pay?link= expects the raw HTTPS transaction
+        // request URL — NOT the "solana:" URI wrapper. Strip it before encoding.
+        const txRequestUrl = resolvedPaymentUrl.startsWith("solana:")
+          ? resolvedPaymentUrl.slice("solana:".length)
+          : resolvedPaymentUrl
+        const encoded = encodeURIComponent(txRequestUrl)
+        const deepLink =
+          walletType === "phantom"
+            ? `https://phantom.app/ul/v1/pay?link=${encoded}`
+            : `https://solflare.com/ul/v1/pay?link=${encoded}`
+
+        window.location.href = deepLink
+      } catch (err) {
+        const msg = (err as Error)?.message || "Failed to open wallet"
+        setLocalError(msg)
+        onError?.(msg)
+      } finally {
+        setIsOpeningWallet(false)
+      }
+    },
+    [isIntentMode, intentId, directPaymentUrl, directPaymentId, onPaymentCreated, onError]
+  )
+
+  // Creates payment (intent mode) then builds + sends tx via the wallet adapter.
   const handlePay = useCallback(async () => {
-    if (!publicKey || !paymentId) return
+    if (!publicKey) return
     setIsPaying(true)
     setLocalError("")
 
     try {
-      const res = await fetch(
-        `/api/solana-pay/transaction?paymentId=${encodeURIComponent(paymentId)}`,
+      let resolvedPaymentId: string
+
+      if (isIntentMode) {
+        // Step 1: create payment
+        const createRes = await fetch(
+          `/api/payment-intents/${encodeURIComponent(intentId!)}/select-network`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ network: "solana" }),
+          }
+        )
+        if (!createRes.ok) {
+          const err = (await createRes.json()) as { error?: string }
+          throw new Error(err.error || "Failed to create payment")
+        }
+        const createResult = (await createRes.json()) as { paymentId?: string }
+        resolvedPaymentId = String(createResult.paymentId || "")
+        if (!resolvedPaymentId) throw new Error("Missing paymentId from server")
+        onPaymentCreated?.(resolvedPaymentId)
+      } else {
+        resolvedPaymentId =
+          directPaymentId || parsePaymentId(directPaymentUrl || "") || ""
+        if (!resolvedPaymentId) throw new Error("Cannot determine paymentId")
+      }
+
+      // Step 2: build transaction from the payment
+      const txRes = await fetch(
+        `/api/solana-pay/transaction?paymentId=${encodeURIComponent(resolvedPaymentId)}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ account: publicKey.toBase58() }),
         }
       )
-
-      if (!res.ok) {
-        const err = (await res.json()) as { error?: string }
+      if (!txRes.ok) {
+        const err = (await txRes.json()) as { error?: string }
         throw new Error(err.error || "Failed to build transaction")
       }
+      const { transaction: serialized } = (await txRes.json()) as { transaction: string }
 
-      const { transaction: serialized } = (await res.json()) as { transaction: string }
-
-      // Decode base64 → Uint8Array without Buffer (browser-safe)
       const txBytes = Uint8Array.from(atob(serialized), (c) => c.charCodeAt(0))
       const tx = Transaction.from(txBytes)
 
@@ -116,8 +211,9 @@ export default function SolanaWalletPayment({
         throw new Error("Invalid transaction: missing split instructions")
       }
 
+      // Step 3: send + confirm
       const signature = await sendTransaction(tx, connection)
-      console.log("SOLANA TX SIGNATURE:", signature)
+      console.log("[SolanaWalletPayment] tx:signature", signature)
 
       const latestBlockhash = await connection.getLatestBlockhash()
       await connection.confirmTransaction(
@@ -126,7 +222,7 @@ export default function SolanaWalletPayment({
       )
 
       setTxSignature(signature)
-      onSuccess?.(signature)
+      onSuccess?.(signature, resolvedPaymentId)
     } catch (err) {
       const msg = (err as Error)?.message || "Transaction failed"
       const friendly =
@@ -138,38 +234,54 @@ export default function SolanaWalletPayment({
     } finally {
       setIsPaying(false)
     }
-  }, [publicKey, paymentId, sendTransaction, connection, onSuccess, onError])
+  }, [
+    isIntentMode,
+    intentId,
+    directPaymentUrl,
+    directPaymentId,
+    publicKey,
+    sendTransaction,
+    connection,
+    onPaymentCreated,
+    onSuccess,
+    onError,
+  ])
 
-  // Wallets to show: exclude Unsupported, sort Installed first
   const readyStateRank = (s: WalletReadyState) =>
     s === WalletReadyState.Installed ? 0
     : s === WalletReadyState.Loadable ? 1
     : s === WalletReadyState.NotDetected ? 2
     : 3
 
-  const availableWallets = wallets
-    .filter((w) => w.readyState !== WalletReadyState.Unsupported)
-    .sort((a, b) => readyStateRank(a.readyState) - readyStateRank(b.readyState))
-
-  // Wallets that can be connected via the adapter (extension/in-app browser only).
-  // NotDetected wallets are excluded — on mobile Safari they are never injected,
-  // so calling connect() on them throws a "Wallet not found" error.
+  // Only adapters that can actually connect — NotDetected = never injected on this browser
   const connectableWallets = wallets
-    .filter((w) => w.readyState === WalletReadyState.Installed || w.readyState === WalletReadyState.Loadable)
+    .filter(
+      (w) =>
+        w.readyState === WalletReadyState.Installed ||
+        w.readyState === WalletReadyState.Loadable
+    )
     .sort((a, b) => readyStateRank(a.readyState) - readyStateRank(b.readyState))
 
   // ── Amount display (shared) ────────────────────────────────────────────────
 
   const amountDisplay = (
     <div className="bg-gray-50 rounded-xl px-4 py-3 text-center space-y-1">
-      <p className="text-lg font-bold text-gray-900">{nativeAmount} SOL</p>
-      <p className="text-xs text-gray-500">≈ ${usdAmount.toFixed(2)} USD</p>
+      {isIntentMode ? (
+        <>
+          <p className="text-lg font-bold text-gray-900">${usdAmount.toFixed(2)} USD</p>
+          <p className="text-xs text-gray-500">via Solana · exact SOL determined at payment</p>
+        </>
+      ) : (
+        <>
+          <p className="text-lg font-bold text-gray-900">{nativeAmount} SOL</p>
+          <p className="text-xs text-gray-500">≈ ${usdAmount.toFixed(2)} USD</p>
+        </>
+      )}
     </div>
   )
 
-  // ── QR fallback (always preserved) ────────────────────────────────────────
-
-  const qrFallback = qrCodeUrl ? (
+  // QR fallback — only in direct mode and only when a QR URL is provided
+  const qrFallback = !isIntentMode && qrCodeUrl ? (
     <details className="group">
       <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 text-center list-none">
         Prefer scanning QR instead?
@@ -235,7 +347,8 @@ export default function SolanaWalletPayment({
         </p>
         {connectableWallets.length === 0 ? (
           <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-            No wallet extension detected in this browser. Use the &ldquo;Open in Phantom&rdquo; or &ldquo;Open in Solflare&rdquo; buttons on the previous screen to pay from your mobile wallet.
+            No wallet extension detected in this browser. Use the &ldquo;Open in Phantom&rdquo;
+            or &ldquo;Open in Solflare&rdquo; buttons to pay from your mobile wallet.
           </div>
         ) : (
           <div className="space-y-2">
@@ -305,7 +418,7 @@ export default function SolanaWalletPayment({
           </Button>
         ) : (
           <Button fullWidth onClick={() => void handlePay()}>
-            Pay {nativeAmount} SOL
+            {isIntentMode ? `Pay $${usdAmount.toFixed(2)} USD` : `Pay ${nativeAmount} SOL`}
           </Button>
         )}
         <Button variant="secondary" fullWidth onClick={() => void disconnect()}>
@@ -316,16 +429,7 @@ export default function SolanaWalletPayment({
     )
   }
 
-  // ── Not connected — wallet deep links (mobile) + extension connect (desktop) ──
-
-  // Opens the current checkout URL inside the wallet's in-app browser where the
-  // Solana provider IS injected. The adapter connect flow then works normally.
-  const deepLinks = typeof window !== "undefined"
-    ? {
-        phantom: `https://phantom.app/ul/browse/${encodeURIComponent(window.location.href)}`,
-        solflare: `https://solflare.com/ul/v1/browse/${encodeURIComponent(window.location.href)}`
-      }
-    : null
+  // ── Not connected — deep links (mobile) + adapter (desktop) ───────────────
 
   return (
     <div className="space-y-3">
@@ -338,27 +442,36 @@ export default function SolanaWalletPayment({
           {localError}
         </div>
       ) : null}
-      {/* Primary: open checkout inside wallet's in-app browser — works on iOS + Android */}
-      {deepLinks ? (
-        <div className="space-y-2">
-          <p className="text-xs text-center text-gray-500">Open your wallet to pay:</p>
-          <a
-            href={deepLinks.phantom}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium transition"
-          >
-            <span className="text-base leading-none">👻</span>
-            Open in Phantom
-          </a>
-          <a
-            href={deepLinks.solflare}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition"
-          >
-            <span className="text-base leading-none">🔥</span>
-            Open in Solflare
-          </a>
-        </div>
-      ) : null}
-      {/* Secondary: adapter connect for installed wallet extensions (desktop / wallet browser) */}
+
+      {/* Primary: open wallet with payment pre-filled — works on iOS + Android */}
+      <div className="space-y-2">
+        <p className="text-xs text-center text-gray-500">Open your wallet to pay:</p>
+        {isOpeningWallet ? (
+          <Button fullWidth disabled>
+            <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
+            Preparing payment…
+          </Button>
+        ) : (
+          <>
+            <button
+              onClick={() => void handleDeepLink("phantom")}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium transition"
+            >
+              <span className="text-base leading-none">👻</span>
+              Open in Phantom
+            </button>
+            <button
+              onClick={() => void handleDeepLink("solflare")}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition"
+            >
+              <span className="text-base leading-none">🔥</span>
+              Open in Solflare
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Secondary: connect installed wallet extension (desktop / wallet browser) */}
       {connectableWallets.length > 0 ? (
         connecting ? (
           <Button fullWidth disabled>
@@ -371,6 +484,7 @@ export default function SolanaWalletPayment({
           </Button>
         )
       ) : null}
+
       {qrFallback}
     </div>
   )

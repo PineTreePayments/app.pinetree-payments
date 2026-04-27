@@ -7,11 +7,11 @@ import {
   getPaymentById
 } from "@/database"
 import QRCode from "qrcode"
-import { createPayment } from "./createPayment"
-import { buildCreatePaymentRequest } from "./createPayment"
+import { createPayment, buildCreatePaymentRequest, inferNativeSymbolFromNetwork } from "./createPayment"
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 import { PINETREE_FEE } from "./config"
-import { updatePaymentStatus } from "./updatePaymentStatus"
+import { markPaymentIncomplete } from "./paymentStateActions"
+import { StoredPaymentSplitMetadata } from "@/types/payment"
 
 const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base", "shift4"]
 const PAYMENT_DETAILS_TIMEOUT_MS = Number(process.env.PAYMENT_DETAILS_TIMEOUT_MS || 12000)
@@ -37,17 +37,6 @@ async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, label: s
 
 function uniqueNetworks(networks: WalletNetwork[]) {
   return [...new Set(networks)]
-}
-
-type StoredPaymentSplitMetadata = {
-  split?: {
-    merchantWallet?: string
-    feeCaptureMethod?: string
-    splitContract?: string
-    expectedAmountNative?: number
-    merchantNativeAmount?: number
-    feeNativeAmount?: number
-  }
 }
 
 type WalletOption = {
@@ -80,13 +69,6 @@ function buildWalletOptions(walletUrl: string, network?: string): WalletOption[]
   if (isSolana) return solanaWallets
   if (isBase) return evmWallets
   return [...solanaWallets, ...evmWallets]
-}
-
-function inferNativeSymbolFromNetwork(network?: string): string | undefined {
-  const normalized = String(network || "").toLowerCase().trim()
-  if (normalized === "solana") return "SOL"
-  if (normalized === "base" || normalized === "ethereum") return "ETH"
-  return undefined
 }
 
 function inferNativeAmountFromPayment(payment: { metadata?: unknown } | null | undefined): number | undefined {
@@ -208,31 +190,6 @@ export async function getPaymentIntentEngine(intentId: string) {
   }
 }
 
-async function markPaymentIncomplete(paymentId: string): Promise<void> {
-  try {
-    const existing = await getPaymentById(paymentId)
-    if (!existing) return
-
-    const status = String(existing.status || "").toUpperCase()
-
-    // Skip terminal states
-    if (["CONFIRMED", "FAILED", "INCOMPLETE"].includes(status)) return
-
-    // Only transition if payment was actually presented to user
-    if (status === "PENDING") {
-      await updatePaymentStatus(paymentId, "INCOMPLETE", {
-        providerEvent: "network_switched",
-        rawPayload: { reason: "network_switched" }
-      })
-    }
-
-    // If status === CREATED → do nothing (no artificial transition)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (!message.includes("Invalid payment transition")) throw error
-  }
-}
-
 export async function selectPaymentIntentNetworkEngine(input: {
   intentId: string
   network: string
@@ -330,7 +287,10 @@ export async function selectPaymentIntentNetworkEngine(input: {
 
     // New payment is safely linked — now it is safe to retire the previous payment.
     if (prevPaymentId) {
-      await markPaymentIncomplete(prevPaymentId)
+      await markPaymentIncomplete(prevPaymentId, {
+        providerEvent: "network_switched",
+        rawPayload: { reason: "network_switched" }
+      })
     }
 
     const persistedPayment = await getPaymentById(payment.id)
