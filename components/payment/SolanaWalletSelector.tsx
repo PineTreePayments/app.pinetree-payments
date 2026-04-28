@@ -18,20 +18,16 @@ type WalletOption = {
 }
 
 function buildSupportedWalletOptions(paymentUrl: string): WalletOption[] {
-  const txUrl = paymentUrl.replace("solana:", "")
-  const encodedTransactionRequestUrl = encodeURIComponent(txUrl)
-  const encodedPaymentUrl = encodeURIComponent(paymentUrl)
-
   return [
     {
       id: "phantom",
       label: "Phantom",
-      url: `https://phantom.app/ul/v1/pay?link=${encodedTransactionRequestUrl}`,
+      url: paymentUrl,
     },
     {
       id: "solflare",
       label: "Solflare",
-      url: `https://solflare.com/ul/v1/browse/${encodedPaymentUrl}`,
+      url: paymentUrl,
     },
   ]
 }
@@ -56,6 +52,8 @@ export default function SolanaWalletSelector({
     }
 
     onLaunch?.()
+    // Solana Pay transaction requests must be launched as `solana:https://...`.
+    // eslint-disable-next-line react-hooks/immutability
     window.location.href = url
   }
 

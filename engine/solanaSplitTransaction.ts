@@ -47,6 +47,13 @@ export async function buildSolanaSplitTransactionEngine(input: {
     throw new Error("Payment not found")
   }
 
+  console.log("[SOLANA ENGINE][TX] payment lookup success", {
+    paymentId,
+    status: payment.status,
+    network: payment.network,
+    hasMetadata: Boolean(payment.metadata)
+  })
+
   const network = String(payment.network || "").toLowerCase()
   if (network !== "solana") {
     console.error("[SOLANA ENGINE][TX] wrong network", { paymentId, network })
@@ -133,6 +140,19 @@ export async function buildSolanaSplitTransactionEngine(input: {
       data: Buffer.from(paymentId, "utf8")
     })
   )
+
+  console.log("[SOLANA ENGINE][TX] transaction built", {
+    paymentId,
+    feePayer: tx.feePayer?.toBase58(),
+    recentBlockhash: tx.recentBlockhash,
+    instructionCount: tx.instructions.length,
+    instructions: tx.instructions.map((instruction, index) => ({
+      index,
+      programId: instruction.programId.toBase58(),
+      keyCount: instruction.keys.length,
+      dataLength: instruction.data.length
+    }))
+  })
 
   const serialized = tx.serialize({ requireAllSignatures: false }).toString("base64")
   console.log("[SOLANA ENGINE][TX] serialized transaction", {
