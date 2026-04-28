@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Button from "@/components/ui/Button"
+import SolanaWalletSelector from "@/components/payment/SolanaWalletSelector"
 
 type SolanaAsset = "SOL" | "USDC"
 
@@ -90,6 +91,7 @@ export default function SolanaWalletPayment({
   const [hasLaunchedWallet, setHasLaunchedWallet] = useState(false)
   const [copied, setCopied] = useState(false)
   const [localError, setLocalError] = useState("")
+  const [isWalletSelectorOpen, setIsWalletSelectorOpen] = useState(false)
 
   const sessionRequestRef = useRef<Promise<SolanaPaymentSession> | null>(null)
   const isIntentMode = Boolean(intentId)
@@ -219,18 +221,16 @@ export default function SolanaWalletPayment({
     })
   }, [directSession, isIntentMode, onError, prepareSession])
 
-  const openWallet = useCallback((option: WalletOption) => {
-    const url = String(option.url || option.href || "").trim()
-    if (!url || !isSafeSolanaWalletOption(option)) {
-      const message = "Unsupported Solana wallet option"
+  const openWalletSelector = useCallback(() => {
+    if (!session?.paymentUrl) {
+      const message = "Solana payment is not ready yet"
       setLocalError(message)
       onError?.(message)
       return
     }
 
-    setHasLaunchedWallet(true)
-    window.location.href = url
-  }, [onError])
+    setIsWalletSelectorOpen(true)
+  }, [onError, session?.paymentUrl])
 
   const copyPaymentLink = useCallback(async () => {
     if (!session?.paymentUrl) return
@@ -291,22 +291,10 @@ export default function SolanaWalletPayment({
         </Button>
       ) : null}
 
-      {session?.walletOptions.length ? (
-        <div className="space-y-2">
-          {session.walletOptions.map((option) => (
-            <Button
-              key={option.id}
-              fullWidth
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                openWallet(option)
-              }}
-            >
-              {option.label}
-            </Button>
-          ))}
-        </div>
+      {session?.paymentUrl ? (
+        <Button fullWidth onClick={openWalletSelector}>
+          Choose your wallet
+        </Button>
       ) : null}
 
       {session?.paymentUrl ? (
@@ -319,6 +307,22 @@ export default function SolanaWalletPayment({
         <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 text-center">
           Processing payment… approve the transaction in your wallet. This page will update after confirmation.
         </div>
+      ) : null}
+
+      {session?.paymentUrl ? (
+        <SolanaWalletSelector
+          paymentUrl={session.paymentUrl}
+          open={isWalletSelectorOpen}
+          onClose={() => setIsWalletSelectorOpen(false)}
+          onLaunch={() => {
+            setHasLaunchedWallet(true)
+            setIsWalletSelectorOpen(false)
+          }}
+          onError={(message) => {
+            setLocalError(message)
+            onError?.(message)
+          }}
+        />
       ) : null}
     </div>
   )
