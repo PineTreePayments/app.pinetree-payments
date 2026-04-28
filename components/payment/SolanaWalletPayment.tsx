@@ -1,42 +1,45 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { useWallet, useConnection } from "@solana/wallet-adapter-react"
-import { useWalletModal } from "@solana/wallet-adapter-react-ui"
-import { Transaction } from "@solana/web3.js"
-import { Buffer } from "buffer"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Button from "@/components/ui/Button"
+
+type SolanaAsset = "SOL" | "USDC"
+
+type WalletOption = {
+  id: string
+  label: string
+  url?: string
+  href?: string
+}
+
+type SolanaPaymentSession = {
+  paymentId: string
+  network: "solana"
+  asset: SolanaAsset
+  paymentUrl: string
+  walletOptions: WalletOption[]
+}
 
 type Props = {
   intentId?: string
+  selectedAsset?: SolanaAsset
   paymentUrl?: string
   nativeAmount?: number
   usdAmount: number
-  // Kept for compatibility with existing callers; not used in Wallet Adapter flow.
   qrCodeUrl?: string
   paymentId?: string
+  walletOptions?: WalletOption[]
   onPaymentCreated?: (paymentId: string) => void
-  onSuccess?: (txHash: string, paymentId: string) => void
   onError?: (error: string) => void
-}
-
-type PaymentData = {
-  paymentId: string
-  paymentUrl: string
 }
 
 function parsePaymentId(paymentUrl: string): string | null {
   try {
-    // Handles: solana:https://app.../api/solana-pay/transaction?paymentId=<id>
     const txUrl = paymentUrl.replace(/^solana:/, "")
     return new URL(txUrl).searchParams.get("paymentId")
   } catch {
     return null
   }
-}
-
-function isMobileUserAgent(): boolean {
-  return /iPhone|iPad|Android/i.test(navigator.userAgent)
 }
 
 function isSolanaPayTransactionRequest(paymentUrl: string, paymentId: string): boolean {
@@ -54,239 +57,193 @@ function isSolanaPayTransactionRequest(paymentUrl: string, paymentId: string): b
   }
 }
 
+function isSafeSolanaWalletOption(option: WalletOption): boolean {
+  const url = String(option.url || option.href || "").trim()
+  const id = String(option.id || "").toLowerCase().trim()
+
+  if (!url) return false
+  if (url.startsWith("ethereum:")) return false
+  if (url.startsWith("metamask:")) return false
+  if (url.startsWith("cbwallet:")) return false
+
+  return id === "phantom" || id === "solflare"
+}
+
+function normalizeWalletOptions(options?: WalletOption[]): WalletOption[] {
+  if (!Array.isArray(options)) return []
+  return options.filter(isSafeSolanaWalletOption)
+}
+
 export default function SolanaWalletPayment({
   intentId,
+  selectedAsset = "SOL",
   paymentUrl: directPaymentUrl,
   nativeAmount,
   usdAmount,
   paymentId: directPaymentId,
+  walletOptions: directWalletOptions,
   onPaymentCreated,
-  onSuccess,
   onError,
 }: Props) {
-  const { connection } = useConnection()
-  const { connected, publicKey, connecting, disconnect, sendTransaction } = useWallet()
-  const { setVisible: setWalletModalVisible } = useWalletModal()
-
-  const [isPaying, setIsPaying] = useState(false)
-  const [txSignature, setTxSignature] = useState("")
+  const [session, setSession] = useState<SolanaPaymentSession | null>(null)
+  const [isPreparing, setIsPreparing] = useState(false)
+  const [hasLaunchedWallet, setHasLaunchedWallet] = useState(false)
+  const [copied, setCopied] = useState(false)
   const [localError, setLocalError] = useState("")
-  const [paymentData, setPaymentData] = useState<PaymentData | null>(null)
 
-  const pendingPaymentRef = useRef(false)
-  const paymentInFlightRef = useRef(false)
-  const paymentResolutionInFlightRef = useRef<Promise<PaymentData> | null>(null)
-
+  const sessionRequestRef = useRef<Promise<SolanaPaymentSession> | null>(null)
   const isIntentMode = Boolean(intentId)
 
-  const resolveSolanaPayment = useCallback(async (): Promise<PaymentData> => {
-    if (!isIntentMode && paymentData?.paymentId && paymentData.paymentUrl) {
-      return paymentData
+  const directSession = useMemo<SolanaPaymentSession | null>(() => {
+    if (isIntentMode) return null
+
+    const paymentUrl = String(directPaymentUrl || "").trim()
+    const paymentId = directPaymentId || parsePaymentId(paymentUrl) || ""
+
+    if (!paymentUrl || !paymentId) return null
+    if (!isSolanaPayTransactionRequest(paymentUrl, paymentId)) return null
+
+    return {
+      paymentId,
+      network: "solana",
+      asset: selectedAsset,
+      paymentUrl,
+      walletOptions: normalizeWalletOptions(directWalletOptions),
+    }
+  }, [directPaymentId, directPaymentUrl, directWalletOptions, isIntentMode, selectedAsset])
+
+  const prepareSession = useCallback(async (): Promise<SolanaPaymentSession> => {
+    if (session) return session
+    if (directSession) {
+      setSession(directSession)
+      return directSession
     }
 
-    if (!isIntentMode) {
-      const paymentId = directPaymentId || parsePaymentId(directPaymentUrl || "") || ""
-      const paymentUrl = String(directPaymentUrl || "")
-
-      if (!paymentId) throw new Error("Cannot determine paymentId")
-      if (!paymentUrl) throw new Error("Missing Solana payment URL")
-
-      const directPaymentData = { paymentId, paymentUrl }
-      setPaymentData(directPaymentData)
-      return directPaymentData
+    if (!intentId) {
+      throw new Error("Missing Solana payment intent")
     }
 
-    if (paymentResolutionInFlightRef.current) {
-      return paymentResolutionInFlightRef.current
+    if (selectedAsset !== "SOL") {
+      throw new Error("USDC on Solana is coming soon")
     }
 
-    const resolution = (async () => {
-      const network = "solana"
-      console.log("[NETWORK SENT]", network)
+    if (sessionRequestRef.current) return sessionRequestRef.current
 
-      const createRes = await fetch(
-        `/api/payment-intents/${encodeURIComponent(intentId!)}/select-network`,
+    const request = (async () => {
+      setIsPreparing(true)
+      setLocalError("")
+
+      const res = await fetch(
+        `/api/payment-intents/${encodeURIComponent(intentId)}/select-network`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ network }),
+          body: JSON.stringify({ network: "solana", asset: selectedAsset }),
         }
       )
 
-      if (!createRes.ok) {
-        const err = (await createRes.json()) as { error?: string }
-        throw new Error(err.error || "Failed to create payment")
+      if (!res.ok) {
+        const err = (await res.json()) as { error?: string }
+        throw new Error(err.error || "Failed to prepare Solana payment")
       }
 
-      const createResult = (await createRes.json()) as {
+      const data = (await res.json()) as {
         paymentId?: string
+        network?: string
+        selectedNetwork?: string
+        asset?: string
         paymentUrl?: string
+        walletOptions?: WalletOption[]
       }
-      console.log("[SOLANA API RESPONSE]", createResult)
-      console.log("[SOLANA DEBUG] FULL API RESPONSE", createResult)
-      const resolvedPaymentId = String(createResult.paymentId || "")
-      const resolvedPaymentUrl = String(createResult.paymentUrl || "")
-      console.log("[SOLANA DEBUG] resolvedPaymentUrl", resolvedPaymentUrl)
-      console.log("[SOLANA DEBUG] paymentUrl used", resolvedPaymentUrl)
+
+      const resolvedPaymentId = String(data.paymentId || "")
+      const resolvedPaymentUrl = String(data.paymentUrl || "")
+      const resolvedNetwork = String(data.network || data.selectedNetwork || "").toLowerCase()
+      const resolvedAsset = String(data.asset || selectedAsset).toUpperCase()
+
+      if (resolvedNetwork !== "solana") {
+        throw new Error("Server returned a non-Solana payment session")
+      }
+
+      if (resolvedAsset !== "SOL") {
+        throw new Error("Server returned an unsupported Solana asset")
+      }
 
       if (!resolvedPaymentId || !resolvedPaymentUrl) {
-        throw new Error("Incomplete payment data returned from server")
+        throw new Error("Incomplete Solana payment session returned from server")
       }
-
-      if (!resolvedPaymentUrl.startsWith("solana:")) {
-        alert("WRONG URL: " + resolvedPaymentUrl)
-        console.error("[CRITICAL] WRONG PAYMENT URL", resolvedPaymentUrl)
-        throw new Error("Non-solana URL returned")
-      }
-
-      const resolvedPaymentData = {
-        paymentId: resolvedPaymentId,
-        paymentUrl: resolvedPaymentUrl,
-      }
-
-      setPaymentData(resolvedPaymentData)
-      onPaymentCreated?.(resolvedPaymentId)
-
-      return resolvedPaymentData
-    })()
-
-    paymentResolutionInFlightRef.current = resolution
-
-    try {
-      return await resolution
-    } finally {
-      paymentResolutionInFlightRef.current = null
-    }
-  }, [
-    paymentData,
-    isIntentMode,
-    directPaymentId,
-    directPaymentUrl,
-    intentId,
-    onPaymentCreated,
-  ])
-
-  const handlePay = useCallback(async () => {
-    console.log("[SOLANA DEBUG] handlePay started")
-    console.log("[SOLANA DEBUG] handlePay executing", {
-      connected,
-      publicKey,
-    })
-    if (paymentInFlightRef.current || txSignature) return
-
-    pendingPaymentRef.current = false
-    paymentInFlightRef.current = true
-    setIsPaying(true)
-    setLocalError("")
-
-    try {
-      const isMobile = isMobileUserAgent()
-      const { paymentId: resolvedPaymentId, paymentUrl: resolvedPaymentUrl } =
-        await resolveSolanaPayment()
 
       if (!isSolanaPayTransactionRequest(resolvedPaymentUrl, resolvedPaymentId)) {
-        console.error("[CRITICAL] WRONG SOLANA PAY TRANSACTION URL", resolvedPaymentUrl)
         throw new Error("Invalid Solana Pay transaction request URL")
       }
 
-      if (isMobile) {
-        console.log("[SOLANA DEBUG] opening Solana Pay transaction request", resolvedPaymentUrl)
-        console.log("[SOLANA FINAL URL]", resolvedPaymentUrl)
-        alert("SOLANA URL: " + resolvedPaymentUrl)
-        if (!resolvedPaymentUrl.startsWith("solana:")) {
-          return
-        }
-        setTimeout(() => {
-          window.location.href = resolvedPaymentUrl
-        }, 50)
-        return
+      const walletOptions = normalizeWalletOptions(data.walletOptions)
+      if (!walletOptions.length) {
+        throw new Error("No supported Solana wallet options were returned")
       }
 
-      if (!publicKey) {
-        throw new Error("Connect a Solana wallet to continue")
+      const resolvedSession: SolanaPaymentSession = {
+        paymentId: resolvedPaymentId,
+        network: "solana",
+        asset: "SOL",
+        paymentUrl: resolvedPaymentUrl,
+        walletOptions,
       }
 
-      // Build transaction from backend
-      const txRes = await fetch(
-        `/api/solana-pay/transaction?paymentId=${encodeURIComponent(resolvedPaymentId)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ account: publicKey.toBase58() }),
-        }
-      )
-      if (!txRes.ok) {
-        const err = (await txRes.json()) as { error?: string }
-        throw new Error(err.error || "Failed to build transaction")
-      }
-      const txData = (await txRes.json()) as { transaction?: string }
-      console.log("[SOLANA DEBUG] tx response", txData)
-      const serialized = txData?.transaction
+      setSession(resolvedSession)
+      onPaymentCreated?.(resolvedPaymentId)
+      return resolvedSession
+    })()
 
-      if (!serialized) {
-        throw new Error("Missing serialized Solana transaction")
-      }
+    sessionRequestRef.current = request
 
-      const transaction = Transaction.from(Buffer.from(serialized, "base64"))
-
-      const signature = await sendTransaction(transaction, connection)
-      console.log("[SOLANA DEBUG] tx sent", signature)
-      console.log("[SOLANA] wallet adapter tx submitted", { signature })
-
-      setTxSignature(signature)
-      onSuccess?.(signature, resolvedPaymentId)
-    } catch (err) {
-      const msg = (err as Error)?.message || "Transaction failed"
-      const friendly =
-        msg.toLowerCase().includes("rejected") || msg.toLowerCase().includes("user rejected")
-          ? "Transaction rejected by user."
-          : msg
-      setLocalError(friendly)
-      onError?.(friendly)
+    try {
+      return await request
     } finally {
-      paymentInFlightRef.current = false
-      setIsPaying(false)
+      sessionRequestRef.current = null
+      setIsPreparing(false)
     }
-  }, [
-    resolveSolanaPayment,
-    connected,
-    publicKey,
-    sendTransaction,
-    connection,
-    txSignature,
-    onSuccess,
-    onError,
-  ])
+  }, [directSession, intentId, onPaymentCreated, selectedAsset, session])
 
   useEffect(() => {
-    if (connected && publicKey && pendingPaymentRef.current) {
-      console.log("[SOLANA DEBUG] wallet connected, triggering payment")
-      pendingPaymentRef.current = false
-      void handlePay()
-    }
-  }, [connected, publicKey, handlePay])
-
-  const handleChooseWalletClick = useCallback(() => {
-    if (paymentInFlightRef.current || txSignature) return
-
-    console.log("[SOLANA DEBUG] choose wallet clicked")
-    setLocalError("")
-    console.log("[SOLANA DEBUG] connected", connected)
-
-    if (isMobileUserAgent()) {
-      void handlePay()
+    if (!isIntentMode) {
+      if (directSession) setSession(directSession)
       return
     }
 
-    if (!connected || !publicKey) {
-      pendingPaymentRef.current = true
-      console.log("[SOLANA DEBUG] pendingPaymentRef", pendingPaymentRef.current)
-      setWalletModalVisible(true)
+    void prepareSession().catch((err) => {
+      const message = err instanceof Error ? err.message : "Failed to prepare Solana payment"
+      setLocalError(message)
+      onError?.(message)
+      setIsPreparing(false)
+    })
+  }, [directSession, isIntentMode, onError, prepareSession])
+
+  const openWallet = useCallback((option: WalletOption) => {
+    const url = String(option.url || option.href || "").trim()
+    if (!url || !isSafeSolanaWalletOption(option)) {
+      const message = "Unsupported Solana wallet option"
+      setLocalError(message)
+      onError?.(message)
       return
     }
 
-    void handlePay()
-  }, [connected, publicKey, setWalletModalVisible, handlePay, txSignature])
+    setHasLaunchedWallet(true)
+    window.location.href = url
+  }, [onError])
+
+  const copyPaymentLink = useCallback(async () => {
+    if (!session?.paymentUrl) return
+    try {
+      await navigator.clipboard.writeText(session.paymentUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      const message = "Unable to copy payment link"
+      setLocalError(message)
+      onError?.(message)
+    }
+  }, [onError, session?.paymentUrl])
 
   const amountDisplay = (
     <div className="bg-gray-50 rounded-xl px-4 py-3 text-center space-y-1">
@@ -304,34 +261,14 @@ export default function SolanaWalletPayment({
     </div>
   )
 
-  if (txSignature) {
+  if (selectedAsset !== "SOL") {
     return (
-      <div className="space-y-3 text-center py-2">
-        <div className="flex justify-center">
-          <svg
-            className="w-12 h-12 text-green-500"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={1.5}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
+      <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
+        <div className="text-xs uppercase tracking-widest text-gray-500 text-center">Pay via Solana</div>
+        {amountDisplay}
+        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+          USDC on Solana is coming soon. Please select SOL to continue.
         </div>
-        <p className="text-sm font-semibold text-gray-900">Transaction submitted</p>
-        <p className="text-xs text-gray-500">Processing payment...</p>
-        <a
-          href={`https://solscan.io/tx/${txSignature}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs text-blue-600 underline break-all block"
-        >
-          View on Solscan ↗
-        </a>
       </div>
     )
   }
@@ -341,41 +278,47 @@ export default function SolanaWalletPayment({
       <div className="text-xs uppercase tracking-widest text-gray-500 text-center">Pay via Solana</div>
       {amountDisplay}
 
-      {connected && publicKey ? (
-        <div className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-xl px-3 py-2 break-all font-mono">
-          {publicKey.toBase58()}
-        </div>
-      ) : null}
-
       {localError ? (
         <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
           {localError}
         </div>
       ) : null}
 
-      {isPaying ? (
+      {isPreparing ? (
         <Button fullWidth disabled>
           <span className="inline-block h-3 w-3 rounded-full border border-gray-500 border-t-transparent animate-spin mr-2" />
-          Approve in your wallet
+          Preparing Solana payment…
         </Button>
-      ) : (
-        <Button
-          fullWidth
-          disabled={connecting}
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            handleChooseWalletClick()
-          }}
-        >
-          Choose your wallet
-        </Button>
-      )}
+      ) : null}
 
-      {connected ? (
-        <Button variant="secondary" fullWidth disabled={connecting} onClick={() => void disconnect()}>
-          Disconnect
+      {session?.walletOptions.length ? (
+        <div className="space-y-2">
+          {session.walletOptions.map((option) => (
+            <Button
+              key={option.id}
+              fullWidth
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                openWallet(option)
+              }}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+      ) : null}
+
+      {session?.paymentUrl ? (
+        <Button variant="secondary" fullWidth onClick={copyPaymentLink}>
+          {copied ? "Payment Link Copied" : "Copy Solana Pay Link"}
         </Button>
+      ) : null}
+
+      {hasLaunchedWallet ? (
+        <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 text-center">
+          Processing payment… approve the transaction in your wallet. This page will update after confirmation.
+        </div>
       ) : null}
     </div>
   )

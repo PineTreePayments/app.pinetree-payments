@@ -34,8 +34,9 @@ function classifySelectNetworkError(message: string) {
 export async function POST(req: NextRequest, { params }: Params) {
   try {
     const { intentId } = await params
-    const body = (await req.json()) as { network?: string }
+    const body = (await req.json()) as { network?: string; asset?: string }
     const network = String(body?.network || "").trim().toLowerCase()
+    const asset = body?.asset ? String(body.asset).trim().toUpperCase() : undefined
 
     if (!network) {
       return NextResponse.json({ error: "Missing network selection" }, { status: 400 })
@@ -46,6 +47,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     const result = await selectPaymentIntentNetworkEngine({
       intentId: String(intentId || "").trim(),
       network,
+      asset,
       idempotencyKey
     })
 

@@ -7,6 +7,7 @@ import {
 } from "@solana/web3.js"
 import { getPaymentById } from "@/database/payments"
 import { getRpcUrl } from "@/engine/config"
+import { normalizeToStrictPaymentStatus } from "./paymentStateMachine"
 
 // Solana Memo Program — used to attach a deterministic payment reference on-chain.
 // The watcher reads this back to guarantee payment identity before confirming.
@@ -45,13 +46,24 @@ export async function buildSolanaSplitTransactionEngine(input: {
     throw new Error("Payment is not Solana network")
   }
 
+  const status = normalizeToStrictPaymentStatus(payment.status)
+  if (status === "CONFIRMED" || status === "FAILED" || status === "INCOMPLETE") {
+    throw new Error("Payment is no longer payable")
+  }
+
   const metadata = (payment.metadata || {}) as {
+    selectedAsset?: string
     split?: {
       merchantWallet?: string
       pinetreeWallet?: string
       merchantNativeAmountAtomic?: number
       feeNativeAmountAtomic?: number
     }
+  }
+
+  const selectedAsset = String(metadata.selectedAsset || "SOL").trim().toUpperCase()
+  if (selectedAsset !== "SOL") {
+    throw new Error("Unsupported Solana asset")
   }
 
   const split = metadata.split

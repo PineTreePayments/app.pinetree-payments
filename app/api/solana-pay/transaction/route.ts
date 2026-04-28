@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
 import { buildSolanaSplitTransactionEngine } from "@/engine/solanaSplitTransaction"
-import { getPaymentById } from "@/database/payments"
 
 /**
  * GET — Solana Pay Transaction Request metadata
@@ -53,16 +52,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing sender account" }, { status: 400 })
     }
 
-    const payment = await getPaymentById(paymentId)
-    const split = (payment?.metadata as { split?: { merchantWallet?: string; pinetreeWallet?: string } } | null)?.split
-
-    const merchantWallet = String(split?.merchantWallet || "").trim()
-    const pinetreeWallet = String(split?.pinetreeWallet || "").trim()
-
-    if (!payment || !split || !merchantWallet || !pinetreeWallet) {
-      throw new Error("Missing split metadata for Solana payment")
-    }
-
     const serializedTxBase64 = await buildSolanaSplitTransactionEngine({
       paymentId,
       senderAccount
@@ -70,8 +59,6 @@ export async function POST(req: NextRequest) {
 
     console.log("[SOLANA] tx built", {
       paymentId,
-      merchantWallet,
-      pinetreeWallet,
       base64Length: serializedTxBase64.length
     })
 
@@ -92,6 +79,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (lower.includes("not solana network")) {
+      return NextResponse.json({ error: message }, { status: 400 })
+    }
+
+    if (lower.includes("unsupported solana asset") || lower.includes("no longer payable")) {
       return NextResponse.json({ error: message }, { status: 400 })
     }
 

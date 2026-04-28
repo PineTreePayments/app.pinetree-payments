@@ -42,7 +42,32 @@ function uniqueNetworks(networks: WalletNetwork[]) {
 type WalletOption = {
   id: string
   label: string
+  url: string
   href: string
+}
+
+type PaymentAsset = "SOL" | "USDC"
+
+function normalizePaymentAsset(value?: string): PaymentAsset | null {
+  const normalized = String(value || "").trim().toUpperCase()
+  if (normalized === "SOL") return "SOL"
+  if (normalized === "USDC") return "USDC"
+  return null
+}
+
+function resolveSupportedAssetForNetwork(network: WalletNetwork, asset?: string): PaymentAsset | undefined {
+  if (network !== "solana") return undefined
+
+  const normalizedAsset = normalizePaymentAsset(asset)
+  if (!normalizedAsset) {
+    throw new Error("Missing Solana asset selection")
+  }
+
+  if (normalizedAsset !== "SOL") {
+    throw new Error("USDC on Solana is not supported yet")
+  }
+
+  return normalizedAsset
 }
 
 function buildWalletOptions(walletUrl: string, network?: string): WalletOption[] {
@@ -55,15 +80,25 @@ function buildWalletOptions(walletUrl: string, network?: string): WalletOption[]
   const isBase = net === "base"
 
   const solanaWallets: WalletOption[] = [
-    { id: "phantom", label: "Phantom", href: `https://phantom.app/ul/browse/${encodedWalletUrl}` },
-    { id: "solflare", label: "Solflare", href: `https://solflare.com/ul/v1/browse/${encodedWalletUrl}` }
+    {
+      id: "phantom",
+      label: "Open in Phantom",
+      url: `https://phantom.app/ul/browse/${encodedWalletUrl}`,
+      href: `https://phantom.app/ul/browse/${encodedWalletUrl}`
+    },
+    {
+      id: "solflare",
+      label: "Open in Solflare",
+      url: `https://solflare.com/ul/v1/browse/${encodedWalletUrl}`,
+      href: `https://solflare.com/ul/v1/browse/${encodedWalletUrl}`
+    }
   ]
 
   const evmWallets: WalletOption[] = [
-    { id: "metamask", label: "MetaMask", href: `metamask://dapp?url=${encodedWalletUrl}` },
-    { id: "basewallet", label: "Base Wallet", href: `cbwallet://dapp?url=${encodedWalletUrl}` },
-    { id: "coinbase", label: "Coinbase App", href: `https://go.cb-w.com/dapp?cb_url=${encodedWalletUrl}` },
-    { id: "trust", label: "Trust Wallet", href: `https://link.trustwallet.com/open_url?url=${encodedWalletUrl}` }
+    { id: "metamask", label: "MetaMask", url: `metamask://dapp?url=${encodedWalletUrl}`, href: `metamask://dapp?url=${encodedWalletUrl}` },
+    { id: "basewallet", label: "Base Wallet", url: `cbwallet://dapp?url=${encodedWalletUrl}`, href: `cbwallet://dapp?url=${encodedWalletUrl}` },
+    { id: "coinbase", label: "Coinbase App", url: `https://go.cb-w.com/dapp?cb_url=${encodedWalletUrl}`, href: `https://go.cb-w.com/dapp?cb_url=${encodedWalletUrl}` },
+    { id: "trust", label: "Trust Wallet", url: `https://link.trustwallet.com/open_url?url=${encodedWalletUrl}`, href: `https://link.trustwallet.com/open_url?url=${encodedWalletUrl}` }
   ]
 
   if (isSolana) return solanaWallets
@@ -193,6 +228,7 @@ export async function getPaymentIntentEngine(intentId: string) {
 export async function selectPaymentIntentNetworkEngine(input: {
   intentId: string
   network: string
+  asset?: string
   idempotencyKey?: string
 }) {
   const startedAt = Date.now()
@@ -204,18 +240,30 @@ export async function selectPaymentIntentNetworkEngine(input: {
     throw new Error("Unsupported network selection")
   }
 
+  const selectedAsset = resolveSupportedAssetForNetwork(normalizedNetwork, input.asset)
+
   // Idempotency: only short-circuit if a payment already exists for the same network.
   // A different network request must proceed to create a new payment.
   if (intent.status === "SELECTED" && intent.payment_id &&
       intent.selected_network === normalizedNetwork) {
     const existingPayment = await getPaymentById(intent.payment_id)
+    const existingAsset = normalizePaymentAsset(
+      String((existingPayment?.metadata as { selectedAsset?: unknown } | null)?.selectedAsset || "")
+    )
+
+    if (normalizedNetwork === "solana" && existingAsset && existingAsset !== selectedAsset) {
+      throw new Error("Existing Solana payment asset does not match selected asset")
+    }
+
     const walletUrl = String(existingPayment?.payment_url || "")
     const recipientAddress = inferRecipientAddressFromPayment(existingPayment)
 
     return {
       intentId: intent.id,
       paymentId: intent.payment_id,
+      network: intent.selected_network,
       selectedNetwork: intent.selected_network,
+      asset: existingAsset || selectedAsset,
       alreadySelected: true,
       universalUrl: undefined,
       paymentUrl: existingPayment?.payment_url || undefined,
@@ -262,7 +310,8 @@ export async function selectPaymentIntentNetworkEngine(input: {
         metadata: {
           ...(intent.metadata || {}),
           paymentIntentId: intent.id,
-          selectedNetwork: normalizedNetwork
+          selectedNetwork: normalizedNetwork,
+          selectedAsset
         }
       }),
       PAYMENT_DETAILS_TIMEOUT_MS,
@@ -273,6 +322,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
       createPayment({
         ...createPaymentInput,
         preferredNetwork: normalizedNetwork,
+        asset: selectedAsset,
         idempotencyKey: input.idempotencyKey || `payment-intent:${intent.id}:${normalizedNetwork}`
       }),
       PAYMENT_DETAILS_TIMEOUT_MS,
@@ -305,12 +355,16 @@ export async function selectPaymentIntentNetworkEngine(input: {
       paymentId: payment.id
     })
 
-    const walletUrl = String(payment.universalUrl || payment.paymentUrl || "")
+    const walletUrl = normalizedNetwork === "solana"
+      ? String(payment.paymentUrl || "")
+      : String(payment.universalUrl || payment.paymentUrl || "")
 
     return {
       intentId: intent.id,
       paymentId: payment.id,
+      network: normalizedNetwork,
       selectedNetwork: normalizedNetwork,
+      asset: selectedAsset,
       provider: payment.provider,
       paymentUrl: payment.paymentUrl,
       qrCodeUrl: payment.qrCodeUrl,

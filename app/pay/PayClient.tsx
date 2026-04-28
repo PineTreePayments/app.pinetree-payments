@@ -56,7 +56,17 @@ type IntentPayload = {
 type WalletOption = {
   id: string
   label: string
+  url?: string
   href: string
+}
+
+type AssetOption = {
+  id: string
+  label: string
+  network: string
+  symbol: string
+  disabled?: boolean
+  disabledCopy?: string
 }
 
 function parsePayload(raw: string | null): SplitPayload | null {
@@ -101,6 +111,24 @@ function formatUsd(amount: number) {
     style: "currency",
     currency: "USD"
   }).format(Number.isFinite(amount) ? amount : 0)
+}
+
+function getCheckoutAssetOptions(networks: string[]): AssetOption[] {
+  const availableAssets = getAvailableAssetsFromValues(networks)
+
+  return availableAssets.map((assetId) => {
+    const asset = ALLOWED_ASSETS[assetId]
+    const isUnsupportedSolanaUsdc = assetId === "sol-usdc"
+
+    return {
+      id: assetId,
+      label: asset.label,
+      network: asset.network,
+      symbol: asset.symbol,
+      disabled: isUnsupportedSolanaUsdc,
+      disabledCopy: isUnsupportedSolanaUsdc ? "USDC on Solana coming soon" : undefined
+    }
+  })
 }
 
 export default function PayClient() {
@@ -473,22 +501,33 @@ export default function PayClient() {
             <p className="text-xs uppercase tracking-widest text-gray-500">Select an asset to continue:</p>
 
             <div className="space-y-2">
-              {getAvailableAssetsFromValues(intentPayload?.availableNetworks || []).map((assetId) => {
-                const asset = ALLOWED_ASSETS[assetId]
-                const isActive = selectedAssetId === assetId
+              {getCheckoutAssetOptions(intentPayload?.availableNetworks || []).map((asset) => {
+                const isActive = selectedAssetId === asset.id
 
                 return (
-                  <div key={assetId} className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div key={asset.id} className="rounded-xl border border-gray-200 overflow-hidden">
                     {/* Asset selector button — pure UI, no API call */}
                     <button
-                      onClick={() => selectAsset(assetId)}
+                      onClick={() => {
+                        if (asset.disabled) return
+                        selectAsset(asset.id)
+                      }}
+                      disabled={asset.disabled}
                       className={`w-full px-4 py-4 text-left transition ${
-                        isActive ? "bg-blue-50" : "bg-white hover:bg-gray-50"
+                        asset.disabled
+                          ? "bg-gray-50 opacity-60 cursor-not-allowed"
+                          : isActive
+                            ? "bg-blue-50"
+                            : "bg-white hover:bg-gray-50"
                       }`}
                     >
                       <span className="font-medium text-gray-900">Pay with {asset.label}</span>
                       <p className="text-xs text-gray-500 mt-1">
-                        {isActive ? "Connect your wallet below" : "Tap to reveal payment options"}
+                        {asset.disabled
+                          ? asset.disabledCopy
+                          : isActive
+                            ? "Choose a wallet below"
+                            : "Tap to reveal payment options"}
                       </p>
                     </button>
 
@@ -545,25 +584,14 @@ export default function PayClient() {
                           />
                         ) : null}
 
-                        {/* ── Solana: in-page wallet adapter + deep links ── */}
+                        {/* ── Solana: canonical engine payment session + wallet links ── */}
                         {asset.network === "solana" ? (
                           <SolanaWalletPayment
                             intentId={intentId!}
+                            selectedAsset={asset.symbol === "USDC" ? "USDC" : "SOL"}
                             usdAmount={displayAmount}
                             onPaymentCreated={() => {
                               void loadIntentCallback()
-                            }}
-                            onSuccess={(txHash, paymentId) => {
-                              void fetch(
-                                `/api/payments/${encodeURIComponent(paymentId)}/detect`,
-                                {
-                                  method: "POST",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({ txHash }),
-                                }
-                              )
-                                .catch(() => null)
-                                .then(() => loadIntentCallback())
                             }}
                           />
                         ) : null}
@@ -642,6 +670,7 @@ export default function PayClient() {
             nativeAmount={nativeAmount}
             usdAmount={usdTotalAmount}
             qrCodeUrl={paymentQrUrl}
+            walletOptions={walletOptions}
           />
         ) : (
           <>
@@ -654,7 +683,7 @@ export default function PayClient() {
           </>
         )}
 
-        {recipientAddress && !isBaseContractPayment(activePayload) ? (
+        {recipientAddress && !isBaseContractPayment(activePayload) && !isSolanaPayment(activePayload) ? (
           <div className="space-y-2">
             <label className="text-xs uppercase tracking-widest text-gray-500">Payment Address</label>
             <div className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800 break-all font-mono">
@@ -671,6 +700,7 @@ export default function PayClient() {
           </div>
         ) : null}
 
+        {!isSolanaPayment(activePayload) ? (
         <div className="space-y-3">
           <label className="text-xs uppercase tracking-widest text-gray-500">Select your wallet:</label>
           <select
@@ -706,14 +736,15 @@ export default function PayClient() {
             </Button>
           ) : null}
         </div>
+        ) : null}
 
-        {walletUrl ? (
+        {walletUrl && !isSolanaPayment(activePayload) ? (
           <Button variant="secondary" fullWidth onClick={copyWalletUrl}>
             {copiedLink ? "Copied" : "Copy Wallet Address"}
           </Button>
         ) : null}
 
-        {primaryOpenUrl ? (
+        {primaryOpenUrl && !isSolanaPayment(activePayload) ? (
           <Button fullWidth onClick={() => { window.location.href = primaryOpenUrl }}>
             Open in Wallet App
           </Button>

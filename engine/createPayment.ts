@@ -89,6 +89,7 @@ type CreatePaymentInput = {
   adapterId?: PaymentAdapterId
   merchantId: string
   preferredNetwork?: string
+  asset?: string
   channel?: "pos" | "online" | "api" | "invoice"
   metadata?: PaymentMetadata
   idempotencyKey?: string
@@ -103,6 +104,7 @@ type CreatePaymentResult = {
   universalUrl?: string
   nativeAmount?: number
   nativeSymbol?: string
+  asset?: string
 }
 
 export type BuildCreatePaymentRequestInput = {
@@ -111,6 +113,7 @@ export type BuildCreatePaymentRequestInput = {
   merchantId: string
   adapterId?: PaymentAdapterId
   preferredNetwork?: string
+  asset?: string
   terminalId?: string
   metadata?: Record<string, unknown>
 }
@@ -163,6 +166,7 @@ export async function buildCreatePaymentRequest(
         adapterId: input.adapterId,
         merchantId,
         preferredNetwork: input.preferredNetwork,
+        asset: input.asset,
         metadata: {
           ...(input.metadata || {}),
           terminalId: input.terminalId,
@@ -197,6 +201,7 @@ export async function buildCreatePaymentRequest(
         adapterId: input.adapterId,
         merchantId,
         preferredNetwork: input.preferredNetwork,
+        asset: input.asset,
         metadata: {
           ...(input.metadata || {}),
           terminalId: input.terminalId,
@@ -239,7 +244,7 @@ export async function createPayment(
       return null
     }
 
-    const existingMetadata = (existingPayment.metadata || null) as StoredPaymentSplitMetadata | null
+    const existingMetadata = (existingPayment.metadata || null) as (StoredPaymentSplitMetadata & { selectedAsset?: string }) | null
     const split = existingMetadata?.split
     const expectedAmountNative = Number(split?.expectedAmountNative || 0)
     const merchantNativeAmount = Number(split?.merchantNativeAmount || 0)
@@ -274,12 +279,14 @@ export async function createPayment(
       address: existingDisplayAddress,
       universalUrl: undefined,
       nativeAmount: inferredNativeAmount > 0 ? inferredNativeAmount : undefined,
-      nativeSymbol: inferNativeSymbolFromNetwork(existingPayment.network)
+      nativeSymbol: inferNativeSymbolFromNetwork(existingPayment.network),
+      asset: existingMetadata?.selectedAsset
     }
   }
 
   const paymentId = crypto.randomUUID()
   let claimedIdempotencyKey = false
+  const requestedAsset = String(input.asset || input.metadata?.selectedAsset || "").trim().toUpperCase()
 
   if (input.idempotencyKey) {
     const claim = await claimIdempotencyKey(input.idempotencyKey, paymentId)
@@ -351,6 +358,13 @@ export async function createPayment(
     merchantWalletAddress = merchantWallet.wallet_address
     network = merchantWallet.network
     walletAsset = merchantWallet.asset || undefined
+  }
+
+  if (network === "solana") {
+    if (requestedAsset !== "SOL") {
+      throw new Error("Solana payments currently support SOL only")
+    }
+    walletAsset = "sol"
   }
 
   /* ---------------------------
@@ -462,6 +476,7 @@ export async function createPayment(
     qr_code_url: canonicalQrCodeUrl,
     metadata: {
       ...(input.metadata || {}),
+      selectedAsset: network === "solana" ? requestedAsset : input.asset,
       split: {
         merchantWallet: merchantWalletAddress,
         pinetreeWallet,
@@ -531,7 +546,8 @@ export async function createPayment(
     address: displayAddress,
     universalUrl: splitPayment.universalUrl,
     nativeAmount: Number(splitPayment.nativeAmount || 0),
-    nativeSymbol: String(splitPayment.nativeSymbol || "").toUpperCase() || undefined
+    nativeSymbol: String(splitPayment.nativeSymbol || "").toUpperCase() || undefined,
+    asset: network === "solana" ? requestedAsset : input.asset
   }
   } catch (error) {
     if (claimedIdempotencyKey && input.idempotencyKey) {
