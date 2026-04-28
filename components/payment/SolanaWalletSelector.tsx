@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import QRCode from "react-qr-code"
 import Button from "@/components/ui/Button"
 
 type Props = {
@@ -22,24 +23,11 @@ export default function SolanaWalletSelector({
 
   if (!open) return null
 
-  function launchPhantom() {
+  function launchSolanaWallet() {
     if (!paymentUrl) {
-      const message = "Missing wallet link"
-      onError?.(message)
+      onError?.("Missing wallet link")
       return
     }
-
-    onLaunch?.()
-    window.location.href = `solana:${paymentUrl}`
-  }
-
-  function launchSolflare() {
-    if (!paymentUrl) {
-      const message = "Missing wallet link"
-      onError?.(message)
-      return
-    }
-
     onLaunch?.()
     window.location.href = `solana:${paymentUrl}`
   }
@@ -68,7 +56,7 @@ export default function SolanaWalletSelector({
       >
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <h2 id="solana-wallet-selector-title" className="text-lg font-bold text-gray-900">
-            Choose your wallet
+            Pay with Solana
           </h2>
           <button
             type="button"
@@ -80,24 +68,20 @@ export default function SolanaWalletSelector({
           </button>
         </div>
 
-        <div className="p-4 space-y-2">
-          <button
-            type="button"
-            onClick={launchPhantom}
-            className="w-full flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left hover:bg-gray-50 active:scale-[0.99] transition"
-          >
-            <span className="font-semibold text-gray-900">Phantom</span>
-            <span className="text-xs text-gray-400">Open wallet (if already using this device)</span>
-          </button>
+        <div className="p-4 space-y-4">
+          <p className="text-sm text-gray-600">
+            Your device will open the Solana wallet registered for Solana Pay links.
+            To use a specific wallet, open that wallet and scan the QR below.
+          </p>
 
-          <button
-            type="button"
-            onClick={launchSolflare}
-            className="w-full flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left hover:bg-gray-50 active:scale-[0.99] transition"
-          >
-            <span className="font-semibold text-gray-900">Solflare</span>
-            <span className="text-xs text-gray-400">Open wallet (if already using this device)</span>
-          </button>
+          <Button fullWidth onClick={launchSolanaWallet}>
+            Open Solana Wallet
+          </Button>
+
+          <div className="flex flex-col items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+            <p className="text-xs text-gray-500">Scan from inside your wallet</p>
+            <QRCode value={`solana:${paymentUrl}`} size={180} />
+          </div>
 
           <Button fullWidth variant="secondary" onClick={copyPaymentLink}>
             {copied ? "Payment Link Copied" : "Copy payment link"}

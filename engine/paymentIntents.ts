@@ -81,14 +81,8 @@ function buildWalletOptions(walletUrl: string, network?: string): WalletOption[]
 
   const solanaWallets: WalletOption[] = [
     {
-      id: "phantom",
-      label: "Open in Phantom",
-      url: `solana:${normalizedUrl}`,
-      href: `solana:${normalizedUrl}`
-    },
-    {
-      id: "solflare",
-      label: "Open in Solflare",
+      id: "solana-pay",
+      label: "Open Solana Wallet",
       url: `solana:${normalizedUrl}`,
       href: `solana:${normalizedUrl}`
     }

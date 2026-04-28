@@ -185,3 +185,10 @@ export async function buildSolanaSplitTransactionEngine(input: {
 
   return serialized
 }
+
+export async function getSolanaUnsignedTransaction(input: {
+  paymentId: string
+  senderAccount: string
+}): Promise<string> {
+  return buildSolanaSplitTransactionEngine(input)
+}
