@@ -101,6 +101,7 @@ export default function SolanaWalletPayment({
       }
       const resolvedPaymentId = String(createResult.paymentId || "")
       const resolvedPaymentUrl = String(createResult.paymentUrl || "")
+      console.log("[SOLANA DEBUG] resolvedPaymentUrl", resolvedPaymentUrl)
 
       if (!resolvedPaymentId || !resolvedPaymentUrl) {
         throw new Error("Incomplete payment data returned from server")
@@ -134,6 +135,7 @@ export default function SolanaWalletPayment({
   ])
 
   const handlePay = useCallback(async () => {
+    console.log("[SOLANA DEBUG] handlePay started")
     if (!publicKey || paymentInFlightRef.current || txSignature) return
 
     pendingPaymentRef.current = false
@@ -197,10 +199,11 @@ export default function SolanaWalletPayment({
 
   useEffect(() => {
     if (connected && publicKey && pendingPaymentRef.current) {
+      console.log("[SOLANA DEBUG] wallet connected, triggering payment")
       pendingPaymentRef.current = false
       void handlePay()
     }
-  }, [connected, publicKey, handlePay])
+  }, [connected, publicKey])
 
   const handleOpenWithWalletClick = useCallback(async () => {
     if (paymentInFlightRef.current || txSignature) return
@@ -210,8 +213,9 @@ export default function SolanaWalletPayment({
     try {
       const { paymentUrl: resolvedPaymentUrl } = await resolveSolanaPayment()
 
-      if (!resolvedPaymentUrl.startsWith("solana:")) {
-        throw new Error("Invalid Solana Pay link")
+      if (!resolvedPaymentUrl || !resolvedPaymentUrl.startsWith("solana:")) {
+        console.error("[SOLANA ERROR] invalid paymentUrl", resolvedPaymentUrl)
+        throw new Error("Expected solana: paymentUrl but received invalid URL")
       }
 
       console.log("[SOLANA] deep link open", { url: resolvedPaymentUrl })
@@ -226,14 +230,18 @@ export default function SolanaWalletPayment({
   const handleChooseWalletClick = useCallback(() => {
     if (paymentInFlightRef.current || txSignature) return
 
+    console.log("[SOLANA DEBUG] choose wallet clicked")
     setLocalError("")
+    pendingPaymentRef.current = true
+    console.log("[SOLANA DEBUG] pendingPaymentRef", pendingPaymentRef.current)
+    console.log("[SOLANA DEBUG] connected", connected)
 
     if (!connected || !publicKey) {
-      pendingPaymentRef.current = true
       setWalletModalVisible(true)
       return
     }
 
+    pendingPaymentRef.current = false
     void handlePay()
   }, [connected, publicKey, setWalletModalVisible, handlePay, txSignature])
 

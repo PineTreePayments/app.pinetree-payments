@@ -54,6 +54,22 @@ function extractEvmSplitContractFromPaymentUrl(paymentUrl?: string): string | un
   return contract
 }
 
+function buildSolanaPaymentUrl(paymentId: string): string {
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://app.pinetree-payments.com"
+  return `solana:${baseUrl}/api/solana-pay/transaction?paymentId=${encodeURIComponent(paymentId)}`
+}
+
+function enforceNetworkPaymentUrl(network: string, paymentId: string, paymentUrl?: string): string {
+  const normalizedNetwork = normalizeWalletNetwork(network) || String(network || "").toLowerCase().trim()
+  const normalizedPaymentUrl = String(paymentUrl || "").trim()
+
+  if (normalizedNetwork === "solana" && !normalizedPaymentUrl.startsWith("solana:")) {
+    return buildSolanaPaymentUrl(paymentId)
+  }
+
+  return normalizedPaymentUrl
+}
+
 async function getProviderApiKey(
   adapterId: string,
   merchantId: string
@@ -241,10 +257,16 @@ export async function createPayment(
         ? existingSplitContract
         : String(split?.merchantWallet || "")
 
+    const paymentUrl = enforceNetworkPaymentUrl(
+      existingPayment.network,
+      existingPayment.id,
+      existingPayment.payment_url || ""
+    )
+
     return {
       id: existingPayment.id,
       provider: existingPayment.provider,
-      paymentUrl: existingPayment.payment_url || "",
+      paymentUrl,
       qrCodeUrl: existingPayment.qr_code_url || "",
       address: existingDisplayAddress,
       universalUrl: undefined,
@@ -416,7 +438,9 @@ export async function createPayment(
     ""
   ).trim() || undefined
 
-  const canonicalPaymentUrl = providerHostedUrl || splitPayment.paymentUrl
+  const canonicalPaymentUrl = network === "solana"
+    ? enforceNetworkPaymentUrl(network, paymentId, splitPayment.paymentUrl)
+    : providerHostedUrl || splitPayment.paymentUrl
   const canonicalQrCodeUrl = providerHostedUrl
     ? splitPayment.qrCodeUrl  // QR still points to universalUrl so merchant can scan
     : splitPayment.qrCodeUrl
