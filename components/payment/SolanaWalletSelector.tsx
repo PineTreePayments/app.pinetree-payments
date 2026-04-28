@@ -19,7 +19,6 @@ export default function SolanaWalletSelector({
   onError,
 }: Props) {
   const [copied, setCopied] = useState(false)
-  const txUrl = paymentUrl.replace("solana:", "")
 
   if (!open) return null
 
@@ -33,30 +32,6 @@ export default function SolanaWalletSelector({
     onLaunch?.()
     // Solana Pay transaction requests must be launched as `solana:https://...`.
     window.location.href = url
-  }
-
-  function launchPhantom() {
-    if (!txUrl) {
-      const message = "Missing wallet link"
-      onError?.(message)
-      return
-    }
-
-    onLaunch?.()
-    const phantomUrl = `https://phantom.app/ul/v1/pay?link=${encodeURIComponent(txUrl)}`
-    window.location.href = phantomUrl
-  }
-
-  function launchSolflare() {
-    if (!txUrl) {
-      const message = "Missing wallet link"
-      onError?.(message)
-      return
-    }
-
-    onLaunch?.()
-    const solflareUrl = `https://solflare.com/ul/v1/pay?link=${encodeURIComponent(txUrl)}`
-    window.location.href = solflareUrl
   }
 
   async function copyPaymentLink() {
@@ -98,7 +73,7 @@ export default function SolanaWalletSelector({
         <div className="p-4 space-y-2">
           <button
             type="button"
-            onClick={launchPhantom}
+            onClick={() => launch(paymentUrl)}
             className="w-full flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left hover:bg-gray-50 active:scale-[0.99] transition"
           >
             <span className="font-semibold text-gray-900">Phantom</span>
@@ -107,7 +82,7 @@ export default function SolanaWalletSelector({
 
           <button
             type="button"
-            onClick={launchSolflare}
+            onClick={() => launch(paymentUrl)}
             className="w-full flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left hover:bg-gray-50 active:scale-[0.99] transition"
           >
             <span className="font-semibold text-gray-900">Solflare</span>
