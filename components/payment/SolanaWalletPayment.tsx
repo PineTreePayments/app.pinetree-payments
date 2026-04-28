@@ -174,6 +174,14 @@ export default function SolanaWalletPayment({
       console.log("[SOLANA DEBUG] tx response", txData)
       const { transaction: serialized } = txData
 
+      const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent)
+
+      if (isMobile) {
+        const deepLink = `https://phantom.app/ul/v1/signTransaction?data=${encodeURIComponent(serialized)}`
+        window.location.href = deepLink
+        return
+      }
+
       const txBytes = Uint8Array.from(atob(serialized), (c) => c.charCodeAt(0))
       const transaction = Transaction.from(txBytes)
 
@@ -212,7 +220,7 @@ export default function SolanaWalletPayment({
       pendingPaymentRef.current = false
       void handlePay()
     }
-  }, [connected, publicKey])
+  }, [connected, publicKey, handlePay])
 
   const handleChooseWalletClick = useCallback(() => {
     if (paymentInFlightRef.current || txSignature) return
