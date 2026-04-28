@@ -214,43 +214,20 @@ export default function SolanaWalletPayment({
     }
   }, [connected, publicKey])
 
-  const handleOpenWithWalletClick = useCallback(async () => {
-    if (paymentInFlightRef.current || txSignature) return
-
-    setLocalError("")
-
-    try {
-      const { paymentUrl: resolvedPaymentUrl } = await resolveSolanaPayment()
-
-      if (!resolvedPaymentUrl.startsWith("solana:")) {
-        console.error("[CRITICAL] WRONG PAYMENT URL", resolvedPaymentUrl)
-        throw new Error("Non-Solana paymentUrl received in Solana flow")
-      }
-
-      console.log("[SOLANA] deep link open", { url: resolvedPaymentUrl })
-      window.location.href = resolvedPaymentUrl
-    } catch (err) {
-      const msg = (err as Error)?.message || "Unable to open wallet"
-      setLocalError(msg)
-      onError?.(msg)
-    }
-  }, [resolveSolanaPayment, txSignature, onError])
-
   const handleChooseWalletClick = useCallback(() => {
     if (paymentInFlightRef.current || txSignature) return
 
     console.log("[SOLANA DEBUG] choose wallet clicked")
     setLocalError("")
-    pendingPaymentRef.current = true
-    console.log("[SOLANA DEBUG] pendingPaymentRef", pendingPaymentRef.current)
     console.log("[SOLANA DEBUG] connected", connected)
 
     if (!connected || !publicKey) {
+      pendingPaymentRef.current = true
+      console.log("[SOLANA DEBUG] pendingPaymentRef", pendingPaymentRef.current)
       setWalletModalVisible(true)
       return
     }
 
-    pendingPaymentRef.current = false
     void handlePay()
   }, [connected, publicKey, setWalletModalVisible, handlePay, txSignature])
 
@@ -319,18 +296,14 @@ export default function SolanaWalletPayment({
         </div>
       ) : null}
 
-      <Button fullWidth disabled={isPaying} onClick={() => void handleOpenWithWalletClick()}>
-        Open with your wallet
-      </Button>
-
       {isPaying ? (
-        <Button variant="secondary" fullWidth disabled>
+        <Button fullWidth disabled>
           <span className="inline-block h-3 w-3 rounded-full border border-gray-500 border-t-transparent animate-spin mr-2" />
           Approve in your wallet
         </Button>
       ) : (
-        <Button variant="secondary" fullWidth disabled={connecting} onClick={handleChooseWalletClick}>
-          {connecting ? "Connecting wallet..." : "Choose a wallet"}
+        <Button fullWidth disabled={connecting} onClick={handleChooseWalletClick}>
+          Choose your wallet
         </Button>
       )}
 
