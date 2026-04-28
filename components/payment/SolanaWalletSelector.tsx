@@ -34,6 +34,13 @@ export default function SolanaWalletSelector({
     const phantomUrl = `https://phantom.app/ul/v1/pay?link=${encodeURIComponent(txUrl)}`
     console.log("LAUNCHING PHANTOM:", phantomUrl)
     window.open(phantomUrl, "_self")
+    setTimeout(() => {
+      const a = document.createElement("a")
+      a.href = paymentUrl
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+    }, 1200)
   }
 
   function launchSolflare() {
@@ -92,7 +99,7 @@ export default function SolanaWalletSelector({
             className="w-full flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left hover:bg-gray-50 active:scale-[0.99] transition"
           >
             <span className="font-semibold text-gray-900">Phantom</span>
-            <span className="text-xs text-gray-400">Open</span>
+            <span className="text-xs text-gray-400">Open wallet (if already using this device)</span>
           </button>
 
           <button
@@ -101,7 +108,7 @@ export default function SolanaWalletSelector({
             className="w-full flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left hover:bg-gray-50 active:scale-[0.99] transition"
           >
             <span className="font-semibold text-gray-900">Solflare</span>
-            <span className="text-xs text-gray-400">Open</span>
+            <span className="text-xs text-gray-400">Open wallet (if already using this device)</span>
           </button>
 
           <Button fullWidth variant="secondary" onClick={copyPaymentLink}>

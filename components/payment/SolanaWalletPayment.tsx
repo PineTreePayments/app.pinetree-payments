@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import QRCode from "react-qr-code"
 import Button from "@/components/ui/Button"
 import SolanaWalletSelector from "@/components/payment/SolanaWalletSelector"
 
@@ -291,8 +292,24 @@ export default function SolanaWalletPayment({
       ) : null}
 
       {session?.paymentUrl ? (
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 text-center space-y-3">
+          <div className="mx-auto w-full max-w-[240px] rounded-xl bg-white p-3 shadow-sm">
+            <QRCode
+              value={session.paymentUrl}
+              size={216}
+              className="h-auto w-full"
+              aria-label="Solana Pay QR code"
+            />
+          </div>
+          <p className="text-sm font-semibold text-gray-900">
+            Scan with Phantom or Solflare to complete payment
+          </p>
+        </div>
+      ) : null}
+
+      {session?.paymentUrl ? (
         <Button fullWidth onClick={openWalletSelector}>
-          Choose your wallet
+          Open wallet (if already using this device)
         </Button>
       ) : null}
 
