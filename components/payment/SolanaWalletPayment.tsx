@@ -45,7 +45,7 @@ export default function SolanaWalletPayment({
   onError,
 }: Props) {
   const { connection } = useConnection()
-  const { connected, publicKey, connecting, disconnect, sendTransaction, signTransaction } = useWallet()
+  const { connected, publicKey, connecting, disconnect, sendTransaction } = useWallet()
   const { setVisible: setWalletModalVisible } = useWalletModal()
 
   const [isPaying, setIsPaying] = useState(false)
@@ -60,7 +60,7 @@ export default function SolanaWalletPayment({
   const isIntentMode = Boolean(intentId)
 
   const resolveSolanaPayment = useCallback(async (): Promise<PaymentData> => {
-    if (paymentData?.paymentId && paymentData.paymentUrl) {
+    if (!isIntentMode && paymentData?.paymentId && paymentData.paymentUrl) {
       return paymentData
     }
 
@@ -99,12 +99,19 @@ export default function SolanaWalletPayment({
         paymentId?: string
         paymentUrl?: string
       }
+      console.log("[SOLANA DEBUG] FULL API RESPONSE", createResult)
       const resolvedPaymentId = String(createResult.paymentId || "")
       const resolvedPaymentUrl = String(createResult.paymentUrl || "")
       console.log("[SOLANA DEBUG] resolvedPaymentUrl", resolvedPaymentUrl)
+      console.log("[SOLANA DEBUG] paymentUrl used", resolvedPaymentUrl)
 
       if (!resolvedPaymentId || !resolvedPaymentUrl) {
         throw new Error("Incomplete payment data returned from server")
+      }
+
+      if (!resolvedPaymentUrl.startsWith("solana:")) {
+        console.error("[CRITICAL] WRONG PAYMENT URL", resolvedPaymentUrl)
+        throw new Error("Non-Solana paymentUrl received in Solana flow")
       }
 
       const resolvedPaymentData = {
@@ -136,6 +143,10 @@ export default function SolanaWalletPayment({
 
   const handlePay = useCallback(async () => {
     console.log("[SOLANA DEBUG] handlePay started")
+    console.log("[SOLANA DEBUG] handlePay executing", {
+      connected,
+      publicKey,
+    })
     if (!publicKey || paymentInFlightRef.current || txSignature) return
 
     pendingPaymentRef.current = false
@@ -159,17 +170,15 @@ export default function SolanaWalletPayment({
         const err = (await txRes.json()) as { error?: string }
         throw new Error(err.error || "Failed to build transaction")
       }
-      const { transaction: serialized } = (await txRes.json()) as { transaction: string }
+      const txData = (await txRes.json()) as { transaction: string }
+      console.log("[SOLANA DEBUG] tx response", txData)
+      const { transaction: serialized } = txData
 
       const txBytes = Uint8Array.from(atob(serialized), (c) => c.charCodeAt(0))
-      const tx = Transaction.from(txBytes)
+      const transaction = Transaction.from(txBytes)
 
-      // Step 3: sign in wallet, then send through adapter
-      if (!signTransaction) {
-        throw new Error("Connected wallet does not support transaction signing")
-      }
-      const signedTx = await signTransaction(tx)
-      const signature = await sendTransaction(signedTx, connection)
+      const signature = await sendTransaction(transaction, connection)
+      console.log("[SOLANA DEBUG] tx sent", signature)
       console.log("[SOLANA] wallet adapter tx submitted", { signature })
 
       setTxSignature(signature)
@@ -188,8 +197,8 @@ export default function SolanaWalletPayment({
     }
   }, [
     resolveSolanaPayment,
+    connected,
     publicKey,
-    signTransaction,
     sendTransaction,
     connection,
     txSignature,
@@ -213,9 +222,9 @@ export default function SolanaWalletPayment({
     try {
       const { paymentUrl: resolvedPaymentUrl } = await resolveSolanaPayment()
 
-      if (!resolvedPaymentUrl || !resolvedPaymentUrl.startsWith("solana:")) {
-        console.error("[SOLANA ERROR] invalid paymentUrl", resolvedPaymentUrl)
-        throw new Error("Expected solana: paymentUrl but received invalid URL")
+      if (!resolvedPaymentUrl.startsWith("solana:")) {
+        console.error("[CRITICAL] WRONG PAYMENT URL", resolvedPaymentUrl)
+        throw new Error("Non-Solana paymentUrl received in Solana flow")
       }
 
       console.log("[SOLANA] deep link open", { url: resolvedPaymentUrl })
