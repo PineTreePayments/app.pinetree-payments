@@ -60,10 +60,10 @@ function buildSolanaPaymentUrl(paymentId: string): string {
 }
 
 function enforceNetworkPaymentUrl(network: string, paymentId: string, paymentUrl?: string): string {
-  const normalizedNetwork = normalizeWalletNetwork(network) || String(network || "").toLowerCase().trim()
+  const normalizedNetwork = String(network || "").toLowerCase().trim()
   const normalizedPaymentUrl = String(paymentUrl || "").trim()
 
-  if (normalizedNetwork === "solana" && !normalizedPaymentUrl.startsWith("solana:")) {
+  if ((normalizeWalletNetwork(normalizedNetwork) || normalizedNetwork) === "solana" && !normalizedPaymentUrl.startsWith("solana:")) {
     return buildSolanaPaymentUrl(paymentId)
   }
 
@@ -257,8 +257,11 @@ export async function createPayment(
         ? existingSplitContract
         : String(split?.merchantWallet || "")
 
+    const normalizedNetwork =
+      String(existingPayment.network || "").toLowerCase().trim()
+
     const paymentUrl = enforceNetworkPaymentUrl(
-      existingPayment.network,
+      normalizedNetwork,
       existingPayment.id,
       existingPayment.payment_url || ""
     )
