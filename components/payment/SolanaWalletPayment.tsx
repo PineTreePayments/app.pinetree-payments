@@ -98,21 +98,14 @@ function SolanaWalletPaymentInner({
   const { connection } = useConnection()
   const { setVisible } = useWalletModal()
 
-  // autoConnect=false means the modal's select() sets the wallet but does not
-  // call connect(). This effect bridges the gap: once a wallet is chosen, connect.
-  useEffect(() => {
-    if (wallet && !connected) {
-      connect().catch((err) => {
-        console.error("[SOLANA WALLET] connect error", err)
-      })
+  const handleConnect = async () => {
+    try {
+      await connect()
+      console.log("CONNECTED:", publicKey?.toBase58())
+    } catch (err) {
+      console.error("Connect failed", err)
     }
-  }, [wallet, connected, connect])
-
-  useEffect(() => {
-    if (connected && publicKey) {
-      console.log("WALLET:", publicKey.toBase58())
-    }
-  }, [connected, publicKey])
+  }
 
   const sessionRequestRef = useRef<Promise<SolanaPaymentSession> | null>(null)
   const isIntentMode = Boolean(intentId)
@@ -334,9 +327,13 @@ function SolanaWalletPaymentInner({
 
       {!isPreparing && txStatus !== "sent" && session?.paymentUrl ? (
         <>
-          {!connected ? (
+          {!wallet && !connected ? (
             <Button fullWidth onClick={() => setVisible(true)}>
               Connect Wallet
+            </Button>
+          ) : wallet && !connected ? (
+            <Button fullWidth onClick={handleConnect}>
+              Connect {wallet.adapter.name}
             </Button>
           ) : (
             <div className="space-y-2">
