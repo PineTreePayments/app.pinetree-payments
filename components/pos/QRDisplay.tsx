@@ -18,12 +18,12 @@ export default function QRDisplay({
     return null
   }
 
-  function openWallet(){
+  const canOpenWallet = Boolean(paymentUrl && !paymentUrl.startsWith("solana:"))
 
-    if(paymentUrl){
+  function openWallet(){
+    if(canOpenWallet && paymentUrl){
       window.open(paymentUrl, "_blank")
     }
-
   }
 
   return (
@@ -35,8 +35,8 @@ export default function QRDisplay({
       </div>
 
       <div
-        className="bg-white p-4 rounded-xl shadow cursor-pointer hover:scale-[1.02] transition"
-        onClick={openWallet}
+        className={`bg-white p-4 rounded-xl shadow transition ${canOpenWallet ? "cursor-pointer hover:scale-[1.02]" : ""}`}
+        onClick={canOpenWallet ? openWallet : undefined}
       >
 
         <Image
@@ -48,7 +48,7 @@ export default function QRDisplay({
 
       </div>
 
-      {paymentUrl && (
+      {canOpenWallet && (
 
         <button
           onClick={openWallet}

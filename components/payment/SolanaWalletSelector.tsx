@@ -19,19 +19,34 @@ export default function SolanaWalletSelector({
   onError,
 }: Props) {
   const [copied, setCopied] = useState(false)
+  const txUrl = paymentUrl.replace("solana:", "")
 
   if (!open) return null
 
-  function launch(url: string) {
-    if (!url) {
+  function launchPhantom() {
+    if (!txUrl) {
       const message = "Missing wallet link"
       onError?.(message)
       return
     }
 
     onLaunch?.()
-    // Solana Pay transaction requests must be launched as `solana:https://...`.
-    window.location.href = url
+    const phantomUrl = `https://phantom.app/ul/v1/pay?link=${encodeURIComponent(txUrl)}`
+    console.log("LAUNCHING PHANTOM:", phantomUrl)
+    window.location.href = phantomUrl
+  }
+
+  function launchSolflare() {
+    if (!txUrl) {
+      const message = "Missing wallet link"
+      onError?.(message)
+      return
+    }
+
+    onLaunch?.()
+    const solflareUrl = `https://solflare.com/ul/v1/pay?link=${encodeURIComponent(txUrl)}`
+    console.log("LAUNCHING SOLFLARE:", solflareUrl)
+    window.location.href = solflareUrl
   }
 
   async function copyPaymentLink() {
@@ -73,7 +88,7 @@ export default function SolanaWalletSelector({
         <div className="p-4 space-y-2">
           <button
             type="button"
-            onClick={() => launch(paymentUrl)}
+            onClick={launchPhantom}
             className="w-full flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left hover:bg-gray-50 active:scale-[0.99] transition"
           >
             <span className="font-semibold text-gray-900">Phantom</span>
@@ -82,20 +97,12 @@ export default function SolanaWalletSelector({
 
           <button
             type="button"
-            onClick={() => launch(paymentUrl)}
+            onClick={launchSolflare}
             className="w-full flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left hover:bg-gray-50 active:scale-[0.99] transition"
           >
             <span className="font-semibold text-gray-900">Solflare</span>
             <span className="text-xs text-gray-400">Open</span>
           </button>
-
-          <div className="py-2">
-            <div className="h-px bg-gray-200" />
-          </div>
-
-          <Button fullWidth variant="secondary" onClick={() => launch(paymentUrl)}>
-            Open with installed wallet
-          </Button>
 
           <Button fullWidth variant="secondary" onClick={copyPaymentLink}>
             {copied ? "Payment Link Copied" : "Copy payment link"}
