@@ -90,6 +90,7 @@ export default function SolanaWalletPayment({
   const [isPreparing, setIsPreparing] = useState(false)
   const [localError, setLocalError] = useState("")
   const [isWalletSelectorOpen, setIsWalletSelectorOpen] = useState(false)
+  const [hasLaunchedWallet, setHasLaunchedWallet] = useState(false)
 
   const sessionRequestRef = useRef<Promise<SolanaPaymentSession> | null>(null)
   const isIntentMode = Boolean(intentId)
@@ -276,7 +277,19 @@ export default function SolanaWalletPayment({
         </Button>
       ) : null}
 
-      {session?.paymentUrl ? (
+      {hasLaunchedWallet ? (
+        <div className="text-center space-y-2">
+          <p className="text-sm font-medium text-gray-900">
+            Opening your wallet…
+          </p>
+          <p className="text-xs text-gray-500">
+            Complete the payment in your wallet.
+            This screen will update automatically.
+          </p>
+        </div>
+      ) : null}
+
+      {session?.paymentUrl && !hasLaunchedWallet ? (
         <Button fullWidth onClick={openWalletSelector}>
           Pay with Solana Wallet
         </Button>
@@ -289,6 +302,7 @@ export default function SolanaWalletPayment({
           onClose={() => setIsWalletSelectorOpen(false)}
           onLaunch={() => {
             setIsWalletSelectorOpen(false)
+            setHasLaunchedWallet(true)
           }}
           onError={(message) => {
             setLocalError(message)

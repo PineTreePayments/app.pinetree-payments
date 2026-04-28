@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { SystemProgram, Transaction } from "@solana/web3.js"
 import { buildSolanaSplitTransactionEngine } from "@/engine/solanaSplitTransaction"
 
 /**
@@ -81,9 +82,37 @@ export async function POST(req: NextRequest) {
       durationMs: Date.now() - startedAt
     })
 
-    return Response.json({
-      transaction: serializedTxBase64
+    const serialized = Buffer.from(serializedTxBase64, "base64")
+    const transaction = Transaction.from(serialized)
+    const transferInstruction = transaction.instructions.find((instruction) =>
+      instruction.programId.equals(SystemProgram.programId)
+    )
+    const account = transaction.feePayer?.toBase58() || senderAccount
+    const merchantWallet = transferInstruction?.keys[1]?.pubkey.toBase58() || ""
+    const lamports = transferInstruction?.data.length
+      ? Number(transferInstruction.data.readBigUInt64LE(4))
+      : 0
+
+    console.log("TX DEBUG", {
+      from: account,
+      to: merchantWallet,
+      lamports,
+      blockhash: transaction.recentBlockhash
     })
+
+    console.log("TX SIZE", serialized.length)
+
+    return NextResponse.json(
+      {
+        transaction: serializedTxBase64,
+        message: "PineTree Payment"
+      },
+      {
+        headers: {
+          "Content-Type": "application/json"
+        }
+      }
+    )
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to build Solana split transaction"
     const lower = message.toLowerCase()
