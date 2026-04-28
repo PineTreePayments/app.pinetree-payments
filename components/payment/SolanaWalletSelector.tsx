@@ -43,7 +43,7 @@ export default function SolanaWalletSelector({
     }
 
     onLaunch?.()
-    const phantomUrl = `https://phantom.app/ul/browse/${encodeURIComponent(txUrl)}`
+    const phantomUrl = `https://phantom.app/ul/v1/pay?link=${encodeURIComponent(txUrl)}`
     window.location.href = phantomUrl
   }
 
