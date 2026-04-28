@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useWallet, useConnection } from "@solana/wallet-adapter-react"
 import { useWalletModal } from "@solana/wallet-adapter-react-ui"
 import { Transaction } from "@solana/web3.js"
+import { Buffer } from "buffer"
 import Button from "@/components/ui/Button"
 
 type Props = {
@@ -31,6 +32,25 @@ function parsePaymentId(paymentUrl: string): string | null {
     return new URL(txUrl).searchParams.get("paymentId")
   } catch {
     return null
+  }
+}
+
+function isMobileUserAgent(): boolean {
+  return /iPhone|iPad|Android/i.test(navigator.userAgent)
+}
+
+function isSolanaPayTransactionRequest(paymentUrl: string, paymentId: string): boolean {
+  if (!paymentUrl.startsWith("solana:")) return false
+
+  try {
+    const transactionRequestUrl = new URL(paymentUrl.replace(/^solana:/, ""))
+    return (
+      transactionRequestUrl.protocol === "https:" &&
+      transactionRequestUrl.pathname === "/api/solana-pay/transaction" &&
+      transactionRequestUrl.searchParams.get("paymentId") === paymentId
+    )
+  } catch {
+    return false
   }
 }
 
@@ -147,7 +167,7 @@ export default function SolanaWalletPayment({
       connected,
       publicKey,
     })
-    if (!publicKey || paymentInFlightRef.current || txSignature) return
+    if (paymentInFlightRef.current || txSignature) return
 
     pendingPaymentRef.current = false
     paymentInFlightRef.current = true
@@ -155,7 +175,24 @@ export default function SolanaWalletPayment({
     setLocalError("")
 
     try {
-      const { paymentId: resolvedPaymentId } = await resolveSolanaPayment()
+      const isMobile = isMobileUserAgent()
+      const { paymentId: resolvedPaymentId, paymentUrl: resolvedPaymentUrl } =
+        await resolveSolanaPayment()
+
+      if (!isSolanaPayTransactionRequest(resolvedPaymentUrl, resolvedPaymentId)) {
+        console.error("[CRITICAL] WRONG SOLANA PAY TRANSACTION URL", resolvedPaymentUrl)
+        throw new Error("Invalid Solana Pay transaction request URL")
+      }
+
+      if (isMobile) {
+        console.log("[SOLANA DEBUG] opening Solana Pay transaction request", resolvedPaymentUrl)
+        window.location.href = resolvedPaymentUrl
+        return
+      }
+
+      if (!publicKey) {
+        throw new Error("Connect a Solana wallet to continue")
+      }
 
       // Build transaction from backend
       const txRes = await fetch(
@@ -170,20 +207,15 @@ export default function SolanaWalletPayment({
         const err = (await txRes.json()) as { error?: string }
         throw new Error(err.error || "Failed to build transaction")
       }
-      const txData = (await txRes.json()) as { transaction: string }
+      const txData = (await txRes.json()) as { transaction?: string }
       console.log("[SOLANA DEBUG] tx response", txData)
-      const { transaction: serialized } = txData
+      const serialized = txData?.transaction
 
-      const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent)
-
-      if (isMobile) {
-        const deepLink = `https://phantom.app/ul/v1/signTransaction?data=${encodeURIComponent(serialized)}`
-        window.location.href = deepLink
-        return
+      if (!serialized) {
+        throw new Error("Missing serialized Solana transaction")
       }
 
-      const txBytes = Uint8Array.from(atob(serialized), (c) => c.charCodeAt(0))
-      const transaction = Transaction.from(txBytes)
+      const transaction = Transaction.from(Buffer.from(serialized, "base64"))
 
       const signature = await sendTransaction(transaction, connection)
       console.log("[SOLANA DEBUG] tx sent", signature)
@@ -228,6 +260,11 @@ export default function SolanaWalletPayment({
     console.log("[SOLANA DEBUG] choose wallet clicked")
     setLocalError("")
     console.log("[SOLANA DEBUG] connected", connected)
+
+    if (isMobileUserAgent()) {
+      void handlePay()
+      return
+    }
 
     if (!connected || !publicKey) {
       pendingPaymentRef.current = true
