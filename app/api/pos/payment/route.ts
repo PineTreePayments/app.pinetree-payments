@@ -22,6 +22,12 @@ export async function POST(req: NextRequest) {
       }
     })
 
+    console.info("[api/pos/payment] returning paymentUrl", {
+      paymentId: result.paymentId,
+      intentId: result.intentId,
+      paymentUrl: result.paymentUrl
+    })
+
     return NextResponse.json({
       paymentId: result.paymentId,
       intentId: result.intentId,

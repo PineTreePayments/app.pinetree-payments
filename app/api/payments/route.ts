@@ -44,6 +44,12 @@ export async function POST(req: NextRequest) {
     // subsequent periodic checks. runPaymentWatcher never throws.
     void runPaymentWatcher(payment.id)
 
+    console.info("[api/payments] returning paymentUrl", {
+      paymentId: payment.id,
+      provider: payment.provider,
+      paymentUrl: payment.paymentUrl
+    })
+
     return NextResponse.json({
       paymentId: payment.id,
       provider: payment.provider,

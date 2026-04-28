@@ -60,11 +60,6 @@ function isEvmAddress(value: string): boolean {
   return /^0x[a-fA-F0-9]{40}$/.test(String(value || "").trim())
 }
 
-function getEvmSplitMode(): "direct" | "contract" {
-  const mode = String(process.env.PINETREE_EVM_SPLIT_MODE || "direct").toLowerCase().trim()
-  return mode === "contract" ? "contract" : "direct"
-}
-
 function getEvmSplitContract(network: string): string {
   if (network === "ethereum") {
     return String(process.env.PINETREE_EVM_SPLIT_CONTRACT_ETHEREUM || "").trim()
@@ -119,9 +114,11 @@ export async function generateSplitPayment(
   BASE URL (PRODUCTION SAFE)
   -------------------------------- */
 
-  const BASE_URL =
-    process.env.NEXT_PUBLIC_APP_URL ||
-    "https://app.pinetree-payments.com"
+  const BASE_URL = process.env.NEXT_PUBLIC_APP_URL
+
+  if (network === "solana" && BASE_URL !== "https://app.pinetree-payments.com") {
+    throw new Error("NEXT_PUBLIC_APP_URL must be set to https://app.pinetree-payments.com for Solana Pay URLs")
+  }
 
   /* --------------------------------
   🔥 FIX: DYNAMIC RETURN BASED ON NETWORK
@@ -138,7 +135,7 @@ export async function generateSplitPayment(
   // Provider-declared method takes precedence over network-derived guess.
   // This is critical: Coinbase lives on "base" but uses invoice_split (hosted checkout),
   // NOT contract_split. If the adapter returned a feeCaptureMethod, always trust it.
-  let feeCaptureMethod: string =
+  const feeCaptureMethod: string =
     input.feeCaptureMethodOverride ||
     (network === "solana"
       ? "atomic_split"

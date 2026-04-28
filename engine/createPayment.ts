@@ -55,16 +55,24 @@ function extractEvmSplitContractFromPaymentUrl(paymentUrl?: string): string | un
 }
 
 function buildSolanaPaymentUrl(paymentId: string): string {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://app.pinetree-payments.com"
-  return `solana:${baseUrl}/api/solana-pay/transaction?paymentId=${encodeURIComponent(paymentId)}`
+  const BASE_URL = process.env.NEXT_PUBLIC_APP_URL
+
+  if (BASE_URL !== "https://app.pinetree-payments.com") {
+    throw new Error("NEXT_PUBLIC_APP_URL must be set to https://app.pinetree-payments.com for Solana Pay URLs")
+  }
+
+  return `solana:${BASE_URL}/api/solana-pay/transaction?paymentId=${encodeURIComponent(paymentId)}`
 }
 
 function enforceNetworkPaymentUrl(network: string, paymentId: string, paymentUrl?: string): string {
   const normalizedNetwork = String(network || "").toLowerCase().trim()
   const normalizedPaymentUrl = String(paymentUrl || "").trim()
 
-  if ((normalizeWalletNetwork(normalizedNetwork) || normalizedNetwork) === "solana" && !normalizedPaymentUrl.startsWith("solana:")) {
-    return buildSolanaPaymentUrl(paymentId)
+  if ((normalizeWalletNetwork(normalizedNetwork) || normalizedNetwork) === "solana") {
+    const canonicalSolanaPaymentUrl = buildSolanaPaymentUrl(paymentId)
+    return normalizedPaymentUrl === canonicalSolanaPaymentUrl
+      ? normalizedPaymentUrl
+      : canonicalSolanaPaymentUrl
   }
 
   return normalizedPaymentUrl
@@ -537,6 +545,12 @@ export async function createPayment(
     splitPayment.feeCaptureMethod === "contract_split" && splitContract
       ? splitContract
       : merchantWalletAddress
+
+  console.info("[payment:create] returning paymentUrl", {
+    paymentId,
+    network,
+    paymentUrl: canonicalPaymentUrl
+  })
 
   return {
     id: paymentId,

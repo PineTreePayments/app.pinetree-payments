@@ -51,6 +51,13 @@ export async function POST(req: NextRequest, { params }: Params) {
       idempotencyKey
     })
 
+    console.info("[api/select-network] returning paymentUrl", {
+      intentId,
+      network: result.network || result.selectedNetwork,
+      paymentId: result.paymentId,
+      paymentUrl: result.paymentUrl
+    })
+
     return NextResponse.json(result)
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to select payment network"

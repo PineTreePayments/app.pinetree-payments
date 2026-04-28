@@ -28,6 +28,11 @@ export async function buildSolanaSplitTransactionEngine(input: {
   const paymentId = String(input.paymentId || "").trim()
   const senderAccount = String(input.senderAccount || "").trim()
 
+  console.log("[SOLANA ENGINE][TX] build request", {
+    paymentId,
+    senderAccount
+  })
+
   if (!paymentId) {
     throw new Error("Missing paymentId")
   }
@@ -38,16 +43,19 @@ export async function buildSolanaSplitTransactionEngine(input: {
 
   const payment = await getPaymentById(paymentId)
   if (!payment) {
+    console.error("[SOLANA ENGINE][TX] payment not found", { paymentId })
     throw new Error("Payment not found")
   }
 
   const network = String(payment.network || "").toLowerCase()
   if (network !== "solana") {
+    console.error("[SOLANA ENGINE][TX] wrong network", { paymentId, network })
     throw new Error("Payment is not Solana network")
   }
 
   const status = normalizeToStrictPaymentStatus(payment.status)
   if (status === "CONFIRMED" || status === "FAILED" || status === "INCOMPLETE") {
+    console.error("[SOLANA ENGINE][TX] terminal payment rejected", { paymentId, status })
     throw new Error("Payment is no longer payable")
   }
 
@@ -63,6 +71,7 @@ export async function buildSolanaSplitTransactionEngine(input: {
 
   const selectedAsset = String(metadata.selectedAsset || "SOL").trim().toUpperCase()
   if (selectedAsset !== "SOL") {
+    console.error("[SOLANA ENGINE][TX] unsupported asset", { paymentId, selectedAsset })
     throw new Error("Unsupported Solana asset")
   }
 
@@ -71,15 +80,34 @@ export async function buildSolanaSplitTransactionEngine(input: {
   const pinetreeWallet = String(split?.pinetreeWallet || "").trim()
 
   if (!merchantWallet || !pinetreeWallet) {
+    console.error("[SOLANA ENGINE][TX] missing split wallet metadata", {
+      paymentId,
+      hasMerchantWallet: Boolean(merchantWallet),
+      hasPinetreeWallet: Boolean(pinetreeWallet)
+    })
     throw new Error("Missing split wallet metadata")
   }
 
   const merchantLamports = toLamportsFromAtomic(split?.merchantNativeAmountAtomic)
   const feeLamports = toLamportsFromAtomic(split?.feeNativeAmountAtomic)
 
+  console.log("[SOLANA ENGINE][TX] split resolved", {
+    paymentId,
+    senderAccount,
+    merchantWallet,
+    pinetreeWallet,
+    merchantLamports,
+    feeLamports,
+    selectedAsset
+  })
+
   const rpcUrl = getRpcUrl("solana")
   const connection = new Connection(rpcUrl, "confirmed")
   const { blockhash } = await connection.getLatestBlockhash("confirmed")
+  console.log("[SOLANA ENGINE][TX] blockhash resolved", {
+    paymentId,
+    blockhash
+  })
 
   const tx = new Transaction({
     feePayer: new PublicKey(senderAccount),
@@ -106,5 +134,14 @@ export async function buildSolanaSplitTransactionEngine(input: {
     })
   )
 
-  return tx.serialize({ requireAllSignatures: false }).toString("base64")
+  const serialized = tx.serialize({ requireAllSignatures: false }).toString("base64")
+  console.log("[SOLANA ENGINE][TX] serialized transaction", {
+    paymentId,
+    feePayer: tx.feePayer?.toBase58(),
+    recentBlockhash: tx.recentBlockhash,
+    instructionCount: tx.instructions.length,
+    base64Length: serialized.length
+  })
+
+  return serialized
 }

@@ -10,22 +10,34 @@ import { buildSolanaSplitTransactionEngine } from "@/engine/solanaSplitTransacti
 export async function GET(req: NextRequest) {
   try {
     const paymentId = String(req.nextUrl.searchParams.get("paymentId") || "").trim()
-    console.log("[SOLANA] GET metadata hit", { paymentId, url: req.url })
+    console.log("[SOLANA PAY][GET] metadata request", {
+      paymentId,
+      url: req.url,
+      userAgent: req.headers.get("user-agent") || ""
+    })
 
     const BASE_URL =
       process.env.NEXT_PUBLIC_APP_URL || "https://app.pinetree-payments.com"
 
-    console.log("[SOLANA] BASE_URL", BASE_URL)
+    const response = {
+      label: "PineTree Payments",
+      icon: `${BASE_URL}/pinetree-icon.png`
+    }
+
+    console.log("[SOLANA PAY][GET] metadata response", {
+      paymentId,
+      response
+    })
+
+    return Response.json(response)
+  } catch (error) {
+    console.error("[SOLANA PAY][GET] metadata error", {
+      error: error instanceof Error ? error.message : String(error)
+    })
 
     return Response.json({
       label: "PineTree Payments",
-      icon: `${BASE_URL}/pinetree-icon.png`,
-      message: "Pay with Solana"
-    })
-  } catch {
-    return Response.json({
-      label: "PineTree Payments",
-      message: "Unable to load metadata"
+      icon: "https://app.pinetree-payments.com/pinetree-icon.png"
     })
   }
 }
@@ -41,9 +53,10 @@ export async function POST(req: NextRequest) {
       account?: string
     }
 
-    console.log("[SOLANA] POST transaction hit", {
+    console.log("[SOLANA PAY][POST] transaction request", {
       paymentId,
       sender: body?.account,
+      url: req.url,
       headers: Object.fromEntries(req.headers.entries())
     })
 
@@ -57,8 +70,9 @@ export async function POST(req: NextRequest) {
       senderAccount
     })
 
-    console.log("[SOLANA] tx built", {
+    console.log("[SOLANA PAY][POST] transaction response", {
       paymentId,
+      senderAccount,
       base64Length: serializedTxBase64.length
     })
 
@@ -69,6 +83,11 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to build Solana split transaction"
     const lower = message.toLowerCase()
+
+    console.error("[SOLANA PAY][POST] transaction error", {
+      message,
+      stack: error instanceof Error ? error.stack : undefined
+    })
 
     if (lower.includes("missing paymentid") || lower.includes("missing sender account")) {
       return NextResponse.json({ error: message }, { status: 400 })
