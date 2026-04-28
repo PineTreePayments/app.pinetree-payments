@@ -96,7 +96,7 @@ function parsePayload(raw: string | null): SplitPayload | null {
 function isSolanaPayment(payload: SplitPayload | null): boolean {
   if (!payload) return false
   const network = String(payload.network || "").toLowerCase()
-  return network === "solana" && String(payload.paymentUrl || "").startsWith("solana:")
+  return network === "solana"
 }
 
 function isBaseContractPayment(payload: SplitPayload | null): boolean {

@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from "react"
 import Image from "next/image"
 import { CheckCircle, XCircle } from "lucide-react"
-import QRCode from "qrcode"
 import { supabase } from "@/lib/supabaseClient"
 import AmountDisplay from "./AmountDisplay"
 import Keypad from "./Keypad"
@@ -326,9 +325,8 @@ export default function POSLayout({ locked, terminalContext }: Props) {
       if (returnedIntentId) setIntentId(returnedIntentId)
       setPaymentId(returnedPaymentId)
 
-      if (data.paymentUrl) {
-        const qr = await QRCode.toDataURL(`solana:${data.paymentUrl}`)
-        setQrCodeUrl(qr)
+      if (data.qrCodeUrl) {
+        setQrCodeUrl(data.qrCodeUrl)
       }
 
     } catch {

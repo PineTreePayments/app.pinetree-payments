@@ -83,14 +83,14 @@ function buildWalletOptions(walletUrl: string, network?: string): WalletOption[]
     {
       id: "phantom",
       label: "Open in Phantom",
-      url: `https://phantom.app/ul/browse/${encodedWalletUrl}`,
-      href: `https://phantom.app/ul/browse/${encodedWalletUrl}`
+      url: `solana:${normalizedUrl}`,
+      href: `solana:${normalizedUrl}`
     },
     {
       id: "solflare",
       label: "Open in Solflare",
-      url: `https://solflare.com/ul/v1/browse/${encodedWalletUrl}`,
-      href: `https://solflare.com/ul/v1/browse/${encodedWalletUrl}`
+      url: `solana:${normalizedUrl}`,
+      href: `solana:${normalizedUrl}`
     }
   ]
 

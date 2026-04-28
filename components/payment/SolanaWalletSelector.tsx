@@ -30,7 +30,7 @@ export default function SolanaWalletSelector({
     }
 
     onLaunch?.()
-    window.location.href = `solana:${encodeURIComponent(paymentUrl)}`
+    window.location.href = `solana:${paymentUrl}`
   }
 
   function launchSolflare() {
@@ -41,7 +41,7 @@ export default function SolanaWalletSelector({
     }
 
     onLaunch?.()
-    window.location.href = `solana:${encodeURIComponent(paymentUrl)}`
+    window.location.href = `solana:${paymentUrl}`
   }
 
   async function copyPaymentLink() {

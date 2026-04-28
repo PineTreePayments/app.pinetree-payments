@@ -233,7 +233,12 @@ export async function generateSplitPayment(
     network === "solana" ||
     (network === "base" && feeCaptureMethod === "contract_split")
 
-  const qrSource = isNativeWalletRail ? paymentUrl : universalUrl
+  const qrSource =
+    network === "solana"
+      ? `solana:${paymentUrl}`
+      : isNativeWalletRail
+      ? paymentUrl
+      : universalUrl
   const qrCodeUrl = await QRCode.toDataURL(qrSource)
 
   let merchantNativeAmountAtomic: string | number

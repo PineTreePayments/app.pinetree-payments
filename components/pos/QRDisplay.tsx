@@ -18,7 +18,14 @@ export default function QRDisplay({
     return null
   }
 
-  const canOpenWallet = Boolean(paymentUrl && !paymentUrl.startsWith("solana:"))
+  const canOpenWallet = Boolean(
+    paymentUrl &&
+    (
+      paymentUrl.startsWith("ethereum:") ||
+      paymentUrl.startsWith("metamask:") ||
+      paymentUrl.startsWith("cbwallet:")
+    )
+  )
 
   function openWallet(){
     if(canOpenWallet && paymentUrl){

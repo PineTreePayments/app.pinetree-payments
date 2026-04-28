@@ -45,14 +45,12 @@ function parsePaymentId(paymentUrl: string): string | null {
 }
 
 function isSolanaPayTransactionRequest(paymentUrl: string, paymentId: string): boolean {
-  if (!paymentUrl.startsWith("solana:")) return false
-
   try {
-    const transactionRequestUrl = new URL(paymentUrl.replace(/^solana:/, ""))
+    const url = new URL(paymentUrl)
     return (
-      transactionRequestUrl.protocol === "https:" &&
-      transactionRequestUrl.pathname === "/api/solana-pay/transaction" &&
-      transactionRequestUrl.searchParams.get("paymentId") === paymentId
+      url.protocol === "https:" &&
+      url.pathname === "/api/solana-pay/transaction" &&
+      url.searchParams.get("paymentId") === paymentId
     )
   } catch {
     return false
