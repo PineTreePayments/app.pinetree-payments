@@ -327,7 +327,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
       setPaymentId(returnedPaymentId)
 
       if (data.paymentUrl) {
-        const qr = await QRCode.toDataURL(data.paymentUrl)
+        const qr = await QRCode.toDataURL(`solana:${data.paymentUrl}`)
         setQrCodeUrl(qr)
       }
 

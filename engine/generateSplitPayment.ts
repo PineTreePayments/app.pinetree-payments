@@ -185,7 +185,7 @@ export async function generateSplitPayment(
     const txRequestUrl = `${BASE_URL}/api/solana-pay/transaction?paymentId=${encodeURIComponent(
       String(input.paymentId || "")
     )}`
-    paymentUrl = `solana:${txRequestUrl}`
+    paymentUrl = txRequestUrl
   } else if (network === "base") {
     if (feeCaptureMethod === "invoice_split" || feeCaptureMethod === "collection_then_settle") {
       paymentUrl = `pinetree://pay?data=${encodeURIComponent(payloadString)}`

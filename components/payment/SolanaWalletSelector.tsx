@@ -19,41 +19,29 @@ export default function SolanaWalletSelector({
   onError,
 }: Props) {
   const [copied, setCopied] = useState(false)
-  const txUrl = paymentUrl.replace("solana:", "")
 
   if (!open) return null
 
   function launchPhantom() {
-    if (!txUrl) {
+    if (!paymentUrl) {
       const message = "Missing wallet link"
       onError?.(message)
       return
     }
 
     onLaunch?.()
-    const phantomUrl = `https://phantom.app/ul/v1/pay?link=${encodeURIComponent(txUrl)}`
-    console.log("LAUNCHING PHANTOM:", phantomUrl)
-    window.open(phantomUrl, "_self")
-    setTimeout(() => {
-      const a = document.createElement("a")
-      a.href = paymentUrl
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-    }, 1200)
+    window.location.href = paymentUrl
   }
 
   function launchSolflare() {
-    if (!txUrl) {
+    if (!paymentUrl) {
       const message = "Missing wallet link"
       onError?.(message)
       return
     }
 
     onLaunch?.()
-    const solflareUrl = `https://solflare.com/ul/v1/pay?link=${encodeURIComponent(txUrl)}`
-    console.log("LAUNCHING SOLFLARE:", solflareUrl)
-    window.open(solflareUrl, "_self")
+    window.location.href = paymentUrl
   }
 
   async function copyPaymentLink() {

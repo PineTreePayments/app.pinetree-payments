@@ -61,7 +61,7 @@ function buildSolanaPaymentUrl(paymentId: string): string {
     throw new Error("NEXT_PUBLIC_APP_URL must be set to https://app.pinetree-payments.com for Solana Pay URLs")
   }
 
-  return `solana:${BASE_URL}/api/solana-pay/transaction?paymentId=${encodeURIComponent(paymentId)}`
+  return `${BASE_URL}/api/solana-pay/transaction?paymentId=${encodeURIComponent(paymentId)}`
 }
 
 function enforceNetworkPaymentUrl(network: string, paymentId: string, paymentUrl?: string): string {
