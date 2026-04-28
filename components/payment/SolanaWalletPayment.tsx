@@ -101,12 +101,15 @@ export default function SolanaWalletPayment({
     }
 
     const resolution = (async () => {
+      const network = "solana"
+      console.log("[NETWORK SENT]", network)
+
       const createRes = await fetch(
         `/api/payment-intents/${encodeURIComponent(intentId!)}/select-network`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ network: "solana" }),
+          body: JSON.stringify({ network }),
         }
       )
 
@@ -119,6 +122,7 @@ export default function SolanaWalletPayment({
         paymentId?: string
         paymentUrl?: string
       }
+      console.log("[SOLANA API RESPONSE]", createResult)
       console.log("[SOLANA DEBUG] FULL API RESPONSE", createResult)
       const resolvedPaymentId = String(createResult.paymentId || "")
       const resolvedPaymentUrl = String(createResult.paymentUrl || "")
@@ -130,8 +134,9 @@ export default function SolanaWalletPayment({
       }
 
       if (!resolvedPaymentUrl.startsWith("solana:")) {
+        alert("WRONG URL: " + resolvedPaymentUrl)
         console.error("[CRITICAL] WRONG PAYMENT URL", resolvedPaymentUrl)
-        throw new Error("Non-Solana paymentUrl received in Solana flow")
+        throw new Error("Non-solana URL returned")
       }
 
       const resolvedPaymentData = {
@@ -186,6 +191,8 @@ export default function SolanaWalletPayment({
 
       if (isMobile) {
         console.log("[SOLANA DEBUG] opening Solana Pay transaction request", resolvedPaymentUrl)
+        console.log("[SOLANA FINAL URL]", resolvedPaymentUrl)
+        alert("SOLANA URL: " + resolvedPaymentUrl)
         window.location.href = resolvedPaymentUrl
         return
       }
