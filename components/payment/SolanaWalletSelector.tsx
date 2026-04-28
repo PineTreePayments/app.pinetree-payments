@@ -18,13 +18,15 @@ type WalletOption = {
 }
 
 function buildSupportedWalletOptions(paymentUrl: string): WalletOption[] {
+  const txUrl = paymentUrl.replace("solana:", "")
+  const encodedTransactionRequestUrl = encodeURIComponent(txUrl)
   const encodedPaymentUrl = encodeURIComponent(paymentUrl)
 
   return [
     {
       id: "phantom",
       label: "Phantom",
-      url: `https://phantom.app/ul/browse/${encodedPaymentUrl}`,
+      url: `https://phantom.app/ul/v1/pay?link=${encodedTransactionRequestUrl}`,
     },
     {
       id: "solflare",
