@@ -4,7 +4,7 @@ type Props = {
   variant?: ButtonVariant
   fullWidth?: boolean
   disabled?: boolean
-  onClick?: () => unknown
+  onClick?: React.MouseEventHandler<HTMLButtonElement>
   children: React.ReactNode
   type?: "button" | "submit" | "reset"
   className?: string

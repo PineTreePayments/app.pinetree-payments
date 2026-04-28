@@ -193,7 +193,12 @@ export default function SolanaWalletPayment({
         console.log("[SOLANA DEBUG] opening Solana Pay transaction request", resolvedPaymentUrl)
         console.log("[SOLANA FINAL URL]", resolvedPaymentUrl)
         alert("SOLANA URL: " + resolvedPaymentUrl)
-        window.location.href = resolvedPaymentUrl
+        if (!resolvedPaymentUrl.startsWith("solana:")) {
+          return
+        }
+        setTimeout(() => {
+          window.location.href = resolvedPaymentUrl
+        }, 50)
         return
       }
 
@@ -332,7 +337,7 @@ export default function SolanaWalletPayment({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
       <div className="text-xs uppercase tracking-widest text-gray-500 text-center">Pay via Solana</div>
       {amountDisplay}
 
@@ -354,7 +359,15 @@ export default function SolanaWalletPayment({
           Approve in your wallet
         </Button>
       ) : (
-        <Button fullWidth disabled={connecting} onClick={handleChooseWalletClick}>
+        <Button
+          fullWidth
+          disabled={connecting}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            handleChooseWalletClick()
+          }}
+        >
           Choose your wallet
         </Button>
       )}
