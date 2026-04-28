@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import Button from "@/components/ui/Button"
 
 type Props = {
@@ -11,27 +11,6 @@ type Props = {
   onError?: (error: string) => void
 }
 
-type WalletOption = {
-  id: string
-  label: string
-  url: string
-}
-
-function buildSupportedWalletOptions(paymentUrl: string): WalletOption[] {
-  return [
-    {
-      id: "phantom",
-      label: "Phantom",
-      url: paymentUrl,
-    },
-    {
-      id: "solflare",
-      label: "Solflare",
-      url: paymentUrl,
-    },
-  ]
-}
-
 export default function SolanaWalletSelector({
   paymentUrl,
   open,
@@ -40,7 +19,7 @@ export default function SolanaWalletSelector({
   onError,
 }: Props) {
   const [copied, setCopied] = useState(false)
-  const walletOptions = useMemo(() => buildSupportedWalletOptions(paymentUrl), [paymentUrl])
+  const txUrl = paymentUrl.replace("solana:", "")
 
   if (!open) return null
 
@@ -53,8 +32,31 @@ export default function SolanaWalletSelector({
 
     onLaunch?.()
     // Solana Pay transaction requests must be launched as `solana:https://...`.
-    // eslint-disable-next-line react-hooks/immutability
     window.location.href = url
+  }
+
+  function launchPhantom() {
+    if (!txUrl) {
+      const message = "Missing wallet link"
+      onError?.(message)
+      return
+    }
+
+    onLaunch?.()
+    const phantomUrl = `https://phantom.app/ul/browse/${encodeURIComponent(txUrl)}`
+    window.location.href = phantomUrl
+  }
+
+  function launchSolflare() {
+    if (!txUrl) {
+      const message = "Missing wallet link"
+      onError?.(message)
+      return
+    }
+
+    onLaunch?.()
+    const solflareUrl = `https://solflare.com/ul/v1/browse/${encodeURIComponent(txUrl)}`
+    window.location.href = solflareUrl
   }
 
   async function copyPaymentLink() {
@@ -94,17 +96,23 @@ export default function SolanaWalletSelector({
         </div>
 
         <div className="p-4 space-y-2">
-          {walletOptions.map((wallet) => (
-            <button
-              key={wallet.id}
-              type="button"
-              onClick={() => launch(wallet.url)}
-              className="w-full flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left hover:bg-gray-50 active:scale-[0.99] transition"
-            >
-              <span className="font-semibold text-gray-900">{wallet.label}</span>
-              <span className="text-xs text-gray-400">Open</span>
-            </button>
-          ))}
+          <button
+            type="button"
+            onClick={launchPhantom}
+            className="w-full flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left hover:bg-gray-50 active:scale-[0.99] transition"
+          >
+            <span className="font-semibold text-gray-900">Phantom</span>
+            <span className="text-xs text-gray-400">Open</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={launchSolflare}
+            className="w-full flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left hover:bg-gray-50 active:scale-[0.99] transition"
+          >
+            <span className="font-semibold text-gray-900">Solflare</span>
+            <span className="text-xs text-gray-400">Open</span>
+          </button>
 
           <div className="py-2">
             <div className="h-px bg-gray-200" />
