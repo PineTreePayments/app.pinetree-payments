@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import QRCode from "react-qr-code"
 import Button from "@/components/ui/Button"
 import SolanaWalletSelector from "@/components/payment/SolanaWalletSelector"
 
@@ -89,7 +88,6 @@ export default function SolanaWalletPayment({
 }: Props) {
   const [session, setSession] = useState<SolanaPaymentSession | null>(null)
   const [isPreparing, setIsPreparing] = useState(false)
-  const [copied, setCopied] = useState(false)
   const [localError, setLocalError] = useState("")
   const [isWalletSelectorOpen, setIsWalletSelectorOpen] = useState(false)
 
@@ -232,19 +230,6 @@ export default function SolanaWalletPayment({
     setIsWalletSelectorOpen(true)
   }, [onError, session?.paymentUrl])
 
-  const copyPaymentLink = useCallback(async () => {
-    if (!session?.paymentUrl) return
-    try {
-      await navigator.clipboard.writeText(session.paymentUrl)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      const message = "Unable to copy payment link"
-      setLocalError(message)
-      onError?.(message)
-    }
-  }, [onError, session?.paymentUrl])
-
   const amountDisplay = (
     <div className="bg-gray-50 rounded-xl px-4 py-3 text-center space-y-1">
       {isIntentMode ? (
@@ -292,30 +277,8 @@ export default function SolanaWalletPayment({
       ) : null}
 
       {session?.paymentUrl ? (
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 text-center space-y-3">
-          <div className="mx-auto w-full max-w-[240px] rounded-xl bg-white p-3 shadow-sm">
-            <QRCode
-              value={session.paymentUrl}
-              size={216}
-              className="h-auto w-full"
-              aria-label="Solana Pay QR code"
-            />
-          </div>
-          <p className="text-sm font-semibold text-gray-900">
-            Scan with Phantom or Solflare to complete payment
-          </p>
-        </div>
-      ) : null}
-
-      {session?.paymentUrl ? (
         <Button fullWidth onClick={openWalletSelector}>
-          Open wallet (if already using this device)
-        </Button>
-      ) : null}
-
-      {session?.paymentUrl ? (
-        <Button variant="secondary" fullWidth onClick={copyPaymentLink}>
-          {copied ? "Payment Link Copied" : "Copy Solana Pay Link"}
+          Pay with Solana Wallet
         </Button>
       ) : null}
 
