@@ -12,6 +12,7 @@ import { normalizeToStrictPaymentStatus } from "./paymentStateMachine"
 // Solana Memo Program — used to attach a deterministic payment reference on-chain.
 // The watcher reads this back to guarantee payment identity before confirming.
 const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")
+const SYSTEM_PROGRAM_ADDRESS = SystemProgram.programId.toBase58()
 
 function toLamportsFromAtomic(value: unknown): number {
   const n = Number(value)
@@ -39,6 +40,25 @@ export async function buildSolanaSplitTransactionEngine(input: {
 
   if (!senderAccount) {
     throw new Error("Missing sender account")
+  }
+
+  if (senderAccount === SYSTEM_PROGRAM_ADDRESS) {
+    console.error("[SOLANA ENGINE][TX] invalid payer account", {
+      paymentId,
+      senderAccount
+    })
+    throw new Error("Invalid payer account")
+  }
+
+  let payerPublicKey: PublicKey
+  try {
+    payerPublicKey = new PublicKey(senderAccount)
+  } catch {
+    console.error("[SOLANA ENGINE][TX] invalid payer account", {
+      paymentId,
+      senderAccount
+    })
+    throw new Error("Invalid payer account")
   }
 
   const payment = await getPaymentById(paymentId)
@@ -117,18 +137,18 @@ export async function buildSolanaSplitTransactionEngine(input: {
   })
 
   const tx = new Transaction({
-    feePayer: new PublicKey(senderAccount),
+    feePayer: payerPublicKey,
     recentBlockhash: blockhash
   })
 
   tx.add(
     SystemProgram.transfer({
-      fromPubkey: new PublicKey(senderAccount),
+      fromPubkey: payerPublicKey,
       toPubkey: new PublicKey(merchantWallet),
       lamports: merchantLamports
     }),
     SystemProgram.transfer({
-      fromPubkey: new PublicKey(senderAccount),
+      fromPubkey: payerPublicKey,
       toPubkey: new PublicKey(pinetreeWallet),
       lamports: feeLamports
     }),

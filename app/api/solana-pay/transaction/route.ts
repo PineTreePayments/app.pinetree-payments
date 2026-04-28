@@ -89,7 +89,11 @@ export async function POST(req: NextRequest) {
       stack: error instanceof Error ? error.stack : undefined
     })
 
-    if (lower.includes("missing paymentid") || lower.includes("missing sender account")) {
+    if (
+      lower.includes("missing paymentid") ||
+      lower.includes("missing sender account") ||
+      lower.includes("invalid payer account")
+    ) {
       return NextResponse.json({ error: message }, { status: 400 })
     }
 

@@ -43,7 +43,7 @@ export default function SolanaWalletSelector({
     }
 
     onLaunch?.()
-    const phantomUrl = `https://phantom.app/ul/v1/pay?link=${txUrl}`
+    const phantomUrl = `https://phantom.app/ul/v1/pay?link=${encodeURIComponent(txUrl)}`
     window.location.href = phantomUrl
   }
 
@@ -55,7 +55,7 @@ export default function SolanaWalletSelector({
     }
 
     onLaunch?.()
-    const solflareUrl = `https://solflare.com/ul/v1/pay?link=${txUrl}`
+    const solflareUrl = `https://solflare.com/ul/v1/pay?link=${encodeURIComponent(txUrl)}`
     window.location.href = solflareUrl
   }
 
