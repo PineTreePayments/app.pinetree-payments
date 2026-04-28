@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { buildSolanaSplitTransactionEngine } from "@/engine/solanaSplitTransaction"
+import { getPaymentById } from "@/database/payments"
 
 /**
  * GET — Solana Pay Transaction Request metadata
@@ -7,11 +8,27 @@ import { buildSolanaSplitTransactionEngine } from "@/engine/solanaSplitTransacti
  * Solana Pay wallets perform a GET before POST to retrieve the label and icon.
  * Without this handler, all Solana Pay QR scans fail immediately in the wallet.
  */
-export async function GET(_req: NextRequest) {
-  return NextResponse.json({
-    label: "PineTree Payments",
-    icon: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.pinetree-payments.com"}/pinetree-icon.png`
-  })
+export async function GET(req: NextRequest) {
+  try {
+    const paymentId = String(req.nextUrl.searchParams.get("paymentId") || "").trim()
+    console.log("[SOLANA] GET metadata hit", { paymentId, url: req.url })
+
+    const BASE_URL =
+      process.env.NEXT_PUBLIC_APP_URL || "https://app.pinetree-payments.com"
+
+    console.log("[SOLANA] BASE_URL", BASE_URL)
+
+    return Response.json({
+      label: "PineTree Payments",
+      icon: `${BASE_URL}/pinetree-icon.png`,
+      message: "Pay with Solana"
+    })
+  } catch {
+    return Response.json({
+      label: "PineTree Payments",
+      message: "Unable to load metadata"
+    })
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -25,18 +42,41 @@ export async function POST(req: NextRequest) {
       account?: string
     }
 
+    console.log("[SOLANA] POST transaction hit", {
+      paymentId,
+      sender: body?.account,
+      headers: Object.fromEntries(req.headers.entries())
+    })
+
     const senderAccount = String(body?.account || "").trim()
     if (!senderAccount) {
       return NextResponse.json({ error: "Missing sender account" }, { status: 400 })
     }
 
-    const serialized = await buildSolanaSplitTransactionEngine({
+    const payment = await getPaymentById(paymentId)
+    const split = (payment?.metadata as { split?: { merchantWallet?: string; pinetreeWallet?: string } } | null)?.split
+
+    const merchantWallet = String(split?.merchantWallet || "").trim()
+    const pinetreeWallet = String(split?.pinetreeWallet || "").trim()
+
+    if (!payment || !split || !merchantWallet || !pinetreeWallet) {
+      throw new Error("Missing split metadata for Solana payment")
+    }
+
+    const serializedTxBase64 = await buildSolanaSplitTransactionEngine({
       paymentId,
       senderAccount
     })
 
-    return NextResponse.json({
-      transaction: serialized,
+    console.log("[SOLANA] tx built", {
+      paymentId,
+      merchantWallet,
+      pinetreeWallet,
+      base64Length: serializedTxBase64.length
+    })
+
+    return Response.json({
+      transaction: serializedTxBase64,
       message: "Sign to complete split payment"
     })
   } catch (error) {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   useAccount,
   useConnect,
@@ -101,7 +101,7 @@ export default function BaseWalletPayment({
   const isSwitching = switchStatus === "pending"
   const isSubmitted = writeStatus === "success"
   const isConfirmed = isSubmitted && receiptStatus === "success"
-  // Covers both the "creating payment" API call and the "waiting for wallet" state
+  // True while API call is in flight OR while awaiting wallet approval
   const isPaying = isCreatingPayment || writeStatus === "pending"
 
   // In direct mode, pre-populate paymentData from props once on mount
@@ -120,12 +120,26 @@ export default function BaseWalletPayment({
     [isIntentMode, directPaymentUrl]
   )
 
+  // Log wallet:connected on first successful connection
+  const prevConnected = useRef(false)
+  useEffect(() => {
+    if (isConnected && !prevConnected.current) {
+      prevConnected.current = true
+      console.log("[BaseWalletPayment] wallet:connected", { address, chainId: chain?.id })
+    }
+    if (!isConnected) {
+      prevConnected.current = false
+    }
+  }, [isConnected, address, chain?.id])
+
+  // Log tx:submitted on broadcast
   useEffect(() => {
     if (isSubmitted && txHash) {
       console.log("[BaseWalletPayment] tx:submitted", { paymentId: paymentData?.paymentId, txHash })
     }
   }, [isSubmitted, txHash, paymentData])
 
+  // Call onSuccess only after receipt confirmed (tx mined)
   useEffect(() => {
     if (isConfirmed && txHash && paymentData?.paymentId !== undefined) {
       console.log("[BaseWalletPayment] tx:receipt-confirmed", { paymentId: paymentData.paymentId, txHash })
@@ -192,7 +206,7 @@ export default function BaseWalletPayment({
     setLocalError("")
 
     if (isIntentMode) {
-      // Intent mode: create payment first, then execute
+      // Step 1: create/select payment via API, then immediately execute the contract call
       setIsCreatingPayment(true)
       try {
         const res = await fetch(
@@ -208,6 +222,7 @@ export default function BaseWalletPayment({
           throw new Error(err.error || "Failed to create payment")
         }
         const result = (await res.json()) as { paymentId?: string; paymentUrl?: string }
+        console.log("[BaseWalletPayment] payment:create-response", result)
         const paymentId = String(result.paymentId || "")
         const paymentUrl = String(result.paymentUrl || "")
         if (!paymentId || !paymentUrl) {
@@ -215,6 +230,7 @@ export default function BaseWalletPayment({
         }
         onPaymentCreated?.(paymentId)
         setPaymentData({ paymentId, paymentUrl })
+        // Step 2: decode paymentUrl and call writeContract — this sends the tx to the wallet
         executeWriteContract(paymentUrl, paymentId)
       } catch (err) {
         const msg = (err as Error).message || "Failed to create payment"
@@ -404,10 +420,17 @@ export default function BaseWalletPayment({
         </div>
       ) : null}
       {isPaying ? (
-        <Button fullWidth disabled>
-          <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
-          {isCreatingPayment ? "Creating payment…" : "Waiting for approval in wallet…"}
-        </Button>
+        <div className="space-y-2">
+          <Button fullWidth disabled>
+            <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
+            {isCreatingPayment ? "Creating payment…" : "Waiting for approval in wallet…"}
+          </Button>
+          {!isCreatingPayment ? (
+            <p className="text-xs text-gray-500 text-center">
+              Check your wallet app — a transaction approval request has been sent.
+            </p>
+          ) : null}
+        </div>
       ) : localError ? (
         <Button
           fullWidth
@@ -422,8 +445,8 @@ export default function BaseWalletPayment({
       ) : canPay ? (
         <Button fullWidth onClick={() => void handlePay()}>
           {isIntentMode
-            ? `Pay $${usdAmount.toFixed(2)} USD`
-            : `Pay ${nativeAmount} ETH`}
+            ? `Approve Payment — $${usdAmount.toFixed(2)} USD`
+            : `Approve Payment — ${nativeAmount} ETH`}
         </Button>
       ) : null}
       <Button variant="secondary" fullWidth onClick={() => disconnect()}>

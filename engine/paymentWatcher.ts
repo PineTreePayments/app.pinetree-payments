@@ -212,6 +212,11 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
 
     if (!splitTx) return false
 
+    console.log("[SOLANA] payment detected", {
+      paymentId: input.paymentId,
+      signature: splitTx.hash
+    })
+
     return handleMatchingTransaction(
       input.paymentId,
       { hash: splitTx.hash, value: String(splitTx.totalLamports / 1e9), from: splitTx.from },
@@ -751,6 +756,7 @@ async function findMatchingSolanaSplitTransaction(input: {
     let feeLamports = 0
     let source = ""
     let memoMatches = false
+    let memoObserved = ""
 
     for (const ix of instructions) {
       // Memo program instruction: programId matches and parsed is a plain string.
@@ -759,7 +765,8 @@ async function findMatchingSolanaSplitTransaction(input: {
         ix.programId === SOLANA_MEMO_PROGRAM_ID &&
         typeof ix.parsed === "string"
       ) {
-        memoMatches = ix.parsed.trim() === input.paymentId.trim()
+        memoObserved = ix.parsed.trim()
+        memoMatches = memoObserved === input.paymentId.trim()
         continue
       }
 
@@ -792,6 +799,13 @@ async function findMatchingSolanaSplitTransaction(input: {
     // Require the on-chain memo to match the expected paymentId.
     // This prevents false matches from amount-only coincidence.
     if (!memoMatches) {
+      if (memoObserved) {
+        console.warn("[SOLANA] reference mismatch", {
+          expected: input.paymentId,
+          observed: memoObserved,
+          signature
+        })
+      }
       console.info("[watcher:solana] signature missing required payment reference memo", {
         signature,
         paymentId: input.paymentId

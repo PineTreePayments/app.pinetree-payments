@@ -194,43 +194,36 @@ export async function generateSplitPayment(
       paymentUrl = `pinetree://pay?data=${encodeURIComponent(payloadString)}`
     } else {
       const chainId = "8453"
-      const splitMode = getEvmSplitMode()
-      const splitContract = splitMode === "contract" ? getEvmSplitContract(network) : ""
-
-      if (splitMode === "contract" && isEvmAddress(splitContract)) {
-        if (isUsdc) {
-          // USDC on Base: ABI-encode splitToken() calldata
-          // Caller must approve the split contract for (merchantAmount + feeAmount) USDC first.
-          const calldata = splitIface.encodeFunctionData("splitToken", [
-            input.merchantWallet,
-            input.pinetreeWallet,
-            BigInt(toUSDCAtomicString(merchantNativeAmount)),
-            BigInt(toUSDCAtomicString(feeNativeAmount)),
-            String(input.paymentId || ""),
-            USDC_BASE
-          ])
-          paymentUrl = `ethereum:${splitContract}@${chainId}?data=${calldata}`
-        } else {
-          // ETH on Base: ABI-encode split() calldata + embed total ETH value
-          const totalWei = toWeiString(nativeAmount)
-          const calldata = splitIface.encodeFunctionData("split", [
-            input.merchantWallet,
-            input.pinetreeWallet,
-            BigInt(toWeiString(merchantNativeAmount)),
-            BigInt(toWeiString(feeNativeAmount)),
-            String(input.paymentId || "")
-          ])
-          paymentUrl = `ethereum:${splitContract}@${chainId}?value=${totalWei}&data=${calldata}`
-        }
+      // Base always requires a deployed split contract — direct transfer is not supported.
+      const splitContract = getEvmSplitContract(network)
+      if (!isEvmAddress(splitContract)) {
+        throw new Error(
+          "Base payments require a deployed split contract. Set PINETREE_EVM_SPLIT_CONTRACT_BASE to a valid contract address."
+        )
+      }
+      if (isUsdc) {
+        // USDC on Base: ABI-encode splitToken() calldata
+        // Caller must approve the split contract for (merchantAmount + feeAmount) USDC first.
+        const calldata = splitIface.encodeFunctionData("splitToken", [
+          input.merchantWallet,
+          input.pinetreeWallet,
+          BigInt(toUSDCAtomicString(merchantNativeAmount)),
+          BigInt(toUSDCAtomicString(feeNativeAmount)),
+          String(input.paymentId || ""),
+          USDC_BASE
+        ])
+        paymentUrl = `ethereum:${splitContract}@${chainId}?data=${calldata}`
       } else {
-        // Direct mode (default) or contract mode without an address configured
-        feeCaptureMethod = "direct"
-        if (isUsdc) {
-          // Direct USDC transfer to merchant (fee capture skipped in direct mode)
-          paymentUrl = `ethereum:${USDC_BASE}@${chainId}/transfer?address=${input.merchantWallet}&uint256=${toUSDCAtomicString(nativeAmount)}`
-        } else {
-          paymentUrl = `ethereum:${input.merchantWallet}@${chainId}?value=${toWeiString(nativeAmount)}`
-        }
+        // ETH on Base: ABI-encode split() calldata + embed total ETH value
+        const totalWei = toWeiString(nativeAmount)
+        const calldata = splitIface.encodeFunctionData("split", [
+          input.merchantWallet,
+          input.pinetreeWallet,
+          BigInt(toWeiString(merchantNativeAmount)),
+          BigInt(toWeiString(feeNativeAmount)),
+          String(input.paymentId || "")
+        ])
+        paymentUrl = `ethereum:${splitContract}@${chainId}?value=${totalWei}&data=${calldata}`
       }
     }
   } else {

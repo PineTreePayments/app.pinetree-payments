@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Web3Provider } from "@/components/providers/Web3Provider"
-import { SolanaWalletProvider } from "@/components/providers/SolanaWalletProvider"
+import { SolanaProvider } from "@/components/providers/SolanaProvider"
+import "@solana/wallet-adapter-react-ui/styles.css"
 
 export const metadata: Metadata = {
   title: {
@@ -52,9 +53,9 @@ export default function RootLayout({
       </head>
       <body className="font-sans antialiased">
         <Web3Provider>
-          <SolanaWalletProvider>
+          <SolanaProvider>
             {children}
-          </SolanaWalletProvider>
+          </SolanaProvider>
         </Web3Provider>
       </body>
     </html>
