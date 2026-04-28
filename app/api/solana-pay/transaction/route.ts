@@ -9,39 +9,13 @@ import { buildSolanaSplitTransactionEngine } from "@/engine/solanaSplitTransacti
  * Without this handler, all Solana Pay QR scans fail immediately in the wallet.
  */
 export async function GET(req: NextRequest) {
-  try {
-    const paymentId = String(req.nextUrl.searchParams.get("paymentId") || "").trim()
-    console.log("[SOLANA GET HIT]")
-    console.log("[SOLANA PAY][GET] metadata request", {
-      paymentId,
-      url: req.url,
-      userAgent: req.headers.get("user-agent") || ""
-    })
+  const paymentId = String(req.nextUrl.searchParams.get("paymentId") || "").trim()
+  console.log("SOLANA PAY GET HIT", paymentId)
 
-    const BASE_URL =
-      process.env.NEXT_PUBLIC_APP_URL || "https://app.pinetree-payments.com"
-
-    const response = {
-      label: "PineTree Payments",
-      icon: `${BASE_URL}/pinetree-icon.png`
-    }
-
-    console.log("[SOLANA PAY][GET] metadata response", {
-      paymentId,
-      response
-    })
-
-    return Response.json(response)
-  } catch (error) {
-    console.error("[SOLANA PAY][GET] metadata error", {
-      error: error instanceof Error ? error.message : String(error)
-    })
-
-    return Response.json({
-      label: "PineTree Payments",
-      icon: "https://app.pinetree-payments.com/pinetree-icon.png"
-    })
-  }
+  return NextResponse.json({
+    label: "PineTree Payments",
+    icon: "https://app.pinetree-payments.com/pinetree-icon.png"
+  })
 }
 
 export async function POST(req: NextRequest) {
