@@ -10,6 +10,7 @@ import { buildSolanaSplitTransactionEngine } from "@/engine/solanaSplitTransacti
 export async function GET(req: NextRequest) {
   try {
     const paymentId = String(req.nextUrl.searchParams.get("paymentId") || "").trim()
+    console.log("[SOLANA GET HIT]")
     console.log("[SOLANA PAY][GET] metadata request", {
       paymentId,
       url: req.url,
@@ -43,6 +44,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const startedAt = Date.now()
+
   try {
     const paymentId = String(req.nextUrl.searchParams.get("paymentId") || "").trim()
     if (!paymentId) {
@@ -53,6 +56,7 @@ export async function POST(req: NextRequest) {
       account?: string
     }
 
+    console.log("[SOLANA POST HIT]", body?.account)
     console.log("[SOLANA PAY][POST] transaction request", {
       paymentId,
       sender: body?.account,
@@ -73,12 +77,12 @@ export async function POST(req: NextRequest) {
     console.log("[SOLANA PAY][POST] transaction response", {
       paymentId,
       senderAccount,
-      base64Length: serializedTxBase64.length
+      base64Length: serializedTxBase64.length,
+      durationMs: Date.now() - startedAt
     })
 
     return Response.json({
-      transaction: serializedTxBase64,
-      message: "Sign to complete split payment"
+      transaction: serializedTxBase64
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to build Solana split transaction"
@@ -86,6 +90,7 @@ export async function POST(req: NextRequest) {
 
     console.error("[SOLANA PAY][POST] transaction error", {
       message,
+      durationMs: Date.now() - startedAt,
       stack: error instanceof Error ? error.stack : undefined
     })
 

@@ -88,7 +88,6 @@ export default function SolanaWalletPayment({
 }: Props) {
   const [session, setSession] = useState<SolanaPaymentSession | null>(null)
   const [isPreparing, setIsPreparing] = useState(false)
-  const [hasLaunchedWallet, setHasLaunchedWallet] = useState(false)
   const [copied, setCopied] = useState(false)
   const [localError, setLocalError] = useState("")
   const [isWalletSelectorOpen, setIsWalletSelectorOpen] = useState(false)
@@ -303,19 +302,12 @@ export default function SolanaWalletPayment({
         </Button>
       ) : null}
 
-      {hasLaunchedWallet ? (
-        <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 text-center">
-          Processing payment… approve the transaction in your wallet. This page will update after confirmation.
-        </div>
-      ) : null}
-
       {session?.paymentUrl ? (
         <SolanaWalletSelector
           paymentUrl={session.paymentUrl}
           open={isWalletSelectorOpen}
           onClose={() => setIsWalletSelectorOpen(false)}
           onLaunch={() => {
-            setHasLaunchedWallet(true)
             setIsWalletSelectorOpen(false)
           }}
           onError={(message) => {
