@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
-import { supabase } from "@/database/supabase"
+import { supabase } from "@/lib/supabaseClient"
 import { Toaster } from "sonner"
 
 export default function DashboardLayout({
@@ -27,6 +27,17 @@ export default function DashboardLayout({
     async function checkSession() {
       const { data } = await supabase.auth.getSession()
 
+      console.info("[auth:dashboard] session check", {
+        pathname,
+        hasSession: Boolean(data.session),
+        userId: data.session?.user?.id || null,
+        email: data.session?.user?.email || null,
+        cookieNames: document.cookie
+          .split(";")
+          .map((cookie) => cookie.trim().split("=")[0])
+          .filter((name) => name.startsWith("sb-") || name.includes("auth"))
+      })
+
       if (!data.session) {
         router.replace("/login")
         return
@@ -36,7 +47,7 @@ export default function DashboardLayout({
     }
 
     checkSession()
-  }, [router])
+  }, [pathname, router])
 
   /* -----------------------------
   CLOSE MENUS ON ROUTE CHANGE

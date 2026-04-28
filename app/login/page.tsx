@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import Image from "next/image"
-import { createBrowserClient } from "@supabase/ssr"
+import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import { Eye, EyeOff } from "lucide-react"
 
@@ -11,11 +11,6 @@ TOGGLE GOOGLE LOGIN HERE
 ============================= */
 
 const ENABLE_GOOGLE = false
-
-const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
 
 export default function LoginPage() {
   const [mode, setMode] = useState("login")
@@ -34,6 +29,14 @@ export default function LoginPage() {
   useEffect(() => {
     async function checkSession() {
       const { data } = await supabase.auth.getSession()
+      console.info("[auth:login] initial session check", {
+        hasSession: Boolean(data.session),
+        userId: data.session?.user?.id || null,
+        cookieNames: document.cookie
+          .split(";")
+          .map((cookie) => cookie.trim().split("=")[0])
+          .filter((name) => name.startsWith("sb-") || name.includes("auth"))
+      })
       if (data.session) {
         window.location.href = "/dashboard"
       }
@@ -44,6 +47,11 @@ export default function LoginPage() {
     const {
       data: { subscription }
     } = supabase.auth.onAuthStateChange((event, session) => {
+      console.info("[auth:login] auth state change", {
+        event,
+        hasSession: Boolean(session),
+        userId: session?.user?.id || null
+      })
       if (session) {
         window.location.href = "/dashboard"
       }
@@ -76,7 +84,15 @@ export default function LoginPage() {
     }
 
     const { data: sessionCheck } = await supabase.auth.getSession()
-    console.log("SESSION AFTER LOGIN:", sessionCheck)
+    console.info("[auth:login] session after login", {
+      hasSession: Boolean(sessionCheck.session),
+      userId: sessionCheck.session?.user?.id || null,
+      expiresAt: sessionCheck.session?.expires_at || null,
+      cookieNames: document.cookie
+        .split(";")
+        .map((cookie) => cookie.trim().split("=")[0])
+        .filter((name) => name.startsWith("sb-") || name.includes("auth"))
+    })
 
     toast.success("Welcome back")
     window.location.href = "/dashboard"

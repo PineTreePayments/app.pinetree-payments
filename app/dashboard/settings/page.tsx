@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { supabase } from "@/database/supabase"
+import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 
 type MerchantSettingsPayload = {
@@ -81,6 +81,7 @@ export default function SettingsPage() {
         "Content-Type": "application/json"
       },
       body: method === "POST" ? JSON.stringify(body || {}) : undefined,
+      credentials: "include",
       cache: "no-store"
     })
 

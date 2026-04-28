@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useState, useEffect, useRef, useCallback } from "react"
 import { Eye, EyeOff } from "lucide-react"
-import { supabase } from "@/database/supabase"
+import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import Button from "@/components/ui/Button"
 import Card from "@/components/ui/Card"
@@ -91,6 +91,7 @@ export default function POSPage() {
         "Content-Type": "application/json"
       },
       body: method === "GET" ? undefined : JSON.stringify(body || {}),
+      credentials: "include",
       cache: "no-store"
     })
 
@@ -112,13 +113,15 @@ export default function POSPage() {
       console.error(error)
       toast.error(error instanceof Error ? error.message : "Failed to load terminals")
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [callPosTerminalsApi])
 
   async function loadDrawerBalances(terminalList: Terminal[]) {
     const results = await Promise.allSettled(
       terminalList.map(async (t) => {
-        const res = await fetch(`/api/pos/drawer/balance?terminalId=${encodeURIComponent(t.id)}`, { cache: "no-store" })
+        const res = await fetch(`/api/pos/drawer/balance?terminalId=${encodeURIComponent(t.id)}`, {
+          cache: "no-store",
+          credentials: "include"
+        })
         if (!res.ok) return null
         const data = await res.json() as DrawerBalance
         return { id: t.id, data }
@@ -147,6 +150,7 @@ export default function POSPage() {
       const res = await fetch("/api/pos/drawer/closeout", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+        credentials: "include",
         body: JSON.stringify({ terminalId: closeoutTerminalId, merchantId: terminal?.merchant_id, actualAmount: actual })
       })
       const data = await res.json()

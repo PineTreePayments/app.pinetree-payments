@@ -21,6 +21,13 @@ function isProtectedApi(pathname: string): boolean {
   )
 }
 
+function getAuthCookieNames(req: NextRequest): string[] {
+  return req.cookies
+    .getAll()
+    .map((cookie) => cookie.name)
+    .filter((name) => name.startsWith("sb-") || name.includes("auth"))
+}
+
 export async function middleware(req: NextRequest) {
   // Build a mutable response so @supabase/ssr can refresh session cookies when
   // needed (e.g. silent token rotation). The response is replaced inside
@@ -31,6 +38,11 @@ export async function middleware(req: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      cookieOptions: {
+        path: "/",
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production"
+      },
       cookies: {
         getAll() {
           return req.cookies.getAll()
@@ -53,9 +65,21 @@ export async function middleware(req: NextRequest) {
   } = await supabase.auth.getUser()
 
   const { pathname } = req.nextUrl
+  const protectedPage = isProtectedPage(pathname)
+  const protectedApi = isProtectedApi(pathname)
 
-  if (!user && (isProtectedPage(pathname) || isProtectedApi(pathname))) {
-    if (isProtectedApi(pathname)) {
+  if (protectedPage || protectedApi) {
+    console.info("[auth:middleware] protected request", {
+      pathname,
+      hasUser: Boolean(user),
+      userId: user?.id || null,
+      authCookieNames: getAuthCookieNames(req),
+      userAgent: req.headers.get("user-agent") || ""
+    })
+  }
+
+  if (!user && (protectedPage || protectedApi)) {
+    if (protectedApi) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
-import { supabase } from "@/database/supabase"
+import { supabase } from "@/lib/supabaseClient"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 import StatusBadge from "@/components/ui/StatusBadge"
 
@@ -125,6 +125,7 @@ export default function TransactionsPage() {
         "Content-Type": "application/json"
       },
       body: method === "POST" ? JSON.stringify(body || {}) : undefined,
+      credentials: "include",
       cache: "no-store"
     })
 

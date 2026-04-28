@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { supabase } from "@/database/supabase"
+import { supabase } from "@/lib/supabaseClient"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 import { AUTO_POLLING_ENABLED } from "@/lib/utils/polling"
 
@@ -94,6 +94,7 @@ export default function DashboardPage() {
       headers: {
         Authorization: `Bearer ${token}`
       },
+      credentials: "include",
       cache: "no-store"
     })
 

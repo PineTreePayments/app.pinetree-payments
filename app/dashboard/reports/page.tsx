@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
-import { supabase } from "@/database/supabase"
+import { supabase } from "@/lib/supabaseClient"
 
 type ReportSummary = {
   totalVolume: number
@@ -32,7 +32,11 @@ export default function ReportsPage() {
 
       const res = await fetch(
         `/api/reports?startDate=${start.toISOString()}&endDate=${end.toISOString()}`,
-        { headers: { Authorization: `Bearer ${session.access_token}` }, cache: "no-store" }
+        {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          credentials: "include",
+          cache: "no-store"
+        }
       )
       if (!res.ok) return
       const data = (await res.json()) as ReportSummary

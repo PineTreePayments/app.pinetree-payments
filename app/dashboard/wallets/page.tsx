@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { supabase } from "@/database/supabase"
+import { supabase } from "@/lib/supabaseClient"
 
 type WalletItem = {
   id: string
@@ -73,6 +73,7 @@ export default function WalletsPage() {
         headers: {
           Authorization: `Bearer ${token}`
         },
+        credentials: "include",
         cache: "no-store"
       })
 
