@@ -353,6 +353,12 @@ export default function PayClient() {
 
           console.log("PineTree TX SIGNATURE:", result.signature)
 
+          await fetch(`/api/payments/${encodeURIComponent(paymentId)}/detect`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ txHash: result.signature }),
+          }).catch(() => null)
+
           const intentId = params.get("intent")
           window.location.href = intentId
             ? `/pay?intent=${encodeURIComponent(intentId)}`
