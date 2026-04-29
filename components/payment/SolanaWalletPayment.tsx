@@ -94,6 +94,12 @@ function SolanaWalletPaymentInner({
 
   const { wallet, wallets, connect, connected, select, publicKey, sendTransaction } = useWallet()
   const { connection } = useConnection()
+  const phantomWallet = wallets.find(
+    (walletItem) => walletItem.adapter.name === "Phantom Wallet"
+  )
+  const solflareWallet = wallets.find(
+    (walletItem) => walletItem.adapter.name === "Solflare"
+  )
 
   const handleConnect = async () => {
     try {
@@ -334,10 +340,24 @@ function SolanaWalletPaymentInner({
         <>
           {!wallet && !connected ? (
             <div className="space-y-2">
-              <Button fullWidth onClick={() => select("Phantom Wallet")}> 
+              <Button
+                fullWidth
+                onClick={() => {
+                  if (phantomWallet) {
+                    select(phantomWallet.adapter.name)
+                  }
+                }}
+              >
                 Connect Phantom
               </Button>
-              <Button fullWidth onClick={() => select("Solflare")}> 
+              <Button
+                fullWidth
+                onClick={() => {
+                  if (solflareWallet) {
+                    select(solflareWallet.adapter.name)
+                  }
+                }}
+              >
                 Connect Solflare
               </Button>
             </div>
