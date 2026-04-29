@@ -183,7 +183,7 @@ export default function SolanaWalletPayment({
   }, [directSession, intentId, onPaymentCreated, selectedAsset, session])
 
   const openPaymentUrl = useCallback(
-    async (wallet?: "phantom" | "solflare") => {
+    async (wallet: "phantom" | "solflare") => {
       try {
         const preparedSession = await prepareSession()
 
@@ -200,8 +200,6 @@ export default function SolanaWalletPayment({
           )}`
           return
         }
-
-        window.location.href = preparedSession.paymentUrl
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to open Solana payment"
         setLocalError(message)
@@ -250,22 +248,11 @@ export default function SolanaWalletPayment({
         </div>
       ) : null}
 
-      <Button fullWidth onClick={() => void openPaymentUrl()} disabled={isPreparing}>
-        {isPreparing ? (
-          <>
-            <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
-            Preparing Solana payment…
-          </>
-        ) : (
-          "Pay with Solana"
-        )}
-      </Button>
-
       <div className="grid grid-cols-2 gap-2">
-        <Button variant="secondary" fullWidth onClick={() => void openPaymentUrl("phantom")}>
+        <Button variant="secondary" fullWidth onClick={() => void openPaymentUrl("phantom")} disabled={isPreparing}>
           Phantom
         </Button>
-        <Button variant="secondary" fullWidth onClick={() => void openPaymentUrl("solflare")}>
+        <Button variant="secondary" fullWidth onClick={() => void openPaymentUrl("solflare")} disabled={isPreparing}>
           Solflare
         </Button>
       </div>
