@@ -351,7 +351,12 @@ export default function PayClient() {
 
           const result = await provider.signAndSendTransaction(tx) as { signature: string }
 
-          console.log("[Phantom] transaction sent:", result.signature)
+          console.log("PineTree TX SIGNATURE:", result.signature)
+
+          const intentId = params.get("intent")
+          window.location.href = intentId
+            ? `/pay?intent=${encodeURIComponent(intentId)}`
+            : `/pay?pinetree_payment_id=${encodeURIComponent(paymentId)}&status=processing`
         } catch (err) {
           console.error("[Phantom] flow error:", err)
         }
