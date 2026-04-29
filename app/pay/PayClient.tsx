@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import Image from "next/image"
 import { createBrowserClient } from "@supabase/ssr"
 import { ALLOWED_ASSETS, getAvailableAssetsFromValues } from "@/engine/providerMappings"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
@@ -30,7 +29,6 @@ type SplitPayload = {
   outputs?: SplitOutput[]
   paymentUrl?: string
   walletUrl?: string
-  qrCodeUrl?: string
   universalUrl?: string
   walletOptions?: WalletOption[]
   totalAmount?: number
@@ -178,7 +176,6 @@ export default function PayClient() {
     [walletOptions, resolvedSelectedWalletId]
   )
   const recipientAddress = String(activePayload?.outputs?.[0]?.address || "")
-  const paymentQrUrl = String(activePayload?.qrCodeUrl || "")
   const primaryOpenUrl =
     selectedWallet?.href ||
     String(activePayload?.universalUrl || activePayload?.paymentUrl || walletUrl || "")
@@ -401,7 +398,7 @@ export default function PayClient() {
         <Card className="max-w-md w-full text-center space-y-3">
           <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
           <h1 className="text-xl font-bold text-gray-900">Invalid Payment Link</h1>
-          <p className="text-sm text-gray-500">This QR code payload is missing or malformed.</p>
+          <p className="text-sm text-gray-500">This payment link payload is missing or malformed.</p>
         </Card>
       </PageContainer>
     )
@@ -596,7 +593,7 @@ export default function PayClient() {
                           />
                         ) : null}
 
-                        {/* ── Other networks: QR + copy (unchanged) ─────── */}
+                        {/* ── Other networks: unavailable in hosted checkout ─────── */}
                         {asset.network !== "shift4" &&
                           asset.network !== "base" &&
                           asset.network !== "solana" ? (
@@ -621,7 +618,7 @@ export default function PayClient() {
     )
   }
 
-  // ── Direct-payload mode (non-intent — POS / legacy QR) ────────────────────
+  // ── Direct-payload mode (non-intent) ───────────────────────────────────────
 
   const network = String(activePayload?.network || selectedNetwork || "unknown").toUpperCase()
   const usdTotalAmount = Number(activePayload?.usdTotalAmount ?? activePayload?.totalAmount ?? 0)
@@ -669,19 +666,9 @@ export default function PayClient() {
             paymentUrl={String(activePayload?.paymentUrl || "")}
             nativeAmount={nativeAmount}
             usdAmount={usdTotalAmount}
-            qrCodeUrl={paymentQrUrl}
             walletOptions={walletOptions}
           />
-        ) : (
-          <>
-            {paymentQrUrl ? (
-              <div className="flex flex-col items-center rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <p className="text-xs uppercase tracking-widest text-gray-500 mb-3">Scan QR to Pay</p>
-                <Image src={paymentQrUrl} alt="Payment QR" width={208} height={208} className="h-52 w-52 rounded-xl bg-white p-2" />
-              </div>
-            ) : null}
-          </>
-        )}
+        ) : null}
 
         {recipientAddress && !isBaseContractPayment(activePayload) && !isSolanaPayment(activePayload) ? (
           <div className="space-y-2">

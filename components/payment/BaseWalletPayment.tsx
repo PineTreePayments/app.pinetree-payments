@@ -1,25 +1,10 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import {
-  useAccount,
-  useConnect,
-  useDisconnect,
-  useSwitchChain,
-  useWriteContract,
-  useWaitForTransactionReceipt,
-} from "wagmi"
+import { useCallback, useState } from "react"
+import { useAccount, useConnect, useSwitchChain } from "wagmi"
 import { base } from "wagmi/chains"
-import { parseAbi, decodeFunctionData } from "viem"
 import Button from "@/components/ui/Button"
 
-const SPLIT_ABI = parseAbi([
-  "function split(address merchant, address treasury, uint256 merchantAmountWei, uint256 feeAmountWei, string paymentRef) payable",
-])
-
-// Props support two modes:
-//   Intent mode  — provide `intentId`; payment is created when user clicks Pay.
-//   Direct mode  — provide `paymentUrl`; payment is already created (POS / legacy QR).
 type Props = {
   intentId?: string
   paymentUrl?: string
@@ -36,33 +21,6 @@ type PaymentData = {
   paymentUrl: string
 }
 
-function parseEthereumUrl(url: string): {
-  to: `0x${string}`
-  value: bigint
-  data: `0x${string}`
-} | null {
-  try {
-    const withoutPrefix = url.replace(/^ethereum:/, "")
-    const [addressPart, queryString] = withoutPrefix.split("?")
-    const [to] = (addressPart || "").split("@")
-    if (!/^0x[a-fA-F0-9]{40}$/.test(to)) return null
-    const params = new URLSearchParams(queryString || "")
-    const decimalValue = params.get("value") || "0"
-    const data = (params.get("data") || "0x") as `0x${string}`
-    return { to: to as `0x${string}`, value: BigInt(decimalValue), data }
-  } catch {
-    return null
-  }
-}
-
-function connectorIcon(name: string): string {
-  const n = name.toLowerCase()
-  if (n.includes("metamask")) return "🦊"
-  if (n.includes("coinbase")) return "🔵"
-  if (n.includes("walletconnect")) return "🔗"
-  return "👛"
-}
-
 export default function BaseWalletPayment({
   intentId,
   paymentUrl: directPaymentUrl,
@@ -70,225 +28,105 @@ export default function BaseWalletPayment({
   usdAmount,
   paymentId: directPaymentId,
   onPaymentCreated,
-  onSuccess,
   onError,
 }: Props) {
   const { address, chain, isConnected } = useAccount()
-  const { connectors, connect, status: connectStatus } = useConnect()
-  const { disconnect } = useDisconnect()
-  const { switchChain, status: switchStatus } = useSwitchChain()
-  const {
-    writeContract,
-    data: txHash,
-    status: writeStatus,
-    error: writeError,
-    reset: resetWrite,
-  } = useWriteContract()
-  const { status: receiptStatus } = useWaitForTransactionReceipt({
-    hash: txHash,
-    query: { enabled: Boolean(txHash) },
-  })
+  const { connectors, connectAsync, status: connectStatus } = useConnect()
+  const { switchChainAsync, status: switchStatus } = useSwitchChain()
 
-  const [showPicker, setShowPicker] = useState(false)
   const [localError, setLocalError] = useState("")
-  // Holds paymentId + paymentUrl resolved either from server (intent mode) or props (direct mode)
-  const [paymentData, setPaymentData] = useState<PaymentData | null>(null)
-  const [isCreatingPayment, setIsCreatingPayment] = useState(false)
+  const [isPreparingPayment, setIsPreparingPayment] = useState(false)
+  const [isOpeningWallet, setIsOpeningWallet] = useState(false)
 
   const isIntentMode = Boolean(intentId)
   const isOnBase = chain?.id === base.id
-  const isConnecting = connectStatus === "pending"
-  const isSwitching = switchStatus === "pending"
-  const isSubmitted = writeStatus === "success"
-  const isConfirmed = isSubmitted && receiptStatus === "success"
-  // True while API call is in flight OR while awaiting wallet approval
-  const isPaying = isCreatingPayment || writeStatus === "pending"
+  const isConnecting = connectStatus === "pending" || switchStatus === "pending"
 
-  // In direct mode, pre-populate paymentData from props once on mount
-  useEffect(() => {
-    if (!isIntentMode && directPaymentUrl) {
-      setPaymentData({
-        paymentId: directPaymentId || "",
-        paymentUrl: directPaymentUrl,
-      })
-    }
-  }, [isIntentMode, directPaymentUrl, directPaymentId])
+  const resolvePaymentData = useCallback(async (): Promise<PaymentData> => {
+    if (!isIntentMode) {
+      const paymentUrl = String(directPaymentUrl || "").trim()
+      const paymentId = String(directPaymentId || "").trim()
 
-  // Pre-parse the URL once for display/validation (direct mode only)
-  const parsedDirect = useMemo(
-    () => (!isIntentMode && directPaymentUrl ? parseEthereumUrl(directPaymentUrl) : null),
-    [isIntentMode, directPaymentUrl]
-  )
-
-  // Log wallet:connected on first successful connection
-  const prevConnected = useRef(false)
-  useEffect(() => {
-    if (isConnected && !prevConnected.current) {
-      prevConnected.current = true
-      console.log("[BaseWalletPayment] wallet:connected", { address, chainId: chain?.id })
-    }
-    if (!isConnected) {
-      prevConnected.current = false
-    }
-  }, [isConnected, address, chain?.id])
-
-  // Log tx:submitted on broadcast
-  useEffect(() => {
-    if (isSubmitted && txHash) {
-      console.log("[BaseWalletPayment] tx:submitted", { paymentId: paymentData?.paymentId, txHash })
-    }
-  }, [isSubmitted, txHash, paymentData])
-
-  // Call onSuccess only after receipt confirmed (tx mined)
-  useEffect(() => {
-    if (isConfirmed && txHash && paymentData?.paymentId !== undefined) {
-      console.log("[BaseWalletPayment] tx:receipt-confirmed", { paymentId: paymentData.paymentId, txHash })
-      onSuccess?.(txHash, paymentData.paymentId)
-    }
-  }, [isConfirmed, txHash, paymentData, onSuccess])
-
-  useEffect(() => {
-    if (!writeError) return
-    const msg = writeError.message || "Transaction failed"
-    const friendly = msg.toLowerCase().includes("rejected")
-      ? "Transaction rejected by user."
-      : msg
-    setLocalError(friendly)
-    onError?.(friendly)
-  }, [writeError, onError])
-
-  const executeWriteContract = useCallback(
-    (resolvedPaymentUrl: string, resolvedPaymentId: string) => {
-      const parsed = parseEthereumUrl(resolvedPaymentUrl)
-      if (!parsed) {
-        const msg = "Cannot decode payment URL. Please contact support."
-        setLocalError(msg)
-        onError?.(msg)
-        return
+      if (!paymentUrl) {
+        throw new Error("Payment details unavailable — please contact support.")
       }
-      if (!parsed.data || parsed.data === "0x") {
-        const msg = "Missing calldata — contract call cannot proceed. Please contact support."
-        setLocalError(msg)
-        onError?.(msg)
-        return
-      }
-      try {
-        const { args } = decodeFunctionData({ abi: SPLIT_ABI, data: parsed.data })
-        const a = [...args]
-        console.log("[BaseWalletPayment] tx:pre-submit", {
-          paymentId: resolvedPaymentId,
-          contract: parsed.to,
-          totalValueWei: parsed.value.toString(),
-          merchantAddress: a[0],
-          treasuryAddress: a[1],
-          merchantAmountWei: String(a[2]),
-          feeAmountWei: String(a[3]),
-          paymentRef: a[4],
-        })
-        writeContract({
-          address: parsed.to,
-          abi: SPLIT_ABI,
-          functionName: "split",
-          args: args as [`0x${string}`, `0x${string}`, bigint, bigint, string],
-          value: parsed.value,
-          chainId: base.id,
-        })
-      } catch (err) {
-        const msg = (err as Error).message || "Failed to encode transaction"
-        setLocalError(msg)
-        onError?.(msg)
-      }
-    },
-    [writeContract, onError]
-  )
 
-  const handlePay = useCallback(async () => {
+      return { paymentId, paymentUrl }
+    }
+
+    if (!intentId) {
+      throw new Error("Missing Base payment intent")
+    }
+
+    setIsPreparingPayment(true)
+
+    try {
+      const res = await fetch(
+        `/api/payment-intents/${encodeURIComponent(intentId)}/select-network`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ network: "base" }),
+        }
+      )
+
+      if (!res.ok) {
+        const err = (await res.json()) as { error?: string }
+        throw new Error(err.error || "Failed to prepare Base payment")
+      }
+
+      const result = (await res.json()) as { paymentId?: string; paymentUrl?: string }
+      const paymentId = String(result.paymentId || "").trim()
+      const paymentUrl = String(result.paymentUrl || "").trim()
+
+      if (!paymentId || !paymentUrl) {
+        throw new Error("Incomplete payment data returned from server")
+      }
+
+      onPaymentCreated?.(paymentId)
+
+      return { paymentId, paymentUrl }
+    } finally {
+      setIsPreparingPayment(false)
+    }
+  }, [directPaymentId, directPaymentUrl, intentId, isIntentMode, onPaymentCreated])
+
+  const handlePayClick = useCallback(() => {
     setLocalError("")
 
-    if (isIntentMode) {
-      // Step 1: create/select payment via API, then immediately execute the contract call
-      setIsCreatingPayment(true)
+    void (async () => {
       try {
-        const res = await fetch(
-          `/api/payment-intents/${encodeURIComponent(intentId!)}/select-network`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ network: "base" }),
+        if (isConnected) {
+          if (!isOnBase) {
+            await switchChainAsync({ chainId: base.id })
           }
-        )
-        if (!res.ok) {
-          const err = (await res.json()) as { error?: string }
-          throw new Error(err.error || "Failed to create payment")
+        } else {
+          const connector = connectors[0]
+
+          if (!connector) {
+            throw new Error("No wallet connector is available. Please install a Base-compatible wallet.")
+          }
+
+          await connectAsync({ connector, chainId: base.id })
         }
-        const result = (await res.json()) as { paymentId?: string; paymentUrl?: string }
-        console.log("[BaseWalletPayment] payment:create-response", result)
-        const paymentId = String(result.paymentId || "")
-        const paymentUrl = String(result.paymentUrl || "")
-        if (!paymentId || !paymentUrl) {
-          throw new Error("Incomplete payment data returned from server")
-        }
-        onPaymentCreated?.(paymentId)
-        setPaymentData({ paymentId, paymentUrl })
-        // Step 2: decode paymentUrl and call writeContract — this sends the tx to the wallet
-        executeWriteContract(paymentUrl, paymentId)
+
+        const paymentData = await resolvePaymentData()
+
+        setIsOpeningWallet(true)
+        window.location.href = paymentData.paymentUrl
       } catch (err) {
-        const msg = (err as Error).message || "Failed to create payment"
-        setLocalError(msg)
-        onError?.(msg)
-      } finally {
-        setIsCreatingPayment(false)
+        const message = err instanceof Error ? err.message : "Failed to open Base payment"
+        const friendly = message.toLowerCase().includes("rejected")
+          ? "Wallet connection rejected by user."
+          : message
+
+        setLocalError(friendly)
+        setIsPreparingPayment(false)
+        setIsOpeningWallet(false)
+        onError?.(friendly)
       }
-    } else {
-      // Direct mode: paymentUrl already known from props
-      if (!paymentData) return
-      executeWriteContract(paymentData.paymentUrl, paymentData.paymentId)
-    }
-  }, [isIntentMode, intentId, paymentData, executeWriteContract, onPaymentCreated, onError])
-
-  // ── Success ────────────────────────────────────────────────────────────────
-
-  if (isSubmitted) {
-    return (
-      <div className="space-y-3 text-center py-2">
-        <div className="flex justify-center">
-          <svg
-            className="w-12 h-12 text-green-500"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={1.5}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-        </div>
-        <p className="text-sm font-semibold text-gray-900">
-          {isConfirmed ? "Payment Confirmed" : "Transaction Submitted"}
-        </p>
-        <p className="text-xs text-gray-500">
-          {isConfirmed
-            ? "Your payment was confirmed on Base."
-            : "Awaiting on-chain confirmation — usually 5–30 seconds."}
-        </p>
-        {txHash ? (
-          <a
-            href={`https://basescan.org/tx/${txHash}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-blue-600 underline break-all block"
-          >
-            View on Basescan ↗
-          </a>
-        ) : null}
-      </div>
-    )
-  }
-
-  // ── Amount display (shared across states) ─────────────────────────────────
+    })()
+  }, [connectAsync, connectors, isConnected, isOnBase, onError, resolvePaymentData, switchChainAsync])
 
   const amountDisplay = (
     <div className="bg-gray-50 rounded-xl px-4 py-3 text-center space-y-1">
@@ -306,152 +144,46 @@ export default function BaseWalletPayment({
     </div>
   )
 
-  // Validate the direct-mode URL before showing Pay button
-  const directModeReady = !isIntentMode && parsedDirect && parsedDirect.data !== "0x"
-
-  // ── Wallet picker ──────────────────────────────────────────────────────────
-
-  if (showPicker) {
-    return (
-      <div className="space-y-3">
-        <p className="text-xs uppercase tracking-widest text-gray-500 text-center">
-          Connect a wallet
-        </p>
-        <div className="space-y-2">
-          {connectors.map((connector) => (
-            <button
-              key={connector.uid}
-              disabled={isConnecting}
-              onClick={() => {
-                connect({ connector })
-                setShowPicker(false)
-              }}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 transition text-sm font-medium text-gray-900 disabled:opacity-50"
-            >
-              <span className="text-lg leading-none">{connectorIcon(connector.name)}</span>
-              {connector.name}
-              {connector.name.toLowerCase().includes("walletconnect") ? (
-                <span className="ml-auto text-xs text-gray-400">Scan QR</span>
-              ) : null}
-            </button>
-          ))}
-        </div>
-        <Button variant="secondary" fullWidth onClick={() => setShowPicker(false)}>
-          Cancel
-        </Button>
-      </div>
-    )
-  }
-
-  // ── Not connected ──────────────────────────────────────────────────────────
-
-  if (!isConnected) {
-    return (
-      <div className="space-y-3">
-        <div className="text-xs uppercase tracking-widest text-gray-500 text-center">
-          Pay via Base Network
-        </div>
-        {amountDisplay}
-        {isConnecting ? (
-          <Button fullWidth disabled>
-            <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
-            Connecting…
-          </Button>
-        ) : (
-          <Button fullWidth onClick={() => setShowPicker(true)}>
-            Connect Wallet
-          </Button>
-        )}
-      </div>
-    )
-  }
-
-  // ── Wrong chain ────────────────────────────────────────────────────────────
-
-  if (!isOnBase) {
-    return (
-      <div className="space-y-3">
-        <div className="text-xs uppercase tracking-widest text-gray-500 text-center">
-          Pay via Base Network
-        </div>
-        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-          Your wallet is on the wrong network. Switch to Base to continue.
-        </div>
-        {isSwitching ? (
-          <Button fullWidth disabled>
-            <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
-            Switching to Base…
-          </Button>
-        ) : (
-          <Button fullWidth onClick={() => switchChain({ chainId: base.id })}>
-            Switch to Base Network
-          </Button>
-        )}
-        <Button variant="secondary" fullWidth onClick={() => disconnect()}>
-          Disconnect
-        </Button>
-      </div>
-    )
-  }
-
-  // ── Connected on Base — ready to pay ──────────────────────────────────────
-
-  // In direct mode, refuse to show Pay if the URL is invalid (no calldata).
-  // In intent mode we always show Pay — the URL is fetched on click.
-  const canPay = isIntentMode || directModeReady
-
   return (
     <div className="space-y-3">
       <div className="text-xs uppercase tracking-widest text-gray-500 text-center">
         Pay via Base Network
       </div>
+
       {amountDisplay}
-      <div className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-xl px-3 py-2 break-all font-mono">
-        {address}
-      </div>
+
+      {address ? (
+        <div className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-xl px-3 py-2 break-all font-mono">
+          {address}
+        </div>
+      ) : null}
+
       {localError ? (
         <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
           {localError}
         </div>
       ) : null}
-      {!canPay && !localError ? (
-        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-          Payment details unavailable — please contact support.
-        </div>
-      ) : null}
-      {isPaying ? (
-        <div className="space-y-2">
-          <Button fullWidth disabled>
-            <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
-            {isCreatingPayment ? "Creating payment…" : "Waiting for approval in wallet…"}
-          </Button>
-          {!isCreatingPayment ? (
-            <p className="text-xs text-gray-500 text-center">
-              Check your wallet app — a transaction approval request has been sent.
-            </p>
-          ) : null}
-        </div>
-      ) : localError ? (
-        <Button
-          fullWidth
-          onClick={() => {
-            setLocalError("")
-            resetWrite()
-            void handlePay()
-          }}
-        >
-          Retry Payment
+
+      {isConnecting ? (
+        <Button fullWidth disabled>
+          <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
+          Connecting…
         </Button>
-      ) : canPay ? (
-        <Button fullWidth onClick={() => void handlePay()}>
-          {isIntentMode
-            ? `Approve Payment — $${usdAmount.toFixed(2)} USD`
-            : `Approve Payment — ${nativeAmount} ETH`}
+      ) : isPreparingPayment ? (
+        <Button fullWidth disabled>
+          <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
+          Preparing payment…
         </Button>
-      ) : null}
-      <Button variant="secondary" fullWidth onClick={() => disconnect()}>
-        Disconnect
-      </Button>
+      ) : isOpeningWallet ? (
+        <Button fullWidth disabled>
+          <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
+          Opening wallet…
+        </Button>
+      ) : (
+        <Button fullWidth onClick={handlePayClick}>
+          Pay with ETH
+        </Button>
+      )}
     </div>
   )
 }

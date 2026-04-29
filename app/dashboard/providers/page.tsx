@@ -1,11 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import Image from "next/image"
 import { supabase } from "@/lib/supabaseClient"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
 import { toast } from "sonner"
-import QRCode from "qrcode"
 
 type ProviderCredentials = {
   api_key?: string
@@ -152,8 +150,7 @@ export default function ProvidersPage() {
   const [autoConversion, setAutoConversion] = useState(false)
 
   const [selectedWalletType, setSelectedWalletType] = useState<string | null>(null)
-  const [qrCode, setQrCode] = useState<string | null>(null)
-  const [showQr, setShowQr] = useState(false)
+  const [showMobileConnect, setShowMobileConnect] = useState(false)
 
   const [walletSessionId, setWalletSessionId] = useState<string | null>(null)
   const [walletSessionStatus, setWalletSessionStatus] = useState<string | null>(null)
@@ -219,7 +216,7 @@ export default function ProvidersPage() {
   }, [])
 
   useEffect(() => {
-    if (!walletSessionId || !activeProvider || !showQr) return
+    if (!walletSessionId || !activeProvider || !showMobileConnect) return
 
     pollStopAtRef.current = Date.now() + 15 * 60 * 1000
     let lastPollAt = 0
@@ -276,7 +273,7 @@ export default function ProvidersPage() {
             didToastSyncRef.current = true
           }
 
-          setShowQr(false)
+          setShowMobileConnect(false)
           pollStopAtRef.current = null
           await loadAll()
           return
@@ -306,7 +303,7 @@ export default function ProvidersPage() {
       if (animationFrameId !== null) cancelAnimationFrame(animationFrameId)
       pollStopAtRef.current = null
     }
-  }, [walletSessionId, activeProvider, showQr, loadAll])
+  }, [walletSessionId, activeProvider, showMobileConnect, loadAll])
 
   async function updateSettings(field: string, value: boolean) {
     try {
@@ -489,9 +486,9 @@ export default function ProvidersPage() {
     }
   }
 
-  async function generateSolanaQR(walletType?: string | null) {
+  async function openSolanaMobileWallet(walletType?: string | null) {
     try {
-      console.log("SOLANA QR START", walletType)
+      console.log("SOLANA MOBILE START", walletType)
 
       if (!walletType) {
         toast.error("Select Phantom or Solflare first")
@@ -514,21 +511,17 @@ export default function ProvidersPage() {
       console.log("DEEPLINK:", deeplink)
 
       setWalletMobileDeeplink(deeplink)
-      const qr = await QRCode.toDataURL(deeplink)
-
-      console.log("QR GENERATED")
-
-      setQrCode(qr)
-      setShowQr(true)
+      setShowMobileConnect(true)
+      window.location.href = deeplink
     } catch (err) {
-      console.error("🔥 SOLANA QR ERROR:", err)
-      toast.error("Failed to generate Solana QR")
+      console.error("🔥 SOLANA MOBILE ERROR:", err)
+      toast.error("Failed to open Solana wallet")
     }
   }
 
-  async function generateBaseQR() {
+  async function openBaseMobileWallet() {
     try {
-      console.log("BASE QR START", selectedWalletType)
+      console.log("BASE MOBILE START", selectedWalletType)
 
       if (!selectedWalletType) {
         toast.error("Select wallet first")
@@ -553,15 +546,11 @@ export default function ProvidersPage() {
       console.log("DEEPLINK:", deeplink)
 
       setWalletMobileDeeplink(deeplink)
-      const qr = await QRCode.toDataURL(deeplink)
-
-      console.log("QR GENERATED")
-
-      setQrCode(qr)
-      setShowQr(true)
+      setShowMobileConnect(true)
+      window.location.href = deeplink
     } catch (err) {
-      console.error("🔥 BASE QR ERROR:", err)
-      toast.error("Failed to generate Base QR")
+      console.error("🔥 BASE MOBILE ERROR:", err)
+      toast.error("Failed to open Base wallet")
     }
   }
 
@@ -584,8 +573,7 @@ export default function ProvidersPage() {
       setInputValue("")
     }
 
-    setQrCode(null)
-    setShowQr(false)
+    setShowMobileConnect(false)
     setSelectedWalletType(null)
     setWalletSessionId(null)
     setWalletSessionStatus(null)
@@ -681,8 +669,7 @@ export default function ProvidersPage() {
 
       setActiveProvider(null)
       setInputValue("")
-      setQrCode(null)
-      setShowQr(false)
+      setShowMobileConnect(false)
       setSelectedWalletType(null)
       setWalletSessionId(null)
       setWalletSessionStatus(null)
@@ -934,7 +921,7 @@ export default function ProvidersPage() {
 
             {(activeProvider === "solana" || activeProvider === "base") && (
               <p className="text-sm text-black mb-4">
-                Choose a wallet, scan with mobile, or paste your address
+                Choose a wallet, open it on mobile, or paste your address
               </p>
             )}
 
@@ -974,8 +961,7 @@ export default function ProvidersPage() {
                     <button
                       onClick={() => {
                         setSelectedWalletType("PHANTOM")
-                        setQrCode(null)
-                        setShowQr(false)
+                        setShowMobileConnect(false)
                       }}
                       className={optionButtonClass(selectedWalletType === "PHANTOM")}
                     >
@@ -985,8 +971,7 @@ export default function ProvidersPage() {
                     <button
                       onClick={() => {
                         setSelectedWalletType("SOLFLARE")
-                        setQrCode(null)
-                        setShowQr(false)
+                        setShowMobileConnect(false)
                       }}
                       className={optionButtonClass(selectedWalletType === "SOLFLARE")}
                     >
@@ -1000,8 +985,7 @@ export default function ProvidersPage() {
                     <button
                       onClick={() => {
                         setSelectedWalletType("BASEAPP")
-                        setQrCode(null)
-                        setShowQr(false)
+                        setShowMobileConnect(false)
                       }}
                       className={optionButtonClass(selectedWalletType === "BASEAPP")}
                     >
@@ -1011,8 +995,7 @@ export default function ProvidersPage() {
                     <button
                       onClick={() => {
                         setSelectedWalletType("METAMASK")
-                        setQrCode(null)
-                        setShowQr(false)
+                        setShowMobileConnect(false)
                       }}
                       className={optionButtonClass(selectedWalletType === "METAMASK")}
                     >
@@ -1022,8 +1005,7 @@ export default function ProvidersPage() {
                     <button
                       onClick={() => {
                         setSelectedWalletType("TRUST")
-                        setQrCode(null)
-                        setShowQr(false)
+                        setShowMobileConnect(false)
                       }}
                       className={optionButtonClass(selectedWalletType === "TRUST")}
                     >
@@ -1043,23 +1025,22 @@ export default function ProvidersPage() {
                   <button
                     onClick={async () => {
                       if (activeProvider === "solana") {
-                        await generateSolanaQR(selectedWalletType)
+                        await openSolanaMobileWallet(selectedWalletType)
                       } else {
-                        await generateBaseQR()
+                        await openBaseMobileWallet()
                       }
                     }}
                     className={actionButtonClass()}
                   >
-                    Scan with Mobile
+                    Open Mobile Wallet
                   </button>
                 </div>
 
-                {showQr && qrCode && (
+                {showMobileConnect && (
                   <div className="border rounded-lg p-4 bg-white flex flex-col items-center gap-3">
-                    <Image src={qrCode} alt="Wallet QR" width={208} height={208} className="w-52 h-52" />
                     {walletSessionStatus === "pending" && (
                       <p className="text-xs text-black">
-            Waiting for mobile wallet approval...
+                        Waiting for mobile wallet approval...
                       </p>
                     )}
                     {walletSessionStatus === "connected" && (
@@ -1114,8 +1095,7 @@ export default function ProvidersPage() {
                 onClick={() => {
                   setActiveProvider(null)
                   setInputValue("")
-                  setQrCode(null)
-                  setShowQr(false)
+                  setShowMobileConnect(false)
                   setSelectedWalletType(null)
                   setWalletSessionId(null)
                   setWalletSessionStatus(null)

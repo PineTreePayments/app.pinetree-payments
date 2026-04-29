@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Web3Provider } from "@/components/providers/Web3Provider"
 import { SolanaProvider } from "@/components/providers/SolanaProvider"
-import "@solana/wallet-adapter-react-ui/styles.css"
 
 export const metadata: Metadata = {
   title: {
