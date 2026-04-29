@@ -4,12 +4,11 @@ import { useMemo } from "react"
 import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react"
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui"
 import {
-  LedgerWalletAdapter,
   PhantomWalletAdapter,
   SolflareWalletAdapter,
 } from "@solana/wallet-adapter-wallets"
 
-const RPC_ENDPOINT =
+const SOLANA_RPC_URL =
   process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com"
 
 export function SolanaProvider({ children }: { children: React.ReactNode }) {
@@ -17,15 +16,16 @@ export function SolanaProvider({ children }: { children: React.ReactNode }) {
     () => [
       new PhantomWalletAdapter(),
       new SolflareWalletAdapter(),
-      new LedgerWalletAdapter(),
     ],
     []
   )
 
   return (
-    <ConnectionProvider endpoint={RPC_ENDPOINT}>
+    <ConnectionProvider endpoint={SOLANA_RPC_URL}>
       <WalletProvider wallets={wallets} autoConnect={false}>
-        <WalletModalProvider>{children}</WalletModalProvider>
+        <WalletModalProvider>
+          {children}
+        </WalletModalProvider>
       </WalletProvider>
     </ConnectionProvider>
   )

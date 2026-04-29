@@ -52,11 +52,11 @@ export default function RootLayout({
         <link rel="icon" type="image/png" href="/favicon.png" />
       </head>
       <body className="font-sans antialiased">
-        <Web3Provider>
-          <SolanaProvider>
+        <SolanaProvider>
+          <Web3Provider>
             {children}
-          </SolanaProvider>
-        </Web3Provider>
+          </Web3Provider>
+        </SolanaProvider>
       </body>
     </html>
   );

@@ -3,10 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import QRCode from "react-qr-code"
 import { useWallet, useConnection } from "@solana/wallet-adapter-react"
-import { useWalletModal } from "@solana/wallet-adapter-react-ui"
 import { Transaction } from "@solana/web3.js"
 import Button from "@/components/ui/Button"
-import SolanaWalletProvider from "@/components/solana/SolanaWalletProvider"
 
 type SolanaAsset = "SOL" | "USDC"
 
@@ -94,18 +92,25 @@ function SolanaWalletPaymentInner({
   const [txStatus, setTxStatus] = useState<"idle" | "sending" | "sent">("idle")
   const [txSignature, setTxSignature] = useState("")
 
-  const { publicKey, sendTransaction, connected, connect, wallet } = useWallet()
+  const { wallet, wallets, connect, connected, select, publicKey, sendTransaction } = useWallet()
   const { connection } = useConnection()
-  const { setVisible } = useWalletModal()
 
   const handleConnect = async () => {
     try {
       await connect()
       console.log("CONNECTED:", publicKey?.toBase58())
     } catch (err) {
-      console.error("Connect failed", err)
+      console.error("CONNECT ERROR", err)
     }
   }
+
+  useEffect(() => {
+    console.log("WALLET STATE:", wallet?.adapter?.name, connected)
+  }, [wallet, connected])
+
+  useEffect(() => {
+    console.log("AVAILABLE WALLETS:", wallets.map((walletItem) => walletItem.adapter.name))
+  }, [wallets])
 
   const sessionRequestRef = useRef<Promise<SolanaPaymentSession> | null>(null)
   const isIntentMode = Boolean(intentId)
@@ -328,12 +333,17 @@ function SolanaWalletPaymentInner({
       {!isPreparing && txStatus !== "sent" && session?.paymentUrl ? (
         <>
           {!wallet && !connected ? (
-            <Button fullWidth onClick={() => setVisible(true)}>
-              Connect Wallet
-            </Button>
+            <div className="space-y-2">
+              <Button fullWidth onClick={() => select("Phantom Wallet")}> 
+                Connect Phantom
+              </Button>
+              <Button fullWidth onClick={() => select("Solflare")}> 
+                Connect Solflare
+              </Button>
+            </div>
           ) : wallet && !connected ? (
             <Button fullWidth onClick={handleConnect}>
-              Connect {wallet.adapter.name}
+              Connect {wallet?.adapter?.name}
             </Button>
           ) : (
             <div className="space-y-2">
@@ -372,9 +382,5 @@ function SolanaWalletPaymentInner({
 }
 
 export default function SolanaWalletPayment(props: Props) {
-  return (
-    <SolanaWalletProvider>
-      <SolanaWalletPaymentInner {...props} />
-    </SolanaWalletProvider>
-  )
+  return <SolanaWalletPaymentInner {...props} />
 }
