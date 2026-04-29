@@ -16,10 +16,19 @@ export async function GET(req: NextRequest) {
   const paymentId = String(req.nextUrl.searchParams.get("paymentId") || "").trim()
   console.log("SOLANA PAY GET HIT", paymentId)
 
-  return NextResponse.json({
-    label: "PineTree Payments",
-    icon: "https://app.pinetree-payments.com/pinetree-icon.png"
-  }, { headers: CORS_HEADERS })
+  return new Response(
+    JSON.stringify({
+      label: "PineTree Payments",
+      icon: "https://app.pinetree-payments.com/pinetree-icon.png"
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Access-Control-Allow-Origin": "*"
+      }
+    }
+  )
 }
 
 export async function POST(req: NextRequest) {

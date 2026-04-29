@@ -9,7 +9,7 @@ intent → select asset → select wallet → create payment (PENDING) → open 
 ## UI Rules
 - Show explicit wallet buttons only (Phantom, Solflare)
 - Each button opens its own deep link
-- NEVER open raw paymentUrl
+-  Raw paymentUrl MAY be opened ONLY as fallback when deep link does not trigger Solana Pay execution
 - NEVER use QR in mobile checkout
 - NEVER detect or auto-select wallets
 

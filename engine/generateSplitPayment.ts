@@ -114,11 +114,14 @@ export async function generateSplitPayment(
   BASE URL (PRODUCTION SAFE)
   -------------------------------- */
 
-  const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+  const BASE_URL = process.env.NEXT_PUBLIC_APP_URL
+  if (!BASE_URL || !BASE_URL.startsWith("https://")) {
+    throw new Error("NEXT_PUBLIC_APP_URL must be set to a full https:// production domain")
+  }
 
   if (network === "solana") {
-    const solanaPaymentUrl = `${BASE_URL}/api/solana-pay/transaction?paymentId=${encodeURIComponent(String(input.paymentId || ""))}`
-    console.log("SOLANA PAYMENT URL:", solanaPaymentUrl)
+    const solanaPaymentUrl = `${BASE_URL}/api/solana-pay/transaction?paymentId=${String(input.paymentId || "")}`
+    console.log("FINAL SOLANA PAYMENT URL:", solanaPaymentUrl)
   }
 
   /* --------------------------------
@@ -183,9 +186,7 @@ export async function generateSplitPayment(
   let paymentUrl: string
 
   if (network === "solana") {
-    const txRequestUrl = `${BASE_URL}/api/solana-pay/transaction?paymentId=${encodeURIComponent(
-      String(input.paymentId || "")
-    )}`
+    const txRequestUrl = `${BASE_URL}/api/solana-pay/transaction?paymentId=${String(input.paymentId || "")}`
     paymentUrl = txRequestUrl
   } else if (network === "base") {
     if (feeCaptureMethod === "invoice_split" || feeCaptureMethod === "collection_then_settle") {

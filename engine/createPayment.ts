@@ -55,9 +55,12 @@ function extractEvmSplitContractFromPaymentUrl(paymentUrl?: string): string | un
 }
 
 function buildSolanaPaymentUrl(paymentId: string): string {
-  const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
-  const paymentUrl = `${BASE_URL}/api/solana-pay/transaction?paymentId=${encodeURIComponent(paymentId)}`
-  console.log("SOLANA PAYMENT URL:", paymentUrl)
+  const BASE_URL = process.env.NEXT_PUBLIC_APP_URL
+  if (!BASE_URL || !BASE_URL.startsWith("https://")) {
+    throw new Error("NEXT_PUBLIC_APP_URL must be set to a full https:// production domain")
+  }
+  const paymentUrl = `${BASE_URL}/api/solana-pay/transaction?paymentId=${paymentId}`
+  console.log("FINAL SOLANA PAYMENT URL:", paymentUrl)
   return paymentUrl
 }
 
