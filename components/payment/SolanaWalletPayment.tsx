@@ -183,23 +183,11 @@ export default function SolanaWalletPayment({
   }, [directSession, intentId, onPaymentCreated, selectedAsset, session])
 
   const openPaymentUrl = useCallback(
-    async (wallet: "phantom" | "solflare") => {
+    async (_wallet: "phantom" | "solflare") => {
       try {
         const preparedSession = await prepareSession()
-
-        if (wallet === "phantom") {
-          window.location.href = `phantom://ul/v1/pay?link=${encodeURIComponent(
-            preparedSession.paymentUrl
-          )}`
-          return
-        }
-
-        if (wallet === "solflare") {
-          window.location.href = `solflare://ul/v1/pay?link=${encodeURIComponent(
-            preparedSession.paymentUrl
-          )}`
-          return
-        }
+        const solanaPayUrl = `solana:${encodeURIComponent(preparedSession.paymentUrl)}`
+        window.location.href = solanaPayUrl
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to open Solana payment"
         setLocalError(message)
