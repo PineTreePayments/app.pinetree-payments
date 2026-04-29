@@ -14,7 +14,7 @@ export async function OPTIONS() {
 
 export async function GET(req: NextRequest) {
   const paymentId = String(req.nextUrl.searchParams.get("paymentId") || "").trim()
-  console.log("SOLANA PAY GET HIT", paymentId)
+  console.log("SOLANA GET HIT", paymentId)
 
   return new Response(
     JSON.stringify({
@@ -24,15 +24,14 @@ export async function GET(req: NextRequest) {
     {
       status: 200,
       headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "Access-Control-Allow-Origin": "*"
+        "Content-Type": "application/json"
       }
     }
   )
 }
 
 export async function POST(req: NextRequest) {
-  console.log("SOLANA POST ENTRY")
+  console.log("SOLANA POST HIT")
   const startedAt = Date.now()
 
   try {

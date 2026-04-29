@@ -183,19 +183,10 @@ export default function SolanaWalletPayment({
   }, [directSession, intentId, onPaymentCreated, selectedAsset, session])
 
   const openPaymentUrl = useCallback(
-    async (wallet: "phantom" | "solflare") => {
+    async () => {
       try {
         const preparedSession = await prepareSession()
-
-        if (wallet === "phantom") {
-          window.location.href = `phantom://ul/v1/pay?link=${encodeURIComponent(preparedSession.paymentUrl)}`
-          return
-        }
-
-        if (wallet === "solflare") {
-          window.location.href = `solflare://ul/v1/pay?link=${encodeURIComponent(preparedSession.paymentUrl)}`
-          return
-        }
+        window.location.href = `solana:${encodeURIComponent(preparedSession.paymentUrl)}`
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to open Solana payment"
         setLocalError(message)
@@ -245,10 +236,10 @@ export default function SolanaWalletPayment({
       ) : null}
 
       <div className="grid grid-cols-2 gap-2">
-        <Button variant="secondary" fullWidth onClick={() => void openPaymentUrl("phantom")} disabled={isPreparing}>
+        <Button variant="secondary" fullWidth onClick={() => void openPaymentUrl()} disabled={isPreparing}>
           Phantom
         </Button>
-        <Button variant="secondary" fullWidth onClick={() => void openPaymentUrl("solflare")} disabled={isPreparing}>
+        <Button variant="secondary" fullWidth onClick={() => void openPaymentUrl()} disabled={isPreparing}>
           Solflare
         </Button>
       </div>

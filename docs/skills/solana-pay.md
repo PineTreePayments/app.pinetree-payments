@@ -4,13 +4,13 @@
 Wallet button = trigger everything.
 
 ## Flow
-intent → select asset → select wallet → create payment (PENDING) → open wallet deep link → wallet GET → wallet POST → backend builds tx → user approves → watcher confirms
+intent → select asset → select wallet → create payment (PENDING) → open solana: URI → wallet GET → wallet POST → backend builds tx → user approves → watcher confirms
 
 ## UI Rules
 - Show explicit wallet buttons only (Phantom, Solflare)
-- Each button opens its own wallet-specific deep link
+- Both buttons trigger the same `solana:` URI — they are visual only
 - NEVER open raw paymentUrl directly
-- NEVER use the solana: URI scheme in mobile checkout (iOS routes it to whichever app claims the scheme — not necessarily Phantom)
+- NEVER use wallet-specific deep links (phantom://ul/v1/pay, solflare://ul/v1/pay) — these do NOT execute the GET → POST protocol reliably
 - NEVER use QR in mobile checkout
 - NEVER detect or auto-select wallets
 
@@ -19,16 +19,19 @@ intent → select asset → select wallet → create payment (PENDING) → open 
 - Create payment ONLY on wallet click
 - Status starts as PENDING
 
-## Deep Links (Mobile Checkout)
-Wallet-specific deep links MUST be used in mobile checkout. They route to the correct app and pass the Solana Pay transaction request URL as the payload:
+## URI (Mobile Checkout)
+The `solana:` URI scheme is REQUIRED for mobile checkout. It is the only execution path that triggers the Solana Pay GET → POST transaction protocol:
 
-- Phantom:  `phantom://ul/v1/pay?link=${encodeURIComponent(paymentUrl)}`
-- Solflare: `solflare://ul/v1/pay?link=${encodeURIComponent(paymentUrl)}`
+```
+window.location.href = `solana:${encodeURIComponent(paymentUrl)}`
+```
 
-The `paymentUrl` passed as `link=` is the Solana Pay transaction request endpoint. Phantom and Solflare execute the GET → POST protocol against it.
+The `paymentUrl` is the Solana Pay transaction request endpoint (`https://.../api/solana-pay/transaction?paymentId=...`). The wallet executes GET → POST against it.
 
-## solana: URI (Spec Reference Only)
-The `solana:<encoded_url>` scheme is the Solana Pay protocol-level format. It is NOT used in PineTree mobile checkout because iOS presents an app disambiguation sheet when multiple wallets are installed, which breaks wallet-specific routing.
+**iOS behaviour:** iOS may present an app disambiguation sheet when multiple wallets are installed. PineTree does NOT control which wallet opens — this is OS-level routing. Wallet-specific deep links are NOT supported for transaction execution.
+
+## Wallet-Specific Deep Links (NOT SUPPORTED)
+`phantom://ul/v1/pay` and `solflare://ul/v1/pay` are NOT used in PineTree. They open the wallet app but do not trigger GET/POST against the transaction endpoint.
 
 ## URL Rules
 - paymentUrl MUST be absolute https://.../api/solana-pay/transaction?paymentId=...
@@ -45,4 +48,4 @@ The `solana:<encoded_url>` scheme is the Solana Pay protocol-level format. It is
 - UI transaction logic
 - QR fallback
 - preloading sessions
-- solana: URI in mobile checkout
+- phantom://ul/v1/pay or solflare://ul/v1/pay deep links
