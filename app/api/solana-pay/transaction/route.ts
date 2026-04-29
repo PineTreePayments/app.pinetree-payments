@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  console.log("SOLANA POST ENTRY")
   const startedAt = Date.now()
 
   try {
@@ -70,6 +71,7 @@ export async function POST(req: NextRequest) {
     })
 
     console.log("TX SIZE", serialized.length)
+    console.log("SOLANA RESPONSE SENT")
 
     return NextResponse.json(
       {

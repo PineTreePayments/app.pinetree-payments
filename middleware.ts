@@ -29,6 +29,13 @@ function getAuthCookieNames(req: NextRequest): string[] {
 }
 
 export async function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl
+
+  // CRITICAL: bypass Solana Pay requests — wallets do not send cookies
+  if (pathname.startsWith("/api/solana-pay")) {
+    return NextResponse.next()
+  }
+
   // Build a mutable response so @supabase/ssr can refresh session cookies when
   // needed (e.g. silent token rotation). The response is replaced inside
   // setAll() if any cookies need to be written back to the browser.
@@ -64,7 +71,6 @@ export async function middleware(req: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  const { pathname } = req.nextUrl
   const protectedPage = isProtectedPage(pathname)
   const protectedApi = isProtectedApi(pathname)
 
@@ -95,6 +101,6 @@ export const config = {
   matcher: [
     "/dashboard/:path*",
     "/terminal/:path*",
-    "/api/:path*",
+    "/api/(?!solana-pay).*",
   ],
 }
