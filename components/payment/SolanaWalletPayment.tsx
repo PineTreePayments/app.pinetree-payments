@@ -91,6 +91,7 @@ function SolanaWalletPaymentInner({
   const [localError, setLocalError] = useState("")
   const [txStatus, setTxStatus] = useState<"idle" | "sending" | "sent">("idle")
   const [txSignature, setTxSignature] = useState("")
+  const [showQrFallback, setShowQrFallback] = useState(false)
 
   const { wallet, wallets, connect, connected, select, publicKey, sendTransaction } = useWallet()
   const { connection } = useConnection()
@@ -205,9 +206,6 @@ function SolanaWalletPaymentInner({
       }
 
       const walletOptions = normalizeWalletOptions(data.walletOptions)
-      if (!walletOptions.length) {
-        throw new Error("No supported Solana wallet options were returned")
-      }
 
       const resolvedSession: SolanaPaymentSession = {
         paymentId: resolvedPaymentId,
@@ -337,7 +335,7 @@ function SolanaWalletPaymentInner({
       ) : null}
 
       {!isPreparing && txStatus !== "sent" && session?.paymentUrl ? (
-        <>
+        <div className="space-y-2">
           {!wallet && !connected ? (
             <div className="space-y-2">
               <Button
@@ -386,13 +384,23 @@ function SolanaWalletPaymentInner({
               </Button>
             </div>
           )}
-        </>
+
+          {!connected ? (
+            <Button
+              variant="secondary"
+              fullWidth
+              onClick={() => setShowQrFallback((current) => !current)}
+            >
+              {showQrFallback ? "Hide QR" : "Use another wallet"}
+            </Button>
+          ) : null}
+        </div>
       ) : null}
 
-      {session?.paymentUrl ? (
+      {!connected && showQrFallback && session?.paymentUrl ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-gray-200 bg-white p-4">
           <p className="text-xs text-gray-500">
-            Or scan from inside your Solana wallet
+            Scan from inside your Solana wallet
           </p>
           <QRCode value={`solana:${session.paymentUrl}`} size={180} />
         </div>
