@@ -114,10 +114,11 @@ export async function generateSplitPayment(
   BASE URL (PRODUCTION SAFE)
   -------------------------------- */
 
-  const BASE_URL = process.env.NEXT_PUBLIC_APP_URL
+  const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
 
-  if (network === "solana" && BASE_URL !== "https://app.pinetree-payments.com") {
-    throw new Error("NEXT_PUBLIC_APP_URL must be set to https://app.pinetree-payments.com for Solana Pay URLs")
+  if (network === "solana") {
+    const solanaPaymentUrl = `${BASE_URL}/api/solana-pay/transaction?paymentId=${encodeURIComponent(String(input.paymentId || ""))}`
+    console.log("SOLANA PAYMENT URL:", solanaPaymentUrl)
   }
 
   /* --------------------------------

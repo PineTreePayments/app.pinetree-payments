@@ -55,13 +55,10 @@ function extractEvmSplitContractFromPaymentUrl(paymentUrl?: string): string | un
 }
 
 function buildSolanaPaymentUrl(paymentId: string): string {
-  const BASE_URL = process.env.NEXT_PUBLIC_APP_URL
-
-  if (BASE_URL !== "https://app.pinetree-payments.com") {
-    throw new Error("NEXT_PUBLIC_APP_URL must be set to https://app.pinetree-payments.com for Solana Pay URLs")
-  }
-
-  return `${BASE_URL}/api/solana-pay/transaction?paymentId=${encodeURIComponent(paymentId)}`
+  const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+  const paymentUrl = `${BASE_URL}/api/solana-pay/transaction?paymentId=${encodeURIComponent(paymentId)}`
+  console.log("SOLANA PAYMENT URL:", paymentUrl)
+  return paymentUrl
 }
 
 function enforceNetworkPaymentUrl(network: string, paymentId: string, paymentUrl?: string): string {

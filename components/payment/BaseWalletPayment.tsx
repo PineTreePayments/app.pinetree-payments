@@ -42,6 +42,8 @@ export default function BaseWalletPayment({
   const isOnBase = chain?.id === base.id
   const isConnecting = connectStatus === "pending" || switchStatus === "pending"
 
+  console.log("BASE CONNECTORS:", connectors)
+
   const resolvePaymentData = useCallback(async (): Promise<PaymentData> => {
     if (!isIntentMode) {
       const paymentUrl = String(directPaymentUrl || "").trim()
@@ -85,6 +87,8 @@ export default function BaseWalletPayment({
 
       onPaymentCreated?.(paymentId)
 
+      console.log("BASE PAYMENT URL:", paymentUrl)
+
       return { paymentId, paymentUrl }
     } finally {
       setIsPreparingPayment(false)
@@ -104,9 +108,10 @@ export default function BaseWalletPayment({
           const connector = connectors[0]
 
           if (!connector) {
-            throw new Error("No wallet connector is available. Please install a Base-compatible wallet.")
+            throw new Error("No wallet found. Install Coinbase Wallet, MetaMask, or Trust Wallet.")
           }
 
+          console.log("BASE CONNECTING...")
           await connectAsync({ connector, chainId: base.id })
         }
 

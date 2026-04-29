@@ -154,6 +154,21 @@ export default function SolanaWalletPayment({
 
       setSession(resolvedSession)
       onPaymentCreated?.(resolvedPaymentId)
+
+      console.log("SOLANA PAYMENT URL:", resolvedSession.paymentUrl)
+
+      const parsedPaymentUrl = new URL(resolvedSession.paymentUrl)
+      const isSolanaTransactionUrl =
+        /^\/api\/solana\/tx\/[^/]+$/.test(parsedPaymentUrl.pathname) ||
+        (
+          parsedPaymentUrl.pathname === "/api/solana-pay/transaction" &&
+          parsedPaymentUrl.searchParams.get("paymentId") === resolvedPaymentId
+        )
+
+      if (!isSolanaTransactionUrl) {
+        throw new Error("Invalid Solana payment URL returned from server")
+      }
+
       return resolvedSession
     })()
 

@@ -79,7 +79,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         transaction: serializedTxBase64,
-        message: "PineTree Payment"
+        message: "PineTree Payment",
+        label: "PineTree"
       },
       {
         headers: {
