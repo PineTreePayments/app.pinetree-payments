@@ -133,6 +133,13 @@ export default function PayClient() {
   const searchParams = useSearchParams()
   const rawData = searchParams.get("data")
   const intentId = searchParams.get("intent")
+  const walletBrowserPaymentId = searchParams.get("pinetree_payment_id")
+  const walletBrowserMode = searchParams.get("mode")
+  const walletBrowserWallet = searchParams.get("wallet")
+  const isWalletBrowserMode =
+    walletBrowserMode === "wallet-browser" &&
+    walletBrowserWallet === "phantom" &&
+    Boolean(walletBrowserPaymentId)
 
   // ── Shared clipboard state ─────────────────────────────────────────────────
   const [copiedLink, setCopiedLink] = useState(false)
@@ -292,6 +299,17 @@ export default function PayClient() {
     return () => clearInterval(interval)
   }, [intentId, loadIntentCallback, intentPayload?.paymentId, normalizedPaymentStatus])
 
+  // ── Wallet-browser mode: auto-trigger Solana Pay inside Phantom browser ─────
+
+  useEffect(() => {
+    if (!isWalletBrowserMode || !walletBrowserPaymentId) return
+    const hasTriggered = sessionStorage.getItem("pinetree_wallet_triggered")
+    if (hasTriggered) return
+    sessionStorage.setItem("pinetree_wallet_triggered", "true")
+    const paymentUrl = `https://app.pinetree-payments.com/api/solana-pay/transaction?paymentId=${walletBrowserPaymentId}`
+    window.location.href = `solana:${encodeURIComponent(paymentUrl)}`
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Realtime subscription: instant status updates from DB ─────────────────
 
   useEffect(() => {
@@ -387,6 +405,19 @@ export default function PayClient() {
               <h1 className="text-lg font-bold text-gray-900">Loading payment…</h1>
             </>
           )}
+        </Card>
+      </PageContainer>
+    )
+  }
+
+  if (isWalletBrowserMode) {
+    return (
+      <PageContainer>
+        <Card className="max-w-md w-full text-center space-y-4">
+          <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0052FF] border-t-transparent mx-auto" />
+          <h1 className="text-lg font-bold text-gray-900">Opening transaction in Phantom...</h1>
+          <p className="text-sm text-gray-500">Please approve the transaction in your Phantom wallet.</p>
         </Card>
       </PageContainer>
     )
