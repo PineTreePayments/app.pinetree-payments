@@ -299,15 +299,66 @@ export default function PayClient() {
     return () => clearInterval(interval)
   }, [intentId, loadIntentCallback, intentPayload?.paymentId, normalizedPaymentStatus])
 
-  // ── Wallet-browser mode: auto-trigger Solana Pay inside Phantom browser ─────
+  // ── Wallet-browser mode: Phantom provider flow ────────────────────────────
 
   useEffect(() => {
-    if (!isWalletBrowserMode || !walletBrowserPaymentId) return
+    const params = new URLSearchParams(window.location.search)
+
+    const paymentId = params.get("pinetree_payment_id")
+    const mode = params.get("mode")
+    const wallet = params.get("wallet")
+
     const hasTriggered = sessionStorage.getItem("pinetree_wallet_triggered")
-    if (hasTriggered) return
-    sessionStorage.setItem("pinetree_wallet_triggered", "true")
-    const paymentUrl = `https://app.pinetree-payments.com/api/solana-pay/transaction?paymentId=${walletBrowserPaymentId}`
-    window.location.href = `solana:${encodeURIComponent(paymentUrl)}`
+
+    if (
+      mode === "wallet-browser" &&
+      wallet === "phantom" &&
+      paymentId &&
+      !hasTriggered
+    ) {
+      sessionStorage.setItem("pinetree_wallet_triggered", "true")
+
+      const run = async () => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const provider = (window as any).solana
+
+          if (!provider || !provider.isPhantom) {
+            console.error("[Phantom] provider not found")
+            return
+          }
+
+          await provider.connect()
+
+          const walletPublicKey = provider.publicKey.toString() as string
+
+          const res = await fetch("/api/solana/build-wallet-transaction", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ paymentId, walletPublicKey }),
+          })
+
+          const data = (await res.json()) as { transaction?: string; error?: string }
+
+          if (!data?.transaction) {
+            console.error("[Phantom] no transaction returned", data?.error)
+            return
+          }
+
+          const { Transaction } = await import("@solana/web3.js")
+
+          const tx = Transaction.from(Buffer.from(data.transaction, "base64"))
+
+          const result = await provider.signAndSendTransaction(tx) as { signature: string }
+
+          console.log("[Phantom] transaction sent:", result.signature)
+        } catch (err) {
+          console.error("[Phantom] flow error:", err)
+        }
+      }
+
+      void run()
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Realtime subscription: instant status updates from DB ─────────────────
