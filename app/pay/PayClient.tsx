@@ -480,6 +480,101 @@ export default function PayClient() {
       if (action === "connect_callback") {
         await logSolflare("connect-callback-start", {})
 
+        const flowId = params.get("solflare_flow") ?? ""
+
+        if (flowId) {
+          const sfPublicKey = params.get("solflare_encryption_public_key") ?? ""
+          const nonce = params.get("nonce") ?? ""
+          const data = params.get("data") ?? ""
+
+          const callbackRes = await fetch("/api/solflare/connect-callback", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              flowId,
+              solflareEncryptionPublicKey: sfPublicKey,
+              nonce,
+              data,
+            }),
+          })
+          const callbackData = (await callbackRes.json()) as {
+            ok?: boolean
+            paymentId?: string
+            walletPublicKey?: string
+            error?: string
+          }
+
+          await logSolflare("connect-decrypt-result", {
+            success: !!callbackData.ok,
+            hasPublicKey: !!callbackData.walletPublicKey,
+            hasSession: callbackData.ok ? true : false,
+          })
+
+          if (!callbackRes.ok || !callbackData.ok || !callbackData.paymentId || !callbackData.walletPublicKey) {
+            console.error("[Solflare:connect] server decrypt failed — redirecting to retry")
+            redirectTo(
+              iid
+                ? `/pay?intent=${encodeURIComponent(iid)}&solflare_error=connect_decrypt_failed`
+                : "/pay",
+            )
+            return
+          }
+
+          await logSolflare("build-tx-request", {
+            paymentId: callbackData.paymentId,
+            walletPublicKeyPrefix: callbackData.walletPublicKey.slice(0, 8),
+          })
+          const res = await fetch("/api/solana/build-wallet-transaction", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              paymentId: callbackData.paymentId,
+              walletPublicKey: callbackData.walletPublicKey,
+            }),
+          })
+          const txData = (await res.json()) as { transaction?: string; error?: string }
+          await logSolflare("build-tx-response", {
+            ok: res.ok,
+            status: res.status,
+            hasTransaction: !!txData.transaction,
+            error: txData.error || null,
+          })
+
+          if (!res.ok || !txData.transaction) {
+            console.error("[Solflare:connect] build tx failed — not calling /fail")
+            redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&solflare_error=build_failed` : "/pay")
+            return
+          }
+
+          const base = `${window.location.origin}/pay?intent=${encodeURIComponent(iid)}`
+          const signRedirect = `${base}&solflare_action=sign_callback&solflare_payment_id=${encodeURIComponent(callbackData.paymentId)}&solflare_flow=${encodeURIComponent(flowId)}`
+          const signRes = await fetch("/api/solflare/build-sign-url", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              flowId,
+              transactionBase64: txData.transaction,
+              redirectLink: signRedirect,
+            }),
+          })
+          const signData = (await signRes.json()) as { signUrl?: string; error?: string }
+
+          if (!signRes.ok || !signData.signUrl) {
+            console.error("[Solflare:connect] build sign URL failed", signData.error)
+            redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&solflare_error=build_failed` : "/pay")
+            return
+          }
+
+          await logSolflare("sign-url-built", {
+            startsWithCorrectEndpoint: signData.signUrl.startsWith("https://solflare.com/ul/v1/signAndSendTransaction"),
+            length: signData.signUrl.length,
+          })
+
+          await logSolflare("sign-url-opening", {})
+          window.location.href = signData.signUrl
+          return
+        }
+
         const session = decryptConnectResponse(params)
         await logSolflare("connect-decrypt-result", {
           success: !!session,
@@ -549,6 +644,7 @@ export default function PayClient() {
       // ── sign_callback ─────────────────────────────────────────────────────
       if (action === "sign_callback") {
         const paymentId = params.get("solflare_payment_id") ?? ""
+        const flowId = params.get("solflare_flow") ?? ""
         const errorCode = params.get("errorCode")
         const errorMessage = params.get("errorMessage")
         const signNonce = params.get("nonce")
@@ -576,6 +672,53 @@ export default function PayClient() {
             iid
               ? `/pay?intent=${encodeURIComponent(iid)}&status=${isRejected ? "cancelled" : "failed"}`
               : "/pay",
+          )
+          return
+        }
+
+        if (flowId) {
+          const callbackRes = await fetch("/api/solflare/sign-callback", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              flowId,
+              nonce: signNonce,
+              data: signData,
+              signature: rawSignature,
+            }),
+          })
+          const callbackData = (await callbackRes.json()) as {
+            ok?: boolean
+            paymentId?: string
+            intentId?: string | null
+            signature?: string
+            error?: string
+          }
+
+          await logSolflare("sign-decrypt-result", {
+            success: !!callbackData.signature,
+            signaturePrefix: callbackData.signature ? callbackData.signature.slice(0, 8) : null,
+          })
+
+          const resolvedPaymentId = callbackData.paymentId || paymentId
+          if (!callbackRes.ok || !callbackData.ok || !callbackData.signature || !resolvedPaymentId) {
+            console.error("[Solflare:sign] failed to decrypt signature")
+            if (resolvedPaymentId) await fail(resolvedPaymentId)
+            redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&status=failed` : "/pay")
+            return
+          }
+
+          await logSolflare("detect-calling", { paymentId: resolvedPaymentId, hasSignature: true })
+          await fetch(`/api/payments/${encodeURIComponent(resolvedPaymentId)}/detect`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ txHash: callbackData.signature }),
+          }).catch(() => null)
+
+          redirectTo(
+            iid
+              ? `/pay?intent=${encodeURIComponent(iid)}&status=processing`
+              : `/pay?pinetree_payment_id=${encodeURIComponent(resolvedPaymentId)}&status=processing`,
           )
           return
         }

@@ -3,11 +3,9 @@
 import { useCallback, useState } from "react"
 import Button from "@/components/ui/Button"
 import {
-  buildConnectUrl,
   buildSignAndSendUrl,
   clearSolflareSession,
   getStoredSession,
-  storePendingPaymentId,
 } from "@/lib/solflareDeeplink"
 
 type SolanaAsset = "SOL" | "USDC"
@@ -226,9 +224,7 @@ export default function SolanaWalletPayment({
       const base = `${origin}/pay?intent=${encodeURIComponent(intentId ?? "")}`
 
       if (!session) {
-        // Flow A: no session — start connect
-        storePendingPaymentId(paymentId)
-        const connectRedirect = `${base}&solflare_action=connect_callback&solflare_asset=${encodeURIComponent(selectedAsset)}`
+        // Flow A: no session — start server-backed connect
         console.log("[Solflare] Starting connect deeplink, paymentId:", paymentId)
         await fetch("/api/debug/solflare", {
           method: "POST",
@@ -238,7 +234,19 @@ export default function SolanaWalletPayment({
             payload: { paymentId, intentId: intentId ?? null, selectedAsset },
           }),
         }).catch(() => null)
-        window.location.href = buildConnectUrl(connectRedirect, origin)
+
+        const startRes = await fetch("/api/solflare/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paymentId, intentId, selectedAsset }),
+        })
+        const startData = (await startRes.json()) as { connectUrl?: string; error?: string }
+
+        if (!startRes.ok || !startData.connectUrl) {
+          throw new Error(startData.error || "Failed to start Solflare flow")
+        }
+
+        window.location.href = startData.connectUrl
         return // page is navigating away
       }
 

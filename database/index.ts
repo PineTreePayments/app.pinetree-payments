@@ -51,3 +51,6 @@ export * from "./transactionEvents"
 
 // Wallet Connect Sessions
 export * from "./walletConnectSessions"
+
+// Solflare Deeplink Sessions
+export * from "./solflareDeeplinkSessions"
