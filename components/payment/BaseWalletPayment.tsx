@@ -117,6 +117,8 @@ export default function BaseWalletPayment({
   onSuccess,
   onError,
 }: Props) {
+  console.log("[BaseWalletPayment] rendered")
+
   const { address, chain, isConnected } = useAccount()
   const { connectors, connectAsync, status: connectStatus } = useConnect()
   const { switchChainAsync, status: switchStatus } = useSwitchChain()
