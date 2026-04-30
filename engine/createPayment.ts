@@ -7,13 +7,12 @@
 
 import { chooseBestAdapter } from "./providerSelector"
 import { getProvider } from "./providerRegistry"
-import { type PaymentAdapterId, getAdapterCredentialKey, StoredPaymentSplitMetadata } from "@/types/payment"
+import { type PaymentAdapterId, getAdapterCredentialKey } from "@/types/payment"
 import {
   createPayment as createPaymentRecord,
   createTransaction,
   claimIdempotencyKey,
   releaseIdempotencyKey,
-  getPaymentById
 } from "@/database"
 import { generateSplitPayment } from "./generateSplitPayment"
 import { calculateGrossAmount } from "./fees"
@@ -245,53 +244,6 @@ export async function createPayment(
   // Ensure all provider adapters are registered before selection/use
   await loadProviders()
 
-  const resolveExistingPaymentResult = async (existingPaymentId: string): Promise<CreatePaymentResult | null> => {
-    const existingPayment = await getPaymentById(existingPaymentId)
-
-    if (!existingPayment) {
-      return null
-    }
-
-    const existingMetadata = (existingPayment.metadata || null) as (StoredPaymentSplitMetadata & { selectedAsset?: string }) | null
-    const split = existingMetadata?.split
-    const expectedAmountNative = Number(split?.expectedAmountNative || 0)
-    const merchantNativeAmount = Number(split?.merchantNativeAmount || 0)
-    const feeNativeAmount = Number(split?.feeNativeAmount || 0)
-
-    const inferredNativeAmount =
-      expectedAmountNative > 0
-        ? expectedAmountNative
-        : merchantNativeAmount + feeNativeAmount
-
-    const existingSplitContract = String(split?.splitContract || "").trim()
-    const existingFeeCaptureMethod = String(split?.feeCaptureMethod || "").toLowerCase()
-    const existingDisplayAddress =
-      existingFeeCaptureMethod === "contract_split" && existingSplitContract
-        ? existingSplitContract
-        : String(split?.merchantWallet || "")
-
-    const normalizedNetwork =
-      String(existingPayment.network || "").toLowerCase().trim()
-
-    const paymentUrl = enforceNetworkPaymentUrl(
-      normalizedNetwork,
-      existingPayment.id,
-      existingPayment.payment_url || ""
-    )
-
-    return {
-      id: existingPayment.id,
-      provider: existingPayment.provider,
-      paymentUrl,
-      qrCodeUrl: existingPayment.qr_code_url || "",
-      address: existingDisplayAddress,
-      universalUrl: undefined,
-      nativeAmount: inferredNativeAmount > 0 ? inferredNativeAmount : undefined,
-      nativeSymbol: inferNativeSymbolFromNetwork(existingPayment.network),
-      asset: existingMetadata?.selectedAsset
-    }
-  }
-
   const paymentId = crypto.randomUUID()
   let claimedIdempotencyKey = false
   const requestedAsset = String(input.asset || input.metadata?.selectedAsset || "").trim().toUpperCase()
@@ -299,27 +251,7 @@ export async function createPayment(
   if (input.idempotencyKey) {
     const claim = await claimIdempotencyKey(input.idempotencyKey, paymentId)
     if (claim.status === "existing") {
-      const prevPayment = await getPaymentById(claim.paymentId)
-      const prevStatus = String(prevPayment?.status || "").toUpperCase()
-      if (prevStatus === "INCOMPLETE" || prevStatus === "FAILED") {
-        // The previously-idempotent payment reached a terminal state (e.g. the user
-        // switched networks: A→B→A). Release the stale claim so a fresh payment can
-        // be created under the same key instead of returning the defunct record.
-        await releaseIdempotencyKey(input.idempotencyKey, claim.paymentId)
-        const reClaim = await claimIdempotencyKey(input.idempotencyKey, paymentId)
-        if (reClaim.status === "existing") {
-          const concurrentResult = await resolveExistingPaymentResult(reClaim.paymentId)
-          if (concurrentResult) return concurrentResult
-          throw new Error("Idempotency key conflict after re-claim for terminal payment")
-        }
-        claimedIdempotencyKey = true
-      } else {
-        const existingResult = await resolveExistingPaymentResult(claim.paymentId)
-        if (existingResult) {
-          return existingResult
-        }
-        throw new Error("Idempotency key exists but associated payment could not be loaded")
-      }
+      throw new Error("Duplicate idempotency key. Start a new checkout attempt with a unique idempotency key.")
     } else {
       claimedIdempotencyKey = true
     }

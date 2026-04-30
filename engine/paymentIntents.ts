@@ -7,11 +7,10 @@ import {
   getPaymentById
 } from "@/database"
 import QRCode from "qrcode"
-import { createPayment, buildCreatePaymentRequest, inferNativeSymbolFromNetwork } from "./createPayment"
+import { createPayment, buildCreatePaymentRequest } from "./createPayment"
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 import { PINETREE_FEE } from "./config"
 import { markPaymentIncomplete } from "./paymentStateActions"
-import { StoredPaymentSplitMetadata } from "@/types/payment"
 
 const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base", "shift4"]
 const PAYMENT_DETAILS_TIMEOUT_MS = Number(process.env.PAYMENT_DETAILS_TIMEOUT_MS || 12000)
@@ -94,30 +93,6 @@ function buildWalletOptions(walletUrl: string, network?: string): WalletOption[]
   if (isSolana) return solanaWallets
   if (isBase) return evmWallets
   return [...solanaWallets, ...evmWallets]
-}
-
-function inferNativeAmountFromPayment(payment: { metadata?: unknown } | null | undefined): number | undefined {
-  const metadata = (payment?.metadata || null) as StoredPaymentSplitMetadata | null
-  const split = metadata?.split
-
-  const expectedAmountNative = Number(split?.expectedAmountNative || 0)
-  if (expectedAmountNative > 0) return expectedAmountNative
-
-  const merchantNativeAmount = Number(split?.merchantNativeAmount || 0)
-  const feeNativeAmount = Number(split?.feeNativeAmount || 0)
-  const total = merchantNativeAmount + feeNativeAmount
-  return total > 0 ? total : undefined
-}
-
-function inferRecipientAddressFromPayment(payment: { metadata?: unknown } | null | undefined): string | undefined {
-  const metadata = (payment?.metadata || null) as StoredPaymentSplitMetadata | null
-  const split = metadata?.split
-  // For contract_split payments show the split contract address (where user must send)
-  if (String(split?.feeCaptureMethod || "").toLowerCase() === "contract_split" && split?.splitContract) {
-    return String(split.splitContract).trim() || undefined
-  }
-  const recipient = String(split?.merchantWallet || "").trim()
-  return recipient || undefined
 }
 
 export async function getMerchantAvailableNetworks(merchantId: string): Promise<WalletNetwork[]> {
@@ -232,41 +207,6 @@ export async function selectPaymentIntentNetworkEngine(input: {
 
   const selectedAsset = resolveSupportedAssetForNetwork(normalizedNetwork, input.asset)
 
-  // Idempotency: only short-circuit if a payment already exists for the same network.
-  // A different network request must proceed to create a new payment.
-  if (intent.status === "SELECTED" && intent.payment_id &&
-      intent.selected_network === normalizedNetwork) {
-    const existingPayment = await getPaymentById(intent.payment_id)
-    const existingAsset = normalizePaymentAsset(
-      String((existingPayment?.metadata as { selectedAsset?: unknown } | null)?.selectedAsset || "")
-    )
-
-    if (normalizedNetwork === "solana" && existingAsset && existingAsset !== selectedAsset) {
-      throw new Error("Existing Solana payment asset does not match selected asset")
-    }
-
-    const walletUrl = String(existingPayment?.payment_url || "")
-    const recipientAddress = inferRecipientAddressFromPayment(existingPayment)
-
-    return {
-      intentId: intent.id,
-      paymentId: intent.payment_id,
-      network: intent.selected_network,
-      selectedNetwork: intent.selected_network,
-      asset: existingAsset || selectedAsset,
-      alreadySelected: true,
-      universalUrl: undefined,
-      paymentUrl: existingPayment?.payment_url || undefined,
-      qrCodeUrl: existingPayment?.qr_code_url || undefined,
-      address: recipientAddress,
-      walletUrl: walletUrl || undefined,
-      walletOptions: buildWalletOptions(walletUrl, existingPayment?.network || ""),
-      provider: existingPayment?.provider || undefined,
-      nativeAmount: inferNativeAmountFromPayment(existingPayment),
-      nativeSymbol: inferNativeSymbolFromNetwork(existingPayment?.network)
-    }
-  }
-
   const available = Array.isArray(intent.available_networks)
     ? intent.available_networks.map((n) => String(n).toLowerCase())
     : []
@@ -278,11 +218,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
   // Capture the old payment ID before entering the try block. markPaymentIncomplete is
   // called only AFTER the new payment is successfully created and linked — if creation
   // fails the intent must still point to the old PENDING payment so the user can retry.
-  const prevPaymentId = (
-    intent.payment_id &&
-    intent.selected_network &&
-    intent.selected_network !== normalizedNetwork
-  ) ? intent.payment_id : null
+  const prevPaymentId = intent.payment_id || null
 
   try {
     console.info("[payment-intent] select-network:start", {
@@ -313,7 +249,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
         ...createPaymentInput,
         preferredNetwork: normalizedNetwork,
         asset: selectedAsset,
-        idempotencyKey: input.idempotencyKey || `payment-intent:${intent.id}:${normalizedNetwork}`
+        idempotencyKey: `payment-intent:${intent.id}:${crypto.randomUUID()}`
       }),
       PAYMENT_DETAILS_TIMEOUT_MS,
       "Payment creation"
