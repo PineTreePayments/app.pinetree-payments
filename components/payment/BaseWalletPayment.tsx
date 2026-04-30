@@ -225,6 +225,7 @@ export default function BaseWalletPayment({
   const [isPreparingPayment, setIsPreparingPayment] = useState(false)
   const [isOpeningWallet, setIsOpeningWallet] = useState(false)
   const isSendingBaseTxRef = useRef(false)
+  const autoResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const isIntentMode = Boolean(intentId)
   const isOnBase = chain?.id === base.id
@@ -457,7 +458,7 @@ export default function BaseWalletPayment({
         // Show return instructions before the wallet app opens — connectAsync may never
         // return if the OS switches to the wallet app and suspends this tab.
         setResumeMessage(
-          "After approving the connection in your wallet, return to this checkout and tap Send Base transaction."
+          "Return here after approving the connection — the transaction will open automatically."
         )
 
         const currentAddress = String(address || "").trim()
@@ -524,30 +525,62 @@ export default function BaseWalletPayment({
     const pending = getPendingBaseWalletConnectPayment()
     const hasPending = pendingIntentMatches(pending, intentId)
 
-    console.log("[Base] Resume check", {
-      hasPending,
-      isConnected,
-      hasAddress: Boolean(address),
-    })
+    setHasPendingBaseWcPayment(hasPending)
+    if (!hasPending && pending) clearPendingBaseWalletConnectPayment()
 
-    void logBase("resume-check", {
-      hasPending,
+    void logBase("auto-resume-check", {
+      hasPendingBaseWcPayment: hasPending,
       isConnected,
       hasAddress: Boolean(address),
       isSending: isSendingBaseTxRef.current,
+      isOpeningWallet,
       visibilityState: typeof document === "undefined" ? "unknown" : document.visibilityState,
     })
 
-    setHasPendingBaseWcPayment(hasPending)
+    const skipReason =
+      !hasPending ? "no-pending"
+      : !isConnected ? "not-connected"
+      : !address ? "no-address"
+      : selectedAsset !== "ETH" ? "wrong-asset"
+      : isSendingBaseTxRef.current ? "already-sending"
+      : isOpeningWallet ? "opening-wallet"
+      : null
 
-    if (!hasPending || !isConnected || !address || isSendingBaseTxRef.current) return
+    if (skipReason) {
+      void logBase("auto-resume-skipped", { reason: skipReason })
+      return
+    }
 
-    void continueBasePayment(address)
-  }, [address, continueBasePayment, intentId, isConnected])
+    if (autoResumeTimerRef.current) {
+      clearTimeout(autoResumeTimerRef.current)
+      autoResumeTimerRef.current = null
+    }
+
+    void logBase("auto-resume-scheduled", { delayMs: 700 })
+
+    const capturedAddress = String(address)
+    autoResumeTimerRef.current = setTimeout(() => {
+      autoResumeTimerRef.current = null
+      if (isSendingBaseTxRef.current) {
+        void logBase("auto-resume-skipped", { reason: "already-sending-on-fire" })
+        return
+      }
+      void logBase("auto-resume-fired", { hasAddress: Boolean(capturedAddress) })
+      void continueBasePayment(capturedAddress)
+    }, 700)
+  }, [address, continueBasePayment, intentId, isConnected, isOpeningWallet, selectedAsset])
 
   useEffect(() => {
     refreshPendingState()
   }, [refreshPendingState])
+
+  useEffect(() => {
+    return () => {
+      if (autoResumeTimerRef.current) {
+        clearTimeout(autoResumeTimerRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     tryResumeBaseWalletConnectPayment()
@@ -604,7 +637,7 @@ export default function BaseWalletPayment({
       {hasPendingBaseWcPayment && !isOpeningWallet ? (
         <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 space-y-2">
           <p>
-            {resumeMessage || "Connection approved? Return here and tap Send Base transaction."}
+            {resumeMessage || "Transaction did not open? Tap Send Base transaction."}
           </p>
           <Button
             fullWidth
