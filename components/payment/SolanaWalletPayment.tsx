@@ -108,10 +108,17 @@ export default function SolanaWalletPayment({
           const fullUrl =
             window.location.origin + window.location.pathname + window.location.search
 
+          const encoded = encodeURIComponent(fullUrl)
+
           console.log("[Solflare] Deep linking to:", fullUrl)
 
-          window.location.href =
-            "https://solflare.com/ul/v1/browse?url=" + encodeURIComponent(fullUrl)
+          window.location.href = `solflare://browse?url=${encoded}`
+
+          setTimeout(() => {
+            window.location.href = `https://solflare.com/ul/v1/browse?url=${encoded}`
+          }, 800)
+
+          setError("Opening Solflare… If the page does not load, open this link inside the Solflare browser.")
           return
         }
 
@@ -165,17 +172,39 @@ export default function SolanaWalletPayment({
   }, [handleWalletClick])
 
   useEffect(() => {
-    const provider = getSolanaWindow().solflare
+    if (hasAutoTriggeredRef.current) return
 
-    if (
-      provider?.isSolflare === true &&
-      !hasAutoTriggeredRef.current
-    ) {
-      hasAutoTriggeredRef.current = true
+    let attempts = 0
+    let cancelled = false
 
-      console.log("[Solflare] Auto-triggering payment flow")
+    const tryConnect = () => {
+      if (cancelled) return
 
-      handleSolflareClick()
+      const provider = getSolanaWindow().solflare
+
+      if (
+        provider?.isSolflare === true &&
+        !hasAutoTriggeredRef.current
+      ) {
+        hasAutoTriggeredRef.current = true
+
+        console.log("[Solflare] Auto-triggering payment flow")
+
+        handleSolflareClick()
+        return
+      }
+
+      attempts++
+
+      if (attempts < 10) {
+        setTimeout(tryConnect, 300)
+      }
+    }
+
+    tryConnect()
+
+    return () => {
+      cancelled = true
     }
   }, [handleSolflareClick])
 
