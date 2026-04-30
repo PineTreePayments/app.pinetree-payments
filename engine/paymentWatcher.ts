@@ -176,6 +176,40 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
 
   // ── SOLANA ───────────────────────────────────────────────────────────────────
   if (input.network === "solana") {
+    // ── txHash fast-path ────────────────────────────────────────────────────
+    // When the UI passes a signature immediately after signing, skip the full
+    // getSignaturesForAddress scan (which only returns finalized transactions)
+    // and check the specific transaction directly. Falls through to the full
+    // scan if the transaction isn't available yet or validation fails.
+    if (input.txHash) {
+      try {
+        const tx = await getSolanaParsedTransaction(rpcUrl, input.txHash)
+        if (tx) {
+          const match = parseSolanaSplitTx(tx, {
+            merchantWallet,
+            pinetreeWallet,
+            expectedMerchantLamports: Number(input.expectedMerchantAtomic || 0),
+            expectedFeeLamports: Number(input.expectedFeeAtomic || 0),
+            matchRatio,
+            paymentId: input.paymentId,
+          })
+          if (match) {
+            console.log("[SOLANA] payment detected via txHash fast-path", {
+              paymentId: input.paymentId,
+              txHash: input.txHash,
+            })
+            return handleMatchingTransaction(
+              input.paymentId,
+              { hash: input.txHash, value: String(match.totalLamports / 1e9), from: match.from },
+              true
+            )
+          }
+        }
+      } catch (err) {
+        console.error("[watcher:solana] txHash fast-path failed, falling through to scan:", err)
+      }
+    }
+
     let currentSlot: number
 
     try {
@@ -707,6 +741,65 @@ async function getSolanaParsedTransaction(
  * Criterion 4 prevents false positives where two concurrent unrelated payments
  * happen to overlap on the same wallets within the lookback window.
  */
+
+/**
+ * Validate a single parsed Solana transaction against the expected payment split.
+ * Returns { from, totalLamports } on match, null otherwise.
+ * Used by both the txHash fast-path and the full signature scan.
+ */
+function parseSolanaSplitTx(
+  tx: SolanaParsedTransaction,
+  params: {
+    merchantWallet: string
+    pinetreeWallet: string
+    expectedMerchantLamports: number
+    expectedFeeLamports: number
+    matchRatio: number
+    paymentId: string
+  }
+): { from: string; totalLamports: number } | null {
+  const instructions = tx?.transaction?.message?.instructions
+  if (!Array.isArray(instructions)) return null
+
+  let merchantLamports = 0
+  let feeLamports = 0
+  let source = ""
+  let memoMatches = false
+
+  for (const ix of instructions) {
+    if (ix.programId === SOLANA_MEMO_PROGRAM_ID && typeof ix.parsed === "string") {
+      memoMatches = ix.parsed.trim() === params.paymentId.trim()
+      continue
+    }
+
+    const parsed = ix?.parsed
+    if (!parsed || typeof parsed === "string" || parsed.type !== "transfer") continue
+
+    const info = parsed.info || {}
+    const destination = String(info.destination || "").toLowerCase()
+    const lamports = Number(info.lamports || 0)
+    const from = String(info.source || "")
+
+    if (!source && from) source = from
+
+    if (destination === params.merchantWallet.toLowerCase()) merchantLamports += lamports
+    if (destination === params.pinetreeWallet.toLowerCase()) feeLamports += lamports
+  }
+
+  if (!memoMatches) return null
+
+  const merchantThreshold =
+    params.expectedMerchantLamports > 0 ? params.expectedMerchantLamports * params.matchRatio : 0
+  const feeThreshold =
+    params.expectedFeeLamports > 0 ? params.expectedFeeLamports * params.matchRatio : 0
+
+  if (merchantLamports >= merchantThreshold && feeLamports >= feeThreshold) {
+    return { from: source, totalLamports: merchantLamports + feeLamports }
+  }
+
+  return null
+}
+
 async function findMatchingSolanaSplitTransaction(input: {
   rpcUrl: string
   merchantWallet: string
