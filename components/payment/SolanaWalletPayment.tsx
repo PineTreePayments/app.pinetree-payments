@@ -103,10 +103,14 @@ export default function SolanaWalletPayment({
       const provider = getWalletProvider(wallet)
 
       if (!provider) {
+        if (wallet === "solflare") {
+          window.location.href =
+            "https://solflare.com/ul/v1/browse/" + encodeURIComponent(window.location.href)
+          return
+        }
+
         throw new Error(
-          wallet === "phantom"
-            ? "Phantom wallet not found. Please install or unlock Phantom."
-            : "Solflare wallet not found. Please install or unlock Solflare."
+          "Phantom wallet not found. Please install or unlock Phantom."
         )
       }
 
