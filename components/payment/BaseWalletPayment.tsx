@@ -435,8 +435,6 @@ export default function BaseWalletPayment({
     setResumeMessage("")
 
     void (async () => {
-      let fromAddress = String(address || "").trim()
-
       try {
         if (selectedAsset !== "ETH") {
           throw new Error("USDC on Base is coming soon. Please choose ETH on Base for now.")
@@ -448,44 +446,67 @@ export default function BaseWalletPayment({
 
         console.log("[Base] WalletConnect selected")
         await logBase("wc-selected", { intentId: intentId || null })
+        await logBase("pending-store", { intentId: intentId || null, selectedAsset: "ETH" })
 
-        await logBase("pending-store", {
-          intentId: intentId || null,
-          selectedAsset: "ETH",
-        })
         storePendingBaseWalletConnectPayment({ intentId, selectedAsset })
         setHasPendingBaseWcPayment(true)
 
-        if (!isConnected || !fromAddress) {
-          await logBase("connect-start", {
-            connectorId: walletConnectConnector?.id || null,
-            connectorName: walletConnectConnector?.name || null,
-          })
+        // Show return instructions before the wallet app opens — connectAsync may never
+        // return if the OS switches to the wallet app and suspends this tab.
+        setResumeMessage(
+          "After approving the connection in your wallet, return to this checkout and tap Send Base transaction."
+        )
+
+        const currentAddress = String(address || "").trim()
+        if (isConnected && currentAddress) {
+          // Already connected — skip the connect step
+          await continueBasePayment(currentAddress)
+          return
+        }
+
+        await logBase("connect-start", {
+          connectorId: walletConnectConnector?.id || null,
+          connectorName: walletConnectConnector?.name || null,
+        })
+
+        let fromAddress = ""
+        try {
           const result = await connectAsync({ connector: walletConnectConnector, chainId: base.id })
-          fromAddress = extractAddressFromConnectResult(result) || fromAddress
+          fromAddress = extractAddressFromConnectResult(result) || currentAddress
           console.log("[Base] WalletConnect connect returned", { hasAddress: Boolean(fromAddress) })
           await logBase("connect-returned", {
             hasAccount: Boolean(fromAddress),
             accountPrefix: fromAddress ? fromAddress.slice(0, 8) : null,
           })
+        } catch (connectErr) {
+          const connectMsg = connectErr instanceof Error ? connectErr.message : String(connectErr)
+          const connectRejected = isRejectedError(connectErr, connectMsg)
+          if (connectRejected) {
+            // User explicitly cancelled — clear pending and surface error
+            clearPendingBaseWalletConnectPayment()
+            setHasPendingBaseWcPayment(false)
+            setResumeMessage("")
+            throw connectErr
+          }
+          // connectAsync threw without a rejection (e.g. wallet app backgrounded this tab).
+          // Pending state survives; manual Send Base transaction button handles continuation.
+          await logBase("connect-did-not-return", { message: connectMsg })
+          return
         }
 
         if (fromAddress) {
           await continueBasePayment(fromAddress)
-          return
         }
-
-        setResumeMessage("After approving the wallet connection, return to this checkout and the transaction request will open.")
+        // No address returned — pending state + manual button handles it
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to open Base payment"
         const rejected = isRejectedError(err, message)
-        const friendly = rejected
-          ? "Wallet connection rejected by user."
-          : message
+        const friendly = rejected ? "Wallet connection rejected by user." : message
 
         if (rejected) {
           clearPendingBaseWalletConnectPayment()
           setHasPendingBaseWcPayment(false)
+          setResumeMessage("")
         }
 
         setLocalError(friendly)
@@ -588,15 +609,36 @@ export default function BaseWalletPayment({
             fullWidth
             variant="secondary"
             onClick={() => {
+              void logBase("manual-send-click", { hasAddress: Boolean(address), isConnected })
               if (address) {
                 void continueBasePayment(address)
               } else {
-                tryResumeBaseWalletConnectPayment()
+                setLocalError(
+                  "Wallet connection not detected yet. Return from your wallet after approving the connection, then tap again."
+                )
               }
             }}
           >
             Send Base transaction
           </Button>
+          {!address && !isConnecting ? (
+            <Button
+              fullWidth
+              variant="secondary"
+              onClick={() => {
+                void logBase("reconnect-click", { intentId: intentId || null })
+                if (!walletConnectConnector) return
+                void connectAsync({ connector: walletConnectConnector, chainId: base.id })
+                  .then((result) => {
+                    const addr = extractAddressFromConnectResult(result)
+                    if (addr) void continueBasePayment(addr)
+                  })
+                  .catch(() => null)
+              }}
+            >
+              Reconnect WalletConnect
+            </Button>
+          ) : null}
         </div>
       ) : null}
 
