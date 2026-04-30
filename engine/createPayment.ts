@@ -369,10 +369,10 @@ export async function createPayment(
   }
 
   if (network === "solana") {
-    if (requestedAsset !== "SOL") {
-      throw new Error("Solana payments currently support SOL only")
+    if (requestedAsset !== "SOL" && requestedAsset !== "USDC") {
+      throw new Error("Solana payments support SOL and USDC only")
     }
-    walletAsset = "sol"
+    walletAsset = requestedAsset === "USDC" ? "sol-usdc" : "sol"
   }
 
   /* ---------------------------
@@ -494,7 +494,8 @@ export async function createPayment(
         merchantNativeAmount: splitPayment.merchantNativeAmount,
         feeNativeAmount: splitPayment.feeNativeAmount,
         merchantNativeAmountAtomic: splitPayment.merchantNativeAmountAtomic,
-        feeNativeAmountAtomic: splitPayment.feeNativeAmountAtomic
+        feeNativeAmountAtomic: splitPayment.feeNativeAmountAtomic,
+        ...(network === "solana" && requestedAsset === "USDC" ? { asset: "USDC" } : {})
       }
     },
     status: "CREATED"

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 import { AUTO_POLLING_ENABLED } from "@/lib/utils/polling"
+import StatusBadge from "@/components/ui/StatusBadge"
 
 import {
   LineChart,
@@ -30,11 +31,16 @@ type DashboardOverviewResponse = {
 
 type PaymentSummary = {
   gross_amount?: number | string | null
+  status?: string | null
+  currency?: string | null
+  created_at?: string | null
 }
 
 type RecentTxRow = {
   id: string
   status: string
+  provider?: string | null
+  provider_transaction_id?: string | null
   network?: string | null
   created_at: string
   payments?: PaymentSummary | PaymentSummary[] | null
@@ -64,6 +70,14 @@ function formatChicagoDateTime(value: string | null) {
     minute: "2-digit",
     second: "2-digit"
   })
+}
+
+function networkName(network: string | null) {
+  if (!network) return "-"
+  if (network.toLowerCase() === "solana") return "Solana"
+  if (network.toLowerCase() === "base") return "Base"
+  if (network.toLowerCase() === "ethereum") return "Ethereum"
+  return network.charAt(0).toUpperCase() + network.slice(1).toLowerCase()
 }
 
 export default function DashboardPage() {
@@ -112,7 +126,6 @@ export default function DashboardPage() {
     setTxCount(Number(payload.txCount ?? 0))
     setSuccessRate(Number(payload.successRate ?? 0))
     setProviders(Number(payload.providers ?? 0))
-    setRecentTx(payload.recentTx || [])
     setChartData(payload.chartData || [])
     setWalletValue(Number(payload.walletValue ?? 0))
     setLastRun(payload.lastRun || null)
@@ -120,8 +133,44 @@ export default function DashboardPage() {
 
   const loadOverview = useCallback(async () => {
     const payload = await callOverviewApi(false)
-    applyOverviewPayload(payload)
-  }, [applyOverviewPayload, callOverviewApi])
+
+    // Metrics only from API — recentTx is NOT applied from here
+    setVolume(Number(payload.volume ?? 0))
+    setTxCount(Number(payload.txCount ?? 0))
+    setSuccessRate(Number(payload.successRate ?? 0))
+    setProviders(Number(payload.providers ?? 0))
+    setChartData(payload.chartData || [])
+    setWalletValue(Number(payload.walletValue ?? 0))
+    setLastRun(payload.lastRun || null)
+
+    // Recent activity from direct Supabase query — single source of truth
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.user?.id) {
+      const { data, error } = await supabase
+        .from("transactions")
+        .select(`
+          id,
+          provider,
+          status,
+          provider_transaction_id,
+          network,
+          created_at,
+          payments (
+            created_at,
+            gross_amount,
+            currency,
+            status
+          )
+        `)
+        .eq("merchant_id", session.user.id)
+        .order("created_at", { ascending: false })
+        .limit(10)
+
+      if (!error && data) {
+        setRecentTx(data as RecentTxRow[])
+      }
+    }
+  }, [callOverviewApi])
 
   async function syncNow() {
     setIsSyncing(true)
@@ -316,7 +365,10 @@ export default function DashboardPage() {
                     ? tx.payments[0]
                     : tx.payments
 
-                  const displayStatus = getPaymentDisplayStatus(tx.status, tx.created_at)
+                  const statusTime = tx.created_at || payment?.created_at || ""
+                  const displayStatus = payment
+                    ? getPaymentDisplayStatus(payment.status || tx.status, statusTime)
+                    : { status: tx.status, classes: "bg-gray-100 text-gray-700" }
 
                   return(
 
@@ -331,13 +383,11 @@ export default function DashboardPage() {
                       </td>
 
                       <td className="py-3 text-gray-700">
-                        {tx.network ?? "-"}
+                        {networkName(tx.network ?? null)}
                       </td>
 
                       <td className="py-3">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${displayStatus.classes}`}>
-                          {displayStatus.status}
-                        </span>
+                        <StatusBadge label={displayStatus.status} classes={displayStatus.classes} />
                       </td>
 
                       <td className="py-3 text-gray-500 text-xs">

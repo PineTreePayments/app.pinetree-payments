@@ -116,15 +116,12 @@ function getCheckoutAssetOptions(networks: string[]): AssetOption[] {
 
   return availableAssets.map((assetId) => {
     const asset = ALLOWED_ASSETS[assetId]
-    const isUnsupportedSolanaUsdc = assetId === "sol-usdc"
 
     return {
       id: assetId,
       label: asset.label,
       network: asset.network,
-      symbol: asset.symbol,
-      disabled: isUnsupportedSolanaUsdc,
-      disabledCopy: isUnsupportedSolanaUsdc ? "USDC on Solana coming soon" : undefined
+      symbol: asset.symbol
     }
   })
 }
@@ -560,12 +557,12 @@ export default function PayClient() {
           <div className="p-8 space-y-4">
             <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
             <div className="flex justify-center">
-              <svg className="w-16 h-16 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <svg className="w-16 h-16 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
             <h1 className="text-2xl font-bold text-gray-900">Payment Cancelled</h1>
-            <p className="text-sm text-gray-500">You rejected the transaction. No payment was made.</p>
+            <p className="text-sm text-gray-500">You rejected the transaction.</p>
           </div>
         </Card>
       </PageContainer>
@@ -584,7 +581,7 @@ export default function PayClient() {
               </svg>
             </div>
             <h1 className="text-2xl font-bold text-gray-900">Payment Failed</h1>
-            <p className="text-sm text-gray-500">The transaction could not be completed. Please try again or contact the merchant.</p>
+            <p className="text-sm text-gray-500">Something went wrong. Please try again.</p>
           </div>
         </Card>
       </PageContainer>
@@ -616,7 +613,7 @@ export default function PayClient() {
         <Card className="max-w-md w-full text-center space-y-4">
           <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
           <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0052FF] border-t-transparent mx-auto" />
-          <h1 className="text-lg font-bold text-gray-900">Processing Payment...</h1>
+          <h1 className="text-lg font-bold text-gray-900">Processing payment...</h1>
           <p className="text-sm text-gray-500">Your transaction is being confirmed on-chain. This may take a moment.</p>
         </Card>
       </PageContainer>

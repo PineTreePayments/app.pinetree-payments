@@ -90,6 +90,7 @@ export type PaymentSplitMetadata = {
   expectedFeeAtomic?: string | number
   feeCaptureMethod?: string
   splitContract?: string
+  asset?: string
 }
 
 export type StoredPaymentSplitMetadata = {

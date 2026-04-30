@@ -29,6 +29,7 @@ import { id as ethersId, AbiCoder } from "ethers"
 
 // Solana Memo Program ID — same constant used in solanaSplitTransaction.ts
 const SOLANA_MEMO_PROGRAM_ID = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+const USDC_MINT_ADDRESS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 
 // PineTreeSplit contract event: PaymentSplit(address indexed merchant, address indexed treasury,
 //   uint256 merchantAmount, uint256 feeAmount, string paymentRef, address indexed payer, address token)
@@ -50,6 +51,7 @@ export type WatchOnceInput = {
   splitContract?: string
   network: string
   paymentId: string
+  asset?: string
   txHash?: string
 }
 
@@ -96,11 +98,24 @@ type SolanaParsedInstruction = {
   }
 }
 
+type SolanaTokenBalance = {
+  accountIndex: number
+  mint: string
+  uiTokenAmount: {
+    amount: string
+  }
+  owner?: string
+}
+
 type SolanaParsedTransaction = {
   transaction?: {
     message?: {
       instructions?: SolanaParsedInstruction[]
     }
+  }
+  meta?: {
+    preTokenBalances?: SolanaTokenBalance[]
+    postTokenBalances?: SolanaTokenBalance[]
   }
 }
 
@@ -176,6 +191,8 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
 
   // ── SOLANA ───────────────────────────────────────────────────────────────────
   if (input.network === "solana") {
+    const isUsdc = String(input.asset || "").toUpperCase() === "USDC"
+
     // ── txHash fast-path ────────────────────────────────────────────────────
     // When the UI passes a signature immediately after signing, skip the full
     // getSignaturesForAddress scan (which only returns finalized transactions)
@@ -185,24 +202,46 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
       try {
         const tx = await getSolanaParsedTransaction(rpcUrl, input.txHash)
         if (tx) {
-          const match = parseSolanaSplitTx(tx, {
-            merchantWallet,
-            pinetreeWallet,
-            expectedMerchantLamports: Number(input.expectedMerchantAtomic || 0),
-            expectedFeeLamports: Number(input.expectedFeeAtomic || 0),
-            matchRatio,
-            paymentId: input.paymentId,
-          })
-          if (match) {
-            console.log("[SOLANA] payment detected via txHash fast-path", {
+          if (isUsdc) {
+            const match = parseSolanaUsdcSplitTx(tx, {
+              merchantWallet,
+              pinetreeWallet,
+              expectedMerchantAtomic: Number(input.expectedMerchantAtomic || 0),
+              expectedFeeAtomic: Number(input.expectedFeeAtomic || 0),
+              matchRatio,
               paymentId: input.paymentId,
-              txHash: input.txHash,
             })
-            return handleMatchingTransaction(
-              input.paymentId,
-              { hash: input.txHash, value: String(match.totalLamports / 1e9), from: match.from },
-              true
-            )
+            if (match) {
+              console.log("[SOLANA] USDC payment detected via txHash fast-path", {
+                paymentId: input.paymentId,
+                txHash: input.txHash,
+              })
+              return handleMatchingTransaction(
+                input.paymentId,
+                { hash: input.txHash, value: match.totalAtomic.toString(), from: match.from },
+                true
+              )
+            }
+          } else {
+            const match = parseSolanaSplitTx(tx, {
+              merchantWallet,
+              pinetreeWallet,
+              expectedMerchantLamports: Number(input.expectedMerchantAtomic || 0),
+              expectedFeeLamports: Number(input.expectedFeeAtomic || 0),
+              matchRatio,
+              paymentId: input.paymentId,
+            })
+            if (match) {
+              console.log("[SOLANA] payment detected via txHash fast-path", {
+                paymentId: input.paymentId,
+                txHash: input.txHash,
+              })
+              return handleMatchingTransaction(
+                input.paymentId,
+                { hash: input.txHash, value: String(match.totalLamports / 1e9), from: match.from },
+                true
+              )
+            }
           }
         }
       } catch (err) {
@@ -232,6 +271,32 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
 
     const lookback = getLookbackWindow("solana")
     const sinceSlot = Math.max(0, currentSlot - lookback)
+
+    if (isUsdc) {
+      const splitTx = await findMatchingSolanaUsdcSplitTransaction({
+        rpcUrl,
+        merchantWallet,
+        pinetreeWallet,
+        sinceSlot,
+        expectedMerchantAtomic: Number(input.expectedMerchantAtomic || 0),
+        expectedFeeAtomic: Number(input.expectedFeeAtomic || 0),
+        matchRatio,
+        paymentId: input.paymentId
+      })
+
+      if (!splitTx) return false
+
+      console.log("[SOLANA] USDC payment detected", {
+        paymentId: input.paymentId,
+        signature: splitTx.hash
+      })
+
+      return handleMatchingTransaction(
+        input.paymentId,
+        { hash: splitTx.hash, value: splitTx.totalAtomic.toString(), from: splitTx.from },
+        true // fee capture validated for Solana split
+      )
+    }
 
     const splitTx = await findMatchingSolanaSplitTransaction({
       rpcUrl,
@@ -796,6 +861,175 @@ function parseSolanaSplitTx(
   if (merchantLamports >= merchantThreshold && feeLamports >= feeThreshold) {
     return { from: source, totalLamports: merchantLamports + feeLamports }
   }
+
+  return null
+}
+
+/**
+ * Validate a single parsed Solana transaction for a USDC SPL split.
+ *
+ * SPL token transfers are validated from token balance deltas rather than native
+ * System Program transfer instructions. The receiver accounts are matched by
+ * token-account owner, while the USDC mint filters out unrelated token movement.
+ */
+function parseSolanaUsdcSplitTx(
+  tx: SolanaParsedTransaction,
+  params: {
+    merchantWallet: string
+    pinetreeWallet: string
+    expectedMerchantAtomic: number
+    expectedFeeAtomic: number
+    matchRatio: number
+    paymentId: string
+  }
+): { from: string; totalAtomic: number } | null {
+  const instructions = tx?.transaction?.message?.instructions
+  if (!Array.isArray(instructions)) return null
+
+  let memoMatches = false
+  for (const ix of instructions) {
+    if (ix.programId === SOLANA_MEMO_PROGRAM_ID && typeof ix.parsed === "string") {
+      memoMatches = ix.parsed.trim() === params.paymentId.trim()
+      break
+    }
+  }
+
+  if (!memoMatches) return null
+
+  const preBalances = tx.meta?.preTokenBalances
+  const postBalances = tx.meta?.postTokenBalances
+  if (!Array.isArray(preBalances) || !Array.isArray(postBalances)) return null
+
+  const preByAccount = new Map<number, SolanaTokenBalance>()
+  const postByAccount = new Map<number, SolanaTokenBalance>()
+
+  for (const balance of preBalances) {
+    if (String(balance.mint || "") === USDC_MINT_ADDRESS) {
+      preByAccount.set(balance.accountIndex, balance)
+    }
+  }
+
+  for (const balance of postBalances) {
+    if (String(balance.mint || "") === USDC_MINT_ADDRESS) {
+      postByAccount.set(balance.accountIndex, balance)
+    }
+  }
+
+  const accountIndexes = new Set<number>([
+    ...Array.from(preByAccount.keys()),
+    ...Array.from(postByAccount.keys())
+  ])
+
+  let merchantAtomic = 0
+  let feeAtomic = 0
+  let source = ""
+
+  for (const accountIndex of accountIndexes) {
+    const pre = preByAccount.get(accountIndex)
+    const post = postByAccount.get(accountIndex)
+    const owner = String(post?.owner || pre?.owner || "").trim()
+    const preAmount = Number(pre?.uiTokenAmount?.amount || 0)
+    const postAmount = Number(post?.uiTokenAmount?.amount || 0)
+    const delta = postAmount - preAmount
+
+    if (delta > 0 && owner === params.merchantWallet) {
+      merchantAtomic += delta
+    }
+
+    if (delta > 0 && owner === params.pinetreeWallet) {
+      feeAtomic += delta
+    }
+
+    if (delta < 0 && !source && owner) {
+      source = owner
+    }
+  }
+
+  const merchantThreshold =
+    params.expectedMerchantAtomic > 0 ? params.expectedMerchantAtomic * params.matchRatio : 0
+  const feeThreshold =
+    params.expectedFeeAtomic > 0 ? params.expectedFeeAtomic * params.matchRatio : 0
+
+  if (merchantAtomic >= merchantThreshold && feeAtomic >= feeThreshold) {
+    return { from: source, totalAtomic: merchantAtomic + feeAtomic }
+  }
+
+  return null
+}
+
+async function findMatchingSolanaUsdcSplitTransaction(input: {
+  rpcUrl: string
+  merchantWallet: string
+  pinetreeWallet: string
+  sinceSlot: number
+  expectedMerchantAtomic: number
+  expectedFeeAtomic: number
+  matchRatio: number
+  paymentId: string
+}): Promise<{ hash: string; from: string; totalAtomic: number } | null> {
+  const [merchantSignatures, treasurySignatures] = await Promise.all([
+    getSolanaSignatures(input.rpcUrl, input.merchantWallet, input.sinceSlot),
+    getSolanaSignatures(input.rpcUrl, input.pinetreeWallet, input.sinceSlot)
+  ])
+
+  if (!merchantSignatures.length || !treasurySignatures.length) {
+    console.info("[watcher:solana] no signatures found for USDC split detection", {
+      merchantAddress: input.merchantWallet,
+      treasuryAddress: input.pinetreeWallet,
+      merchantCount: merchantSignatures.length,
+      treasuryCount: treasurySignatures.length,
+      sinceSlot: input.sinceSlot
+    })
+    return null
+  }
+
+  const treasurySet = new Set(treasurySignatures)
+  const candidateSignatures = merchantSignatures.filter((sig) => treasurySet.has(sig))
+
+  if (!candidateSignatures.length) {
+    console.info("[watcher:solana] no overlapping signatures for USDC split detection", {
+      merchantAddress: input.merchantWallet,
+      treasuryAddress: input.pinetreeWallet,
+      merchantCount: merchantSignatures.length,
+      treasuryCount: treasurySignatures.length,
+      sinceSlot: input.sinceSlot
+    })
+    return null
+  }
+
+  for (const signature of candidateSignatures) {
+    const tx = await getSolanaParsedTransaction(input.rpcUrl, signature)
+    if (!tx) continue
+
+    const match = parseSolanaUsdcSplitTx(tx, {
+      merchantWallet: input.merchantWallet,
+      pinetreeWallet: input.pinetreeWallet,
+      expectedMerchantAtomic: input.expectedMerchantAtomic,
+      expectedFeeAtomic: input.expectedFeeAtomic,
+      matchRatio: input.matchRatio,
+      paymentId: input.paymentId
+    })
+
+    if (match) {
+      return { hash: signature, from: match.from, totalAtomic: match.totalAtomic }
+    }
+
+    console.info("[watcher:solana] USDC signature did not match split requirements", {
+      signature,
+      paymentId: input.paymentId,
+      expectedMerchantAtomic: input.expectedMerchantAtomic,
+      expectedFeeAtomic: input.expectedFeeAtomic,
+      matchRatio: input.matchRatio
+    })
+  }
+
+  console.info("[watcher:solana] candidate signatures did not meet USDC split thresholds", {
+    merchantAddress: input.merchantWallet,
+    treasuryAddress: input.pinetreeWallet,
+    candidateCount: candidateSignatures.length,
+    expectedMerchantAtomic: input.expectedMerchantAtomic,
+    expectedFeeAtomic: input.expectedFeeAtomic
+  })
 
   return null
 }

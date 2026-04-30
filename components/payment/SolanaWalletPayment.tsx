@@ -96,24 +96,10 @@ export default function SolanaWalletPayment({
     </div>
   )
 
-  if (selectedAsset !== "SOL") {
-    return (
-      <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
-        <div className="text-xs uppercase tracking-widest text-gray-500 text-center">
-          Pay via Solana
-        </div>
-        {amountDisplay}
-        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-          USDC on Solana is coming soon. Please select SOL to continue.
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
       <div className="text-xs uppercase tracking-widest text-gray-500 text-center">
-        Pay via Solana
+        Pay with {selectedAsset} (Solana)
       </div>
       {amountDisplay}
 

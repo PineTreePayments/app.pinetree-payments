@@ -5,6 +5,11 @@ import {
   Transaction,
   TransactionInstruction
 } from "@solana/web3.js"
+import {
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountIdempotentInstruction,
+  createTransferInstruction
+} from "@solana/spl-token"
 import { getPaymentById } from "@/database/payments"
 import { getRpcUrl } from "@/engine/config"
 import { normalizeToStrictPaymentStatus } from "./paymentStateMachine"
@@ -13,13 +18,14 @@ import { normalizeToStrictPaymentStatus } from "./paymentStateMachine"
 // The watcher reads this back to guarantee payment identity before confirming.
 const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")
 const SYSTEM_PROGRAM_ADDRESS = SystemProgram.programId.toBase58()
+const USDC_MINT = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
 
-function toLamportsFromAtomic(value: unknown): number {
+function toAtomicAmount(value: unknown, label: string): bigint {
   const n = Number(value)
   if (!Number.isFinite(n) || n <= 0) {
-    throw new Error("Invalid lamport amount in payment split metadata")
+    throw new Error(`Invalid atomic amount for ${label} in payment split metadata`)
   }
-  return Math.round(n)
+  return BigInt(Math.round(n))
 }
 
 export async function buildSolanaSplitTransactionEngine(input: {
@@ -97,7 +103,7 @@ export async function buildSolanaSplitTransactionEngine(input: {
   }
 
   const selectedAsset = String(metadata.selectedAsset || "SOL").trim().toUpperCase()
-  if (selectedAsset !== "SOL") {
+  if (selectedAsset !== "SOL" && selectedAsset !== "USDC") {
     console.error("[SOLANA ENGINE][TX] unsupported asset", { paymentId, selectedAsset })
     throw new Error("Unsupported Solana asset")
   }
@@ -115,16 +121,16 @@ export async function buildSolanaSplitTransactionEngine(input: {
     throw new Error("Missing split wallet metadata")
   }
 
-  const merchantLamports = toLamportsFromAtomic(split?.merchantNativeAmountAtomic)
-  const feeLamports = toLamportsFromAtomic(split?.feeNativeAmountAtomic)
+  const merchantAtomic = toAtomicAmount(split?.merchantNativeAmountAtomic, "merchant")
+  const feeAtomic = toAtomicAmount(split?.feeNativeAmountAtomic, "fee")
 
   console.log("[SOLANA ENGINE][TX] split resolved", {
     paymentId,
     senderAccount,
     merchantWallet,
     pinetreeWallet,
-    merchantLamports,
-    feeLamports,
+    merchantAtomic: merchantAtomic.toString(),
+    feeAtomic: feeAtomic.toString(),
     selectedAsset
   })
 
@@ -141,25 +147,53 @@ export async function buildSolanaSplitTransactionEngine(input: {
     recentBlockhash: blockhash
   })
 
-  tx.add(
-    SystemProgram.transfer({
-      fromPubkey: payerPublicKey,
-      toPubkey: new PublicKey(merchantWallet),
-      lamports: merchantLamports
-    }),
-    SystemProgram.transfer({
-      fromPubkey: payerPublicKey,
-      toPubkey: new PublicKey(pinetreeWallet),
-      lamports: feeLamports
-    }),
-    // Attach the PineTree paymentId as an on-chain memo so the watcher can
-    // verify the reference deterministically rather than relying on amounts alone.
-    new TransactionInstruction({
-      keys: [],
-      programId: MEMO_PROGRAM_ID,
-      data: Buffer.from(paymentId, "utf8")
-    })
-  )
+  const memoInstruction = new TransactionInstruction({
+    keys: [],
+    programId: MEMO_PROGRAM_ID,
+    data: Buffer.from(paymentId, "utf8")
+  })
+
+  if (selectedAsset === "USDC") {
+    const merchantPubkey = new PublicKey(merchantWallet)
+    const pinetreePubkey = new PublicKey(pinetreeWallet)
+
+    const [senderAta, merchantAta, pinetreeAta] = await Promise.all([
+      getAssociatedTokenAddress(USDC_MINT, payerPublicKey),
+      getAssociatedTokenAddress(USDC_MINT, merchantPubkey),
+      getAssociatedTokenAddress(USDC_MINT, pinetreePubkey)
+    ])
+
+    tx.add(
+      // Idempotent ATA creation — no-op if account already exists.
+      // Payer funds rent if the ATA needs to be created.
+      createAssociatedTokenAccountIdempotentInstruction(
+        payerPublicKey, merchantAta, merchantPubkey, USDC_MINT
+      ),
+      createAssociatedTokenAccountIdempotentInstruction(
+        payerPublicKey, pinetreeAta, pinetreePubkey, USDC_MINT
+      ),
+      createTransferInstruction(senderAta, merchantAta, payerPublicKey, merchantAtomic),
+      createTransferInstruction(senderAta, pinetreeAta, payerPublicKey, feeAtomic),
+      memoInstruction
+    )
+  } else {
+    // SOL — native lamport transfers
+    tx.add(
+      SystemProgram.transfer({
+        fromPubkey: payerPublicKey,
+        toPubkey: new PublicKey(merchantWallet),
+        lamports: Number(merchantAtomic)
+      }),
+      SystemProgram.transfer({
+        fromPubkey: payerPublicKey,
+        toPubkey: new PublicKey(pinetreeWallet),
+        lamports: Number(feeAtomic)
+      }),
+      // Attach the PineTree paymentId as an on-chain memo so the watcher can
+      // verify the reference deterministically rather than relying on amounts alone.
+      memoInstruction
+    )
+  }
 
   console.log("[SOLANA ENGINE][TX] transaction built", {
     paymentId,

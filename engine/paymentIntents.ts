@@ -63,10 +63,6 @@ function resolveSupportedAssetForNetwork(network: WalletNetwork, asset?: string)
     throw new Error("Missing Solana asset selection")
   }
 
-  if (normalizedAsset !== "SOL") {
-    throw new Error("USDC on Solana is not supported yet")
-  }
-
   return normalizedAsset
 }
 

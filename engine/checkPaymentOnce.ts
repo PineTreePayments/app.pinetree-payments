@@ -60,6 +60,7 @@ export async function runPaymentWatcher(paymentId: string, options?: { txHash?: 
       expectedFeeAtomic: split?.feeNativeAmountAtomic ?? split?.expectedFeeAtomic,
       feeCaptureMethod: split?.feeCaptureMethod,
       splitContract: split?.splitContract,
+      asset: split?.asset,
       txHash: options?.txHash
     })
   } catch (error) {
