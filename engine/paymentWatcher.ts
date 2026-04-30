@@ -200,7 +200,18 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
     // scan if the transaction isn't available yet or validation fails.
     if (input.txHash) {
       try {
-        const tx = await getSolanaParsedTransaction(rpcUrl, input.txHash)
+        const MAX_ATTEMPTS = 5
+        const DELAY_MS = 800
+        let tx: SolanaParsedTransaction | null = null
+
+        for (let i = 0; i < MAX_ATTEMPTS; i++) {
+          tx = await getSolanaParsedTransaction(rpcUrl, input.txHash)
+
+          if (tx) break
+
+          await new Promise((res) => setTimeout(res, DELAY_MS))
+        }
+
         if (tx) {
           if (isUsdc) {
             const match = parseSolanaUsdcSplitTx(tx, {
