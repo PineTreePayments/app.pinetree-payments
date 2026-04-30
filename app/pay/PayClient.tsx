@@ -1217,6 +1217,7 @@ export default function PayClient() {
             paymentUrl={String(activePayload?.paymentUrl || "")}
             nativeAmount={nativeAmount}
             usdAmount={usdTotalAmount}
+            selectedAsset={nativeSymbol === "USDC" ? "USDC" : "ETH"}
           />
         ) : isSolanaPayment(activePayload) ? (
           <SolanaWalletPayment

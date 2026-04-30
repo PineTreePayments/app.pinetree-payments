@@ -308,10 +308,10 @@ export async function createPayment(
   }
 
   if (network === "base") {
-    if (requestedAsset && requestedAsset !== "ETH") {
-      throw new Error("Base payments support ETH only. USDC on Base is coming soon.")
+    if (requestedAsset && requestedAsset !== "ETH" && requestedAsset !== "USDC") {
+      throw new Error("Base payments support ETH and USDC only")
     }
-    walletAsset = "eth-base"
+    walletAsset = requestedAsset === "USDC" ? "base-usdc" : "eth-base"
   }
 
   /* ---------------------------
@@ -423,7 +423,7 @@ export async function createPayment(
     qr_code_url: canonicalQrCodeUrl,
     metadata: {
       ...(input.metadata || {}),
-      selectedAsset: network === "solana" ? requestedAsset : input.asset,
+      selectedAsset: network === "solana" || network === "base" ? requestedAsset : input.asset,
       split: {
         merchantWallet: merchantWalletAddress,
         pinetreeWallet,
@@ -434,7 +434,7 @@ export async function createPayment(
         feeNativeAmount: splitPayment.feeNativeAmount,
         merchantNativeAmountAtomic: splitPayment.merchantNativeAmountAtomic,
         feeNativeAmountAtomic: splitPayment.feeNativeAmountAtomic,
-        ...(network === "solana" && requestedAsset === "USDC" ? { asset: "USDC" } : {})
+        ...((network === "solana" || network === "base") && requestedAsset === "USDC" ? { asset: "USDC" } : {})
       }
     },
     status: "CREATED"
@@ -501,7 +501,7 @@ export async function createPayment(
     universalUrl: splitPayment.universalUrl,
     nativeAmount: Number(splitPayment.nativeAmount || 0),
     nativeSymbol: String(splitPayment.nativeSymbol || "").toUpperCase() || undefined,
-    asset: network === "solana" ? requestedAsset : input.asset
+    asset: network === "solana" || network === "base" ? requestedAsset : input.asset
   }
   } catch (error) {
     if (claimedIdempotencyKey && input.idempotencyKey) {

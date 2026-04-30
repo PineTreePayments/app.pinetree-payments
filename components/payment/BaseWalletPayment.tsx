@@ -1,9 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useAccount, useConnect, useSendTransaction, useSwitchChain } from "wagmi"
+import { useAccount, useConnect, useSwitchChain } from "wagmi"
 import type { Connector } from "wagmi"
 import { base } from "wagmi/chains"
+import { decodeFunctionData, encodeFunctionData } from "viem"
 import Button from "@/components/ui/Button"
 
 type BaseAsset = "ETH" | "USDC"
@@ -32,8 +33,43 @@ type EvmTransactionRequest = {
   chainId: number
 }
 
+type WalletConnectProvider = {
+  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>
+}
+
 const BASE_WC_PENDING_KEY = "pinetree_base_wc_pending"
 const BASE_WC_PENDING_TTL_MS = 10 * 60 * 1000
+const BASE_USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+
+const ERC20_APPROVE_ABI = [
+  {
+    type: "function",
+    name: "approve",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "spender", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+] as const
+
+const SPLIT_TOKEN_ABI = [
+  {
+    type: "function",
+    name: "splitToken",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "merchant", type: "address" },
+      { name: "treasury", type: "address" },
+      { name: "merchantAmount", type: "uint256" },
+      { name: "feeAmount", type: "uint256" },
+      { name: "paymentRef", type: "string" },
+      { name: "token", type: "address" },
+    ],
+    outputs: [],
+  },
+] as const
 
 type PendingBaseWalletConnectPayment = {
   intentId: string | null
@@ -119,6 +155,84 @@ function parseEthereumPaymentUri(paymentUrl: string): EvmTransactionRequest {
     chainId,
     value: decimalOrHexToHex(value),
     data,
+  }
+}
+
+function isWalletConnectProvider(provider: unknown): provider is WalletConnectProvider {
+  return (
+    typeof provider === "object" &&
+    provider !== null &&
+    typeof (provider as { request?: unknown }).request === "function"
+  )
+}
+
+async function getWalletConnectProvider(connector: Connector): Promise<WalletConnectProvider> {
+  const provider = await connector.getProvider()
+  if (!isWalletConnectProvider(provider)) {
+    throw new Error("WalletConnect provider is not available.")
+  }
+  return provider
+}
+
+function normalizeHexTransactionHash(value: unknown): string {
+  const txHash = String(value || "").trim()
+  if (!/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
+    throw new Error("Wallet did not return a transaction hash")
+  }
+  return txHash
+}
+
+async function sendWalletConnectTransaction(input: {
+  provider: WalletConnectProvider
+  fromAddress: string
+  txRequest: EvmTransactionRequest
+}): Promise<string> {
+  const txHash = await input.provider.request({
+    method: "eth_sendTransaction",
+    params: [
+      {
+        from: input.fromAddress,
+        to: input.txRequest.to,
+        value: input.txRequest.value,
+        data: input.txRequest.data,
+        chainId: decimalOrHexToHex(String(input.txRequest.chainId)),
+      },
+    ],
+  })
+
+  return normalizeHexTransactionHash(txHash)
+}
+
+function buildBaseUsdcApprovalTransaction(txRequest: EvmTransactionRequest): EvmTransactionRequest {
+  const decoded = decodeFunctionData({
+    abi: SPLIT_TOKEN_ABI,
+    data: txRequest.data as `0x${string}`,
+  })
+
+  if (decoded.functionName !== "splitToken") {
+    throw new Error("Invalid Base USDC split transaction returned by server")
+  }
+
+  const [, , merchantAmount, feeAmount, , token] = decoded.args
+  const tokenAddress = String(token || "").trim().toLowerCase()
+  if (tokenAddress !== BASE_USDC_ADDRESS.toLowerCase()) {
+    throw new Error("Base USDC payment returned an unexpected token address")
+  }
+
+  const approvalAmount = merchantAmount + feeAmount
+  if (approvalAmount <= BigInt(0)) {
+    throw new Error("Invalid Base USDC approval amount")
+  }
+
+  return {
+    to: BASE_USDC_ADDRESS,
+    chainId: base.id,
+    value: "0x0",
+    data: encodeFunctionData({
+      abi: ERC20_APPROVE_ABI,
+      functionName: "approve",
+      args: [txRequest.to as `0x${string}`, approvalAmount],
+    }),
   }
 }
 
@@ -210,7 +324,6 @@ export default function BaseWalletPayment({
   const { address, chain, isConnected, connector } = useAccount()
   const { connectors, connectAsync, status: connectStatus } = useConnect()
   const { switchChainAsync, status: switchStatus } = useSwitchChain()
-  const { sendTransactionAsync } = useSendTransaction()
 
   const [localError, setLocalError] = useState("")
   const [resumeMessage, setResumeMessage] = useState("")
@@ -224,13 +337,13 @@ export default function BaseWalletPayment({
   })
   const [isPreparingPayment, setIsPreparingPayment] = useState(false)
   const [isOpeningWallet, setIsOpeningWallet] = useState(false)
+  const [isApprovingUsdc, setIsApprovingUsdc] = useState(false)
   const isSendingBaseTxRef = useRef(false)
   const autoResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const isIntentMode = Boolean(intentId)
   const isOnBase = chain?.id === base.id
   const isConnecting = connectStatus === "pending" || switchStatus === "pending"
-  const isUsdcDeferred = selectedAsset === "USDC"
 
   const walletConnectConnector = useMemo(
     () => connectors.find(isWalletConnectConnector) || null,
@@ -318,10 +431,6 @@ export default function BaseWalletPayment({
     let createdPaymentId = ""
 
     try {
-      if (selectedAsset !== "ETH") {
-        throw new Error("USDC on Base is coming soon. Please choose ETH on Base for now.")
-      }
-
       if (!walletConnectConnector) {
         throw new Error("WalletConnect is not configured.")
       }
@@ -361,9 +470,31 @@ export default function BaseWalletPayment({
         hasPaymentUrl: Boolean(paymentData.paymentUrl),
       })
       const txRequest = parseEthereumPaymentUri(paymentData.paymentUrl)
+      const walletConnectProvider = await getWalletConnectProvider(walletConnectConnector)
 
       setIsOpeningWallet(true)
       setResumeMessage("")
+      if (selectedAsset === "USDC") {
+        const approvalRequest = buildBaseUsdcApprovalTransaction(txRequest)
+        setIsApprovingUsdc(true)
+        await logBase("usdc-approve-start", {
+          token: approvalRequest.to,
+          spender: txRequest.to,
+          hasData: Boolean(approvalRequest.data),
+        })
+
+        const approvalTxHash = await sendWalletConnectTransaction({
+          provider: walletConnectProvider,
+          fromAddress,
+          txRequest: approvalRequest,
+        })
+
+        await logBase("usdc-approve-submitted", {
+          txHashPrefix: approvalTxHash.slice(0, 10),
+        })
+        setIsApprovingUsdc(false)
+      }
+
       console.log("[Base] Sending Base transaction via wagmi")
       await logBase("wallet-client-ready", {
         hasAddress: Boolean(fromAddress),
@@ -375,17 +506,11 @@ export default function BaseWalletPayment({
         hasValue: Boolean(txRequest.value),
       })
 
-      const txHash = await sendTransactionAsync({
-        to: txRequest.to as `0x${string}`,
-        value: BigInt(txRequest.value),
-        data: txRequest.data as `0x${string}`,
-        chainId: base.id,
+      const normalizedTxHash = await sendWalletConnectTransaction({
+        provider: walletConnectProvider,
+        fromAddress,
+        txRequest,
       })
-
-      const normalizedTxHash = String(txHash || "").trim()
-      if (!/^0x[a-fA-F0-9]{64}$/.test(normalizedTxHash)) {
-        throw new Error("Wallet did not return a transaction hash")
-      }
 
       console.log("[Base] Base tx submitted", { txHash: normalizedTxHash })
       await logBase("tx-submitted", { txHashPrefix: normalizedTxHash.slice(0, 10) })
@@ -428,11 +553,12 @@ export default function BaseWalletPayment({
       setLocalError(friendly)
       setIsPreparingPayment(false)
       setIsOpeningWallet(false)
+      setIsApprovingUsdc(false)
       onError?.(friendly)
     } finally {
       isSendingBaseTxRef.current = false
     }
-  }, [intentId, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, sendTransactionAsync, switchChainAsync, walletConnectConnector])
+  }, [intentId, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, switchChainAsync, walletConnectConnector])
 
   const startWalletConnectPayment = useCallback(() => {
     setLocalError("")
@@ -440,17 +566,13 @@ export default function BaseWalletPayment({
 
     void (async () => {
       try {
-        if (selectedAsset !== "ETH") {
-          throw new Error("USDC on Base is coming soon. Please choose ETH on Base for now.")
-        }
-
         if (!walletConnectConnector) {
           throw new Error("WalletConnect is not configured.")
         }
 
         console.log("[Base] WalletConnect selected")
         await logBase("wc-selected", { intentId: intentId || null })
-        await logBase("pending-store", { intentId: intentId || null, selectedAsset: "ETH" })
+        await logBase("pending-store", { intentId: intentId || null, selectedAsset })
 
         storePendingBaseWalletConnectPayment({ intentId, selectedAsset })
         setHasPendingBaseWcPayment(true)
@@ -516,6 +638,7 @@ export default function BaseWalletPayment({
         setLocalError(friendly)
         setIsPreparingPayment(false)
         setIsOpeningWallet(false)
+        setIsApprovingUsdc(false)
         onError?.(friendly)
       }
     })()
@@ -541,7 +664,6 @@ export default function BaseWalletPayment({
       !hasPending ? "no-pending"
       : !isConnected ? "not-connected"
       : !address ? "no-address"
-      : selectedAsset !== "ETH" ? "wrong-asset"
       : isSendingBaseTxRef.current ? "already-sending"
       : isOpeningWallet ? "opening-wallet"
       : null
@@ -568,7 +690,7 @@ export default function BaseWalletPayment({
       void logBase("auto-resume-fired", { hasAddress: Boolean(capturedAddress) })
       void continueBasePayment(capturedAddress)
     }, 700)
-  }, [address, continueBasePayment, intentId, isConnected, isOpeningWallet, selectedAsset])
+  }, [address, continueBasePayment, intentId, isConnected, isOpeningWallet])
 
   useEffect(() => {
     refreshPendingState()
@@ -607,7 +729,7 @@ export default function BaseWalletPayment({
         </>
       ) : (
         <>
-          <p className="text-lg font-bold text-gray-900">{nativeAmount} ETH</p>
+          <p className="text-lg font-bold text-gray-900">{nativeAmount} {selectedAsset}</p>
           <p className="text-xs text-gray-500">≈ ${usdAmount.toFixed(2)} USD</p>
         </>
       )}
@@ -676,17 +798,7 @@ export default function BaseWalletPayment({
         </div>
       ) : null}
 
-      {isUsdcDeferred ? (
-        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-          USDC on Base is coming soon. Please choose ETH on Base for now.
-        </div>
-      ) : null}
-
-      {isUsdcDeferred ? (
-        <Button fullWidth disabled>
-          USDC on Base coming soon
-        </Button>
-      ) : isConnecting ? (
+      {isConnecting ? (
         <Button fullWidth disabled>
           <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
           Connecting…
@@ -699,13 +811,13 @@ export default function BaseWalletPayment({
       ) : isOpeningWallet ? (
         <Button fullWidth disabled>
           <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
-          Opening wallet…
+          {isApprovingUsdc ? "Approving USDC…" : selectedAsset === "USDC" ? "Opening wallet for USDC payment…" : "Opening wallet…"}
         </Button>
       ) : (
         <div className="space-y-2">
           {walletConnectConnector ? (
             <Button fullWidth onClick={() => startWalletConnectPayment()}>
-              Pay with WalletConnect
+              Pay with {selectedAsset} (Base)
             </Button>
           ) : (
             <div className="text-[11px] text-gray-500 text-center">

@@ -17,7 +17,7 @@ type GenerateSplitPaymentInput = {
   pinetreeWallet: string
   pinetreeFee: number
   network: string
-  /** Wallet asset type — drives token selection on Base (e.g. "eth-base" vs "usdc-base") */
+  /** Wallet asset type — drives token selection on Base (e.g. "eth-base" vs "base-usdc") */
   asset?: string
   paymentId?: string
   providerPayment?: unknown
@@ -53,7 +53,7 @@ function toUSDCAtomicString(amountUsd: number): string {
 
 function isUsdcAsset(asset?: string): boolean {
   const a = String(asset || "").toLowerCase().trim()
-  return a === "usdc-base" || a === "sol-usdc"
+  return a === "base-usdc" || a === "usdc-base" || a === "sol-usdc"
 }
 
 function isEvmAddress(value: string): boolean {

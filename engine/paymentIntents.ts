@@ -58,13 +58,10 @@ function normalizePaymentAsset(value?: string): PaymentAsset | null {
 function resolveSupportedAssetForNetwork(network: WalletNetwork, asset?: string): PaymentAsset | undefined {
   if (network === "base") {
     const normalizedAsset = normalizePaymentAsset(asset) || "ETH"
-    if (normalizedAsset === "USDC") {
-      throw new Error("USDC on Base is coming soon. Please choose ETH on Base for now.")
+    if (normalizedAsset !== "ETH" && normalizedAsset !== "USDC") {
+      throw new Error("Base payments support ETH and USDC only")
     }
-    if (normalizedAsset !== "ETH") {
-      throw new Error("Base payments support ETH only")
-    }
-    return "ETH"
+    return normalizedAsset
   }
 
   if (network !== "solana") return undefined
