@@ -168,16 +168,12 @@ function getPendingBaseWalletConnectPayment(): PendingBaseWalletConnectPayment |
   }
 }
 
-function pendingMatchesCurrentCheckout(
+function pendingIntentMatches(
   pending: PendingBaseWalletConnectPayment | null,
   intentId?: string,
-  selectedAsset?: BaseAsset,
 ): boolean {
   if (!pending) return false
-  return (
-    String(pending.intentId || "") === String(intentId || "") &&
-    pending.selectedAsset === selectedAsset
-  )
+  return String(pending.intentId || "") === String(intentId || "")
 }
 
 function storePendingBaseWalletConnectPayment(input: {
@@ -218,7 +214,14 @@ export default function BaseWalletPayment({
 
   const [localError, setLocalError] = useState("")
   const [resumeMessage, setResumeMessage] = useState("")
-  const [hasPendingBaseWcPayment, setHasPendingBaseWcPayment] = useState(false)
+  const [hasPendingBaseWcPayment, setHasPendingBaseWcPayment] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false
+    try {
+      return pendingIntentMatches(getPendingBaseWalletConnectPayment(), intentId)
+    } catch {
+      return false
+    }
+  })
   const [isPreparingPayment, setIsPreparingPayment] = useState(false)
   const [isOpeningWallet, setIsOpeningWallet] = useState(false)
   const isSendingBaseTxRef = useRef(false)
@@ -248,13 +251,13 @@ export default function BaseWalletPayment({
 
   const refreshPendingState = useCallback(() => {
     const pending = getPendingBaseWalletConnectPayment()
-    const matches = pendingMatchesCurrentCheckout(pending, intentId, selectedAsset)
+    const matches = pendingIntentMatches(pending, intentId)
     setHasPendingBaseWcPayment(matches)
     if (!matches && pending) {
       clearPendingBaseWalletConnectPayment()
     }
     return matches
-  }, [intentId, selectedAsset])
+  }, [intentId])
 
   const resolvePaymentData = useCallback(async (): Promise<PaymentData> => {
     if (!isIntentMode) {
@@ -323,7 +326,7 @@ export default function BaseWalletPayment({
       }
 
       const pending = getPendingBaseWalletConnectPayment()
-      if (!pendingMatchesCurrentCheckout(pending, intentId, selectedAsset)) {
+      if (!pendingIntentMatches(pending, intentId)) {
         throw new Error("Base WalletConnect payment session expired. Please try again.")
       }
 
@@ -519,8 +522,7 @@ export default function BaseWalletPayment({
 
   const tryResumeBaseWalletConnectPayment = useCallback(() => {
     const pending = getPendingBaseWalletConnectPayment()
-    const hasPending = pendingMatchesCurrentCheckout(pending, intentId, selectedAsset)
-    const pendingMatchesIntent = String(pending?.intentId || "") === String(intentId || "")
+    const hasPending = pendingIntentMatches(pending, intentId)
 
     console.log("[Base] Resume check", {
       hasPending,
@@ -530,7 +532,6 @@ export default function BaseWalletPayment({
 
     void logBase("resume-check", {
       hasPending,
-      pendingMatchesIntent,
       isConnected,
       hasAddress: Boolean(address),
       isSending: isSendingBaseTxRef.current,
@@ -542,7 +543,7 @@ export default function BaseWalletPayment({
     if (!hasPending || !isConnected || !address || isSendingBaseTxRef.current) return
 
     void continueBasePayment(address)
-  }, [address, continueBasePayment, intentId, isConnected, selectedAsset])
+  }, [address, continueBasePayment, intentId, isConnected])
 
   useEffect(() => {
     refreshPendingState()
@@ -603,7 +604,7 @@ export default function BaseWalletPayment({
       {hasPendingBaseWcPayment && !isOpeningWallet ? (
         <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 space-y-2">
           <p>
-            {resumeMessage || "Connection approved. Return here and tap Send Base transaction if the transaction request does not open automatically."}
+            {resumeMessage || "Connection approved? Return here and tap Send Base transaction."}
           </p>
           <Button
             fullWidth
@@ -614,14 +615,14 @@ export default function BaseWalletPayment({
                 void continueBasePayment(address)
               } else {
                 setLocalError(
-                  "Wallet connection not detected yet. Return from your wallet after approving the connection, then tap again."
+                  "Wallet connection not detected yet. Tap Reconnect WalletConnect, then return here."
                 )
               }
             }}
           >
             Send Base transaction
           </Button>
-          {!address && !isConnecting ? (
+          {!address ? (
             <Button
               fullWidth
               variant="secondary"
