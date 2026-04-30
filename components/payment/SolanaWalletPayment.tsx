@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Button from "@/components/ui/Button"
 
 type SolanaAsset = "SOL" | "USDC"
@@ -40,6 +40,7 @@ export default function SolanaWalletPayment({
   const [resolvedPaymentId, setResolvedPaymentId] = useState<string | null>(
     directPaymentId ?? null
   )
+  const hasAutoTriggeredRef = useRef(false)
 
   const getWalletProvider = useCallback((wallet: SolanaWalletId): SolanaBrowserProvider | null => {
     const solanaWindow = getSolanaWindow()
@@ -154,6 +155,25 @@ export default function SolanaWalletPayment({
     }
   }, [getPaymentId, getWalletProvider, onError])
 
+  const handleSolflareClick = useCallback(() => {
+    void handleWalletClick("solflare")
+  }, [handleWalletClick])
+
+  useEffect(() => {
+    const provider = getSolanaWindow().solflare
+
+    if (
+      provider?.isSolflare === true &&
+      !hasAutoTriggeredRef.current
+    ) {
+      hasAutoTriggeredRef.current = true
+
+      console.log("[Solflare] Auto-triggering payment flow")
+
+      handleSolflareClick()
+    }
+  }, [handleSolflareClick])
+
   const amountDisplay = (
     <div className="bg-gray-50 rounded-xl px-4 py-3 text-center space-y-1">
       {intentId ? (
@@ -195,7 +215,7 @@ export default function SolanaWalletPayment({
         <Button
           variant="secondary"
           fullWidth
-          onClick={() => void handleWalletClick("solflare")}
+          onClick={handleSolflareClick}
           disabled={openingWallet !== null}
         >
           {openingWallet === "solflare" ? "Opening..." : "Pay with Solflare"}
