@@ -248,6 +248,11 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
   async function goToConfirm() {
     if (!digits || subtotalNum <= 0) return
+    setQrCodeUrl("")
+    setPaymentId("")
+    setIntentId("")
+    setPaymentError("")
+    resolvedPaymentIdRef.current = ""
     setStatus("confirm")
     setBreakdown(null)
     setBreakdownLoading(true)
@@ -299,6 +304,11 @@ export default function POSLayout({ locked, terminalContext }: Props) {
     if (!digits || subtotalNum <= 0) return
 
     try {
+      setQrCodeUrl("")
+      setPaymentId("")
+      setIntentId("")
+      setPaymentError("")
+      resolvedPaymentIdRef.current = ""
       setStatus("waiting")
 
       const res = await fetch("/api/pos/payment", {
