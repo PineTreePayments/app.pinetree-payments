@@ -136,6 +136,7 @@ export default function PayClient() {
   const walletBrowserPaymentId = searchParams.get("pinetree_payment_id")
   const walletBrowserMode = searchParams.get("mode")
   const walletBrowserWallet = searchParams.get("wallet")
+  const statusOverride = searchParams.get("status")
   const isWalletBrowserMode =
     walletBrowserMode === "wallet-browser" &&
     walletBrowserWallet === "phantom" &&
@@ -549,6 +550,19 @@ export default function PayClient() {
             <h1 className="text-2xl font-bold text-gray-900">Payment Failed</h1>
             <p className="text-sm text-gray-500">The payment was not received. Please try again or contact the merchant.</p>
           </div>
+        </Card>
+      </PageContainer>
+    )
+  }
+
+  if (isIntentMode && (normalizedPaymentStatus === "PROCESSING" || statusOverride === "processing")) {
+    return (
+      <PageContainer>
+        <Card className="max-w-md w-full text-center space-y-4">
+          <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0052FF] border-t-transparent mx-auto" />
+          <h1 className="text-lg font-bold text-gray-900">Processing Payment...</h1>
+          <p className="text-sm text-gray-500">Your transaction is being confirmed on-chain. This may take a moment.</p>
         </Card>
       </PageContainer>
     )
