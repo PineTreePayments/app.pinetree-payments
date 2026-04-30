@@ -52,6 +52,7 @@ function fmtUsd(n: number) {
 // Resolve a DB status string to a UI Status
 function resolveUiStatus(dbStatus: string): Status | null {
   const s = String(dbStatus || "").toUpperCase()
+  if (s === "CREATED" || s === "PENDING") return "waiting"
   if (s === "PROCESSING") return "processing"
   if (s === "CONFIRMED") return "confirmed"
   if (s === "FAILED") return "failed"
@@ -78,8 +79,8 @@ export default function POSLayout({ locked, terminalContext }: Props) {
   const [digits, setDigits] = useState("")
   const [status, setStatus] = useState<Status>("ready")
   const [qrCodeUrl, setQrCodeUrl] = useState("")
-  const [paymentId, setPaymentId] = useState("")
   const [intentId, setIntentId] = useState("")
+  const [activePaymentId, setActivePaymentId] = useState("")
   const [paymentError, setPaymentError] = useState("")
   const [breakdown, setBreakdown] = useState<Breakdown | null>(null)
   const [breakdownLoading, setBreakdownLoading] = useState(false)
@@ -87,22 +88,58 @@ export default function POSLayout({ locked, terminalContext }: Props) {
   const [cashDigits, setCashDigits] = useState("")
 
   const resolvedPaymentIdRef = useRef<string>("")
+  const resetTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const hasScheduledResetRef = useRef(false)
 
   const subtotalNum = digitsToNumber(digits)
   const displayAmount = digitsToDisplay(digits)
 
   function resetSale() {
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current)
+      resetTimerRef.current = null
+    }
+    hasScheduledResetRef.current = false
     setDigits("")
     setStatus("ready")
     setQrCodeUrl("")
-    setPaymentId("")
     setIntentId("")
+    setActivePaymentId("")
     setPaymentError("")
     setBreakdown(null)
     setCashDigits("")
     setAvailableMethods({ cash: true, crypto: true, card: false })
     resolvedPaymentIdRef.current = ""
   }
+
+  function applyPaymentStatus(dbStatus: string) {
+    const next = resolveUiStatus(dbStatus)
+    if (!next) return
+
+    setStatus(next)
+
+    if (next === "confirmed" || next === "failed" || next === "incomplete") {
+      if (!hasScheduledResetRef.current) {
+        hasScheduledResetRef.current = true
+
+        console.log("[POS] Scheduling reset...")
+
+        resetTimerRef.current = setTimeout(() => {
+          resetSale()
+          hasScheduledResetRef.current = false
+          resetTimerRef.current = null
+        }, 3000)
+      }
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current)
+      }
+    }
+  }, [])
 
   /* =========================
      POLLING FALLBACK
@@ -111,19 +148,15 @@ export default function POSLayout({ locked, terminalContext }: Props) {
   ========================= */
 
   useEffect(() => {
-    if (!paymentId || (status !== "waiting" && status !== "processing")) return
+    if (!activePaymentId || (status !== "waiting" && status !== "processing")) return
 
-    const id = paymentId
+    const id = activePaymentId
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/payments/status?paymentId=${encodeURIComponent(id)}`)
         if (!res.ok) return
         const data = await res.json()
-        const next = resolveUiStatus(String(data?.status || ""))
-        if (next) {
-          setStatus(next)
-          if (next === "confirmed") setTimeout(resetSale, 3000)
-        }
+        applyPaymentStatus(String(data?.status || ""))
       } catch {
         // non-fatal — realtime is the primary update path
       }
@@ -131,37 +164,34 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
     return () => clearInterval(interval)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paymentId, status])
+  }, [activePaymentId, status])
 
   /* =========================
      REALTIME: DIRECT PAYMENT
   ========================= */
 
   useEffect(() => {
-    if (!paymentId || intentId) return
+    if (!activePaymentId || intentId) return
 
     const channel = supabase
-      .channel(`pos-payment-${paymentId}`)
+      .channel(`pos-payment-${activePaymentId}`)
       .on(
         "postgres_changes",
         {
           event: "UPDATE",
           schema: "public",
           table: "payments",
-          filter: `id=eq.${paymentId}`
+          filter: `id=eq.${activePaymentId}`
         },
         (payload) => {
-          const next = resolveUiStatus(payload.new.status)
-          if (!next) return
-          setStatus(next)
-          if (next === "confirmed") setTimeout(resetSale, 3000)
+          applyPaymentStatus(String(payload.new.status || ""))
         }
       )
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paymentId, intentId])
+  }, [activePaymentId, intentId])
 
   /* =========================
      REALTIME: INTENT FLOW
@@ -174,7 +204,13 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
     function subscribeToPayment(pid: string) {
       if (resolvedPaymentIdRef.current === pid) return
+      hasScheduledResetRef.current = false
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current)
+        resetTimerRef.current = null
+      }
       resolvedPaymentIdRef.current = pid
+      setActivePaymentId(pid)
 
       paymentChannel = supabase
         .channel(`pos-resolved-payment-${pid}`)
@@ -187,10 +223,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
             filter: `id=eq.${pid}`
           },
           (payload) => {
-            const next = resolveUiStatus(payload.new.status)
-            if (!next) return
-            setStatus(next)
-            if (next === "confirmed") setTimeout(resetSale, 3000)
+            applyPaymentStatus(String(payload.new.status || ""))
           }
         )
         .subscribe()
@@ -248,11 +281,6 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
   async function goToConfirm() {
     if (!digits || subtotalNum <= 0) return
-    setQrCodeUrl("")
-    setPaymentId("")
-    setIntentId("")
-    setPaymentError("")
-    resolvedPaymentIdRef.current = ""
     setStatus("confirm")
     setBreakdown(null)
     setBreakdownLoading(true)
@@ -304,11 +332,6 @@ export default function POSLayout({ locked, terminalContext }: Props) {
     if (!digits || subtotalNum <= 0) return
 
     try {
-      setQrCodeUrl("")
-      setPaymentId("")
-      setIntentId("")
-      setPaymentError("")
-      resolvedPaymentIdRef.current = ""
       setStatus("waiting")
 
       const res = await fetch("/api/pos/payment", {
@@ -333,7 +356,14 @@ export default function POSLayout({ locked, terminalContext }: Props) {
       const returnedPaymentId = String(data.paymentId || "").trim()
 
       if (returnedIntentId) setIntentId(returnedIntentId)
-      setPaymentId(returnedPaymentId)
+      if (returnedPaymentId && !returnedIntentId) {
+        hasScheduledResetRef.current = false
+        if (resetTimerRef.current) {
+          clearTimeout(resetTimerRef.current)
+          resetTimerRef.current = null
+        }
+        setActivePaymentId(returnedPaymentId)
+      }
 
       if (data.qrCodeUrl) {
         setQrCodeUrl(data.qrCodeUrl)
