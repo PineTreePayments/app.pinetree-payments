@@ -366,6 +366,23 @@ export default function PayClient() {
             : `/pay?pinetree_payment_id=${encodeURIComponent(paymentId)}&status=processing`
         } catch (err) {
           console.error("[Phantom] flow error:", err)
+
+          const isRejected =
+            (err as { message?: string; code?: number })?.message?.toLowerCase().includes("rejected") ||
+            (err as { code?: number })?.code === 4001
+
+          try {
+            await fetch(`/api/payments/${encodeURIComponent(paymentId)}/fail`, {
+              method: "POST",
+            })
+          } catch {}
+
+          const intentIdParam = params.get("intent")
+          if (intentIdParam) {
+            window.location.href = isRejected
+              ? `/pay?intent=${encodeURIComponent(intentIdParam)}&status=cancelled`
+              : `/pay?intent=${encodeURIComponent(intentIdParam)}&status=failed`
+          }
         }
       }
 
@@ -530,6 +547,44 @@ export default function PayClient() {
             </div>
             <h1 className="text-2xl font-bold text-gray-900">Payment Confirmed</h1>
             <p className="text-sm text-gray-500">Your payment was received successfully.</p>
+          </div>
+        </Card>
+      </PageContainer>
+    )
+  }
+
+  if (isIntentMode && statusOverride === "cancelled") {
+    return (
+      <PageContainer>
+        <Card className="max-w-md w-full text-center space-y-4" padding={false}>
+          <div className="p-8 space-y-4">
+            <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+            <div className="flex justify-center">
+              <svg className="w-16 h-16 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900">Payment Cancelled</h1>
+            <p className="text-sm text-gray-500">You rejected the transaction. No payment was made.</p>
+          </div>
+        </Card>
+      </PageContainer>
+    )
+  }
+
+  if (isIntentMode && statusOverride === "failed") {
+    return (
+      <PageContainer>
+        <Card className="max-w-md w-full text-center space-y-4" padding={false}>
+          <div className="p-8 space-y-4">
+            <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+            <div className="flex justify-center">
+              <svg className="w-16 h-16 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900">Payment Failed</h1>
+            <p className="text-sm text-gray-500">The transaction could not be completed. Please try again or contact the merchant.</p>
           </div>
         </Card>
       </PageContainer>
