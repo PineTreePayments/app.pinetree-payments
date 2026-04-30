@@ -5,6 +5,7 @@ import Button from "@/components/ui/Button"
 import {
   buildConnectUrl,
   buildSignAndSendUrl,
+  clearSolflareSession,
   getStoredSession,
   storePendingPaymentId,
 } from "@/lib/solflareDeeplink"
@@ -30,6 +31,7 @@ type Props = {
   walletOptions?: Array<{ id: string; label: string; url?: string; href?: string }>
   onPaymentCreated?: (paymentId: string) => void
   onError?: (error: string) => void
+  initialError?: string
 }
 
 export default function SolanaWalletPayment({
@@ -40,9 +42,10 @@ export default function SolanaWalletPayment({
   paymentId: directPaymentId,
   onPaymentCreated,
   onError,
+  initialError = "",
 }: Props) {
   const [openingWallet, setOpeningWallet] = useState<SolanaWalletId | null>(null)
-  const [error, setError] = useState("")
+  const [error, setError] = useState(initialError)
   const [resolvedPaymentId, setResolvedPaymentId] = useState<string | null>(
     directPaymentId ?? null
   )
@@ -161,6 +164,13 @@ export default function SolanaWalletPayment({
   const handleSolflareDeeplinkClick = useCallback(async () => {
     setError("")
     setOpeningWallet("solflare")
+
+    // Strip stale status/error params from URL before navigating to Solflare
+    const currentUrl = new URL(window.location.href)
+    currentUrl.searchParams.delete("status")
+    currentUrl.searchParams.delete("solflare_error")
+    window.history.replaceState({}, "", currentUrl.toString())
+
     try {
       const paymentId = await getPaymentId()
       const session = getStoredSession()
@@ -184,6 +194,8 @@ export default function SolanaWalletPayment({
       })
       const txData = (await res.json()) as { transaction?: string; error?: string }
       if (!res.ok || !txData.transaction) {
+        // Clear stale session so the next tap starts a fresh connect flow
+        clearSolflareSession()
         throw new Error(txData.error || "Failed to build Solana transaction")
       }
 

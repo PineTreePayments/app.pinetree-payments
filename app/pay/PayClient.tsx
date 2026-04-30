@@ -120,6 +120,11 @@ function formatUsd(amount: number) {
   }).format(Number.isFinite(amount) ? amount : 0)
 }
 
+function getSolflareRetryMessage(code: string | null): string {
+  if (!code) return ""
+  return "Solflare connection could not be completed. Please try again."
+}
+
 function getCheckoutAssetOptions(networks: string[]): AssetOption[] {
   const availableAssets = getAvailableAssetsFromValues(networks)
 
@@ -144,6 +149,7 @@ export default function PayClient() {
   const walletBrowserWallet = searchParams.get("wallet")
   const statusOverride = searchParams.get("status")
   const solflareAction = searchParams.get("solflare_action")
+  const solflareError = searchParams.get("solflare_error")
   const isWalletBrowserMode =
     walletBrowserMode === "wallet-browser" &&
     walletBrowserWallet === "phantom" &&
@@ -291,6 +297,14 @@ export default function PayClient() {
     return () => document.removeEventListener("mousedown", handleOutsideClick)
   }, [selectedAssetId])
 
+  // Strip solflare_error param from URL after reading so it doesn't persist on reload
+  useEffect(() => {
+    if (!solflareError) return
+    const url = new URL(window.location.href)
+    url.searchParams.delete("solflare_error")
+    window.history.replaceState({}, "", url.toString())
+  }, [solflareError])
+
   // ── Poll intent status once a payment has been created ────────────────────
 
   useEffect(() => {
@@ -414,8 +428,10 @@ export default function PayClient() {
     const action = params.get("solflare_action")
     if (action !== "connect_callback" && action !== "sign_callback") return
 
-    // One-shot guard — React StrictMode double-invokes effects in dev
-    const guardKey = "pinetree_sf_cb_handled"
+    // Per-nonce guard — prevents StrictMode double-invocation while allowing
+    // retries (each Solflare response carries a unique nonce).
+    const cbNonce = params.get("nonce") ?? action
+    const guardKey = `pinetree_sf_cb_handled_${cbNonce}`
     if (sessionStorage.getItem(guardKey)) {
       sessionStorage.removeItem(guardKey)
       return
@@ -435,41 +451,86 @@ export default function PayClient() {
     const run = async () => {
       // ── connect_callback ─────────────────────────────────────────────────
       if (action === "connect_callback") {
+        console.log("[Solflare:connect] action:", action)
+        console.log("[Solflare:connect] full URL:", window.location.href)
+
+        const sfKey = params.get("solflare_encryption_public_key")
+        const cbNonceVal = params.get("nonce")
+        const cbData = params.get("data")
+        const cbErrorCode = params.get("errorCode")
+        const cbErrorMessage = params.get("errorMessage")
+        console.log("[Solflare:connect] params:", {
+          solflare_encryption_public_key: sfKey ? `present (${sfKey.slice(0, 8)}...)` : "MISSING",
+          nonce: cbNonceVal ? "present" : "MISSING",
+          data: cbData ? "present" : "MISSING",
+          errorCode: cbErrorCode ?? null,
+          errorMessage: cbErrorMessage ?? null,
+        })
+
+        // Solflare returned an explicit connect error — treat as user rejection
+        if (cbErrorCode || cbErrorMessage) {
+          console.error("[Solflare:connect] Solflare returned connect error:", cbErrorCode, cbErrorMessage)
+          clearSolflareSession()
+          redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&solflare_error=connect_rejected` : "/pay")
+          return
+        }
+
         const session = decryptConnectResponse(params)
+        console.log("[Solflare:connect] decrypt:", session
+          ? `OK — publicKey: ${session.publicKey}`
+          : "FAILED")
+
         if (!session) {
-          console.error("[Solflare] Failed to decrypt connect response")
-          redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&status=failed` : "/pay")
+          // Internal decrypt failure — do NOT call /fail; payment is still valid, allow retry
+          console.error("[Solflare:connect] decrypt failed — clearing session, redirecting to retry")
+          clearSolflareSession()
+          redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&solflare_error=connect_failed` : "/pay")
           return
         }
 
         storeSession(session)
 
         const paymentId = consumePendingPaymentId()
+        console.log("[Solflare:connect] pending paymentId:", paymentId ?? "MISSING")
+
         if (!paymentId) {
-          console.error("[Solflare] No pending paymentId in sessionStorage")
-          redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&status=failed` : "/pay")
+          // Internal state loss — do NOT call /fail; allow user to retry
+          console.error("[Solflare:connect] no pending paymentId — clearing session, redirecting to retry")
+          clearSolflareSession()
+          redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&solflare_error=connect_failed` : "/pay")
           return
         }
 
+        console.log("[Solflare:connect] calling build-wallet-transaction:", {
+          paymentId,
+          walletPublicKey: session.publicKey,
+        })
         const res = await fetch("/api/solana/build-wallet-transaction", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ paymentId, walletPublicKey: session.publicKey }),
         })
         const txData = (await res.json()) as { transaction?: string; error?: string }
+        console.log("[Solflare:connect] build-wallet-transaction:", {
+          ok: res.ok,
+          hasTransaction: Boolean(txData.transaction),
+          error: txData.error ?? null,
+        })
 
         if (!res.ok || !txData.transaction) {
-          console.error("[Solflare] Failed to build transaction:", txData.error)
-          await fail(paymentId)
-          redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&status=failed` : "/pay")
+          // Build failure — do NOT call /fail; payment not yet submitted, allow retry
+          console.error("[Solflare:connect] build tx failed — not calling /fail, clearing session")
+          clearSolflareSession()
+          redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&solflare_error=build_failed` : "/pay")
           return
         }
 
         const base = `${window.location.origin}/pay?intent=${encodeURIComponent(iid)}`
         const signRedirect = `${base}&solflare_action=sign_callback&solflare_payment_id=${encodeURIComponent(paymentId)}`
-
-        console.log("[Solflare] connect_callback OK — navigating to signAndSend")
-        window.location.href = buildSignAndSendUrl(txData.transaction, session, signRedirect)
+        const signUrl = buildSignAndSendUrl(txData.transaction, session, signRedirect)
+        console.log("[Solflare:connect] signAndSend URL valid:", signUrl.startsWith("https://solflare.com/ul/v1/signAndSendTransaction"))
+        console.log("[Solflare:connect] navigating to signAndSend deeplink")
+        window.location.href = signUrl
         return
       }
 
@@ -478,9 +539,21 @@ export default function PayClient() {
         const paymentId = params.get("solflare_payment_id") ?? ""
         const errorCode = params.get("errorCode")
         const errorMessage = params.get("errorMessage")
+        const signNonce = params.get("nonce")
+        const signData = params.get("data")
+        const rawSignature = params.get("signature")
+
+        console.log("[Solflare:sign] params:", {
+          paymentId: paymentId || "MISSING",
+          errorCode: errorCode ?? null,
+          errorMessage: errorMessage ?? null,
+          nonce: signNonce ? "present" : "MISSING",
+          data: signData ? "present" : "MISSING",
+          signature: rawSignature ? "present" : "MISSING",
+        })
 
         if (errorCode || errorMessage) {
-          console.log("[Solflare] User rejected or error:", errorCode, errorMessage)
+          console.log("[Solflare:sign] user rejected or error:", errorCode, errorMessage)
           if (paymentId) await fail(paymentId)
           const isRejected =
             errorCode === "4001" ||
@@ -496,8 +569,12 @@ export default function PayClient() {
         }
 
         const session = getStoredSession()
+        console.log("[Solflare:sign] stored session:", session
+          ? `present — publicKey: ${session.publicKey}`
+          : "MISSING")
+
         if (!session || !paymentId) {
-          console.error("[Solflare] sign_callback: missing session or paymentId")
+          console.error("[Solflare:sign] missing session or paymentId")
           if (paymentId) await fail(paymentId)
           clearSolflareSession()
           redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&status=failed` : "/pay")
@@ -505,16 +582,19 @@ export default function PayClient() {
         }
 
         const signature = decryptSignResponse(params, session.sfPublicKey)
+        console.log("[Solflare:sign] decrypted signature:", signature
+          ? `${signature.slice(0, 20)}...`
+          : "FAILED")
+
         if (!signature) {
-          console.error("[Solflare] Failed to decrypt signature")
+          console.error("[Solflare:sign] failed to decrypt signature")
           await fail(paymentId)
           clearSolflareSession()
           redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&status=failed` : "/pay")
           return
         }
 
-        console.log("[Solflare] TX signature:", signature)
-
+        console.log("[Solflare:sign] calling detect:", { paymentId, signature: `${signature.slice(0, 20)}...` })
         await fetch(`/api/payments/${encodeURIComponent(paymentId)}/detect`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -905,6 +985,7 @@ export default function PayClient() {
                             intentId={intentId!}
                             selectedAsset={asset.symbol === "USDC" ? "USDC" : "SOL"}
                             usdAmount={displayAmount}
+                            initialError={getSolflareRetryMessage(solflareError)}
                             onPaymentCreated={() => {
                               void loadIntentCallback()
                             }}

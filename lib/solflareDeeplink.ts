@@ -189,12 +189,15 @@ export function decryptConnectResponse(params: URLSearchParams): SolflareSession
     if (!decrypted) return null
 
     const parsed = JSON.parse(new TextDecoder().decode(decrypted)) as {
-      public_key: string
+      public_key?: string
+      publicKey?: string
       session: string
     }
-    if (!parsed.public_key || !parsed.session) return null
+    // Solflare may return either field name depending on version
+    const userPublicKey = parsed.public_key || parsed.publicKey
+    if (!userPublicKey || !parsed.session) return null
 
-    return { session: parsed.session, publicKey: parsed.public_key, sfPublicKey }
+    return { session: parsed.session, publicKey: userPublicKey, sfPublicKey }
   } catch {
     return null
   }
@@ -219,8 +222,13 @@ export function decryptSignResponse(
       const secret = sharedSecret(sfPublicKey)
       const decrypted = nacl.box.open.after(bs58.decode(data), bs58.decode(nonce), secret)
       if (decrypted) {
-        const parsed = JSON.parse(new TextDecoder().decode(decrypted)) as { signature?: string }
-        if (parsed.signature) return parsed.signature
+        const parsed = JSON.parse(new TextDecoder().decode(decrypted)) as {
+          signature?: string
+          txid?: string
+          transaction_signature?: string
+        }
+        const sig = parsed.signature || parsed.txid || parsed.transaction_signature
+        if (sig) return sig
       }
     }
   } catch { /* fall through to unencrypted fallback */ }
