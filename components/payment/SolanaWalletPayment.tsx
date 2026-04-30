@@ -4,6 +4,15 @@ import { useCallback, useState } from "react"
 import Button from "@/components/ui/Button"
 
 type SolanaAsset = "SOL" | "USDC"
+type SolanaWalletId = "phantom" | "solflare"
+
+type SolanaBrowserProvider = {
+  isPhantom?: boolean
+  isSolflare?: boolean
+  publicKey?: { toString: () => string }
+  connect: () => Promise<unknown>
+  signAndSendTransaction: (transaction: unknown) => Promise<{ signature: string }>
+}
 
 type Props = {
   intentId?: string
@@ -26,11 +35,37 @@ export default function SolanaWalletPayment({
   onPaymentCreated,
   onError,
 }: Props) {
-  const [isOpening, setIsOpening] = useState(false)
+  const [openingWallet, setOpeningWallet] = useState<SolanaWalletId | null>(null)
   const [error, setError] = useState("")
   const [resolvedPaymentId, setResolvedPaymentId] = useState<string | null>(
     directPaymentId ?? null
   )
+
+  const getWalletProvider = useCallback((wallet: SolanaWalletId): SolanaBrowserProvider | null => {
+    const solanaWindow = getSolanaWindow()
+    const phantomProvider =
+      solanaWindow.solana?.isPhantom === true
+        ? solanaWindow.solana
+        : null
+
+    const solflareProvider =
+      solanaWindow.solflare?.isSolflare === true
+        ? solanaWindow.solflare
+        : null
+
+    if (wallet === "phantom") {
+      return phantomProvider
+    }
+
+    return solflareProvider
+  }, [])
+
+  function getSolanaWindow() {
+    return window as Window & {
+      solana?: SolanaBrowserProvider
+      solflare?: SolanaBrowserProvider
+    }
+  }
 
   const getPaymentId = useCallback(async (): Promise<string> => {
     if (resolvedPaymentId) return resolvedPaymentId
@@ -60,32 +95,67 @@ export default function SolanaWalletPayment({
     return id
   }, [intentId, onPaymentCreated, resolvedPaymentId, selectedAsset])
 
-  const handlePhantomClick = useCallback(async () => {
+  const handleWalletClick = useCallback(async (wallet: SolanaWalletId) => {
     setError("")
-    setIsOpening(true)
+    setOpeningWallet(wallet)
     try {
       const paymentId = await getPaymentId()
+      const provider = getWalletProvider(wallet)
 
-      const checkoutUrl = new URL(window.location.href)
-      checkoutUrl.searchParams.set("pinetree_payment_id", paymentId)
-      checkoutUrl.searchParams.set("wallet", "phantom")
-      checkoutUrl.searchParams.set("mode", "wallet-browser")
+      if (!provider) {
+        throw new Error(
+          wallet === "phantom"
+            ? "Phantom wallet not found. Please install or unlock Phantom."
+            : "Solflare wallet not found. Please install or unlock Solflare."
+        )
+      }
 
-      window.location.href = `phantom://browse/${encodeURIComponent(checkoutUrl.toString())}`
+      await provider.connect()
+
+      const walletPublicKey = provider.publicKey?.toString()
+      if (!walletPublicKey) {
+        throw new Error(`Unable to read ${wallet === "phantom" ? "Phantom" : "Solflare"} wallet public key`)
+      }
+
+      const res = await fetch("/api/solana/build-wallet-transaction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentId, walletPublicKey }),
+      })
+
+      const data = (await res.json()) as { transaction?: string; error?: string }
+
+      if (!res.ok || !data?.transaction) {
+        throw new Error(data?.error || "Failed to build Solana transaction")
+      }
+
+      const { Transaction } = await import("@solana/web3.js")
+      const tx = Transaction.from(Buffer.from(data.transaction, "base64"))
+
+      const result = await provider.signAndSendTransaction(tx)
+
+      await fetch(`/api/payments/${encodeURIComponent(paymentId)}/detect`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ txHash: result.signature }),
+      }).catch(() => null)
+
+      setError("")
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to open Phantom"
+      const message = err instanceof Error ? err.message : "Failed to send Solana transaction"
       setError(message)
       onError?.(message)
-      setIsOpening(false)
+    } finally {
+      setOpeningWallet(null)
     }
-  }, [getPaymentId, onError])
+  }, [getPaymentId, getWalletProvider, onError])
 
   const amountDisplay = (
     <div className="bg-gray-50 rounded-xl px-4 py-3 text-center space-y-1">
       {intentId ? (
         <>
           <p className="text-lg font-bold text-gray-900">${usdAmount.toFixed(2)} USD</p>
-          <p className="text-xs text-gray-500">via Solana · exact SOL determined at payment</p>
+          <p className="text-xs text-gray-500">via Solana · exact {selectedAsset} determined at payment</p>
         </>
       ) : (
         <>
@@ -113,17 +183,20 @@ export default function SolanaWalletPayment({
         <Button
           variant="secondary"
           fullWidth
-          onClick={() => void handlePhantomClick()}
-          disabled={isOpening}
+          onClick={() => void handleWalletClick("phantom")}
+          disabled={openingWallet !== null}
         >
-          {isOpening ? "Opening..." : "Phantom"}
+          {openingWallet === "phantom" ? "Opening..." : "Pay with Phantom"}
         </Button>
-        <Button variant="secondary" fullWidth disabled>
-          Solflare
+        <Button
+          variant="secondary"
+          fullWidth
+          onClick={() => void handleWalletClick("solflare")}
+          disabled={openingWallet !== null}
+        >
+          {openingWallet === "solflare" ? "Opening..." : "Pay with Solflare"}
         </Button>
       </div>
-
-      <p className="text-xs text-gray-400 text-center">Solflare coming soon</p>
     </div>
   )
 }
