@@ -1,7 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useState } from "react"
 import Button from "@/components/ui/Button"
+import {
+  buildConnectUrl,
+  buildSignAndSendUrl,
+  getStoredSession,
+  storePendingPaymentId,
+} from "@/lib/solflareDeeplink"
 
 type SolanaAsset = "SOL" | "USDC"
 type SolanaWalletId = "phantom" | "solflare"
@@ -21,7 +27,6 @@ type Props = {
   nativeAmount?: number
   usdAmount: number
   paymentId?: string
-  isActive?: boolean
   walletOptions?: Array<{ id: string; label: string; url?: string; href?: string }>
   onPaymentCreated?: (paymentId: string) => void
   onError?: (error: string) => void
@@ -33,7 +38,6 @@ export default function SolanaWalletPayment({
   usdAmount,
   nativeAmount,
   paymentId: directPaymentId,
-  isActive = true,
   onPaymentCreated,
   onError,
 }: Props) {
@@ -42,26 +46,6 @@ export default function SolanaWalletPayment({
   const [resolvedPaymentId, setResolvedPaymentId] = useState<string | null>(
     directPaymentId ?? null
   )
-  const hasAutoTriggeredRef = useRef(false)
-
-  const getWalletProvider = useCallback((wallet: SolanaWalletId): SolanaBrowserProvider | null => {
-    const solanaWindow = getSolanaWindow()
-    const phantomProvider =
-      solanaWindow.solana?.isPhantom === true
-        ? solanaWindow.solana
-        : null
-
-    const solflareProvider =
-      solanaWindow.solflare?.isSolflare === true
-        ? solanaWindow.solflare
-        : null
-
-    if (wallet === "phantom") {
-      return phantomProvider
-    }
-
-    return solflareProvider
-  }, [])
 
   function getSolanaWindow() {
     return window as Window & {
@@ -70,9 +54,14 @@ export default function SolanaWalletPayment({
     }
   }
 
+  // Phantom provider only — Solflare uses the deep link flow, not an injected provider
+  const getPhantomProvider = useCallback((): SolanaBrowserProvider | null => {
+    const w = getSolanaWindow()
+    return w.solana?.isPhantom === true ? w.solana : null
+  }, [])
+
   const getPaymentId = useCallback(async (): Promise<string> => {
     if (resolvedPaymentId) return resolvedPaymentId
-
     if (!intentId) throw new Error("Missing payment ID")
 
     const res = await fetch(
@@ -98,41 +87,24 @@ export default function SolanaWalletPayment({
     return id
   }, [intentId, onPaymentCreated, resolvedPaymentId, selectedAsset])
 
-  const handleWalletClick = useCallback(async (wallet: SolanaWalletId) => {
+  // ── Phantom: in-browser provider flow (unchanged) ─────────────────────────
+
+  const handlePhantomClick = useCallback(async () => {
     setError("")
-    setOpeningWallet(wallet)
+    setOpeningWallet("phantom")
     try {
       const paymentId = await getPaymentId()
-      const provider = getWalletProvider(wallet)
+      const provider = getPhantomProvider()
 
       if (!provider) {
-        if (wallet === "solflare") {
-          const fullUrl =
-            window.location.origin + window.location.pathname + window.location.search
-
-          const encoded = encodeURIComponent(fullUrl)
-
-          console.log("[Solflare] Deep linking to:", fullUrl)
-
-          window.location.href = `solflare://browse?url=${encoded}`
-
-          setTimeout(() => {
-            window.location.href = `https://solflare.com/ul/v1/browse?url=${encoded}`
-          }, 800)
-
-          return
-        }
-
-        throw new Error(
-          "Phantom wallet not found. Please install or unlock Phantom."
-        )
+        throw new Error("Phantom wallet not found. Please install or unlock Phantom.")
       }
 
       await provider.connect()
 
       const walletPublicKey = provider.publicKey?.toString()
       if (!walletPublicKey) {
-        throw new Error(`Unable to read ${wallet === "phantom" ? "Phantom" : "Solflare"} wallet public key`)
+        throw new Error("Unable to read Phantom wallet public key")
       }
 
       const res = await fetch("/api/solana/build-wallet-transaction", {
@@ -166,47 +138,68 @@ export default function SolanaWalletPayment({
     } finally {
       setOpeningWallet(null)
     }
-  }, [getPaymentId, getWalletProvider, onError])
+  }, [getPaymentId, getPhantomProvider, onError])
 
-  const handleSolflareClick = useCallback(() => {
-    void handleWalletClick("solflare")
-  }, [handleWalletClick])
+  // ── Solflare: Universal Link v1 deep link flow ────────────────────────────
+  //
+  // Flow A — no existing session:
+  //   1. getPaymentId() creates the payment and returns the ID
+  //   2. paymentId is saved to sessionStorage (bridges the connect redirect)
+  //   3. navigate → Solflare connect URL
+  //   4. Solflare redirects back to /pay?...&solflare_action=connect_callback
+  //   5. PayClient decrypts connect response, builds tx, navigates to signAndSend
+  //   6. Solflare redirects back to /pay?...&solflare_action=sign_callback
+  //   7. PayClient decrypts signature, calls /detect, shows processing screen
+  //
+  // Flow B — session already in sessionStorage:
+  //   1. getPaymentId() creates/resolves the payment
+  //   2. Build tx via /api/solana/build-wallet-transaction using session.publicKey
+  //   3. navigate → Solflare signAndSendTransaction URL
+  //   4. Solflare redirects back to /pay?...&solflare_action=sign_callback
+  //   5. PayClient handles sign_callback (same as Flow A step 7)
 
-  useEffect(() => {
-    if (!isActive) return
-    if (hasAutoTriggeredRef.current) return
+  const handleSolflareDeeplinkClick = useCallback(async () => {
+    setError("")
+    setOpeningWallet("solflare")
+    try {
+      const paymentId = await getPaymentId()
+      const session = getStoredSession()
+      const origin = window.location.origin
+      const base = `${origin}/pay?intent=${encodeURIComponent(intentId ?? "")}`
 
-    let attempts = 0
-    let cancelled = false
-
-    const tryConnect = () => {
-      if (cancelled) return
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const provider = (window as any).solflare
-
-      if (provider?.isSolflare === true) {
-        hasAutoTriggeredRef.current = true
-
-        console.log("[Solflare] Auto-trigger firing")
-
-        handleSolflareClick()
-        return
+      if (!session) {
+        // Flow A: no session — start connect
+        storePendingPaymentId(paymentId)
+        const connectRedirect = `${base}&solflare_action=connect_callback&solflare_asset=${encodeURIComponent(selectedAsset)}`
+        console.log("[Solflare] Starting connect deeplink, paymentId:", paymentId)
+        window.location.href = buildConnectUrl(connectRedirect, origin)
+        return // page is navigating away
       }
 
-      attempts++
-
-      if (attempts < 20) {
-        setTimeout(tryConnect, 300)
+      // Flow B: session exists — build tx and send signAndSendTransaction deeplink
+      const res = await fetch("/api/solana/build-wallet-transaction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentId, walletPublicKey: session.publicKey }),
+      })
+      const txData = (await res.json()) as { transaction?: string; error?: string }
+      if (!res.ok || !txData.transaction) {
+        throw new Error(txData.error || "Failed to build Solana transaction")
       }
-    }
 
-    tryConnect()
-
-    return () => {
-      cancelled = true
+      const signRedirect = `${base}&solflare_action=sign_callback&solflare_payment_id=${encodeURIComponent(paymentId)}`
+      console.log("[Solflare] Starting signAndSendTransaction deeplink")
+      window.location.href = buildSignAndSendUrl(txData.transaction, session, signRedirect)
+      // page is navigating away — no finally cleanup needed
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to start Solflare payment"
+      setError(message)
+      onError?.(message)
+      setOpeningWallet(null)
     }
-  }, [isActive, handleSolflareClick])
+  }, [getPaymentId, intentId, selectedAsset, onError])
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   const amountDisplay = (
     <div className="bg-gray-50 rounded-xl px-4 py-3 text-center space-y-1">
@@ -241,7 +234,7 @@ export default function SolanaWalletPayment({
         <Button
           variant="secondary"
           fullWidth
-          onClick={() => void handleWalletClick("phantom")}
+          onClick={() => void handlePhantomClick()}
           disabled={openingWallet !== null}
         >
           {openingWallet === "phantom" ? "Opening..." : "Pay with Phantom"}
@@ -249,10 +242,10 @@ export default function SolanaWalletPayment({
         <Button
           variant="secondary"
           fullWidth
-          onClick={handleSolflareClick}
+          onClick={() => void handleSolflareDeeplinkClick()}
           disabled={openingWallet !== null}
         >
-          {openingWallet === "solflare" ? "Opening..." : "Pay with Solflare"}
+          {openingWallet === "solflare" ? "Opening Solflare..." : "Pay with Solflare"}
         </Button>
       </div>
     </div>

@@ -11,6 +11,15 @@ import PageContainer from "@/components/ui/PageContainer"
 import StatusBadge from "@/components/ui/StatusBadge"
 import BaseWalletPayment from "@/components/payment/BaseWalletPayment"
 import SolanaWalletPayment from "@/components/payment/SolanaWalletPayment"
+import {
+  buildSignAndSendUrl,
+  clearSolflareSession,
+  consumePendingPaymentId,
+  decryptConnectResponse,
+  decryptSignResponse,
+  getStoredSession,
+  storeSession,
+} from "@/lib/solflareDeeplink"
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -134,10 +143,13 @@ export default function PayClient() {
   const walletBrowserMode = searchParams.get("mode")
   const walletBrowserWallet = searchParams.get("wallet")
   const statusOverride = searchParams.get("status")
+  const solflareAction = searchParams.get("solflare_action")
   const isWalletBrowserMode =
     walletBrowserMode === "wallet-browser" &&
     walletBrowserWallet === "phantom" &&
     Boolean(walletBrowserPaymentId)
+  const isSolflareCallbackMode =
+    solflareAction === "connect_callback" || solflareAction === "sign_callback"
 
   // ── Shared clipboard state ─────────────────────────────────────────────────
   const [copiedLink, setCopiedLink] = useState(false)
@@ -187,13 +199,6 @@ export default function PayClient() {
 
   const normalizedPaymentStatus = String(paymentStatus || "").toUpperCase()
   const intentCardsRef = useRef<HTMLDivElement | null>(null)
-
-  const isSolflare =
-    typeof window !== "undefined" &&
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).solflare?.isSolflare === true
-
-  const hasAutoEnteredSolanaRef = useRef(false)
 
   // ── Intent mode helpers ────────────────────────────────────────────────────
 
@@ -304,27 +309,6 @@ export default function PayClient() {
     return () => clearInterval(interval)
   }, [intentId, loadIntentCallback, intentPayload?.paymentId, normalizedPaymentStatus])
 
-  // ── Solflare auto-enter: skip asset selection when opened in Solflare browser ──
-
-  useEffect(() => {
-    if (
-      isSolflare &&
-      intentPayload &&
-      !hasAutoEnteredSolanaRef.current
-    ) {
-      hasAutoEnteredSolanaRef.current = true
-
-      console.log("[Solflare] Auto-entering Solana flow")
-
-      const solanaAsset = getCheckoutAssetOptions(intentPayload.availableNetworks || [])
-        .find((a) => a.network === "solana")
-
-      if (solanaAsset) {
-        setSelectedAssetId(solanaAsset.id)
-      }
-    }
-  }, [isSolflare, intentPayload])
-
   // ── Wallet-browser mode: Phantom provider flow ────────────────────────────
 
   useEffect(() => {
@@ -413,7 +397,141 @@ export default function PayClient() {
 
       void run()
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── Solflare Universal Link v1 callback handler ───────────────────────────
+  //
+  // Handles two redirect actions appended to the URL by Solflare:
+  //
+  //  connect_callback — user approved connect; decrypt response, store session,
+  //    build transaction, navigate to signAndSendTransaction deeplink.
+  //
+  //  sign_callback — user approved/denied signing; on success decrypt signature
+  //    and call /detect; on rejection call /fail. Clear session and redirect.
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const action = params.get("solflare_action")
+    if (action !== "connect_callback" && action !== "sign_callback") return
+
+    // One-shot guard — React StrictMode double-invokes effects in dev
+    const guardKey = "pinetree_sf_cb_handled"
+    if (sessionStorage.getItem(guardKey)) {
+      sessionStorage.removeItem(guardKey)
+      return
+    }
+    sessionStorage.setItem(guardKey, "1")
+
+    const iid = params.get("intent") ?? ""
+
+    const fail = async (paymentId: string) => {
+      await fetch(`/api/payments/${encodeURIComponent(paymentId)}/fail`, {
+        method: "POST",
+      }).catch(() => null)
+    }
+
+    const redirectTo = (path: string) => { window.location.href = path }
+
+    const run = async () => {
+      // ── connect_callback ─────────────────────────────────────────────────
+      if (action === "connect_callback") {
+        const session = decryptConnectResponse(params)
+        if (!session) {
+          console.error("[Solflare] Failed to decrypt connect response")
+          redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&status=failed` : "/pay")
+          return
+        }
+
+        storeSession(session)
+
+        const paymentId = consumePendingPaymentId()
+        if (!paymentId) {
+          console.error("[Solflare] No pending paymentId in sessionStorage")
+          redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&status=failed` : "/pay")
+          return
+        }
+
+        const res = await fetch("/api/solana/build-wallet-transaction", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paymentId, walletPublicKey: session.publicKey }),
+        })
+        const txData = (await res.json()) as { transaction?: string; error?: string }
+
+        if (!res.ok || !txData.transaction) {
+          console.error("[Solflare] Failed to build transaction:", txData.error)
+          await fail(paymentId)
+          redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&status=failed` : "/pay")
+          return
+        }
+
+        const base = `${window.location.origin}/pay?intent=${encodeURIComponent(iid)}`
+        const signRedirect = `${base}&solflare_action=sign_callback&solflare_payment_id=${encodeURIComponent(paymentId)}`
+
+        console.log("[Solflare] connect_callback OK — navigating to signAndSend")
+        window.location.href = buildSignAndSendUrl(txData.transaction, session, signRedirect)
+        return
+      }
+
+      // ── sign_callback ─────────────────────────────────────────────────────
+      if (action === "sign_callback") {
+        const paymentId = params.get("solflare_payment_id") ?? ""
+        const errorCode = params.get("errorCode")
+        const errorMessage = params.get("errorMessage")
+
+        if (errorCode || errorMessage) {
+          console.log("[Solflare] User rejected or error:", errorCode, errorMessage)
+          if (paymentId) await fail(paymentId)
+          const isRejected =
+            errorCode === "4001" ||
+            String(errorMessage ?? "").toLowerCase().includes("reject") ||
+            String(errorMessage ?? "").toLowerCase().includes("cancel")
+          clearSolflareSession()
+          redirectTo(
+            iid
+              ? `/pay?intent=${encodeURIComponent(iid)}&status=${isRejected ? "cancelled" : "failed"}`
+              : "/pay",
+          )
+          return
+        }
+
+        const session = getStoredSession()
+        if (!session || !paymentId) {
+          console.error("[Solflare] sign_callback: missing session or paymentId")
+          if (paymentId) await fail(paymentId)
+          clearSolflareSession()
+          redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&status=failed` : "/pay")
+          return
+        }
+
+        const signature = decryptSignResponse(params, session.sfPublicKey)
+        if (!signature) {
+          console.error("[Solflare] Failed to decrypt signature")
+          await fail(paymentId)
+          clearSolflareSession()
+          redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&status=failed` : "/pay")
+          return
+        }
+
+        console.log("[Solflare] TX signature:", signature)
+
+        await fetch(`/api/payments/${encodeURIComponent(paymentId)}/detect`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ txHash: signature }),
+        }).catch(() => null)
+
+        clearSolflareSession()
+        redirectTo(
+          iid
+            ? `/pay?intent=${encodeURIComponent(iid)}&status=processing`
+            : `/pay?pinetree_payment_id=${encodeURIComponent(paymentId)}&status=processing`,
+        )
+      }
+    }
+
+    void run()
+  }, [])
 
   // ── Realtime subscription: instant status updates from DB ─────────────────
 
@@ -489,6 +607,19 @@ export default function PayClient() {
   }
 
   // ── Loading / error screens ────────────────────────────────────────────────
+
+  if (isSolflareCallbackMode) {
+    return (
+      <PageContainer>
+        <Card className="max-w-md w-full text-center space-y-4">
+          <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0052FF] border-t-transparent mx-auto" />
+          <h1 className="text-lg font-bold text-gray-900">Processing Solflare payment...</h1>
+          <p className="text-sm text-gray-500">Please wait while we confirm your transaction.</p>
+        </Card>
+      </PageContainer>
+    )
+  }
 
   if (intentId && !intentPayload) {
     return (
@@ -774,7 +905,6 @@ export default function PayClient() {
                             intentId={intentId!}
                             selectedAsset={asset.symbol === "USDC" ? "USDC" : "SOL"}
                             usdAmount={displayAmount}
-                            isActive={isActive}
                             onPaymentCreated={() => {
                               void loadIntentCallback()
                             }}
