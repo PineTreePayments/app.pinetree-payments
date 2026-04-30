@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useAccount, useConnect, useSwitchChain } from "wagmi"
+import { useAccount, useConnect, useSendTransaction, useSwitchChain } from "wagmi"
 import type { Connector } from "wagmi"
 import { base } from "wagmi/chains"
 import Button from "@/components/ui/Button"
@@ -45,6 +45,15 @@ function isEip1193Error(error: unknown): error is { code?: number; message?: str
   return typeof error === "object" && error !== null
 }
 
+async function logBase(stage: string, payload: Record<string, unknown> = {}): Promise<void> {
+  console.log("[BASE DEBUG]", stage, payload)
+  await fetch("/api/debug/base", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ stage, payload }),
+  }).catch(() => null)
+}
+
 function isRejectedError(error: unknown, message: string): boolean {
   return (
     message.toLowerCase().includes("rejected") ||
@@ -54,13 +63,6 @@ function isRejectedError(error: unknown, message: string): boolean {
   )
 }
 
-function isEip1193Provider(value: unknown): value is Eip1193Provider {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    typeof (value as { request?: unknown }).request === "function"
-  )
-}
 
 function connectorMetadata(connector: Connector) {
   return {
@@ -120,39 +122,6 @@ function parseEthereumPaymentUri(paymentUrl: string): EvmTransactionRequest {
   }
 }
 
-async function getWalletConnectProvider(connector: Connector): Promise<Eip1193Provider> {
-  if (!("getProvider" in connector) || typeof connector.getProvider !== "function") {
-    throw new Error("WalletConnect provider is unavailable. Please try again.")
-  }
-
-  const provider = await connector.getProvider()
-  if (!isEip1193Provider(provider)) {
-    throw new Error("WalletConnect provider is unavailable. Please try again.")
-  }
-
-  return provider
-}
-
-async function ensureBaseChain(provider: Eip1193Provider): Promise<void> {
-  const chainId = await provider.request({ method: "eth_chainId" })
-  if (String(chainId).toLowerCase() === `0x${base.id.toString(16)}`) return
-
-  await provider.request({
-    method: "wallet_switchEthereumChain",
-    params: [{ chainId: `0x${base.id.toString(16)}` }],
-  })
-}
-
-async function getConnectedEvmAddress(provider: Eip1193Provider): Promise<string> {
-  const accounts = await provider.request({ method: "eth_requestAccounts" })
-  const firstAccount = Array.isArray(accounts) ? String(accounts[0] || "").trim() : ""
-
-  if (!/^0x[a-fA-F0-9]{40}$/.test(firstAccount)) {
-    throw new Error("Unable to read connected Base wallet address")
-  }
-
-  return firstAccount
-}
 
 function extractAddressFromConnectResult(result: unknown): string {
   if (!result || typeof result !== "object") return ""
@@ -242,9 +211,10 @@ export default function BaseWalletPayment({
 }: Props) {
   console.log("[BaseWalletPayment] rendered")
 
-  const { address, chain, isConnected } = useAccount()
+  const { address, chain, isConnected, connector } = useAccount()
   const { connectors, connectAsync, status: connectStatus } = useConnect()
   const { switchChainAsync, status: switchStatus } = useSwitchChain()
+  const { sendTransactionAsync } = useSendTransaction()
 
   const [localError, setLocalError] = useState("")
   const [resumeMessage, setResumeMessage] = useState("")
@@ -264,6 +234,17 @@ export default function BaseWalletPayment({
   )
 
   console.log("[Base] available connectors", connectors.map(connectorMetadata))
+
+  useEffect(() => {
+    void logBase("render", {
+      intentId: intentId || null,
+      isConnected,
+      hasAddress: Boolean(address),
+      chainId: chain?.id || null,
+      connectorName: connector?.name || null,
+      connectorId: connector?.id || null,
+    })
+  }, [address, chain?.id, connector?.id, connector?.name, intentId, isConnected])
 
   const refreshPendingState = useCallback(() => {
     const pending = getPendingBaseWalletConnectPayment()
@@ -346,12 +327,16 @@ export default function BaseWalletPayment({
         throw new Error("Base WalletConnect payment session expired. Please try again.")
       }
 
-      let fromAddress = String(connectedAddress || "").trim()
+      const fromAddress = String(connectedAddress || "").trim()
       if (!/^0x[a-fA-F0-9]{40}$/.test(fromAddress)) {
         throw new Error("Wallet connected, but no wallet address was returned.")
       }
 
       console.log("[Base] Continuing Base payment after WalletConnect")
+      await logBase("continue-start", {
+        intentId: intentId || null,
+        hasAddress: Boolean(fromAddress),
+      })
 
       if (!isOnBase) {
         try {
@@ -364,26 +349,33 @@ export default function BaseWalletPayment({
         }
       }
 
-      const provider = await getWalletConnectProvider(walletConnectConnector)
-      await ensureBaseChain(provider)
-      fromAddress = fromAddress || await getConnectedEvmAddress(provider)
-
+      await logBase("resolve-payment-start", { intentId: intentId || null })
       const paymentData = await resolvePaymentData()
       createdPaymentId = paymentData.paymentId
+      await logBase("resolve-payment-result", {
+        paymentId: paymentData.paymentId,
+        hasPaymentUrl: Boolean(paymentData.paymentUrl),
+      })
       const txRequest = parseEthereumPaymentUri(paymentData.paymentUrl)
 
       setIsOpeningWallet(true)
       setResumeMessage("")
-      console.log("[Base] Sending Base transaction")
+      console.log("[Base] Sending Base transaction via wagmi")
+      await logBase("wallet-client-ready", {
+        hasAddress: Boolean(fromAddress),
+        chainId: base.id,
+      })
+      await logBase("send-transaction-start", {
+        to: txRequest.to,
+        hasData: Boolean(txRequest.data),
+        hasValue: Boolean(txRequest.value),
+      })
 
-      const txHash = await provider.request({
-        method: "eth_sendTransaction",
-        params: [{
-          from: fromAddress,
-          to: txRequest.to,
-          value: txRequest.value,
-          data: txRequest.data,
-        }],
+      const txHash = await sendTransactionAsync({
+        to: txRequest.to as `0x${string}`,
+        value: BigInt(txRequest.value),
+        data: txRequest.data as `0x${string}`,
+        chainId: base.id,
       })
 
       const normalizedTxHash = String(txHash || "").trim()
@@ -392,8 +384,11 @@ export default function BaseWalletPayment({
       }
 
       console.log("[Base] Base tx submitted", { txHash: normalizedTxHash })
+      await logBase("tx-submitted", { txHashPrefix: normalizedTxHash.slice(0, 10) })
 
+      await logBase("detect-start", { paymentId: paymentData.paymentId })
       await onSuccess?.(normalizedTxHash, paymentData.paymentId)
+      await logBase("detect-finished", { paymentId: paymentData.paymentId })
 
       clearPendingBaseWalletConnectPayment()
       setHasPendingBaseWcPayment(false)
@@ -407,6 +402,8 @@ export default function BaseWalletPayment({
       const friendly = rejected
         ? "Wallet connection rejected by user."
         : message
+
+      void logBase("send-transaction-error", { message: friendly, rejected })
 
       if (rejected || message.toLowerCase().includes("expired") || message.toLowerCase().includes("unavailable")) {
         clearPendingBaseWalletConnectPayment()
@@ -431,7 +428,7 @@ export default function BaseWalletPayment({
     } finally {
       isSendingBaseTxRef.current = false
     }
-  }, [intentId, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, switchChainAsync, walletConnectConnector])
+  }, [intentId, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, sendTransactionAsync, switchChainAsync, walletConnectConnector])
 
   const startWalletConnectPayment = useCallback(() => {
     setLocalError("")
@@ -450,13 +447,27 @@ export default function BaseWalletPayment({
         }
 
         console.log("[Base] WalletConnect selected")
+        await logBase("wc-selected", { intentId: intentId || null })
+
+        await logBase("pending-store", {
+          intentId: intentId || null,
+          selectedAsset: "ETH",
+        })
         storePendingBaseWalletConnectPayment({ intentId, selectedAsset })
         setHasPendingBaseWcPayment(true)
 
         if (!isConnected || !fromAddress) {
+          await logBase("connect-start", {
+            connectorId: walletConnectConnector?.id || null,
+            connectorName: walletConnectConnector?.name || null,
+          })
           const result = await connectAsync({ connector: walletConnectConnector, chainId: base.id })
           fromAddress = extractAddressFromConnectResult(result) || fromAddress
           console.log("[Base] WalletConnect connect returned", { hasAddress: Boolean(fromAddress) })
+          await logBase("connect-returned", {
+            hasAccount: Boolean(fromAddress),
+            accountPrefix: fromAddress ? fromAddress.slice(0, 8) : null,
+          })
         }
 
         if (fromAddress) {
@@ -488,11 +499,21 @@ export default function BaseWalletPayment({
   const tryResumeBaseWalletConnectPayment = useCallback(() => {
     const pending = getPendingBaseWalletConnectPayment()
     const hasPending = pendingMatchesCurrentCheckout(pending, intentId, selectedAsset)
+    const pendingMatchesIntent = String(pending?.intentId || "") === String(intentId || "")
 
     console.log("[Base] Resume check", {
       hasPending,
       isConnected,
       hasAddress: Boolean(address),
+    })
+
+    void logBase("resume-check", {
+      hasPending,
+      pendingMatchesIntent,
+      isConnected,
+      hasAddress: Boolean(address),
+      isSending: isSendingBaseTxRef.current,
+      visibilityState: typeof document === "undefined" ? "unknown" : document.visibilityState,
     })
 
     setHasPendingBaseWcPayment(hasPending)
@@ -513,10 +534,12 @@ export default function BaseWalletPayment({
   useEffect(() => {
     window.addEventListener("focus", tryResumeBaseWalletConnectPayment)
     document.addEventListener("visibilitychange", tryResumeBaseWalletConnectPayment)
+    window.addEventListener("pageshow", tryResumeBaseWalletConnectPayment)
 
     return () => {
       window.removeEventListener("focus", tryResumeBaseWalletConnectPayment)
       document.removeEventListener("visibilitychange", tryResumeBaseWalletConnectPayment)
+      window.removeEventListener("pageshow", tryResumeBaseWalletConnectPayment)
     }
   }, [tryResumeBaseWalletConnectPayment])
 
@@ -557,8 +580,23 @@ export default function BaseWalletPayment({
       ) : null}
 
       {hasPendingBaseWcPayment && !isOpeningWallet ? (
-        <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
-          {resumeMessage || "Wallet connected. Return to this checkout to continue the Base payment."}
+        <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 space-y-2">
+          <p>
+            {resumeMessage || "Connection approved. Return here and tap Send Base transaction if the transaction request does not open automatically."}
+          </p>
+          <Button
+            fullWidth
+            variant="secondary"
+            onClick={() => {
+              if (address) {
+                void continueBasePayment(address)
+              } else {
+                tryResumeBaseWalletConnectPayment()
+              }
+            }}
+          >
+            Send Base transaction
+          </Button>
         </div>
       ) : null}
 
