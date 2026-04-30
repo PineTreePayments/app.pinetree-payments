@@ -1,5 +1,6 @@
 import { Suspense } from "react"
 import PayClient from "./PayClient"
+import { Web3Provider } from "@/components/providers/Web3Provider"
 
 export const dynamic = "force-dynamic"
 
@@ -14,7 +15,9 @@ export default function PayPage() {
         </main>
       }
     >
-      <PayClient />
+      <Web3Provider>
+        <PayClient />
+      </Web3Provider>
     </Suspense>
   )
 }
