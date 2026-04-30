@@ -111,7 +111,7 @@ export default function SolanaWalletPayment({
           console.log("[Solflare] Deep linking to:", fullUrl)
 
           window.location.href =
-            "https://solflare.com/ul/v1/browse/" + encodeURIComponent(fullUrl)
+            "https://solflare.com/ul/v1/browse?url=" + encodeURIComponent(fullUrl)
           return
         }
 
