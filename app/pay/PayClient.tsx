@@ -125,6 +125,18 @@ function getSolflareRetryMessage(code: string | null): string {
   return "Solflare connection could not be completed. Please try again."
 }
 
+async function logSolflare(
+  stage: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  console.log("[Solflare DEBUG]", stage, payload)
+  await fetch("/api/debug/solflare", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ stage, payload }),
+  }).catch(() => null)
+}
+
 function getCheckoutAssetOptions(networks: string[]): AssetOption[] {
   const availableAssets = getAvailableAssetsFromValues(networks)
 
@@ -428,12 +440,27 @@ export default function PayClient() {
     const action = params.get("solflare_action")
     if (action !== "connect_callback" && action !== "sign_callback") return
 
-    // Per-nonce guard — prevents StrictMode double-invocation while allowing
-    // retries (each Solflare response carries a unique nonce).
-    const cbNonce = params.get("nonce") ?? action
-    const guardKey = `pinetree_sf_cb_handled_${cbNonce}`
+    // Log entry BEFORE the guard so every callback visit is visible in Vercel logs
+    void logSolflare("callback-entry", {
+      action,
+      hasIntent: !!params.get("intent"),
+      hasNonce: !!params.get("nonce"),
+      hasData: !!params.get("data"),
+      hasSolflarePubKey: !!params.get("solflare_encryption_public_key"),
+      hasErrorCode: !!params.get("errorCode"),
+      hasErrorMessage: !!params.get("errorMessage"),
+    })
+
+    // Per-fingerprint guard — unique per Solflare response, key is never removed
+    // so duplicate invocations (StrictMode) are blocked without blocking retries
+    // (each new Solflare response has a different nonce).
+    const callbackFingerprint =
+      params.get("nonce") ||
+      params.get("data")?.slice(0, 24) ||
+      `${action}:${Date.now()}`
+    const guardKey = `pinetree_sf_cb_${action}_${callbackFingerprint}`
     if (sessionStorage.getItem(guardKey)) {
-      sessionStorage.removeItem(guardKey)
+      void logSolflare("callback-skipped-duplicate", { guardKey })
       return
     }
     sessionStorage.setItem(guardKey, "1")
@@ -451,37 +478,17 @@ export default function PayClient() {
     const run = async () => {
       // ── connect_callback ─────────────────────────────────────────────────
       if (action === "connect_callback") {
-        console.log("[Solflare:connect] action:", action)
-        console.log("[Solflare:connect] full URL:", window.location.href)
-
-        const sfKey = params.get("solflare_encryption_public_key")
-        const cbNonceVal = params.get("nonce")
-        const cbData = params.get("data")
-        const cbErrorCode = params.get("errorCode")
-        const cbErrorMessage = params.get("errorMessage")
-        console.log("[Solflare:connect] params:", {
-          solflare_encryption_public_key: sfKey ? `present (${sfKey.slice(0, 8)}...)` : "MISSING",
-          nonce: cbNonceVal ? "present" : "MISSING",
-          data: cbData ? "present" : "MISSING",
-          errorCode: cbErrorCode ?? null,
-          errorMessage: cbErrorMessage ?? null,
-        })
-
-        // Solflare returned an explicit connect error — treat as user rejection
-        if (cbErrorCode || cbErrorMessage) {
-          console.error("[Solflare:connect] Solflare returned connect error:", cbErrorCode, cbErrorMessage)
-          clearSolflareSession()
-          redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&solflare_error=connect_rejected` : "/pay")
-          return
-        }
+        await logSolflare("connect-callback-start", {})
 
         const session = decryptConnectResponse(params)
-        console.log("[Solflare:connect] decrypt:", session
-          ? `OK — publicKey: ${session.publicKey}`
-          : "FAILED")
+        await logSolflare("connect-decrypt-result", {
+          success: !!session,
+          hasPublicKey: !!session?.publicKey,
+          hasSession: !!session?.session,
+          hasSfPublicKey: !!session?.sfPublicKey,
+        })
 
         if (!session) {
-          // Internal decrypt failure — do NOT call /fail; payment is still valid, allow retry
           console.error("[Solflare:connect] decrypt failed — clearing session, redirecting to retry")
           clearSolflareSession()
           redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&solflare_error=connect_failed` : "/pay")
@@ -491,19 +498,20 @@ export default function PayClient() {
         storeSession(session)
 
         const paymentId = consumePendingPaymentId()
-        console.log("[Solflare:connect] pending paymentId:", paymentId ?? "MISSING")
+        await logSolflare("pending-payment", {
+          pendingPaymentId: paymentId || "MISSING",
+        })
 
         if (!paymentId) {
-          // Internal state loss — do NOT call /fail; allow user to retry
           console.error("[Solflare:connect] no pending paymentId — clearing session, redirecting to retry")
           clearSolflareSession()
           redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&solflare_error=connect_failed` : "/pay")
           return
         }
 
-        console.log("[Solflare:connect] calling build-wallet-transaction:", {
+        await logSolflare("build-tx-request", {
           paymentId,
-          walletPublicKey: session.publicKey,
+          walletPublicKeyPrefix: session.publicKey.slice(0, 8),
         })
         const res = await fetch("/api/solana/build-wallet-transaction", {
           method: "POST",
@@ -511,14 +519,14 @@ export default function PayClient() {
           body: JSON.stringify({ paymentId, walletPublicKey: session.publicKey }),
         })
         const txData = (await res.json()) as { transaction?: string; error?: string }
-        console.log("[Solflare:connect] build-wallet-transaction:", {
+        await logSolflare("build-tx-response", {
           ok: res.ok,
-          hasTransaction: Boolean(txData.transaction),
-          error: txData.error ?? null,
+          status: res.status,
+          hasTransaction: !!txData.transaction,
+          error: txData.error || null,
         })
 
         if (!res.ok || !txData.transaction) {
-          // Build failure — do NOT call /fail; payment not yet submitted, allow retry
           console.error("[Solflare:connect] build tx failed — not calling /fail, clearing session")
           clearSolflareSession()
           redirectTo(iid ? `/pay?intent=${encodeURIComponent(iid)}&solflare_error=build_failed` : "/pay")
@@ -528,8 +536,12 @@ export default function PayClient() {
         const base = `${window.location.origin}/pay?intent=${encodeURIComponent(iid)}`
         const signRedirect = `${base}&solflare_action=sign_callback&solflare_payment_id=${encodeURIComponent(paymentId)}`
         const signUrl = buildSignAndSendUrl(txData.transaction, session, signRedirect)
-        console.log("[Solflare:connect] signAndSend URL valid:", signUrl.startsWith("https://solflare.com/ul/v1/signAndSendTransaction"))
-        console.log("[Solflare:connect] navigating to signAndSend deeplink")
+        await logSolflare("sign-url-built", {
+          startsWithCorrectEndpoint: signUrl.startsWith("https://solflare.com/ul/v1/signAndSendTransaction"),
+          length: signUrl.length,
+        })
+
+        await logSolflare("sign-url-opening", {})
         window.location.href = signUrl
         return
       }
@@ -543,7 +555,7 @@ export default function PayClient() {
         const signData = params.get("data")
         const rawSignature = params.get("signature")
 
-        console.log("[Solflare:sign] params:", {
+        await logSolflare("sign-callback-start", {
           paymentId: paymentId || "MISSING",
           errorCode: errorCode ?? null,
           errorMessage: errorMessage ?? null,
@@ -569,9 +581,10 @@ export default function PayClient() {
         }
 
         const session = getStoredSession()
-        console.log("[Solflare:sign] stored session:", session
-          ? `present — publicKey: ${session.publicKey}`
-          : "MISSING")
+        await logSolflare("sign-session-check", {
+          hasSession: !!session,
+          hasPaymentId: !!paymentId,
+        })
 
         if (!session || !paymentId) {
           console.error("[Solflare:sign] missing session or paymentId")
@@ -582,9 +595,10 @@ export default function PayClient() {
         }
 
         const signature = decryptSignResponse(params, session.sfPublicKey)
-        console.log("[Solflare:sign] decrypted signature:", signature
-          ? `${signature.slice(0, 20)}...`
-          : "FAILED")
+        await logSolflare("sign-decrypt-result", {
+          success: !!signature,
+          signaturePrefix: signature ? signature.slice(0, 8) : null,
+        })
 
         if (!signature) {
           console.error("[Solflare:sign] failed to decrypt signature")
@@ -594,7 +608,7 @@ export default function PayClient() {
           return
         }
 
-        console.log("[Solflare:sign] calling detect:", { paymentId, signature: `${signature.slice(0, 20)}...` })
+        await logSolflare("detect-calling", { paymentId, hasSignature: true })
         await fetch(`/api/payments/${encodeURIComponent(paymentId)}/detect`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },

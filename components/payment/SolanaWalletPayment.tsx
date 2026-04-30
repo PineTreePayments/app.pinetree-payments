@@ -182,6 +182,14 @@ export default function SolanaWalletPayment({
         storePendingPaymentId(paymentId)
         const connectRedirect = `${base}&solflare_action=connect_callback&solflare_asset=${encodeURIComponent(selectedAsset)}`
         console.log("[Solflare] Starting connect deeplink, paymentId:", paymentId)
+        await fetch("/api/debug/solflare", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stage: "start-connect",
+            payload: { paymentId, intentId: intentId ?? null, selectedAsset },
+          }),
+        }).catch(() => null)
         window.location.href = buildConnectUrl(connectRedirect, origin)
         return // page is navigating away
       }
