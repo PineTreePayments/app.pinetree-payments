@@ -1,7 +1,8 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useAccount, useConnect, useSwitchChain } from "wagmi"
+import type { Connector } from "wagmi"
 import { base } from "wagmi/chains"
 import Button from "@/components/ui/Button"
 
@@ -33,6 +34,40 @@ type EvmTransactionRequest = {
 
 function isEip1193Error(error: unknown): error is { code?: number; message?: string } {
   return typeof error === "object" && error !== null
+}
+
+function isEip1193Provider(value: unknown): value is Eip1193Provider {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    typeof (value as { request?: unknown }).request === "function"
+  )
+}
+
+function connectorMetadata(connector: Connector) {
+  return {
+    id: connector.id,
+    name: connector.name,
+    type: connector.type,
+  }
+}
+
+function connectorText(connector: Connector): string {
+  return `${connector.id} ${connector.name} ${connector.type}`.toLowerCase()
+}
+
+function isCoinbaseConnector(connector: Connector): boolean {
+  return connectorText(connector).includes("coinbase")
+}
+
+function isWalletConnectConnector(connector: Connector): boolean {
+  const text = connectorText(connector)
+  return text.includes("walletconnect") || text.includes("wallet connect")
+}
+
+function isBrowserWalletConnector(connector: Connector): boolean {
+  const text = connectorText(connector)
+  return text.includes("injected") || text.includes("metamask") || text.includes("browser")
 }
 
 function decimalOrHexToHex(value: string): string {
@@ -76,10 +111,19 @@ function parseEthereumPaymentUri(paymentUrl: string): EvmTransactionRequest {
   }
 }
 
-async function getEthereumProvider(): Promise<Eip1193Provider> {
+async function getEthereumProvider(connector?: Connector): Promise<Eip1193Provider> {
+  if (connector && "getProvider" in connector && typeof connector.getProvider === "function") {
+    const provider = await connector.getProvider()
+    if (isEip1193Provider(provider)) {
+      return provider
+    }
+  }
+
   const provider = window.ethereum
   if (!provider) {
-    throw new Error("No EVM wallet found. Install Coinbase Wallet, MetaMask, or Trust Wallet.")
+    throw new Error(
+      "Open this checkout in Coinbase Wallet, MetaMask, or use WalletConnect to pay on Base."
+    )
   }
 
   return provider
@@ -119,7 +163,7 @@ export default function BaseWalletPayment({
 }: Props) {
   console.log("[BaseWalletPayment] rendered")
 
-  const { address, chain, isConnected } = useAccount()
+  const { address, chain, isConnected, connector: activeConnector } = useAccount()
   const { connectors, connectAsync, status: connectStatus } = useConnect()
   const { switchChainAsync, status: switchStatus } = useSwitchChain()
 
@@ -132,7 +176,20 @@ export default function BaseWalletPayment({
   const isConnecting = connectStatus === "pending" || switchStatus === "pending"
   const isUsdcDeferred = selectedAsset === "USDC"
 
-  console.log("BASE CONNECTORS:", connectors)
+  const coinbaseConnector = useMemo(
+    () => connectors.find(isCoinbaseConnector) || null,
+    [connectors]
+  )
+  const walletConnectConnector = useMemo(
+    () => connectors.find(isWalletConnectConnector) || null,
+    [connectors]
+  )
+  const browserWalletConnector = useMemo(
+    () => connectors.find(isBrowserWalletConnector) || null,
+    [connectors]
+  )
+
+  console.log("[Base] available connectors", connectors.map(connectorMetadata))
 
   const resolvePaymentData = useCallback(async (): Promise<PaymentData> => {
     if (!isIntentMode) {
@@ -185,7 +242,7 @@ export default function BaseWalletPayment({
     }
   }, [directPaymentId, directPaymentUrl, intentId, isIntentMode, onPaymentCreated, selectedAsset])
 
-  const handlePayClick = useCallback(() => {
+  const handlePayClick = useCallback((selectedConnector?: Connector) => {
     setLocalError("")
 
     void (async () => {
@@ -201,20 +258,18 @@ export default function BaseWalletPayment({
             await switchChainAsync({ chainId: base.id })
           }
         } else {
-          const connector = connectors[0]
-
-          if (!connector) {
-            throw new Error("No wallet found. Install Coinbase Wallet, MetaMask, or Trust Wallet.")
+          if (!selectedConnector) {
+            throw new Error("Choose a Base wallet to continue.")
           }
 
-          console.log("BASE CONNECTING...")
-          await connectAsync({ connector, chainId: base.id })
+          console.log("[Base] connecting", connectorMetadata(selectedConnector))
+          await connectAsync({ connector: selectedConnector, chainId: base.id })
         }
 
         const paymentData = await resolvePaymentData()
         createdPaymentId = paymentData.paymentId
         const txRequest = parseEthereumPaymentUri(paymentData.paymentUrl)
-        const provider = await getEthereumProvider()
+        const provider = await getEthereumProvider(selectedConnector || activeConnector || undefined)
         await ensureBaseChain(provider)
         const fromAddress = await getConnectedEvmAddress(provider)
 
@@ -266,7 +321,7 @@ export default function BaseWalletPayment({
         onError?.(friendly)
       }
     })()
-  }, [connectAsync, connectors, intentId, isConnected, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, switchChainAsync])
+  }, [activeConnector, connectAsync, intentId, isConnected, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, switchChainAsync])
 
   const amountDisplay = (
     <div className="bg-gray-50 rounded-xl px-4 py-3 text-center space-y-1">
@@ -330,9 +385,36 @@ export default function BaseWalletPayment({
           Opening wallet…
         </Button>
       ) : (
-        <Button fullWidth onClick={handlePayClick}>
-          Pay with {selectedAsset}
-        </Button>
+        <div className="space-y-2">
+          {coinbaseConnector ? (
+            <Button fullWidth onClick={() => handlePayClick(coinbaseConnector)}>
+              Pay with Coinbase Wallet
+            </Button>
+          ) : null}
+
+          {walletConnectConnector ? (
+            <Button fullWidth variant="secondary" onClick={() => handlePayClick(walletConnectConnector)}>
+              Pay with WalletConnect
+            </Button>
+          ) : (
+            <div className="text-[11px] text-gray-500 text-center">
+              WalletConnect is not configured.
+            </div>
+          )}
+
+          {browserWalletConnector ? (
+            <Button fullWidth variant="secondary" onClick={() => handlePayClick(browserWalletConnector)}>
+              Pay with MetaMask / Browser Wallet
+            </Button>
+          ) : null}
+
+          {!coinbaseConnector && !walletConnectConnector && !browserWalletConnector ? (
+            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-center">
+              No Base wallet connector is available. Open this checkout in Coinbase Wallet,
+              MetaMask, or use a WalletConnect-compatible wallet.
+            </div>
+          ) : null}
+        </div>
       )}
     </div>
   )
