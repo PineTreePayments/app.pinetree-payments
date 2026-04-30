@@ -774,6 +774,7 @@ export default function PayClient() {
                             intentId={intentId!}
                             selectedAsset={asset.symbol === "USDC" ? "USDC" : "SOL"}
                             usdAmount={displayAmount}
+                            isActive={isActive}
                             onPaymentCreated={() => {
                               void loadIntentCallback()
                             }}

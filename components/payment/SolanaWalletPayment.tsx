@@ -21,6 +21,7 @@ type Props = {
   nativeAmount?: number
   usdAmount: number
   paymentId?: string
+  isActive?: boolean
   walletOptions?: Array<{ id: string; label: string; url?: string; href?: string }>
   onPaymentCreated?: (paymentId: string) => void
   onError?: (error: string) => void
@@ -32,6 +33,7 @@ export default function SolanaWalletPayment({
   usdAmount,
   nativeAmount,
   paymentId: directPaymentId,
+  isActive = true,
   onPaymentCreated,
   onError,
 }: Props) {
@@ -118,7 +120,6 @@ export default function SolanaWalletPayment({
             window.location.href = `https://solflare.com/ul/v1/browse?url=${encoded}`
           }, 800)
 
-          setError("Opening Solflare… If the page does not load, open this link inside the Solflare browser.")
           return
         }
 
@@ -172,6 +173,7 @@ export default function SolanaWalletPayment({
   }, [handleWalletClick])
 
   useEffect(() => {
+    if (!isActive) return
     if (hasAutoTriggeredRef.current) return
 
     let attempts = 0
@@ -180,15 +182,13 @@ export default function SolanaWalletPayment({
     const tryConnect = () => {
       if (cancelled) return
 
-      const provider = getSolanaWindow().solflare
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const provider = (window as any).solflare
 
-      if (
-        provider?.isSolflare === true &&
-        !hasAutoTriggeredRef.current
-      ) {
+      if (provider?.isSolflare === true) {
         hasAutoTriggeredRef.current = true
 
-        console.log("[Solflare] Auto-triggering payment flow")
+        console.log("[Solflare] Auto-trigger firing")
 
         handleSolflareClick()
         return
@@ -196,7 +196,7 @@ export default function SolanaWalletPayment({
 
       attempts++
 
-      if (attempts < 10) {
+      if (attempts < 20) {
         setTimeout(tryConnect, 300)
       }
     }
@@ -206,7 +206,7 @@ export default function SolanaWalletPayment({
     return () => {
       cancelled = true
     }
-  }, [handleSolflareClick])
+  }, [isActive, handleSolflareClick])
 
   const amountDisplay = (
     <div className="bg-gray-50 rounded-xl px-4 py-3 text-center space-y-1">
