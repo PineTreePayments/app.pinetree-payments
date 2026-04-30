@@ -45,16 +45,28 @@ type WalletOption = {
   href: string
 }
 
-type PaymentAsset = "SOL" | "USDC"
+type PaymentAsset = "SOL" | "USDC" | "ETH"
 
 function normalizePaymentAsset(value?: string): PaymentAsset | null {
   const normalized = String(value || "").trim().toUpperCase()
+  if (normalized === "ETH") return "ETH"
   if (normalized === "SOL") return "SOL"
   if (normalized === "USDC") return "USDC"
   return null
 }
 
 function resolveSupportedAssetForNetwork(network: WalletNetwork, asset?: string): PaymentAsset | undefined {
+  if (network === "base") {
+    const normalizedAsset = normalizePaymentAsset(asset) || "ETH"
+    if (normalizedAsset === "USDC") {
+      throw new Error("USDC on Base is coming soon. Please choose ETH on Base for now.")
+    }
+    if (normalizedAsset !== "ETH") {
+      throw new Error("Base payments support ETH only")
+    }
+    return "ETH"
+  }
+
   if (network !== "solana") return undefined
 
   const normalizedAsset = normalizePaymentAsset(asset)

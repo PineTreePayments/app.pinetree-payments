@@ -1117,12 +1117,13 @@ export default function PayClient() {
                         {asset.network === "base" ? (
                           <BaseWalletPayment
                             intentId={intentId!}
+                            selectedAsset={asset.symbol === "USDC" ? "USDC" : "ETH"}
                             usdAmount={displayAmount}
                             onPaymentCreated={() => {
                               void loadIntentCallback()
                             }}
-                            onSuccess={(txHash, paymentId) => {
-                              void fetch(
+                            onSuccess={async (txHash, paymentId) => {
+                              await fetch(
                                 `/api/payments/${encodeURIComponent(paymentId)}/detect`,
                                 {
                                   method: "POST",
@@ -1131,7 +1132,7 @@ export default function PayClient() {
                                 }
                               )
                                 .catch(() => null)
-                                .then(() => loadIntentCallback())
+                              await loadIntentCallback()
                             }}
                           />
                         ) : null}

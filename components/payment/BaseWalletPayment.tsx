@@ -5,14 +5,17 @@ import { useAccount, useConnect, useSwitchChain } from "wagmi"
 import { base } from "wagmi/chains"
 import Button from "@/components/ui/Button"
 
+type BaseAsset = "ETH" | "USDC"
+
 type Props = {
   intentId?: string
   paymentUrl?: string
   nativeAmount?: number
   usdAmount: number
   paymentId?: string
+  selectedAsset?: BaseAsset
   onPaymentCreated?: (paymentId: string) => void
-  onSuccess?: (txHash: string, paymentId: string) => void
+  onSuccess?: (txHash: string, paymentId: string) => void | Promise<void>
   onError?: (error: string) => void
 }
 
@@ -21,13 +24,97 @@ type PaymentData = {
   paymentUrl: string
 }
 
+type EvmTransactionRequest = {
+  to: string
+  value: string
+  data: string
+  chainId: number
+}
+
+function isEip1193Error(error: unknown): error is { code?: number; message?: string } {
+  return typeof error === "object" && error !== null
+}
+
+function decimalOrHexToHex(value: string): string {
+  const normalized = String(value || "0").trim()
+  if (!normalized) return "0x0"
+  if (normalized.startsWith("0x")) return `0x${BigInt(normalized).toString(16)}`
+  return `0x${BigInt(normalized).toString(16)}`
+}
+
+function parseEthereumPaymentUri(paymentUrl: string): EvmTransactionRequest {
+  const raw = String(paymentUrl || "").trim()
+  if (!raw.startsWith("ethereum:")) {
+    throw new Error("Invalid Base payment transaction returned by server")
+  }
+
+  const withoutScheme = raw.slice("ethereum:".length)
+  const [target, query = ""] = withoutScheme.split("?")
+  const [contractAddress, chainIdRaw = ""] = target.split("@")
+  const chainId = Number(chainIdRaw || 0)
+  const params = new URLSearchParams(query)
+  const data = String(params.get("data") || "").trim()
+  const value = String(params.get("value") || "0").trim()
+
+  if (!/^0x[a-fA-F0-9]{40}$/.test(contractAddress)) {
+    throw new Error("Invalid Base split contract address returned by server")
+  }
+
+  if (chainId !== base.id) {
+    throw new Error("Payment is not configured for Base mainnet")
+  }
+
+  if (!/^0x[a-fA-F0-9]*$/.test(data)) {
+    throw new Error("Invalid Base transaction calldata returned by server")
+  }
+
+  return {
+    to: contractAddress,
+    chainId,
+    value: decimalOrHexToHex(value),
+    data,
+  }
+}
+
+async function getEthereumProvider(): Promise<Eip1193Provider> {
+  const provider = window.ethereum
+  if (!provider) {
+    throw new Error("No EVM wallet found. Install Coinbase Wallet, MetaMask, or Trust Wallet.")
+  }
+
+  return provider
+}
+
+async function ensureBaseChain(provider: Eip1193Provider): Promise<void> {
+  const chainId = await provider.request({ method: "eth_chainId" })
+  if (String(chainId).toLowerCase() === `0x${base.id.toString(16)}`) return
+
+  await provider.request({
+    method: "wallet_switchEthereumChain",
+    params: [{ chainId: `0x${base.id.toString(16)}` }],
+  })
+}
+
+async function getConnectedEvmAddress(provider: Eip1193Provider): Promise<string> {
+  const accounts = await provider.request({ method: "eth_requestAccounts" })
+  const firstAccount = Array.isArray(accounts) ? String(accounts[0] || "").trim() : ""
+
+  if (!/^0x[a-fA-F0-9]{40}$/.test(firstAccount)) {
+    throw new Error("Unable to read connected Base wallet address")
+  }
+
+  return firstAccount
+}
+
 export default function BaseWalletPayment({
   intentId,
   paymentUrl: directPaymentUrl,
   nativeAmount,
   usdAmount,
   paymentId: directPaymentId,
+  selectedAsset = "ETH",
   onPaymentCreated,
+  onSuccess,
   onError,
 }: Props) {
   const { address, chain, isConnected } = useAccount()
@@ -41,6 +128,7 @@ export default function BaseWalletPayment({
   const isIntentMode = Boolean(intentId)
   const isOnBase = chain?.id === base.id
   const isConnecting = connectStatus === "pending" || switchStatus === "pending"
+  const isUsdcDeferred = selectedAsset === "USDC"
 
   console.log("BASE CONNECTORS:", connectors)
 
@@ -68,7 +156,7 @@ export default function BaseWalletPayment({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ network: "base" }),
+          body: JSON.stringify({ network: "base", asset: selectedAsset }),
         }
       )
 
@@ -93,13 +181,19 @@ export default function BaseWalletPayment({
     } finally {
       setIsPreparingPayment(false)
     }
-  }, [directPaymentId, directPaymentUrl, intentId, isIntentMode, onPaymentCreated])
+  }, [directPaymentId, directPaymentUrl, intentId, isIntentMode, onPaymentCreated, selectedAsset])
 
   const handlePayClick = useCallback(() => {
     setLocalError("")
 
     void (async () => {
+      let createdPaymentId = ""
+
       try {
+        if (selectedAsset !== "ETH") {
+          throw new Error("USDC on Base is coming soon. Please choose ETH on Base for now.")
+        }
+
         if (isConnected) {
           if (!isOnBase) {
             await switchChainAsync({ chainId: base.id })
@@ -116,14 +210,53 @@ export default function BaseWalletPayment({
         }
 
         const paymentData = await resolvePaymentData()
+        createdPaymentId = paymentData.paymentId
+        const txRequest = parseEthereumPaymentUri(paymentData.paymentUrl)
+        const provider = await getEthereumProvider()
+        await ensureBaseChain(provider)
+        const fromAddress = await getConnectedEvmAddress(provider)
 
         setIsOpeningWallet(true)
-        window.location.href = paymentData.paymentUrl
+
+        const txHash = await provider.request({
+          method: "eth_sendTransaction",
+          params: [{
+            from: fromAddress,
+            to: txRequest.to,
+            value: txRequest.value,
+            data: txRequest.data,
+          }],
+        })
+
+        const normalizedTxHash = String(txHash || "").trim()
+        if (!/^0x[a-fA-F0-9]{64}$/.test(normalizedTxHash)) {
+          throw new Error("Wallet did not return a transaction hash")
+        }
+
+        await onSuccess?.(normalizedTxHash, paymentData.paymentId)
+
+        if (intentId) {
+          window.location.href = `/pay?intent=${encodeURIComponent(intentId)}&status=processing`
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to open Base payment"
-        const friendly = message.toLowerCase().includes("rejected")
+        const rejected =
+          message.toLowerCase().includes("rejected") ||
+          (isEip1193Error(err) && err.code === 4001)
+        const friendly = rejected
           ? "Wallet connection rejected by user."
           : message
+
+        if (rejected && createdPaymentId) {
+          await fetch(`/api/payments/${encodeURIComponent(createdPaymentId)}/fail`, {
+            method: "POST",
+          }).catch(() => null)
+
+          if (intentId) {
+            window.location.href = `/pay?intent=${encodeURIComponent(intentId)}&status=cancelled`
+            return
+          }
+        }
 
         setLocalError(friendly)
         setIsPreparingPayment(false)
@@ -131,14 +264,14 @@ export default function BaseWalletPayment({
         onError?.(friendly)
       }
     })()
-  }, [connectAsync, connectors, isConnected, isOnBase, onError, resolvePaymentData, switchChainAsync])
+  }, [connectAsync, connectors, intentId, isConnected, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, switchChainAsync])
 
   const amountDisplay = (
     <div className="bg-gray-50 rounded-xl px-4 py-3 text-center space-y-1">
       {isIntentMode ? (
         <>
           <p className="text-lg font-bold text-gray-900">${usdAmount.toFixed(2)} USD</p>
-          <p className="text-xs text-gray-500">via Base Network · exact ETH determined at payment</p>
+          <p className="text-xs text-gray-500">via Base Network · exact {selectedAsset} determined at payment</p>
         </>
       ) : (
         <>
@@ -169,7 +302,17 @@ export default function BaseWalletPayment({
         </div>
       ) : null}
 
-      {isConnecting ? (
+      {isUsdcDeferred ? (
+        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+          USDC on Base is coming soon. Please choose ETH on Base for now.
+        </div>
+      ) : null}
+
+      {isUsdcDeferred ? (
+        <Button fullWidth disabled>
+          USDC on Base coming soon
+        </Button>
+      ) : isConnecting ? (
         <Button fullWidth disabled>
           <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
           Connecting…
@@ -186,7 +329,7 @@ export default function BaseWalletPayment({
         </Button>
       ) : (
         <Button fullWidth onClick={handlePayClick}>
-          Pay with ETH
+          Pay with {selectedAsset}
         </Button>
       )}
     </div>

@@ -307,6 +307,13 @@ export async function createPayment(
     walletAsset = requestedAsset === "USDC" ? "sol-usdc" : "sol"
   }
 
+  if (network === "base") {
+    if (requestedAsset && requestedAsset !== "ETH") {
+      throw new Error("Base payments support ETH only. USDC on Base is coming soon.")
+    }
+    walletAsset = "eth-base"
+  }
+
   /* ---------------------------
      ADAPTER SELECTION
   --------------------------- */
