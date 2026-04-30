@@ -105,8 +105,13 @@ export default function SolanaWalletPayment({
 
       if (!provider) {
         if (wallet === "solflare") {
+          const fullUrl =
+            window.location.origin + window.location.pathname + window.location.search
+
+          console.log("[Solflare] Deep linking to:", fullUrl)
+
           window.location.href =
-            "https://solflare.com/ul/v1/browse/" + encodeURIComponent(window.location.href)
+            "https://solflare.com/ul/v1/browse/" + encodeURIComponent(fullUrl)
           return
         }
 

@@ -188,6 +188,13 @@ export default function PayClient() {
   const normalizedPaymentStatus = String(paymentStatus || "").toUpperCase()
   const intentCardsRef = useRef<HTMLDivElement | null>(null)
 
+  const isSolflare =
+    typeof window !== "undefined" &&
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).solflare?.isSolflare === true
+
+  const hasAutoEnteredSolanaRef = useRef(false)
+
   // ── Intent mode helpers ────────────────────────────────────────────────────
 
   async function loadIntent() {
@@ -296,6 +303,27 @@ export default function PayClient() {
 
     return () => clearInterval(interval)
   }, [intentId, loadIntentCallback, intentPayload?.paymentId, normalizedPaymentStatus])
+
+  // ── Solflare auto-enter: skip asset selection when opened in Solflare browser ──
+
+  useEffect(() => {
+    if (
+      isSolflare &&
+      intentPayload &&
+      !hasAutoEnteredSolanaRef.current
+    ) {
+      hasAutoEnteredSolanaRef.current = true
+
+      console.log("[Solflare] Auto-entering Solana flow")
+
+      const solanaAsset = getCheckoutAssetOptions(intentPayload.availableNetworks || [])
+        .find((a) => a.network === "solana")
+
+      if (solanaAsset) {
+        setSelectedAssetId(solanaAsset.id)
+      }
+    }
+  }, [isSolflare, intentPayload])
 
   // ── Wallet-browser mode: Phantom provider flow ────────────────────────────
 
