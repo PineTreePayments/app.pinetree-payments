@@ -63,6 +63,11 @@ export default function SolanaWalletPayment({
     return w.solana?.isPhantom === true ? w.solana : null
   }, [])
 
+  const getSolflareProvider = useCallback((): SolanaBrowserProvider | null => {
+    const w = window as Window & { solflare?: SolanaBrowserProvider }
+    return w.solflare?.isSolflare === true ? w.solflare : null
+  }, [])
+
   const getPaymentId = useCallback(async (): Promise<string> => {
     if (resolvedPaymentId) return resolvedPaymentId
     if (!intentId) throw new Error("Missing payment ID")
@@ -172,6 +177,49 @@ export default function SolanaWalletPayment({
     window.history.replaceState({}, "", currentUrl.toString())
 
     try {
+      const injectedSolflare = getSolflareProvider()
+
+      if (injectedSolflare) {
+        console.log("[Solflare] Using injected Solflare provider")
+
+        const paymentId = await getPaymentId()
+
+        await injectedSolflare.connect()
+
+        const walletPublicKey = injectedSolflare.publicKey?.toString()
+        if (!walletPublicKey) {
+          throw new Error("Unable to read Solflare wallet public key")
+        }
+
+        const res = await fetch("/api/solana/build-wallet-transaction", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paymentId, walletPublicKey }),
+        })
+
+        const data = (await res.json()) as { transaction?: string; error?: string }
+
+        if (!res.ok || !data?.transaction) {
+          throw new Error(data?.error || "Failed to build Solana transaction")
+        }
+
+        const { Transaction } = await import("@solana/web3.js")
+        const tx = Transaction.from(Buffer.from(data.transaction, "base64"))
+
+        const result = await injectedSolflare.signAndSendTransaction(tx)
+
+        await fetch(`/api/payments/${encodeURIComponent(paymentId)}/detect`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ txHash: result.signature }),
+        }).catch(() => null)
+
+        setError("")
+        return
+      }
+
+      console.log("[Solflare] No injected provider, using deeplink flow")
+
       const paymentId = await getPaymentId()
       const session = getStoredSession()
       const origin = window.location.origin
@@ -217,7 +265,7 @@ export default function SolanaWalletPayment({
       onError?.(message)
       setOpeningWallet(null)
     }
-  }, [getPaymentId, intentId, selectedAsset, onError])
+  }, [getPaymentId, getSolflareProvider, intentId, selectedAsset, onError])
 
   // ── Render ────────────────────────────────────────────────────────────────
 
