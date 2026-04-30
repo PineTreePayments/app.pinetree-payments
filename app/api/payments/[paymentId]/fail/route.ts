@@ -5,9 +5,10 @@ import { normalizeToStrictPaymentStatus } from "@/engine/paymentStateMachine"
 
 export async function POST(
   _req: NextRequest,
-  { params }: { params: { paymentId: string } }
+  context: { params: Promise<{ paymentId: string }> }
 ) {
-  const paymentId = String(params.paymentId || "").trim()
+  const { paymentId: rawPaymentId } = await context.params
+  const paymentId = String(rawPaymentId || "").trim()
 
   if (!paymentId) {
     return new Response(JSON.stringify({ error: "Missing paymentId" }), {
