@@ -20,6 +20,11 @@ import {
   getStoredSession,
   storeSession,
 } from "@/lib/solflareDeeplink"
+import {
+  getInjectedPhantomProvider,
+  getSolanaProviderPublicKey,
+  getSolanaTransactionSignature,
+} from "@/lib/wallets/solana"
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -125,6 +130,14 @@ function getSolflareRetryMessage(code: string | null): string {
   return "Solflare connection could not be completed. Please try again."
 }
 
+function getPhantomRetryMessage(code: string | null): string {
+  if (!code) return ""
+  if (code === "not_detected") {
+    return "Phantom could not be detected after opening the wallet. Please open this page in Phantom or install Phantom, then try again."
+  }
+  return "Phantom connection could not be completed. Please try again."
+}
+
 async function logSolflare(
   stage: string,
   payload: Record<string, unknown>,
@@ -162,6 +175,7 @@ export default function PayClient() {
   const statusOverride = searchParams.get("status")
   const solflareAction = searchParams.get("solflare_action")
   const solflareError = searchParams.get("solflare_error")
+  const phantomError = searchParams.get("phantom_error")
   const isWalletBrowserMode =
     walletBrowserMode === "wallet-browser" &&
     walletBrowserWallet === "phantom" &&
@@ -317,6 +331,14 @@ export default function PayClient() {
     window.history.replaceState({}, "", url.toString())
   }, [solflareError])
 
+  // Strip phantom_error param from URL after reading so it doesn't persist on reload
+  useEffect(() => {
+    if (!phantomError) return
+    const url = new URL(window.location.href)
+    url.searchParams.delete("phantom_error")
+    window.history.replaceState({}, "", url.toString())
+  }, [phantomError])
+
   // ── Poll intent status once a payment has been created ────────────────────
 
   useEffect(() => {
@@ -344,7 +366,8 @@ export default function PayClient() {
     const mode = params.get("mode")
     const wallet = params.get("wallet")
 
-    const hasTriggered = sessionStorage.getItem("pinetree_wallet_triggered")
+    const guardKey = paymentId ? `pinetree_wallet_triggered_${paymentId}` : "pinetree_wallet_triggered"
+    const hasTriggered = sessionStorage.getItem(guardKey)
 
     if (
       mode === "wallet-browser" &&
@@ -352,21 +375,27 @@ export default function PayClient() {
       paymentId &&
       !hasTriggered
     ) {
-      sessionStorage.setItem("pinetree_wallet_triggered", "true")
+      sessionStorage.setItem(guardKey, "true")
 
       const run = async () => {
         try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const provider = (window as any).solana
+          const provider = getInjectedPhantomProvider()
 
-          if (!provider || !provider.isPhantom) {
+          if (!provider) {
             console.error("[Phantom] provider not found")
+            const intentIdParam = params.get("intent")
+            window.location.href = intentIdParam
+              ? `/pay?intent=${encodeURIComponent(intentIdParam)}&phantom_error=not_detected`
+              : `/pay?pinetree_payment_id=${encodeURIComponent(paymentId)}&phantom_error=not_detected`
             return
           }
 
-          await provider.connect()
+          const connectResult = await provider.connect()
 
-          const walletPublicKey = provider.publicKey.toString() as string
+          const walletPublicKey = getSolanaProviderPublicKey(provider, connectResult)
+          if (!walletPublicKey) {
+            throw new Error("Unable to read Phantom wallet public key")
+          }
 
           const res = await fetch("/api/solana/build-wallet-transaction", {
             method: "POST",
@@ -385,14 +414,18 @@ export default function PayClient() {
 
           const tx = Transaction.from(Buffer.from(data.transaction, "base64"))
 
-          const result = await provider.signAndSendTransaction(tx) as { signature: string }
+          const result = await provider.signAndSendTransaction(tx)
+          const signature = getSolanaTransactionSignature(result)
+          if (!signature) {
+            throw new Error("Phantom did not return a transaction signature")
+          }
 
-          console.log("PineTree TX SIGNATURE:", result.signature)
+          console.log("PineTree TX SIGNATURE:", signature)
 
           await fetch(`/api/payments/${encodeURIComponent(paymentId)}/detect`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ txHash: result.signature }),
+            body: JSON.stringify({ txHash: signature }),
           }).catch(() => null)
 
           const intentId = params.get("intent")
@@ -1143,7 +1176,7 @@ export default function PayClient() {
                             intentId={intentId!}
                             selectedAsset={asset.symbol === "USDC" ? "USDC" : "SOL"}
                             usdAmount={displayAmount}
-                            initialError={getSolflareRetryMessage(solflareError)}
+                            initialError={getPhantomRetryMessage(phantomError) || getSolflareRetryMessage(solflareError)}
                             onPaymentCreated={() => {
                               void loadIntentCallback()
                             }}

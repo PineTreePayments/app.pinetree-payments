@@ -326,7 +326,6 @@ export default function BaseWalletPayment({
   const { switchChainAsync, status: switchStatus } = useSwitchChain()
 
   const [localError, setLocalError] = useState("")
-  const [resumeMessage, setResumeMessage] = useState("")
   const [hasPendingBaseWcPayment, setHasPendingBaseWcPayment] = useState<boolean>(() => {
     if (typeof window === "undefined") return false
     try {
@@ -473,7 +472,6 @@ export default function BaseWalletPayment({
       const walletConnectProvider = await getWalletConnectProvider(walletConnectConnector)
 
       setIsOpeningWallet(true)
-      setResumeMessage("")
       if (selectedAsset === "USDC") {
         const approvalRequest = buildBaseUsdcApprovalTransaction(txRequest)
         setIsApprovingUsdc(true)
@@ -562,7 +560,6 @@ export default function BaseWalletPayment({
 
   const startWalletConnectPayment = useCallback(() => {
     setLocalError("")
-    setResumeMessage("")
 
     void (async () => {
       try {
@@ -576,12 +573,6 @@ export default function BaseWalletPayment({
 
         storePendingBaseWalletConnectPayment({ intentId, selectedAsset })
         setHasPendingBaseWcPayment(true)
-
-        // Show return instructions before the wallet app opens — connectAsync may never
-        // return if the OS switches to the wallet app and suspends this tab.
-        setResumeMessage(
-          "Return here after approving the connection — the transaction will open automatically."
-        )
 
         const currentAddress = String(address || "").trim()
         if (isConnected && currentAddress) {
@@ -611,7 +602,6 @@ export default function BaseWalletPayment({
             // User explicitly cancelled — clear pending and surface error
             clearPendingBaseWalletConnectPayment()
             setHasPendingBaseWcPayment(false)
-            setResumeMessage("")
             throw connectErr
           }
           // connectAsync threw without a rejection (e.g. wallet app backgrounded this tab).
@@ -632,7 +622,6 @@ export default function BaseWalletPayment({
         if (rejected) {
           clearPendingBaseWalletConnectPayment()
           setHasPendingBaseWcPayment(false)
-          setResumeMessage("")
         }
 
         setLocalError(friendly)
@@ -756,28 +745,15 @@ export default function BaseWalletPayment({
         </div>
       ) : null}
 
-      {hasPendingBaseWcPayment && !isOpeningWallet ? (
-        <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 space-y-2">
-          <p>
-            {resumeMessage || "Transaction did not open? Tap Send Base transaction."}
-          </p>
-          <Button
-            fullWidth
-            variant="secondary"
-            onClick={() => {
-              void logBase("manual-send-click", { hasAddress: Boolean(address), isConnected })
-              if (address) {
-                void continueBasePayment(address)
-              } else {
-                setLocalError(
-                  "Wallet connection not detected yet. Tap Reconnect WalletConnect, then return here."
-                )
-              }
-            }}
-          >
-            Send Base transaction
-          </Button>
-          {!address ? (
+      {hasPendingBaseWcPayment && !isOpeningWallet && !isConnecting && !isPreparingPayment ? (
+        address ? (
+          <div className="text-xs text-gray-500 text-center py-2 flex items-center justify-center gap-2">
+            <span className="inline-block h-3 w-3 rounded-full border border-gray-400 border-t-transparent animate-spin" />
+            Resuming transaction…
+          </div>
+        ) : (
+          <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2 space-y-2">
+            <p>Wallet disconnected. Reconnect to continue.</p>
             <Button
               fullWidth
               variant="secondary"
@@ -794,24 +770,24 @@ export default function BaseWalletPayment({
             >
               Reconnect WalletConnect
             </Button>
-          ) : null}
-        </div>
+          </div>
+        )
       ) : null}
 
       {isConnecting ? (
         <Button fullWidth disabled>
           <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
-          Connecting…
+          Connecting wallet…
         </Button>
       ) : isPreparingPayment ? (
         <Button fullWidth disabled>
           <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
-          Preparing payment…
+          Processing payment…
         </Button>
       ) : isOpeningWallet ? (
         <Button fullWidth disabled>
           <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
-          {isApprovingUsdc ? "Approving USDC…" : selectedAsset === "USDC" ? "Opening wallet for USDC payment…" : "Opening wallet…"}
+          {isApprovingUsdc ? "Approving USDC…" : "Confirming transaction…"}
         </Button>
       ) : (
         <div className="space-y-2">
