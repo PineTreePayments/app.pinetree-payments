@@ -360,6 +360,9 @@ export default function BaseWalletPayment({
   const autoResumeRetryStartedAtRef = useRef<number>(0)
   const paymentSubmittedRef = useRef(false)
   const prefetchedPaymentDataRef = useRef<PaymentData | null>(null)
+  const prefetchedProviderRef = useRef<WalletConnectProvider | null>(null)
+  const prefetchedTxRequestRef = useRef<EvmTransactionRequest | null>(null)
+  const connectedChainIdRef = useRef<number | null>(null)
   const sessionSettleTriggerFiredRef = useRef(false)
 
   const isIntentMode = Boolean(intentId)
@@ -468,13 +471,17 @@ export default function BaseWalletPayment({
         throw new Error("Wallet connected, but no wallet address was returned.")
       }
 
-      console.log("[Base] Continuing Base payment after WalletConnect")
-      await logBase("continue-start", {
+      console.log("[Base ETH] continue-start", { hasAddress: Boolean(fromAddress) })
+      void logBase("continue-start", {
         intentId: intentId || null,
         hasAddress: Boolean(fromAddress),
       })
 
-      if (!isOnBase) {
+      // Skip chain switch if wagmi already reports Base or if the WalletConnect session
+      // was just established on Base (isOnBase may lag behind the actual connected chain).
+      const alreadyOnBase = isOnBase || connectedChainIdRef.current === base.id
+      connectedChainIdRef.current = null
+      if (!alreadyOnBase) {
         try {
           await switchChainAsync({ chainId: base.id })
         } catch (error) {
@@ -485,18 +492,26 @@ export default function BaseWalletPayment({
         }
       }
 
-      await logBase("resolve-payment-start", { intentId: intentId || null })
+      void logBase("resolve-payment-start", { intentId: intentId || null })
       const prefetched = selectedAsset === "ETH" ? prefetchedPaymentDataRef.current : null
       if (prefetched) prefetchedPaymentDataRef.current = null
       const paymentData = prefetched ?? await resolvePaymentData()
       createdPaymentId = paymentData.paymentId
-      await logBase("resolve-payment-result", {
+      void logBase("resolve-payment-result", {
         paymentId: paymentData.paymentId,
         hasPaymentUrl: Boolean(paymentData.paymentUrl),
         prefetched: Boolean(prefetched),
       })
-      const txRequest = parseEthereumPaymentUri(paymentData.paymentUrl)
-      const walletConnectProvider = await getWalletConnectProvider(walletConnectConnector)
+      // Use pre-parsed tx request if available (parsed from prefetched payment URL before connect)
+      const cachedTxRequest = selectedAsset === "ETH" ? prefetchedTxRequestRef.current : null
+      if (cachedTxRequest) prefetchedTxRequestRef.current = null
+      const txRequest = cachedTxRequest ?? parseEthereumPaymentUri(paymentData.paymentUrl)
+      // Use pre-fetched provider if available (fetched concurrently with connectAsync)
+      const cachedProvider = prefetchedProviderRef.current
+      prefetchedProviderRef.current = null
+      console.log("[Base ETH] provider-ready", { prefetched: Boolean(cachedProvider) })
+      void logBase("provider-ready", { prefetched: Boolean(cachedProvider) })
+      const walletConnectProvider = cachedProvider ?? await getWalletConnectProvider(walletConnectConnector)
 
       setIsOpeningWallet(true)
       if (selectedAsset === "USDC") {
@@ -520,12 +535,12 @@ export default function BaseWalletPayment({
         setIsApprovingUsdc(false)
       }
 
-      console.log("[Base] Sending Base transaction via wagmi")
-      await logBase("wallet-client-ready", {
+      console.log("[Base ETH] eth-sendTransaction-requested", { to: txRequest.to, hasData: Boolean(txRequest.data) })
+      void logBase("wallet-client-ready", {
         hasAddress: Boolean(fromAddress),
         chainId: base.id,
       })
-      await logBase("send-transaction-start", {
+      void logBase("eth-sendTransaction-requested", {
         to: txRequest.to,
         hasData: Boolean(txRequest.data),
         hasValue: Boolean(txRequest.value),
@@ -550,12 +565,13 @@ export default function BaseWalletPayment({
 
       paymentSubmittedRef.current = true
 
-      console.log("[Base] Base tx submitted", { txHash: normalizedTxHash })
-      await logBase("tx-submitted", { txHashPrefix: normalizedTxHash.slice(0, 10) })
+      console.log("[Base ETH] eth-sendTransaction-result", { txHashPrefix: normalizedTxHash.slice(0, 10) })
+      void logBase("tx-submitted", { txHashPrefix: normalizedTxHash.slice(0, 10) })
+      void logBase("eth-sendTransaction-result", { txHashPrefix: normalizedTxHash.slice(0, 10) })
 
-      await logBase("detect-start", { paymentId: paymentData.paymentId })
+      void logBase("detect-start", { paymentId: paymentData.paymentId })
       await onSuccess?.(normalizedTxHash, paymentData.paymentId)
-      await logBase("detect-finished", { paymentId: paymentData.paymentId })
+      void logBase("detect-finished", { paymentId: paymentData.paymentId })
 
       clearPendingBaseWalletConnectPayment()
       setHasPendingBaseWcPayment(false)
@@ -631,16 +647,34 @@ export default function BaseWalletPayment({
         })
 
         if (selectedAsset === "ETH") {
-          // Pre-fetch payment data concurrently with WalletConnect connection so that
+          // Pre-fetch payment data, provider, and connect concurrently so that
           // eth_sendTransaction can be dispatched immediately after session settles —
           // before the mobile OS can suspend the browser's WalletConnect WebSocket.
-          const [connectSettled, paymentSettled] = await Promise.allSettled([
+          console.log("[Base ETH] connection-started")
+          void logBase("connection-started", { intentId: intentId || null })
+          const [connectSettled, paymentSettled, providerSettled] = await Promise.allSettled([
             connectAsync({ connector: walletConnectConnector, chainId: base.id }),
             resolvePaymentData(),
+            getWalletConnectProvider(walletConnectConnector),
           ])
 
           if (paymentSettled.status === "fulfilled") {
             prefetchedPaymentDataRef.current = paymentSettled.value
+            console.log("[Base ETH] payment-prefetched", { paymentId: paymentSettled.value.paymentId })
+            void logBase("payment-prefetched", {
+              paymentId: paymentSettled.value.paymentId,
+              hasPaymentUrl: Boolean(paymentSettled.value.paymentUrl),
+            })
+            // Pre-parse the URI so continueBasePayment has zero async work before eth_sendTransaction
+            try {
+              prefetchedTxRequestRef.current = parseEthereumPaymentUri(paymentSettled.value.paymentUrl)
+            } catch {
+              prefetchedTxRequestRef.current = null
+            }
+          }
+
+          if (providerSettled.status === "fulfilled") {
+            prefetchedProviderRef.current = providerSettled.value
           }
 
           if (connectSettled.status === "rejected") {
@@ -654,21 +688,28 @@ export default function BaseWalletPayment({
                 await fetch(`/api/payments/${encodeURIComponent(failId)}/fail`, { method: "POST" }).catch(() => null)
                 prefetchedPaymentDataRef.current = null
               }
+              prefetchedProviderRef.current = null
+              prefetchedTxRequestRef.current = null
               clearPendingBaseWalletConnectPayment()
               setHasPendingBaseWcPayment(false)
               throw connectErr
             }
             // Non-rejection: browser was likely suspended. Prefetched data is preserved
             // for use when the session-settle useEffect or focus handlers resume.
-            await logBase("connect-did-not-return", { message: connectMsg })
+            void logBase("connect-did-not-return", { message: connectMsg })
             return
           }
 
+          // Store the chain ID from the connect result so continueBasePayment can skip
+          // switchChainAsync when the session was established on Base (wagmi state may lag).
+          connectedChainIdRef.current = connectSettled.value.chainId
+
           const fromAddress = extractAddressFromConnectResult(connectSettled.value) || currentAddress
-          console.log("[Base] WalletConnect connect returned", { hasAddress: Boolean(fromAddress) })
-          await logBase("connect-returned", {
+          console.log("[Base ETH] connect-resolved", { hasAddress: Boolean(fromAddress), chainId: connectedChainIdRef.current })
+          void logBase("connect-resolved", {
             hasAccount: Boolean(fromAddress),
             accountPrefix: fromAddress ? fromAddress.slice(0, 8) : null,
+            chainId: connectedChainIdRef.current,
           })
 
           if (fromAddress) {
@@ -868,6 +909,9 @@ export default function BaseWalletPayment({
     paymentSubmittedRef.current = false
     isSendingBaseTxRef.current = false
     prefetchedPaymentDataRef.current = null
+    prefetchedProviderRef.current = null
+    prefetchedTxRequestRef.current = null
+    connectedChainIdRef.current = null
     sessionSettleTriggerFiredRef.current = false
     stopAutoResumeRetry()
     if (autoResumeTimerRef.current) {
