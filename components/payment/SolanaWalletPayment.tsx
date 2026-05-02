@@ -7,17 +7,16 @@ import {
   clearSolflareSession,
   getStoredSession,
 } from "@/lib/solflareDeeplink"
+import {
+  buildPhantomWalletBrowserUrl,
+  getInjectedPhantomProvider,
+  getSolanaProviderPublicKey,
+  getSolanaTransactionSignature,
+  type SolanaBrowserProvider,
+} from "@/lib/wallets/solana"
 
 type SolanaAsset = "SOL" | "USDC"
 type SolanaWalletId = "phantom" | "solflare"
-
-type SolanaBrowserProvider = {
-  isPhantom?: boolean
-  isSolflare?: boolean
-  publicKey?: { toString: () => string }
-  connect: () => Promise<unknown>
-  signAndSendTransaction: (transaction: unknown) => Promise<{ signature: string }>
-}
 
 type Props = {
   intentId?: string
@@ -48,17 +47,48 @@ export default function SolanaWalletPayment({
     directPaymentId ?? null
   )
 
-  function getSolanaWindow() {
-    return window as Window & {
-      solana?: SolanaBrowserProvider
-      solflare?: SolanaBrowserProvider
+  async function sendPhantomTransaction(
+    provider: SolanaBrowserProvider,
+    paymentId: string,
+  ): Promise<void> {
+    const connectResult = await provider.connect()
+
+    const walletPublicKey = getSolanaProviderPublicKey(provider, connectResult)
+    if (!walletPublicKey) {
+      throw new Error("Unable to read Phantom wallet public key")
     }
+
+    const res = await fetch("/api/solana/build-wallet-transaction", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paymentId, walletPublicKey }),
+    })
+
+    const data = (await res.json()) as { transaction?: string; error?: string }
+
+    if (!res.ok || !data?.transaction) {
+      throw new Error(data?.error || "Failed to build Solana transaction")
+    }
+
+    const { Transaction } = await import("@solana/web3.js")
+    const tx = Transaction.from(Buffer.from(data.transaction, "base64"))
+
+    const result = await provider.signAndSendTransaction(tx)
+    const signature = getSolanaTransactionSignature(result)
+    if (!signature) {
+      throw new Error("Phantom did not return a transaction signature")
+    }
+
+    await fetch(`/api/payments/${encodeURIComponent(paymentId)}/detect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ txHash: signature }),
+    }).catch(() => null)
   }
 
-  // Phantom provider only — Solflare uses the deep link flow, not an injected provider
+  // Phantom provider only — Solflare uses the existing Solflare deep link flow
   const getPhantomProvider = useCallback((): SolanaBrowserProvider | null => {
-    const w = getSolanaWindow()
-    return w.solana?.isPhantom === true ? w.solana : null
+    return getInjectedPhantomProvider()
   }, [])
 
   const getSolflareProvider = useCallback((): SolanaBrowserProvider | null => {
@@ -93,7 +123,19 @@ export default function SolanaWalletPayment({
     return id
   }, [intentId, onPaymentCreated, resolvedPaymentId, selectedAsset])
 
-  // ── Phantom: in-browser provider flow (unchanged) ─────────────────────────
+  // ── Phantom: injected-provider desktop flow + mobile wallet-browser fallback ──
+
+  const launchPhantomWalletBrowser = useCallback((paymentId: string) => {
+    const context = {
+      currentHref: window.location.href,
+      paymentId,
+      intentId,
+      selectedAsset,
+      selectedNetwork: "solana",
+    }
+
+    window.location.href = buildPhantomWalletBrowserUrl(context)
+  }, [intentId, selectedAsset])
 
   const handlePhantomClick = useCallback(async () => {
     setError("")
@@ -103,48 +145,24 @@ export default function SolanaWalletPayment({
       const provider = getPhantomProvider()
 
       if (!provider) {
-        throw new Error("Phantom wallet not found. Please install or unlock Phantom.")
+        launchPhantomWalletBrowser(paymentId)
+        return
       }
 
-      await provider.connect()
-
-      const walletPublicKey = provider.publicKey?.toString()
-      if (!walletPublicKey) {
-        throw new Error("Unable to read Phantom wallet public key")
-      }
-
-      const res = await fetch("/api/solana/build-wallet-transaction", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentId, walletPublicKey }),
-      })
-
-      const data = (await res.json()) as { transaction?: string; error?: string }
-
-      if (!res.ok || !data?.transaction) {
-        throw new Error(data?.error || "Failed to build Solana transaction")
-      }
-
-      const { Transaction } = await import("@solana/web3.js")
-      const tx = Transaction.from(Buffer.from(data.transaction, "base64"))
-
-      const result = await provider.signAndSendTransaction(tx)
-
-      await fetch(`/api/payments/${encodeURIComponent(paymentId)}/detect`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ txHash: result.signature }),
-      }).catch(() => null)
+      await sendPhantomTransaction(provider, paymentId)
 
       setError("")
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to send Solana transaction"
       setError(message)
       onError?.(message)
-    } finally {
       setOpeningWallet(null)
+    } finally {
+      if (getPhantomProvider()) {
+        setOpeningWallet(null)
+      }
     }
-  }, [getPaymentId, getPhantomProvider, onError])
+  }, [getPaymentId, getPhantomProvider, launchPhantomWalletBrowser, onError])
 
   // ── Solflare: Universal Link v1 deep link flow ────────────────────────────
   //
@@ -205,11 +223,15 @@ export default function SolanaWalletPayment({
         const tx = Transaction.from(Buffer.from(data.transaction, "base64"))
 
         const result = await injectedSolflare.signAndSendTransaction(tx)
+        const signature = getSolanaTransactionSignature(result)
+        if (!signature) {
+          throw new Error("Solflare did not return a transaction signature")
+        }
 
         await fetch(`/api/payments/${encodeURIComponent(paymentId)}/detect`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ txHash: result.signature }),
+          body: JSON.stringify({ txHash: signature }),
         }).catch(() => null)
 
         setError("")

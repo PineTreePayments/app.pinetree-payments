@@ -31,6 +31,9 @@ const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
+const PHANTOM_PROVIDER_RETRY_TIMEOUT_MS = 4000
+const PHANTOM_PROVIDER_RETRY_INTERVAL_MS = 150
+
 type SplitOutput = {
   address: string
   amount: number
@@ -148,6 +151,21 @@ async function logSolflare(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ stage, payload }),
   }).catch(() => null)
+}
+
+async function waitForInjectedPhantomProvider() {
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt <= PHANTOM_PROVIDER_RETRY_TIMEOUT_MS) {
+    const provider = getInjectedPhantomProvider()
+    if (provider) return provider
+
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, PHANTOM_PROVIDER_RETRY_INTERVAL_MS)
+    })
+  }
+
+  return null
 }
 
 function getCheckoutAssetOptions(networks: string[]): AssetOption[] {
@@ -379,7 +397,7 @@ export default function PayClient() {
 
       const run = async () => {
         try {
-          const provider = getInjectedPhantomProvider()
+          const provider = await waitForInjectedPhantomProvider()
 
           if (!provider) {
             console.error("[Phantom] provider not found")
