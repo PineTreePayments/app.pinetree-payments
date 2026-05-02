@@ -45,6 +45,9 @@ const BASE_ETH_AUTO_RESUME_RETRY_MS = 5000
 const BASE_ETH_AUTO_RESUME_INTERVAL_MS = 250
 const BASE_ETH_TX_REQUEST_TIMEOUT_MS = 90_000
 const BASE_ETH_TX_TIMEOUT_MESSAGE = "Transaction approval was not completed. Tap Pay to try again."
+const BASE_USDC_TX_REQUEST_TIMEOUT_MS = 90_000
+const BASE_USDC_APPROVE_TX_TIMEOUT_MESSAGE = "USDC approval was not completed. Tap Pay to try again."
+const BASE_USDC_SPLIT_TX_TIMEOUT_MESSAGE = "USDC payment confirmation was not completed. Tap Pay to try again."
 const BASE_USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 
 const ERC20_APPROVE_ABI = [
@@ -209,6 +212,34 @@ async function sendWalletConnectTransaction(input: {
   return normalizeHexTransactionHash(txHash)
 }
 
+async function sendWalletConnectTransactionWithTimeout(input: {
+  provider: WalletConnectProvider
+  fromAddress: string
+  txRequest: EvmTransactionRequest
+  timeoutMs: number
+  timeoutMessage: string
+}): Promise<string> {
+  let txTimeoutHandle: ReturnType<typeof setTimeout> | null = null
+
+  try {
+    return await Promise.race([
+      sendWalletConnectTransaction({
+        provider: input.provider,
+        fromAddress: input.fromAddress,
+        txRequest: input.txRequest,
+      }),
+      new Promise<never>((_, reject) => {
+        txTimeoutHandle = setTimeout(
+          () => reject(new Error(input.timeoutMessage)),
+          input.timeoutMs
+        )
+      }),
+    ])
+  } finally {
+    if (txTimeoutHandle !== null) clearTimeout(txTimeoutHandle)
+  }
+}
+
 function buildBaseUsdcApprovalTransaction(txRequest: EvmTransactionRequest): EvmTransactionRequest {
   const decoded = decodeFunctionData({
     abi: SPLIT_TOKEN_ABI,
@@ -307,6 +338,15 @@ function pendingIntentMatches(
   return String(pending.intentId || "") === String(intentId || "")
 }
 
+function pendingPaymentMatches(
+  pending: PendingBaseWalletConnectPayment | null,
+  intentId: string | undefined,
+  selectedAsset: BaseAsset,
+): boolean {
+  if (!pending || !pendingIntentMatches(pending, intentId)) return false
+  return pending.selectedAsset === selectedAsset
+}
+
 function storePendingBaseWalletConnectPayment(input: {
   intentId?: string
   selectedAsset: BaseAsset
@@ -346,7 +386,7 @@ export default function BaseWalletPayment({
   const [hasPendingBaseWcPayment, setHasPendingBaseWcPayment] = useState<boolean>(() => {
     if (typeof window === "undefined") return false
     try {
-      return pendingIntentMatches(getPendingBaseWalletConnectPayment(), intentId)
+      return pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)
     } catch {
       return false
     }
@@ -390,13 +430,13 @@ export default function BaseWalletPayment({
 
   const refreshPendingState = useCallback(() => {
     const pending = getPendingBaseWalletConnectPayment()
-    const matches = pendingIntentMatches(pending, intentId)
+    const matches = pendingPaymentMatches(pending, intentId, selectedAsset)
     setHasPendingBaseWcPayment(matches)
     if (!matches && pending) {
       clearPendingBaseWalletConnectPayment()
     }
     return matches
-  }, [intentId])
+  }, [intentId, selectedAsset])
 
   const resolvePaymentData = useCallback(async (): Promise<PaymentData> => {
     if (!isIntentMode) {
@@ -451,7 +491,7 @@ export default function BaseWalletPayment({
 
   const continueBasePayment = useCallback(async (connectedAddress: string) => {
     if (isSendingBaseTxRef.current) return
-    if (selectedAsset === "ETH" && paymentSubmittedRef.current) return
+    if (paymentSubmittedRef.current) return
     isSendingBaseTxRef.current = true
 
     let createdPaymentId = ""
@@ -462,7 +502,7 @@ export default function BaseWalletPayment({
       }
 
       const pending = getPendingBaseWalletConnectPayment()
-      if (!pendingIntentMatches(pending, intentId)) {
+      if (!pendingPaymentMatches(pending, intentId, selectedAsset)) {
         throw new Error("Base WalletConnect payment session expired. Please try again.")
       }
 
@@ -493,7 +533,9 @@ export default function BaseWalletPayment({
       }
 
       void logBase("resolve-payment-start", { intentId: intentId || null })
-      const prefetched = selectedAsset === "ETH" ? prefetchedPaymentDataRef.current : null
+      const prefetched = selectedAsset === "ETH" || selectedAsset === "USDC"
+        ? prefetchedPaymentDataRef.current
+        : null
       if (prefetched) prefetchedPaymentDataRef.current = null
       const paymentData = prefetched ?? await resolvePaymentData()
       createdPaymentId = paymentData.paymentId
@@ -503,7 +545,9 @@ export default function BaseWalletPayment({
         prefetched: Boolean(prefetched),
       })
       // Use pre-parsed tx request if available (parsed from prefetched payment URL before connect)
-      const cachedTxRequest = selectedAsset === "ETH" ? prefetchedTxRequestRef.current : null
+      const cachedTxRequest = selectedAsset === "ETH" || selectedAsset === "USDC"
+        ? prefetchedTxRequestRef.current
+        : null
       if (cachedTxRequest) prefetchedTxRequestRef.current = null
       const txRequest = cachedTxRequest ?? parseEthereumPaymentUri(paymentData.paymentUrl)
       // Use pre-fetched provider if available (fetched concurrently with connectAsync)
@@ -517,19 +561,21 @@ export default function BaseWalletPayment({
       if (selectedAsset === "USDC") {
         const approvalRequest = buildBaseUsdcApprovalTransaction(txRequest)
         setIsApprovingUsdc(true)
-        await logBase("usdc-approve-start", {
+        void logBase("usdc-approve-start", {
           token: approvalRequest.to,
           spender: txRequest.to,
           hasData: Boolean(approvalRequest.data),
         })
 
-        const approvalTxHash = await sendWalletConnectTransaction({
+        const approvalTxHash = await sendWalletConnectTransactionWithTimeout({
           provider: walletConnectProvider,
           fromAddress,
           txRequest: approvalRequest,
+          timeoutMs: BASE_USDC_TX_REQUEST_TIMEOUT_MS,
+          timeoutMessage: BASE_USDC_APPROVE_TX_TIMEOUT_MESSAGE,
         })
 
-        await logBase("usdc-approve-submitted", {
+        void logBase("usdc-approve-submitted", {
           txHashPrefix: approvalTxHash.slice(0, 10),
         })
         setIsApprovingUsdc(false)
@@ -560,7 +606,15 @@ export default function BaseWalletPayment({
               )
             }),
           ])
-        : sendWalletConnectTransaction({ provider: walletConnectProvider, fromAddress, txRequest }))
+        : selectedAsset === "USDC"
+          ? sendWalletConnectTransactionWithTimeout({
+              provider: walletConnectProvider,
+              fromAddress,
+              txRequest,
+              timeoutMs: BASE_USDC_TX_REQUEST_TIMEOUT_MS,
+              timeoutMessage: BASE_USDC_SPLIT_TX_TIMEOUT_MESSAGE,
+            })
+          : sendWalletConnectTransaction({ provider: walletConnectProvider, fromAddress, txRequest }))
       if (txTimeoutHandle !== null) clearTimeout(txTimeoutHandle)
 
       paymentSubmittedRef.current = true
@@ -586,15 +640,21 @@ export default function BaseWalletPayment({
         ? "Wallet connection rejected by user."
         : message
 
-      const timedOut = message === BASE_ETH_TX_TIMEOUT_MESSAGE
+      const timedOut =
+        message === BASE_ETH_TX_TIMEOUT_MESSAGE ||
+        message === BASE_USDC_APPROVE_TX_TIMEOUT_MESSAGE ||
+        message === BASE_USDC_SPLIT_TX_TIMEOUT_MESSAGE
 
       void logBase("send-transaction-error", { message: friendly, rejected, timedOut })
 
       if (rejected || timedOut || message.toLowerCase().includes("expired") || message.toLowerCase().includes("unavailable")) {
         clearPendingBaseWalletConnectPayment()
         setHasPendingBaseWcPayment(false)
-        // On timeout, also drop pre-fetched payment data so a retry fetches a fresh record.
-        if (timedOut) prefetchedPaymentDataRef.current = null
+        // On timeout, also drop pre-fetched data so a retry fetches a fresh record.
+        if (timedOut) {
+          prefetchedPaymentDataRef.current = null
+          prefetchedTxRequestRef.current = null
+        }
       }
 
       if (rejected && createdPaymentId) {
@@ -646,11 +706,11 @@ export default function BaseWalletPayment({
           connectorName: walletConnectConnector?.name || null,
         })
 
-        if (selectedAsset === "ETH") {
+        if (selectedAsset === "ETH" || selectedAsset === "USDC") {
           // Pre-fetch payment data, provider, and connect concurrently so that
           // eth_sendTransaction can be dispatched immediately after session settles —
           // before the mobile OS can suspend the browser's WalletConnect WebSocket.
-          console.log("[Base ETH] connection-started")
+          console.log("[Base] connection-started", { selectedAsset })
           void logBase("connection-started", { intentId: intentId || null })
           const [connectSettled, paymentSettled, providerSettled] = await Promise.allSettled([
             connectAsync({ connector: walletConnectConnector, chainId: base.id }),
@@ -660,10 +720,11 @@ export default function BaseWalletPayment({
 
           if (paymentSettled.status === "fulfilled") {
             prefetchedPaymentDataRef.current = paymentSettled.value
-            console.log("[Base ETH] payment-prefetched", { paymentId: paymentSettled.value.paymentId })
+            console.log("[Base] payment-prefetched", { paymentId: paymentSettled.value.paymentId, selectedAsset })
             void logBase("payment-prefetched", {
               paymentId: paymentSettled.value.paymentId,
               hasPaymentUrl: Boolean(paymentSettled.value.paymentUrl),
+              selectedAsset,
             })
             // Pre-parse the URI so continueBasePayment has zero async work before eth_sendTransaction
             try {
@@ -705,11 +766,12 @@ export default function BaseWalletPayment({
           connectedChainIdRef.current = connectSettled.value.chainId
 
           const fromAddress = extractAddressFromConnectResult(connectSettled.value) || currentAddress
-          console.log("[Base ETH] connect-resolved", { hasAddress: Boolean(fromAddress), chainId: connectedChainIdRef.current })
+          console.log("[Base] connect-resolved", { selectedAsset, hasAddress: Boolean(fromAddress), chainId: connectedChainIdRef.current })
           void logBase("connect-resolved", {
             hasAccount: Boolean(fromAddress),
             accountPrefix: fromAddress ? fromAddress.slice(0, 8) : null,
             chainId: connectedChainIdRef.current,
+            selectedAsset,
           })
 
           if (fromAddress) {
@@ -771,8 +833,8 @@ export default function BaseWalletPayment({
   }, [])
 
   const resumeFromWalletConnectProvider = useCallback(async (source: string) => {
-    if (selectedAsset !== "ETH") return false
-    if (!pendingIntentMatches(getPendingBaseWalletConnectPayment(), intentId)) return false
+    if (selectedAsset !== "ETH" && selectedAsset !== "USDC") return false
+    if (!pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)) return false
     if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return false
     if (!walletConnectConnector) return false
 
@@ -802,7 +864,7 @@ export default function BaseWalletPayment({
 
   const tryResumeBaseWalletConnectPayment = useCallback((source = "auto") => {
     const pending = getPendingBaseWalletConnectPayment()
-    const hasPending = pendingIntentMatches(pending, intentId)
+    const hasPending = pendingPaymentMatches(pending, intentId, selectedAsset)
 
     setHasPendingBaseWcPayment(hasPending)
     if (!hasPending && pending) {
@@ -824,7 +886,7 @@ export default function BaseWalletPayment({
 
     const skipReason =
       !hasPending ? "no-pending"
-      : selectedAsset !== "ETH" ? "not-eth"
+      : selectedAsset !== "ETH" && selectedAsset !== "USDC" ? "not-base-asset"
       : !isConnected ? "not-connected"
       : !address ? "no-address"
       : isSendingBaseTxRef.current ? "already-sending"
@@ -865,9 +927,9 @@ export default function BaseWalletPayment({
     }, 700)
   }, [address, continueBasePayment, intentId, isConnected, isOpeningWallet, resumeFromWalletConnectProvider, selectedAsset, stopAutoResumeRetry])
 
-  const startBaseEthAutoResumeRetry = useCallback((source: string) => {
-    if (selectedAsset !== "ETH") return
-    if (!pendingIntentMatches(getPendingBaseWalletConnectPayment(), intentId)) return
+  const startBaseWalletConnectAutoResumeRetry = useCallback((source: string) => {
+    if (selectedAsset !== "ETH" && selectedAsset !== "USDC") return
+    if (!pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)) return
     if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return
 
     if (!autoResumeRetryRef.current) {
@@ -884,7 +946,7 @@ export default function BaseWalletPayment({
           elapsed > BASE_ETH_AUTO_RESUME_RETRY_MS ||
           isSendingBaseTxRef.current ||
           paymentSubmittedRef.current ||
-          !pendingIntentMatches(getPendingBaseWalletConnectPayment(), intentId)
+          !pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)
         ) {
           void logBase("auto-resume-retry-stop", { source, elapsed })
           stopAutoResumeRetry()
@@ -930,13 +992,13 @@ export default function BaseWalletPayment({
   }, [stopAutoResumeRetry])
 
   useEffect(() => {
-    startBaseEthAutoResumeRetry("state-change")
-  }, [startBaseEthAutoResumeRetry])
+    startBaseWalletConnectAutoResumeRetry("state-change")
+  }, [startBaseWalletConnectAutoResumeRetry])
 
   useEffect(() => {
-    const handleFocus = () => startBaseEthAutoResumeRetry("focus")
-    const handleVisibilityChange = () => startBaseEthAutoResumeRetry("visibilitychange")
-    const handlePageShow = () => startBaseEthAutoResumeRetry("pageshow")
+    const handleFocus = () => startBaseWalletConnectAutoResumeRetry("focus")
+    const handleVisibilityChange = () => startBaseWalletConnectAutoResumeRetry("visibilitychange")
+    const handlePageShow = () => startBaseWalletConnectAutoResumeRetry("pageshow")
 
     window.addEventListener("focus", handleFocus)
     document.addEventListener("visibilitychange", handleVisibilityChange)
@@ -947,17 +1009,17 @@ export default function BaseWalletPayment({
       document.removeEventListener("visibilitychange", handleVisibilityChange)
       window.removeEventListener("pageshow", handlePageShow)
     }
-  }, [startBaseEthAutoResumeRetry])
+  }, [startBaseWalletConnectAutoResumeRetry])
 
   // Session-settle trigger: fires immediately when wagmi reports a connected address
-  // for an active pending ETH payment, without waiting for browser focus events.
+  // for an active pending Base WalletConnect payment, without waiting for browser focus events.
   // This covers the window where connectAsync resolved (or wagmi reconnected after
   // the WalletConnect session settled) while the browser was briefly active.
   // Fires once per payment intent; focus/visibility/pageshow handlers remain as fallback.
   useEffect(() => {
-    if (selectedAsset !== "ETH") return
+    if (selectedAsset !== "ETH" && selectedAsset !== "USDC") return
     if (!isConnected || !address) return
-    if (!pendingIntentMatches(getPendingBaseWalletConnectPayment(), intentId)) return
+    if (!pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)) return
     if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return
     if (sessionSettleTriggerFiredRef.current) return
     sessionSettleTriggerFiredRef.current = true
@@ -966,7 +1028,7 @@ export default function BaseWalletPayment({
   }, [address, continueBasePayment, intentId, isConnected, selectedAsset, stopAutoResumeRetry])
 
   useEffect(() => {
-    if (selectedAsset !== "ETH") return
+    if (selectedAsset !== "ETH" && selectedAsset !== "USDC") return
     if (!walletConnectConnector) return
 
     let provider: WalletConnectProvider | null = null
@@ -981,7 +1043,7 @@ export default function BaseWalletPayment({
 
       if (eventAddress) {
         if (
-          pendingIntentMatches(getPendingBaseWalletConnectPayment(), intentId) &&
+          pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset) &&
           !isSendingBaseTxRef.current &&
           !paymentSubmittedRef.current
         ) {
