@@ -43,6 +43,8 @@ const BASE_WC_PENDING_KEY = "pinetree_base_wc_pending"
 const BASE_WC_PENDING_TTL_MS = 10 * 60 * 1000
 const BASE_ETH_AUTO_RESUME_RETRY_MS = 5000
 const BASE_ETH_AUTO_RESUME_INTERVAL_MS = 250
+const BASE_ETH_TX_REQUEST_TIMEOUT_MS = 90_000
+const BASE_ETH_TX_TIMEOUT_MESSAGE = "Transaction approval was not completed. Tap Pay to try again."
 const BASE_USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 
 const ERC20_APPROVE_ABI = [
@@ -529,11 +531,22 @@ export default function BaseWalletPayment({
         hasValue: Boolean(txRequest.value),
       })
 
-      const normalizedTxHash = await sendWalletConnectTransaction({
-        provider: walletConnectProvider,
-        fromAddress,
-        txRequest,
-      })
+      // For ETH: race the transaction request against a timeout so that if the wallet
+      // never presents the approval dialog, the checkout clears its "Confirming" state
+      // and shows a retry error instead of hanging indefinitely.
+      let txTimeoutHandle: ReturnType<typeof setTimeout> | null = null
+      const normalizedTxHash = await (selectedAsset === "ETH"
+        ? Promise.race([
+            sendWalletConnectTransaction({ provider: walletConnectProvider, fromAddress, txRequest }),
+            new Promise<never>((_, reject) => {
+              txTimeoutHandle = setTimeout(
+                () => reject(new Error(BASE_ETH_TX_TIMEOUT_MESSAGE)),
+                BASE_ETH_TX_REQUEST_TIMEOUT_MS
+              )
+            }),
+          ])
+        : sendWalletConnectTransaction({ provider: walletConnectProvider, fromAddress, txRequest }))
+      if (txTimeoutHandle !== null) clearTimeout(txTimeoutHandle)
 
       paymentSubmittedRef.current = true
 
@@ -557,11 +570,15 @@ export default function BaseWalletPayment({
         ? "Wallet connection rejected by user."
         : message
 
-      void logBase("send-transaction-error", { message: friendly, rejected })
+      const timedOut = message === BASE_ETH_TX_TIMEOUT_MESSAGE
 
-      if (rejected || message.toLowerCase().includes("expired") || message.toLowerCase().includes("unavailable")) {
+      void logBase("send-transaction-error", { message: friendly, rejected, timedOut })
+
+      if (rejected || timedOut || message.toLowerCase().includes("expired") || message.toLowerCase().includes("unavailable")) {
         clearPendingBaseWalletConnectPayment()
         setHasPendingBaseWcPayment(false)
+        // On timeout, also drop pre-fetched payment data so a retry fetches a fresh record.
+        if (timedOut) prefetchedPaymentDataRef.current = null
       }
 
       if (rejected && createdPaymentId) {
