@@ -35,6 +35,8 @@ type EvmTransactionRequest = {
 
 type WalletConnectProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>
+  on?: (event: string, handler: (...args: unknown[]) => void) => void
+  removeListener?: (event: string, handler: (...args: unknown[]) => void) => void
 }
 
 const BASE_WC_PENDING_KEY = "pinetree_base_wc_pending"
@@ -240,6 +242,8 @@ function buildBaseUsdcApprovalTransaction(txRequest: EvmTransactionRequest): Evm
 
 
 function extractAddressFromConnectResult(result: unknown): string {
+  if (typeof result === "string") return result.trim()
+  if (Array.isArray(result)) return String(result[0] || "").trim()
   if (!result || typeof result !== "object") return ""
 
   const source = result as {
@@ -249,6 +253,15 @@ function extractAddressFromConnectResult(result: unknown): string {
   }
 
   return String(source.accounts?.[0] || source.account || source.addresses?.[0] || "").trim()
+}
+
+function extractAddressFromWalletConnectEvent(args: unknown[]): string {
+  for (const arg of args) {
+    const address = extractAddressFromConnectResult(arg)
+    if (address) return address
+  }
+
+  return ""
 }
 
 function getPendingBaseWalletConnectPayment(): PendingBaseWalletConnectPayment | null {
@@ -344,6 +357,8 @@ export default function BaseWalletPayment({
   const autoResumeRetryRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const autoResumeRetryStartedAtRef = useRef<number>(0)
   const paymentSubmittedRef = useRef(false)
+  const prefetchedPaymentDataRef = useRef<PaymentData | null>(null)
+  const sessionSettleTriggerFiredRef = useRef(false)
 
   const isIntentMode = Boolean(intentId)
   const isOnBase = chain?.id === base.id
@@ -469,11 +484,14 @@ export default function BaseWalletPayment({
       }
 
       await logBase("resolve-payment-start", { intentId: intentId || null })
-      const paymentData = await resolvePaymentData()
+      const prefetched = selectedAsset === "ETH" ? prefetchedPaymentDataRef.current : null
+      if (prefetched) prefetchedPaymentDataRef.current = null
+      const paymentData = prefetched ?? await resolvePaymentData()
       createdPaymentId = paymentData.paymentId
       await logBase("resolve-payment-result", {
         paymentId: paymentData.paymentId,
         hasPaymentUrl: Boolean(paymentData.paymentUrl),
+        prefetched: Boolean(prefetched),
       })
       const txRequest = parseEthereumPaymentUri(paymentData.paymentUrl)
       const walletConnectProvider = await getWalletConnectProvider(walletConnectConnector)
@@ -595,35 +613,78 @@ export default function BaseWalletPayment({
           connectorName: walletConnectConnector?.name || null,
         })
 
-        let fromAddress = ""
-        try {
-          const result = await connectAsync({ connector: walletConnectConnector, chainId: base.id })
-          fromAddress = extractAddressFromConnectResult(result) || currentAddress
+        if (selectedAsset === "ETH") {
+          // Pre-fetch payment data concurrently with WalletConnect connection so that
+          // eth_sendTransaction can be dispatched immediately after session settles —
+          // before the mobile OS can suspend the browser's WalletConnect WebSocket.
+          const [connectSettled, paymentSettled] = await Promise.allSettled([
+            connectAsync({ connector: walletConnectConnector, chainId: base.id }),
+            resolvePaymentData(),
+          ])
+
+          if (paymentSettled.status === "fulfilled") {
+            prefetchedPaymentDataRef.current = paymentSettled.value
+          }
+
+          if (connectSettled.status === "rejected") {
+            const connectErr = connectSettled.reason
+            const connectMsg = connectErr instanceof Error ? connectErr.message : String(connectErr)
+            const connectRejected = isRejectedError(connectErr, connectMsg)
+            if (connectRejected) {
+              // Explicit user cancellation — fail any created payment record
+              const failId = prefetchedPaymentDataRef.current?.paymentId
+              if (failId) {
+                await fetch(`/api/payments/${encodeURIComponent(failId)}/fail`, { method: "POST" }).catch(() => null)
+                prefetchedPaymentDataRef.current = null
+              }
+              clearPendingBaseWalletConnectPayment()
+              setHasPendingBaseWcPayment(false)
+              throw connectErr
+            }
+            // Non-rejection: browser was likely suspended. Prefetched data is preserved
+            // for use when the session-settle useEffect or focus handlers resume.
+            await logBase("connect-did-not-return", { message: connectMsg })
+            return
+          }
+
+          const fromAddress = extractAddressFromConnectResult(connectSettled.value) || currentAddress
           console.log("[Base] WalletConnect connect returned", { hasAddress: Boolean(fromAddress) })
           await logBase("connect-returned", {
             hasAccount: Boolean(fromAddress),
             accountPrefix: fromAddress ? fromAddress.slice(0, 8) : null,
           })
-        } catch (connectErr) {
-          const connectMsg = connectErr instanceof Error ? connectErr.message : String(connectErr)
-          const connectRejected = isRejectedError(connectErr, connectMsg)
-          if (connectRejected) {
-            // User explicitly cancelled — clear pending and surface error
-            clearPendingBaseWalletConnectPayment()
-            setHasPendingBaseWcPayment(false)
-            throw connectErr
-          }
-          // connectAsync threw without a rejection (e.g. wallet app backgrounded this tab).
-          // Pending state survives; the ETH auto-resume retry loop handles continuation
-          // once wagmi reports the connected WalletConnect account after focus returns.
-          await logBase("connect-did-not-return", { message: connectMsg })
-          return
-        }
 
-        if (fromAddress) {
-          await continueBasePayment(fromAddress)
+          if (fromAddress) {
+            await continueBasePayment(fromAddress)
+          }
+        } else {
+          // Non-ETH: original sequential behavior (USDC approval flow unchanged)
+          let fromAddress = ""
+          try {
+            const result = await connectAsync({ connector: walletConnectConnector, chainId: base.id })
+            fromAddress = extractAddressFromConnectResult(result) || currentAddress
+            console.log("[Base] WalletConnect connect returned", { hasAddress: Boolean(fromAddress) })
+            await logBase("connect-returned", {
+              hasAccount: Boolean(fromAddress),
+              accountPrefix: fromAddress ? fromAddress.slice(0, 8) : null,
+            })
+          } catch (connectErr) {
+            const connectMsg = connectErr instanceof Error ? connectErr.message : String(connectErr)
+            const connectRejected = isRejectedError(connectErr, connectMsg)
+            if (connectRejected) {
+              clearPendingBaseWalletConnectPayment()
+              setHasPendingBaseWcPayment(false)
+              throw connectErr
+            }
+            await logBase("connect-did-not-return", { message: connectMsg })
+            return
+          }
+
+          if (fromAddress) {
+            await continueBasePayment(fromAddress)
+          }
         }
-        // No address returned — pending state + manual button handles it
+        // No address returned — pending state + session-settle/focus handlers resume
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to open Base payment"
         const rejected = isRejectedError(err, message)
@@ -641,7 +702,7 @@ export default function BaseWalletPayment({
         onError?.(friendly)
       }
     })()
-  }, [address, connectAsync, continueBasePayment, intentId, isConnected, onError, selectedAsset, walletConnectConnector])
+  }, [address, connectAsync, continueBasePayment, intentId, isConnected, onError, resolvePaymentData, selectedAsset, walletConnectConnector])
 
   const stopAutoResumeRetry = useCallback(() => {
     if (autoResumeRetryRef.current) {
@@ -650,6 +711,36 @@ export default function BaseWalletPayment({
     }
     autoResumeRetryStartedAtRef.current = 0
   }, [])
+
+  const resumeFromWalletConnectProvider = useCallback(async (source: string) => {
+    if (selectedAsset !== "ETH") return false
+    if (!pendingIntentMatches(getPendingBaseWalletConnectPayment(), intentId)) return false
+    if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return false
+    if (!walletConnectConnector) return false
+
+    try {
+      const provider = await getWalletConnectProvider(walletConnectConnector)
+      const accounts = await provider.request({ method: "eth_accounts" })
+      const providerAddress = extractAddressFromConnectResult(accounts)
+
+      await logBase("auto-resume-provider-check", {
+        source,
+        hasProviderAddress: Boolean(providerAddress),
+      })
+
+      if (!providerAddress) return false
+
+      stopAutoResumeRetry()
+      void continueBasePayment(providerAddress)
+      return true
+    } catch (error) {
+      await logBase("auto-resume-provider-check-error", {
+        source,
+        message: error instanceof Error ? error.message : String(error),
+      })
+      return false
+    }
+  }, [continueBasePayment, intentId, selectedAsset, stopAutoResumeRetry, walletConnectConnector])
 
   const tryResumeBaseWalletConnectPayment = useCallback((source = "auto") => {
     const pending = getPendingBaseWalletConnectPayment()
@@ -685,6 +776,9 @@ export default function BaseWalletPayment({
 
     if (skipReason) {
       void logBase("auto-resume-skipped", { reason: skipReason })
+      if (skipReason === "not-connected" || skipReason === "no-address") {
+        void resumeFromWalletConnectProvider(source)
+      }
       return
     }
 
@@ -711,7 +805,7 @@ export default function BaseWalletPayment({
       void logBase("auto-resume-fired", { hasAddress: Boolean(capturedAddress) })
       void continueBasePayment(capturedAddress)
     }, 700)
-  }, [address, continueBasePayment, intentId, isConnected, isOpeningWallet, selectedAsset, stopAutoResumeRetry])
+  }, [address, continueBasePayment, intentId, isConnected, isOpeningWallet, resumeFromWalletConnectProvider, selectedAsset, stopAutoResumeRetry])
 
   const startBaseEthAutoResumeRetry = useCallback((source: string) => {
     if (selectedAsset !== "ETH") return
@@ -740,12 +834,14 @@ export default function BaseWalletPayment({
           return
         }
 
+        void resumeFromWalletConnectProvider(`retry-provider:${source}`)
         tryResumeBaseWalletConnectPayment(`retry:${source}`)
       }, BASE_ETH_AUTO_RESUME_INTERVAL_MS)
     }
 
+    void resumeFromWalletConnectProvider(`provider:${source}`)
     tryResumeBaseWalletConnectPayment(source)
-  }, [intentId, refreshPendingState, selectedAsset, stopAutoResumeRetry, tryResumeBaseWalletConnectPayment])
+  }, [intentId, refreshPendingState, resumeFromWalletConnectProvider, selectedAsset, stopAutoResumeRetry, tryResumeBaseWalletConnectPayment])
 
   useEffect(() => {
     refreshPendingState()
@@ -754,6 +850,8 @@ export default function BaseWalletPayment({
   useEffect(() => {
     paymentSubmittedRef.current = false
     isSendingBaseTxRef.current = false
+    prefetchedPaymentDataRef.current = null
+    sessionSettleTriggerFiredRef.current = false
     stopAutoResumeRetry()
     if (autoResumeTimerRef.current) {
       clearTimeout(autoResumeTimerRef.current)
@@ -789,6 +887,73 @@ export default function BaseWalletPayment({
       window.removeEventListener("pageshow", handlePageShow)
     }
   }, [startBaseEthAutoResumeRetry])
+
+  // Session-settle trigger: fires immediately when wagmi reports a connected address
+  // for an active pending ETH payment, without waiting for browser focus events.
+  // This covers the window where connectAsync resolved (or wagmi reconnected after
+  // the WalletConnect session settled) while the browser was briefly active.
+  // Fires once per payment intent; focus/visibility/pageshow handlers remain as fallback.
+  useEffect(() => {
+    if (selectedAsset !== "ETH") return
+    if (!isConnected || !address) return
+    if (!pendingIntentMatches(getPendingBaseWalletConnectPayment(), intentId)) return
+    if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return
+    if (sessionSettleTriggerFiredRef.current) return
+    sessionSettleTriggerFiredRef.current = true
+    stopAutoResumeRetry()
+    void continueBasePayment(address)
+  }, [address, continueBasePayment, intentId, isConnected, selectedAsset, stopAutoResumeRetry])
+
+  useEffect(() => {
+    if (selectedAsset !== "ETH") return
+    if (!walletConnectConnector) return
+
+    let provider: WalletConnectProvider | null = null
+    let cancelled = false
+
+    const handleProviderEvent = (...args: unknown[]) => {
+      const eventAddress = extractAddressFromWalletConnectEvent(args)
+      void logBase("auto-resume-provider-event", {
+        hasEventAddress: Boolean(eventAddress),
+        argCount: args.length,
+      })
+
+      if (eventAddress) {
+        if (
+          pendingIntentMatches(getPendingBaseWalletConnectPayment(), intentId) &&
+          !isSendingBaseTxRef.current &&
+          !paymentSubmittedRef.current
+        ) {
+          stopAutoResumeRetry()
+          void continueBasePayment(eventAddress)
+        }
+        return
+      }
+
+      void resumeFromWalletConnectProvider("provider-event")
+    }
+
+    void getWalletConnectProvider(walletConnectConnector)
+      .then((resolvedProvider) => {
+        if (cancelled) return
+        provider = resolvedProvider
+        provider.on?.("connect", handleProviderEvent)
+        provider.on?.("accountsChanged", handleProviderEvent)
+        provider.on?.("chainChanged", handleProviderEvent)
+        provider.on?.("session_update", handleProviderEvent)
+        provider.on?.("session_event", handleProviderEvent)
+      })
+      .catch(() => null)
+
+    return () => {
+      cancelled = true
+      provider?.removeListener?.("connect", handleProviderEvent)
+      provider?.removeListener?.("accountsChanged", handleProviderEvent)
+      provider?.removeListener?.("chainChanged", handleProviderEvent)
+      provider?.removeListener?.("session_update", handleProviderEvent)
+      provider?.removeListener?.("session_event", handleProviderEvent)
+    }
+  }, [continueBasePayment, intentId, resumeFromWalletConnectProvider, selectedAsset, stopAutoResumeRetry, walletConnectConnector])
 
   const amountDisplay = (
     <div className="bg-gray-50 rounded-xl px-4 py-3 text-center space-y-1">
