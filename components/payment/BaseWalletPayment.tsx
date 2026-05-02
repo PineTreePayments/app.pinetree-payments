@@ -39,6 +39,8 @@ type WalletConnectProvider = {
 
 const BASE_WC_PENDING_KEY = "pinetree_base_wc_pending"
 const BASE_WC_PENDING_TTL_MS = 10 * 60 * 1000
+const BASE_ETH_AUTO_RESUME_RETRY_MS = 5000
+const BASE_ETH_AUTO_RESUME_INTERVAL_MS = 250
 const BASE_USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 
 const ERC20_APPROVE_ABI = [
@@ -339,10 +341,14 @@ export default function BaseWalletPayment({
   const [isApprovingUsdc, setIsApprovingUsdc] = useState(false)
   const isSendingBaseTxRef = useRef(false)
   const autoResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const autoResumeRetryRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const autoResumeRetryStartedAtRef = useRef<number>(0)
+  const paymentSubmittedRef = useRef(false)
 
   const isIntentMode = Boolean(intentId)
   const isOnBase = chain?.id === base.id
   const isConnecting = connectStatus === "pending" || switchStatus === "pending"
+  const pendingPaymentKey = `${intentId || "direct"}:${selectedAsset}`
 
   const walletConnectConnector = useMemo(
     () => connectors.find(isWalletConnectConnector) || null,
@@ -425,6 +431,7 @@ export default function BaseWalletPayment({
 
   const continueBasePayment = useCallback(async (connectedAddress: string) => {
     if (isSendingBaseTxRef.current) return
+    if (selectedAsset === "ETH" && paymentSubmittedRef.current) return
     isSendingBaseTxRef.current = true
 
     let createdPaymentId = ""
@@ -509,6 +516,8 @@ export default function BaseWalletPayment({
         fromAddress,
         txRequest,
       })
+
+      paymentSubmittedRef.current = true
 
       console.log("[Base] Base tx submitted", { txHash: normalizedTxHash })
       await logBase("tx-submitted", { txHashPrefix: normalizedTxHash.slice(0, 10) })
@@ -605,7 +614,8 @@ export default function BaseWalletPayment({
             throw connectErr
           }
           // connectAsync threw without a rejection (e.g. wallet app backgrounded this tab).
-          // Pending state survives; manual Send Base transaction button handles continuation.
+          // Pending state survives; the ETH auto-resume retry loop handles continuation
+          // once wagmi reports the connected WalletConnect account after focus returns.
           await logBase("connect-did-not-return", { message: connectMsg })
           return
         }
@@ -633,27 +643,43 @@ export default function BaseWalletPayment({
     })()
   }, [address, connectAsync, continueBasePayment, intentId, isConnected, onError, selectedAsset, walletConnectConnector])
 
-  const tryResumeBaseWalletConnectPayment = useCallback(() => {
+  const stopAutoResumeRetry = useCallback(() => {
+    if (autoResumeRetryRef.current) {
+      clearInterval(autoResumeRetryRef.current)
+      autoResumeRetryRef.current = null
+    }
+    autoResumeRetryStartedAtRef.current = 0
+  }, [])
+
+  const tryResumeBaseWalletConnectPayment = useCallback((source = "auto") => {
     const pending = getPendingBaseWalletConnectPayment()
     const hasPending = pendingIntentMatches(pending, intentId)
 
     setHasPendingBaseWcPayment(hasPending)
-    if (!hasPending && pending) clearPendingBaseWalletConnectPayment()
+    if (!hasPending && pending) {
+      clearPendingBaseWalletConnectPayment()
+      stopAutoResumeRetry()
+    }
 
     void logBase("auto-resume-check", {
+      source,
       hasPendingBaseWcPayment: hasPending,
+      selectedAsset,
       isConnected,
       hasAddress: Boolean(address),
       isSending: isSendingBaseTxRef.current,
+      paymentSubmitted: paymentSubmittedRef.current,
       isOpeningWallet,
       visibilityState: typeof document === "undefined" ? "unknown" : document.visibilityState,
     })
 
     const skipReason =
       !hasPending ? "no-pending"
+      : selectedAsset !== "ETH" ? "not-eth"
       : !isConnected ? "not-connected"
       : !address ? "no-address"
       : isSendingBaseTxRef.current ? "already-sending"
+      : paymentSubmittedRef.current ? "already-submitted"
       : isOpeningWallet ? "opening-wallet"
       : null
 
@@ -661,6 +687,8 @@ export default function BaseWalletPayment({
       void logBase("auto-resume-skipped", { reason: skipReason })
       return
     }
+
+    stopAutoResumeRetry()
 
     if (autoResumeTimerRef.current) {
       clearTimeout(autoResumeTimerRef.current)
@@ -676,38 +704,91 @@ export default function BaseWalletPayment({
         void logBase("auto-resume-skipped", { reason: "already-sending-on-fire" })
         return
       }
+      if (paymentSubmittedRef.current) {
+        void logBase("auto-resume-skipped", { reason: "already-submitted-on-fire" })
+        return
+      }
       void logBase("auto-resume-fired", { hasAddress: Boolean(capturedAddress) })
       void continueBasePayment(capturedAddress)
     }, 700)
-  }, [address, continueBasePayment, intentId, isConnected, isOpeningWallet])
+  }, [address, continueBasePayment, intentId, isConnected, isOpeningWallet, selectedAsset, stopAutoResumeRetry])
+
+  const startBaseEthAutoResumeRetry = useCallback((source: string) => {
+    if (selectedAsset !== "ETH") return
+    if (!pendingIntentMatches(getPendingBaseWalletConnectPayment(), intentId)) return
+    if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return
+
+    if (!autoResumeRetryRef.current) {
+      autoResumeRetryStartedAtRef.current = Date.now()
+      void logBase("auto-resume-retry-start", {
+        source,
+        retryMs: BASE_ETH_AUTO_RESUME_RETRY_MS,
+        intervalMs: BASE_ETH_AUTO_RESUME_INTERVAL_MS,
+      })
+
+      autoResumeRetryRef.current = setInterval(() => {
+        const elapsed = Date.now() - autoResumeRetryStartedAtRef.current
+        if (
+          elapsed > BASE_ETH_AUTO_RESUME_RETRY_MS ||
+          isSendingBaseTxRef.current ||
+          paymentSubmittedRef.current ||
+          !pendingIntentMatches(getPendingBaseWalletConnectPayment(), intentId)
+        ) {
+          void logBase("auto-resume-retry-stop", { source, elapsed })
+          stopAutoResumeRetry()
+          refreshPendingState()
+          return
+        }
+
+        tryResumeBaseWalletConnectPayment(`retry:${source}`)
+      }, BASE_ETH_AUTO_RESUME_INTERVAL_MS)
+    }
+
+    tryResumeBaseWalletConnectPayment(source)
+  }, [intentId, refreshPendingState, selectedAsset, stopAutoResumeRetry, tryResumeBaseWalletConnectPayment])
 
   useEffect(() => {
     refreshPendingState()
   }, [refreshPendingState])
 
   useEffect(() => {
+    paymentSubmittedRef.current = false
+    isSendingBaseTxRef.current = false
+    stopAutoResumeRetry()
+    if (autoResumeTimerRef.current) {
+      clearTimeout(autoResumeTimerRef.current)
+      autoResumeTimerRef.current = null
+    }
+  }, [pendingPaymentKey, stopAutoResumeRetry])
+
+  useEffect(() => {
     return () => {
       if (autoResumeTimerRef.current) {
         clearTimeout(autoResumeTimerRef.current)
       }
+      stopAutoResumeRetry()
     }
-  }, [])
+  }, [stopAutoResumeRetry])
 
   useEffect(() => {
-    tryResumeBaseWalletConnectPayment()
-  }, [tryResumeBaseWalletConnectPayment])
+    startBaseEthAutoResumeRetry("state-change")
+  }, [startBaseEthAutoResumeRetry])
 
   useEffect(() => {
-    window.addEventListener("focus", tryResumeBaseWalletConnectPayment)
-    document.addEventListener("visibilitychange", tryResumeBaseWalletConnectPayment)
-    window.addEventListener("pageshow", tryResumeBaseWalletConnectPayment)
+    const handleFocus = () => startBaseEthAutoResumeRetry("focus")
+    const handleVisibilityChange = () => startBaseEthAutoResumeRetry("visibilitychange")
+    const handlePageShow = () => startBaseEthAutoResumeRetry("pageshow")
+
+    window.addEventListener("focus", handleFocus)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    window.addEventListener("pageshow", handlePageShow)
 
     return () => {
-      window.removeEventListener("focus", tryResumeBaseWalletConnectPayment)
-      document.removeEventListener("visibilitychange", tryResumeBaseWalletConnectPayment)
-      window.removeEventListener("pageshow", tryResumeBaseWalletConnectPayment)
+      window.removeEventListener("focus", handleFocus)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+      window.removeEventListener("pageshow", handlePageShow)
     }
-  }, [tryResumeBaseWalletConnectPayment])
+  }, [startBaseEthAutoResumeRetry])
 
   const amountDisplay = (
     <div className="bg-gray-50 rounded-xl px-4 py-3 text-center space-y-1">
