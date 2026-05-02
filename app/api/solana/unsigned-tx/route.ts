@@ -32,6 +32,13 @@ export async function GET(req: NextRequest) {
     if (lower.includes("no longer payable") || lower.includes("not solana network")) {
       return NextResponse.json({ error: message }, { status: 400 })
     }
+    if (
+      lower.includes("solana usdc token account") ||
+      lower.includes("insufficient solana usdc balance") ||
+      lower.includes("pinetree solana usdc mint")
+    ) {
+      return NextResponse.json({ error: message }, { status: 422 })
+    }
 
     return NextResponse.json({ error: message }, { status: 500 })
   }

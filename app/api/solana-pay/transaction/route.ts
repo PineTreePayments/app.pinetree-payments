@@ -132,6 +132,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: message }, { status: 422, headers: CORS_HEADERS })
     }
 
+    if (
+      lower.includes("solana usdc token account") ||
+      lower.includes("insufficient solana usdc balance") ||
+      lower.includes("pinetree solana usdc mint")
+    ) {
+      return NextResponse.json({ error: message }, { status: 422, headers: CORS_HEADERS })
+    }
+
     return NextResponse.json({ error: message }, { status: 500, headers: CORS_HEADERS })
   }
 }

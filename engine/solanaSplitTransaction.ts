@@ -8,7 +8,8 @@ import {
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountIdempotentInstruction,
-  createTransferInstruction
+  createTransferInstruction,
+  getAccount
 } from "@solana/spl-token"
 import { getPaymentById } from "@/database/payments"
 import { getRpcUrl } from "@/engine/config"
@@ -19,6 +20,8 @@ import { normalizeToStrictPaymentStatus } from "./paymentStateMachine"
 const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")
 const SYSTEM_PROGRAM_ADDRESS = SystemProgram.programId.toBase58()
 const USDC_MINT = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
+const USDC_DECIMALS = 6
+const USDC_BASE_UNITS = BigInt(1_000_000)
 
 function toAtomicAmount(value: unknown, label: string): bigint {
   const n = Number(value)
@@ -26,6 +29,42 @@ function toAtomicAmount(value: unknown, label: string): bigint {
     throw new Error(`Invalid atomic amount for ${label} in payment split metadata`)
   }
   return BigInt(Math.round(n))
+}
+
+function formatUsdcAmount(amount: bigint): string {
+  const whole = amount / USDC_BASE_UNITS
+  const fraction = amount % USDC_BASE_UNITS
+  const fractionText = fraction.toString().padStart(USDC_DECIMALS, "0").replace(/0+$/, "")
+  return fractionText ? `${whole.toString()}.${fractionText}` : whole.toString()
+}
+
+async function assertConnectedWalletUsdcBalance(input: {
+  connection: Connection
+  senderAta: PublicKey
+  payerPublicKey: PublicKey
+  requiredAtomic: bigint
+}) {
+  let sourceAccount: Awaited<ReturnType<typeof getAccount>>
+
+  try {
+    sourceAccount = await getAccount(input.connection, input.senderAta, "confirmed")
+  } catch {
+    throw new Error("Connected wallet does not have a Solana USDC token account for PineTree USDC.")
+  }
+
+  if (!sourceAccount.mint.equals(USDC_MINT)) {
+    throw new Error("Connected wallet USDC token account does not match PineTree Solana USDC mint.")
+  }
+
+  if (!sourceAccount.owner.equals(input.payerPublicKey)) {
+    throw new Error("Connected wallet USDC token account is not owned by the connected wallet.")
+  }
+
+  if (sourceAccount.amount < input.requiredAtomic) {
+    throw new Error(
+      `Insufficient Solana USDC balance. Required ${formatUsdcAmount(input.requiredAtomic)} USDC, available ${formatUsdcAmount(sourceAccount.amount)} USDC.`
+    )
+  }
 }
 
 export async function buildSolanaSplitTransactionEngine(input: {
@@ -162,6 +201,13 @@ export async function buildSolanaSplitTransactionEngine(input: {
       getAssociatedTokenAddress(USDC_MINT, merchantPubkey),
       getAssociatedTokenAddress(USDC_MINT, pinetreePubkey)
     ])
+
+    await assertConnectedWalletUsdcBalance({
+      connection,
+      senderAta,
+      payerPublicKey,
+      requiredAtomic: merchantAtomic + feeAtomic
+    })
 
     tx.add(
       // Idempotent ATA creation — no-op if account already exists.

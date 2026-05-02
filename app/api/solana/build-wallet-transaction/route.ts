@@ -50,6 +50,16 @@ export async function POST(req: NextRequest) {
         headers: { "Content-Type": "application/json" },
       })
     }
+    if (
+      lower.includes("solana usdc token account") ||
+      lower.includes("insufficient solana usdc balance") ||
+      lower.includes("pinetree solana usdc mint")
+    ) {
+      return new Response(JSON.stringify({ error: message }), {
+        status: 422,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
 
     return new Response(JSON.stringify({ error: message }), {
       status: 500,
