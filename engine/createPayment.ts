@@ -382,11 +382,13 @@ export async function createPayment(
   // Base USDC V4 metadata is now supported, but the V4 frontend signature flow
   // and backend relayer routes are not wired yet. Keep live Base USDC payments
   // on the current V1 approve → splitToken fallback until those phases ship.
-  const requestedBaseUsdcStrategy = network === "base" && requestedAsset === "USDC"
+  const isBaseUsdcPayment = network === "base" && requestedAsset === "USDC"
+  const requestedBaseUsdcStrategy = isBaseUsdcPayment
     ? getBaseUsdcStrategy()
     : undefined
+  const isBaseUsdcV4ConfigValid = isBaseUsdcPayment ? isBaseUsdcV4Configured() : false
   const baseUsdcStrategy: BaseUsdcStrategy | undefined =
-    requestedBaseUsdcStrategy === "v4_eip3009_relayer" && !isBaseUsdcV4Configured()
+    requestedBaseUsdcStrategy === "v4_eip3009_relayer" && !isBaseUsdcV4ConfigValid
       ? "v1_approve_splitToken"
       : requestedBaseUsdcStrategy
 
@@ -404,6 +406,23 @@ export async function createPayment(
   })
 
   const splitContract = splitPayment.splitContract || extractEvmSplitContractFromPaymentUrl(splitPayment.paymentUrl)
+  const paymentUrlKind = splitPayment.paymentUrl.startsWith("pinetree://base-usdc-v4")
+    ? "pinetree://base-usdc-v4"
+    : splitPayment.paymentUrl.startsWith("ethereum:")
+      ? "ethereum:"
+      : "other"
+
+  if (isBaseUsdcPayment) {
+    console.info("[payment:create][base-usdc] strategy resolved", {
+      paymentId,
+      selectedStrategy: baseUsdcStrategy,
+      requestedStrategy: requestedBaseUsdcStrategy,
+      isV4ConfigValid: isBaseUsdcV4ConfigValid,
+      metadataBaseUsdcStrategy: baseUsdcStrategy,
+      metadataSplitContract: splitContract,
+      paymentUrlKind
+    })
+  }
 
   /* ---------------------------
      INSERT PAYMENT RECORD

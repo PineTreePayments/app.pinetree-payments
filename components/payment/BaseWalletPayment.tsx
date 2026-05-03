@@ -28,6 +28,7 @@ type PaymentData = {
   paymentId: string
   paymentUrl: string
   baseUsdcStrategy?: BaseUsdcStrategy
+  splitContract?: string
 }
 
 type BaseUsdcV4Authorization = {
@@ -307,6 +308,21 @@ function isBaseUsdcV4Unavailable(result: { unavailable?: boolean; code?: string 
   return result.unavailable === true || result.code === "BASE_USDC_TEMPORARILY_UNAVAILABLE"
 }
 
+function resolveBaseUsdcStrategyFromResponse(result: {
+  baseUsdcStrategy?: BaseUsdcStrategy
+  metadata?: { split?: { baseUsdcStrategy?: unknown } }
+}): BaseUsdcStrategy | undefined {
+  const strategy = String(
+    result.metadata?.split?.baseUsdcStrategy || result.baseUsdcStrategy || ""
+  ).trim()
+
+  if (strategy === "v4_eip3009_relayer" || strategy === "v1_approve_splitToken") {
+    return strategy
+  }
+
+  return undefined
+}
+
 function buildBaseUsdcApprovalTransaction(txRequest: EvmTransactionRequest): EvmTransactionRequest {
   const decoded = decodeFunctionData({
     abi: SPLIT_TOKEN_ABI,
@@ -544,14 +560,17 @@ export default function BaseWalletPayment({
         paymentId?: string
         paymentUrl?: string
         baseUsdcStrategy?: BaseUsdcStrategy
+        metadata?: {
+          split?: {
+            baseUsdcStrategy?: BaseUsdcStrategy
+            splitContract?: string
+          }
+        }
       }
       const paymentId = String(result.paymentId || "").trim()
       const paymentUrl = String(result.paymentUrl || "").trim()
-      const baseUsdcStrategy = result.baseUsdcStrategy === "v4_eip3009_relayer"
-        ? "v4_eip3009_relayer"
-        : result.baseUsdcStrategy === "v1_approve_splitToken"
-          ? "v1_approve_splitToken"
-          : undefined
+      const baseUsdcStrategy = resolveBaseUsdcStrategyFromResponse(result)
+      const splitContract = String(result.metadata?.split?.splitContract || "").trim() || undefined
 
       if (!paymentId || !paymentUrl) {
         throw new Error("Incomplete payment data returned from server")
@@ -560,8 +579,20 @@ export default function BaseWalletPayment({
       onPaymentCreated?.(paymentId)
 
       console.log("BASE PAYMENT URL:", paymentUrl)
+      if (selectedAsset === "USDC") {
+        console.info("[Base USDC] strategy response", {
+          paymentId,
+          baseUsdcStrategy,
+          splitContract,
+          paymentUrlKind: paymentUrl.startsWith("pinetree://base-usdc-v4")
+            ? "pinetree://base-usdc-v4"
+            : paymentUrl.startsWith("ethereum:")
+              ? "ethereum:"
+              : "other"
+        })
+      }
 
-      return { paymentId, paymentUrl, baseUsdcStrategy }
+      return { paymentId, paymentUrl, baseUsdcStrategy, splitContract }
     } finally {
       setIsPreparingPayment(false)
     }
@@ -572,6 +603,9 @@ export default function BaseWalletPayment({
     provider: WalletConnectProvider
     fromAddress: string
   }): Promise<string> => {
+    console.info("[Base USDC V4] base-usdc-v4-prepare-start", {
+      paymentId: input.paymentData.paymentId
+    })
     setBaseUsdcV4Status("Preparing USDC authorization...")
     const prepareRes = await fetch(
       `/api/payments/${encodeURIComponent(input.paymentData.paymentId)}/base-usdc-v4/prepare-authorization`,
@@ -584,6 +618,10 @@ export default function BaseWalletPayment({
     const prepare = (await prepareRes.json()) as BaseUsdcV4PrepareResponse
     if (!prepareRes.ok) throw new Error(prepare.error || "Failed to prepare Base USDC authorization")
     if (isBaseUsdcV4Unavailable(prepare)) {
+      console.info("[Base USDC V4] base-usdc-v4-unavailable", {
+        paymentId: input.paymentData.paymentId,
+        stage: "prepare"
+      })
       throw new Error(prepare.message || BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE)
     }
     if (!prepare.typedData || !prepare.authorization) {
@@ -591,13 +629,23 @@ export default function BaseWalletPayment({
     }
 
     setBaseUsdcV4Status("Sign USDC payment authorization...")
+    console.info("[Base USDC V4] base-usdc-v4-signature-requested", {
+      paymentId: input.paymentData.paymentId
+    })
     const signature = await signBaseUsdcV4AuthorizationWithTimeout({
       provider: input.provider,
       fromAddress: input.fromAddress,
       typedData: prepare.typedData
     })
+    console.info("[Base USDC V4] base-usdc-v4-signature-received", {
+      paymentId: input.paymentData.paymentId,
+      signaturePrefix: signature.slice(0, 10)
+    })
 
     setBaseUsdcV4Status("Relaying payment...")
+    console.info("[Base USDC V4] base-usdc-v4-relay-start", {
+      paymentId: input.paymentData.paymentId
+    })
     const relayRes = await fetch(
       `/api/payments/${encodeURIComponent(input.paymentData.paymentId)}/base-usdc-v4/relay`,
       {
@@ -613,10 +661,18 @@ export default function BaseWalletPayment({
     const relay = (await relayRes.json()) as BaseUsdcV4RelayResponse
     if (!relayRes.ok) throw new Error(relay.error || "Failed to relay Base USDC payment")
     if (isBaseUsdcV4Unavailable(relay)) {
+      console.info("[Base USDC V4] base-usdc-v4-unavailable", {
+        paymentId: input.paymentData.paymentId,
+        stage: "relay"
+      })
       throw new Error(relay.message || BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE)
     }
 
     const txHash = normalizeHexTransactionHash(relay.txHash)
+    console.info("[Base USDC V4] base-usdc-v4-relay-result", {
+      paymentId: input.paymentData.paymentId,
+      txHashPrefix: txHash.slice(0, 10)
+    })
     setBaseUsdcV4Status("Processing payment...")
     return txHash
   }, [])
@@ -694,6 +750,15 @@ export default function BaseWalletPayment({
       createdBaseUsdcV4Payment = isBaseUsdcV4
 
       if (isBaseUsdcV4) {
+        console.info("[Base USDC V4] base-usdc-v4-strategy-detected", {
+          paymentId: paymentData.paymentId,
+          splitContract: paymentData.splitContract,
+          paymentUrlKind: paymentData.paymentUrl.startsWith("pinetree://base-usdc-v4")
+            ? "pinetree://base-usdc-v4"
+            : paymentData.paymentUrl.startsWith("ethereum:")
+              ? "ethereum:"
+              : "other"
+        })
         const normalizedTxHash = await executeBaseUsdcV4Payment({
           paymentData,
           provider: walletConnectProvider,

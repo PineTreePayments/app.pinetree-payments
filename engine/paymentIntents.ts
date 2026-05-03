@@ -293,6 +293,13 @@ export async function selectPaymentIntentNetworkEngine(input: {
     const walletUrl = normalizedNetwork === "solana"
       ? String(payment.paymentUrl || "")
       : String(payment.universalUrl || payment.paymentUrl || "")
+    const persistedSplit = (persistedPayment.metadata as { split?: Record<string, unknown> } | null)?.split
+    const persistedBaseUsdcStrategy = persistedSplit?.baseUsdcStrategy === "v4_eip3009_relayer"
+      ? "v4_eip3009_relayer"
+      : persistedSplit?.baseUsdcStrategy === "v1_approve_splitToken"
+        ? "v1_approve_splitToken"
+        : payment.baseUsdcStrategy
+    const persistedSplitContract = String(persistedSplit?.splitContract || payment.address || "").trim() || undefined
 
     return {
       intentId: intent.id,
@@ -309,7 +316,13 @@ export async function selectPaymentIntentNetworkEngine(input: {
       universalUrl: payment.universalUrl,
       nativeAmount: payment.nativeAmount,
       nativeSymbol: payment.nativeSymbol,
-      baseUsdcStrategy: payment.baseUsdcStrategy,
+      baseUsdcStrategy: persistedBaseUsdcStrategy,
+      metadata: {
+        split: {
+          baseUsdcStrategy: persistedBaseUsdcStrategy,
+          splitContract: persistedSplitContract
+        }
+      },
       alreadySelected: false
     }
   } catch (error) {
