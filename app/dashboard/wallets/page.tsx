@@ -148,9 +148,9 @@ export default function WalletsPage() {
           )}
 
           {wallets.map((w) => (
-            <div key={w.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border rounded-xl p-5 min-h-[90px]">
+          <div key={w.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white rounded-2xl shadow-sm p-6 min-h-[90px] hover:shadow-md transition-shadow">
               <div>
-                <p className="text-sm text-blue-600 font-medium mb-1">
+                <p className="text-base font-semibold text-gray-800 mb-1">
                   {formatProvider(w.provider, w.network)}
                 </p>
 
