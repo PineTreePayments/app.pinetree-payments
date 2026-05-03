@@ -224,6 +224,71 @@ export async function selectPaymentIntentNetworkEngine(input: {
     throw new Error("Selected network is not enabled for this merchant")
   }
 
+  // Fast-path: reuse an active payment when the intent already has one for the same
+  // network and asset. This prevents creating a duplicate payment (and marking the
+  // active one INCOMPLETE) when the checkout resumes after a browser suspension —
+  // e.g. when the customer returns from a mobile wallet mid V4 EIP-3009 signing.
+  if (intent.payment_id) {
+    const existingPayment = await getPaymentById(intent.payment_id)
+    if (existingPayment) {
+      const existingStatus = String(existingPayment.status || "").toUpperCase()
+      const existingNetwork = String(existingPayment.network || "").toLowerCase().trim()
+      const existingMeta = (existingPayment.metadata ?? null) as {
+        selectedAsset?: string
+        split?: { baseUsdcStrategy?: string; splitContract?: string }
+      } | null
+      const existingSelectedAsset = String(existingMeta?.selectedAsset || "").toUpperCase()
+      const isSameNetwork = existingNetwork === normalizedNetwork
+      const isSameAsset = !selectedAsset || existingSelectedAsset === String(selectedAsset || "").toUpperCase()
+      const isActiveStatus = existingStatus === "CREATED" || existingStatus === "PENDING" || existingStatus === "PROCESSING"
+
+      if (isActiveStatus && isSameNetwork && isSameAsset) {
+        const existingSplit = existingMeta?.split
+        const reuseStrategy = existingSplit?.baseUsdcStrategy === "v4_eip3009_relayer"
+          ? "v4_eip3009_relayer" as const
+          : existingSplit?.baseUsdcStrategy === "v1_approve_splitToken"
+            ? "v1_approve_splitToken" as const
+            : undefined
+        const reuseSplitContract = String(existingSplit?.splitContract || "").trim() || undefined
+        const reusePaymentUrl = String(existingPayment.payment_url || "").trim()
+        const reuseWalletUrl = reusePaymentUrl
+
+        console.info("[payment-intent] select-network:reuse-existing", {
+          intentId: intent.id,
+          paymentId: existingPayment.id,
+          network: normalizedNetwork,
+          status: existingStatus,
+          durationMs: Date.now() - startedAt
+        })
+
+        return {
+          intentId: intent.id,
+          paymentId: existingPayment.id,
+          network: normalizedNetwork,
+          selectedNetwork: normalizedNetwork,
+          asset: selectedAsset,
+          provider: String(existingPayment.provider || ""),
+          paymentUrl: reusePaymentUrl,
+          qrCodeUrl: String(existingPayment.qr_code_url || ""),
+          address: reuseSplitContract,
+          walletUrl: reuseWalletUrl || undefined,
+          walletOptions: buildWalletOptions(reuseWalletUrl, normalizedNetwork),
+          universalUrl: undefined,
+          nativeAmount: undefined,
+          nativeSymbol: undefined,
+          baseUsdcStrategy: reuseStrategy,
+          metadata: {
+            split: {
+              baseUsdcStrategy: reuseStrategy,
+              splitContract: reuseSplitContract
+            }
+          },
+          alreadySelected: true
+        }
+      }
+    }
+  }
+
   // Capture the old payment ID before entering the try block. markPaymentIncomplete is
   // called only AFTER the new payment is successfully created and linked — if creation
   // fails the intent must still point to the old PENDING payment so the user can retry.

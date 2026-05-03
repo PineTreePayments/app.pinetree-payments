@@ -735,6 +735,7 @@ export default function BaseWalletPayment({
         }
       }
 
+      setIsOpeningWallet(true)
       void logBase("resolve-payment-start", { intentId: intentId || null })
       const prefetched = selectedAsset === "ETH" || selectedAsset === "USDC"
         ? prefetchedPaymentDataRef.current
@@ -759,7 +760,6 @@ export default function BaseWalletPayment({
       void logBase("provider-ready", { prefetched: Boolean(cachedProvider) })
       const walletConnectProvider = cachedProvider ?? await getWalletConnectProvider(walletConnectConnector)
 
-      setIsOpeningWallet(true)
       const isBaseUsdcV4 = selectedAsset === "USDC" && paymentData.baseUsdcStrategy === "v4_eip3009_relayer"
       createdBaseUsdcV4Payment = isBaseUsdcV4
 
@@ -1144,6 +1144,7 @@ export default function BaseWalletPayment({
     const skipReason =
       !hasPending ? "no-pending"
       : selectedAsset !== "ETH" && selectedAsset !== "USDC" ? "not-base-asset"
+      : activeBaseUsdcV4PaymentRef.current !== null ? "v4-active"
       : !isConnected ? "not-connected"
       : !address ? "no-address"
       : isSendingBaseTxRef.current ? "already-sending"
@@ -1188,6 +1189,7 @@ export default function BaseWalletPayment({
     if (selectedAsset !== "ETH" && selectedAsset !== "USDC") return
     if (!pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)) return
     if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return
+    if (activeBaseUsdcV4PaymentRef.current !== null) return
 
     if (!autoResumeRetryRef.current) {
       autoResumeRetryStartedAtRef.current = Date.now()
@@ -1304,7 +1306,8 @@ export default function BaseWalletPayment({
         if (
           pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset) &&
           !isSendingBaseTxRef.current &&
-          !paymentSubmittedRef.current
+          !paymentSubmittedRef.current &&
+          activeBaseUsdcV4PaymentRef.current === null
         ) {
           stopAutoResumeRetry()
           void continueBasePayment(eventAddress)
