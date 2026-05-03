@@ -148,7 +148,7 @@ export default function WalletsPage() {
           )}
 
           {wallets.map((w) => (
-          <div key={w.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white rounded-2xl shadow-sm p-6 min-h-[90px] hover:shadow-md transition-shadow">
+          <div key={w.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white border border-blue-100 rounded-2xl p-6 min-h-[90px] shadow-[0_4px_24px_rgba(0,0,0,0.06),0_0_20px_rgba(125,63,224,0.12)] transition-all duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_20px_60px_rgba(0,0,0,0.12),0_0_40px_rgba(125,63,224,0.25)]">
               <div>
                 <p className="text-base font-semibold text-gray-800 mb-1">
                   {formatProvider(w.provider, w.network)}

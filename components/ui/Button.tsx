@@ -32,7 +32,7 @@ export default function Button({
         disabled={disabled}
         onClick={onClick}
         style={{ background: disabled ? undefined : primaryBlue }}
-        className={`${base} border border-transparent text-white shadow-sm hover:brightness-110 hover:shadow-md disabled:bg-blue-100 disabled:text-blue-300 disabled:shadow-none ${fullWidth ? "w-full" : ""} ${className}`}
+        className={`${base} border border-transparent text-white shadow-sm hover:brightness-110 hover:shadow-md disabled:bg-[#1652f0] disabled:text-white disabled:opacity-60 disabled:shadow-none ${fullWidth ? "w-full" : ""} ${className}`}
       >
         {children}
       </button>

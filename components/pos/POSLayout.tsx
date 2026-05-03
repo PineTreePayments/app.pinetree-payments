@@ -388,7 +388,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
           <div className="space-y-4">
             <AmountDisplay amount={displayAmount} />
             <Keypad digits={digits} setDigits={setDigits} showDecimal />
-            <div className="max-w-[300px] mx-auto mt-2">
+            <div className="max-w-[340px] mx-auto mt-2">
               <Button fullWidth disabled={subtotalNum <= 0} onClick={goToConfirm}>
                 Charge
               </Button>
@@ -508,7 +508,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
               </p>
             )}
 
-            <div className="max-w-[300px] mx-auto space-y-2">
+            <div className="max-w-[340px] mx-auto space-y-2">
               <Button fullWidth disabled={!cashDigits || cashTendered < totalDue} onClick={confirmCashTender}>
                 Confirm
               </Button>

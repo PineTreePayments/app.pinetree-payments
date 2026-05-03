@@ -40,12 +40,11 @@ export default function Keypad({
     setDigits((prev: string) => prev.slice(0, -1))
   }
 
-  // Use the same height/padding as the shared Button component (h-10, px-4) for visual consistency.
   const btn =
-    "h-10 rounded-md border border-gray-200 bg-white text-gray-900 font-semibold text-sm shadow-sm transition-all duration-150 hover:border-blue-300 hover:bg-blue-50 hover:shadow-md active:translate-y-[1px] active:bg-blue-100 active:shadow-sm"
+    "h-14 rounded-xl border border-gray-200 bg-white text-gray-900 font-semibold text-base shadow transition-all duration-150 hover:border-blue-300 hover:bg-blue-50 hover:shadow-md active:translate-y-[1px] active:bg-blue-100 active:shadow-sm"
 
   return (
-    <div className="grid grid-cols-3 gap-3 max-w-[300px] mx-auto">
+    <div className="grid grid-cols-3 gap-3 max-w-[340px] mx-auto">
 
       {[1,2,3,4,5,6,7,8,9].map((n) => (
         <button

@@ -328,9 +328,8 @@ export default function SolanaWalletPayment({
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="space-y-2">
         <Button
-          variant="secondary"
           fullWidth
           onClick={() => void handlePhantomClick()}
           disabled={openingWallet !== null}
@@ -338,7 +337,6 @@ export default function SolanaWalletPayment({
           {openingWallet === "phantom" ? "Opening..." : "Pay with Phantom"}
         </Button>
         <Button
-          variant="secondary"
           fullWidth
           onClick={() => void handleSolflareDeeplinkClick()}
           disabled={openingWallet !== null}
