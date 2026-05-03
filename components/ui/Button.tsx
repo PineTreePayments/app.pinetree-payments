@@ -23,12 +23,15 @@ export default function Button({
     "inline-flex items-center justify-center font-semibold text-sm rounded-full h-[46px] px-6 transition-all focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]"
 
   if (variant === "primary") {
+    // Use a solid professional blue for primary actions, matching the Coinbase style.
+    // The color #1652f0 is the suggested primary blue; fallback to #0052FF if needed.
+    const primaryBlue = "#1652f0";
     return (
       <button
         type={type}
         disabled={disabled}
         onClick={onClick}
-        style={{ background: disabled ? undefined : "linear-gradient(135deg, #5cc8ff 0%, #7d3fe0 100%)" }}
+        style={{ background: disabled ? undefined : primaryBlue }}
         className={`${base} text-white hover:brightness-110 disabled:bg-gray-300 disabled:text-gray-500 ${fullWidth ? "w-full" : ""} ${className}`}
       >
         {children}

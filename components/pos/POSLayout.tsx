@@ -453,14 +453,12 @@ export default function POSLayout({ locked, terminalContext }: Props) {
                     onClick={startCash}
                     className="flex flex-col items-center gap-1.5 py-4 rounded-xl border border-gray-200 bg-gray-50 text-gray-800 font-semibold text-sm hover:bg-gray-100 hover:border-gray-300 transition"
                   >
-                    <span className="text-xl">💵</span>
                     Cash
                   </button>
                   <button
                     onClick={startCrypto}
                     className="flex flex-col items-center gap-1.5 py-4 rounded-xl border border-gray-200 bg-gray-50 text-gray-800 font-semibold text-sm hover:bg-gray-100 hover:border-gray-300 transition"
                   >
-                    <span className="text-xl">₿</span>
                     Crypto
                   </button>
                   <button
@@ -468,7 +466,6 @@ export default function POSLayout({ locked, terminalContext }: Props) {
                     title={!availableMethods.card ? "Card payments not connected" : undefined}
                     className="flex flex-col items-center gap-1.5 py-4 rounded-xl border border-gray-200 bg-gray-50 text-gray-400 font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed transition"
                   >
-                    <span className="text-xl">💳</span>
                     Card
                   </button>
                 </div>
