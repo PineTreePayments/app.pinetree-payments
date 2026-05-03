@@ -49,6 +49,7 @@ type BaseUsdcV4PrepareResponse = {
 
 type BaseUsdcV4RelayResponse = {
   ok?: boolean
+  status?: string
   unavailable?: boolean
   code?: string
   message?: string
@@ -489,6 +490,7 @@ export default function BaseWalletPayment({
   const prefetchedTxRequestRef = useRef<EvmTransactionRequest | null>(null)
   const connectedChainIdRef = useRef<number | null>(null)
   const sessionSettleTriggerFiredRef = useRef(false)
+  const activeBaseUsdcV4PaymentRef = useRef<string | null>(null)
 
   const isIntentMode = Boolean(intentId)
   const isOnBase = chain?.id === base.id
@@ -603,6 +605,13 @@ export default function BaseWalletPayment({
     provider: WalletConnectProvider
     fromAddress: string
   }): Promise<string> => {
+    if (activeBaseUsdcV4PaymentRef.current === input.paymentData.paymentId) {
+      throw new Error("Base USDC V4 payment is already in progress. Please wait for the current attempt to finish.")
+    }
+
+    activeBaseUsdcV4PaymentRef.current = input.paymentData.paymentId
+
+    try {
     console.info("[Base USDC V4] base-usdc-v4-prepare-start", {
       paymentId: input.paymentData.paymentId
     })
@@ -671,10 +680,15 @@ export default function BaseWalletPayment({
     const txHash = normalizeHexTransactionHash(relay.txHash)
     console.info("[Base USDC V4] base-usdc-v4-relay-result", {
       paymentId: input.paymentData.paymentId,
+      status: relay.status || "submitted",
       txHashPrefix: txHash.slice(0, 10)
     })
     setBaseUsdcV4Status("Processing payment...")
     return txHash
+    } catch (error) {
+      activeBaseUsdcV4PaymentRef.current = null
+      throw error
+    }
   }, [])
 
   const continueBasePayment = useCallback(async (connectedAddress: string) => {
@@ -767,7 +781,16 @@ export default function BaseWalletPayment({
 
         paymentSubmittedRef.current = true
         void logBase("usdc-v4-relayed", { txHashPrefix: normalizedTxHash.slice(0, 10) })
+        console.info("[Base USDC V4] base-usdc-v4-detect-start", {
+          paymentId: paymentData.paymentId,
+          txHashPrefix: normalizedTxHash.slice(0, 10)
+        })
         await onSuccess?.(normalizedTxHash, paymentData.paymentId)
+        console.info("[Base USDC V4] base-usdc-v4-detect-result", {
+          paymentId: paymentData.paymentId,
+          txHashPrefix: normalizedTxHash.slice(0, 10)
+        })
+        activeBaseUsdcV4PaymentRef.current = null
 
         clearPendingBaseWalletConnectPayment()
         setHasPendingBaseWcPayment(false)
@@ -870,7 +893,16 @@ export default function BaseWalletPayment({
 
       void logBase("send-transaction-error", { message: friendly, rejected, timedOut })
 
-      if (rejected || timedOut || message.toLowerCase().includes("expired") || message.toLowerCase().includes("unavailable")) {
+      // V4 errors always clear pending state — each attempt needs fresh prepare + sign,
+      // so auto-resume retrying on a V4 error would only trigger repeated signing prompts.
+      const shouldClearPending =
+        rejected ||
+        timedOut ||
+        message.toLowerCase().includes("expired") ||
+        message.toLowerCase().includes("unavailable") ||
+        createdBaseUsdcV4Payment
+
+      if (shouldClearPending) {
         clearPendingBaseWalletConnectPayment()
         setHasPendingBaseWcPayment(false)
         // On timeout, also drop pre-fetched data so a retry fetches a fresh record.
@@ -1199,6 +1231,7 @@ export default function BaseWalletPayment({
     prefetchedProviderRef.current = null
     prefetchedTxRequestRef.current = null
     setBaseUsdcV4Status("")
+    activeBaseUsdcV4PaymentRef.current = null
     connectedChainIdRef.current = null
     sessionSettleTriggerFiredRef.current = false
     stopAutoResumeRetry()

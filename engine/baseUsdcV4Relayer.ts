@@ -39,7 +39,10 @@ const TERMINAL_PAYMENT_STATUSES = new Set([
 ])
 
 const V4_ABI = [
-  "function payWithUsdcAuthorization((address payer,address merchant,address treasury,uint256 merchantAmount,uint256 feeAmount,string paymentRef) payment,(uint256 validAfter,uint256 validBefore,bytes32 nonce) authorization,(uint8 v,bytes32 r,bytes32 s) signature)"
+  "function payWithUsdcAuthorization((address payer,address merchant,address treasury,uint256 merchantAmount,uint256 feeAmount,string paymentRef) payment,(uint256 validAfter,uint256 validBefore,bytes32 nonce) authorization,(uint8 v,bytes32 r,bytes32 s) signature)",
+  "function relayers(address relayer) view returns (bool)",
+  "function isPaymentRefUsed(string paymentRef) view returns (bool)",
+  "function pineTreeTreasury() view returns (address)"
 ] as const
 
 type BaseUsdcV4Authorization = {
@@ -75,7 +78,7 @@ export type BaseUsdcV4UnavailableResponse = {
 }
 
 export type BaseUsdcV4RelayResponse =
-  | { ok: true; txHash: string }
+  | { ok: true; status: "submitted"; txHash: string }
   | BaseUsdcV4UnavailableResponse
 
 function unavailable(): BaseUsdcV4UnavailableResponse {
@@ -295,7 +298,7 @@ export async function relayBaseUsdcV4Payment(input: {
   const existingTransaction = await getTransactionByPaymentId(input.paymentId)
   const existingTxHash = String(existingTransaction?.provider_transaction_id || "").trim()
   if (/^0x[a-fA-F0-9]{64}$/.test(existingTxHash)) {
-    return { ok: true, txHash: existingTxHash }
+    return { ok: true, status: "submitted", txHash: existingTxHash }
   }
 
   const context = await loadValidatedPaymentContext({
@@ -324,9 +327,44 @@ export async function relayBaseUsdcV4Payment(input: {
 
   const signature = Signature.from(input.signature)
   const provider = new JsonRpcProvider(getRpcUrl("base"), BASE_CHAIN_ID)
-  const { privateKey } = getBaseUsdcRelayer()
+  const { address: configuredRelayerAddress, privateKey } = getBaseUsdcRelayer()
   const relayer = new Wallet(privateKey, provider)
+  if (getAddress(relayer.address) !== getAddress(configuredRelayerAddress)) {
+    console.error("[base-usdc-v4] relayer private key does not match configured address", {
+      configured: configuredRelayerAddress,
+      derived: relayer.address
+    })
+    return unavailable()
+  }
+
   const contract = new Contract(context.splitContract, V4_ABI, relayer)
+
+  const [isRelayerAllowed, isPaymentRefUsed, contractTreasury] = await Promise.all([
+    contract.relayers(relayer.address) as Promise<boolean>,
+    contract.isPaymentRefUsed(context.paymentId) as Promise<boolean>,
+    contract.pineTreeTreasury() as Promise<string>
+  ])
+
+  if (!isRelayerAllowed) {
+    console.error("[base-usdc-v4] relayer not allowlisted on V4 contract", {
+      relayerAddress: relayer.address,
+      contractAddress: context.splitContract
+    })
+    return unavailable()
+  }
+
+  if (isPaymentRefUsed) {
+    throw new Error("Base USDC V4 payment reference has already been used on-chain")
+  }
+
+  if (getAddress(contractTreasury) !== getAddress(context.treasuryWallet)) {
+    console.error("[base-usdc-v4] contract treasury mismatch", {
+      contractTreasury: getAddress(contractTreasury),
+      expectedTreasury: context.treasuryWallet
+    })
+    return unavailable()
+  }
+
   const paymentArgs = {
     payer: context.payerAddress,
     merchant: context.merchantWallet,
@@ -382,5 +420,5 @@ export async function relayBaseUsdcV4Payment(input: {
     await updateTransactionProviderReference(existingTransaction.id, txHash)
   }
 
-  return { ok: true, txHash }
+  return { ok: true, status: "submitted", txHash }
 }
