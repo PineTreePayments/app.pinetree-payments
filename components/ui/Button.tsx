@@ -20,7 +20,7 @@ export default function Button({
   className = ""
 }: Props) {
   const base =
-    "inline-flex items-center justify-center font-semibold text-sm rounded-full h-[46px] px-6 transition-all focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]"
+    "inline-flex items-center justify-center font-semibold text-sm rounded-md h-10 px-4 transition-all focus:outline-none disabled:cursor-not-allowed active:scale-[0.98]"
 
   if (variant === "primary") {
     // Use a solid professional blue for primary actions, matching the Coinbase style.
@@ -32,7 +32,7 @@ export default function Button({
         disabled={disabled}
         onClick={onClick}
         style={{ background: disabled ? undefined : primaryBlue }}
-        className={`${base} text-white hover:brightness-110 disabled:bg-gray-300 disabled:text-gray-500 ${fullWidth ? "w-full" : ""} ${className}`}
+        className={`${base} border border-transparent text-white shadow-sm hover:brightness-110 hover:shadow-md disabled:bg-blue-100 disabled:text-blue-300 disabled:shadow-none ${fullWidth ? "w-full" : ""} ${className}`}
       >
         {children}
       </button>
@@ -45,7 +45,7 @@ export default function Button({
         type={type}
         disabled={disabled}
         onClick={onClick}
-        className={`${base} bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300 ${fullWidth ? "w-full" : ""} ${className}`}
+        className={`${base} border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 hover:border-gray-300 hover:shadow-md active:bg-gray-100 disabled:bg-gray-100 disabled:text-gray-400 disabled:shadow-none ${fullWidth ? "w-full" : ""} ${className}`}
       >
         {children}
       </button>
@@ -57,7 +57,7 @@ export default function Button({
       type={type}
       disabled={disabled}
       onClick={onClick}
-      className={`${base} bg-transparent text-red-500 hover:text-red-700 ${fullWidth ? "w-full" : ""} ${className}`}
+      className={`${base} border border-red-200 bg-white text-red-600 shadow-sm hover:bg-red-50 hover:border-red-300 hover:text-red-700 hover:shadow-md disabled:bg-red-50 disabled:text-red-300 disabled:shadow-none ${fullWidth ? "w-full" : ""} ${className}`}
     >
       {children}
     </button>

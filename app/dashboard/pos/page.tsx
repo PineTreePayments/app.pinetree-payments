@@ -295,17 +295,17 @@ export default function POSPage() {
                 Cancel
               </Button>
 
-              <button
+              <Button
+                variant="danger"
                 onClick={()=>{
                   if(terminalToDelete){
                     deleteTerminal(terminalToDelete)
                   }
                   setConfirmDelete(false)
                 }}
-                className="px-4 py-2.5 text-sm bg-red-600 text-white rounded-xl font-medium hover:bg-red-700"
               >
                 Delete Terminal
-              </button>
+              </Button>
 
             </div>
 
@@ -520,16 +520,14 @@ export default function POSPage() {
                   {expandedTerminalId === t.id ? "Hide details" : "Details"}
                 </Button>
 
-                <Link
-                  href={`/terminal?tid=${t.id}`}
-                  className="inline-flex items-center justify-center font-semibold text-sm rounded-full h-[46px] px-6 transition-all active:scale-[0.98] text-white hover:brightness-110"
-                  style={{ background: "linear-gradient(135deg, #5cc8ff 0%, #7d3fe0 100%)" }}
-                >
-                  Launch
-                </Link>
+                  <Link href={`/terminal?tid=${t.id}`} className="inline-block">
+                    <Button fullWidth variant="primary">
+                      Launch
+                    </Button>
+                  </Link>
 
                 <Button
-                  variant="secondary"
+                  variant="danger"
                   onClick={()=>{
                     setTerminalToDelete(t.id)
                     setConfirmDelete(true)

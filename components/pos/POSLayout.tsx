@@ -449,25 +449,27 @@ export default function POSLayout({ locked, terminalContext }: Props) {
                   Payment Method
                 </p>
                 <div className="grid grid-cols-3 gap-2">
-                  <button
+                  <Button
+                    variant="secondary"
+                    fullWidth
                     onClick={startCash}
-                    className="flex flex-col items-center gap-1.5 py-4 rounded-xl border border-gray-200 bg-gray-50 text-gray-800 font-semibold text-sm hover:bg-gray-100 hover:border-gray-300 transition"
                   >
                     Cash
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    fullWidth
                     onClick={startCrypto}
-                    className="flex flex-col items-center gap-1.5 py-4 rounded-xl border border-gray-200 bg-gray-50 text-gray-800 font-semibold text-sm hover:bg-gray-100 hover:border-gray-300 transition"
                   >
                     Crypto
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    fullWidth
                     disabled={!availableMethods.card}
-                    title={!availableMethods.card ? "Card payments not connected" : undefined}
-                    className="flex flex-col items-center gap-1.5 py-4 rounded-xl border border-gray-200 bg-gray-50 text-gray-400 font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed transition"
                   >
                     Card
-                  </button>
+                  </Button>
                 </div>
                 <Button variant="danger" fullWidth onClick={resetSale}>
                   Cancel Payment
@@ -510,7 +512,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
               <Button fullWidth disabled={!cashDigits || cashTendered < totalDue} onClick={confirmCashTender}>
                 Confirm
               </Button>
-              <Button variant="danger" fullWidth onClick={() => setStatus("confirm")}>
+              <Button variant="secondary" fullWidth onClick={() => setStatus("confirm")}>
                 Back
               </Button>
             </div>

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import POSLayout from "@/components/pos/POSLayout"
 import Keypad from "@/components/pos/Keypad"
+import Button from "@/components/ui/Button"
 
 type Toast = {
   id: string
@@ -276,16 +277,17 @@ export default function TerminalInner() {
           <p className="text-sm text-gray-500">
             Confirm the starting cash in the drawer before beginning your shift.
           </p>
-          <button
-            onClick={confirmShiftStart}
+          <Button
+            fullWidth
+            variant="primary"
             disabled={shiftStarting}
-            className="w-full bg-[#0052FF] text-white py-3 rounded-xl font-semibold disabled:opacity-50"
+            onClick={confirmShiftStart}
           >
             {shiftStarting ? "Starting…" : "Confirm & Start Shift"}
-          </button>
+          </Button>
           <button
             onClick={() => setShiftStarted(true)}
-            className="w-full text-xs text-gray-400 hover:text-gray-600 py-1"
+            className="inline-flex h-10 w-full items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition-all hover:bg-gray-50 hover:border-gray-300 hover:shadow-md active:bg-gray-100"
           >
             Skip (no drawer tracking)
           </button>
@@ -320,7 +322,7 @@ export default function TerminalInner() {
 
           <button
             onClick={cancelUnlock}
-            className="mt-6 text-sm text-gray-500 hover:text-gray-700 w-full text-center"
+            className="mt-6 inline-flex h-10 w-full items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition-all hover:bg-gray-50 hover:border-gray-300 hover:shadow-md active:bg-gray-100"
           >
             Cancel
           </button>
@@ -347,16 +349,17 @@ export default function TerminalInner() {
                 className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-black text-center tracking-widest"
               />
               <div className="flex flex-col sm:flex-row gap-2">
-                <button
-                  onClick={recoverPin}
-                  disabled={recoveryBusy}
-                  className="flex-1 bg-[#0052FF] text-white rounded-md py-2 text-sm disabled:opacity-60"
-                >
-                  {recoveryBusy ? "Resetting..." : "Reset PIN"}
-                </button>
+                  <Button
+                    fullWidth
+                    variant="primary"
+                    disabled={recoveryBusy}
+                    onClick={recoverPin}
+                  >
+                    {recoveryBusy ? "Resetting..." : "Reset PIN"}
+                  </Button>
                 <button
                   onClick={() => setShowRecovery(false)}
-                  className="px-3 py-2 text-sm border border-gray-300 rounded-md text-gray-700"
+                  className="inline-flex h-10 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition-all hover:bg-gray-50 hover:border-gray-300 hover:shadow-md active:bg-gray-100"
                 >
                   Cancel
                 </button>

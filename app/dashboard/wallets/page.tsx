@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
+import Button from "@/components/ui/Button"
 
 type WalletItem = {
   id: string
@@ -115,13 +116,12 @@ export default function WalletsPage() {
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-8">
         <h1 className="text-2xl md:text-3xl font-semibold text-black">Wallets</h1>
 
-        <button
+        <Button
           onClick={() => loadOverview(true)}
           disabled={isRefreshing}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition"
         >
           {isRefreshing ? "Refreshing..." : "Refresh Balances"}
-        </button>
+        </Button>
       </div>
 
       {refreshError && (

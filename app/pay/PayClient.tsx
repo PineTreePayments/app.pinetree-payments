@@ -1108,7 +1108,7 @@ export default function PayClient() {
                 const isActive = selectedAssetId === asset.id
 
                 return (
-                  <div key={asset.id} className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div key={asset.id} className="overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm">
                     {/* Asset selector button — pure UI, no API call */}
                     <button
                       onClick={() => {
@@ -1116,11 +1116,11 @@ export default function PayClient() {
                         selectAsset(asset.id)
                       }}
                       disabled={asset.disabled}
-                      className={`w-full px-4 py-4 text-left transition ${
+                      className={`w-full px-4 py-4 text-left transition-all ${
                         asset.disabled
-                          ? "bg-gray-50 opacity-60 cursor-not-allowed"
+                          ? "bg-gray-100 text-gray-400 cursor-not-allowed"
                           : isActive
-                            ? "bg-blue-50"
+                            ? "bg-blue-50 shadow-inner"
                             : "bg-white hover:bg-gray-50"
                       }`}
                     >
