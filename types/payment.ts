@@ -78,6 +78,8 @@ export type PaymentStatus =
   | "EXPIRED"
   | "REFUNDED"
 
+export type BaseUsdcStrategy = "v1_approve_splitToken" | "v4_eip3009_relayer"
+
 export type PaymentSplitMetadata = {
   merchantWallet?: string
   pinetreeWallet?: string
@@ -91,6 +93,7 @@ export type PaymentSplitMetadata = {
   feeCaptureMethod?: string
   splitContract?: string
   asset?: string
+  baseUsdcStrategy?: BaseUsdcStrategy
 }
 
 export type StoredPaymentSplitMetadata = {

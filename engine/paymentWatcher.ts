@@ -23,7 +23,7 @@
  *             engine/checkPaymentOnce.ts
  */
 
-import { getRpcUrl } from "./config"
+import { getBaseUsdcTokenAddress, getRpcUrl } from "./config"
 import { processPaymentEvent } from "./eventProcessor"
 import { id as ethersId, AbiCoder } from "ethers"
 
@@ -179,6 +179,7 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
   const merchantWalletEvm = merchantWallet.toLowerCase()
   const splitContractEvm = String(input.splitContract || "").trim().toLowerCase()
   const feeCaptureMethod = String(input.feeCaptureMethod || "").trim().toLowerCase()
+  const isBaseUsdc = input.network === "base" && String(input.asset || "").toUpperCase() === "USDC"
 
   // ── Resolve RPC ─────────────────────────────────────────────────────────────
   let rpcUrl = ""
@@ -387,6 +388,15 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
       const decoded = decodePaymentSplitLog(matchingLog.data)
       if (!decoded) return false
 
+      if (!isValidBaseUsdcToken(decoded.token, isBaseUsdc)) {
+        console.info("[watcher:evm] txHash receipt PaymentSplit token mismatch", {
+          paymentId: input.paymentId,
+          txHash: input.txHash,
+          token: decoded.token
+        })
+        return false
+      }
+
       if (decoded.paymentRef !== input.paymentId) {
         console.info("[watcher:evm] txHash receipt PaymentSplit log paymentRef mismatch", {
           paymentId: input.paymentId,
@@ -452,6 +462,15 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
     for (const log of logs) {
       const decoded = decodePaymentSplitLog(log.data)
       if (!decoded) continue
+
+      if (!isValidBaseUsdcToken(decoded.token, isBaseUsdc)) {
+        console.info("[watcher:evm] PaymentSplit event token mismatch", {
+          paymentId: input.paymentId,
+          txHash: log.transactionHash,
+          token: decoded.token
+        })
+        continue
+      }
 
       if (decoded.paymentRef !== input.paymentId) continue
 
@@ -719,6 +738,19 @@ function decodePaymentSplitLog(data: string): DecodedPaymentSplitLog | null {
     }
   } catch {
     return null
+  }
+}
+
+function isValidBaseUsdcToken(
+  token: string,
+  isBaseUsdc: boolean
+): boolean {
+  if (!isBaseUsdc) return true
+
+  try {
+    return token.toLowerCase() === getBaseUsdcTokenAddress().toLowerCase()
+  } catch {
+    return false
   }
 }
 

@@ -16,14 +16,43 @@ type Props = {
   usdAmount: number
   paymentId?: string
   selectedAsset?: BaseAsset
+  baseUsdcStrategy?: BaseUsdcStrategy
   onPaymentCreated?: (paymentId: string) => void
   onSuccess?: (txHash: string, paymentId: string) => void | Promise<void>
   onError?: (error: string) => void
 }
 
+type BaseUsdcStrategy = "v1_approve_splitToken" | "v4_eip3009_relayer"
+
 type PaymentData = {
   paymentId: string
   paymentUrl: string
+  baseUsdcStrategy?: BaseUsdcStrategy
+}
+
+type BaseUsdcV4Authorization = {
+  validAfter: string
+  validBefore: string
+  nonce: string
+}
+
+type BaseUsdcV4PrepareResponse = {
+  ok?: boolean
+  unavailable?: boolean
+  code?: string
+  message?: string
+  error?: string
+  typedData?: unknown
+  authorization?: BaseUsdcV4Authorization
+}
+
+type BaseUsdcV4RelayResponse = {
+  ok?: boolean
+  unavailable?: boolean
+  code?: string
+  message?: string
+  error?: string
+  txHash?: string
 }
 
 type EvmTransactionRequest = {
@@ -48,7 +77,10 @@ const BASE_ETH_TX_TIMEOUT_MESSAGE = "Transaction approval was not completed. Tap
 const BASE_USDC_TX_REQUEST_TIMEOUT_MS = 90_000
 const BASE_USDC_APPROVE_TX_TIMEOUT_MESSAGE = "USDC approval was not completed. Tap Pay to try again."
 const BASE_USDC_SPLIT_TX_TIMEOUT_MESSAGE = "USDC payment confirmation was not completed. Tap Pay to try again."
+const BASE_USDC_SIGN_TIMEOUT_MESSAGE = "USDC authorization signature was not completed. Tap Pay to try again."
 const BASE_USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+const BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE =
+  "Base USDC is temporarily unavailable because current network costs are above PineTree’s limit. Please try again shortly or choose another payment method."
 
 const ERC20_APPROVE_ABI = [
   {
@@ -240,6 +272,41 @@ async function sendWalletConnectTransactionWithTimeout(input: {
   }
 }
 
+async function signBaseUsdcV4AuthorizationWithTimeout(input: {
+  provider: WalletConnectProvider
+  fromAddress: string
+  typedData: unknown
+}): Promise<string> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+
+  try {
+    const signature = await Promise.race([
+      input.provider.request({
+        method: "eth_signTypedData_v4",
+        params: [input.fromAddress, JSON.stringify(input.typedData)],
+      }),
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(
+          () => reject(new Error(BASE_USDC_SIGN_TIMEOUT_MESSAGE)),
+          BASE_USDC_TX_REQUEST_TIMEOUT_MS
+        )
+      })
+    ])
+
+    const normalized = String(signature || "").trim()
+    if (!/^0x[a-fA-F0-9]+$/.test(normalized)) {
+      throw new Error("Wallet did not return a valid USDC authorization signature")
+    }
+    return normalized
+  } finally {
+    if (timeoutHandle !== null) clearTimeout(timeoutHandle)
+  }
+}
+
+function isBaseUsdcV4Unavailable(result: { unavailable?: boolean; code?: string }): boolean {
+  return result.unavailable === true || result.code === "BASE_USDC_TEMPORARILY_UNAVAILABLE"
+}
+
 function buildBaseUsdcApprovalTransaction(txRequest: EvmTransactionRequest): EvmTransactionRequest {
   const decoded = decodeFunctionData({
     abi: SPLIT_TOKEN_ABI,
@@ -372,6 +439,7 @@ export default function BaseWalletPayment({
   usdAmount,
   paymentId: directPaymentId,
   selectedAsset = "ETH",
+  baseUsdcStrategy: directBaseUsdcStrategy,
   onPaymentCreated,
   onSuccess,
   onError,
@@ -394,6 +462,7 @@ export default function BaseWalletPayment({
   const [isPreparingPayment, setIsPreparingPayment] = useState(false)
   const [isOpeningWallet, setIsOpeningWallet] = useState(false)
   const [isApprovingUsdc, setIsApprovingUsdc] = useState(false)
+  const [baseUsdcV4Status, setBaseUsdcV4Status] = useState("")
   const isSendingBaseTxRef = useRef(false)
   const autoResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const autoResumeRetryRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -447,7 +516,7 @@ export default function BaseWalletPayment({
         throw new Error("Payment details unavailable — please contact support.")
       }
 
-      return { paymentId, paymentUrl }
+      return { paymentId, paymentUrl, baseUsdcStrategy: directBaseUsdcStrategy }
     }
 
     if (!intentId) {
@@ -471,9 +540,18 @@ export default function BaseWalletPayment({
         throw new Error(err.error || "Failed to prepare Base payment")
       }
 
-      const result = (await res.json()) as { paymentId?: string; paymentUrl?: string }
+      const result = (await res.json()) as {
+        paymentId?: string
+        paymentUrl?: string
+        baseUsdcStrategy?: BaseUsdcStrategy
+      }
       const paymentId = String(result.paymentId || "").trim()
       const paymentUrl = String(result.paymentUrl || "").trim()
+      const baseUsdcStrategy = result.baseUsdcStrategy === "v4_eip3009_relayer"
+        ? "v4_eip3009_relayer"
+        : result.baseUsdcStrategy === "v1_approve_splitToken"
+          ? "v1_approve_splitToken"
+          : undefined
 
       if (!paymentId || !paymentUrl) {
         throw new Error("Incomplete payment data returned from server")
@@ -483,11 +561,65 @@ export default function BaseWalletPayment({
 
       console.log("BASE PAYMENT URL:", paymentUrl)
 
-      return { paymentId, paymentUrl }
+      return { paymentId, paymentUrl, baseUsdcStrategy }
     } finally {
       setIsPreparingPayment(false)
     }
-  }, [directPaymentId, directPaymentUrl, intentId, isIntentMode, onPaymentCreated, selectedAsset])
+  }, [directBaseUsdcStrategy, directPaymentId, directPaymentUrl, intentId, isIntentMode, onPaymentCreated, selectedAsset])
+
+  const executeBaseUsdcV4Payment = useCallback(async (input: {
+    paymentData: PaymentData
+    provider: WalletConnectProvider
+    fromAddress: string
+  }): Promise<string> => {
+    setBaseUsdcV4Status("Preparing USDC authorization...")
+    const prepareRes = await fetch(
+      `/api/payments/${encodeURIComponent(input.paymentData.paymentId)}/base-usdc-v4/prepare-authorization`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payerAddress: input.fromAddress })
+      }
+    )
+    const prepare = (await prepareRes.json()) as BaseUsdcV4PrepareResponse
+    if (!prepareRes.ok) throw new Error(prepare.error || "Failed to prepare Base USDC authorization")
+    if (isBaseUsdcV4Unavailable(prepare)) {
+      throw new Error(prepare.message || BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE)
+    }
+    if (!prepare.typedData || !prepare.authorization) {
+      throw new Error("Incomplete Base USDC authorization returned by server")
+    }
+
+    setBaseUsdcV4Status("Sign USDC payment authorization...")
+    const signature = await signBaseUsdcV4AuthorizationWithTimeout({
+      provider: input.provider,
+      fromAddress: input.fromAddress,
+      typedData: prepare.typedData
+    })
+
+    setBaseUsdcV4Status("Relaying payment...")
+    const relayRes = await fetch(
+      `/api/payments/${encodeURIComponent(input.paymentData.paymentId)}/base-usdc-v4/relay`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payerAddress: input.fromAddress,
+          authorization: prepare.authorization,
+          signature
+        })
+      }
+    )
+    const relay = (await relayRes.json()) as BaseUsdcV4RelayResponse
+    if (!relayRes.ok) throw new Error(relay.error || "Failed to relay Base USDC payment")
+    if (isBaseUsdcV4Unavailable(relay)) {
+      throw new Error(relay.message || BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE)
+    }
+
+    const txHash = normalizeHexTransactionHash(relay.txHash)
+    setBaseUsdcV4Status("Processing payment...")
+    return txHash
+  }, [])
 
   const continueBasePayment = useCallback(async (connectedAddress: string) => {
     if (isSendingBaseTxRef.current) return
@@ -495,6 +627,7 @@ export default function BaseWalletPayment({
     isSendingBaseTxRef.current = true
 
     let createdPaymentId = ""
+    let createdBaseUsdcV4Payment = false
 
     try {
       if (!walletConnectConnector) {
@@ -549,7 +682,6 @@ export default function BaseWalletPayment({
         ? prefetchedTxRequestRef.current
         : null
       if (cachedTxRequest) prefetchedTxRequestRef.current = null
-      const txRequest = cachedTxRequest ?? parseEthereumPaymentUri(paymentData.paymentUrl)
       // Use pre-fetched provider if available (fetched concurrently with connectAsync)
       const cachedProvider = prefetchedProviderRef.current
       prefetchedProviderRef.current = null
@@ -558,6 +690,31 @@ export default function BaseWalletPayment({
       const walletConnectProvider = cachedProvider ?? await getWalletConnectProvider(walletConnectConnector)
 
       setIsOpeningWallet(true)
+      const isBaseUsdcV4 = selectedAsset === "USDC" && paymentData.baseUsdcStrategy === "v4_eip3009_relayer"
+      createdBaseUsdcV4Payment = isBaseUsdcV4
+
+      if (isBaseUsdcV4) {
+        const normalizedTxHash = await executeBaseUsdcV4Payment({
+          paymentData,
+          provider: walletConnectProvider,
+          fromAddress
+        })
+
+        paymentSubmittedRef.current = true
+        void logBase("usdc-v4-relayed", { txHashPrefix: normalizedTxHash.slice(0, 10) })
+        await onSuccess?.(normalizedTxHash, paymentData.paymentId)
+
+        clearPendingBaseWalletConnectPayment()
+        setHasPendingBaseWcPayment(false)
+
+        if (intentId) {
+          window.location.href = `/pay?intent=${encodeURIComponent(intentId)}&status=processing`
+        }
+        return
+      }
+
+      const txRequest = cachedTxRequest ?? parseEthereumPaymentUri(paymentData.paymentUrl)
+
       if (selectedAsset === "USDC") {
         const approvalRequest = buildBaseUsdcApprovalTransaction(txRequest)
         setIsApprovingUsdc(true)
@@ -643,7 +800,8 @@ export default function BaseWalletPayment({
       const timedOut =
         message === BASE_ETH_TX_TIMEOUT_MESSAGE ||
         message === BASE_USDC_APPROVE_TX_TIMEOUT_MESSAGE ||
-        message === BASE_USDC_SPLIT_TX_TIMEOUT_MESSAGE
+        message === BASE_USDC_SPLIT_TX_TIMEOUT_MESSAGE ||
+        message === BASE_USDC_SIGN_TIMEOUT_MESSAGE
 
       void logBase("send-transaction-error", { message: friendly, rejected, timedOut })
 
@@ -657,7 +815,7 @@ export default function BaseWalletPayment({
         }
       }
 
-      if (rejected && createdPaymentId) {
+      if (rejected && createdPaymentId && !createdBaseUsdcV4Payment) {
         await fetch(`/api/payments/${encodeURIComponent(createdPaymentId)}/fail`, {
           method: "POST",
         }).catch(() => null)
@@ -672,11 +830,12 @@ export default function BaseWalletPayment({
       setIsPreparingPayment(false)
       setIsOpeningWallet(false)
       setIsApprovingUsdc(false)
+      setBaseUsdcV4Status("")
       onError?.(friendly)
     } finally {
       isSendingBaseTxRef.current = false
     }
-  }, [intentId, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, switchChainAsync, walletConnectConnector])
+  }, [executeBaseUsdcV4Payment, intentId, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, switchChainAsync, walletConnectConnector])
 
   const startWalletConnectPayment = useCallback(() => {
     setLocalError("")
@@ -819,6 +978,7 @@ export default function BaseWalletPayment({
         setIsPreparingPayment(false)
         setIsOpeningWallet(false)
         setIsApprovingUsdc(false)
+        setBaseUsdcV4Status("")
         onError?.(friendly)
       }
     })()
@@ -973,6 +1133,7 @@ export default function BaseWalletPayment({
     prefetchedPaymentDataRef.current = null
     prefetchedProviderRef.current = null
     prefetchedTxRequestRef.current = null
+    setBaseUsdcV4Status("")
     connectedChainIdRef.current = null
     sessionSettleTriggerFiredRef.current = false
     stopAutoResumeRetry()
@@ -1151,12 +1312,12 @@ export default function BaseWalletPayment({
       ) : isPreparingPayment ? (
         <Button fullWidth disabled>
           <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
-          Processing payment…
+          {baseUsdcV4Status || "Processing payment…"}
         </Button>
       ) : isOpeningWallet ? (
         <Button fullWidth disabled>
           <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
-          {isApprovingUsdc ? "Approving USDC…" : "Confirming transaction…"}
+          {baseUsdcV4Status || (isApprovingUsdc ? "Approving USDC…" : "Confirming transaction…")}
         </Button>
       ) : (
         <div className="space-y-2">

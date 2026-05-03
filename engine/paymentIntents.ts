@@ -309,6 +309,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
       universalUrl: payment.universalUrl,
       nativeAmount: payment.nativeAmount,
       nativeSymbol: payment.nativeSymbol,
+      baseUsdcStrategy: payment.baseUsdcStrategy,
       alreadySelected: false
     }
   } catch (error) {

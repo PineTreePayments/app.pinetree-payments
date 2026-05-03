@@ -1,3 +1,5 @@
+import type { BaseUsdcStrategy } from "@/types/payment"
+
 /**
  * PineTree Engine Configuration
  * 
@@ -23,6 +25,12 @@ const DEFAULT_PINETREE_TREASURY_WALLETS = {
   base: "0xDfB2EB3FccB76B8C7f7e352d5421654add5a7903",
   ethereum: "0xDfB2EB3FccB76B8C7f7e352d5421654add5a7903"
 } as const
+
+const BASE_NATIVE_USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+const DEFAULT_BASE_USDC_AUTH_VALIDITY_SECONDS = 600
+const MIN_BASE_USDC_AUTH_VALIDITY_SECONDS = 300
+const MAX_BASE_USDC_AUTH_VALIDITY_SECONDS = 900
+const DEFAULT_BASE_USDC_STRATEGY: BaseUsdcStrategy = "v1_approve_splitToken"
 
 /**
  * Network-specific PineTree treasury wallets
@@ -69,6 +77,24 @@ const TREASURY_WALLET_SOURCES = {
 
 function isEvmAddress(value: string): boolean {
   return /^0x[a-fA-F0-9]{40}$/.test(String(value || "").trim())
+}
+
+function requireEvmAddress(envName: string, value: string): string {
+  const normalized = String(value || "").trim()
+
+  if (!normalized) {
+    throw new Error(`Missing required environment variable: ${envName}`)
+  }
+
+  if (!isEvmAddress(normalized)) {
+    throw new Error(`Invalid ${envName}. Expected a valid 0x EVM address.`)
+  }
+
+  return normalized
+}
+
+function isPrivateKey(value: string): boolean {
+  return /^0x[a-fA-F0-9]{64}$/.test(String(value || "").trim())
 }
 
 function getEvmSplitMode(): string {
@@ -161,6 +187,126 @@ export function assertSplitRailConfig(network: string): void {
     }
   }
   // Direct mode (PINETREE_EVM_SPLIT_MODE not set or "direct"): no contract required
+}
+
+/**
+ * Base USDC V4 relayer configuration
+ *
+ * These helpers are server-side engine configuration only. In particular,
+ * PINETREE_BASE_USDC_RELAYER_PRIVATE_KEY must never be exposed to browser code
+ * or any NEXT_PUBLIC_* environment variable.
+ */
+export function getBaseUsdcV4Contract(): string {
+  return requireEvmAddress(
+    "PINETREE_BASE_USDC_V4_CONTRACT",
+    process.env.PINETREE_BASE_USDC_V4_CONTRACT || ""
+  )
+}
+
+export function getBaseUsdcTokenAddress(): string {
+  const tokenAddress = requireEvmAddress(
+    "PINETREE_BASE_USDC_TOKEN_ADDRESS",
+    process.env.PINETREE_BASE_USDC_TOKEN_ADDRESS || BASE_NATIVE_USDC_ADDRESS
+  )
+
+  if (tokenAddress.toLowerCase() !== BASE_NATIVE_USDC_ADDRESS.toLowerCase()) {
+    throw new Error(
+      "Invalid PINETREE_BASE_USDC_TOKEN_ADDRESS. Base USDC V4 requires native Base USDC " +
+        `${BASE_NATIVE_USDC_ADDRESS}.`
+    )
+  }
+
+  return tokenAddress
+}
+
+export function getBaseUsdcRelayer(): { address: string; privateKey: string } {
+  const address = requireEvmAddress(
+    "PINETREE_BASE_USDC_RELAYER_ADDRESS",
+    process.env.PINETREE_BASE_USDC_RELAYER_ADDRESS || ""
+  )
+  const privateKey = String(process.env.PINETREE_BASE_USDC_RELAYER_PRIVATE_KEY || "").trim()
+
+  if (!privateKey) {
+    throw new Error("Missing required environment variable: PINETREE_BASE_USDC_RELAYER_PRIVATE_KEY")
+  }
+
+  if (!isPrivateKey(privateKey)) {
+    throw new Error(
+      "Invalid PINETREE_BASE_USDC_RELAYER_PRIVATE_KEY. Expected a 0x-prefixed 32-byte private key."
+    )
+  }
+
+  return { address, privateKey }
+}
+
+export function getBaseUsdcGasCap(): { maxGasUsd: number } {
+  const raw = String(process.env.PINETREE_BASE_USDC_MAX_GAS_USD || "").trim()
+
+  if (!raw) {
+    throw new Error("Missing required environment variable: PINETREE_BASE_USDC_MAX_GAS_USD")
+  }
+
+  const maxGasUsd = Number(raw)
+
+  if (!Number.isFinite(maxGasUsd) || maxGasUsd <= 0) {
+    throw new Error("Invalid PINETREE_BASE_USDC_MAX_GAS_USD. Expected a finite number greater than 0.")
+  }
+
+  return { maxGasUsd }
+}
+
+export function getBaseUsdcAuthValiditySeconds(): number {
+  const raw = String(process.env.PINETREE_BASE_USDC_AUTH_VALIDITY_SECONDS || "").trim()
+  const seconds = raw ? Number(raw) : DEFAULT_BASE_USDC_AUTH_VALIDITY_SECONDS
+
+  if (
+    !Number.isFinite(seconds) ||
+    seconds < MIN_BASE_USDC_AUTH_VALIDITY_SECONDS ||
+    seconds > MAX_BASE_USDC_AUTH_VALIDITY_SECONDS
+  ) {
+    throw new Error(
+      "Invalid PINETREE_BASE_USDC_AUTH_VALIDITY_SECONDS. Expected a finite number between " +
+        `${MIN_BASE_USDC_AUTH_VALIDITY_SECONDS} and ${MAX_BASE_USDC_AUTH_VALIDITY_SECONDS}.`
+    )
+  }
+
+  return Math.floor(seconds)
+}
+
+export function assertBaseUsdcV4Config(): void {
+  getBaseUsdcV4Contract()
+  getBaseUsdcTokenAddress()
+  getBaseUsdcRelayer()
+  getBaseUsdcGasCap()
+  getBaseUsdcAuthValiditySeconds()
+
+  requireEvmAddress(
+    "PINETREE_TREASURY_WALLET_BASE",
+    process.env.PINETREE_TREASURY_WALLET_BASE || ""
+  )
+}
+
+export function isBaseUsdcV4Configured(): boolean {
+  try {
+    assertBaseUsdcV4Config()
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function getBaseUsdcStrategy(): BaseUsdcStrategy {
+  const strategy = String(
+    process.env.PINETREE_BASE_USDC_STRATEGY || DEFAULT_BASE_USDC_STRATEGY
+  ).trim()
+
+  if (strategy === "v1_approve_splitToken" || strategy === "v4_eip3009_relayer") {
+    return strategy
+  }
+
+  throw new Error(
+    "Invalid PINETREE_BASE_USDC_STRATEGY. Expected v1_approve_splitToken or v4_eip3009_relayer."
+  )
 }
 
 /**

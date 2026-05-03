@@ -7,7 +7,7 @@
 
 import { chooseBestAdapter } from "./providerSelector"
 import { getProvider } from "./providerRegistry"
-import { type PaymentAdapterId, getAdapterCredentialKey } from "@/types/payment"
+import { type BaseUsdcStrategy, type PaymentAdapterId, getAdapterCredentialKey } from "@/types/payment"
 import {
   createPayment as createPaymentRecord,
   createTransaction,
@@ -25,6 +25,8 @@ import {
   getPineTreeTreasuryWallet,
   assertTreasuryWalletFormat,
   assertSplitRailConfig,
+  getBaseUsdcStrategy,
+  isBaseUsdcV4Configured,
   validateConfigOnce
 } from "./config"
 import { getMerchantCredential } from "@/database/merchants"
@@ -112,6 +114,7 @@ type CreatePaymentResult = {
   nativeAmount?: number
   nativeSymbol?: string
   asset?: string
+  baseUsdcStrategy?: BaseUsdcStrategy
 }
 
 export type BuildCreatePaymentRequestInput = {
@@ -375,6 +378,18 @@ export async function createPayment(
     (providerPayment as { feeCaptureMethod?: string } | null)?.feeCaptureMethod || ""
   ).trim() || undefined
 
+  // Conservative Phase 2 strategy selection:
+  // Base USDC V4 metadata is now supported, but the V4 frontend signature flow
+  // and backend relayer routes are not wired yet. Keep live Base USDC payments
+  // on the current V1 approve → splitToken fallback until those phases ship.
+  const requestedBaseUsdcStrategy = network === "base" && requestedAsset === "USDC"
+    ? getBaseUsdcStrategy()
+    : undefined
+  const baseUsdcStrategy: BaseUsdcStrategy | undefined =
+    requestedBaseUsdcStrategy === "v4_eip3009_relayer" && !isBaseUsdcV4Configured()
+      ? "v1_approve_splitToken"
+      : requestedBaseUsdcStrategy
+
   const splitPayment = await generateSplitPayment({
     merchantWallet: merchantWalletAddress,
     merchantAmount,
@@ -384,10 +399,11 @@ export async function createPayment(
     asset: walletAsset,
     paymentId,
     providerPayment,
+    baseUsdcStrategy,
     feeCaptureMethodOverride: providerDeclaredFeeMethod
   })
 
-  const splitContract = extractEvmSplitContractFromPaymentUrl(splitPayment.paymentUrl)
+  const splitContract = splitPayment.splitContract || extractEvmSplitContractFromPaymentUrl(splitPayment.paymentUrl)
 
   /* ---------------------------
      INSERT PAYMENT RECORD
@@ -434,6 +450,7 @@ export async function createPayment(
         feeNativeAmount: splitPayment.feeNativeAmount,
         merchantNativeAmountAtomic: splitPayment.merchantNativeAmountAtomic,
         feeNativeAmountAtomic: splitPayment.feeNativeAmountAtomic,
+        ...(baseUsdcStrategy ? { baseUsdcStrategy } : {}),
         ...((network === "solana" || network === "base") && requestedAsset === "USDC" ? { asset: "USDC" } : {})
       }
     },
@@ -501,7 +518,8 @@ export async function createPayment(
     universalUrl: splitPayment.universalUrl,
     nativeAmount: Number(splitPayment.nativeAmount || 0),
     nativeSymbol: String(splitPayment.nativeSymbol || "").toUpperCase() || undefined,
-    asset: network === "solana" || network === "base" ? requestedAsset : input.asset
+    asset: network === "solana" || network === "base" ? requestedAsset : input.asset,
+    baseUsdcStrategy
   }
   } catch (error) {
     if (claimedIdempotencyKey && input.idempotencyKey) {
