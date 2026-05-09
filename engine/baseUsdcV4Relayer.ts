@@ -420,5 +420,23 @@ export async function relayBaseUsdcV4Payment(input: {
     await updateTransactionProviderReference(existingTransaction.id, txHash)
   }
 
+  try {
+    const receipt = await provider.waitForTransaction(txHash, 1, 90_000)
+    if (receipt) {
+      const { runPaymentWatcher } = await import("./checkPaymentOnce")
+      await runPaymentWatcher(input.paymentId, { txHash }).catch((watcherErr) => {
+        console.error("[base-usdc-v4] post-relay watcher error", {
+          txHash,
+          error: watcherErr instanceof Error ? watcherErr.message : String(watcherErr)
+        })
+      })
+    }
+  } catch (waitErr) {
+    console.warn("[base-usdc-v4] waitForTransaction did not resolve — cron will detect", {
+      txHash,
+      error: waitErr instanceof Error ? waitErr.message : String(waitErr)
+    })
+  }
+
   return { ok: true, status: "submitted", txHash }
 }

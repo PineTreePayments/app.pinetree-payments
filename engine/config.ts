@@ -30,7 +30,7 @@ const BASE_NATIVE_USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 const DEFAULT_BASE_USDC_AUTH_VALIDITY_SECONDS = 600
 const MIN_BASE_USDC_AUTH_VALIDITY_SECONDS = 300
 const MAX_BASE_USDC_AUTH_VALIDITY_SECONDS = 900
-const DEFAULT_BASE_USDC_STRATEGY: BaseUsdcStrategy = "v1_approve_splitToken"
+const DEFAULT_BASE_USDC_STRATEGY: BaseUsdcStrategy = "v4_eip3009_relayer"
 
 /**
  * Network-specific PineTree treasury wallets
@@ -169,6 +169,13 @@ export function assertSplitRailConfig(network: string): void {
   assertTreasuryWalletFormat(normalized)
 
   if (normalized === "solana") {
+    return
+  }
+
+  if (normalized === "base") {
+    // Base uses PineTreeSplitV4 for all payments (ETH + USDC).
+    // Validate V4 config upfront so payment creation fails with a clear error.
+    assertBaseUsdcV4Config()
     return
   }
 

@@ -46,28 +46,48 @@ export async function runPaymentWatcher(paymentId: string, options?: { txHash?: 
 
   const split = ((payment.metadata ?? null) as StoredPaymentSplitMetadata | null)?.split
 
-  try {
-    return await watchPaymentOnce({
-      paymentId: payment.id,
-      network: payment.network ?? "",
-      merchantWallet: split?.merchantWallet ?? "",
-      pinetreeWallet: split?.pinetreeWallet ?? "",
-      merchantAmount: Number(payment.merchant_amount ?? 0),
-      pinetreeFee: Number(payment.pinetree_fee ?? 0),
-      expectedAmountNative: split?.expectedAmountNative,
-      // prefer the canonical field names written by createPayment; fall back to legacy aliases
-      expectedMerchantAtomic: split?.merchantNativeAmountAtomic ?? split?.expectedMerchantAtomic,
-      expectedFeeAtomic: split?.feeNativeAmountAtomic ?? split?.expectedFeeAtomic,
-      feeCaptureMethod: split?.feeCaptureMethod,
-      splitContract: split?.splitContract,
-      asset: split?.asset,
-      txHash: options?.txHash
-    })
-  } catch (error) {
-    console.error("[checkPaymentOnce] watcher error", {
-      paymentId,
-      error: error instanceof Error ? error.message : String(error)
-    })
-    return false
+  const watchInput = {
+    paymentId: payment.id,
+    network: payment.network ?? "",
+    merchantWallet: split?.merchantWallet ?? "",
+    pinetreeWallet: split?.pinetreeWallet ?? "",
+    merchantAmount: Number(payment.merchant_amount ?? 0),
+    pinetreeFee: Number(payment.pinetree_fee ?? 0),
+    expectedAmountNative: split?.expectedAmountNative,
+    // prefer the canonical field names written by createPayment; fall back to legacy aliases
+    expectedMerchantAtomic: split?.merchantNativeAmountAtomic ?? split?.expectedMerchantAtomic,
+    expectedFeeAtomic: split?.feeNativeAmountAtomic ?? split?.expectedFeeAtomic,
+    feeCaptureMethod: split?.feeCaptureMethod,
+    splitContract: split?.splitContract,
+    asset: split?.asset,
+    txHash: options?.txHash
   }
+
+  // For EVM payments where we have a txHash, the receipt may not be available
+  // immediately after the tx is submitted. Retry up to 5 times with a short delay
+  // so detection succeeds without waiting for the next cron cycle.
+  const network = payment.network ?? ""
+  const isEvmWithTxHash =
+    (network === "base" || network === "ethereum") && Boolean(options?.txHash)
+  const maxAttempts = isEvmWithTxHash ? 5 : 1
+  const retryDelayMs = 3_000
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const detected = await watchPaymentOnce(watchInput)
+      if (detected) return true
+    } catch (error) {
+      console.error("[checkPaymentOnce] watcher error", {
+        paymentId,
+        attempt,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    }
+
+    if (attempt < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
+    }
+  }
+
+  return false
 }

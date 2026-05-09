@@ -4,12 +4,9 @@ import { getMarketPricesUSD } from "./marketPrices"
 import { getBaseUsdcV4Contract } from "./config"
 import type { BaseUsdcStrategy } from "@/types/payment"
 
-// USDC contract address on Base mainnet
-const USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 
 const SPLIT_ABI = [
-  "function split(address merchant, address treasury, uint256 merchantAmountWei, uint256 feeAmountWei, string paymentRef) payable",
-  "function splitToken(address merchant, address treasury, uint256 merchantAmount, uint256 feeAmount, string paymentRef, address token)"
+  "function split(address merchant, address treasury, uint256 merchantAmountWei, uint256 feeAmountWei, string paymentRef) payable"
 ]
 const splitIface = new Interface(SPLIT_ABI)
 
@@ -69,21 +66,11 @@ function isEvmAddress(value: string): boolean {
   return /^0x[a-fA-F0-9]{40}$/.test(String(value || "").trim())
 }
 
-function getEvmSplitContract(network: string): string {
-  if (network === "ethereum") {
-    return String(process.env.PINETREE_EVM_SPLIT_CONTRACT_ETHEREUM || "").trim()
-  }
-
-  return String(process.env.PINETREE_EVM_SPLIT_CONTRACT_BASE || "").trim()
-}
 
 function resolveBaseUsdcStrategy(input: GenerateSplitPaymentInput): BaseUsdcStrategy | undefined {
   const network = input.network === "base_pay" ? "base" : input.network
   if (network !== "base" || !isBaseUsdcAsset(input.asset)) return undefined
-
-  // Conservative Phase 2 default: keep the currently working V1 approve → splitToken flow
-  // active until the V4 frontend signature flow and backend relayer routes are implemented.
-  return input.baseUsdcStrategy || "v1_approve_splitToken"
+  return input.baseUsdcStrategy
 }
 
 export async function generateSplitPayment(
@@ -214,33 +201,19 @@ export async function generateSplitPayment(
       paymentUrl = `pinetree://pay?data=${encodeURIComponent(payloadString)}`
     } else {
       const chainId = "8453"
-      // Base always requires a deployed split contract — direct transfer is not supported.
-      evmSplitContract = baseUsdcStrategy === "v4_eip3009_relayer"
-        ? getBaseUsdcV4Contract()
-        : getEvmSplitContract(network)
+      // Base always uses PineTreeSplitV4 for both ETH and USDC.
+      evmSplitContract = getBaseUsdcV4Contract()
 
       if (!isEvmAddress(evmSplitContract)) {
         throw new Error(
-          "Base payments require a deployed split contract. Set PINETREE_EVM_SPLIT_CONTRACT_BASE to a valid contract address."
+          "Base payments require a deployed V4 split contract. Set PINETREE_BASE_USDC_V4_CONTRACT to a valid contract address."
         )
       }
       if (isUsdc && baseUsdcStrategy === "v4_eip3009_relayer") {
         // USDC on Base V4: no wallet transaction calldata is generated here.
-        // The customer will sign EIP-3009 typed data, and the PineTree backend relayer
-        // will submit payWithUsdcAuthorization(...) in a later phase.
+        // The customer signs EIP-3009 typed data and the PineTree relayer submits
+        // payWithUsdcAuthorization() on the V4 contract.
         paymentUrl = `pinetree://base-usdc-v4?paymentId=${encodeURIComponent(String(input.paymentId || ""))}`
-      } else if (isUsdc) {
-        // USDC on Base: ABI-encode splitToken() calldata
-        // Caller must approve the split contract for (merchantAmount + feeAmount) USDC first.
-        const calldata = splitIface.encodeFunctionData("splitToken", [
-          input.merchantWallet,
-          input.pinetreeWallet,
-          BigInt(toUSDCAtomicString(merchantNativeAmount)),
-          BigInt(toUSDCAtomicString(feeNativeAmount)),
-          String(input.paymentId || ""),
-          USDC_BASE
-        ])
-        paymentUrl = `ethereum:${evmSplitContract}@${chainId}?data=${calldata}`
       } else {
         // ETH on Base: ABI-encode split() calldata + embed total ETH value
         const totalWei = toWeiString(nativeAmount)

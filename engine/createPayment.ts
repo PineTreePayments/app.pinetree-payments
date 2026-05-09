@@ -378,19 +378,18 @@ export async function createPayment(
     (providerPayment as { feeCaptureMethod?: string } | null)?.feeCaptureMethod || ""
   ).trim() || undefined
 
-  // Conservative Phase 2 strategy selection:
-  // Base USDC V4 metadata is now supported, but the V4 frontend signature flow
-  // and backend relayer routes are not wired yet. Keep live Base USDC payments
-  // on the current V1 approve → splitToken fallback until those phases ship.
   const isBaseUsdcPayment = network === "base" && requestedAsset === "USDC"
   const requestedBaseUsdcStrategy = isBaseUsdcPayment
     ? getBaseUsdcStrategy()
     : undefined
-  const isBaseUsdcV4ConfigValid = isBaseUsdcPayment ? isBaseUsdcV4Configured() : false
-  const baseUsdcStrategy: BaseUsdcStrategy | undefined =
-    requestedBaseUsdcStrategy === "v4_eip3009_relayer" && !isBaseUsdcV4ConfigValid
-      ? "v1_approve_splitToken"
-      : requestedBaseUsdcStrategy
+
+  if (isBaseUsdcPayment && requestedBaseUsdcStrategy === "v4_eip3009_relayer" && !isBaseUsdcV4Configured()) {
+    throw new Error(
+      "Base USDC V4 is not configured. Ensure PINETREE_BASE_USDC_V4_CONTRACT, PINETREE_BASE_USDC_RELAYER_ADDRESS, PINETREE_BASE_USDC_RELAYER_PRIVATE_KEY, PINETREE_BASE_USDC_MAX_GAS_USD, and PINETREE_BASE_USDC_AUTH_VALIDITY_SECONDS are set."
+    )
+  }
+
+  const baseUsdcStrategy: BaseUsdcStrategy | undefined = requestedBaseUsdcStrategy
 
   const splitPayment = await generateSplitPayment({
     merchantWallet: merchantWalletAddress,
@@ -417,7 +416,6 @@ export async function createPayment(
       paymentId,
       selectedStrategy: baseUsdcStrategy,
       requestedStrategy: requestedBaseUsdcStrategy,
-      isV4ConfigValid: isBaseUsdcV4ConfigValid,
       metadataBaseUsdcStrategy: baseUsdcStrategy,
       metadataSplitContract: splitContract,
       paymentUrlKind
