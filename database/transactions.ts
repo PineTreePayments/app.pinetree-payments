@@ -13,7 +13,7 @@ export type Transaction = {
   status: TransactionStatus
   channel?: "pos" | "online" | "api" | "invoice"
   created_at: string
-  updated_at: string
+  updated_at?: string
 }
 
 export type CreateTransactionInput = {
@@ -123,16 +123,27 @@ export async function updateTransactionStatus(
   const { data, error } = await supabase
     .from("transactions")
     .update({
-      status,
-      updated_at: new Date().toISOString()
+      status
     })
     .eq("id", transactionId)
     .select()
     .single()
 
   if (error) {
+    console.error("[PineTreeBaseTrace] transaction status update failed", {
+      step: "transaction-status-update-failed",
+      transactionId,
+      status,
+      error: error.message
+    })
     throw new Error(`Failed to update transaction status: ${error.message}`)
   }
+
+  console.info("[PineTreeBaseTrace] transaction status update success", {
+    step: "transaction-status-update-success",
+    transactionId,
+    status
+  })
 
   return data as Transaction
 }
@@ -147,16 +158,27 @@ export async function updateTransactionProviderReference(
   const { data, error } = await supabase
     .from("transactions")
     .update({
-      provider_transaction_id: providerTransactionId,
-      updated_at: new Date().toISOString()
+      provider_transaction_id: providerTransactionId
     })
     .eq("id", transactionId)
     .select()
     .single()
 
   if (error) {
+    console.error("[PineTreeBaseTrace] transaction provider reference update failed", {
+      step: "transaction-provider-reference-update-failed",
+      transactionId,
+      providerTransactionId,
+      error: error.message
+    })
     throw new Error(`Failed to update provider transaction ID: ${error.message}`)
   }
+
+  console.info("[PineTreeBaseTrace] transaction provider reference update success", {
+    step: "transaction-provider-reference-update-success",
+    transactionId,
+    providerTransactionId
+  })
 
   return data as Transaction
 }

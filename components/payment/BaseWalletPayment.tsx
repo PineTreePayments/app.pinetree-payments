@@ -69,10 +69,20 @@ type WalletConnectProvider = {
   removeListener?: (event: string, handler: (...args: unknown[]) => void) => void
 }
 
+type Eip712TypedData = {
+  domain: {
+    name?: unknown
+    version?: unknown
+    chainId?: unknown
+    verifyingContract?: unknown
+  }
+  types: Record<string, Array<{ name: string; type: string }>>
+  primaryType: string
+  message: Record<string, unknown>
+}
+
 const BASE_WC_PENDING_KEY = "pinetree_base_wc_pending"
 const BASE_WC_PENDING_TTL_MS = 10 * 60 * 1000
-const BASE_ETH_AUTO_RESUME_RETRY_MS = 5000
-const BASE_ETH_AUTO_RESUME_INTERVAL_MS = 250
 const BASE_ETH_TX_REQUEST_TIMEOUT_MS = 90_000
 const BASE_ETH_TX_TIMEOUT_MESSAGE = "Transaction approval was not completed. Tap Pay to try again."
 const BASE_USDC_TX_REQUEST_TIMEOUT_MS = 90_000
@@ -109,6 +119,51 @@ function extractErrorMessage(err: unknown): string {
   }
   if (typeof err === "string" && err) return err
   return ""
+}
+
+function extractErrorDetails(err: unknown): Record<string, unknown> {
+  if (typeof err === "object" && err !== null) {
+    const source = err as {
+      code?: unknown
+      message?: unknown
+      name?: unknown
+      shortMessage?: unknown
+      details?: unknown
+      data?: unknown
+      cause?: unknown
+    }
+
+    return {
+      code: source.code ?? null,
+      message: typeof source.message === "string" ? source.message : String(source.message || ""),
+      name: source.name ?? null,
+      shortMessage: source.shortMessage ?? null,
+      details: source.details ?? null,
+      data: source.data ?? null,
+      causeMessage: extractErrorMessage(source.cause) || null,
+    }
+  }
+
+  return {
+    code: null,
+    message: extractErrorMessage(err) || String(err || ""),
+  }
+}
+
+function isUnsupportedTypedDataMethodError(error: unknown, message: string): boolean {
+  const code = typeof error === "object" && error !== null
+    ? (error as { code?: unknown }).code
+    : undefined
+  const normalized = message.toLowerCase()
+
+  return (
+    code === -32601 ||
+    code === 4200 ||
+    normalized.includes("method not found") ||
+    normalized.includes("method is not supported") ||
+    normalized.includes("unsupported method") ||
+    normalized.includes("does not support")
+  )
 }
 
 function isRejectedError(error: unknown, message: string): boolean {
@@ -195,6 +250,94 @@ async function getWalletConnectProvider(connector: Connector): Promise<WalletCon
   return provider
 }
 
+function requireBaseUsdcV4TypedData(typedData: unknown, fromAddress: string): Eip712TypedData {
+  if (!typedData || typeof typedData !== "object") {
+    throw new Error("Invalid Base USDC typed data returned by server")
+  }
+
+  const source = typedData as Partial<Eip712TypedData>
+  const domain = source.domain
+  const message = source.message
+
+  if (!domain || typeof domain !== "object" || !message || typeof message !== "object") {
+    throw new Error("Incomplete Base USDC typed data returned by server")
+  }
+
+  const normalizedChainId = Number(domain.chainId)
+  const verifyingContract = String(domain.verifyingContract || "").trim()
+  const payer = String((message as Record<string, unknown>).from || "").trim()
+  const to = String((message as Record<string, unknown>).to || "").trim()
+  const value = String((message as Record<string, unknown>).value ?? "").trim()
+  const validAfter = String((message as Record<string, unknown>).validAfter ?? "").trim()
+  const validBefore = String((message as Record<string, unknown>).validBefore ?? "").trim()
+  const nonce = String((message as Record<string, unknown>).nonce || "").trim()
+
+  if (String(domain.name || "") !== "USD Coin") {
+    throw new Error("Invalid Base USDC typed data domain name")
+  }
+
+  if (String(domain.version || "") !== "2") {
+    throw new Error("Invalid Base USDC typed data domain version")
+  }
+
+  if (normalizedChainId !== base.id) {
+    throw new Error("Invalid Base USDC typed data chainId")
+  }
+
+  if (verifyingContract.toLowerCase() !== BASE_USDC_ADDRESS.toLowerCase()) {
+    throw new Error("Invalid Base USDC typed data verifying contract")
+  }
+
+  if (source.primaryType !== "ReceiveWithAuthorization") {
+    throw new Error("Invalid Base USDC typed data primary type")
+  }
+
+  if (payer.toLowerCase() !== fromAddress.toLowerCase()) {
+    throw new Error("Base USDC typed data payer does not match connected wallet")
+  }
+
+  if (!/^0x[a-fA-F0-9]{40}$/.test(to)) {
+    throw new Error("Invalid Base USDC typed data recipient")
+  }
+
+  if (!/^\d+$/.test(value) || BigInt(value) <= BigInt(0)) {
+    throw new Error("Invalid Base USDC typed data value")
+  }
+
+  if (!/^\d+$/.test(validAfter) || !/^\d+$/.test(validBefore)) {
+    throw new Error("Invalid Base USDC typed data validity window")
+  }
+
+  if (!/^0x[a-fA-F0-9]{64}$/.test(nonce)) {
+    throw new Error("Invalid Base USDC typed data nonce")
+  }
+
+  return {
+    domain: {
+      ...domain,
+      chainId: normalizedChainId,
+      verifyingContract,
+    },
+    types: source.types || {},
+    primaryType: source.primaryType,
+    message: {
+      ...message,
+      from: payer,
+      to,
+      value,
+      validAfter,
+      validBefore,
+      nonce,
+    },
+  }
+}
+
+function serializeTypedDataForWallet(typedData: Eip712TypedData): string {
+  return JSON.stringify(typedData, (_key, value) =>
+    typeof value === "bigint" ? value.toString() : value
+  )
+}
+
 function normalizeHexTransactionHash(value: unknown): string {
   const txHash = String(value || "").trim()
   if (!/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
@@ -258,12 +401,25 @@ async function signBaseUsdcV4AuthorizationWithTimeout(input: {
   typedData: unknown
 }): Promise<string> {
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+  const typedData = requireBaseUsdcV4TypedData(input.typedData, input.fromAddress)
+  const serializedTypedData = serializeTypedDataForWallet(typedData)
 
   try {
     const signature = await Promise.race([
       input.provider.request({
         method: "eth_signTypedData_v4",
-        params: [input.fromAddress, JSON.stringify(input.typedData)],
+        params: [input.fromAddress, serializedTypedData],
+      }).catch((error) => {
+        const message = extractErrorMessage(error) || "Failed to sign Base USDC authorization"
+        if (isUnsupportedTypedDataMethodError(error, message)) {
+          console.warn("[PineTreeBaseTrace] Base USDC typed-data signing unsupported", {
+            step: "base-usdc-v4-sign-unsupported",
+            method: "eth_signTypedData_v4",
+            ...extractErrorDetails(error),
+          })
+          throw new Error("Wallet does not support eth_signTypedData_v4 for Base USDC authorization.")
+        }
+        throw error
       }),
       new Promise<never>((_, reject) => {
         timeoutHandle = setTimeout(
@@ -582,13 +738,38 @@ export default function BaseWalletPayment({
     }
 
     setBaseUsdcV4Status("Sign USDC payment authorization...")
+    console.info("[PineTreeBaseTrace] Base USDC signing start", {
+      step: "base-usdc-v4-sign-start",
+      paymentId: input.paymentData.paymentId,
+      method: "eth_signTypedData_v4",
+      typedDataParam: "json-string"
+    })
     console.info("[Base USDC V4] base-usdc-v4-signature-requested", {
       paymentId: input.paymentData.paymentId
     })
-    const signature = await signBaseUsdcV4AuthorizationWithTimeout({
-      provider: input.provider,
-      fromAddress: input.fromAddress,
-      typedData: prepare.typedData
+    let signature = ""
+    try {
+      signature = await signBaseUsdcV4AuthorizationWithTimeout({
+        provider: input.provider,
+        fromAddress: input.fromAddress,
+        typedData: prepare.typedData
+      })
+    } catch (signError) {
+      console.error("[PineTreeBaseTrace] Base USDC signing failure", {
+        step: "base-usdc-v4-sign-failure",
+        paymentId: input.paymentData.paymentId,
+        method: "eth_signTypedData_v4",
+        ...extractErrorDetails(signError),
+      })
+      throw signError
+    }
+    if (!/^0x[a-fA-F0-9]+$/.test(signature)) {
+      throw new Error("Base USDC relay blocked because no valid authorization signature exists")
+    }
+    console.info("[PineTreeBaseTrace] Base USDC signing success", {
+      step: "base-usdc-v4-sign-success",
+      paymentId: input.paymentData.paymentId,
+      signaturePrefix: signature.slice(0, 10)
     })
     console.info("[Base USDC V4] base-usdc-v4-signature-received", {
       paymentId: input.paymentData.paymentId,
@@ -693,7 +874,7 @@ export default function BaseWalletPayment({
         prefetched: Boolean(prefetched),
       })
       // Use pre-parsed tx request if available (parsed from prefetched payment URL before connect)
-      const cachedTxRequest = selectedAsset === "ETH" || selectedAsset === "USDC"
+      const cachedTxRequest = selectedAsset === "ETH"
         ? prefetchedTxRequestRef.current
         : null
       if (cachedTxRequest) prefetchedTxRequestRef.current = null
@@ -753,6 +934,10 @@ export default function BaseWalletPayment({
         return
       }
 
+      if (selectedAsset === "USDC") {
+        throw new Error("Base USDC requires EIP-3009 relayer authorization and cannot use a sendTransaction payment path.")
+      }
+
       const txRequest = cachedTxRequest ?? parseEthereumPaymentUri(paymentData.paymentUrl)
 
       console.log("[Base ETH] eth-sendTransaction-requested", { to: txRequest.to, hasData: Boolean(txRequest.data) })
@@ -808,7 +993,15 @@ export default function BaseWalletPayment({
         message === BASE_ETH_TX_TIMEOUT_MESSAGE ||
         message === BASE_USDC_SIGN_TIMEOUT_MESSAGE
 
-      void logBase("send-transaction-error", { message: friendly, rejected, timedOut })
+      void logBase("send-transaction-error", {
+        message: friendly,
+        rejected,
+        timedOut,
+        selectedAsset,
+        paymentId: createdPaymentId || null,
+        isBaseUsdcV4: createdBaseUsdcV4Payment,
+        errorDetails: extractErrorDetails(err),
+      })
       console.error("[PineTreeBaseTrace] BaseWalletPayment error", {
         step: "payment-error",
         selectedAsset,
@@ -917,9 +1110,13 @@ export default function BaseWalletPayment({
               selectedAsset,
             })
             // Pre-parse the URI so continueBasePayment has zero async work before eth_sendTransaction
-            try {
-              prefetchedTxRequestRef.current = parseEthereumPaymentUri(paymentSettled.value.paymentUrl)
-            } catch {
+            if (selectedAsset === "ETH") {
+              try {
+                prefetchedTxRequestRef.current = parseEthereumPaymentUri(paymentSettled.value.paymentUrl)
+              } catch {
+                prefetchedTxRequestRef.current = null
+              }
+            } else {
               prefetchedTxRequestRef.current = null
             }
           }
@@ -1034,15 +1231,30 @@ export default function BaseWalletPayment({
     if (!pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)) return false
     if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return false
     if (!walletConnectConnector) return false
+    if (!isConnected || !address) {
+      await logBase("auto-resume-provider-check-skipped", {
+        source,
+        reason: !isConnected ? "not-connected" : "no-address",
+      })
+      return false
+    }
+    if (!connector || !isWalletConnectConnector(connector)) {
+      await logBase("auto-resume-provider-check-skipped", {
+        source,
+        reason: "active-connector-not-walletconnect",
+      })
+      return false
+    }
 
     try {
       const provider = await getWalletConnectProvider(walletConnectConnector)
-      const accounts = await provider.request({ method: "eth_accounts" })
-      const providerAddress = extractAddressFromConnectResult(accounts)
+      const providerAddress = String(address || "").trim()
 
       await logBase("auto-resume-provider-check", {
         source,
         hasProviderAddress: Boolean(providerAddress),
+        hasProvider: Boolean(provider),
+        chainId: chain?.id || connectedChainIdRef.current || null,
       })
 
       if (!providerAddress) return false
@@ -1057,7 +1269,7 @@ export default function BaseWalletPayment({
       })
       return false
     }
-  }, [continueBasePayment, intentId, selectedAsset, stopAutoResumeRetry, walletConnectConnector])
+  }, [address, chain?.id, connector, continueBasePayment, intentId, isConnected, selectedAsset, stopAutoResumeRetry, walletConnectConnector])
 
   const tryResumeBaseWalletConnectPayment = useCallback((source = "auto") => {
     const pending = getPendingBaseWalletConnectPayment()
@@ -1087,6 +1299,7 @@ export default function BaseWalletPayment({
       : activeBaseUsdcV4PaymentRef.current !== null ? "v4-active"
       : !isConnected ? "not-connected"
       : !address ? "no-address"
+      : !connector || !isWalletConnectConnector(connector) ? "active-connector-not-walletconnect"
       : isSendingBaseTxRef.current ? "already-sending"
       : paymentSubmittedRef.current ? "already-submitted"
       : isOpeningWallet ? "opening-wallet"
@@ -1094,9 +1307,6 @@ export default function BaseWalletPayment({
 
     if (skipReason) {
       void logBase("auto-resume-skipped", { reason: skipReason })
-      if (skipReason === "not-connected" || skipReason === "no-address") {
-        void resumeFromWalletConnectProvider(source)
-      }
       return
     }
 
@@ -1123,44 +1333,28 @@ export default function BaseWalletPayment({
       void logBase("auto-resume-fired", { hasAddress: Boolean(capturedAddress) })
       void continueBasePayment(capturedAddress)
     }, 700)
-  }, [address, continueBasePayment, intentId, isConnected, isOpeningWallet, resumeFromWalletConnectProvider, selectedAsset, stopAutoResumeRetry])
+  }, [address, connector, continueBasePayment, intentId, isConnected, isOpeningWallet, selectedAsset, stopAutoResumeRetry])
 
   const startBaseWalletConnectAutoResumeRetry = useCallback((source: string) => {
     if (selectedAsset !== "ETH" && selectedAsset !== "USDC") return
     if (!pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)) return
     if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return
     if (activeBaseUsdcV4PaymentRef.current !== null) return
-
-    if (!autoResumeRetryRef.current) {
-      autoResumeRetryStartedAtRef.current = Date.now()
-      void logBase("auto-resume-retry-start", {
+    if (!isConnected || !address || !connector || !isWalletConnectConnector(connector)) {
+      stopAutoResumeRetry()
+      void logBase("auto-resume-waiting-for-connected-walletconnect", {
         source,
-        retryMs: BASE_ETH_AUTO_RESUME_RETRY_MS,
-        intervalMs: BASE_ETH_AUTO_RESUME_INTERVAL_MS,
+        isConnected,
+        hasAddress: Boolean(address),
+        activeConnectorId: connector?.id || null,
       })
-
-      autoResumeRetryRef.current = setInterval(() => {
-        const elapsed = Date.now() - autoResumeRetryStartedAtRef.current
-        if (
-          elapsed > BASE_ETH_AUTO_RESUME_RETRY_MS ||
-          isSendingBaseTxRef.current ||
-          paymentSubmittedRef.current ||
-          !pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)
-        ) {
-          void logBase("auto-resume-retry-stop", { source, elapsed })
-          stopAutoResumeRetry()
-          refreshPendingState()
-          return
-        }
-
-        void resumeFromWalletConnectProvider(`retry-provider:${source}`)
-        tryResumeBaseWalletConnectPayment(`retry:${source}`)
-      }, BASE_ETH_AUTO_RESUME_INTERVAL_MS)
+      refreshPendingState()
+      return
     }
 
     void resumeFromWalletConnectProvider(`provider:${source}`)
     tryResumeBaseWalletConnectPayment(source)
-  }, [intentId, refreshPendingState, resumeFromWalletConnectProvider, selectedAsset, stopAutoResumeRetry, tryResumeBaseWalletConnectPayment])
+  }, [address, connector, intentId, isConnected, refreshPendingState, resumeFromWalletConnectProvider, selectedAsset, stopAutoResumeRetry, tryResumeBaseWalletConnectPayment])
 
   useEffect(() => {
     refreshPendingState()
@@ -1259,7 +1453,9 @@ export default function BaseWalletPayment({
         return
       }
 
-      void resumeFromWalletConnectProvider("provider-event")
+      void logBase("auto-resume-provider-event-skipped", {
+        reason: "no-address-in-event"
+      })
     }
 
     void getWalletConnectProvider(walletConnectConnector)
