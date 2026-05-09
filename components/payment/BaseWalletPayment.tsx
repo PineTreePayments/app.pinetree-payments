@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useAccount, useConnect, useSwitchChain } from "wagmi"
+import { useAccount, useConnect, useSwitchChain, useWalletClient } from "wagmi"
 import type { Connector } from "wagmi"
 import { base } from "wagmi/chains"
 import Button from "@/components/ui/Button"
@@ -67,6 +67,16 @@ type WalletConnectProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>
   on?: (event: string, handler: (...args: unknown[]) => void) => void
   removeListener?: (event: string, handler: (...args: unknown[]) => void) => void
+}
+
+type BaseWalletClient = {
+  signTypedData: (args: {
+    account: string
+    domain: Eip712TypedData["domain"]
+    types: Eip712TypedData["types"]
+    primaryType: string
+    message: Record<string, unknown>
+  }) => Promise<string>
 }
 
 type Eip712TypedData = {
@@ -166,6 +176,25 @@ function isUnsupportedTypedDataMethodError(error: unknown, message: string): boo
   )
 }
 
+function shouldTryTypedDataWalletClientFallback(error: unknown, message: string): boolean {
+  const code = typeof error === "object" && error !== null
+    ? (error as { code?: unknown }).code
+    : undefined
+  const normalized = message.toLowerCase()
+
+  return (
+    isUnsupportedTypedDataMethodError(error, message) ||
+    code === -32000 ||
+    normalized.includes("failed to sign message") ||
+    normalized.includes("failed to sign") ||
+    normalized.includes("could not sign")
+  )
+}
+
+function isValidAuthorizationSignature(value: unknown): value is string {
+  return /^0x[a-fA-F0-9]{130}$/.test(String(value || "").trim())
+}
+
 function isRejectedError(error: unknown, message: string): boolean {
   return (
     message.toLowerCase().includes("rejected") ||
@@ -173,6 +202,21 @@ function isRejectedError(error: unknown, message: string): boolean {
     message.toLowerCase().includes("cancel") ||
     (isEip1193Error(error) && error.code === 4001)
   )
+}
+
+function getFailReason(input: {
+  selectedAsset: BaseAsset
+  isBaseUsdcV4: boolean
+  rejected: boolean
+  timedOut: boolean
+  transactionPromptStarted: boolean
+}): "user-rejected-transaction" | "transaction-timeout" | null {
+  if (input.selectedAsset !== "ETH") return null
+  if (input.isBaseUsdcV4) return null
+  if (!input.transactionPromptStarted) return null
+  if (input.rejected) return "user-rejected-transaction"
+  if (input.timedOut) return "transaction-timeout"
+  return null
 }
 
 
@@ -248,6 +292,21 @@ async function getWalletConnectProvider(connector: Connector): Promise<WalletCon
     throw new Error("WalletConnect provider is not available.")
   }
   return provider
+}
+
+function getWalletConnectPeerName(provider: WalletConnectProvider): string | null {
+  const source = provider as {
+    session?: {
+      peer?: {
+        metadata?: {
+          name?: unknown
+        }
+      }
+    }
+  }
+
+  const name = source.session?.peer?.metadata?.name
+  return typeof name === "string" && name.trim() ? name.trim() : null
 }
 
 function requireBaseUsdcV4TypedData(typedData: unknown, fromAddress: string): Eip712TypedData {
@@ -397,30 +456,111 @@ async function sendWalletConnectTransactionWithTimeout(input: {
 
 async function signBaseUsdcV4AuthorizationWithTimeout(input: {
   provider: WalletConnectProvider
+  walletClient?: BaseWalletClient | null
   fromAddress: string
   typedData: unknown
-}): Promise<string> {
+  signingContext: Record<string, unknown>
+}): Promise<{ signature: string; method: "A" | "B" }> {
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null
   const typedData = requireBaseUsdcV4TypedData(input.typedData, input.fromAddress)
   const serializedTypedData = serializeTypedDataForWallet(typedData)
 
-  try {
-    const signature = await Promise.race([
-      input.provider.request({
+  const safeContext = {
+    ...input.signingContext,
+    payerPrefix: input.fromAddress.slice(0, 10),
+    domain: {
+      name: typedData.domain.name,
+      version: typedData.domain.version,
+      chainId: typedData.domain.chainId,
+      verifyingContract: typedData.domain.verifyingContract,
+    },
+    primaryType: typedData.primaryType,
+    messageFieldNames: Object.keys(typedData.message),
+    typedDataIsJsonString: typeof serializedTypedData === "string",
+  }
+
+  const sign = async (): Promise<{ signature: string; method: "A" | "B" }> => {
+    await logBase("usdc-sign-method-start", {
+      method: "A",
+      requestMethod: "eth_signTypedData_v4",
+      ...safeContext,
+    })
+
+    try {
+      const signature = await input.provider.request({
         method: "eth_signTypedData_v4",
         params: [input.fromAddress, serializedTypedData],
-      }).catch((error) => {
-        const message = extractErrorMessage(error) || "Failed to sign Base USDC authorization"
-        if (isUnsupportedTypedDataMethodError(error, message)) {
-          console.warn("[PineTreeBaseTrace] Base USDC typed-data signing unsupported", {
-            step: "base-usdc-v4-sign-unsupported",
-            method: "eth_signTypedData_v4",
-            ...extractErrorDetails(error),
-          })
-          throw new Error("Wallet does not support eth_signTypedData_v4 for Base USDC authorization.")
-        }
-        throw error
-      }),
+      })
+
+      const normalized = String(signature || "").trim()
+      if (!isValidAuthorizationSignature(normalized)) {
+        throw new Error("Wallet did not return a valid USDC authorization signature")
+      }
+
+      await logBase("usdc-sign-success", {
+        method: "A",
+        signaturePrefix: normalized.slice(0, 10),
+      })
+      return { signature: normalized, method: "A" }
+    } catch (methodAError) {
+      const methodAMessage = extractErrorMessage(methodAError) || "Failed to sign Base USDC authorization"
+      await logBase("usdc-sign-method-failed", {
+        method: "A",
+        ...extractErrorDetails(methodAError),
+      })
+
+      if (!shouldTryTypedDataWalletClientFallback(methodAError, methodAMessage)) {
+        throw methodAError
+      }
+    }
+
+    await logBase("usdc-sign-method-start", {
+      method: "B",
+      requestMethod: "walletClient.signTypedData",
+      walletClientAvailable: Boolean(input.walletClient?.signTypedData),
+      ...safeContext,
+    })
+
+    if (!input.walletClient?.signTypedData) {
+      await logBase("usdc-sign-method-failed", {
+        method: "B",
+        code: "WALLET_CLIENT_UNAVAILABLE",
+        message: "Wagmi walletClient.signTypedData is not available",
+      })
+      throw new Error("This wallet could not sign the Base USDC authorization. Try another WalletConnect wallet for Base USDC.")
+    }
+
+    try {
+      const signature = await input.walletClient.signTypedData({
+        account: input.fromAddress,
+        domain: typedData.domain,
+        types: typedData.types,
+        primaryType: typedData.primaryType,
+        message: typedData.message,
+      })
+
+      const normalized = String(signature || "").trim()
+      if (!isValidAuthorizationSignature(normalized)) {
+        throw new Error("Wallet did not return a valid USDC authorization signature")
+      }
+
+      await logBase("usdc-sign-success", {
+        method: "B",
+        signaturePrefix: normalized.slice(0, 10),
+      })
+      return { signature: normalized, method: "B" }
+    } catch (methodBError) {
+      await logBase("usdc-sign-method-failed", {
+        method: "B",
+        ...extractErrorDetails(methodBError),
+      })
+      throw new Error("This wallet could not sign the Base USDC authorization. Try another WalletConnect wallet for Base USDC.")
+    }
+  }
+
+  try {
+    return await Promise.race([
+      sign(),
       new Promise<never>((_, reject) => {
         timeoutHandle = setTimeout(
           () => reject(new Error(BASE_USDC_SIGN_TIMEOUT_MESSAGE)),
@@ -429,11 +569,6 @@ async function signBaseUsdcV4AuthorizationWithTimeout(input: {
       })
     ])
 
-    const normalized = String(signature || "").trim()
-    if (!/^0x[a-fA-F0-9]+$/.test(normalized)) {
-      throw new Error("Wallet did not return a valid USDC authorization signature")
-    }
-    return normalized
   } finally {
     if (timeoutHandle !== null) clearTimeout(timeoutHandle)
   }
@@ -567,6 +702,7 @@ export default function BaseWalletPayment({
   const { address, chain, isConnected, connector } = useAccount()
   const { connectors, connectAsync, status: connectStatus } = useConnect()
   const { switchChainAsync, status: switchStatus } = useSwitchChain()
+  const { data: walletClient } = useWalletClient()
 
   const [localError, setLocalError] = useState("")
   const [hasPendingBaseWcPayment, setHasPendingBaseWcPayment] = useState<boolean>(() => {
@@ -591,6 +727,7 @@ export default function BaseWalletPayment({
   const connectedChainIdRef = useRef<number | null>(null)
   const sessionSettleTriggerFiredRef = useRef(false)
   const activeBaseUsdcV4PaymentRef = useRef<string | null>(null)
+  const activeBasePaymentAttemptRef = useRef<string | null>(null)
 
   const isIntentMode = Boolean(intentId)
   const isOnBase = chain?.id === base.id
@@ -703,7 +840,9 @@ export default function BaseWalletPayment({
   const executeBaseUsdcV4Payment = useCallback(async (input: {
     paymentData: PaymentData
     provider: WalletConnectProvider
+    walletClient?: BaseWalletClient | null
     fromAddress: string
+    signingContext: Record<string, unknown>
   }): Promise<string> => {
     if (activeBaseUsdcV4PaymentRef.current === input.paymentData.paymentId) {
       throw new Error("Base USDC V4 payment is already in progress. Please wait for the current attempt to finish.")
@@ -738,37 +877,48 @@ export default function BaseWalletPayment({
     }
 
     setBaseUsdcV4Status("Sign USDC payment authorization...")
+    const peerName = getWalletConnectPeerName(input.provider)
     console.info("[PineTreeBaseTrace] Base USDC signing start", {
       step: "base-usdc-v4-sign-start",
       paymentId: input.paymentData.paymentId,
       method: "eth_signTypedData_v4",
-      typedDataParam: "json-string"
+      typedDataParam: "json-string",
+      peerName
     })
     console.info("[Base USDC V4] base-usdc-v4-signature-requested", {
       paymentId: input.paymentData.paymentId
     })
     let signature = ""
+    let signMethod: "A" | "B" = "A"
     try {
-      signature = await signBaseUsdcV4AuthorizationWithTimeout({
+      const signResult = await signBaseUsdcV4AuthorizationWithTimeout({
         provider: input.provider,
+        walletClient: input.walletClient,
         fromAddress: input.fromAddress,
-        typedData: prepare.typedData
+        typedData: prepare.typedData,
+        signingContext: {
+          ...input.signingContext,
+          providerPeerName: peerName,
+        }
       })
+      signature = signResult.signature
+      signMethod = signResult.method
     } catch (signError) {
       console.error("[PineTreeBaseTrace] Base USDC signing failure", {
         step: "base-usdc-v4-sign-failure",
         paymentId: input.paymentData.paymentId,
-        method: "eth_signTypedData_v4",
+        method: "typed-data-compatible",
         ...extractErrorDetails(signError),
       })
       throw signError
     }
-    if (!/^0x[a-fA-F0-9]+$/.test(signature)) {
+    if (!isValidAuthorizationSignature(signature)) {
       throw new Error("Base USDC relay blocked because no valid authorization signature exists")
     }
     console.info("[PineTreeBaseTrace] Base USDC signing success", {
       step: "base-usdc-v4-sign-success",
       paymentId: input.paymentData.paymentId,
+      method: signMethod,
       signaturePrefix: signature.slice(0, 10)
     })
     console.info("[Base USDC V4] base-usdc-v4-signature-received", {
@@ -777,6 +927,7 @@ export default function BaseWalletPayment({
     })
 
     setBaseUsdcV4Status("Relaying payment...")
+    void logBase("relay-start", { paymentId: input.paymentData.paymentId })
     console.info("[Base USDC V4] base-usdc-v4-relay-start", {
       paymentId: input.paymentData.paymentId
     })
@@ -808,6 +959,10 @@ export default function BaseWalletPayment({
       status: relay.status || "submitted",
       txHashPrefix: txHash.slice(0, 10)
     })
+    void logBase("relay-success", {
+      paymentId: input.paymentData.paymentId,
+      txHashPrefix: txHash.slice(0, 10),
+    })
     setBaseUsdcV4Status("Processing payment...")
     return txHash
     } catch (error) {
@@ -823,6 +978,8 @@ export default function BaseWalletPayment({
 
     let createdPaymentId = ""
     let createdBaseUsdcV4Payment = false
+    let transactionPromptStarted = false
+    let activeAttemptKey = ""
 
     try {
       if (!walletConnectConnector) {
@@ -868,6 +1025,22 @@ export default function BaseWalletPayment({
       if (prefetched) prefetchedPaymentDataRef.current = null
       const paymentData = prefetched ?? await resolvePaymentData()
       createdPaymentId = paymentData.paymentId
+      activeAttemptKey = `${paymentData.paymentId}:${selectedAsset}`
+      if (activeBasePaymentAttemptRef.current && activeBasePaymentAttemptRef.current === activeAttemptKey) {
+        void logBase("auto-resume-skipped", { reason: "active-attempt-lock", activeAttemptKey })
+        setIsOpeningWallet(false)
+        return
+      }
+      if (activeBasePaymentAttemptRef.current && activeBasePaymentAttemptRef.current !== activeAttemptKey) {
+        void logBase("auto-resume-skipped", {
+          reason: "different-active-attempt-lock",
+          activeAttemptKey: activeBasePaymentAttemptRef.current,
+          nextAttemptKey: activeAttemptKey,
+        })
+        setIsOpeningWallet(false)
+        return
+      }
+      activeBasePaymentAttemptRef.current = activeAttemptKey
       void logBase("resolve-payment-result", {
         paymentId: paymentData.paymentId,
         hasPaymentUrl: Boolean(paymentData.paymentUrl),
@@ -909,10 +1082,17 @@ export default function BaseWalletPayment({
         const normalizedTxHash = await executeBaseUsdcV4Payment({
           paymentData,
           provider: walletConnectProvider,
-          fromAddress
+          walletClient: (walletClient as BaseWalletClient | undefined) || null,
+          fromAddress,
+          signingContext: {
+            connectorName: connector?.name || walletConnectConnector.name || null,
+            connectorId: connector?.id || walletConnectConnector.id || null,
+            chainId: chain?.id || connectedChainIdRef.current || base.id,
+          }
         })
 
         paymentSubmittedRef.current = true
+        activeBasePaymentAttemptRef.current = null
         void logBase("usdc-v4-relayed", { txHashPrefix: normalizedTxHash.slice(0, 10) })
         console.info("[Base USDC V4] base-usdc-v4-detect-start", {
           paymentId: paymentData.paymentId,
@@ -950,6 +1130,11 @@ export default function BaseWalletPayment({
         hasData: Boolean(txRequest.data),
         hasValue: Boolean(txRequest.value),
       })
+      void logBase("eth-tx-prompt-start", {
+        paymentId: paymentData.paymentId,
+        to: txRequest.to,
+      })
+      transactionPromptStarted = true
 
       // Race the transaction request against a timeout so that if the wallet never
       // presents the approval dialog, the checkout clears its "Confirming" state
@@ -967,9 +1152,11 @@ export default function BaseWalletPayment({
       if (txTimeoutHandle !== null) clearTimeout(txTimeoutHandle)
 
       paymentSubmittedRef.current = true
+      activeBasePaymentAttemptRef.current = null
 
       console.log("[Base ETH] eth-sendTransaction-result", { txHashPrefix: normalizedTxHash.slice(0, 10) })
       void logBase("tx-submitted", { txHashPrefix: normalizedTxHash.slice(0, 10) })
+      void logBase("eth-tx-submitted", { txHashPrefix: normalizedTxHash.slice(0, 10) })
       void logBase("eth-sendTransaction-result", { txHashPrefix: normalizedTxHash.slice(0, 10) })
 
       void logBase("detect-start", { paymentId: paymentData.paymentId })
@@ -992,6 +1179,17 @@ export default function BaseWalletPayment({
       const timedOut =
         message === BASE_ETH_TX_TIMEOUT_MESSAGE ||
         message === BASE_USDC_SIGN_TIMEOUT_MESSAGE
+      const failReason = getFailReason({
+        selectedAsset,
+        isBaseUsdcV4: createdBaseUsdcV4Payment,
+        rejected,
+        timedOut,
+        transactionPromptStarted,
+      })
+      const isRetryableUsdcSigningFailure =
+        createdBaseUsdcV4Payment &&
+        !rejected &&
+        !timedOut
 
       void logBase("send-transaction-error", {
         message: friendly,
@@ -1000,6 +1198,8 @@ export default function BaseWalletPayment({
         selectedAsset,
         paymentId: createdPaymentId || null,
         isBaseUsdcV4: createdBaseUsdcV4Payment,
+        transactionPromptStarted,
+        failReason,
         errorDetails: extractErrorDetails(err),
       })
       console.error("[PineTreeBaseTrace] BaseWalletPayment error", {
@@ -1010,17 +1210,16 @@ export default function BaseWalletPayment({
         error: message,
         rejected,
         timedOut,
+        transactionPromptStarted,
+        failReason,
         isBaseUsdcV4: createdBaseUsdcV4Payment
       })
 
-      // V4 errors always clear pending state — each attempt needs fresh prepare + sign,
-      // so auto-resume retrying on a V4 error would only trigger repeated signing prompts.
       const shouldClearPending =
         rejected ||
         timedOut ||
         message.toLowerCase().includes("expired") ||
-        message.toLowerCase().includes("unavailable") ||
-        createdBaseUsdcV4Payment
+        message.toLowerCase().includes("unavailable")
 
       if (shouldClearPending) {
         clearPendingBaseWalletConnectPayment()
@@ -1032,7 +1231,12 @@ export default function BaseWalletPayment({
         }
       }
 
-      if (rejected && createdPaymentId && !createdBaseUsdcV4Payment) {
+      if (failReason && createdPaymentId) {
+        activeBasePaymentAttemptRef.current = null
+        void logBase("fail-called", {
+          paymentId: createdPaymentId,
+          reason: failReason,
+        })
         await fetch(`/api/payments/${encodeURIComponent(createdPaymentId)}/fail`, {
           method: "POST",
         }).catch(() => null)
@@ -1043,6 +1247,10 @@ export default function BaseWalletPayment({
         }
       }
 
+      if (isRetryableUsdcSigningFailure) {
+        setHasPendingBaseWcPayment(false)
+      }
+
       setLocalError(friendly)
       setIsPreparingPayment(false)
       setIsOpeningWallet(false)
@@ -1051,9 +1259,23 @@ export default function BaseWalletPayment({
     } finally {
       isSendingBaseTxRef.current = false
     }
-  }, [executeBaseUsdcV4Payment, intentId, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, switchChainAsync, walletConnectConnector])
+  }, [chain?.id, connector?.id, connector?.name, executeBaseUsdcV4Payment, intentId, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, switchChainAsync, walletClient, walletConnectConnector])
+
+  const resetBasePaymentAttemptForRetry = useCallback(() => {
+    activeBasePaymentAttemptRef.current = null
+    activeBaseUsdcV4PaymentRef.current = null
+    isSendingBaseTxRef.current = false
+    paymentSubmittedRef.current = false
+    sessionSettleTriggerFiredRef.current = false
+    prefetchedPaymentDataRef.current = null
+    prefetchedTxRequestRef.current = null
+    setBaseUsdcV4Status("")
+    clearPendingBaseWalletConnectPayment()
+    setHasPendingBaseWcPayment(false)
+  }, [])
 
   const startWalletConnectPayment = useCallback(() => {
+    resetBasePaymentAttemptForRetry()
     setLocalError("")
 
     void (async () => {
@@ -1130,12 +1352,7 @@ export default function BaseWalletPayment({
             const connectMsg = connectErr instanceof Error ? connectErr.message : String(connectErr)
             const connectRejected = isRejectedError(connectErr, connectMsg)
             if (connectRejected) {
-              // Explicit user cancellation — fail any created payment record
-              const failId = prefetchedPaymentDataRef.current?.paymentId
-              if (failId) {
-                await fetch(`/api/payments/${encodeURIComponent(failId)}/fail`, { method: "POST" }).catch(() => null)
-                prefetchedPaymentDataRef.current = null
-              }
+              prefetchedPaymentDataRef.current = null
               prefetchedProviderRef.current = null
               prefetchedTxRequestRef.current = null
               clearPendingBaseWalletConnectPayment()
@@ -1205,6 +1422,7 @@ export default function BaseWalletPayment({
         })
 
         if (rejected) {
+          activeBasePaymentAttemptRef.current = null
           clearPendingBaseWalletConnectPayment()
           setHasPendingBaseWcPayment(false)
         }
@@ -1216,7 +1434,7 @@ export default function BaseWalletPayment({
         onError?.(friendly)
       }
     })()
-  }, [address, connectAsync, continueBasePayment, intentId, isConnected, onError, resolvePaymentData, selectedAsset, walletConnectConnector])
+  }, [address, connectAsync, continueBasePayment, intentId, isConnected, onError, resetBasePaymentAttemptForRetry, resolvePaymentData, selectedAsset, walletConnectConnector])
 
   const stopAutoResumeRetry = useCallback(() => {
     if (autoResumeRetryRef.current) {
@@ -1296,7 +1514,9 @@ export default function BaseWalletPayment({
     const skipReason =
       !hasPending ? "no-pending"
       : selectedAsset !== "ETH" && selectedAsset !== "USDC" ? "not-base-asset"
+      : activeBasePaymentAttemptRef.current !== null ? "active-attempt-lock"
       : activeBaseUsdcV4PaymentRef.current !== null ? "v4-active"
+      : isConnecting ? "connecting"
       : !isConnected ? "not-connected"
       : !address ? "no-address"
       : !connector || !isWalletConnectConnector(connector) ? "active-connector-not-walletconnect"
@@ -1339,7 +1559,9 @@ export default function BaseWalletPayment({
     if (selectedAsset !== "ETH" && selectedAsset !== "USDC") return
     if (!pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)) return
     if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return
+    if (activeBasePaymentAttemptRef.current !== null) return
     if (activeBaseUsdcV4PaymentRef.current !== null) return
+    if (isConnecting) return
     if (!isConnected || !address || !connector || !isWalletConnectConnector(connector)) {
       stopAutoResumeRetry()
       void logBase("auto-resume-waiting-for-connected-walletconnect", {
@@ -1354,7 +1576,7 @@ export default function BaseWalletPayment({
 
     void resumeFromWalletConnectProvider(`provider:${source}`)
     tryResumeBaseWalletConnectPayment(source)
-  }, [address, connector, intentId, isConnected, refreshPendingState, resumeFromWalletConnectProvider, selectedAsset, stopAutoResumeRetry, tryResumeBaseWalletConnectPayment])
+  }, [address, connector, intentId, isConnected, isConnecting, refreshPendingState, resumeFromWalletConnectProvider, selectedAsset, stopAutoResumeRetry, tryResumeBaseWalletConnectPayment])
 
   useEffect(() => {
     refreshPendingState()
@@ -1367,6 +1589,7 @@ export default function BaseWalletPayment({
     prefetchedProviderRef.current = null
     prefetchedTxRequestRef.current = null
     setBaseUsdcV4Status("")
+    activeBasePaymentAttemptRef.current = null
     activeBaseUsdcV4PaymentRef.current = null
     connectedChainIdRef.current = null
     sessionSettleTriggerFiredRef.current = false
@@ -1416,6 +1639,7 @@ export default function BaseWalletPayment({
     if (!isConnected || !address) return
     if (!pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)) return
     if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return
+    if (activeBasePaymentAttemptRef.current !== null) return
     if (sessionSettleTriggerFiredRef.current) return
     sessionSettleTriggerFiredRef.current = true
     // Snapshot the chain ID at session-settle time so continueBasePayment can skip
@@ -1445,6 +1669,7 @@ export default function BaseWalletPayment({
           pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset) &&
           !isSendingBaseTxRef.current &&
           !paymentSubmittedRef.current &&
+          activeBasePaymentAttemptRef.current === null &&
           activeBaseUsdcV4PaymentRef.current === null
         ) {
           stopAutoResumeRetry()
