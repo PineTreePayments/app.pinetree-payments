@@ -255,14 +255,60 @@ export async function prepareBaseUsdcV4Authorization(input: {
   paymentId: string
   payerAddress: string
 }) {
-  const availability = await getBaseUsdcV4Availability()
-  if (!availability.ok) return availability
-
-  const context = await loadValidatedPaymentContext({
+  console.info("[PineTreeBaseTrace] prepare-authorization engine called", {
+    step: "prepare-entry",
     paymentId: input.paymentId,
     payerAddress: input.payerAddress,
-    allowTerminal: false
+    asset: "USDC",
+    network: "base",
+    chainId: BASE_CHAIN_ID
   })
+
+  const availability = await getBaseUsdcV4Availability()
+  if (!availability.ok) {
+    console.warn("[PineTreeBaseTrace] prepare-authorization config unavailable", {
+      step: "prepare-unavailable",
+      paymentId: input.paymentId,
+      code: availability.code
+    })
+    return availability
+  }
+
+  let context: BaseUsdcV4PaymentContext
+  try {
+    context = await loadValidatedPaymentContext({
+      paymentId: input.paymentId,
+      payerAddress: input.payerAddress,
+      allowTerminal: false
+    })
+  } catch (ctxErr) {
+    const ctxMsg = ctxErr instanceof Error ? ctxErr.message : String(ctxErr)
+    console.error("[PineTreeBaseTrace] prepare-authorization context load failed", {
+      step: "prepare-context-error",
+      paymentId: input.paymentId,
+      error: ctxMsg
+    })
+    throw ctxErr
+  }
+
+  const v4Contract = getBaseUsdcV4Contract()
+  const usdcTokenAddress = getBaseUsdcTokenAddress()
+
+  console.info("[PineTreeBaseTrace] prepare-authorization context loaded", {
+    step: "prepare-context",
+    paymentId: context.paymentId,
+    payerAddress: context.payerAddress,
+    asset: "USDC",
+    network: "base",
+    baseUsdcStrategy: "v4_eip3009_relayer",
+    chainId: BASE_CHAIN_ID,
+    splitContract: v4Contract,
+    usdcTokenAddress,
+    merchantAmount: context.merchantAmount.toString(),
+    feeAmount: context.feeAmount.toString(),
+    totalAmount: context.totalAmount.toString()
+  })
+
   const now = Math.floor(Date.now() / 1000)
   const authorization: BaseUsdcV4Authorization = {
     validAfter: "0",
@@ -275,6 +321,15 @@ export async function prepareBaseUsdcV4Authorization(input: {
     validAfter: authorization.validAfter,
     validBefore: authorization.validBefore,
     nonce: authorization.nonce
+  })
+
+  console.info("[PineTreeBaseTrace] prepare-authorization typed-data prepared", {
+    step: "prepare-success",
+    paymentId: context.paymentId,
+    asset: "USDC",
+    network: "base",
+    baseUsdcStrategy: "v4_eip3009_relayer",
+    validBefore: authorization.validBefore
   })
 
   return {
@@ -292,12 +347,33 @@ export async function relayBaseUsdcV4Payment(input: {
   authorization: BaseUsdcV4Authorization
   signature: string
 }): Promise<BaseUsdcV4RelayResponse> {
+  console.info("[PineTreeBaseTrace] relayer called", {
+    step: "relay-entry",
+    paymentId: input.paymentId,
+    payerAddress: input.payerAddress,
+    asset: "USDC",
+    network: "base",
+    chainId: BASE_CHAIN_ID
+  })
+
   const availability = await getBaseUsdcV4Availability()
-  if (!availability.ok) return availability
+  if (!availability.ok) {
+    console.warn("[PineTreeBaseTrace] relayer config unavailable", {
+      step: "relay-config-unavailable",
+      paymentId: input.paymentId,
+      code: availability.code
+    })
+    return availability
+  }
 
   const existingTransaction = await getTransactionByPaymentId(input.paymentId)
   const existingTxHash = String(existingTransaction?.provider_transaction_id || "").trim()
   if (/^0x[a-fA-F0-9]{64}$/.test(existingTxHash)) {
+    console.info("[PineTreeBaseTrace] relayer idempotent — txHash already exists", {
+      step: "relay-idempotent",
+      paymentId: input.paymentId,
+      txHash: existingTxHash
+    })
     return { ok: true, status: "submitted", txHash: existingTxHash }
   }
 
@@ -322,6 +398,12 @@ export async function relayBaseUsdcV4Payment(input: {
   ))
 
   if (recovered !== context.payerAddress) {
+    console.error("[PineTreeBaseTrace] relayer signature mismatch", {
+      step: "relay-sig-mismatch",
+      paymentId: input.paymentId,
+      recovered,
+      expected: context.payerAddress
+    })
     throw new Error("Base USDC authorization signature does not match payer")
   }
 
@@ -334,8 +416,23 @@ export async function relayBaseUsdcV4Payment(input: {
       configured: configuredRelayerAddress,
       derived: relayer.address
     })
+    console.error("[PineTreeBaseTrace] relayer address mismatch — returning unavailable", {
+      step: "relay-address-mismatch",
+      paymentId: input.paymentId,
+      configuredRelayerAddress,
+      derivedRelayerAddress: relayer.address
+    })
     return unavailable()
   }
+
+  console.info("[PineTreeBaseTrace] relayer wallet ready", {
+    step: "relay-wallet",
+    paymentId: input.paymentId,
+    relayerAddress: relayer.address,
+    splitContract: context.splitContract,
+    network: "base",
+    chainId: BASE_CHAIN_ID
+  })
 
   const contract = new Contract(context.splitContract, V4_ABI, relayer)
 
@@ -345,15 +442,36 @@ export async function relayBaseUsdcV4Payment(input: {
     contract.pineTreeTreasury() as Promise<string>
   ])
 
+  console.info("[PineTreeBaseTrace] relayer contract checks", {
+    step: "relay-contract-checks",
+    paymentId: input.paymentId,
+    splitContract: context.splitContract,
+    relayerAddress: relayer.address,
+    isRelayerAllowed,
+    isPaymentRefUsed,
+    contractTreasuryMatchesConfig: getAddress(contractTreasury) === getAddress(context.treasuryWallet)
+  })
+
   if (!isRelayerAllowed) {
     console.error("[base-usdc-v4] relayer not allowlisted on V4 contract", {
       relayerAddress: relayer.address,
       contractAddress: context.splitContract
     })
+    console.error("[PineTreeBaseTrace] relayer not allowlisted — returning unavailable", {
+      step: "relay-not-allowlisted",
+      paymentId: input.paymentId,
+      relayerAddress: relayer.address,
+      splitContract: context.splitContract
+    })
     return unavailable()
   }
 
   if (isPaymentRefUsed) {
+    console.error("[PineTreeBaseTrace] relayer paymentRef already used on-chain", {
+      step: "relay-ref-used",
+      paymentId: input.paymentId,
+      splitContract: context.splitContract
+    })
     throw new Error("Base USDC V4 payment reference has already been used on-chain")
   }
 
@@ -361,6 +479,12 @@ export async function relayBaseUsdcV4Payment(input: {
     console.error("[base-usdc-v4] contract treasury mismatch", {
       contractTreasury: getAddress(contractTreasury),
       expectedTreasury: context.treasuryWallet
+    })
+    console.error("[PineTreeBaseTrace] relayer treasury mismatch — returning unavailable", {
+      step: "relay-treasury-mismatch",
+      paymentId: input.paymentId,
+      contractTreasury: getAddress(contractTreasury),
+      configuredTreasury: context.treasuryWallet
     })
     return unavailable()
   }
@@ -391,20 +515,66 @@ export async function relayBaseUsdcV4Payment(input: {
   )
   const feeData = await provider.getFeeData()
   const gasPrice = feeData.maxFeePerGas || feeData.gasPrice
-  if (!gasPrice) return unavailable()
+  if (!gasPrice) {
+    console.warn("[PineTreeBaseTrace] relayer no gas price available — returning unavailable", {
+      step: "relay-no-gas-price",
+      paymentId: input.paymentId
+    })
+    return unavailable()
+  }
 
   const gasCostWei = estimatedGas * gasPrice
   const prices = await getMarketPricesUSD()
   const gasCostUsd = Number(formatEther(gasCostWei)) * prices.ETH
   const { maxGasUsd } = getBaseUsdcGasCap()
+
+  const relayerBalance = await provider.getBalance(relayer.address)
+
+  console.info("[PineTreeBaseTrace] relayer gas check", {
+    step: "relay-gas-check",
+    paymentId: input.paymentId,
+    relayerAddress: relayer.address,
+    estimatedGas: estimatedGas.toString(),
+    gasCostWei: gasCostWei.toString(),
+    gasCostUsd: Number.isFinite(gasCostUsd) ? gasCostUsd.toFixed(6) : "NaN",
+    maxGasUsd,
+    relayerBalanceWei: relayerBalance.toString(),
+    gasCostWithinCap: Number.isFinite(gasCostUsd) && gasCostUsd <= maxGasUsd,
+    relayerHasSufficientBalance: relayerBalance >= gasCostWei
+  })
+
   if (!Number.isFinite(gasCostUsd) || gasCostUsd > maxGasUsd) {
+    console.warn("[PineTreeBaseTrace] relayer gas cap exceeded — returning unavailable", {
+      step: "relay-gas-cap-exceeded",
+      paymentId: input.paymentId,
+      gasCostUsd,
+      maxGasUsd
+    })
     return unavailable()
   }
 
-  const relayerBalance = await provider.getBalance(relayer.address)
   if (relayerBalance < gasCostWei) {
+    console.warn("[PineTreeBaseTrace] relayer insufficient ETH balance — returning unavailable", {
+      step: "relay-balance-insufficient",
+      paymentId: input.paymentId,
+      relayerAddress: relayer.address,
+      gasCostWei: gasCostWei.toString(),
+      relayerBalanceWei: relayerBalance.toString()
+    })
     return unavailable()
   }
+
+  console.info("[PineTreeBaseTrace] relayer submitting payWithUsdcAuthorization", {
+    step: "relay-submit",
+    paymentId: input.paymentId,
+    splitContract: context.splitContract,
+    relayerAddress: relayer.address,
+    asset: "USDC",
+    network: "base",
+    chainId: BASE_CHAIN_ID,
+    merchantAmount: context.merchantAmount.toString(),
+    feeAmount: context.feeAmount.toString()
+  })
 
   const tx = await contract.payWithUsdcAuthorization(
     paymentArgs,
@@ -416,23 +586,76 @@ export async function relayBaseUsdcV4Payment(input: {
     throw new Error("Base USDC relayer did not return a transaction hash")
   }
 
+  console.info("[PineTreeBaseTrace] relayer txHash returned", {
+    step: "relay-tx-submitted",
+    paymentId: input.paymentId,
+    txHash,
+    asset: "USDC",
+    network: "base",
+    chainId: BASE_CHAIN_ID
+  })
+
   if (existingTransaction?.id) {
     await updateTransactionProviderReference(existingTransaction.id, txHash)
   }
 
+  console.info("[PineTreeBaseTrace] relayer waiting for receipt", {
+    step: "relay-wait-receipt",
+    paymentId: input.paymentId,
+    txHash
+  })
+
   try {
     const receipt = await provider.waitForTransaction(txHash, 1, 90_000)
     if (receipt) {
+      console.info("[PineTreeBaseTrace] relayer receipt mined", {
+        step: "relay-receipt",
+        paymentId: input.paymentId,
+        txHash,
+        receiptStatus: receipt.status !== undefined ? String(receipt.status) : "unknown"
+      })
       const { runPaymentWatcher } = await import("./checkPaymentOnce")
-      await runPaymentWatcher(input.paymentId, { txHash }).catch((watcherErr) => {
+      console.info("[PineTreeBaseTrace] relayer triggering watcher", {
+        step: "relay-watcher-start",
+        paymentId: input.paymentId,
+        txHash
+      })
+      let watcherDetected = false
+      try {
+        watcherDetected = await runPaymentWatcher(input.paymentId, { txHash })
+      } catch (watcherErr) {
         console.error("[base-usdc-v4] post-relay watcher error", {
           txHash,
           error: watcherErr instanceof Error ? watcherErr.message : String(watcherErr)
         })
+        console.error("[PineTreeBaseTrace] relayer watcher error", {
+          step: "relay-watcher-error",
+          paymentId: input.paymentId,
+          txHash,
+          error: watcherErr instanceof Error ? watcherErr.message : String(watcherErr)
+        })
+      }
+      console.info("[PineTreeBaseTrace] relayer watcher result", {
+        step: "relay-watcher-done",
+        paymentId: input.paymentId,
+        txHash,
+        detected: watcherDetected
+      })
+    } else {
+      console.warn("[PineTreeBaseTrace] relayer receipt null after wait", {
+        step: "relay-receipt-null",
+        paymentId: input.paymentId,
+        txHash
       })
     }
   } catch (waitErr) {
     console.warn("[base-usdc-v4] waitForTransaction did not resolve — cron will detect", {
+      txHash,
+      error: waitErr instanceof Error ? waitErr.message : String(waitErr)
+    })
+    console.warn("[PineTreeBaseTrace] relayer wait-for-receipt timeout — cron will detect", {
+      step: "relay-wait-timeout",
+      paymentId: input.paymentId,
       txHash,
       error: waitErr instanceof Error ? waitErr.message : String(waitErr)
     })

@@ -32,6 +32,7 @@ function classifySelectNetworkError(message: string) {
 }
 
 export async function POST(req: NextRequest, { params }: Params) {
+  let isBase = false
   try {
     const { intentId } = await params
     const body = (await req.json()) as { network?: string; asset?: string }
@@ -42,6 +43,16 @@ export async function POST(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "Missing network selection" }, { status: 400 })
     }
 
+    isBase = network === "base"
+    if (isBase) {
+      console.info("[PineTreeBaseTrace] select-network called", {
+        step: "route-entry",
+        intentId,
+        network,
+        asset: asset || null
+      })
+    }
+
     const idempotencyKey = req.headers.get("idempotency-key") || undefined
 
     const result = await selectPaymentIntentNetworkEngine({
@@ -50,6 +61,28 @@ export async function POST(req: NextRequest, { params }: Params) {
       asset,
       idempotencyKey
     })
+
+    if (isBase) {
+      const r = result as Record<string, unknown>
+      const splitData = ((r.metadata as Record<string, unknown> | undefined)?.split as Record<string, unknown>) ?? {}
+      const baseUsdcStrategy = splitData.baseUsdcStrategy || r.baseUsdcStrategy || null
+      const splitContract = String(splitData.splitContract || "").trim() || null
+      const paymentUrl = String(r.paymentUrl || "")
+      console.info("[PineTreeBaseTrace] select-network success", {
+        step: "route-response",
+        intentId,
+        paymentId: r.paymentId || null,
+        network: r.network || r.selectedNetwork || network,
+        asset: asset || null,
+        baseUsdcStrategy,
+        splitContract,
+        paymentUrlKind: paymentUrl.startsWith("pinetree://base-usdc-v4")
+          ? "pinetree://base-usdc-v4"
+          : paymentUrl.startsWith("ethereum:")
+            ? "ethereum:"
+            : "other"
+      })
+    }
 
     console.info("[api/select-network] returning paymentUrl", {
       intentId,
@@ -62,6 +95,15 @@ export async function POST(req: NextRequest, { params }: Params) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to select payment network"
     const { status, code } = classifySelectNetworkError(message)
+
+    if (isBase) {
+      console.error("[PineTreeBaseTrace] select-network error", {
+        step: "route-error",
+        network: "base",
+        error: message,
+        code
+      })
+    }
 
     return NextResponse.json({ error: message, code }, { status })
   }

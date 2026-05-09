@@ -180,6 +180,7 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
   const splitContractEvm = String(input.splitContract || "").trim().toLowerCase()
   const feeCaptureMethod = String(input.feeCaptureMethod || "").trim().toLowerCase()
   const isBaseUsdc = input.network === "base" && String(input.asset || "").toUpperCase() === "USDC"
+  const isBaseNetwork = input.network === "base"
 
   // ── Resolve RPC ─────────────────────────────────────────────────────────────
   let rpcUrl = ""
@@ -336,6 +337,19 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
   }
 
   // ── EVM ──────────────────────────────────────────────────────────────────────
+  if (isBaseNetwork) {
+    console.info("[PineTreeBaseTrace] watcher:evm entered", {
+      step: "watcher-evm-entry",
+      paymentId: input.paymentId,
+      network: input.network,
+      asset: input.asset || null,
+      feeCaptureMethod,
+      splitContract: splitContractEvm || null,
+      txHash: input.txHash || null,
+      isBaseUsdc
+    })
+  }
+
   let currentBlock: number
   try {
     currentBlock = await getCurrentBlockHeight(rpcUrl)
@@ -360,6 +374,17 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
     // txHash-first: check the exact transaction receipt instead of scanning all logs.
     // This path is taken when detect is called after on-chain confirmation (receipt known).
     if (input.txHash) {
+      if (isBaseNetwork) {
+        console.info("[PineTreeBaseTrace] watcher:evm txHash fast-path start", {
+          step: "watcher-evm-txhash",
+          paymentId: input.paymentId,
+          txHash: input.txHash,
+          splitContract: splitContractEvm,
+          network: input.network,
+          asset: input.asset || null
+        })
+      }
+
       const receipt = await getTransactionReceipt(rpcUrl, input.txHash)
 
       if (!receipt) {
@@ -367,7 +392,25 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
           paymentId: input.paymentId,
           txHash: input.txHash
         })
+        if (isBaseNetwork) {
+          console.info("[PineTreeBaseTrace] watcher:evm receipt not yet available", {
+            step: "watcher-evm-no-receipt",
+            paymentId: input.paymentId,
+            txHash: input.txHash
+          })
+        }
         return false
+      }
+
+      if (isBaseNetwork) {
+        console.info("[PineTreeBaseTrace] watcher:evm receipt found", {
+          step: "watcher-evm-receipt",
+          paymentId: input.paymentId,
+          txHash: input.txHash,
+          receiptStatus: String((receipt as { status?: unknown }).status ?? "unknown"),
+          logCount: receipt.logs.length,
+          splitContract: splitContractEvm
+        })
       }
 
       const matchingLog = receipt.logs.find(
@@ -382,11 +425,32 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
           txHash: input.txHash,
           contractAddress: splitContractEvm
         })
+        if (isBaseNetwork) {
+          console.info("[PineTreeBaseTrace] watcher:evm no PaymentSplit log in receipt", {
+            step: "watcher-evm-no-split-log",
+            paymentId: input.paymentId,
+            txHash: input.txHash,
+            splitContract: splitContractEvm,
+            logAddresses: receipt.logs.map((l) => l.address.toLowerCase())
+          })
+        }
         return false
       }
 
       const decoded = decodePaymentSplitLog(matchingLog.data)
       if (!decoded) return false
+
+      if (isBaseNetwork) {
+        console.info("[PineTreeBaseTrace] watcher:evm PaymentSplit decoded", {
+          step: "watcher-evm-split-decoded",
+          paymentId: input.paymentId,
+          txHash: input.txHash,
+          decodedPaymentRef: decoded.paymentRef,
+          decodedToken: decoded.token,
+          merchantAmount: decoded.merchantAmount.toString(),
+          feeAmount: decoded.feeAmount.toString()
+        })
+      }
 
       if (!isValidBaseUsdcToken(decoded.token, isBaseUsdc)) {
         console.info("[watcher:evm] txHash receipt PaymentSplit token mismatch", {
@@ -394,6 +458,15 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
           txHash: input.txHash,
           token: decoded.token
         })
+        if (isBaseNetwork) {
+          console.info("[PineTreeBaseTrace] watcher:evm token mismatch", {
+            step: "watcher-evm-token-mismatch",
+            paymentId: input.paymentId,
+            txHash: input.txHash,
+            decodedToken: decoded.token,
+            isBaseUsdc
+          })
+        }
         return false
       }
 
@@ -403,6 +476,14 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
           paymentRef: decoded.paymentRef,
           txHash: input.txHash
         })
+        if (isBaseNetwork) {
+          console.info("[PineTreeBaseTrace] watcher:evm paymentRef mismatch", {
+            step: "watcher-evm-ref-mismatch",
+            paymentId: input.paymentId,
+            decodedRef: decoded.paymentRef,
+            txHash: input.txHash
+          })
+        }
         return false
       }
 
@@ -424,6 +505,17 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
           expectedFee: expectedFeeNum,
           feeThreshold
         })
+        if (isBaseNetwork) {
+          console.info("[PineTreeBaseTrace] watcher:evm amounts below threshold", {
+            step: "watcher-evm-amount-fail",
+            paymentId: input.paymentId,
+            txHash: input.txHash,
+            merchantAmount: merchantAmountNum,
+            merchantThreshold,
+            feeAmount: feeAmountNum,
+            feeThreshold
+          })
+        }
         return false
       }
 
@@ -438,6 +530,21 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
         merchantAmount: merchantAmountNum,
         feeAmount: feeAmountNum
       })
+
+      if (isBaseNetwork) {
+        console.info("[PineTreeBaseTrace] watcher:evm PaymentSplit matched", {
+          step: "watcher-evm-match",
+          paymentId: input.paymentId,
+          txHash: input.txHash,
+          payer,
+          merchantAmount: merchantAmountNum,
+          feeAmount: feeAmountNum,
+          decodedToken: decoded.token,
+          network: input.network,
+          asset: input.asset || null,
+          splitContract: splitContractEvm
+        })
+      }
 
       return handleMatchingTransaction(
         input.paymentId,
@@ -527,6 +634,15 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
       splitContract: splitContractEvm,
       logsChecked: logs.length
     })
+    if (isBaseNetwork) {
+      console.info("[PineTreeBaseTrace] watcher:evm fallback scan — no match", {
+        step: "watcher-evm-scan-no-match",
+        paymentId: input.paymentId,
+        network: input.network,
+        splitContract: splitContractEvm,
+        logsChecked: logs.length
+      })
+    }
     return false
   }
 

@@ -45,6 +45,21 @@ export async function runPaymentWatcher(paymentId: string, options?: { txHash?: 
   }
 
   const split = ((payment.metadata ?? null) as StoredPaymentSplitMetadata | null)?.split
+  const isBase = String(payment.network || "").toLowerCase() === "base"
+
+  if (isBase) {
+    console.info("[PineTreeBaseTrace] watcher engine started", {
+      step: "watcher-entry",
+      paymentId,
+      network: payment.network,
+      asset: split?.asset || null,
+      baseUsdcStrategy: split?.baseUsdcStrategy || null,
+      splitContract: split?.splitContract || null,
+      feeCaptureMethod: split?.feeCaptureMethod || null,
+      txHash: options?.txHash || null,
+      paymentStatus: payment.status
+    })
+  }
 
   const watchInput = {
     paymentId: payment.id,
@@ -75,18 +90,50 @@ export async function runPaymentWatcher(paymentId: string, options?: { txHash?: 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const detected = await watchPaymentOnce(watchInput)
-      if (detected) return true
+      if (detected) {
+        if (isBase) {
+          console.info("[PineTreeBaseTrace] watcher detected payment", {
+            step: "watcher-detected",
+            paymentId,
+            txHash: options?.txHash || null,
+            network: payment.network,
+            attempt
+          })
+        }
+        return true
+      }
     } catch (error) {
       console.error("[checkPaymentOnce] watcher error", {
         paymentId,
         attempt,
         error: error instanceof Error ? error.message : String(error)
       })
+      if (isBase) {
+        console.error("[PineTreeBaseTrace] watcher attempt error", {
+          step: "watcher-attempt-error",
+          paymentId,
+          txHash: options?.txHash || null,
+          network: payment.network,
+          attempt,
+          maxAttempts,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      }
     }
 
     if (attempt < maxAttempts) {
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
     }
+  }
+
+  if (isBase) {
+    console.info("[PineTreeBaseTrace] watcher completed without detection", {
+      step: "watcher-not-detected",
+      paymentId,
+      txHash: options?.txHash || null,
+      network: payment.network,
+      attemptsUsed: maxAttempts
+    })
   }
 
   return false

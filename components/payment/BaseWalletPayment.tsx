@@ -707,6 +707,14 @@ export default function BaseWalletPayment({
       const isBaseUsdcV4 = selectedAsset === "USDC" && paymentData.baseUsdcStrategy === "v4_eip3009_relayer"
       createdBaseUsdcV4Payment = isBaseUsdcV4
 
+      console.log("[PineTreeBaseTrace] BaseWalletPayment branch selected", {
+        step: "branch-selection",
+        selectedAsset,
+        paymentId: paymentData.paymentId,
+        isBaseUsdcV4,
+        baseUsdcStrategy: paymentData.baseUsdcStrategy || null
+      })
+
       if (isBaseUsdcV4) {
         console.info("[Base USDC V4] base-usdc-v4-strategy-detected", {
           paymentId: paymentData.paymentId,
@@ -801,6 +809,16 @@ export default function BaseWalletPayment({
         message === BASE_USDC_SIGN_TIMEOUT_MESSAGE
 
       void logBase("send-transaction-error", { message: friendly, rejected, timedOut })
+      console.error("[PineTreeBaseTrace] BaseWalletPayment error", {
+        step: "payment-error",
+        selectedAsset,
+        intentId: intentId || null,
+        paymentId: createdPaymentId || null,
+        error: message,
+        rejected,
+        timedOut,
+        isBaseUsdcV4: createdBaseUsdcV4Payment
+      })
 
       // V4 errors always clear pending state — each attempt needs fresh prepare + sign,
       // so auto-resume retrying on a V4 error would only trigger repeated signing prompts.
@@ -852,6 +870,14 @@ export default function BaseWalletPayment({
         }
 
         console.log("[Base] WalletConnect selected")
+        console.log("[PineTreeBaseTrace] BaseWalletPayment pay button clicked", {
+          step: "button-click",
+          selectedAsset,
+          intentId: intentId || null,
+          isConnected,
+          hasAddress: Boolean(address),
+          connectorId: walletConnectConnector?.id || null
+        })
         await logBase("wc-selected", { intentId: intentId || null })
         await logBase("pending-store", { intentId: intentId || null, selectedAsset })
 
@@ -972,6 +998,14 @@ export default function BaseWalletPayment({
         const message = extractErrorMessage(err) || "Failed to open Base payment"
         const rejected = isRejectedError(err, message)
         const friendly = rejected ? "Wallet connection rejected by user." : message
+
+        console.error("[PineTreeBaseTrace] BaseWalletPayment startWalletConnectPayment error", {
+          step: "start-error",
+          selectedAsset,
+          intentId: intentId || null,
+          error: message,
+          rejected
+        })
 
         if (rejected) {
           clearPendingBaseWalletConnectPayment()

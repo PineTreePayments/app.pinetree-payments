@@ -1174,7 +1174,17 @@ export default function PayClient() {
                               void loadIntentCallback()
                             }}
                             onSuccess={async (txHash, paymentId) => {
-                              await fetch(
+                              console.log("[PineTreeBaseTrace] PayClient onSuccess", {
+                                step: "on-success",
+                                paymentId,
+                                txHashPrefix: txHash.slice(0, 10)
+                              })
+                              console.log("[PineTreeBaseTrace] PayClient detect POST start", {
+                                step: "detect-post-start",
+                                paymentId,
+                                txHashPrefix: txHash.slice(0, 10)
+                              })
+                              const detectRes = await fetch(
                                 `/api/payments/${encodeURIComponent(paymentId)}/detect`,
                                 {
                                   method: "POST",
@@ -1183,6 +1193,11 @@ export default function PayClient() {
                                 }
                               )
                                 .catch(() => null)
+                              console.log("[PineTreeBaseTrace] PayClient detect POST done", {
+                                step: "detect-post-done",
+                                paymentId,
+                                status: detectRes?.status ?? "error"
+                              })
                               await loadIntentCallback()
                             }}
                           />
