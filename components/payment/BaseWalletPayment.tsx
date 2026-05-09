@@ -101,6 +101,16 @@ async function logBase(stage: string, payload: Record<string, unknown> = {}): Pr
   }).catch(() => null)
 }
 
+function extractErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (typeof err === "object" && err !== null) {
+    const msg = (err as { message?: unknown }).message
+    if (typeof msg === "string" && msg) return msg
+  }
+  if (typeof err === "string" && err) return err
+  return ""
+}
+
 function isRejectedError(error: unknown, message: string): boolean {
   return (
     message.toLowerCase().includes("rejected") ||
@@ -780,7 +790,7 @@ export default function BaseWalletPayment({
         window.location.href = `/pay?intent=${encodeURIComponent(intentId)}&status=processing`
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to open Base payment"
+      const message = extractErrorMessage(err) || "Failed to open Base payment"
       const rejected = isRejectedError(err, message)
       const friendly = rejected
         ? "Wallet connection rejected by user."
@@ -959,7 +969,7 @@ export default function BaseWalletPayment({
         }
         // No address returned — pending state + session-settle/focus handlers resume
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to open Base payment"
+        const message = extractErrorMessage(err) || "Failed to open Base payment"
         const rejected = isRejectedError(err, message)
         const friendly = rejected ? "Wallet connection rejected by user." : message
 
@@ -1180,9 +1190,13 @@ export default function BaseWalletPayment({
     if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return
     if (sessionSettleTriggerFiredRef.current) return
     sessionSettleTriggerFiredRef.current = true
+    // Snapshot the chain ID at session-settle time so continueBasePayment can skip
+    // switchChainAsync when the wallet just connected on Base. This ref is consumed
+    // and cleared inside continueBasePayment before any chain switch check.
+    if (chain?.id) connectedChainIdRef.current = chain.id
     stopAutoResumeRetry()
     void continueBasePayment(address)
-  }, [address, continueBasePayment, intentId, isConnected, selectedAsset, stopAutoResumeRetry])
+  }, [address, chain?.id, continueBasePayment, intentId, isConnected, selectedAsset, stopAutoResumeRetry])
 
   useEffect(() => {
     if (selectedAsset !== "ETH" && selectedAsset !== "USDC") return
