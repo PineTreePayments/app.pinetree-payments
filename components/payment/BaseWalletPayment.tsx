@@ -69,6 +69,28 @@ type BaseUsdcV5AllowancePaymentResponse = {
   error?: string
 }
 
+type DelegatedWalletCall = {
+  to: string
+  value: string
+  data: string
+}
+
+type BaseDelegatedPrepareResponse = {
+  ok?: boolean
+  enabled?: boolean
+  paymentId?: string
+  payerAddress?: string
+  strategy?: "delegated_eoa_batch"
+  chainId?: number
+  calls?: DelegatedWalletCall[]
+  callSummaries?: Array<{ kind: string; to: string; target: string; redacted: boolean }>
+  requiredUsdcAmount?: string
+  v5Contract?: string
+  usdcToken?: string
+  warnings?: string[]
+  error?: string
+}
+
 type EvmTransactionRequest = {
   to: string
   value: string
@@ -420,6 +442,58 @@ function normalizeHexTransactionHash(value: unknown): string {
   return txHash
 }
 
+function maybeHexTransactionHash(value: unknown): string | null {
+  const txHash = String(value || "").trim()
+  return /^0x[a-fA-F0-9]{64}$/.test(txHash) ? txHash : null
+}
+
+function extractDirectFinalTxHashFromSendCallsResult(result: unknown): string | null {
+  if (!result || typeof result !== "object") return null
+  const source = result as {
+    txHash?: unknown
+    transactionHash?: unknown
+    hash?: unknown
+  }
+
+  return (
+    maybeHexTransactionHash(source.transactionHash) ||
+    maybeHexTransactionHash(source.txHash) ||
+    maybeHexTransactionHash(source.hash)
+  )
+}
+
+function extractCallIdFromSendCallsResult(result: unknown): string {
+  if (!result || typeof result !== "object") return ""
+  const source = result as {
+    id?: unknown
+    callId?: unknown
+    bundleId?: unknown
+  }
+
+  return String(source.id || source.callId || source.bundleId || "").trim()
+}
+
+function extractFinalTxHashFromCallsStatus(result: unknown): string | null {
+  if (!result || typeof result !== "object") return null
+  const source = result as {
+    txHash?: unknown
+    transactionHash?: unknown
+    receipts?: Array<{ transactionHash?: unknown; txHash?: unknown }>
+  }
+
+  const direct = maybeHexTransactionHash(source.transactionHash) || maybeHexTransactionHash(source.txHash)
+  if (direct) return direct
+
+  if (Array.isArray(source.receipts)) {
+    for (const receipt of source.receipts) {
+      const txHash = maybeHexTransactionHash(receipt.transactionHash) || maybeHexTransactionHash(receipt.txHash)
+      if (txHash) return txHash
+    }
+  }
+
+  return null
+}
+
 async function sendWalletConnectTransaction(input: {
   provider: WalletConnectProvider
   fromAddress: string
@@ -716,8 +790,6 @@ export default function BaseWalletPayment({
   onSuccess,
   onError,
 }: Props) {
-  console.log("[BaseWalletPayment] rendered")
-
   const { address, chain, isConnected, connector } = useAccount()
   const { connectors, connectAsync, status: connectStatus } = useConnect()
   const { switchChainAsync, status: switchStatus } = useSwitchChain()
@@ -758,8 +830,6 @@ export default function BaseWalletPayment({
     () => connectors.find(isWalletConnectConnector) || null,
     [connectors]
   )
-
-  console.log("[Base] available connectors", connectors.map(connectorMetadata))
 
   useEffect(() => {
     void logBase("render", {
@@ -1023,8 +1093,133 @@ export default function BaseWalletPayment({
 
     try {
       let authTxHash: string | null = null
-      let shouldUseAllowancePath = isTrustWallet
+      let shouldUseAllowancePath = false
 
+      void logBase("usdc-strategy-selected", {
+        paymentId,
+        strategy: "delegated-eoa-first",
+        eip3009Skipped: isTrustWallet,
+        peerName: input.peerName,
+      })
+
+      // ── Strategy 1: Delegated EOA batch (wallet_sendCalls) ──────────────────
+      // Attempts [USDC.approve + V5.payUsdcWithAllowance] as a single wallet approval.
+      // Falls through silently to next strategy if: feature disabled server-side, wallet
+      // does not support wallet_sendCalls, or the prepare call fails non-fatally.
+      // User rejection and unresolvable confirmation are propagated as errors.
+      let delegatedFallthrough = false
+      try {
+        setBaseUsdcV4Status("Preparing payment...")
+        const delegatedPrepareRes = await fetch(
+          `/api/payments/${encodeURIComponent(paymentId)}/base-usdc-v5/delegated/prepare`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ payerAddress: input.fromAddress }),
+          }
+        )
+        const delegatedPrepared = (await delegatedPrepareRes.json()) as BaseDelegatedPrepareResponse
+
+        if (
+          delegatedPrepared.ok &&
+          delegatedPrepared.enabled &&
+          Array.isArray(delegatedPrepared.calls) &&
+          delegatedPrepared.calls.length >= 2
+        ) {
+          console.info("[BASE DELEGATED] batch-start", { paymentId })
+          setBaseUsdcV4Status("Confirm payment in your wallet...")
+
+          let sendCallsResult: unknown
+          try {
+            sendCallsResult = await input.provider.request({
+              method: "wallet_sendCalls",
+              params: [
+                {
+                  version: "2.0.0",
+                  from: input.fromAddress,
+                  chainId: decimalOrHexToHex(String(base.id)),
+                  calls: delegatedPrepared.calls.map((call) => ({
+                    to: call.to,
+                    value: call.value || "0x0",
+                    data: call.data || "0x",
+                  })),
+                  capabilities: {},
+                },
+              ],
+            })
+            console.info("[BASE DELEGATED] wallet-send-calls-sent", { paymentId })
+          } catch (sendCallsErr) {
+            const sendMsg = extractErrorMessage(sendCallsErr)
+            if (isRejectedError(sendCallsErr, sendMsg)) throw sendCallsErr
+            // wallet_sendCalls unsupported or method not found — fall through to next strategy
+            console.info("[BASE DELEGATED] wallet-send-calls-unsupported", { paymentId, error: sendMsg })
+            delegatedFallthrough = true
+          }
+
+          if (!delegatedFallthrough) {
+            let finalTxHash = extractDirectFinalTxHashFromSendCallsResult(sendCallsResult)
+            const callId = extractCallIdFromSendCallsResult(sendCallsResult)
+
+            if (!finalTxHash && !callId) {
+              throw new Error("Payment submitted but confirmation details were not returned. Please try again.")
+            }
+
+            if (!finalTxHash && callId) {
+              setBaseUsdcV4Status("Waiting for confirmation...")
+              const maxAttempts = 20
+              const delayMs = 3_000
+              for (let attempt = 1; attempt <= maxAttempts && !finalTxHash; attempt++) {
+                try {
+                  const statusResult = await input.provider.request({
+                    method: "wallet_getCallsStatus",
+                    params: [callId],
+                  })
+                  finalTxHash = extractFinalTxHashFromCallsStatus(statusResult)
+                  if (finalTxHash) break
+                } catch {
+                  break
+                }
+                if (attempt < maxAttempts && !finalTxHash) {
+                  await new Promise<void>((resolve) => setTimeout(resolve, delayMs))
+                }
+              }
+            }
+
+            if (!finalTxHash) {
+              throw new Error("Payment confirmation was not returned by wallet. Please try again.")
+            }
+
+            console.info("[BASE DELEGATED] final-tx-resolved", {
+              paymentId,
+              txHashPrefix: finalTxHash.slice(0, 10),
+            })
+            setBaseUsdcV4Status("Processing payment...")
+            return normalizeHexTransactionHash(finalTxHash)
+          }
+        } else {
+          // Feature disabled server-side or unexpected response — fall through
+          console.info("[BASE DELEGATED] batch-disabled-or-unavailable", {
+            paymentId,
+            enabled: delegatedPrepared.enabled,
+          })
+          delegatedFallthrough = true
+        }
+      } catch (delegatedErr) {
+        const delegatedMsg = extractErrorMessage(delegatedErr)
+        if (isRejectedError(delegatedErr, delegatedMsg)) throw delegatedErr
+        if (
+          delegatedMsg.startsWith("Payment submitted") ||
+          delegatedMsg.startsWith("Payment confirmation")
+        ) {
+          // Retryable: payment went through but txHash unresolvable
+          throw delegatedErr
+        }
+        if (!delegatedFallthrough) {
+          console.info("[BASE DELEGATED] error-falling-through-to-next-strategy", { paymentId, error: delegatedMsg })
+        }
+      }
+
+      // ── Strategy 2: EIP-3009 relayer ────────────────────────────────────────
       if (!isTrustWallet) {
         try {
           setBaseUsdcV4Status("Preparing USDC authorization...")
@@ -1053,6 +1248,8 @@ export default function BaseWalletPayment({
           let signTimeoutHandle: ReturnType<typeof setTimeout> | null = null
           let signature = ""
 
+          void logBase("usdc-auth-start", { paymentId })
+
           try {
             const rawSig = await Promise.race([
               input.provider.request({ method: "eth_signTypedData_v4", params: [input.fromAddress, serializedTypedData] }),
@@ -1063,6 +1260,7 @@ export default function BaseWalletPayment({
             if (signTimeoutHandle) clearTimeout(signTimeoutHandle)
             signature = String(rawSig || "").trim()
             if (!isValidAuthorizationSignature(signature)) throw new Error("Wallet did not return a valid USDC V5 authorization signature")
+            void logBase("usdc-auth-success", { paymentId, signaturePrefix: signature.slice(0, 10) })
           } catch (signErrA) {
             if (signTimeoutHandle) clearTimeout(signTimeoutHandle)
             const signMsgA = extractErrorMessage(signErrA)
@@ -1081,22 +1279,15 @@ export default function BaseWalletPayment({
                   message: typedData.message,
                 })
                 if (!isValidAuthorizationSignature(signature)) throw new Error("Wallet did not return a valid USDC V5 authorization signature")
+                void logBase("usdc-auth-success", { paymentId, method: "walletClient", signaturePrefix: signature.slice(0, 10) })
               } catch (signErrB) {
                 const signMsgB = extractErrorMessage(signErrB)
                 if (isRejectedError(signErrB, signMsgB)) throw signErrB
-                console.info("[PineTreeBaseTrace] v5 walletClient sign failed — falling through to allowance", {
-                  step: "v5-sign-b-fallback",
-                  paymentId,
-                  error: signMsgB
-                })
+                void logBase("usdc-auth-failed-switching-to-guided-two-step", { paymentId, error: signMsgB, method: "walletClient" })
                 shouldUseAllowancePath = true
               }
             } else {
-              console.info("[PineTreeBaseTrace] v5 method-A sign failed — falling through to allowance", {
-                step: "v5-sign-a-fallback",
-                paymentId,
-                error: signMsgA
-              })
+              void logBase("usdc-auth-failed-switching-to-guided-two-step", { paymentId, error: signMsgA, method: "provider" })
               shouldUseAllowancePath = true
             }
           }
@@ -1170,14 +1361,15 @@ export default function BaseWalletPayment({
 
       if (!sufficient && approveTx) {
         setBaseUsdcV4Status("Step 1 of 2: Authorize USDC...")
-        console.info("[PineTreeBaseTrace] v5 approve-tx start", { step: "v5-approve-tx", paymentId })
-        await sendWalletConnectTransactionWithTimeout({
+        void logBase("usdc-approve-requested", { paymentId, isTrustWallet })
+        const approveTxHash = await sendWalletConnectTransactionWithTimeout({
           provider: input.provider,
           fromAddress: input.fromAddress,
           txRequest: approveTx,
           timeoutMs: BASE_USDC_TX_REQUEST_TIMEOUT_MS,
           timeoutMessage: "USDC authorization approval was not completed. Tap Pay to try again."
         })
+        void logBase("usdc-approve-submitted", { paymentId, txHashPrefix: approveTxHash.slice(0, 10) })
 
         setBaseUsdcV4Status("Waiting for USDC authorization...")
         const maxWaitMs = 120_000
@@ -1210,10 +1402,11 @@ export default function BaseWalletPayment({
         if (!allowanceSufficient) {
           throw new Error("USDC allowance was not confirmed in time. Please try again.")
         }
+        void logBase("usdc-allowance-confirmed", { paymentId })
       }
 
       setBaseUsdcV4Status("Step 2 of 2: Confirm payment...")
-      console.info("[PineTreeBaseTrace] v5 payment-tx start", { step: "v5-payment-tx", paymentId })
+      void logBase("usdc-payment-requested", { paymentId, isTrustWallet })
       const paymentTxHash = await sendWalletConnectTransactionWithTimeout({
         provider: input.provider,
         fromAddress: input.fromAddress,
@@ -1223,7 +1416,7 @@ export default function BaseWalletPayment({
       })
 
       setBaseUsdcV4Status("Processing payment...")
-      console.info("[PineTreeBaseTrace] v5 payment-tx success", { step: "v5-payment-tx-success", paymentId, txHashPrefix: paymentTxHash.slice(0, 10) })
+      void logBase("usdc-payment-submitted", { paymentId, txHashPrefix: paymentTxHash.slice(0, 10) })
       return paymentTxHash
     } catch (error) {
       activeBaseUsdcV5PaymentRef.current = null
@@ -1361,15 +1554,9 @@ export default function BaseWalletPayment({
         paymentSubmittedRef.current = true
         activeBasePaymentAttemptRef.current = null
         activeBaseUsdcV5PaymentRef.current = null
-        console.info("[Base USDC V5] v5-detect-start", {
-          paymentId: paymentData.paymentId,
-          txHashPrefix: normalizedTxHash.slice(0, 10)
-        })
+        void logBase("detect-start", { paymentId: paymentData.paymentId, txHashPrefix: normalizedTxHash.slice(0, 10) })
         await onSuccess?.(normalizedTxHash, paymentData.paymentId)
-        console.info("[Base USDC V5] v5-detect-result", {
-          paymentId: paymentData.paymentId,
-          txHashPrefix: normalizedTxHash.slice(0, 10)
-        })
+        void logBase("detect-success", { paymentId: paymentData.paymentId })
 
         clearPendingBaseWalletConnectPayment()
         setHasPendingBaseWcPayment(false)
@@ -1404,16 +1591,9 @@ export default function BaseWalletPayment({
 
         paymentSubmittedRef.current = true
         activeBasePaymentAttemptRef.current = null
-        void logBase("usdc-v4-relayed", { txHashPrefix: normalizedTxHash.slice(0, 10) })
-        console.info("[Base USDC V4] base-usdc-v4-detect-start", {
-          paymentId: paymentData.paymentId,
-          txHashPrefix: normalizedTxHash.slice(0, 10)
-        })
+        void logBase("detect-start", { paymentId: paymentData.paymentId, txHashPrefix: normalizedTxHash.slice(0, 10) })
         await onSuccess?.(normalizedTxHash, paymentData.paymentId)
-        console.info("[Base USDC V4] base-usdc-v4-detect-result", {
-          paymentId: paymentData.paymentId,
-          txHashPrefix: normalizedTxHash.slice(0, 10)
-        })
+        void logBase("detect-success", { paymentId: paymentData.paymentId })
         activeBaseUsdcV4PaymentRef.current = null
 
         clearPendingBaseWalletConnectPayment()
@@ -1431,19 +1611,11 @@ export default function BaseWalletPayment({
 
       const txRequest = cachedTxRequest ?? parseEthereumPaymentUri(paymentData.paymentUrl)
 
-      console.log("[Base ETH] eth-sendTransaction-requested", { to: txRequest.to, hasData: Boolean(txRequest.data) })
-      void logBase("wallet-client-ready", {
-        hasAddress: Boolean(fromAddress),
-        chainId: base.id,
-      })
-      void logBase("eth-sendTransaction-requested", {
+      void logBase("eth-payment-requested", {
+        paymentId: paymentData.paymentId,
         to: txRequest.to,
         hasData: Boolean(txRequest.data),
         hasValue: Boolean(txRequest.value),
-      })
-      void logBase("eth-tx-prompt-start", {
-        paymentId: paymentData.paymentId,
-        to: txRequest.to,
       })
       transactionPromptStarted = true
 
@@ -1465,14 +1637,10 @@ export default function BaseWalletPayment({
       paymentSubmittedRef.current = true
       activeBasePaymentAttemptRef.current = null
 
-      console.log("[Base ETH] eth-sendTransaction-result", { txHashPrefix: normalizedTxHash.slice(0, 10) })
-      void logBase("tx-submitted", { txHashPrefix: normalizedTxHash.slice(0, 10) })
-      void logBase("eth-tx-submitted", { txHashPrefix: normalizedTxHash.slice(0, 10) })
-      void logBase("eth-sendTransaction-result", { txHashPrefix: normalizedTxHash.slice(0, 10) })
-
+      void logBase("eth-payment-submitted", { txHashPrefix: normalizedTxHash.slice(0, 10) })
       void logBase("detect-start", { paymentId: paymentData.paymentId })
       await onSuccess?.(normalizedTxHash, paymentData.paymentId)
-      void logBase("detect-finished", { paymentId: paymentData.paymentId })
+      void logBase("detect-success", { paymentId: paymentData.paymentId })
 
       clearPendingBaseWalletConnectPayment()
       setHasPendingBaseWcPayment(false)
@@ -1592,6 +1760,8 @@ export default function BaseWalletPayment({
     setHasPendingBaseWcPayment(false)
   }, [])
 
+
+
   const startWalletConnectPayment = useCallback(() => {
     resetBasePaymentAttemptForRetry()
     setLocalError("")
@@ -1624,17 +1794,17 @@ export default function BaseWalletPayment({
           return
         }
 
-        await logBase("connect-start", {
+        void logBase("wc-connect-start", {
           connectorId: walletConnectConnector?.id || null,
           connectorName: walletConnectConnector?.name || null,
+          selectedAsset,
+          intentId: intentId || null,
         })
 
         if (selectedAsset === "ETH" || selectedAsset === "USDC") {
           // Pre-fetch payment data, provider, and connect concurrently so that
           // eth_sendTransaction can be dispatched immediately after session settles —
           // before the mobile OS can suspend the browser's WalletConnect WebSocket.
-          console.log("[Base] connection-started", { selectedAsset })
-          void logBase("connection-started", { intentId: intentId || null })
           const [connectSettled, paymentSettled, providerSettled] = await Promise.allSettled([
             connectAsync({ connector: walletConnectConnector, chainId: base.id }),
             resolvePaymentData(),
@@ -1688,13 +1858,13 @@ export default function BaseWalletPayment({
           connectedChainIdRef.current = connectSettled.value.chainId
 
           const fromAddress = extractAddressFromConnectResult(connectSettled.value) || currentAddress
-          console.log("[Base] connect-resolved", { selectedAsset, hasAddress: Boolean(fromAddress), chainId: connectedChainIdRef.current })
-          void logBase("connect-resolved", {
-            hasAccount: Boolean(fromAddress),
-            accountPrefix: fromAddress ? fromAddress.slice(0, 8) : null,
-            chainId: connectedChainIdRef.current,
-            selectedAsset,
-          })
+          if (fromAddress) {
+            void logBase("wc-connect-success", {
+              hasAddress: Boolean(fromAddress),
+              chainId: connectedChainIdRef.current,
+              selectedAsset,
+            })
+          }
 
           if (fromAddress) {
             await continueBasePayment(fromAddress)
@@ -1704,11 +1874,12 @@ export default function BaseWalletPayment({
           try {
             const result = await connectAsync({ connector: walletConnectConnector, chainId: base.id })
             fromAddress = extractAddressFromConnectResult(result) || currentAddress
-            console.log("[Base] WalletConnect connect returned", { hasAddress: Boolean(fromAddress) })
-            await logBase("connect-returned", {
-              hasAccount: Boolean(fromAddress),
-              accountPrefix: fromAddress ? fromAddress.slice(0, 8) : null,
-            })
+            if (fromAddress) {
+              void logBase("wc-connect-success", {
+                hasAddress: Boolean(fromAddress),
+                selectedAsset,
+              })
+            }
           } catch (connectErr) {
             const connectMsg = connectErr instanceof Error ? connectErr.message : String(connectErr)
             const connectRejected = isRejectedError(connectErr, connectMsg)
@@ -1817,17 +1988,17 @@ export default function BaseWalletPayment({
       stopAutoResumeRetry()
     }
 
-    void logBase("auto-resume-check", {
-      source,
-      hasPendingBaseWcPayment: hasPending,
-      selectedAsset,
-      isConnected,
-      hasAddress: Boolean(address),
-      isSending: isSendingBaseTxRef.current,
-      paymentSubmitted: paymentSubmittedRef.current,
-      isOpeningWallet,
-      visibilityState: typeof document === "undefined" ? "unknown" : document.visibilityState,
-    })
+    if (hasPending) {
+      void logBase("auto-resume-check", {
+        source,
+        selectedAsset,
+        isConnected,
+        hasAddress: Boolean(address),
+        isSending: isSendingBaseTxRef.current,
+        paymentSubmitted: paymentSubmittedRef.current,
+        isOpeningWallet,
+      })
+    }
 
     const skipReason =
       !hasPending ? "no-pending"
@@ -1906,9 +2077,8 @@ export default function BaseWalletPayment({
       return
     }
 
-    void resumeFromWalletConnectProvider(`provider:${source}`)
     tryResumeBaseWalletConnectPayment(source)
-  }, [address, connector, intentId, isConnected, isConnecting, refreshPendingState, resumeFromWalletConnectProvider, selectedAsset, stopAutoResumeRetry, tryResumeBaseWalletConnectPayment])
+  }, [address, connector, intentId, isConnected, isConnecting, refreshPendingState, selectedAsset, stopAutoResumeRetry, tryResumeBaseWalletConnectPayment])
 
   useEffect(() => {
     refreshPendingState()
@@ -2076,6 +2246,7 @@ export default function BaseWalletPayment({
         </div>
       ) : null}
 
+
       {hasPendingBaseWcPayment && !isOpeningWallet && !isConnecting && !isPreparingPayment ? (
         address ? (
           <div className="text-xs text-gray-500 text-center py-2 flex items-center justify-center gap-2">
@@ -2113,18 +2284,76 @@ export default function BaseWalletPayment({
       ) : isPreparingPayment ? (
         <Button fullWidth disabled>
           <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
-          {baseUsdcV4Status || "Processing payment…"}
+          {baseUsdcV4Status || "Preparing payment…"}
         </Button>
       ) : isOpeningWallet ? (
-        <Button fullWidth disabled>
-          <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
-          {baseUsdcV4Status || "Confirming transaction…"}
-        </Button>
+        (() => {
+          const isTwoStep = (
+            baseUsdcV4Status.startsWith("Step 1") ||
+            baseUsdcV4Status.startsWith("Waiting for USDC") ||
+            baseUsdcV4Status.startsWith("Step 2")
+          )
+          const isPolling = baseUsdcV4Status.startsWith("Waiting for USDC")
+          const isProcessing = baseUsdcV4Status.startsWith("Processing")
+          const isWalletPrompt = !isPolling && !isProcessing && (
+            isTwoStep ||
+            baseUsdcV4Status.startsWith("Authorize USDC") ||
+            (selectedAsset === "ETH" && !baseUsdcV4Status)
+          )
+
+          let buttonLabel: string
+          if (isPolling) {
+            buttonLabel = "Verifying authorization…"
+          } else if (baseUsdcV4Status.startsWith("Step 1")) {
+            buttonLabel = "Waiting for your approval…"
+          } else if (baseUsdcV4Status.startsWith("Step 2")) {
+            buttonLabel = "Waiting for your approval…"
+          } else if (isProcessing) {
+            buttonLabel = "Waiting for confirmation…"
+          } else {
+            buttonLabel = baseUsdcV4Status || "Confirming transaction…"
+          }
+
+          return (
+            <div className="space-y-3">
+              {isTwoStep ? (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block h-3 w-3 rounded-full border border-blue-500 border-t-transparent animate-spin flex-shrink-0" />
+                    <span className="text-sm font-medium text-blue-900">
+                      {isPolling
+                        ? "Authorization received. Verifying on-chain…"
+                        : baseUsdcV4Status.startsWith("Step 1")
+                          ? "Step 1 of 2: Authorize USDC"
+                          : "Step 2 of 2: Confirm payment"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-blue-700 pl-5">
+                    {isPolling
+                      ? "We'll automatically request your payment confirmation next."
+                      : "This wallet requires two confirmations for USDC payments."}
+                  </p>
+                </div>
+              ) : null}
+
+              <Button fullWidth disabled>
+                <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
+                {buttonLabel}
+              </Button>
+
+              {isWalletPrompt ? (
+                <p className="text-xs text-gray-500 text-center">
+                  Check your wallet app to approve, then return to your browser.
+                </p>
+              ) : null}
+            </div>
+          )
+        })()
       ) : (
         <div className="space-y-2">
           {walletConnectConnector ? (
             <Button fullWidth onClick={() => startWalletConnectPayment()}>
-              Pay with {selectedAsset} (Base)
+              Pay with {selectedAsset} on Base
             </Button>
           ) : (
             <div className="text-[11px] text-gray-500 text-center">

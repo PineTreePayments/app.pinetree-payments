@@ -345,6 +345,12 @@ export function isBaseV5Configured(): boolean {
   }
 }
 
+export function isBaseDelegatedEoaEnabled(): boolean {
+  return String(process.env.PINETREE_BASE_DELEGATED_EOA_ENABLED || "")
+    .toLowerCase()
+    .trim() === "true"
+}
+
 // LEGACY — not called when PINETREE_BASE_SPLIT_VERSION=v5. Preserved for V4 rollback only.
 export function getBaseUsdcStrategy(): BaseUsdcStrategy {
   const strategy = String(
