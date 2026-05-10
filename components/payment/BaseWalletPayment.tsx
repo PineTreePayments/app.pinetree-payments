@@ -2130,7 +2130,7 @@ export default function BaseWalletPayment({
       autoResumeTimerRef.current = null
     }
 
-    void logBase("auto-resume-scheduled", { delayMs: 700 })
+    void logBase("auto-resume-scheduled", { delayMs: 50 })
 
     const capturedAddress = String(address)
     autoResumeTimerRef.current = setTimeout(() => {
@@ -2157,7 +2157,7 @@ export default function BaseWalletPayment({
       }
       void logBase("auto-resume-fired", { hasAddress: Boolean(capturedAddress) })
       void continueBasePayment(capturedAddress)
-    }, 700)
+    }, 50)
   }, [address, connector, continueBasePayment, intentId, isConnected, isOpeningWallet, selectedAsset, stopAutoResumeRetry])
 
   const startBaseWalletConnectAutoResumeRetry = useCallback((source: string) => {
@@ -2246,6 +2246,7 @@ export default function BaseWalletPayment({
     if (!pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)) return
     if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return
     if (activeBasePaymentAttemptRef.current !== null) return
+    if (activeBaseUsdcV4PaymentRef.current !== null) return
     if (activeBaseUsdcV5PaymentRef.current !== null) return
     if (sessionSettleTriggerFiredRef.current) return
     sessionSettleTriggerFiredRef.current = true
@@ -2366,7 +2367,7 @@ export default function BaseWalletPayment({
   } else if (execStage === "wallet_connected" || execStage === "preparing_payment") {
     contextMessage = "Preparing your payment…"
   } else if (execStage === "authorizing_usdc") {
-    contextMessage = "Confirm USDC authorization in your wallet"
+    contextMessage = "Confirm payment in your wallet"
   } else if (execStage === "usdc_authorized") {
     contextMessage = "Authorization confirmed. Preparing payment…"
   } else if (execStage === "confirm_payment") {
@@ -2378,6 +2379,7 @@ export default function BaseWalletPayment({
   }
 
   const showWalletPrompt = execStage === "confirm_payment" || execStage === "authorizing_usdc"
+  const showReturnHereHint = execStage === "connecting_wallet" || execStage === "asset_selected"
 
   function renderStepIcon(status: "done" | "active" | "upcoming") {
     if (status === "done") {
@@ -2449,6 +2451,11 @@ export default function BaseWalletPayment({
                   {contextMessage}
                 </span>
               )}
+              {showReturnHereHint ? (
+                <p className="mt-2 text-xs text-gray-400">
+                  Return here after approving — your wallet will switch back automatically if supported
+                </p>
+              ) : null}
             </div>
           ) : null}
         </div>
