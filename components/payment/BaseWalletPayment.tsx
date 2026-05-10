@@ -21,7 +21,7 @@ type Props = {
   onError?: (error: string) => void
 }
 
-type BaseUsdcStrategy = "v1_approve_splitToken" | "v4_eip3009_relayer"
+type BaseUsdcStrategy = "v1_approve_splitToken" | "v4_eip3009_relayer" | "v5_eip3009_relayer"
 
 type PaymentData = {
   paymentId: string
@@ -54,6 +54,19 @@ type BaseUsdcV4RelayResponse = {
   message?: string
   error?: string
   txHash?: string
+}
+
+type BaseUsdcV5AllowancePaymentResponse = {
+  ok?: boolean
+  sufficient?: boolean
+  currentAllowance?: string
+  requiredAmount?: string
+  approveTx?: { to: string; data: string; value: string; chainId: number } | null
+  paymentTx?: { to: string; data: string; value: string; chainId: number }
+  unavailable?: boolean
+  code?: string
+  message?: string
+  error?: string
 }
 
 type EvmTransactionRequest = {
@@ -207,12 +220,14 @@ function isRejectedError(error: unknown, message: string): boolean {
 function getFailReason(input: {
   selectedAsset: BaseAsset
   isBaseUsdcV4: boolean
+  isBaseUsdcV5: boolean
   rejected: boolean
   timedOut: boolean
   transactionPromptStarted: boolean
 }): "user-rejected-transaction" | "transaction-timeout" | null {
   if (input.selectedAsset !== "ETH") return null
   if (input.isBaseUsdcV4) return null
+  if (input.isBaseUsdcV5) return null
   if (!input.transactionPromptStarted) return null
   if (input.rejected) return "user-rejected-transaction"
   if (input.timedOut) return "transaction-timeout"
@@ -586,7 +601,11 @@ function resolveBaseUsdcStrategyFromResponse(result: {
     result.metadata?.split?.baseUsdcStrategy || result.baseUsdcStrategy || ""
   ).trim()
 
-  if (strategy === "v4_eip3009_relayer" || strategy === "v1_approve_splitToken") {
+  if (
+    strategy === "v5_eip3009_relayer" ||
+    strategy === "v4_eip3009_relayer" ||
+    strategy === "v1_approve_splitToken"
+  ) {
     return strategy
   }
 
@@ -702,7 +721,7 @@ export default function BaseWalletPayment({
   const { address, chain, isConnected, connector } = useAccount()
   const { connectors, connectAsync, status: connectStatus } = useConnect()
   const { switchChainAsync, status: switchStatus } = useSwitchChain()
-  const { data: walletClient } = useWalletClient()
+  const { data: walletClient } = useWalletClient({ chainId: base.id })
 
   const [localError, setLocalError] = useState("")
   const [hasPendingBaseWcPayment, setHasPendingBaseWcPayment] = useState<boolean>(() => {
@@ -727,6 +746,7 @@ export default function BaseWalletPayment({
   const connectedChainIdRef = useRef<number | null>(null)
   const sessionSettleTriggerFiredRef = useRef(false)
   const activeBaseUsdcV4PaymentRef = useRef<string | null>(null)
+  const activeBaseUsdcV5PaymentRef = useRef<string | null>(null)
   const activeBasePaymentAttemptRef = useRef<string | null>(null)
 
   const isIntentMode = Boolean(intentId)
@@ -823,11 +843,13 @@ export default function BaseWalletPayment({
           paymentId,
           baseUsdcStrategy,
           splitContract,
-          paymentUrlKind: paymentUrl.startsWith("pinetree://base-usdc-v4")
-            ? "pinetree://base-usdc-v4"
-            : paymentUrl.startsWith("ethereum:")
-              ? "ethereum:"
-              : "other"
+          paymentUrlKind: paymentUrl.startsWith("pinetree://base-usdc-v5")
+            ? "pinetree://base-usdc-v5"
+            : paymentUrl.startsWith("pinetree://base-usdc-v4")
+              ? "pinetree://base-usdc-v4"
+              : paymentUrl.startsWith("ethereum:")
+                ? "ethereum:"
+                : "other"
         })
       }
 
@@ -904,6 +926,18 @@ export default function BaseWalletPayment({
       signature = signResult.signature
       signMethod = signResult.method
     } catch (signError) {
+      const signMsg = extractErrorMessage(signError)
+      const signRejected = isRejectedError(signError, signMsg)
+      if (peerName && peerName.toLowerCase().includes("trust wallet") && !signRejected) {
+        void logBase("usdc-wallet-unsupported-for-typed-data", {
+          providerPeerName: peerName,
+          connectorId: String(input.signingContext.connectorId || ""),
+          paymentId: input.paymentData.paymentId,
+        })
+        throw new Error(
+          "Trust Wallet could not sign this Base USDC authorization. Try MetaMask, Coinbase Wallet, or another WalletConnect wallet that supports typed-data signing on Base."
+        )
+      }
       console.error("[PineTreeBaseTrace] Base USDC signing failure", {
         step: "base-usdc-v4-sign-failure",
         paymentId: input.paymentData.paymentId,
@@ -971,6 +1005,232 @@ export default function BaseWalletPayment({
     }
   }, [])
 
+  const executeBaseUsdcV5Payment = useCallback(async (input: {
+    paymentData: PaymentData
+    provider: WalletConnectProvider
+    walletClient?: BaseWalletClient | null
+    fromAddress: string
+    peerName: string | null
+    signingContext: Record<string, unknown>
+  }): Promise<string> => {
+    if (activeBaseUsdcV5PaymentRef.current === input.paymentData.paymentId) {
+      throw new Error("Base USDC V5 payment is already in progress. Please wait for the current attempt to finish.")
+    }
+    activeBaseUsdcV5PaymentRef.current = input.paymentData.paymentId
+
+    const paymentId = input.paymentData.paymentId
+    const isTrustWallet = Boolean(input.peerName && input.peerName.toLowerCase().includes("trust"))
+
+    try {
+      let authTxHash: string | null = null
+      let shouldUseAllowancePath = isTrustWallet
+
+      if (!isTrustWallet) {
+        try {
+          setBaseUsdcV4Status("Preparing USDC authorization...")
+          console.info("[PineTreeBaseTrace] v5 prepare-authorization start", {
+            step: "v5-prepare-start",
+            paymentId,
+            peerName: input.peerName
+          })
+          const prepareRes = await fetch(
+            `/api/payments/${encodeURIComponent(paymentId)}/base-usdc-v5/prepare`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ payerAddress: input.fromAddress })
+            }
+          )
+          const prepare = (await prepareRes.json()) as BaseUsdcV4PrepareResponse
+          if (!prepareRes.ok) throw new Error(prepare.error || "Failed to prepare Base USDC V5 authorization")
+          if (isBaseUsdcV4Unavailable(prepare)) throw new Error(prepare.message || BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE)
+          if (!prepare.typedData || !prepare.authorization) throw new Error("Incomplete Base USDC V5 authorization returned by server")
+
+          setBaseUsdcV4Status("Authorize USDC payment...")
+          const typedData = requireBaseUsdcV4TypedData(prepare.typedData, input.fromAddress)
+          const serializedTypedData = serializeTypedDataForWallet(typedData)
+
+          let signTimeoutHandle: ReturnType<typeof setTimeout> | null = null
+          let signature = ""
+
+          try {
+            const rawSig = await Promise.race([
+              input.provider.request({ method: "eth_signTypedData_v4", params: [input.fromAddress, serializedTypedData] }),
+              new Promise<never>((_, reject) => {
+                signTimeoutHandle = setTimeout(() => reject(new Error(BASE_USDC_SIGN_TIMEOUT_MESSAGE)), BASE_USDC_TX_REQUEST_TIMEOUT_MS)
+              })
+            ])
+            if (signTimeoutHandle) clearTimeout(signTimeoutHandle)
+            signature = String(rawSig || "").trim()
+            if (!isValidAuthorizationSignature(signature)) throw new Error("Wallet did not return a valid USDC V5 authorization signature")
+          } catch (signErrA) {
+            if (signTimeoutHandle) clearTimeout(signTimeoutHandle)
+            const signMsgA = extractErrorMessage(signErrA)
+
+            if (isRejectedError(signErrA, signMsgA) || signMsgA === BASE_USDC_SIGN_TIMEOUT_MESSAGE) {
+              throw signErrA
+            }
+
+            if (input.walletClient?.signTypedData && shouldTryTypedDataWalletClientFallback(signErrA, signMsgA)) {
+              try {
+                signature = await input.walletClient.signTypedData({
+                  account: input.fromAddress,
+                  domain: typedData.domain,
+                  types: typedData.types,
+                  primaryType: typedData.primaryType,
+                  message: typedData.message,
+                })
+                if (!isValidAuthorizationSignature(signature)) throw new Error("Wallet did not return a valid USDC V5 authorization signature")
+              } catch (signErrB) {
+                const signMsgB = extractErrorMessage(signErrB)
+                if (isRejectedError(signErrB, signMsgB)) throw signErrB
+                console.info("[PineTreeBaseTrace] v5 walletClient sign failed — falling through to allowance", {
+                  step: "v5-sign-b-fallback",
+                  paymentId,
+                  error: signMsgB
+                })
+                shouldUseAllowancePath = true
+              }
+            } else {
+              console.info("[PineTreeBaseTrace] v5 method-A sign failed — falling through to allowance", {
+                step: "v5-sign-a-fallback",
+                paymentId,
+                error: signMsgA
+              })
+              shouldUseAllowancePath = true
+            }
+          }
+
+          if (!shouldUseAllowancePath && signature) {
+            setBaseUsdcV4Status("Relaying payment...")
+            console.info("[PineTreeBaseTrace] v5 relay start", { step: "v5-relay-start", paymentId })
+            const relayRes = await fetch(
+              `/api/payments/${encodeURIComponent(paymentId)}/base-usdc-v5/relay`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  payerAddress: input.fromAddress,
+                  authorization: prepare.authorization,
+                  signature
+                })
+              }
+            )
+            const relay = (await relayRes.json()) as BaseUsdcV4RelayResponse
+            if (!relayRes.ok) throw new Error(relay.error || "Failed to relay Base USDC V5 payment")
+            if (isBaseUsdcV4Unavailable(relay)) throw new Error(relay.message || BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE)
+            authTxHash = normalizeHexTransactionHash(relay.txHash)
+            console.info("[PineTreeBaseTrace] v5 relay success", { step: "v5-relay-success", paymentId, txHashPrefix: authTxHash.slice(0, 10) })
+          }
+        } catch (authErr) {
+          const authMsg = extractErrorMessage(authErr)
+          if (
+            isRejectedError(authErr, authMsg) ||
+            authMsg === BASE_USDC_SIGN_TIMEOUT_MESSAGE ||
+            isBaseUsdcV4Unavailable(authErr as { unavailable?: boolean; code?: string })
+          ) {
+            throw authErr
+          }
+          console.warn("[PineTreeBaseTrace] v5 authorization path error — falling through to allowance", {
+            step: "v5-auth-path-error-fallback",
+            paymentId,
+            error: authMsg
+          })
+          shouldUseAllowancePath = true
+        }
+      }
+
+      if (authTxHash) {
+        setBaseUsdcV4Status("Processing payment...")
+        return authTxHash
+      }
+
+      // ── Allowance path ────────────────────────────────────────────────────────
+      console.info("[PineTreeBaseTrace] v5 allowance path start", {
+        step: "v5-allowance-start",
+        paymentId,
+        isTrustWallet
+      })
+      setBaseUsdcV4Status("Preparing USDC payment...")
+      const buildRes = await fetch(
+        `/api/payments/${encodeURIComponent(paymentId)}/base-usdc-v5/build-allowance-payment`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ payerAddress: input.fromAddress })
+        }
+      )
+      const buildData = (await buildRes.json()) as BaseUsdcV5AllowancePaymentResponse
+      if (!buildRes.ok) throw new Error(buildData.error || "Failed to build Base USDC V5 allowance payment")
+      if (isBaseUsdcV4Unavailable(buildData)) throw new Error(buildData.message || BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE)
+      if (!buildData.ok) throw new Error("Failed to build Base USDC V5 allowance payment")
+      if (!buildData.paymentTx) throw new Error("Incomplete allowance payment data returned by server")
+
+      const { sufficient, approveTx, paymentTx } = buildData as Required<Pick<BaseUsdcV5AllowancePaymentResponse, "sufficient" | "approveTx" | "paymentTx">>
+
+      if (!sufficient && approveTx) {
+        setBaseUsdcV4Status("Step 1 of 2: Authorize USDC...")
+        console.info("[PineTreeBaseTrace] v5 approve-tx start", { step: "v5-approve-tx", paymentId })
+        await sendWalletConnectTransactionWithTimeout({
+          provider: input.provider,
+          fromAddress: input.fromAddress,
+          txRequest: approveTx,
+          timeoutMs: BASE_USDC_TX_REQUEST_TIMEOUT_MS,
+          timeoutMessage: "USDC authorization approval was not completed. Tap Pay to try again."
+        })
+
+        setBaseUsdcV4Status("Waiting for USDC authorization...")
+        const maxWaitMs = 120_000
+        const pollIntervalMs = 3_000
+        const pollStartedAt = Date.now()
+        let allowanceSufficient = false
+
+        while (!allowanceSufficient && Date.now() - pollStartedAt < maxWaitMs) {
+          await new Promise<void>(resolve => setTimeout(resolve, pollIntervalMs))
+          if (!isSendingBaseTxRef.current) break
+
+          try {
+            const checkRes = await fetch(
+              `/api/payments/${encodeURIComponent(paymentId)}/base-usdc-v5/allowance-check`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ payerAddress: input.fromAddress })
+              }
+            )
+            const checkData = (await checkRes.json()) as { ok?: boolean; sufficient?: boolean }
+            if (checkData.ok && checkData.sufficient) {
+              allowanceSufficient = true
+            }
+          } catch {
+            // Continue polling on transient errors
+          }
+        }
+
+        if (!allowanceSufficient) {
+          throw new Error("USDC allowance was not confirmed in time. Please try again.")
+        }
+      }
+
+      setBaseUsdcV4Status("Step 2 of 2: Confirm payment...")
+      console.info("[PineTreeBaseTrace] v5 payment-tx start", { step: "v5-payment-tx", paymentId })
+      const paymentTxHash = await sendWalletConnectTransactionWithTimeout({
+        provider: input.provider,
+        fromAddress: input.fromAddress,
+        txRequest: paymentTx,
+        timeoutMs: BASE_USDC_TX_REQUEST_TIMEOUT_MS,
+        timeoutMessage: "Payment transaction was not completed. Tap Pay to try again."
+      })
+
+      setBaseUsdcV4Status("Processing payment...")
+      console.info("[PineTreeBaseTrace] v5 payment-tx success", { step: "v5-payment-tx-success", paymentId, txHashPrefix: paymentTxHash.slice(0, 10) })
+      return paymentTxHash
+    } catch (error) {
+      activeBaseUsdcV5PaymentRef.current = null
+      throw error
+    }
+  }, [])
+
   const continueBasePayment = useCallback(async (connectedAddress: string) => {
     if (isSendingBaseTxRef.current) return
     if (paymentSubmittedRef.current) return
@@ -978,6 +1238,7 @@ export default function BaseWalletPayment({
 
     let createdPaymentId = ""
     let createdBaseUsdcV4Payment = false
+    let createdBaseUsdcV5Payment = false
     let transactionPromptStarted = false
     let activeAttemptKey = ""
 
@@ -1058,16 +1319,66 @@ export default function BaseWalletPayment({
       void logBase("provider-ready", { prefetched: Boolean(cachedProvider) })
       const walletConnectProvider = cachedProvider ?? await getWalletConnectProvider(walletConnectConnector)
 
-      const isBaseUsdcV4 = selectedAsset === "USDC" && paymentData.baseUsdcStrategy === "v4_eip3009_relayer"
+      const isBaseUsdcV5 = selectedAsset === "USDC" && (
+        paymentData.baseUsdcStrategy === "v5_eip3009_relayer" ||
+        paymentData.paymentUrl.startsWith("pinetree://base-usdc-v5")
+      )
+      const isBaseUsdcV4 = !isBaseUsdcV5 && selectedAsset === "USDC" && paymentData.baseUsdcStrategy === "v4_eip3009_relayer"
       createdBaseUsdcV4Payment = isBaseUsdcV4
+      createdBaseUsdcV5Payment = isBaseUsdcV5
 
       console.log("[PineTreeBaseTrace] BaseWalletPayment branch selected", {
         step: "branch-selection",
         selectedAsset,
         paymentId: paymentData.paymentId,
         isBaseUsdcV4,
+        isBaseUsdcV5,
         baseUsdcStrategy: paymentData.baseUsdcStrategy || null
       })
+
+      if (isBaseUsdcV5) {
+        console.info("[Base USDC V5] v5-strategy-detected", {
+          paymentId: paymentData.paymentId,
+          splitContract: paymentData.splitContract,
+          paymentUrlKind: paymentData.paymentUrl.startsWith("pinetree://base-usdc-v5")
+            ? "pinetree://base-usdc-v5"
+            : "other"
+        })
+        const peerName = getWalletConnectPeerName(walletConnectProvider)
+        const normalizedTxHash = await executeBaseUsdcV5Payment({
+          paymentData,
+          provider: walletConnectProvider,
+          walletClient: (walletClient as BaseWalletClient | undefined) || null,
+          fromAddress,
+          peerName,
+          signingContext: {
+            connectorName: connector?.name || walletConnectConnector.name || null,
+            connectorId: connector?.id || walletConnectConnector.id || null,
+            chainId: chain?.id || connectedChainIdRef.current || base.id,
+          }
+        })
+
+        paymentSubmittedRef.current = true
+        activeBasePaymentAttemptRef.current = null
+        activeBaseUsdcV5PaymentRef.current = null
+        console.info("[Base USDC V5] v5-detect-start", {
+          paymentId: paymentData.paymentId,
+          txHashPrefix: normalizedTxHash.slice(0, 10)
+        })
+        await onSuccess?.(normalizedTxHash, paymentData.paymentId)
+        console.info("[Base USDC V5] v5-detect-result", {
+          paymentId: paymentData.paymentId,
+          txHashPrefix: normalizedTxHash.slice(0, 10)
+        })
+
+        clearPendingBaseWalletConnectPayment()
+        setHasPendingBaseWcPayment(false)
+
+        if (intentId) {
+          window.location.href = `/pay?intent=${encodeURIComponent(intentId)}&status=processing`
+        }
+        return
+      }
 
       if (isBaseUsdcV4) {
         console.info("[Base USDC V4] base-usdc-v4-strategy-detected", {
@@ -1182,12 +1493,13 @@ export default function BaseWalletPayment({
       const failReason = getFailReason({
         selectedAsset,
         isBaseUsdcV4: createdBaseUsdcV4Payment,
+        isBaseUsdcV5: createdBaseUsdcV5Payment,
         rejected,
         timedOut,
         transactionPromptStarted,
       })
       const isRetryableUsdcSigningFailure =
-        createdBaseUsdcV4Payment &&
+        (createdBaseUsdcV4Payment || createdBaseUsdcV5Payment) &&
         !rejected &&
         !timedOut
 
@@ -1212,7 +1524,8 @@ export default function BaseWalletPayment({
         timedOut,
         transactionPromptStarted,
         failReason,
-        isBaseUsdcV4: createdBaseUsdcV4Payment
+        isBaseUsdcV4: createdBaseUsdcV4Payment,
+        isBaseUsdcV5: createdBaseUsdcV5Payment
       })
 
       const shouldClearPending =
@@ -1248,7 +1561,11 @@ export default function BaseWalletPayment({
       }
 
       if (isRetryableUsdcSigningFailure) {
+        clearPendingBaseWalletConnectPayment()
         setHasPendingBaseWcPayment(false)
+        activeBasePaymentAttemptRef.current = null
+        activeBaseUsdcV4PaymentRef.current = null
+        activeBaseUsdcV5PaymentRef.current = null
       }
 
       setLocalError(friendly)
@@ -1259,11 +1576,12 @@ export default function BaseWalletPayment({
     } finally {
       isSendingBaseTxRef.current = false
     }
-  }, [chain?.id, connector?.id, connector?.name, executeBaseUsdcV4Payment, intentId, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, switchChainAsync, walletClient, walletConnectConnector])
+  }, [chain?.id, connector?.id, connector?.name, executeBaseUsdcV4Payment, executeBaseUsdcV5Payment, intentId, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, switchChainAsync, walletClient, walletConnectConnector])
 
   const resetBasePaymentAttemptForRetry = useCallback(() => {
     activeBasePaymentAttemptRef.current = null
     activeBaseUsdcV4PaymentRef.current = null
+    activeBaseUsdcV5PaymentRef.current = null
     isSendingBaseTxRef.current = false
     paymentSubmittedRef.current = false
     sessionSettleTriggerFiredRef.current = false
@@ -1516,6 +1834,7 @@ export default function BaseWalletPayment({
       : selectedAsset !== "ETH" && selectedAsset !== "USDC" ? "not-base-asset"
       : activeBasePaymentAttemptRef.current !== null ? "active-attempt-lock"
       : activeBaseUsdcV4PaymentRef.current !== null ? "v4-active"
+      : activeBaseUsdcV5PaymentRef.current !== null ? "v5-active"
       : isConnecting ? "connecting"
       : !isConnected ? "not-connected"
       : !address ? "no-address"
@@ -1550,6 +1869,18 @@ export default function BaseWalletPayment({
         void logBase("auto-resume-skipped", { reason: "already-submitted-on-fire" })
         return
       }
+      if (activeBasePaymentAttemptRef.current !== null) {
+        void logBase("auto-resume-skipped", { reason: "attempt-lock-on-fire" })
+        return
+      }
+      if (activeBaseUsdcV4PaymentRef.current !== null) {
+        void logBase("auto-resume-skipped", { reason: "v4-active-on-fire" })
+        return
+      }
+      if (activeBaseUsdcV5PaymentRef.current !== null) {
+        void logBase("auto-resume-skipped", { reason: "v5-active-on-fire" })
+        return
+      }
       void logBase("auto-resume-fired", { hasAddress: Boolean(capturedAddress) })
       void continueBasePayment(capturedAddress)
     }, 700)
@@ -1561,6 +1892,7 @@ export default function BaseWalletPayment({
     if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return
     if (activeBasePaymentAttemptRef.current !== null) return
     if (activeBaseUsdcV4PaymentRef.current !== null) return
+    if (activeBaseUsdcV5PaymentRef.current !== null) return
     if (isConnecting) return
     if (!isConnected || !address || !connector || !isWalletConnectConnector(connector)) {
       stopAutoResumeRetry()
@@ -1591,6 +1923,7 @@ export default function BaseWalletPayment({
     setBaseUsdcV4Status("")
     activeBasePaymentAttemptRef.current = null
     activeBaseUsdcV4PaymentRef.current = null
+    activeBaseUsdcV5PaymentRef.current = null
     connectedChainIdRef.current = null
     sessionSettleTriggerFiredRef.current = false
     stopAutoResumeRetry()
@@ -1640,6 +1973,7 @@ export default function BaseWalletPayment({
     if (!pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)) return
     if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return
     if (activeBasePaymentAttemptRef.current !== null) return
+    if (activeBaseUsdcV5PaymentRef.current !== null) return
     if (sessionSettleTriggerFiredRef.current) return
     sessionSettleTriggerFiredRef.current = true
     // Snapshot the chain ID at session-settle time so continueBasePayment can skip
@@ -1670,7 +2004,8 @@ export default function BaseWalletPayment({
           !isSendingBaseTxRef.current &&
           !paymentSubmittedRef.current &&
           activeBasePaymentAttemptRef.current === null &&
-          activeBaseUsdcV4PaymentRef.current === null
+          activeBaseUsdcV4PaymentRef.current === null &&
+          activeBaseUsdcV5PaymentRef.current === null
         ) {
           stopAutoResumeRetry()
           void continueBasePayment(eventAddress)

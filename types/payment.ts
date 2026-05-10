@@ -78,7 +78,7 @@ export type PaymentStatus =
   | "EXPIRED"
   | "REFUNDED"
 
-export type BaseUsdcStrategy = "v1_approve_splitToken" | "v4_eip3009_relayer"
+export type BaseUsdcStrategy = "v1_approve_splitToken" | "v4_eip3009_relayer" | "v5_eip3009_relayer"
 
 export type PaymentSplitMetadata = {
   merchantWallet?: string

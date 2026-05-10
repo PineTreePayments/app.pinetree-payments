@@ -1,7 +1,7 @@
 import QRCode from "qrcode"
 import { Interface } from "ethers"
 import { getMarketPricesUSD } from "./marketPrices"
-import { getBaseUsdcV4Contract } from "./config"
+import { getBaseUsdcV4Contract, getBaseV5SplitContract, isBaseSplitV5 } from "./config"
 import type { BaseUsdcStrategy } from "@/types/payment"
 
 
@@ -9,6 +9,11 @@ const SPLIT_ABI = [
   "function split(address merchant, address treasury, uint256 merchantAmountWei, uint256 feeAmountWei, string paymentRef) payable"
 ]
 const splitIface = new Interface(SPLIT_ABI)
+
+const SPLIT_ETH_ABI = [
+  "function splitEth(address merchant, address treasury, uint256 merchantAmountWei, uint256 feeAmountWei, string paymentRef) payable"
+]
+const splitEthIface = new Interface(SPLIT_ETH_ABI)
 
 type GenerateSplitPaymentInput = {
   merchantWallet: string
@@ -201,30 +206,53 @@ export async function generateSplitPayment(
       paymentUrl = `pinetree://pay?data=${encodeURIComponent(payloadString)}`
     } else {
       const chainId = "8453"
-      // Base always uses PineTreeSplitV4 for both ETH and USDC.
-      evmSplitContract = getBaseUsdcV4Contract()
 
-      if (!isEvmAddress(evmSplitContract)) {
-        throw new Error(
-          "Base payments require a deployed V4 split contract. Set PINETREE_BASE_USDC_V4_CONTRACT to a valid contract address."
-        )
-      }
-      if (isUsdc && baseUsdcStrategy === "v4_eip3009_relayer") {
-        // USDC on Base V4: no wallet transaction calldata is generated here.
-        // The customer signs EIP-3009 typed data and the PineTree relayer submits
-        // payWithUsdcAuthorization() on the V4 contract.
-        paymentUrl = `pinetree://base-usdc-v4?paymentId=${encodeURIComponent(String(input.paymentId || ""))}`
+      if (isBaseSplitV5()) {
+        // ── V5 split contract ────────────────────────────────────────────────
+        evmSplitContract = getBaseV5SplitContract()
+
+        if (isUsdc) {
+          // USDC on Base V5: customer signs EIP-3009 typed data or approves allowance;
+          // the component detects the pinetree://base-usdc-v5 scheme and executes the
+          // appropriate path internally (authorization first, allowance fallback for Trust Wallet).
+          paymentUrl = `pinetree://base-usdc-v5?paymentId=${encodeURIComponent(String(input.paymentId || ""))}`
+        } else {
+          // ETH on Base V5: ABI-encode splitEth() calldata + embed total ETH value
+          const totalWei = toWeiString(nativeAmount)
+          const calldata = splitEthIface.encodeFunctionData("splitEth", [
+            input.merchantWallet,
+            input.pinetreeWallet,
+            BigInt(toWeiString(merchantNativeAmount)),
+            BigInt(toWeiString(feeNativeAmount)),
+            String(input.paymentId || "")
+          ])
+          paymentUrl = `ethereum:${evmSplitContract}@${chainId}?value=${totalWei}&data=${calldata}`
+        }
       } else {
-        // ETH on Base: ABI-encode split() calldata + embed total ETH value
-        const totalWei = toWeiString(nativeAmount)
-        const calldata = splitIface.encodeFunctionData("split", [
-          input.merchantWallet,
-          input.pinetreeWallet,
-          BigInt(toWeiString(merchantNativeAmount)),
-          BigInt(toWeiString(feeNativeAmount)),
-          String(input.paymentId || "")
-        ])
-        paymentUrl = `ethereum:${evmSplitContract}@${chainId}?value=${totalWei}&data=${calldata}`
+        // ── V4 split contract — LEGACY; not used for new payments when PINETREE_BASE_SPLIT_VERSION=v5 ──
+        // Preserved for rollback safety and historical V4 payment routing only.
+        evmSplitContract = getBaseUsdcV4Contract()
+
+        if (!isEvmAddress(evmSplitContract)) {
+          throw new Error(
+            "Base payments require a deployed V4 split contract. Set PINETREE_BASE_USDC_V4_CONTRACT to a valid contract address."
+          )
+        }
+
+        if (isUsdc && baseUsdcStrategy === "v4_eip3009_relayer") {
+          paymentUrl = `pinetree://base-usdc-v4?paymentId=${encodeURIComponent(String(input.paymentId || ""))}`
+        } else {
+          // ETH on Base V4: ABI-encode split() calldata + embed total ETH value
+          const totalWei = toWeiString(nativeAmount)
+          const calldata = splitIface.encodeFunctionData("split", [
+            input.merchantWallet,
+            input.pinetreeWallet,
+            BigInt(toWeiString(merchantNativeAmount)),
+            BigInt(toWeiString(feeNativeAmount)),
+            String(input.paymentId || "")
+          ])
+          paymentUrl = `ethereum:${evmSplitContract}@${chainId}?value=${totalWei}&data=${calldata}`
+        }
       }
     }
   } else {

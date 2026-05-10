@@ -45,7 +45,31 @@ export async function upsertLedgerEntry(input: LedgerEntryInsert): Promise<Ledge
     .select()
     .maybeSingle()
 
-  if (error) throw new Error(`Failed to upsert ledger entry: ${error.message}`)
+  if (error) {
+    console.error('[PineTreeBaseTrace] ledger upsert failure', {
+      step: 'ledger-upsert-failure',
+      table: 'ledger_entries',
+      onConflict: 'payment_id',
+      paymentId: input.payment_id || null,
+      transactionId: input.transaction_id || null,
+      provider: input.provider || null,
+      network: input.network || null,
+      error: error.message
+    })
+    throw new Error(`Failed to upsert ledger entry: ${error.message}`)
+  }
+
+  console.info('[PineTreeBaseTrace] ledger upsert success', {
+    step: 'ledger-upsert-success',
+    table: 'ledger_entries',
+    onConflict: 'payment_id',
+    paymentId: input.payment_id || null,
+    transactionId: input.transaction_id || null,
+    provider: input.provider || null,
+    network: input.network || null,
+    inserted: Boolean(data)
+  })
+
   return data
 }
 

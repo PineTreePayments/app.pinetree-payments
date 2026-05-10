@@ -3,7 +3,8 @@
     "allow": [
       "Bash(xargs grep *)",
       "Bash(grep -n \"supabase.*from\\\\|supabase.*select\\\\|\\\\.from\\(\" /c/Users/andri/Desktop/app.pinetree-payments/app/dashboard/*.tsx)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(node -e ' *)"
     ]
   }
 }

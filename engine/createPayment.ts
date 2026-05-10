@@ -27,6 +27,8 @@ import {
   assertSplitRailConfig,
   getBaseUsdcStrategy,
   isBaseUsdcV4Configured,
+  isBaseSplitV5,
+  isBaseV5Configured,
   validateConfigOnce
 } from "./config"
 import { getMerchantCredential } from "@/database/merchants"
@@ -380,13 +382,20 @@ export async function createPayment(
 
   const isBaseUsdcPayment = network === "base" && requestedAsset === "USDC"
   const requestedBaseUsdcStrategy = isBaseUsdcPayment
-    ? getBaseUsdcStrategy()
+    ? (isBaseSplitV5() ? "v5_eip3009_relayer" : getBaseUsdcStrategy())
     : undefined
 
-  if (isBaseUsdcPayment && requestedBaseUsdcStrategy === "v4_eip3009_relayer" && !isBaseUsdcV4Configured()) {
-    throw new Error(
-      "Base USDC V4 is not configured. Ensure PINETREE_BASE_USDC_V4_CONTRACT, PINETREE_BASE_USDC_RELAYER_ADDRESS, PINETREE_BASE_USDC_RELAYER_PRIVATE_KEY, PINETREE_BASE_USDC_MAX_GAS_USD, and PINETREE_BASE_USDC_AUTH_VALIDITY_SECONDS are set."
-    )
+  if (isBaseUsdcPayment) {
+    if (isBaseSplitV5() && !isBaseV5Configured()) {
+      throw new Error(
+        "Base V5 is not configured. Ensure PINETREE_BASE_SPLIT_V5_CONTRACT, PINETREE_BASE_USDC_RELAYER_ADDRESS, PINETREE_BASE_USDC_RELAYER_PRIVATE_KEY, PINETREE_BASE_USDC_MAX_GAS_USD, and PINETREE_BASE_USDC_AUTH_VALIDITY_SECONDS are set."
+      )
+    } else if (!isBaseSplitV5() && requestedBaseUsdcStrategy === "v4_eip3009_relayer" && !isBaseUsdcV4Configured()) {
+      // LEGACY V4 path — not reached when PINETREE_BASE_SPLIT_VERSION=v5.
+      throw new Error(
+        "Base USDC V4 is not configured. Ensure PINETREE_BASE_USDC_V4_CONTRACT, PINETREE_BASE_USDC_RELAYER_ADDRESS, PINETREE_BASE_USDC_RELAYER_PRIVATE_KEY, PINETREE_BASE_USDC_MAX_GAS_USD, and PINETREE_BASE_USDC_AUTH_VALIDITY_SECONDS are set."
+      )
+    }
   }
 
   const baseUsdcStrategy: BaseUsdcStrategy | undefined = requestedBaseUsdcStrategy
@@ -405,11 +414,13 @@ export async function createPayment(
   })
 
   const splitContract = splitPayment.splitContract || extractEvmSplitContractFromPaymentUrl(splitPayment.paymentUrl)
-  const paymentUrlKind = splitPayment.paymentUrl.startsWith("pinetree://base-usdc-v4")
-    ? "pinetree://base-usdc-v4"
-    : splitPayment.paymentUrl.startsWith("ethereum:")
-      ? "ethereum:"
-      : "other"
+  const paymentUrlKind = splitPayment.paymentUrl.startsWith("pinetree://base-usdc-v5")
+    ? "pinetree://base-usdc-v5"
+    : splitPayment.paymentUrl.startsWith("pinetree://base-usdc-v4")
+      ? "pinetree://base-usdc-v4"
+      : splitPayment.paymentUrl.startsWith("ethereum:")
+        ? "ethereum:"
+        : "other"
 
   if (isBaseUsdcPayment) {
     console.info("[payment:create][base-usdc] strategy resolved", {

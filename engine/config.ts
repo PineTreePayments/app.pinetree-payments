@@ -30,6 +30,7 @@ const BASE_NATIVE_USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 const DEFAULT_BASE_USDC_AUTH_VALIDITY_SECONDS = 600
 const MIN_BASE_USDC_AUTH_VALIDITY_SECONDS = 300
 const MAX_BASE_USDC_AUTH_VALIDITY_SECONDS = 900
+// LEGACY — only used by getBaseUsdcStrategy() which is not called when PINETREE_BASE_SPLIT_VERSION=v5
 const DEFAULT_BASE_USDC_STRATEGY: BaseUsdcStrategy = "v4_eip3009_relayer"
 
 /**
@@ -173,9 +174,12 @@ export function assertSplitRailConfig(network: string): void {
   }
 
   if (normalized === "base") {
-    // Base uses PineTreeSplitV4 for all payments (ETH + USDC).
-    // Validate V4 config upfront so payment creation fails with a clear error.
-    assertBaseUsdcV4Config()
+    // Route to V5 or V4 config check depending on the active split version.
+    if (isBaseSplitV5()) {
+      assertBaseV5Config()
+    } else {
+      assertBaseUsdcV4Config()
+    }
     return
   }
 
@@ -302,6 +306,46 @@ export function isBaseUsdcV4Configured(): boolean {
   }
 }
 
+// ─── Base V5 config ───────────────────────────────────────────────────────────
+
+export function getBaseSplitVersion(): string {
+  return String(process.env.PINETREE_BASE_SPLIT_VERSION || "").toLowerCase().trim() || "v4"
+}
+
+export function isBaseSplitV5(): boolean {
+  return getBaseSplitVersion() === "v5"
+}
+
+export function getBaseV5SplitContract(): string {
+  return requireEvmAddress(
+    "PINETREE_BASE_SPLIT_V5_CONTRACT",
+    process.env.PINETREE_BASE_SPLIT_V5_CONTRACT || ""
+  )
+}
+
+export function assertBaseV5Config(): void {
+  getBaseV5SplitContract()
+  getBaseUsdcTokenAddress()
+  getBaseUsdcRelayer()
+  getBaseUsdcGasCap()
+  getBaseUsdcAuthValiditySeconds()
+
+  requireEvmAddress(
+    "PINETREE_TREASURY_WALLET_BASE",
+    process.env.PINETREE_TREASURY_WALLET_BASE || ""
+  )
+}
+
+export function isBaseV5Configured(): boolean {
+  try {
+    assertBaseV5Config()
+    return true
+  } catch {
+    return false
+  }
+}
+
+// LEGACY — not called when PINETREE_BASE_SPLIT_VERSION=v5. Preserved for V4 rollback only.
 export function getBaseUsdcStrategy(): BaseUsdcStrategy {
   const strategy = String(
     process.env.PINETREE_BASE_USDC_STRATEGY || DEFAULT_BASE_USDC_STRATEGY
