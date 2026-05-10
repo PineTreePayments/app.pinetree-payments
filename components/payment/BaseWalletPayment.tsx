@@ -20,6 +20,7 @@ type Props = {
   onSuccess?: (txHash: string, paymentId: string) => void | Promise<void>
   onError?: (error: string) => void
   onExecutionStarted?: () => void
+  onCancel?: () => void
 }
 
 type BaseUsdcStrategy = "v1_approve_splitToken" | "v4_eip3009_relayer" | "v5_eip3009_relayer"
@@ -824,6 +825,7 @@ export default function BaseWalletPayment({
   onSuccess,
   onError,
   onExecutionStarted,
+  onCancel,
 }: Props) {
   const { address, chain, isConnected, connector } = useAccount()
   const { connectors, connectAsync, status: connectStatus } = useConnect()
@@ -2450,6 +2452,21 @@ export default function BaseWalletPayment({
             </div>
           ) : null}
         </div>
+
+        {/* Cancel — available until the transaction is submitted to the network */}
+        {execStage !== "payment_submitted" && execStage !== "detecting" && execStage !== "confirmed" ? (
+          <button
+            type="button"
+            className="w-full text-xs text-gray-400 hover:text-red-500 py-1 transition-colors"
+            onClick={() => {
+              void logBase("cancel-click", { intentId: intentId || null, execStage })
+              resetBasePaymentAttemptForRetry()
+              onCancel?.()
+            }}
+          >
+            Cancel payment
+          </button>
+        ) : null}
 
         {/* Disconnected wallet while pending — allow reconnect without full restart */}
         {hasPendingBaseWcPayment && !isOpeningWallet && !isConnecting && !address ? (

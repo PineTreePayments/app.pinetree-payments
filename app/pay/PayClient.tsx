@@ -219,6 +219,11 @@ export default function PayClient() {
   // ── Base execution: once Base payment starts, collapse asset selector ──────
   const [baseExecutionActive, setBaseExecutionActive] = useState(false)
 
+  const handleBaseCancelPayment = useCallback(() => {
+    setBaseExecutionActive(false)
+    setSelectedAssetId("")
+  }, [])
+
   // ── Direct-payload mode state (non-intent, legacy QR) ─────────────────────
   const payload = useMemo(() => parsePayload(rawData), [rawData])
   const [selectedNetwork, setSelectedNetwork] = useState<string | null>(null)
@@ -330,6 +335,9 @@ export default function PayClient() {
 
   useEffect(() => {
     if (!selectedAssetId) return
+    // Never deselect while Base execution is active — the returning-from-wallet
+    // tap would fire mousedown outside intentCardsRef and unmount BaseWalletPayment.
+    if (baseExecutionActive) return
 
     function handleOutsideClick(event: MouseEvent) {
       const target = event.target as Node | null
@@ -342,7 +350,7 @@ export default function PayClient() {
 
     document.addEventListener("mousedown", handleOutsideClick)
     return () => document.removeEventListener("mousedown", handleOutsideClick)
-  }, [selectedAssetId])
+  }, [selectedAssetId, baseExecutionActive])
 
   // Strip solflare_error param from URL after reading so it doesn't persist on reload
   useEffect(() => {
@@ -1189,6 +1197,7 @@ export default function PayClient() {
                             selectedAsset={asset.symbol === "USDC" ? "USDC" : "ETH"}
                             usdAmount={displayAmount}
                             onExecutionStarted={() => setBaseExecutionActive(true)}
+                            onCancel={handleBaseCancelPayment}
                             onPaymentCreated={() => {
                               void loadIntentCallback()
                             }}
