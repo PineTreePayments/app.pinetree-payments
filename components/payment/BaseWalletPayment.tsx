@@ -19,9 +19,26 @@ type Props = {
   onPaymentCreated?: (paymentId: string) => void
   onSuccess?: (txHash: string, paymentId: string) => void | Promise<void>
   onError?: (error: string) => void
+  onExecutionStarted?: () => void
 }
 
 type BaseUsdcStrategy = "v1_approve_splitToken" | "v4_eip3009_relayer" | "v5_eip3009_relayer"
+
+type BaseExecutionStage =
+  | "idle"
+  | "asset_selected"
+  | "connecting_wallet"
+  | "wallet_connected"
+  | "preparing_payment"
+  | "confirm_payment"
+  | "authorizing_usdc"
+  | "usdc_authorized"
+  | "submitting_payment"
+  | "payment_submitted"
+  | "detecting"
+  | "confirmed"
+  | "retryable_error"
+  | "failed"
 
 type PaymentData = {
   paymentId: string
@@ -135,6 +152,23 @@ const BASE_USDC_SIGN_TIMEOUT_MESSAGE = "USDC authorization signature was not com
 const BASE_USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 const BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE =
   "Base USDC is temporarily unavailable because current network costs are above PineTree’s limit. Please try again shortly or choose another payment method."
+
+const STAGE_NUM: Record<BaseExecutionStage, number> = {
+  idle: 0,
+  asset_selected: 1,
+  connecting_wallet: 2,
+  wallet_connected: 3,
+  preparing_payment: 4,
+  authorizing_usdc: 5,
+  usdc_authorized: 6,
+  confirm_payment: 7,
+  submitting_payment: 8,
+  payment_submitted: 9,
+  detecting: 10,
+  confirmed: 11,
+  retryable_error: -1,
+  failed: -2,
+}
 
 
 type PendingBaseWalletConnectPayment = {
@@ -789,6 +823,7 @@ export default function BaseWalletPayment({
   onPaymentCreated,
   onSuccess,
   onError,
+  onExecutionStarted,
 }: Props) {
   const { address, chain, isConnected, connector } = useAccount()
   const { connectors, connectAsync, status: connectStatus } = useConnect()
@@ -820,6 +855,24 @@ export default function BaseWalletPayment({
   const activeBaseUsdcV4PaymentRef = useRef<string | null>(null)
   const activeBaseUsdcV5PaymentRef = useRef<string | null>(null)
   const activeBasePaymentAttemptRef = useRef<string | null>(null)
+
+  // ── Base UI execution state machine ────────────────────────────────────────
+  const [execStage, setExecStageRaw] = useState<BaseExecutionStage>("idle")
+  const [usedEmergencyAllowance, setUsedEmergencyAllowance] = useState(false)
+  const execStageRef = useRef<BaseExecutionStage>("idle")
+  // Stable ref so useCallbacks with [] deps always call the latest setter logic
+  const setExecStageRef = useRef<(stage: BaseExecutionStage, opts?: { allowance?: boolean }) => void>(() => {})
+  setExecStageRef.current = (stage, opts) => {
+    const prev = execStageRef.current
+    if (prev === stage) return
+    console.log("[BASE UI] stage-change", { from: prev, to: stage, asset: selectedAsset, intentId: intentId ?? null })
+    execStageRef.current = stage
+    setExecStageRaw(stage)
+    if (opts?.allowance) setUsedEmergencyAllowance(true)
+    try {
+      sessionStorage.setItem(`pinetree_base_exec_${intentId ?? "direct"}_${selectedAsset}`, stage)
+    } catch {}
+  }
 
   const isIntentMode = Boolean(intentId)
   const isOnBase = chain?.id === base.id
@@ -968,6 +1021,8 @@ export default function BaseWalletPayment({
       throw new Error("Incomplete Base USDC authorization returned by server")
     }
 
+    setExecStageRef.current("confirm_payment")
+    console.log("[BASE UI] awaiting-wallet-confirmation", { paymentId: input.paymentData.paymentId, strategy: "v4_eip3009_relayer" })
     setBaseUsdcV4Status("Sign USDC payment authorization...")
     const peerName = getWalletConnectPeerName(input.provider)
     console.info("[PineTreeBaseTrace] Base USDC signing start", {
@@ -1127,6 +1182,8 @@ export default function BaseWalletPayment({
           delegatedPrepared.calls.length >= 2
         ) {
           console.info("[BASE DELEGATED] batch-start", { paymentId })
+          setExecStageRef.current("confirm_payment")
+          console.log("[BASE UI] awaiting-wallet-confirmation", { paymentId, strategy: "delegated_eoa_batch" })
           setBaseUsdcV4Status("Confirm payment in your wallet...")
 
           let sendCallsResult: unknown
@@ -1165,6 +1222,7 @@ export default function BaseWalletPayment({
             }
 
             if (!finalTxHash && callId) {
+              setExecStageRef.current("submitting_payment")
               setBaseUsdcV4Status("Waiting for confirmation...")
               const maxAttempts = 20
               const delayMs = 3_000
@@ -1241,6 +1299,8 @@ export default function BaseWalletPayment({
           if (isBaseUsdcV4Unavailable(prepare)) throw new Error(prepare.message || BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE)
           if (!prepare.typedData || !prepare.authorization) throw new Error("Incomplete Base USDC V5 authorization returned by server")
 
+          setExecStageRef.current("confirm_payment")
+          console.log("[BASE UI] awaiting-wallet-confirmation", { paymentId, strategy: "eip3009_relayer" })
           setBaseUsdcV4Status("Authorize USDC payment...")
           const typedData = requireBaseUsdcV4TypedData(prepare.typedData, input.fromAddress)
           const serializedTypedData = serializeTypedDataForWallet(typedData)
@@ -1360,6 +1420,8 @@ export default function BaseWalletPayment({
       const { sufficient, approveTx, paymentTx } = buildData as Required<Pick<BaseUsdcV5AllowancePaymentResponse, "sufficient" | "approveTx" | "paymentTx">>
 
       if (!sufficient && approveTx) {
+        setExecStageRef.current("authorizing_usdc", { allowance: true })
+        console.log("[BASE UI] usdc-authorization-start", { paymentId })
         setBaseUsdcV4Status("Step 1 of 2: Authorize USDC...")
         void logBase("usdc-approve-requested", { paymentId, isTrustWallet })
         const approveTxHash = await sendWalletConnectTransactionWithTimeout({
@@ -1402,9 +1464,13 @@ export default function BaseWalletPayment({
         if (!allowanceSufficient) {
           throw new Error("USDC allowance was not confirmed in time. Please try again.")
         }
+        setExecStageRef.current("usdc_authorized")
+        console.log("[BASE UI] usdc-authorization-confirmed", { paymentId })
         void logBase("usdc-allowance-confirmed", { paymentId })
       }
 
+      setExecStageRef.current("confirm_payment")
+      console.log("[BASE UI] awaiting-wallet-confirmation", { paymentId, strategy: "allowance_two_step" })
       setBaseUsdcV4Status("Step 2 of 2: Confirm payment...")
       void logBase("usdc-payment-requested", { paymentId, isTrustWallet })
       const paymentTxHash = await sendWalletConnectTransactionWithTimeout({
@@ -1472,6 +1538,7 @@ export default function BaseWalletPayment({
       }
 
       setIsOpeningWallet(true)
+      setExecStageRef.current("preparing_payment")
       void logBase("resolve-payment-start", { intentId: intentId || null })
       const prefetched = selectedAsset === "ETH" || selectedAsset === "USDC"
         ? prefetchedPaymentDataRef.current
@@ -1554,7 +1621,11 @@ export default function BaseWalletPayment({
         paymentSubmittedRef.current = true
         activeBasePaymentAttemptRef.current = null
         activeBaseUsdcV5PaymentRef.current = null
+        setExecStageRef.current("payment_submitted")
+        console.log("[BASE UI] final-tx-submitted", { paymentId: paymentData.paymentId, txHashPrefix: normalizedTxHash.slice(0, 10), asset: "USDC" })
         void logBase("detect-start", { paymentId: paymentData.paymentId, txHashPrefix: normalizedTxHash.slice(0, 10) })
+        setExecStageRef.current("detecting")
+        console.log("[BASE UI] detecting", { paymentId: paymentData.paymentId })
         await onSuccess?.(normalizedTxHash, paymentData.paymentId)
         void logBase("detect-success", { paymentId: paymentData.paymentId })
 
@@ -1591,7 +1662,11 @@ export default function BaseWalletPayment({
 
         paymentSubmittedRef.current = true
         activeBasePaymentAttemptRef.current = null
+        setExecStageRef.current("payment_submitted")
+        console.log("[BASE UI] final-tx-submitted", { paymentId: paymentData.paymentId, txHashPrefix: normalizedTxHash.slice(0, 10), asset: "USDC", strategy: "v4" })
         void logBase("detect-start", { paymentId: paymentData.paymentId, txHashPrefix: normalizedTxHash.slice(0, 10) })
+        setExecStageRef.current("detecting")
+        console.log("[BASE UI] detecting", { paymentId: paymentData.paymentId })
         await onSuccess?.(normalizedTxHash, paymentData.paymentId)
         void logBase("detect-success", { paymentId: paymentData.paymentId })
         activeBaseUsdcV4PaymentRef.current = null
@@ -1618,6 +1693,8 @@ export default function BaseWalletPayment({
         hasValue: Boolean(txRequest.value),
       })
       transactionPromptStarted = true
+      setExecStageRef.current("confirm_payment")
+      console.log("[BASE UI] awaiting-wallet-confirmation", { paymentId: paymentData.paymentId, asset: "ETH" })
 
       // Race the transaction request against a timeout so that if the wallet never
       // presents the approval dialog, the checkout clears its "Confirming" state
@@ -1636,9 +1713,13 @@ export default function BaseWalletPayment({
 
       paymentSubmittedRef.current = true
       activeBasePaymentAttemptRef.current = null
+      setExecStageRef.current("payment_submitted")
+      console.log("[BASE UI] final-tx-submitted", { paymentId: paymentData.paymentId, txHashPrefix: normalizedTxHash.slice(0, 10), asset: "ETH" })
 
       void logBase("eth-payment-submitted", { txHashPrefix: normalizedTxHash.slice(0, 10) })
       void logBase("detect-start", { paymentId: paymentData.paymentId })
+      setExecStageRef.current("detecting")
+      console.log("[BASE UI] detecting", { paymentId: paymentData.paymentId })
       await onSuccess?.(normalizedTxHash, paymentData.paymentId)
       void logBase("detect-success", { paymentId: paymentData.paymentId })
 
@@ -1736,6 +1817,8 @@ export default function BaseWalletPayment({
         activeBaseUsdcV5PaymentRef.current = null
       }
 
+      setExecStageRef.current("retryable_error")
+      console.log("[BASE UI] retryable-error", { message: friendly, selectedAsset, intentId: intentId || null })
       setLocalError(friendly)
       setIsPreparingPayment(false)
       setIsOpeningWallet(false)
@@ -1758,6 +1841,9 @@ export default function BaseWalletPayment({
     setBaseUsdcV4Status("")
     clearPendingBaseWalletConnectPayment()
     setHasPendingBaseWcPayment(false)
+    execStageRef.current = "idle"
+    setExecStageRaw("idle")
+    setUsedEmergencyAllowance(false)
   }, [])
 
 
@@ -1765,6 +1851,7 @@ export default function BaseWalletPayment({
   const startWalletConnectPayment = useCallback(() => {
     resetBasePaymentAttemptForRetry()
     setLocalError("")
+    setExecStageRef.current("asset_selected")
 
     void (async () => {
       try {
@@ -1773,6 +1860,10 @@ export default function BaseWalletPayment({
         }
 
         console.log("[Base] WalletConnect selected")
+        console.log("[BASE UI] execution-start", {
+          selectedAsset,
+          intentId: intentId || null,
+        })
         console.log("[PineTreeBaseTrace] BaseWalletPayment pay button clicked", {
           step: "button-click",
           selectedAsset,
@@ -1786,10 +1877,14 @@ export default function BaseWalletPayment({
 
         storePendingBaseWalletConnectPayment({ intentId, selectedAsset })
         setHasPendingBaseWcPayment(true)
+        setExecStageRef.current("connecting_wallet")
+        onExecutionStarted?.()
 
         const currentAddress = String(address || "").trim()
         if (isConnected && currentAddress) {
           // Already connected — skip the connect step
+          setExecStageRef.current("wallet_connected")
+          console.log("[BASE UI] wallet-connected", { source: "already-connected", intentId: intentId || null })
           await continueBasePayment(currentAddress)
           return
         }
@@ -1859,6 +1954,8 @@ export default function BaseWalletPayment({
 
           const fromAddress = extractAddressFromConnectResult(connectSettled.value) || currentAddress
           if (fromAddress) {
+            setExecStageRef.current("wallet_connected")
+            console.log("[BASE UI] wallet-connected", { intentId: intentId || null, selectedAsset })
             void logBase("wc-connect-success", {
               hasAddress: Boolean(fromAddress),
               chainId: connectedChainIdRef.current,
@@ -1875,6 +1972,8 @@ export default function BaseWalletPayment({
             const result = await connectAsync({ connector: walletConnectConnector, chainId: base.id })
             fromAddress = extractAddressFromConnectResult(result) || currentAddress
             if (fromAddress) {
+              setExecStageRef.current("wallet_connected")
+              console.log("[BASE UI] wallet-connected", { intentId: intentId || null, selectedAsset })
               void logBase("wc-connect-success", {
                 hasAddress: Boolean(fromAddress),
                 selectedAsset,
@@ -1916,6 +2015,8 @@ export default function BaseWalletPayment({
           setHasPendingBaseWcPayment(false)
         }
 
+        setExecStageRef.current("retryable_error")
+        console.log("[BASE UI] retryable-error", { message: friendly, selectedAsset })
         setLocalError(friendly)
         setIsPreparingPayment(false)
         setIsOpeningWallet(false)
@@ -1923,7 +2024,7 @@ export default function BaseWalletPayment({
         onError?.(friendly)
       }
     })()
-  }, [address, connectAsync, continueBasePayment, intentId, isConnected, onError, resetBasePaymentAttemptForRetry, resolvePaymentData, selectedAsset, walletConnectConnector])
+  }, [address, connectAsync, continueBasePayment, intentId, isConnected, onError, onExecutionStarted, resetBasePaymentAttemptForRetry, resolvePaymentData, selectedAsset, walletConnectConnector])
 
   const stopAutoResumeRetry = useCallback(() => {
     if (autoResumeRetryRef.current) {
@@ -2210,6 +2311,8 @@ export default function BaseWalletPayment({
     }
   }, [continueBasePayment, intentId, resumeFromWalletConnectProvider, selectedAsset, stopAutoResumeRetry, walletConnectConnector])
 
+  // ── Render helpers ────────────────────────────────────────────────────────
+
   const amountDisplay = (
     <div className="bg-gray-50 rounded-xl px-4 py-3 text-center space-y-1">
       {isIntentMode ? (
@@ -2226,6 +2329,186 @@ export default function BaseWalletPayment({
     </div>
   )
 
+  // ── Base UI execution state machine render ────────────────────────────────
+
+  const currentStageNum = STAGE_NUM[execStage]
+  const showUsdcAuthStep = selectedAsset === "USDC" && usedEmergencyAllowance
+
+  function getStepStatus(doneAtNum: number, activeNums: number[]): "done" | "active" | "upcoming" {
+    if (currentStageNum >= doneAtNum) return "done"
+    if (activeNums.includes(currentStageNum)) return "active"
+    return "upcoming"
+  }
+
+  const walletConnectedStatus = getStepStatus(
+    STAGE_NUM.wallet_connected,
+    [STAGE_NUM.asset_selected, STAGE_NUM.connecting_wallet]
+  )
+  const usdcAuthStatus = showUsdcAuthStep
+    ? getStepStatus(STAGE_NUM.usdc_authorized, [STAGE_NUM.authorizing_usdc])
+    : "done"
+  const confirmPayStatus = getStepStatus(
+    STAGE_NUM.payment_submitted,
+    showUsdcAuthStep
+      ? [STAGE_NUM.usdc_authorized, STAGE_NUM.confirm_payment, STAGE_NUM.submitting_payment]
+      : [STAGE_NUM.wallet_connected, STAGE_NUM.preparing_payment, STAGE_NUM.confirm_payment, STAGE_NUM.submitting_payment]
+  )
+  const networkConfStatus = getStepStatus(
+    STAGE_NUM.confirmed,
+    [STAGE_NUM.payment_submitted, STAGE_NUM.detecting]
+  )
+
+  let contextMessage = ""
+  if (execStage === "connecting_wallet" || execStage === "asset_selected") {
+    contextMessage = "Opening your wallet…"
+  } else if (execStage === "wallet_connected" || execStage === "preparing_payment") {
+    contextMessage = "Preparing your payment…"
+  } else if (execStage === "authorizing_usdc") {
+    contextMessage = "Confirm USDC authorization in your wallet"
+  } else if (execStage === "usdc_authorized") {
+    contextMessage = "Authorization confirmed. Preparing payment…"
+  } else if (execStage === "confirm_payment") {
+    contextMessage = "Confirm payment in your wallet"
+  } else if (execStage === "submitting_payment") {
+    contextMessage = "Confirming your payment…"
+  } else if (execStage === "payment_submitted" || execStage === "detecting") {
+    contextMessage = "Waiting for network confirmation…"
+  }
+
+  const showWalletPrompt = execStage === "confirm_payment" || execStage === "authorizing_usdc"
+
+  function renderStepIcon(status: "done" | "active" | "upcoming") {
+    if (status === "done") {
+      return (
+        <span className="flex-shrink-0 flex items-center justify-center w-5 h-5 rounded-full bg-green-500">
+          <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2 6l2.5 2.5 5.5-5" />
+          </svg>
+        </span>
+      )
+    }
+    if (status === "active") {
+      return (
+        <span className="flex-shrink-0 w-5 h-5 rounded-full border-2 border-[#0052FF] border-t-transparent animate-spin" />
+      )
+    }
+    return (
+      <span className="flex-shrink-0 w-5 h-5 rounded-full border-2 border-gray-200" />
+    )
+  }
+
+  function renderStep(label: string, status: "done" | "active" | "upcoming") {
+    return (
+      <div className="flex items-center gap-3">
+        {renderStepIcon(status)}
+        <span className={`text-sm ${
+          status === "done"
+            ? "text-green-700 font-medium"
+            : status === "active"
+              ? "text-gray-900 font-semibold"
+              : "text-gray-400"
+        }`}>
+          {label}
+        </span>
+      </div>
+    )
+  }
+
+  // When execution is active (not idle / not failed), show progress panel
+  const isExecutingStage = execStage !== "idle" && execStage !== "failed"
+
+  if (isExecutingStage && execStage !== "retryable_error") {
+    return (
+      <div className="space-y-4">
+        <div className="text-xs uppercase tracking-widest text-gray-500 text-center">
+          Base Network Payment
+        </div>
+
+        {amountDisplay}
+
+        <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4 shadow-sm">
+          <div className="space-y-3">
+            {renderStep("Wallet connected", walletConnectedStatus)}
+            {showUsdcAuthStep ? renderStep("Authorize USDC", usdcAuthStatus) : null}
+            {renderStep("Confirm payment", confirmPayStatus)}
+            {renderStep("Network confirmation", networkConfStatus)}
+          </div>
+
+          {contextMessage ? (
+            <div className={`pt-3 border-t border-gray-100 text-sm text-center ${showWalletPrompt ? "text-[#0052FF] font-medium" : "text-gray-500"}`}>
+              {showWalletPrompt ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="inline-block h-2 w-2 rounded-full bg-[#0052FF] animate-pulse flex-shrink-0" />
+                  {contextMessage}
+                </span>
+              ) : (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="inline-block h-3 w-3 rounded-full border border-gray-400 border-t-transparent animate-spin flex-shrink-0" />
+                  {contextMessage}
+                </span>
+              )}
+            </div>
+          ) : null}
+        </div>
+
+        {/* Disconnected wallet while pending — allow reconnect without full restart */}
+        {hasPendingBaseWcPayment && !isOpeningWallet && !isConnecting && !address ? (
+          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 space-y-2">
+            <p>Return to your wallet to continue, or reconnect if disconnected.</p>
+            <Button
+              fullWidth
+              variant="secondary"
+              onClick={() => {
+                void logBase("reconnect-click", { intentId: intentId || null })
+                if (!walletConnectConnector) return
+                void connectAsync({ connector: walletConnectConnector, chainId: base.id })
+                  .then((result) => {
+                    const addr = extractAddressFromConnectResult(result)
+                    if (addr) {
+                      setExecStageRef.current("wallet_connected")
+                      void continueBasePayment(addr)
+                    }
+                  })
+                  .catch(() => null)
+              }}
+            >
+              Reconnect wallet
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+
+  // Retryable error — show error + retry button
+  if (execStage === "retryable_error") {
+    return (
+      <div className="space-y-3">
+        <div className="text-xs uppercase tracking-widest text-gray-500 text-center">
+          Base Network Payment
+        </div>
+        {amountDisplay}
+        {localError ? (
+          <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+            {localError}
+          </div>
+        ) : null}
+        <div className="space-y-2">
+          {walletConnectConnector ? (
+            <Button fullWidth onClick={() => startWalletConnectPayment()}>
+              Try Again
+            </Button>
+          ) : (
+            <div className="text-[11px] text-gray-500 text-center">
+              WalletConnect is not configured.
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // Idle — standard pay button UI
   return (
     <div className="space-y-3">
       <div className="text-xs uppercase tracking-widest text-gray-500 text-center">
@@ -2245,7 +2528,6 @@ export default function BaseWalletPayment({
           {localError}
         </div>
       ) : null}
-
 
       {hasPendingBaseWcPayment && !isOpeningWallet && !isConnecting && !isPreparingPayment ? (
         address ? (
@@ -2287,68 +2569,10 @@ export default function BaseWalletPayment({
           {baseUsdcV4Status || "Preparing payment…"}
         </Button>
       ) : isOpeningWallet ? (
-        (() => {
-          const isTwoStep = (
-            baseUsdcV4Status.startsWith("Step 1") ||
-            baseUsdcV4Status.startsWith("Waiting for USDC") ||
-            baseUsdcV4Status.startsWith("Step 2")
-          )
-          const isPolling = baseUsdcV4Status.startsWith("Waiting for USDC")
-          const isProcessing = baseUsdcV4Status.startsWith("Processing")
-          const isWalletPrompt = !isPolling && !isProcessing && (
-            isTwoStep ||
-            baseUsdcV4Status.startsWith("Authorize USDC") ||
-            (selectedAsset === "ETH" && !baseUsdcV4Status)
-          )
-
-          let buttonLabel: string
-          if (isPolling) {
-            buttonLabel = "Verifying authorization…"
-          } else if (baseUsdcV4Status.startsWith("Step 1")) {
-            buttonLabel = "Waiting for your approval…"
-          } else if (baseUsdcV4Status.startsWith("Step 2")) {
-            buttonLabel = "Waiting for your approval…"
-          } else if (isProcessing) {
-            buttonLabel = "Waiting for confirmation…"
-          } else {
-            buttonLabel = baseUsdcV4Status || "Confirming transaction…"
-          }
-
-          return (
-            <div className="space-y-3">
-              {isTwoStep ? (
-                <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="inline-block h-3 w-3 rounded-full border border-blue-500 border-t-transparent animate-spin flex-shrink-0" />
-                    <span className="text-sm font-medium text-blue-900">
-                      {isPolling
-                        ? "Authorization received. Verifying on-chain…"
-                        : baseUsdcV4Status.startsWith("Step 1")
-                          ? "Step 1 of 2: Authorize USDC"
-                          : "Step 2 of 2: Confirm payment"}
-                    </span>
-                  </div>
-                  <p className="text-xs text-blue-700 pl-5">
-                    {isPolling
-                      ? "We'll automatically request your payment confirmation next."
-                      : "This wallet requires two confirmations for USDC payments."}
-                  </p>
-                </div>
-              ) : null}
-
-              <Button fullWidth disabled>
-                <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
-                {buttonLabel}
-              </Button>
-
-              {isWalletPrompt ? (
-                <p className="text-xs text-gray-500 text-center">
-                  Check your wallet app to approve, then return to your browser.
-                </p>
-              ) : null}
-            </div>
-          )
-        })()
+        <Button fullWidth disabled>
+          <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
+          {baseUsdcV4Status || "Confirming transaction…"}
+        </Button>
       ) : (
         <div className="space-y-2">
           {walletConnectConnector ? (

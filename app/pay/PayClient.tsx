@@ -216,6 +216,9 @@ export default function PayClient() {
   const [shift4Loading, setShift4Loading] = useState(false)
   const [shift4Error, setShift4Error] = useState("")
 
+  // ── Base execution: once Base payment starts, collapse asset selector ──────
+  const [baseExecutionActive, setBaseExecutionActive] = useState(false)
+
   // ── Direct-payload mode state (non-intent, legacy QR) ─────────────────────
   const payload = useMemo(() => parsePayload(rawData), [rawData])
   const [selectedNetwork, setSelectedNetwork] = useState<string | null>(null)
@@ -1073,70 +1076,85 @@ export default function PayClient() {
       new Date().toISOString()
     )
 
+    const amountSummary = (
+      <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm text-gray-800">
+        <div className="flex items-center justify-between">
+          <span className="text-gray-600">Subtotal</span>
+          <span className="font-semibold">{formatUsd(Number(intentPayload?.amount || 0))}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-gray-600">PineTree Service Fee</span>
+          <span className="font-semibold">{formatUsd(Number(intentPayload?.pinetreeFee || 0))}</span>
+        </div>
+        <div className="flex items-center justify-between border-t border-gray-200 pt-2">
+          <span className="font-semibold text-gray-900">Total</span>
+          <span className="font-bold text-lg text-gray-900">{formatUsd(displayAmount)}</span>
+        </div>
+      </div>
+    )
+
     return (
       <PageContainer>
         <Card className="max-w-md w-full space-y-5">
           <div>
             <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">PineTree Checkout</p>
-            <h1 className="text-2xl font-bold text-gray-900">Choose Payment Asset</h1>
+            {!baseExecutionActive && (
+              <h1 className="text-2xl font-bold text-gray-900">Choose Payment Asset</h1>
+            )}
           </div>
 
-          <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm text-gray-800">
-            <div className="flex items-center justify-between">
-              <span className="text-gray-600">Subtotal</span>
-              <span className="font-semibold">{formatUsd(Number(intentPayload?.amount || 0))}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-gray-600">PineTree Service Fee</span>
-              <span className="font-semibold">{formatUsd(Number(intentPayload?.pinetreeFee || 0))}</span>
-            </div>
-            <div className="flex items-center justify-between border-t border-gray-200 pt-2">
-              <span className="font-semibold text-gray-900">Total</span>
-              <span className="font-bold text-lg text-gray-900">{formatUsd(displayAmount)}</span>
-            </div>
-          </div>
+          {amountSummary}
 
-          <div className="flex justify-center">
-            <StatusBadge label={displayStatus.label} classes={`${displayStatus.classes} px-3 py-1.5 text-sm`} />
-          </div>
+          {!baseExecutionActive && (
+            <div className="flex justify-center">
+              <StatusBadge label={displayStatus.label} classes={`${displayStatus.classes} px-3 py-1.5 text-sm`} />
+            </div>
+          )}
 
           <div className="space-y-3" ref={intentCardsRef}>
-            <p className="text-xs uppercase tracking-widest text-gray-500">Select an asset to continue:</p>
+            {!baseExecutionActive && (
+              <p className="text-xs uppercase tracking-widest text-gray-500">Select an asset to continue:</p>
+            )}
 
             <div className="space-y-2">
               {getCheckoutAssetOptions(intentPayload?.availableNetworks || []).map((asset) => {
                 const isActive = selectedAssetId === asset.id
 
+                // While Base execution is running, hide all non-active asset cards
+                if (baseExecutionActive && !isActive) return null
+
                 return (
                   <div key={asset.id} className="overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm">
-                    {/* Asset selector button — pure UI, no API call */}
-                    <button
-                      onClick={() => {
-                        if (asset.disabled) return
-                        selectAsset(asset.id)
-                      }}
-                      disabled={asset.disabled}
-                      className={`w-full px-4 py-4 text-left transition-all ${
-                        asset.disabled
-                          ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                          : isActive
-                            ? "bg-blue-50 shadow-inner"
-                            : "bg-white hover:bg-gray-50"
-                      }`}
-                    >
-                      <span className="font-medium text-gray-900">Pay with {asset.label}</span>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {asset.disabled
-                          ? asset.disabledCopy
-                          : isActive
-                            ? "Choose a wallet below"
-                            : "Tap to reveal payment options"}
-                      </p>
-                    </button>
+                    {/* Asset selector button — hidden once execution starts */}
+                    {!baseExecutionActive && (
+                      <button
+                        onClick={() => {
+                          if (asset.disabled) return
+                          selectAsset(asset.id)
+                        }}
+                        disabled={asset.disabled}
+                        className={`w-full px-4 py-4 text-left transition-all ${
+                          asset.disabled
+                            ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                            : isActive
+                              ? "bg-blue-50 shadow-inner"
+                              : "bg-white hover:bg-gray-50"
+                        }`}
+                      >
+                        <span className="font-medium text-gray-900">Pay with {asset.label}</span>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {asset.disabled
+                            ? asset.disabledCopy
+                            : isActive
+                              ? "Choose a wallet below"
+                              : "Tap to reveal payment options"}
+                        </p>
+                      </button>
+                    )}
 
-                    {/* Payment UI — rendered immediately on selection, no loading gate */}
+                    {/* Payment UI — always mounted when active so state is never lost */}
                     {isActive ? (
-                      <div className="px-4 py-4 border-t border-gray-200 bg-white space-y-4">
+                      <div className={`${baseExecutionActive ? "p-0" : "px-4 py-4 border-t border-gray-200"} bg-white space-y-4`}>
 
                         {/* ── Shift4: hosted checkout redirect ──────────── */}
                         {asset.network === "shift4" ? (
@@ -1170,6 +1188,7 @@ export default function PayClient() {
                             intentId={intentId!}
                             selectedAsset={asset.symbol === "USDC" ? "USDC" : "ETH"}
                             usdAmount={displayAmount}
+                            onExecutionStarted={() => setBaseExecutionActive(true)}
                             onPaymentCreated={() => {
                               void loadIntentCallback()
                             }}
@@ -1232,9 +1251,11 @@ export default function PayClient() {
               })}
             </div>
 
-            <Button variant="danger" fullWidth onClick={() => window.close()}>
-              Cancel
-            </Button>
+            {!baseExecutionActive && (
+              <Button variant="danger" fullWidth onClick={() => window.close()}>
+                Cancel
+              </Button>
+            )}
           </div>
         </Card>
       </PageContainer>
