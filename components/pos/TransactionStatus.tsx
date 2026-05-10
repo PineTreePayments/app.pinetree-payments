@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
+import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 
 export default function TransactionStatus({
   status,
@@ -22,16 +23,24 @@ export default function TransactionStatus({
 
   }, [status, resetPOS])
 
-  if (status === "pending") {
-    return <p className="text-yellow-500">Waiting for payment…</p>
+  if (status === "pending" || status === "waiting") {
+    return <PaymentStatusVisual status="PENDING" iconSize={34} />
   }
 
   if (status === "confirmed") {
-    return <p className="text-green-600">Payment confirmed</p>
+    return <PaymentStatusVisual status="CONFIRMED" iconSize={34} />
   }
 
   if (status === "error" || status === "failed") {
-    return <p className="text-red-600">Payment failed</p>
+    return <PaymentStatusVisual status="FAILED" iconSize={34} />
+  }
+
+  if (status === "incomplete") {
+    return <PaymentStatusVisual status="INCOMPLETE" iconSize={34} />
+  }
+
+  if (status === "expired") {
+    return <PaymentStatusVisual status="EXPIRED" iconSize={34} />
   }
 
   return null

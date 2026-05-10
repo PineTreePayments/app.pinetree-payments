@@ -11,6 +11,7 @@ import PageContainer from "@/components/ui/PageContainer"
 import StatusBadge from "@/components/ui/StatusBadge"
 import BaseWalletPayment from "@/components/payment/BaseWalletPayment"
 import SolanaWalletPayment from "@/components/payment/SolanaWalletPayment"
+import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import {
   buildSignAndSendUrl,
   clearSolflareSession,
@@ -33,6 +34,9 @@ const supabase = createBrowserClient(
 
 const PHANTOM_PROVIDER_RETRY_TIMEOUT_MS = 4000
 const PHANTOM_PROVIDER_RETRY_INTERVAL_MS = 150
+const BASE_WC_PENDING_KEY = "pinetree_base_wc_pending"
+const BASE_EXEC_STORAGE_PREFIX = "pinetree_base_exec_"
+const TERMINAL_PAYMENT_STATUSES = new Set(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED"])
 
 type SplitOutput = {
   address: string
@@ -139,6 +143,31 @@ function getPhantomRetryMessage(code: string | null): string {
     return "Phantom could not be detected after opening the wallet. Please open this page in Phantom or install Phantom, then try again."
   }
   return "Phantom connection could not be completed. Please try again."
+}
+
+function normalizeTerminalPaymentStatus(status: string): string {
+  const normalized = String(status || "").trim().toUpperCase()
+  if (normalized === "CANCELLED") return "CANCELED"
+  return normalized
+}
+
+function isTerminalPaymentStatus(status: string): boolean {
+  return TERMINAL_PAYMENT_STATUSES.has(normalizeTerminalPaymentStatus(status))
+}
+
+function clearStaleBaseExecutionSessionStorage(): void {
+  if (typeof window === "undefined") return
+  try {
+    window.sessionStorage.removeItem(BASE_WC_PENDING_KEY)
+    for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.sessionStorage.key(index)
+      if (key?.startsWith(BASE_EXEC_STORAGE_PREFIX)) {
+        window.sessionStorage.removeItem(key)
+      }
+    }
+  } catch {
+    // Session storage cleanup is best-effort only.
+  }
 }
 
 async function logSolflare(
@@ -256,6 +285,13 @@ export default function PayClient() {
     String(activePayload?.universalUrl || activePayload?.paymentUrl || walletUrl || "")
 
   const normalizedPaymentStatus = String(paymentStatus || "").toUpperCase()
+  const isIntentMode = Boolean(intentId && intentPayload)
+  const normalizedStatusOverride = normalizeTerminalPaymentStatus(statusOverride || "")
+  const terminalPaymentStatus = isTerminalPaymentStatus(normalizedPaymentStatus)
+    ? normalizedPaymentStatus
+    : normalizedStatusOverride === "FAILED" || normalizedStatusOverride === "CANCELED"
+      ? normalizedStatusOverride
+      : ""
   const intentCardsRef = useRef<HTMLDivElement | null>(null)
 
   // ── Intent mode helpers ────────────────────────────────────────────────────
@@ -331,6 +367,15 @@ export default function PayClient() {
     void loadIntentCallback()
   }, [intentId, loadIntentCallback])
 
+  useEffect(() => {
+    if (!isIntentMode) return
+    if (!terminalPaymentStatus) return
+
+    clearStaleBaseExecutionSessionStorage()
+    setBaseExecutionActive(false)
+    setSelectedAssetId("")
+  }, [isIntentMode, terminalPaymentStatus])
+
   // ── Deselect asset when clicking outside the card list ────────────────────
 
   useEffect(() => {
@@ -373,10 +418,7 @@ export default function PayClient() {
   useEffect(() => {
     if (!intentId) return
     if (!intentPayload?.paymentId) return
-    const isTerminal =
-      normalizedPaymentStatus === "CONFIRMED" ||
-      normalizedPaymentStatus === "FAILED" ||
-      normalizedPaymentStatus === "INCOMPLETE"
+    const isTerminal = isTerminalPaymentStatus(normalizedPaymentStatus)
     if (isTerminal) return
 
     const interval = setInterval(() => {
@@ -838,10 +880,7 @@ export default function PayClient() {
     const paymentId = intentPayload?.paymentId
     if (!paymentId) return
 
-    const isTerminal =
-      normalizedPaymentStatus === "CONFIRMED" ||
-      normalizedPaymentStatus === "FAILED" ||
-      normalizedPaymentStatus === "INCOMPLETE"
+    const isTerminal = isTerminalPaymentStatus(normalizedPaymentStatus)
     if (isTerminal) return
 
     const channel = supabase
@@ -972,7 +1011,6 @@ export default function PayClient() {
 
   // ── Intent mode ────────────────────────────────────────────────────────────
 
-  const isIntentMode = Boolean(intentId && intentPayload)
   const displayAmount = isIntentMode
     ? Number(intentPayload?.amount || 0) + Number(intentPayload?.pinetreeFee || 0)
     : Number(payload?.usdTotalAmount ?? payload?.totalAmount ?? 0)
@@ -989,76 +1027,13 @@ export default function PayClient() {
     )
   }
 
-  if (isIntentMode && normalizedPaymentStatus === "CONFIRMED") {
+  if (isIntentMode && terminalPaymentStatus) {
     return (
       <PageContainer>
         <Card className="max-w-md w-full text-center space-y-4" padding={false}>
-          <div className="p-8 space-y-4">
+          <div className="p-8 space-y-5">
             <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
-            <div className="flex justify-center">
-              <svg className="w-16 h-16 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <h1 className="text-2xl font-bold text-gray-900">Payment Confirmed</h1>
-            <p className="text-sm text-gray-500">Your payment was received successfully.</p>
-          </div>
-        </Card>
-      </PageContainer>
-    )
-  }
-
-  if (isIntentMode && statusOverride === "cancelled") {
-    return (
-      <PageContainer>
-        <Card className="max-w-md w-full text-center space-y-4" padding={false}>
-          <div className="p-8 space-y-4">
-            <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
-            <div className="flex justify-center">
-              <svg className="w-16 h-16 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <h1 className="text-2xl font-bold text-gray-900">Payment Cancelled</h1>
-            <p className="text-sm text-gray-500">You rejected the transaction.</p>
-          </div>
-        </Card>
-      </PageContainer>
-    )
-  }
-
-  if (isIntentMode && statusOverride === "failed") {
-    return (
-      <PageContainer>
-        <Card className="max-w-md w-full text-center space-y-4" padding={false}>
-          <div className="p-8 space-y-4">
-            <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
-            <div className="flex justify-center">
-              <svg className="w-16 h-16 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <h1 className="text-2xl font-bold text-gray-900">Payment Failed</h1>
-            <p className="text-sm text-gray-500">Something went wrong. Please try again.</p>
-          </div>
-        </Card>
-      </PageContainer>
-    )
-  }
-
-  if (isIntentMode && (normalizedPaymentStatus === "FAILED" || normalizedPaymentStatus === "INCOMPLETE")) {
-    return (
-      <PageContainer>
-        <Card className="max-w-md w-full text-center space-y-4" padding={false}>
-          <div className="p-8 space-y-4">
-            <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
-            <div className="flex justify-center">
-              <svg className="w-16 h-16 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <h1 className="text-2xl font-bold text-gray-900">Payment Failed</h1>
-            <p className="text-sm text-gray-500">The payment was not received. Please try again or contact the merchant.</p>
+            <PaymentStatusVisual status={terminalPaymentStatus} />
           </div>
         </Card>
       </PageContainer>
@@ -1070,9 +1045,7 @@ export default function PayClient() {
       <PageContainer>
         <Card className="max-w-md w-full text-center space-y-4">
           <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
-          <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0052FF] border-t-transparent mx-auto" />
-          <h1 className="text-lg font-bold text-gray-900">Processing payment...</h1>
-          <p className="text-sm text-gray-500">Your transaction is being confirmed on-chain. This may take a moment.</p>
+          <PaymentStatusVisual status="PROCESSING" />
         </Card>
       </PageContainer>
     )
@@ -1196,6 +1169,7 @@ export default function PayClient() {
                             intentId={intentId!}
                             selectedAsset={asset.symbol === "USDC" ? "USDC" : "ETH"}
                             usdAmount={displayAmount}
+                            paymentStatus={normalizedPaymentStatus}
                             onExecutionStarted={() => setBaseExecutionActive(true)}
                             onCancel={handleBaseCancelPayment}
                             onPaymentCreated={() => {

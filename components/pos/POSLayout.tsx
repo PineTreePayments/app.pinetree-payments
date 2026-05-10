@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useRef } from "react"
 import Image from "next/image"
-import { CheckCircle, XCircle } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import AmountDisplay from "./AmountDisplay"
 import Keypad from "./Keypad"
 import Button from "@/components/ui/Button"
+import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 
 type Props = {
   locked: boolean
@@ -27,6 +27,7 @@ type Status =
   | "confirmed"
   | "incomplete"
   | "failed"
+  | "expired"
 
 type AvailableMethods = {
   cash: boolean
@@ -56,7 +57,8 @@ function resolveUiStatus(dbStatus: string): Status | null {
   if (s === "PROCESSING") return "processing"
   if (s === "CONFIRMED") return "confirmed"
   if (s === "FAILED") return "failed"
-  if (s === "INCOMPLETE" || s === "EXPIRED") return "incomplete"
+  if (s === "INCOMPLETE") return "incomplete"
+  if (s === "EXPIRED") return "expired"
   return null
 }
 
@@ -118,7 +120,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
     setStatus(next)
 
-    if (next === "confirmed" || next === "failed" || next === "incomplete") {
+    if (next === "confirmed" || next === "failed" || next === "incomplete" || next === "expired") {
       if (!hasScheduledResetRef.current) {
         hasScheduledResetRef.current = true
 
@@ -627,14 +629,11 @@ export default function POSLayout({ locked, terminalContext }: Props) {
               </div>
             )}
 
-            <div className="flex items-center justify-center gap-2">
-              <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${
-                status === "processing" ? "bg-green-500" : "bg-[#0052FF]"
-              }`} />
-              <p className="text-sm text-gray-800 font-medium">
-                {status === "waiting" ? "Waiting for payment…" : "Processing…"}
-              </p>
-            </div>
+            <PaymentStatusVisual
+              status={status === "waiting" ? "PENDING" : "PROCESSING"}
+              iconSize={34}
+              className="gap-2"
+            />
 
             <Button variant="danger" fullWidth onClick={resetSale}>
               Cancel Sale
@@ -646,19 +645,14 @@ export default function POSLayout({ locked, terminalContext }: Props) {
         {/* ── CONFIRMED ── */}
         {status === "confirmed" && (
           <div className="flex flex-col items-center gap-3 py-6">
-            <CheckCircle size={60} className="text-green-500" />
-            <p className="text-lg font-semibold text-gray-900">Payment Confirmed</p>
+            <PaymentStatusVisual status="CONFIRMED" />
           </div>
         )}
 
         {/* ── INCOMPLETE ── */}
         {status === "incomplete" && (
           <div className="flex flex-col items-center gap-3 py-6">
-            <XCircle size={60} className="text-amber-500" />
-            <p className="text-lg font-semibold text-gray-900">Payment Incomplete</p>
-            <p className="text-sm text-gray-500 text-center">
-              The payment was not fully received.
-            </p>
+            <PaymentStatusVisual status="INCOMPLETE" />
             <Button variant="secondary" fullWidth onClick={resetSale}>
               Back
             </Button>
@@ -668,13 +662,25 @@ export default function POSLayout({ locked, terminalContext }: Props) {
         {/* ── FAILED ── */}
         {status === "failed" && (
           <div className="flex flex-col items-center gap-3 py-6">
-            <XCircle size={60} className="text-red-500" />
-            <p className="text-lg font-semibold text-gray-900">Payment Failed</p>
+            <PaymentStatusVisual
+              status="FAILED"
+              messageOverride={paymentError || undefined}
+            />
             {paymentError && (
-              <p className="text-sm text-gray-500 text-center">{paymentError}</p>
+              <span className="sr-only">{paymentError}</span>
             )}
             <Button fullWidth onClick={resetSale}>
               Try Again
+            </Button>
+          </div>
+        )}
+
+        {/* ── EXPIRED ── */}
+        {status === "expired" && (
+          <div className="flex flex-col items-center gap-3 py-6">
+            <PaymentStatusVisual status="EXPIRED" />
+            <Button variant="secondary" fullWidth onClick={resetSale}>
+              Back
             </Button>
           </div>
         )}

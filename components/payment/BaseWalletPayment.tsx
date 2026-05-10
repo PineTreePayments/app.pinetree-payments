@@ -5,6 +5,7 @@ import { useAccount, useConnect, useSwitchChain, useWalletClient } from "wagmi"
 import type { Connector } from "wagmi"
 import { base } from "wagmi/chains"
 import Button from "@/components/ui/Button"
+import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 
 type BaseAsset = "ETH" | "USDC"
 
@@ -14,6 +15,7 @@ type Props = {
   nativeAmount?: number
   usdAmount: number
   paymentId?: string
+  paymentStatus?: string
   selectedAsset?: BaseAsset
   baseUsdcStrategy?: BaseUsdcStrategy
   onPaymentCreated?: (paymentId: string) => void
@@ -145,6 +147,7 @@ type Eip712TypedData = {
 }
 
 const BASE_WC_PENDING_KEY = "pinetree_base_wc_pending"
+const BASE_EXEC_STORAGE_PREFIX = "pinetree_base_exec_"
 const BASE_WC_PENDING_TTL_MS = 10 * 60 * 1000
 const BASE_ETH_TX_REQUEST_TIMEOUT_MS = 90_000
 const BASE_ETH_TX_TIMEOUT_MESSAGE = "Transaction approval was not completed. Tap Pay to try again."
@@ -153,6 +156,7 @@ const BASE_USDC_SIGN_TIMEOUT_MESSAGE = "USDC authorization signature was not com
 const BASE_USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 const BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE =
   "Base USDC is temporarily unavailable because current network costs are above PineTree’s limit. Please try again shortly or choose another payment method."
+const TERMINAL_PAYMENT_STATUSES = new Set(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED"])
 
 const STAGE_NUM: Record<BaseExecutionStage, number> = {
   idle: 0,
@@ -813,12 +817,37 @@ function clearPendingBaseWalletConnectPayment(): void {
   sessionStorage.removeItem(BASE_WC_PENDING_KEY)
 }
 
+function normalizeTerminalPaymentStatus(status: string): string {
+  const normalized = String(status || "").trim().toUpperCase()
+  if (normalized === "CANCELLED") return "CANCELED"
+  return normalized
+}
+
+function isTerminalPaymentStatus(status: string): boolean {
+  return TERMINAL_PAYMENT_STATUSES.has(normalizeTerminalPaymentStatus(status))
+}
+
+function clearBaseExecutionSessionStorage(): void {
+  try {
+    sessionStorage.removeItem(BASE_WC_PENDING_KEY)
+    for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = sessionStorage.key(index)
+      if (key?.startsWith(BASE_EXEC_STORAGE_PREFIX)) {
+        sessionStorage.removeItem(key)
+      }
+    }
+  } catch {
+    // best-effort only
+  }
+}
+
 export default function BaseWalletPayment({
   intentId,
   paymentUrl: directPaymentUrl,
   nativeAmount,
   usdAmount,
   paymentId: directPaymentId,
+  paymentStatus = "",
   selectedAsset = "ETH",
   baseUsdcStrategy: directBaseUsdcStrategy,
   onPaymentCreated,
@@ -833,6 +862,7 @@ export default function BaseWalletPayment({
   const { data: walletClient } = useWalletClient({ chainId: base.id })
 
   const [localError, setLocalError] = useState("")
+  const [defensiveTerminalStatus, setDefensiveTerminalStatus] = useState("")
   const [hasPendingBaseWcPayment, setHasPendingBaseWcPayment] = useState<boolean>(() => {
     if (typeof window === "undefined") return false
     try {
@@ -877,6 +907,10 @@ export default function BaseWalletPayment({
   }
 
   const isIntentMode = Boolean(intentId)
+  const propTerminalStatus = isTerminalPaymentStatus(paymentStatus)
+    ? normalizeTerminalPaymentStatus(paymentStatus)
+    : ""
+  const terminalStatus = propTerminalStatus || defensiveTerminalStatus
   const isOnBase = chain?.id === base.id
   const isConnecting = connectStatus === "pending" || switchStatus === "pending"
   const pendingPaymentKey = `${intentId || "direct"}:${selectedAsset}`
@@ -885,6 +919,59 @@ export default function BaseWalletPayment({
     () => connectors.find(isWalletConnectConnector) || null,
     [connectors]
   )
+
+  const resolveTerminalStatusBeforeWalletConnect = useCallback(async (): Promise<string> => {
+    if (propTerminalStatus) return propTerminalStatus
+
+    const query = intentId
+      ? `intentId=${encodeURIComponent(intentId)}`
+      : directPaymentId
+        ? `paymentId=${encodeURIComponent(directPaymentId)}`
+        : ""
+    if (!query) return ""
+
+    try {
+      const res = await fetch(`/api/payments/status?${query}`, { cache: "no-store" })
+      if (!res.ok) return ""
+      const data = (await res.json()) as { status?: string }
+      const resolvedStatus = normalizeTerminalPaymentStatus(String(data.status || ""))
+      return isTerminalPaymentStatus(resolvedStatus) ? resolvedStatus : ""
+    } catch {
+      return ""
+    }
+  }, [directPaymentId, intentId, propTerminalStatus])
+
+  const enforceActivePaymentBeforeWalletConnect = useCallback(async (): Promise<boolean> => {
+    const resolvedTerminalStatus = await resolveTerminalStatusBeforeWalletConnect()
+    if (!resolvedTerminalStatus) return true
+
+    clearBaseExecutionSessionStorage()
+    setHasPendingBaseWcPayment(false)
+    setDefensiveTerminalStatus(resolvedTerminalStatus)
+    setLocalError("")
+    setIsPreparingPayment(false)
+    setIsOpeningWallet(false)
+    setExecStageRef.current("idle")
+    await logBase("terminal-guard-blocked-walletconnect", {
+      intentId: intentId || null,
+      paymentId: directPaymentId || null,
+      status: resolvedTerminalStatus,
+      selectedAsset,
+    })
+    return false
+  }, [directPaymentId, intentId, resolveTerminalStatusBeforeWalletConnect, selectedAsset])
+
+  useEffect(() => {
+    if (!propTerminalStatus) return
+    clearBaseExecutionSessionStorage()
+    setHasPendingBaseWcPayment(false)
+    setDefensiveTerminalStatus(propTerminalStatus)
+    setLocalError("")
+    setIsPreparingPayment(false)
+    setIsOpeningWallet(false)
+    execStageRef.current = "idle"
+    setExecStageRaw("idle")
+  }, [propTerminalStatus])
 
   useEffect(() => {
     void logBase("render", {
@@ -1508,6 +1595,9 @@ export default function BaseWalletPayment({
         throw new Error("WalletConnect is not configured.")
       }
 
+      const isActivePayment = await enforceActivePaymentBeforeWalletConnect()
+      if (!isActivePayment) return
+
       const pending = getPendingBaseWalletConnectPayment()
       if (!pendingPaymentMatches(pending, intentId, selectedAsset)) {
         throw new Error("Base WalletConnect payment session expired. Please try again.")
@@ -1829,7 +1919,7 @@ export default function BaseWalletPayment({
     } finally {
       isSendingBaseTxRef.current = false
     }
-  }, [chain?.id, connector?.id, connector?.name, executeBaseUsdcV4Payment, executeBaseUsdcV5Payment, intentId, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, switchChainAsync, walletClient, walletConnectConnector])
+  }, [chain?.id, connector?.id, connector?.name, enforceActivePaymentBeforeWalletConnect, executeBaseUsdcV4Payment, executeBaseUsdcV5Payment, intentId, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, switchChainAsync, walletClient, walletConnectConnector])
 
   const resetBasePaymentAttemptForRetry = useCallback(() => {
     activeBasePaymentAttemptRef.current = null
@@ -1851,12 +1941,15 @@ export default function BaseWalletPayment({
 
 
   const startWalletConnectPayment = useCallback(() => {
-    resetBasePaymentAttemptForRetry()
-    setLocalError("")
-    setExecStageRef.current("asset_selected")
-
     void (async () => {
       try {
+        const isActivePayment = await enforceActivePaymentBeforeWalletConnect()
+        if (!isActivePayment) return
+
+        resetBasePaymentAttemptForRetry()
+        setLocalError("")
+        setExecStageRef.current("asset_selected")
+
         if (!walletConnectConnector) {
           throw new Error("WalletConnect is not configured.")
         }
@@ -1900,40 +1993,48 @@ export default function BaseWalletPayment({
 
         if (selectedAsset === "ETH" || selectedAsset === "USDC") {
           // Pre-fetch payment data, provider, and connect concurrently so that
-          // eth_sendTransaction can be dispatched immediately after session settles —
+          // splitEth / USDC requests can be dispatched immediately after session settles —
           // before the mobile OS can suspend the browser's WalletConnect WebSocket.
-          const [connectSettled, paymentSettled, providerSettled] = await Promise.allSettled([
-            connectAsync({ connector: walletConnectConnector, chainId: base.id }),
-            resolvePaymentData(),
-            getWalletConnectProvider(walletConnectConnector),
-          ])
+          const paymentPromise = resolvePaymentData()
+          const providerPromise = getWalletConnectProvider(walletConnectConnector)
+          const connectPromise = connectAsync({ connector: walletConnectConnector, chainId: base.id })
 
-          if (paymentSettled.status === "fulfilled") {
-            prefetchedPaymentDataRef.current = paymentSettled.value
-            console.log("[Base] payment-prefetched", { paymentId: paymentSettled.value.paymentId, selectedAsset })
-            void logBase("payment-prefetched", {
-              paymentId: paymentSettled.value.paymentId,
-              hasPaymentUrl: Boolean(paymentSettled.value.paymentUrl),
-              selectedAsset,
-            })
-            // Pre-parse the URI so continueBasePayment has zero async work before eth_sendTransaction
-            if (selectedAsset === "ETH") {
-              try {
-                prefetchedTxRequestRef.current = parseEthereumPaymentUri(paymentSettled.value.paymentUrl)
-              } catch {
+          void paymentPromise
+            .then((paymentData) => {
+              prefetchedPaymentDataRef.current = paymentData
+              console.log("[Base] payment-prefetched", { paymentId: paymentData.paymentId, selectedAsset })
+              void logBase("payment-prefetched", {
+                paymentId: paymentData.paymentId,
+                hasPaymentUrl: Boolean(paymentData.paymentUrl),
+                selectedAsset,
+              })
+              if (selectedAsset === "ETH") {
+                try {
+                  prefetchedTxRequestRef.current = parseEthereumPaymentUri(paymentData.paymentUrl)
+                } catch {
+                  prefetchedTxRequestRef.current = null
+                }
+              } else {
                 prefetchedTxRequestRef.current = null
               }
-            } else {
-              prefetchedTxRequestRef.current = null
-            }
-          }
+            })
+            .catch((error) => {
+              void logBase("payment-prefetch-failed", {
+                message: extractErrorMessage(error) || String(error || ""),
+                selectedAsset,
+              })
+            })
 
-          if (providerSettled.status === "fulfilled") {
-            prefetchedProviderRef.current = providerSettled.value
-          }
+          void providerPromise
+            .then((provider) => {
+              prefetchedProviderRef.current = provider
+            })
+            .catch(() => null)
 
-          if (connectSettled.status === "rejected") {
-            const connectErr = connectSettled.reason
+          let connectResult: Awaited<ReturnType<typeof connectAsync>>
+          try {
+            connectResult = await connectPromise
+          } catch (connectErr) {
             const connectMsg = connectErr instanceof Error ? connectErr.message : String(connectErr)
             const connectRejected = isRejectedError(connectErr, connectMsg)
             if (connectRejected) {
@@ -1952,9 +2053,9 @@ export default function BaseWalletPayment({
 
           // Store the chain ID from the connect result so continueBasePayment can skip
           // switchChainAsync when the session was established on Base (wagmi state may lag).
-          connectedChainIdRef.current = connectSettled.value.chainId
+          connectedChainIdRef.current = connectResult.chainId
 
-          const fromAddress = extractAddressFromConnectResult(connectSettled.value) || currentAddress
+          const fromAddress = extractAddressFromConnectResult(connectResult) || currentAddress
           if (fromAddress) {
             setExecStageRef.current("wallet_connected")
             console.log("[BASE UI] wallet-connected", { intentId: intentId || null, selectedAsset })
@@ -2026,7 +2127,7 @@ export default function BaseWalletPayment({
         onError?.(friendly)
       }
     })()
-  }, [address, connectAsync, continueBasePayment, intentId, isConnected, onError, onExecutionStarted, resetBasePaymentAttemptForRetry, resolvePaymentData, selectedAsset, walletConnectConnector])
+  }, [address, connectAsync, continueBasePayment, enforceActivePaymentBeforeWalletConnect, intentId, isConnected, onError, onExecutionStarted, resetBasePaymentAttemptForRetry, resolvePaymentData, selectedAsset, walletConnectConnector])
 
   const stopAutoResumeRetry = useCallback(() => {
     if (autoResumeRetryRef.current) {
@@ -2161,6 +2262,7 @@ export default function BaseWalletPayment({
   }, [address, connector, continueBasePayment, intentId, isConnected, isOpeningWallet, selectedAsset, stopAutoResumeRetry])
 
   const startBaseWalletConnectAutoResumeRetry = useCallback((source: string) => {
+    if (terminalStatus) return
     if (selectedAsset !== "ETH" && selectedAsset !== "USDC") return
     if (!pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)) return
     if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return
@@ -2181,7 +2283,7 @@ export default function BaseWalletPayment({
     }
 
     tryResumeBaseWalletConnectPayment(source)
-  }, [address, connector, intentId, isConnected, isConnecting, refreshPendingState, selectedAsset, stopAutoResumeRetry, tryResumeBaseWalletConnectPayment])
+  }, [address, connector, intentId, isConnected, isConnecting, refreshPendingState, selectedAsset, stopAutoResumeRetry, terminalStatus, tryResumeBaseWalletConnectPayment])
 
   useEffect(() => {
     refreshPendingState()
@@ -2242,6 +2344,7 @@ export default function BaseWalletPayment({
   // Fires once per payment intent; focus/visibility/pageshow handlers remain as fallback.
   useEffect(() => {
     if (selectedAsset !== "ETH" && selectedAsset !== "USDC") return
+    if (terminalStatus) return
     if (!isConnected || !address) return
     if (!pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)) return
     if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return
@@ -2256,7 +2359,7 @@ export default function BaseWalletPayment({
     if (chain?.id) connectedChainIdRef.current = chain.id
     stopAutoResumeRetry()
     void continueBasePayment(address)
-  }, [address, chain?.id, continueBasePayment, intentId, isConnected, selectedAsset, stopAutoResumeRetry])
+  }, [address, chain?.id, continueBasePayment, intentId, isConnected, selectedAsset, stopAutoResumeRetry, terminalStatus])
 
   useEffect(() => {
     if (selectedAsset !== "ETH" && selectedAsset !== "USDC") return
@@ -2315,6 +2418,17 @@ export default function BaseWalletPayment({
   }, [continueBasePayment, intentId, resumeFromWalletConnectProvider, selectedAsset, stopAutoResumeRetry, walletConnectConnector])
 
   // ── Render helpers ────────────────────────────────────────────────────────
+
+  if (terminalStatus) {
+    return (
+      <div className="space-y-4">
+        <div className="text-xs uppercase tracking-widest text-gray-500 text-center">
+          Base Network Payment
+        </div>
+        <PaymentStatusVisual status={terminalStatus} className="py-2" />
+      </div>
+    )
+  }
 
   const amountDisplay = (
     <div className="bg-gray-50 rounded-xl px-4 py-3 text-center space-y-1">
@@ -2418,88 +2532,91 @@ export default function BaseWalletPayment({
     )
   }
 
-  // When execution is active (not idle / not failed), show progress panel
   const isExecutingStage = execStage !== "idle" && execStage !== "failed"
 
   if (isExecutingStage && execStage !== "retryable_error") {
     return (
-      <div className="space-y-4">
-        <div className="text-xs uppercase tracking-widest text-gray-500 text-center">
+      <div className="w-full space-y-4">
+        <div className="text-xs uppercase tracking-widest text-gray-500 text-center font-semibold">
           Base Network Payment
         </div>
 
-        {amountDisplay}
+        <div className="space-y-4">
+          {amountDisplay}
 
-        <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4 shadow-sm">
-          <div className="space-y-3">
-            {renderStep("Wallet connected", walletConnectedStatus)}
-            {showUsdcAuthStep ? renderStep("Authorize USDC", usdcAuthStatus) : null}
-            {renderStep("Confirm payment", confirmPayStatus)}
-            {renderStep("Network confirmation", networkConfStatus)}
+          <div className="bg-gray-50 border border-gray-200 rounded-2xl p-5 space-y-4">
+            <div className="space-y-3">
+              {renderStep("Wallet connected", walletConnectedStatus)}
+              {showUsdcAuthStep ? renderStep("Authorize USDC", usdcAuthStatus) : null}
+              {renderStep("Confirm payment", confirmPayStatus)}
+              {renderStep("Network confirmation", networkConfStatus)}
+            </div>
+
+            {contextMessage ? (
+              <div className={`pt-4 border-t border-gray-200 text-sm text-center ${showWalletPrompt ? "text-[#0052FF] font-medium" : "text-gray-600"}`}>
+                {showWalletPrompt ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="inline-block h-2 w-2 rounded-full bg-[#0052FF] animate-pulse flex-shrink-0" />
+                    {contextMessage}
+                  </span>
+                ) : (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="inline-block h-3 w-3 rounded-full border border-gray-400 border-t-transparent animate-spin flex-shrink-0" />
+                    {contextMessage}
+                  </span>
+                )}
+                {showReturnHereHint ? (
+                  <p className="mt-2 text-xs text-gray-500 leading-relaxed">
+                    Return here after approving if your wallet does not switch automatically.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
-          {contextMessage ? (
-            <div className={`pt-3 border-t border-gray-100 text-sm text-center ${showWalletPrompt ? "text-[#0052FF] font-medium" : "text-gray-500"}`}>
-              {showWalletPrompt ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="inline-block h-2 w-2 rounded-full bg-[#0052FF] animate-pulse flex-shrink-0" />
-                  {contextMessage}
-                </span>
-              ) : (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="inline-block h-3 w-3 rounded-full border border-gray-400 border-t-transparent animate-spin flex-shrink-0" />
-                  {contextMessage}
-                </span>
-              )}
-              {showReturnHereHint ? (
-                <p className="mt-2 text-xs text-gray-400">
-                  Return here after approving — your wallet will switch back automatically if supported
-                </p>
-              ) : null}
+          {execStage !== "payment_submitted" && execStage !== "detecting" && execStage !== "confirmed" ? (
+            <button
+              type="button"
+              className="w-full rounded-xl border border-gray-200 bg-white py-3 text-sm font-medium text-gray-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600 transition-colors"
+              onClick={() => {
+                void logBase("cancel-click", { intentId: intentId || null, execStage })
+                resetBasePaymentAttemptForRetry()
+                onCancel?.()
+              }}
+            >
+              Cancel payment
+            </button>
+          ) : null}
+
+          {hasPendingBaseWcPayment && !isOpeningWallet && !isConnecting && !address ? (
+            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 space-y-2">
+              <p>Return to your wallet to continue, or reconnect if disconnected.</p>
+              <Button
+                fullWidth
+                variant="secondary"
+                onClick={() => {
+                  void logBase("reconnect-click", { intentId: intentId || null })
+                  if (!walletConnectConnector) return
+                  void enforceActivePaymentBeforeWalletConnect().then((isActivePayment) => {
+                    if (!isActivePayment) return
+                    return connectAsync({ connector: walletConnectConnector, chainId: base.id })
+                  })
+                    .then((result) => {
+                      if (!result) return
+                      const addr = extractAddressFromConnectResult(result)
+                      if (addr) {
+                        setExecStageRef.current("wallet_connected")
+                        void continueBasePayment(addr)
+                      }
+                    })
+                    .catch(() => null)
+                }}
+              >
+                Reconnect wallet
+              </Button>
             </div>
           ) : null}
         </div>
-
-        {/* Cancel — available until the transaction is submitted to the network */}
-        {execStage !== "payment_submitted" && execStage !== "detecting" && execStage !== "confirmed" ? (
-          <button
-            type="button"
-            className="w-full text-xs text-gray-400 hover:text-red-500 py-1 transition-colors"
-            onClick={() => {
-              void logBase("cancel-click", { intentId: intentId || null, execStage })
-              resetBasePaymentAttemptForRetry()
-              onCancel?.()
-            }}
-          >
-            Cancel payment
-          </button>
-        ) : null}
-
-        {/* Disconnected wallet while pending — allow reconnect without full restart */}
-        {hasPendingBaseWcPayment && !isOpeningWallet && !isConnecting && !address ? (
-          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 space-y-2">
-            <p>Return to your wallet to continue, or reconnect if disconnected.</p>
-            <Button
-              fullWidth
-              variant="secondary"
-              onClick={() => {
-                void logBase("reconnect-click", { intentId: intentId || null })
-                if (!walletConnectConnector) return
-                void connectAsync({ connector: walletConnectConnector, chainId: base.id })
-                  .then((result) => {
-                    const addr = extractAddressFromConnectResult(result)
-                    if (addr) {
-                      setExecStageRef.current("wallet_connected")
-                      void continueBasePayment(addr)
-                    }
-                  })
-                  .catch(() => null)
-              }}
-            >
-              Reconnect wallet
-            </Button>
-          </div>
-        ) : null}
       </div>
     )
   }
@@ -2568,8 +2685,12 @@ export default function BaseWalletPayment({
               onClick={() => {
                 void logBase("reconnect-click", { intentId: intentId || null })
                 if (!walletConnectConnector) return
-                void connectAsync({ connector: walletConnectConnector, chainId: base.id })
+                void enforceActivePaymentBeforeWalletConnect().then((isActivePayment) => {
+                  if (!isActivePayment) return
+                  return connectAsync({ connector: walletConnectConnector, chainId: base.id })
+                })
                   .then((result) => {
+                    if (!result) return
                     const addr = extractAddressFromConnectResult(result)
                     if (addr) void continueBasePayment(addr)
                   })
