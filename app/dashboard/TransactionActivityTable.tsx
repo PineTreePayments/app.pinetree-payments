@@ -126,7 +126,55 @@ export default function TransactionActivityTable({
 
   return (
     <>
-      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-x-auto">
+      {/* Mobile card list — shown below md breakpoint */}
+      <div className="md:hidden space-y-2">
+        {transactions.length === 0 && (
+          <div className="bg-white border border-gray-200 rounded-2xl shadow-sm px-4 py-12 text-center text-gray-700 text-sm">
+            {emptyMessage}
+          </div>
+        )}
+        {transactions.map((tx) => {
+          const payment = getPayment(tx)
+          const statusTime = tx.created_at || payment?.created_at || null
+          const displayStatus = payment
+            ? getPaymentDisplayStatus(payment.status || tx.status, statusTime || "")
+            : { status: tx.status, classes: "bg-gray-100 text-gray-700" }
+          const reference = formatTransactionReference(tx)
+
+          return (
+            <button
+              key={tx.id}
+              type="button"
+              onClick={() => setSelectedTx(tx)}
+              className="w-full text-left bg-white border border-gray-200 rounded-2xl shadow-sm px-4 py-3 hover:bg-gray-50 focus:outline-none focus:bg-blue-50/60"
+            >
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <span className="text-sm font-medium text-gray-900">
+                  {providerName(tx.provider)}
+                  {tx.provider !== "cash" && tx.network && (
+                    <span className="text-gray-400 font-normal"> · {networkName(tx.network)}</span>
+                  )}
+                </span>
+                <StatusBadge label={displayStatus.status} classes={displayStatus.classes} />
+              </div>
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <span className="text-sm font-semibold text-gray-900">
+                  {formatUsd(Number(payment?.gross_amount ?? 0))}
+                </span>
+                <span className="text-xs text-gray-500">
+                  {formatChicagoDateTime(statusTime)}
+                </span>
+              </div>
+              <div className="text-xs text-gray-500 font-mono truncate">
+                {reference}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Desktop table — hidden below md breakpoint */}
+      <div className="hidden md:block bg-white border border-gray-200 rounded-2xl shadow-sm overflow-x-auto">
         <table className="w-full min-w-[980px] table-fixed">
           <colgroup>
             <col className="w-[190px]" />

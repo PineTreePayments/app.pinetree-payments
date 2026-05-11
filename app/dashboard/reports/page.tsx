@@ -111,9 +111,9 @@ export default function ReportsPage() {
 
       {summary && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">
-          <SummaryCard title="Avg Transaction"   value={fmt(summary.avgTransaction)} />
-          <SummaryCard title="Failed Payments"   value={String(summary.failedPayments)} />
-          <SummaryCard title="PineTree Fees"     value={fmt(summary.totalVolume - summary.merchantNet)} />
+          <SummaryCard title="Avg Transaction"      value={fmt(summary.avgTransaction)} />
+          <SummaryCard title="Failed Payments"      value={String(summary.failedPayments)} />
+          <SummaryCard title="Successful Payments"  value={String(Math.max(0, summary.transactionCount - summary.failedPayments))} />
         </div>
       )}
 
