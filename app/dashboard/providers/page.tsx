@@ -967,7 +967,7 @@ export default function ProvidersPage() {
           description={[
             "Network: Solana",
             "Settlement: Direct wallet",
-            "Use Phantom or Solflare",
+            "Supports Phantom, Solflare, Backpack, Glow, and other Solana-compatible wallets.",
           ]}
         />
 
@@ -987,7 +987,7 @@ export default function ProvidersPage() {
           description={[
             "Network: Base",
             "Settlement: Direct wallet",
-            "Use Base Wallet, MetaMask, or Trust Wallet",
+            "Supports Base Wallet, MetaMask, Trust Wallet, Phantom, Coinbase Wallet, and other WalletConnect-compatible EVM wallets.",
           ]}
         />
 
