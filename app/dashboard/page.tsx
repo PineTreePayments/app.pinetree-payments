@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 import { AUTO_POLLING_ENABLED } from "@/lib/utils/polling"
-import StatusBadge from "@/components/ui/StatusBadge"
-import { formatTransactionReference } from "./transactionReference"
+import TransactionActivityTable, {
+  type DashboardTransactionRow
+} from "./TransactionActivityTable"
 
 import {
   LineChart,
@@ -23,31 +23,11 @@ type DashboardOverviewResponse = {
   txCount?: number
   successRate?: number
   providers?: number
-  recentTx?: RecentTxRow[]
+  recentTx?: DashboardTransactionRow[]
   chartData?: ChartPoint[]
   walletValue?: number
   lastRun?: string | null
   error?: string
-}
-
-type PaymentSummary = {
-  id?: string | null
-  gross_amount?: number | string | null
-  status?: string | null
-  currency?: string | null
-  provider_reference?: string | null
-  created_at?: string | null
-}
-
-type RecentTxRow = {
-  id: string
-  payment_id?: string | null
-  status: string
-  provider?: string | null
-  provider_transaction_id?: string | null
-  network?: string | null
-  created_at: string
-  payments?: PaymentSummary | PaymentSummary[] | null
 }
 
 type ChartPoint = {
@@ -101,7 +81,7 @@ export default function DashboardPage() {
   const [txCount,setTxCount] = useState(0)
   const [successRate,setSuccessRate] = useState(0)
   const [providers,setProviders] = useState(0)
-  const [recentTx,setRecentTx] = useState<RecentTxRow[]>([])
+  const [recentTx,setRecentTx] = useState<DashboardTransactionRow[]>([])
   const [chartData,setChartData] = useState<ChartPoint[]>([])
   const [walletValue,setWalletValue] = useState(0)
   const [lastRun,setLastRun] = useState<string | null>(null)
@@ -312,82 +292,16 @@ export default function DashboardPage() {
 
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+      <div>
 
         <h2 className="text-lg font-semibold text-gray-900 mb-4">
           Recent Activity
         </h2>
 
-        {recentTx.length === 0 && (
-          <div className="text-gray-500 text-sm">
-            No transactions yet.
-          </div>
-        )}
-
-        {recentTx.length > 0 && (
-          <div className="overflow-x-auto">
-
-            <table className="w-full min-w-[720px] text-sm">
-
-              <thead className="text-left text-gray-500 border-b">
-                <tr>
-                  <th className="py-2">Reference</th>
-                  <th className="py-2">Amount</th>
-                  <th className="py-2">Network</th>
-                  <th className="py-2">Status</th>
-                  <th className="py-2">Time</th>
-                </tr>
-              </thead>
-
-              <tbody>
-
-                {recentTx.map((tx)=>{
-
-                  const payment = Array.isArray(tx.payments)
-                    ? tx.payments[0]
-                    : tx.payments
-
-                  const statusTime = tx.created_at || payment?.created_at || ""
-                  const displayStatus = payment
-                    ? getPaymentDisplayStatus(payment.status || tx.status, statusTime)
-                    : { status: tx.status, classes: "bg-gray-100 text-gray-700" }
-
-                  return(
-
-                    <tr key={tx.id} className="border-b last:border-none">
-
-                      <td className="py-3 font-mono text-xs text-gray-700">
-                        {formatTransactionReference(tx)}
-                      </td>
-
-                      <td className="py-3 text-gray-800 font-medium">
-                        {formatUsd(Number(payment?.gross_amount ?? 0))}
-                      </td>
-
-                      <td className="py-3 text-gray-700">
-                        {networkName(tx.provider === "cash" ? "cash" : tx.network ?? null)}
-                      </td>
-
-                      <td className="py-3">
-                        <StatusBadge label={displayStatus.status} classes={displayStatus.classes} />
-                      </td>
-
-                      <td className="py-3 text-gray-500 text-xs">
-                        {formatChicagoDateTime(tx.created_at)}
-                      </td>
-
-                    </tr>
-
-                  )
-
-                })}
-
-              </tbody>
-
-            </table>
-
-          </div>
-        )}
+        <TransactionActivityTable
+          transactions={recentTx}
+          emptyMessage="No transactions yet."
+        />
 
       </div>
 

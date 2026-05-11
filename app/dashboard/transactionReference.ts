@@ -11,25 +11,41 @@ type TransactionReferenceFields = {
   payments?: PaymentReferenceFields | PaymentReferenceFields[] | null
 }
 
-function firstValue(value: string | null | undefined) {
+export function firstReferenceValue(value: string | null | undefined) {
   const normalized = String(value || "").trim()
   return normalized.length > 0 ? normalized : null
 }
 
 export function shortReferenceId(value: string | null | undefined) {
-  const normalized = firstValue(value)
+  const normalized = firstReferenceValue(value)
   if (!normalized) return null
   return normalized.length > 12 ? `${normalized.slice(0, 12)}...` : normalized
 }
 
-export function formatTransactionReference(tx: TransactionReferenceFields) {
+export function getTransactionReferenceParts(tx: TransactionReferenceFields) {
   const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
-  const paymentId = firstValue(payment?.id) || firstValue(tx.payment_id)
-  const transactionId = firstValue(tx.id)
-  const providerTransactionId = firstValue(tx.provider_transaction_id)
-  const providerReference = firstValue(payment?.provider_reference)
+  const paymentId = firstReferenceValue(payment?.id) || firstReferenceValue(tx.payment_id)
+  const transactionId = firstReferenceValue(tx.id)
+  const blockchainReference = firstReferenceValue(tx.provider_transaction_id)
+  const providerReference = firstReferenceValue(payment?.provider_reference)
 
-  if (providerTransactionId) return providerTransactionId
+  return {
+    paymentId,
+    transactionId,
+    blockchainReference,
+    providerReference
+  }
+}
+
+export function formatTransactionReference(tx: TransactionReferenceFields) {
+  const {
+    paymentId,
+    transactionId,
+    blockchainReference,
+    providerReference
+  } = getTransactionReferenceParts(tx)
+
+  if (blockchainReference) return blockchainReference
   if (providerReference) return providerReference
 
   if (tx.provider === "cash") {

@@ -19,6 +19,7 @@ type TransactionRow = {
   provider?: string | null
   provider_transaction_id?: string | null
   network?: string | null
+  channel?: string | null
   created_at: string
   payments?: PaymentSummary | PaymentSummary[] | null
 }
@@ -46,6 +47,7 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
       provider,
       provider_transaction_id,
       network,
+      channel,
       created_at,
       payments (
         id,

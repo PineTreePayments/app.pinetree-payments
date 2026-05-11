@@ -3,9 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
-import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
-import StatusBadge from "@/components/ui/StatusBadge"
-import { formatTransactionReference } from "../transactionReference"
+import TransactionActivityTable from "../TransactionActivityTable"
 
 import {
   ResponsiveContainer,
@@ -393,74 +391,8 @@ export default function TransactionsPage() {
 
       {/* TABLE */}
 
-      <div ref={tableRef} className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-x-auto">
-        <table className="w-full min-w-[860px]">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr className="text-left text-sm text-gray-700">
-              <th className="px-6 py-3 font-medium">Date</th>
-              <th className="px-6 py-3 font-medium">Amount</th>
-              <th className="px-6 py-3 font-medium">Currency</th>
-              <th className="px-6 py-3 font-medium">Network</th>
-              <th className="px-6 py-3 font-medium">Provider</th>
-              <th className="px-6 py-3 font-medium">Status</th>
-              <th className="px-6 py-3 font-medium">Reference</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {filteredTransactions.length === 0 && (
-              <tr>
-                <td colSpan={7} className="text-center text-gray-700 py-16">
-                  No transactions found.
-                </td>
-              </tr>
-            )}
-
-            {filteredTransactions.map((tx) => {
-              const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
-              const statusTime = tx.created_at || payment?.created_at || null
-
-              const displayStatus = payment
-                ? getPaymentDisplayStatus(payment.status || tx.status, statusTime || "")
-                : { status: tx.status, classes: "bg-gray-100 text-gray-700" }
-
-              return (
-                <tr
-                  key={tx.id}
-                  className="border-b border-gray-100 text-sm hover:bg-gray-50"
-                >
-                  <td className="px-6 py-4 text-gray-900">
-                    {formatChicagoDateTime(statusTime)}
-                  </td>
-
-                  <td className="px-6 py-4 font-medium text-gray-900">
-                    {payment ? formatUsd(Number(payment.gross_amount || 0)) : "—"}
-                  </td>
-
-                  <td className="px-6 py-4 text-gray-900">
-                    {payment?.currency || "—"}
-                  </td>
-
-                  <td className="px-6 py-4 text-gray-700">
-                    {networkName(tx.provider === "cash" ? "cash" : tx.network)}
-                  </td>
-
-                  <td className="px-6 py-4 text-gray-900">
-                    {providerName(tx.provider)}
-                  </td>
-
-                  <td className="px-6 py-4">
-                    <StatusBadge label={displayStatus.status} classes={displayStatus.classes} />
-                  </td>
-
-                  <td className="px-6 py-4 text-gray-700 font-mono text-xs">
-                    {formatTransactionReference(tx)}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+      <div ref={tableRef}>
+        <TransactionActivityTable transactions={filteredTransactions} />
       </div>
 
       {/* CHART */}
