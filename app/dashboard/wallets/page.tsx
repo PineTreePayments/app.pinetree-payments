@@ -148,18 +148,18 @@ export default function WalletsPage() {
           )}
 
           {wallets.map((w) => (
-          <div key={w.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white border border-blue-100 rounded-2xl p-6 min-h-[90px] shadow-[0_4px_24px_rgba(0,0,0,0.06),0_0_20px_rgba(125,63,224,0.12)] transition-all duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_20px_60px_rgba(0,0,0,0.12),0_0_40px_rgba(125,63,224,0.25)]">
-              <div>
+          <div key={w.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white border border-gray-200 rounded-2xl p-5 sm:p-6 min-h-[90px] shadow-[0_8px_30px_rgba(15,23,42,0.07),0_0_26px_rgba(125,63,224,0.14)] transition-all duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_20px_60px_rgba(0,0,0,0.12),0_0_40px_rgba(125,63,224,0.25)]">
+              <div className="min-w-0 flex-1">
                 <p className="text-base font-semibold text-gray-800 mb-1">
                   {formatProvider(w.provider, w.network)}
                 </p>
 
-                <p className="text-base font-semibold text-black break-all">
+                <p className="text-base font-semibold text-black break-words [overflow-wrap:anywhere]">
                   {w.wallet_address}
                 </p>
               </div>
 
-              <div className="text-left sm:text-right">
+              <div className="text-left sm:text-right shrink-0">
                 <p className="text-sm text-blue-600 mb-1">Balance</p>
 
                 <p className="text-lg text-black font-semibold">
