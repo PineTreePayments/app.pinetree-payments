@@ -67,6 +67,7 @@ type IntentPayload = {
   pinetreeFee: number
   availableNetworks: string[]
   selectedNetwork?: string | null
+  selectedAsset?: string | null
   paymentId?: string | null
   paymentStatus?: string | null
   checkoutUrl?: string
@@ -316,6 +317,17 @@ export default function PayClient() {
       setIntentPayload(intent)
       setIntentLoadError("")
       setPaymentStatus(String(intent.paymentStatus || ""))
+      const selectedNetwork = String(intent.selectedNetwork || "").toLowerCase()
+      const selectedAsset = String(intent.selectedAsset || "").toUpperCase()
+      const activeStatus = String(intent.paymentStatus || "").toUpperCase()
+      if (
+        selectedNetwork === "solana" &&
+        intent.paymentId &&
+        (activeStatus === "CREATED" || activeStatus === "PENDING" || activeStatus === "PROCESSING")
+      ) {
+        setSelectedAssetId(selectedAsset === "USDC" ? "sol-usdc" : "sol")
+        setSolanaExecutionActive(true)
+      }
     } catch {
       setIntentLoadError("Unable to load payment. Please try again.")
     }
@@ -1044,7 +1056,11 @@ export default function PayClient() {
     )
   }
 
-  if (isIntentMode && (normalizedPaymentStatus === "PROCESSING" || statusOverride === "processing")) {
+  if (
+    isIntentMode &&
+    intentPayload?.selectedNetwork !== "solana" &&
+    (normalizedPaymentStatus === "PROCESSING" || statusOverride === "processing")
+  ) {
     return (
       <PageContainer>
         <Card className="max-w-md w-full text-center space-y-4">

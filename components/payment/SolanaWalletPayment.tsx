@@ -55,7 +55,9 @@ type WalletCatalogItem = {
   id: string
   name: string
   aliases?: string[]
-  mobileDeepLink?: "phantom" | "trust" | "coinbase" | "okx"
+  mobileDeepLink?: "phantom" | "solflare" | "trust" | "coinbase" | "okx"
+  installName?: string
+  installUrl: string
 }
 
 type WalletPickerRow = WalletCatalogItem & {
@@ -67,31 +69,31 @@ type WalletPickerRow = WalletCatalogItem & {
 const TERMINAL_PAYMENT_STATUSES = new Set(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "CANCELED"])
 
 const POPULAR_WALLETS: WalletCatalogItem[] = [
-  { id: "phantom", name: "Phantom", mobileDeepLink: "phantom" },
-  { id: "solflare", name: "Solflare" },
-  { id: "backpack", name: "Backpack" },
-  { id: "glow", name: "Glow" },
-  { id: "trust-wallet", name: "Trust Wallet", aliases: ["trust"], mobileDeepLink: "trust" },
-  { id: "coinbase-wallet", name: "Coinbase Wallet", aliases: ["coinbase"], mobileDeepLink: "coinbase" },
-  { id: "okx-wallet", name: "OKX Wallet", aliases: ["okx"], mobileDeepLink: "okx" },
+  { id: "phantom", name: "Phantom", mobileDeepLink: "phantom", installUrl: "https://phantom.com/download" },
+  { id: "solflare", name: "Solflare", mobileDeepLink: "solflare", installUrl: "https://solflare.com/download" },
+  { id: "backpack", name: "Backpack", installUrl: "https://backpack.app/download" },
+  { id: "glow", name: "Glow", installUrl: "https://glow.app" },
+  { id: "trust-wallet", name: "Trust Wallet", aliases: ["trust"], mobileDeepLink: "trust", installUrl: "https://trustwallet.com/download" },
+  { id: "coinbase-wallet", name: "Coinbase Wallet", aliases: ["coinbase"], mobileDeepLink: "coinbase", installUrl: "https://www.coinbase.com/wallet/downloads" },
+  { id: "okx-wallet", name: "OKX Wallet", aliases: ["okx"], mobileDeepLink: "okx", installUrl: "https://www.okx.com/web3" },
 ]
 
 const MORE_WALLETS: WalletCatalogItem[] = [
-  { id: "exodus", name: "Exodus" },
-  { id: "ledger", name: "Ledger" },
-  { id: "mathwallet", name: "MathWallet", aliases: ["math wallet"] },
-  { id: "tokenpocket", name: "TokenPocket", aliases: ["token pocket"] },
-  { id: "torus", name: "Torus" },
-  { id: "clover", name: "Clover" },
-  { id: "coin98", name: "Coin98" },
-  { id: "safepal", name: "SafePal", aliases: ["safe pal"] },
-  { id: "bitget-wallet", name: "Bitget Wallet", aliases: ["bitget"] },
-  { id: "brave-wallet", name: "Brave Wallet", aliases: ["brave"] },
-  { id: "nightly", name: "Nightly" },
-  { id: "ultimate", name: "Ultimate" },
-  { id: "salmon", name: "Salmon" },
-  { id: "slope", name: "Slope" },
-  { id: "sollet", name: "Sollet" },
+  { id: "exodus", name: "Exodus", installUrl: "https://www.exodus.com/download" },
+  { id: "ledger", name: "Ledger", installUrl: "https://www.ledger.com/ledger-live" },
+  { id: "mathwallet", name: "MathWallet", aliases: ["math wallet"], installUrl: "https://mathwallet.org" },
+  { id: "tokenpocket", name: "TokenPocket", aliases: ["token pocket"], installUrl: "https://www.tokenpocket.pro" },
+  { id: "torus", name: "Torus", installUrl: "https://tor.us" },
+  { id: "clover", name: "Clover", installUrl: "https://clv.org" },
+  { id: "coin98", name: "Coin98", installUrl: "https://coin98.com/wallet" },
+  { id: "safepal", name: "SafePal", aliases: ["safe pal"], installUrl: "https://www.safepal.com/download" },
+  { id: "bitget-wallet", name: "Bitget Wallet", aliases: ["bitget"], installUrl: "https://web3.bitget.com" },
+  { id: "brave-wallet", name: "Brave Wallet", aliases: ["brave"], installUrl: "https://brave.com/wallet" },
+  { id: "nightly", name: "Nightly", installUrl: "https://nightly.app/download" },
+  { id: "ultimate", name: "Ultimate", installUrl: "https://ultimate.app" },
+  { id: "salmon", name: "Salmon", installUrl: "https://www.salmonwallet.io" },
+  { id: "slope", name: "Slope", installUrl: "https://slope.finance" },
+  { id: "sollet", name: "Sollet", installUrl: "https://www.sollet.io" },
 ]
 
 const STAGE_NUM: Record<SolanaExecutionStage, number> = {
@@ -144,12 +146,55 @@ function walletInitial(name: string): string {
   return String(name || "S").trim().slice(0, 1).toUpperCase() || "S"
 }
 
-function buildMobileWalletBrowserUrl(kind: WalletCatalogItem["mobileDeepLink"], targetUrl: string): string {
+function buildMobileWalletBrowserUrl(wallet: WalletCatalogItem, targetUrl: string): string {
   const encodedTarget = encodeURIComponent(targetUrl)
-  if (kind === "trust") return `https://link.trustwallet.com/open_url?coin_id=501&url=${encodedTarget}`
-  if (kind === "coinbase") return `https://go.cb-w.com/dapp?cb_url=${encodedTarget}`
-  if (kind === "okx") return `okx://wallet/dapp/url?dappUrl=${encodedTarget}`
-  return targetUrl
+  if (wallet.mobileDeepLink === "phantom") return targetUrl
+  if (wallet.mobileDeepLink === "trust") return `https://link.trustwallet.com/open_url?coin_id=501&url=${encodedTarget}`
+  if (wallet.mobileDeepLink === "coinbase") return `https://go.cb-w.com/dapp?cb_url=${encodedTarget}`
+  if (wallet.mobileDeepLink === "okx") return `okx://wallet/dapp/url?dappUrl=${encodedTarget}`
+
+  const scheme = wallet.id
+    .replace(/-wallet$/, "")
+    .replace(/[^a-z0-9-]/gi, "")
+    .toLowerCase()
+
+  const schemeMap: Record<string, string> = {
+    backpack: `backpack://browse?url=${encodedTarget}`,
+    glow: `glow://browse/${encodedTarget}`,
+    exodus: `exodus://dapp?url=${encodedTarget}`,
+    ledger: `ledgerlive://discover?url=${encodedTarget}`,
+    mathwallet: `mathwallet://dapp?url=${encodedTarget}`,
+    tokenpocket: `tpoutside://open?url=${encodedTarget}`,
+    torus: `torus://open?url=${encodedTarget}`,
+    clover: `clover://dapp?url=${encodedTarget}`,
+    coin98: `coin98://browser?url=${encodedTarget}`,
+    safepal: `safepalwallet://browser?url=${encodedTarget}`,
+    bitget: `bitget://wallet/dapp?url=${encodedTarget}`,
+    brave: targetUrl,
+    nightly: `nightly://browse?url=${encodedTarget}`,
+    ultimate: `ultimate://dapp?url=${encodedTarget}`,
+    salmon: `salmon://browse?url=${encodedTarget}`,
+    slope: `slope://browse?url=${encodedTarget}`,
+    sollet: `sollet://browse?url=${encodedTarget}`,
+  }
+
+  return schemeMap[scheme] || `${scheme}://open?url=${encodedTarget}`
+}
+
+function getMobilePlatform(): "ios" | "android" | "desktop" {
+  if (typeof navigator === "undefined") return "desktop"
+  const ua = navigator.userAgent
+  if (/iPhone|iPad|iPod/i.test(ua)) return "ios"
+  if (/Android/i.test(ua)) return "android"
+  return "desktop"
+}
+
+function buildInstallUrl(wallet: WalletCatalogItem): string {
+  const query = encodeURIComponent(wallet.installName || wallet.name)
+  const platform = getMobilePlatform()
+  if (platform === "ios") return `https://apps.apple.com/us/search?term=${query}`
+  if (platform === "android") return `https://play.google.com/store/search?q=${query}&c=apps`
+  return wallet.installUrl
 }
 
 export default function SolanaWalletPayment({
@@ -205,6 +250,13 @@ export default function SolanaWalletPayment({
     if (terminalStatus === "CONFIRMED") setExecStage("confirmed")
   }, [terminalStatus])
 
+  useEffect(() => {
+    const normalized = String(paymentStatus || "").toUpperCase()
+    if (normalized === "PROCESSING" && execStage === "idle") {
+      setExecStage("detecting")
+    }
+  }, [execStage, paymentStatus])
+
   const walletCatalog = useMemo(() => {
     const catalogIds = new Set([...POPULAR_WALLETS, ...MORE_WALLETS].map((wallet) => wallet.id))
     const extraDetectedWallets = wallets
@@ -212,6 +264,7 @@ export default function SolanaWalletPayment({
       .map((wallet): WalletCatalogItem => ({
         id: `detected-${wallet.id}`,
         name: wallet.name,
+        installUrl: "https://solana.com/ecosystem/explore?categories=wallet",
       }))
 
     return {
@@ -232,7 +285,7 @@ export default function SolanaWalletPayment({
           ...item,
           detectedWallet,
           available: Boolean(detectedWallet),
-          mobileOpenable: Boolean(!detectedWallet && isMobile && item.mobileDeepLink),
+          mobileOpenable: Boolean(!detectedWallet && isMobile),
         }
       })
       .filter((item) => {
@@ -354,8 +407,6 @@ export default function SolanaWalletPayment({
   }, [getPaymentData, onError, onExecutionStarted, onPaymentCreated])
 
   const openMobileWalletBrowser = useCallback(async (wallet: WalletCatalogItem) => {
-    if (!wallet.mobileDeepLink) return
-
     setError("")
     setSelectedWalletId(wallet.id)
     setActiveWalletName(wallet.name)
@@ -366,6 +417,32 @@ export default function SolanaWalletPayment({
     try {
       const preparedPayment = await getPaymentData()
       setExecStage("connecting_wallet")
+
+      if (wallet.mobileDeepLink === "solflare") {
+        if (!intentId) throw new Error("Missing Solflare checkout intent")
+        const res = await fetch("/api/solflare/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            paymentId: preparedPayment.paymentId,
+            intentId,
+            selectedAsset
+          })
+        })
+        const data = (await res.json()) as { connectUrl?: string; error?: string }
+        if (!res.ok || !data.connectUrl) {
+          throw new Error(data.error || "Failed to open Solflare")
+        }
+        const fallbackTimer = window.setTimeout(() => {
+          if (document.visibilityState === "visible") {
+            window.location.href = buildInstallUrl(wallet)
+          }
+        }, 1400)
+
+        window.addEventListener("pagehide", () => window.clearTimeout(fallbackTimer), { once: true })
+        window.location.href = data.connectUrl
+        return
+      }
 
       const currentUrl = new URL(window.location.href)
       currentUrl.searchParams.delete("status")
@@ -381,8 +458,15 @@ export default function SolanaWalletPayment({
             selectedAsset,
             selectedNetwork: "solana",
           })
-        : buildMobileWalletBrowserUrl(wallet.mobileDeepLink, targetUrl)
+        : buildMobileWalletBrowserUrl(wallet, targetUrl)
 
+      const fallbackTimer = window.setTimeout(() => {
+        if (document.visibilityState === "visible") {
+          window.location.href = buildInstallUrl(wallet)
+        }
+      }, 1400)
+
+      window.addEventListener("pagehide", () => window.clearTimeout(fallbackTimer), { once: true })
       window.location.href = walletUrl
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to open Solana wallet"
@@ -392,6 +476,13 @@ export default function SolanaWalletPayment({
       setPendingWalletId("")
     }
   }, [getPaymentData, intentId, onError, onExecutionStarted, selectedAsset])
+
+  const openInstallPage = useCallback((wallet: WalletCatalogItem) => {
+    setError("")
+    setSelectedWalletId(wallet.id)
+    setActiveWalletName(wallet.name)
+    window.location.href = buildInstallUrl(wallet)
+  }, [])
 
   function renderStepIcon(status: StepStatus) {
     if (status === "done") {
@@ -458,52 +549,54 @@ export default function SolanaWalletPayment({
         <div className="space-y-2">
           {rows.map((row) => {
             const available = row.available && row.detectedWallet
-            const clickable = Boolean(available || row.mobileOpenable)
+            const action: "connect" | "open" | "install" = available
+              ? "connect"
+              : row.mobileOpenable
+                ? "open"
+                : "install"
             const active = row.detectedWallet?.id === selectedWalletId || row.detectedWallet?.id === pendingWalletId
             return (
               <button
                 key={row.id}
                 type="button"
-                disabled={!clickable || Boolean(pendingWalletId)}
+                disabled={Boolean(pendingWalletId)}
                 onClick={() => {
-                  if (row.detectedWallet) {
+                  if (action === "connect" && row.detectedWallet) {
                     void startPayment(row.detectedWallet)
                     return
                   }
-                  if (row.mobileOpenable) {
+                  if (action === "open") {
                     void openMobileWalletBrowser(row)
+                    return
                   }
+                  openInstallPage(row)
                 }}
                 className={`w-full rounded-2xl border px-3.5 py-3 text-left transition-all ${
-                  clickable
-                    ? active
-                      ? "border-[#0052FF]/35 bg-[#0052FF]/5 shadow-sm shadow-[#0052FF]/10"
-                      : "border-gray-200 bg-white hover:border-[#0052FF]/25 hover:bg-[#0052FF]/5"
-                    : "border-gray-100 bg-gray-50/80 opacity-70"
+                  active
+                    ? "border-[#0052FF]/35 bg-[#0052FF]/5 shadow-sm shadow-[#0052FF]/10"
+                    : "border-gray-200 bg-white hover:border-[#0052FF]/25 hover:bg-[#0052FF]/5"
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <span className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl text-sm font-bold ${
-                    clickable
-                      ? "bg-gradient-to-br from-[#0052FF] to-[#0039B8] text-white shadow-sm shadow-[#0052FF]/20"
-                      : "bg-gray-200 text-gray-400"
-                  }`}>
+                  <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#0052FF] to-[#0039B8] text-sm font-bold text-white shadow-sm shadow-[#0052FF]/20">
                     {walletInitial(row.name)}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className={`block truncate text-sm font-semibold ${clickable ? "text-gray-900" : "text-gray-400"}`}>
+                    <span className="block truncate text-sm font-semibold text-gray-900">
                       {row.name}
                     </span>
-                    <span className={`mt-0.5 block text-xs ${available ? "text-green-600" : row.mobileOpenable ? "text-[#0052FF]" : "text-gray-400"}`}>
-                      {available ? "Available" : row.mobileOpenable ? "Open in wallet browser" : "Not detected"}
+                    <span className={`mt-0.5 block text-xs ${available ? "text-green-600" : row.mobileOpenable ? "text-[#0052FF]" : "text-gray-500"}`}>
+                      {available ? "Detected" : row.mobileOpenable ? "Open app" : "Install"}
                     </span>
                   </span>
-                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                    clickable
-                      ? "bg-[#0052FF]/10 text-[#0052FF]"
-                      : "bg-gray-100 text-gray-400"
-                  }`}>
-                    {pendingWalletId === (row.detectedWallet?.id || row.id) ? "Opening" : available ? "Connect" : row.mobileOpenable ? "Open wallet" : "Unavailable"}
+                  <span className="rounded-full bg-[#0052FF]/10 px-2.5 py-1 text-[11px] font-semibold text-[#0052FF]">
+                    {pendingWalletId === (row.detectedWallet?.id || row.id)
+                      ? "Opening"
+                      : action === "connect"
+                        ? "Connect"
+                        : action === "open"
+                          ? "Open app"
+                          : "Install"}
                   </span>
                 </div>
               </button>
@@ -651,7 +744,7 @@ export default function SolanaWalletPayment({
             <div className="max-h-[62vh] space-y-5 overflow-y-auto px-5 py-4">
               {wallets.length === 0 ? (
                 <div className="rounded-2xl bg-gray-50 px-4 py-3 text-xs leading-relaxed text-gray-600 ring-1 ring-gray-100">
-                  No Solana wallet detected. Open this checkout on a device with Phantom, Solflare, Backpack, or another Solana wallet installed.
+                  No Solana wallet is detected in this browser. Choose Open wallet for supported mobile wallets or Install to get a wallet.
                 </div>
               ) : null}
               {renderWalletPickerSection("Popular", walletPickerSections.popular)}

@@ -178,6 +178,9 @@ export async function getPaymentIntentEngine(intentId: string) {
   if (!intent) return null
 
   const selectedPayment = intent.payment_id ? await getPaymentById(intent.payment_id) : null
+  const selectedPaymentMetadata = (selectedPayment?.metadata || null) as {
+    selectedAsset?: string | null
+  } | null
 
   return {
     intentId: intent.id,
@@ -189,6 +192,7 @@ export async function getPaymentIntentEngine(intentId: string) {
       ? intent.available_networks.map((n) => String(n))
       : [],
     selectedNetwork: intent.selected_network || null,
+    selectedAsset: selectedPaymentMetadata?.selectedAsset || null,
     paymentId: intent.payment_id || null,
     status: intent.status,
     paymentStatus: selectedPayment?.status || null,

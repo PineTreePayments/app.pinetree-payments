@@ -64,9 +64,9 @@ export async function recordCashSale(input: RecordCashSaleInput): Promise<Record
       provider: "cash",
       network: "cash",
       channel: "pos",
-      total_amount: saleTotal,
-      subtotal_amount: subtotalAmount,
-      platform_fee: serviceFee,
+      total_amount: Math.round(saleTotal * 100),
+      subtotal_amount: Math.round(subtotalAmount * 100),
+      platform_fee: Math.round(serviceFee * 100),
       status: "CONFIRMED"
     }),
     upsertLedgerEntry({
