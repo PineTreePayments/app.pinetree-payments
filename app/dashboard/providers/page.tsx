@@ -177,6 +177,7 @@ export default function ProvidersPage() {
   const [inputValue, setInputValue] = useState("")
   const [lightningSpeedAccountId, setLightningSpeedAccountId] = useState("")
   const [lightningAddress, setLightningAddress] = useState("")
+  const [lightningSetupStep, setLightningSetupStep] = useState<1 | 2 | 3>(1)
   const [loading, setLoading] = useState(false)
 
   const [smartRouting, setSmartRouting] = useState(false)
@@ -365,9 +366,9 @@ export default function ProvidersPage() {
     if (provider === "lightning") {
       const p = getProvider(provider)
       if (!p || p.dashboard_status === "not_configured") return "Not configured"
-      if (p.dashboard_status === "address_needs_verification") return "Address needs verification"
+      if (p.dashboard_status === "address_needs_verification") return "Needs verification"
       if (p.dashboard_status === "provider_unavailable") return "Provider unavailable"
-      if (p.dashboard_status === "connected") return "Ready"
+      if (p.dashboard_status === "connected") return p.enabled ? "Enabled" : "Ready"
       return "Not configured"
     }
 
@@ -386,7 +387,8 @@ export default function ProvidersPage() {
   function isEnabled(provider: string) {
     if (provider === "lightning") {
       const p = getProvider(provider)
-      return Boolean(p?.enabled && getStatus(provider) === "Ready")
+      const status = getStatus(provider)
+      return Boolean(p?.enabled && (status === "Ready" || status === "Enabled"))
     }
 
     const wallet = getWallet(provider)
@@ -614,6 +616,7 @@ export default function ProvidersPage() {
       setInputValue("")
       setLightningSpeedAccountId(String(p?.credentials?.speed_account_id || ""))
       setLightningAddress(String(p?.credentials?.lightning_address || ""))
+      setLightningSetupStep(1)
     } else if (p?.credentials?.api_key) {
       setInputValue(p.credentials.api_key)
       setLightningSpeedAccountId("")
@@ -743,6 +746,7 @@ export default function ProvidersPage() {
       setInputValue("")
       setLightningSpeedAccountId("")
       setLightningAddress("")
+      setLightningSetupStep(1)
       setShowMobileConnect(false)
       setSelectedWalletType(null)
       setWalletSessionId(null)
@@ -820,12 +824,25 @@ export default function ProvidersPage() {
   }
 
   function actionButtonClass() {
-    return "px-3 py-2 rounded text-sm border border-blue-600 text-blue-600 bg-white hover:bg-blue-50 transition"
+    return "rounded-lg border border-blue-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-blue-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50"
+  }
+
+  function primaryButtonClass() {
+    return "rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+  }
+
+  function secondaryButtonClass() {
+    return "rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
+  }
+
+  function lightningInputClass() {
+    return "mt-2 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-3 text-sm text-gray-950 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
   }
 
   function statusClass(status: string) {
     if (status === "Connected" || status === "Ready") return "border-blue-200 bg-blue-50 text-blue-700"
-    if (status === "Address needs verification") return "border-amber-200 bg-amber-50 text-amber-800"
+    if (status === "Enabled") return "border-emerald-200 bg-emerald-50 text-emerald-700"
+    if (status === "Needs verification") return "border-amber-200 bg-amber-50 text-amber-800"
     if (status === "Provider unavailable") return "border-red-200 bg-red-50 text-red-700"
     return "border-gray-200 bg-gray-50 text-gray-600"
   }
@@ -851,7 +868,7 @@ export default function ProvidersPage() {
     description: string[]
   }) {
     const status = getStatus(provider)
-    const connected = status === "Connected" || status === "Ready"
+    const connected = status === "Connected" || status === "Ready" || status === "Enabled"
     const enabled = isEnabled(provider)
     const p = getProvider(provider)
     const wallet = getWallet(provider)
@@ -863,7 +880,7 @@ export default function ProvidersPage() {
     const detailRows = description.map(parseDetailLine)
 
     return (
-      <div className="relative overflow-hidden rounded-2xl border border-gray-200 bg-white/95 p-4 shadow-[0_8px_30px_rgba(15,23,42,0.07),0_0_24px_rgba(125,63,224,0.08)] transition-all duration-300 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_18px_50px_rgba(15,23,42,0.11),0_0_34px_rgba(125,63,224,0.16)] sm:min-h-[240px] sm:p-6">
+      <div className="relative overflow-hidden rounded-2xl border border-gray-200 bg-white/95 p-4 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_18px_50px_rgba(15,23,42,0.11),0_0_34px_rgba(37,99,235,0.16)] focus-within:-translate-y-0.5 focus-within:border-blue-200 focus-within:shadow-[0_18px_50px_rgba(15,23,42,0.11),0_0_34px_rgba(37,99,235,0.16)] sm:min-h-[240px] sm:p-6">
         <div className="mb-4 flex items-start justify-between gap-3">
           <h2 className="min-w-0 text-base font-semibold leading-tight text-gray-950 sm:text-lg">{name}</h2>
           <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold leading-none sm:text-xs ${statusClass(status)}`}>
@@ -961,7 +978,7 @@ export default function ProvidersPage() {
             <span className="text-xs font-medium text-gray-700 sm:text-sm">Enabled</span>
             <ToggleSwitch
               checked={enabled}
-              disabled={provider === "lightning" ? status !== "Ready" : !connected}
+              disabled={provider === "lightning" ? status !== "Ready" && status !== "Enabled" : !connected}
               onChange={(v) => toggleProvider(provider, v)}
             />
           </div>
@@ -1066,10 +1083,9 @@ export default function ProvidersPage() {
           description={[
             "Network: Bitcoin Lightning",
             "Provider: Speed",
-            "PineTree platform Speed credentials are configured by PineTree.",
-            "Merchants only need Speed Account ID and BTC Lightning Address.",
-            "Customers can pay with any compatible Bitcoin Lightning wallet.",
-            "Speed handles the merchant Lightning account and settlement. PineTree routes checkout, status, and platform fee collection.",
+            "Setup: Speed Account + BTC Lightning Address",
+            "Customer Wallets: Any compatible Lightning wallet",
+            "Settlement: Speed merchant account",
           ]}
         />
       </div>
@@ -1088,75 +1104,172 @@ export default function ProvidersPage() {
             </h2>
 
             {activeProvider === "lightning" && (
-              <div className="mb-4 space-y-4">
-                <p className="text-sm text-black">
-                  Customers can pay with any compatible Bitcoin Lightning wallet. Speed handles the merchant Lightning account and settlement. PineTree routes checkout, status, and platform fee collection.
-                </p>
-                <p className="text-xs text-gray-600">
-                  PineTree platform Speed credentials are configured by PineTree. You only need your Speed Account ID and BTC Lightning Address.
-                </p>
+              <div className="mb-2">
+                <div className="mb-5 grid grid-cols-3 gap-2">
+                  {[1, 2, 3].map((step) => (
+                    <div
+                      key={step}
+                      className={`h-1.5 rounded-full ${
+                        lightningSetupStep >= step ? "bg-blue-600" : "bg-gray-200"
+                      }`}
+                    />
+                  ))}
+                </div>
 
-                <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Step 1</p>
-                    <p className="text-sm font-medium text-gray-950">Create or open your Speed account.</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <a href={SPEED_LINKS.signup} target="_blank" rel="noopener noreferrer" className={actionButtonClass()}>
-                        Create Speed Account
-                      </a>
-                      <a href={SPEED_LINKS.dashboard} target="_blank" rel="noopener noreferrer" className={actionButtonClass()}>
-                        Open Speed Dashboard
-                      </a>
+                <div className="rounded-2xl border border-gray-200 bg-gray-50/80 p-4 shadow-inner sm:p-5">
+                  {lightningSetupStep === 1 && (
+                    <div className="space-y-5">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
+                          Step 1 of 3
+                        </p>
+                        <h3 className="mt-2 text-xl font-semibold leading-tight text-gray-950">
+                          Connect Speed
+                        </h3>
+                        <p className="mt-2 text-sm leading-6 text-gray-600">
+                          Speed handles the Bitcoin Lightning account and settlement. PineTree handles checkout, status, and the platform fee.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <a href={SPEED_LINKS.signup} target="_blank" rel="noopener noreferrer" className={actionButtonClass()}>
+                          Create Speed Account
+                        </a>
+                        <a href={SPEED_LINKS.dashboard} target="_blank" rel="noopener noreferrer" className={actionButtonClass()}>
+                          Open Speed Dashboard
+                        </a>
+                      </div>
+
+                      <button
+                        onClick={() => setLightningSetupStep(2)}
+                        className={`${primaryButtonClass()} w-full`}
+                      >
+                        I have a Speed account
+                      </button>
                     </div>
-                  </div>
+                  )}
 
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Step 2</p>
-                    <p className="text-sm font-medium text-gray-950">Verify your Speed account.</p>
-                    <p className="mt-1 text-xs text-gray-600">Speed handles your Lightning payment account and verification.</p>
-                  </div>
+                  {lightningSetupStep === 2 && (
+                    <div className="space-y-5">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
+                          Step 2 of 3
+                        </p>
+                        <h3 className="mt-2 text-xl font-semibold leading-tight text-gray-950">
+                          Add Speed Account ID
+                        </h3>
+                        <p className="mt-2 text-sm leading-6 text-gray-600">
+                          Paste your Speed Account ID so Speed knows where to send your Lightning proceeds.
+                        </p>
+                      </div>
 
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Step 3</p>
-                    <p className="text-sm font-medium text-gray-950">Add Speed Account ID.</p>
-                    <a href={SPEED_LINKS.accountSettings} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-sm font-medium text-blue-600 underline">
-                      Open Account Settings / Account ID
-                    </a>
-                    <input
-                      value={lightningSpeedAccountId}
-                      onChange={(e) => setLightningSpeedAccountId(e.target.value)}
-                      placeholder="Speed Account ID"
-                      className="mt-2 w-full border border-gray-300 rounded p-2 text-black bg-white"
-                    />
-                    <p className="mt-1 text-xs text-gray-600">Used by Speed as the transfer destination for your Lightning proceeds.</p>
-                  </div>
+                      <label className="block">
+                        <span className="text-sm font-semibold text-gray-900">Speed Account ID</span>
+                        <input
+                          value={lightningSpeedAccountId}
+                          onChange={(e) => setLightningSpeedAccountId(e.target.value)}
+                          placeholder="Speed Account ID"
+                          className={lightningInputClass()}
+                        />
+                      </label>
 
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Step 4</p>
-                    <p className="text-sm font-medium text-gray-950">Add BTC Lightning Address.</p>
-                    <a href={SPEED_LINKS.lightningAddress} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-sm font-medium text-blue-600 underline">
-                      Open Speed Lightning Address
-                    </a>
-                    <input
-                      value={lightningAddress}
-                      onChange={(e) => setLightningAddress(e.target.value)}
-                      placeholder="BTC Lightning Address (e.g. you@getalby.com)"
-                      className="mt-2 w-full border border-gray-300 rounded p-2 text-black bg-white"
-                    />
-                    <p className="mt-1 text-xs text-gray-600">Used to verify your Lightning receiving setup.</p>
-                  </div>
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-xs text-gray-500">Find this in Speed account settings.</p>
+                        <a href={SPEED_LINKS.accountSettings} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
+                          Open Account Settings
+                        </a>
+                      </div>
 
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Step 5</p>
-                    <p className="text-sm font-medium text-gray-950">Verify setup / Enable Bitcoin Lightning.</p>
-                    <button
-                      onClick={() => saveProvider("lightning")}
-                      disabled={loading}
-                      className="mt-2 rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
-                    >
-                      {loading ? "Verifying..." : "Verify Bitcoin Lightning"}
-                    </button>
-                  </div>
+                      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+                        <button
+                          onClick={() => setLightningSetupStep(1)}
+                          className={`${secondaryButtonClass()} w-full sm:w-auto`}
+                        >
+                          Back
+                        </button>
+                        <button
+                          onClick={() => setLightningSetupStep(3)}
+                          className={`${primaryButtonClass()} w-full sm:w-auto`}
+                        >
+                          Continue
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {lightningSetupStep === 3 && (
+                    <div className="space-y-5">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
+                          Step 3 of 3
+                        </p>
+                        <h3 className="mt-2 text-xl font-semibold leading-tight text-gray-950">
+                          Add BTC Lightning Address
+                        </h3>
+                        <p className="mt-2 text-sm leading-6 text-gray-600">
+                          Paste your BTC Lightning Address so PineTree can verify your Lightning receiving setup.
+                        </p>
+                      </div>
+
+                      <label className="block">
+                        <span className="text-sm font-semibold text-gray-900">BTC Lightning Address</span>
+                        <input
+                          value={lightningAddress}
+                          onChange={(e) => setLightningAddress(e.target.value)}
+                          placeholder="merchant@getalby.com"
+                          className={lightningInputClass()}
+                        />
+                      </label>
+
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-xs text-gray-500">Example: merchant@getalby.com</p>
+                        <a href={SPEED_LINKS.lightningAddress} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
+                          Open Speed Lightning Address
+                        </a>
+                      </div>
+
+                      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+                        <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                          <button
+                            onClick={() => {
+                              setActiveProvider(null)
+                              setInputValue("")
+                              setLightningSpeedAccountId("")
+                              setLightningAddress("")
+                              setLightningSetupStep(1)
+                              setShowMobileConnect(false)
+                              setSelectedWalletType(null)
+                              setWalletSessionId(null)
+                              setWalletSessionStatus(null)
+                              setWalletMobileDeeplink(null)
+                              didToastSyncRef.current = false
+
+                              if (pollerRef.current) {
+                                clearInterval(pollerRef.current)
+                                pollerRef.current = null
+                              }
+                            }}
+                            className={`${secondaryButtonClass()} w-full sm:w-auto`}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => setLightningSetupStep(2)}
+                            className={`${secondaryButtonClass()} w-full sm:w-auto`}
+                          >
+                            Back
+                          </button>
+                        </div>
+                        <button
+                          onClick={() => saveProvider("lightning")}
+                          disabled={loading}
+                          className={`${primaryButtonClass()} w-full sm:w-auto`}
+                        >
+                          {loading ? "Verifying..." : "Verify and Enable Bitcoin Lightning"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1333,6 +1446,7 @@ export default function ProvidersPage() {
                 />
               )}
 
+            {activeProvider !== "lightning" && (
             <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
               <button
                 onClick={() => {
@@ -1340,6 +1454,7 @@ export default function ProvidersPage() {
                   setInputValue("")
                   setLightningSpeedAccountId("")
                   setLightningAddress("")
+                  setLightningSetupStep(1)
                   setShowMobileConnect(false)
                   setSelectedWalletType(null)
                   setWalletSessionId(null)
@@ -1365,6 +1480,7 @@ export default function ProvidersPage() {
                 {loading ? "Saving..." : activeProvider === "lightning" ? "Verify Bitcoin Lightning" : "Save Wallet"}
               </button>
             </div>
+            )}
           </div>
         </div>
       )}

@@ -155,7 +155,7 @@ export default function WalletsPage() {
           )}
 
           {wallets.map((w) => (
-          <div key={w.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white border border-gray-200 rounded-2xl p-5 sm:p-6 min-h-[90px] shadow-[0_8px_30px_rgba(15,23,42,0.07),0_0_26px_rgba(125,63,224,0.14)] transition-all duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_20px_60px_rgba(0,0,0,0.12),0_0_40px_rgba(125,63,224,0.25)]">
+          <div key={w.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white border border-gray-200 rounded-2xl p-5 sm:p-6 min-h-[90px] shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_20px_60px_rgba(15,23,42,0.12),0_0_40px_rgba(37,99,235,0.18)] focus-within:-translate-y-1 focus-within:border-blue-200 focus-within:shadow-[0_20px_60px_rgba(15,23,42,0.12),0_0_40px_rgba(37,99,235,0.18)]">
               <div className="min-w-0 flex-1">
                 <p className="text-base font-semibold text-gray-800 mb-1">
                   {formatProvider(w.provider, w.network)}
