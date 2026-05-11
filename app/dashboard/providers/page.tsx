@@ -819,9 +819,7 @@ export default function ProvidersPage() {
     const detailRows = description.map(parseDetailLine)
 
     return (
-      <div className="relative overflow-hidden rounded-2xl border border-[#0052FF]/15 bg-gradient-to-br from-white via-white to-[#f3f8ff] p-4 shadow-[0_12px_32px_rgba(15,23,42,0.07)] ring-1 ring-white/80 sm:min-h-[240px] sm:p-6">
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#0052FF]/70 via-[#6aa7ff]/45 to-transparent" />
-
+      <div className="relative overflow-hidden rounded-2xl border border-gray-200 bg-white/95 p-4 shadow-[0_8px_30px_rgba(15,23,42,0.07),0_0_24px_rgba(125,63,224,0.08)] transition-all duration-300 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_18px_50px_rgba(15,23,42,0.11),0_0_34px_rgba(125,63,224,0.16)] sm:min-h-[240px] sm:p-6">
         <div className="mb-4 flex items-start justify-between gap-3">
           <h2 className="min-w-0 text-base font-semibold leading-tight text-gray-950 sm:text-lg">{name}</h2>
           <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold leading-none sm:text-xs ${statusClass(status)}`}>
@@ -833,7 +831,7 @@ export default function ProvidersPage() {
           {detailRows.map((row, i) => (
             <div
               key={i}
-              className="grid grid-cols-[82px_1fr] items-start gap-3 border-b border-[#0052FF]/8 pb-2 last:border-b-0 last:pb-0 sm:grid-cols-[96px_1fr]"
+              className="grid grid-cols-[82px_1fr] items-start gap-3 border-b border-gray-100 pb-2 last:border-b-0 last:pb-0 sm:grid-cols-[96px_1fr]"
             >
               {row.label ? (
                 <>
@@ -853,7 +851,7 @@ export default function ProvidersPage() {
           ))}
 
           {walletValue && (
-            <div className="grid grid-cols-[82px_1fr] items-start gap-3 rounded-xl border border-[#0052FF]/10 bg-white/65 px-3 py-2 sm:grid-cols-[96px_1fr]">
+            <div className="grid grid-cols-[82px_1fr] items-start gap-3 rounded-xl border border-gray-200 bg-gray-50/70 px-3 py-2 sm:grid-cols-[96px_1fr]">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                 Connected
               </span>
@@ -866,7 +864,7 @@ export default function ProvidersPage() {
           )}
         </div>
 
-        <div className="mt-auto flex items-center justify-between gap-3 border-t border-[#0052FF]/10 pt-4">
+        <div className="mt-auto flex items-center justify-between gap-3 border-t border-gray-100 pt-4">
           <div className="flex flex-wrap gap-2">
             {connected ? (
               <button

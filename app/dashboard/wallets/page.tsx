@@ -43,6 +43,13 @@ function formatProvider(name?: string | null, network?: string) {
   return "Connected"
 }
 
+function formatWalletAddress(address: string) {
+  const trimmed = address.trim()
+  if (trimmed.length <= 14) return trimmed
+
+  return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`
+}
+
 export default function WalletsPage() {
   const [wallets, setWallets] = useState<WalletItem[]>([])
   const [totalBalance, setTotalBalance] = useState(0)
@@ -154,8 +161,11 @@ export default function WalletsPage() {
                   {formatProvider(w.provider, w.network)}
                 </p>
 
-                <p className="text-base font-semibold text-black break-words [overflow-wrap:anywhere]">
-                  {w.wallet_address}
+                <p
+                  className="max-w-full truncate text-base font-semibold text-black"
+                  title={w.wallet_address}
+                >
+                  {formatWalletAddress(w.wallet_address)}
                 </p>
               </div>
 
