@@ -4,9 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import {
+  buildPhantomWalletBrowserUrl,
   getDetectedSolanaWallets,
   getSolanaProviderPublicKey,
   getSolanaTransactionSignature,
+  isMobileBrowser,
   type DetectedSolanaWallet,
   type SolanaBrowserProvider,
 } from "@/lib/wallets/solana"
@@ -53,23 +55,25 @@ type WalletCatalogItem = {
   id: string
   name: string
   aliases?: string[]
+  mobileDeepLink?: "phantom" | "trust" | "coinbase" | "okx"
 }
 
 type WalletPickerRow = WalletCatalogItem & {
   detectedWallet?: DetectedSolanaWallet
   available: boolean
+  mobileOpenable: boolean
 }
 
 const TERMINAL_PAYMENT_STATUSES = new Set(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "CANCELED"])
 
 const POPULAR_WALLETS: WalletCatalogItem[] = [
-  { id: "phantom", name: "Phantom" },
+  { id: "phantom", name: "Phantom", mobileDeepLink: "phantom" },
   { id: "solflare", name: "Solflare" },
   { id: "backpack", name: "Backpack" },
   { id: "glow", name: "Glow" },
-  { id: "trust-wallet", name: "Trust Wallet", aliases: ["trust"] },
-  { id: "coinbase-wallet", name: "Coinbase Wallet", aliases: ["coinbase"] },
-  { id: "okx-wallet", name: "OKX Wallet", aliases: ["okx"] },
+  { id: "trust-wallet", name: "Trust Wallet", aliases: ["trust"], mobileDeepLink: "trust" },
+  { id: "coinbase-wallet", name: "Coinbase Wallet", aliases: ["coinbase"], mobileDeepLink: "coinbase" },
+  { id: "okx-wallet", name: "OKX Wallet", aliases: ["okx"], mobileDeepLink: "okx" },
 ]
 
 const MORE_WALLETS: WalletCatalogItem[] = [
@@ -140,6 +144,14 @@ function walletInitial(name: string): string {
   return String(name || "S").trim().slice(0, 1).toUpperCase() || "S"
 }
 
+function buildMobileWalletBrowserUrl(kind: WalletCatalogItem["mobileDeepLink"], targetUrl: string): string {
+  const encodedTarget = encodeURIComponent(targetUrl)
+  if (kind === "trust") return `https://link.trustwallet.com/open_url?coin_id=501&url=${encodedTarget}`
+  if (kind === "coinbase") return `https://go.cb-w.com/dapp?cb_url=${encodedTarget}`
+  if (kind === "okx") return `okx://wallet/dapp/url?dappUrl=${encodedTarget}`
+  return targetUrl
+}
+
 export default function SolanaWalletPayment({
   intentId,
   selectedAsset = "SOL",
@@ -168,6 +180,7 @@ export default function SolanaWalletPayment({
   })
 
   const terminalStatus = normalizeTerminalStatus(paymentStatus)
+  const isMobile = useMemo(() => isMobileBrowser(), [])
   const refreshWallets = useCallback(() => {
     const detected = getDetectedSolanaWallets()
     setWallets(detected)
@@ -219,6 +232,7 @@ export default function SolanaWalletPayment({
           ...item,
           detectedWallet,
           available: Boolean(detectedWallet),
+          mobileOpenable: Boolean(!detectedWallet && isMobile && item.mobileDeepLink),
         }
       })
       .filter((item) => {
@@ -232,7 +246,7 @@ export default function SolanaWalletPayment({
       popular: toRows(walletCatalog.popular),
       more: toRows(walletCatalog.more),
     }
-  }, [walletCatalog, wallets, walletSearch])
+  }, [isMobile, walletCatalog, wallets, walletSearch])
 
   const getPaymentData = useCallback(async (): Promise<PaymentData> => {
     if (paymentData?.paymentId) return paymentData
@@ -339,6 +353,46 @@ export default function SolanaWalletPayment({
     }
   }, [getPaymentData, onError, onExecutionStarted, onPaymentCreated])
 
+  const openMobileWalletBrowser = useCallback(async (wallet: WalletCatalogItem) => {
+    if (!wallet.mobileDeepLink) return
+
+    setError("")
+    setSelectedWalletId(wallet.id)
+    setActiveWalletName(wallet.name)
+    setPendingWalletId(wallet.id)
+    setWalletPickerOpen(false)
+    onExecutionStarted?.()
+
+    try {
+      const preparedPayment = await getPaymentData()
+      setExecStage("connecting_wallet")
+
+      const currentUrl = new URL(window.location.href)
+      currentUrl.searchParams.delete("status")
+      currentUrl.searchParams.delete("phantom_error")
+      currentUrl.searchParams.delete("solflare_error")
+
+      const targetUrl = currentUrl.toString()
+      const walletUrl = wallet.mobileDeepLink === "phantom"
+        ? buildPhantomWalletBrowserUrl({
+            currentHref: targetUrl,
+            paymentId: preparedPayment.paymentId,
+            intentId,
+            selectedAsset,
+            selectedNetwork: "solana",
+          })
+        : buildMobileWalletBrowserUrl(wallet.mobileDeepLink, targetUrl)
+
+      window.location.href = walletUrl
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to open Solana wallet"
+      setError(message)
+      setExecStage("retryable_error")
+      onError?.(message)
+      setPendingWalletId("")
+    }
+  }, [getPaymentData, intentId, onError, onExecutionStarted, selectedAsset])
+
   function renderStepIcon(status: StepStatus) {
     if (status === "done") {
       return (
@@ -404,18 +458,24 @@ export default function SolanaWalletPayment({
         <div className="space-y-2">
           {rows.map((row) => {
             const available = row.available && row.detectedWallet
+            const clickable = Boolean(available || row.mobileOpenable)
             const active = row.detectedWallet?.id === selectedWalletId || row.detectedWallet?.id === pendingWalletId
             return (
               <button
                 key={row.id}
                 type="button"
-                disabled={!available || Boolean(pendingWalletId)}
+                disabled={!clickable || Boolean(pendingWalletId)}
                 onClick={() => {
-                  if (!row.detectedWallet) return
-                  void startPayment(row.detectedWallet)
+                  if (row.detectedWallet) {
+                    void startPayment(row.detectedWallet)
+                    return
+                  }
+                  if (row.mobileOpenable) {
+                    void openMobileWalletBrowser(row)
+                  }
                 }}
                 className={`w-full rounded-2xl border px-3.5 py-3 text-left transition-all ${
-                  available
+                  clickable
                     ? active
                       ? "border-[#0052FF]/35 bg-[#0052FF]/5 shadow-sm shadow-[#0052FF]/10"
                       : "border-gray-200 bg-white hover:border-[#0052FF]/25 hover:bg-[#0052FF]/5"
@@ -424,26 +484,26 @@ export default function SolanaWalletPayment({
               >
                 <div className="flex items-center gap-3">
                   <span className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl text-sm font-bold ${
-                    available
+                    clickable
                       ? "bg-gradient-to-br from-[#0052FF] to-[#0039B8] text-white shadow-sm shadow-[#0052FF]/20"
                       : "bg-gray-200 text-gray-400"
                   }`}>
                     {walletInitial(row.name)}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className={`block truncate text-sm font-semibold ${available ? "text-gray-900" : "text-gray-400"}`}>
+                    <span className={`block truncate text-sm font-semibold ${clickable ? "text-gray-900" : "text-gray-400"}`}>
                       {row.name}
                     </span>
-                    <span className={`mt-0.5 block text-xs ${available ? "text-green-600" : "text-gray-400"}`}>
-                      {available ? "Available" : "Not detected"}
+                    <span className={`mt-0.5 block text-xs ${available ? "text-green-600" : row.mobileOpenable ? "text-[#0052FF]" : "text-gray-400"}`}>
+                      {available ? "Available" : row.mobileOpenable ? "Open in wallet browser" : "Not detected"}
                     </span>
                   </span>
                   <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                    available
+                    clickable
                       ? "bg-[#0052FF]/10 text-[#0052FF]"
                       : "bg-gray-100 text-gray-400"
                   }`}>
-                    {pendingWalletId === row.detectedWallet?.id ? "Opening" : available ? "Connect" : "Unavailable"}
+                    {pendingWalletId === (row.detectedWallet?.id || row.id) ? "Opening" : available ? "Connect" : row.mobileOpenable ? "Open wallet" : "Unavailable"}
                   </span>
                 </div>
               </button>
@@ -537,25 +597,6 @@ export default function SolanaWalletPayment({
           {error}
         </div>
       ) : null}
-
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#EAF2FF] via-white to-[#DCEBFF] p-[1px] shadow-sm shadow-[#0052FF]/10">
-        <div className="pointer-events-none absolute -right-16 -top-20 h-40 w-40 rounded-full bg-[#0052FF]/15 blur-3xl" />
-        <div className="relative bg-white/95 rounded-3xl overflow-hidden ring-1 ring-white/80">
-          <div className="px-4 pt-4 pb-3 space-y-2.5">
-            {renderStep("Wallet selection", "active", wallets.length ? "Choose an installed Solana wallet" : "No installed Solana wallet detected")}
-            {renderStep("Confirm payment", "upcoming")}
-            {renderStep("Network confirmation", "upcoming")}
-          </div>
-          <div className="mx-4 mb-4 rounded-2xl bg-[#0052FF]/5 px-4 py-3 ring-1 ring-[#0052FF]/15">
-            <p className="text-sm font-semibold text-[#0052FF]">
-              Choose your Solana wallet
-            </p>
-            <p className="mt-1 text-xs leading-relaxed text-gray-600">
-              PineTree will prepare the payment only after you select a wallet.
-            </p>
-          </div>
-        </div>
-      </div>
 
       <Button
         fullWidth
