@@ -843,6 +843,7 @@ export default function BaseWalletPayment({
   const activeBaseUsdcV4PaymentRef = useRef<string | null>(null)
   const activeBaseUsdcV5PaymentRef = useRef<string | null>(null)
   const activeBasePaymentAttemptRef = useRef<string | null>(null)
+  const triggerBaseAutoResumeRef = useRef<((source: string) => void) | null>(null)
   const usdcFinalPaymentTxRef = useRef<EvmTransactionRequest | null>(null)
   const usdcFinalPaymentIdRef = useRef<string | null>(null)
   const pendingEthPaymentTxRef = useRef<EvmTransactionRequest | null>(null)
@@ -1354,6 +1355,11 @@ export default function BaseWalletPayment({
     if (!prepare.typedData || !prepare.authorization) {
       throw new Error("Incomplete Base USDC authorization returned by server")
     }
+    console.info("[Base USDC V4] base-usdc-v4-prepare-response", {
+      paymentId: input.paymentData.paymentId,
+      hasTypedData: Boolean(prepare.typedData),
+      hasAuthorization: Boolean(prepare.authorization)
+    })
     setExecStageRef.current("confirm_payment")
     console.log("[BASE UI] awaiting-wallet-confirmation", { paymentId: input.paymentData.paymentId, strategy: "v4_eip3009_relayer" })
     setBaseUsdcV4Status("Sign USDC payment authorization...")
@@ -1630,6 +1636,11 @@ export default function BaseWalletPayment({
           if (!prepareRes.ok) throw new Error(prepare.error || "Failed to prepare Base USDC V5 authorization")
           if (isBaseUsdcV4Unavailable(prepare)) throw new Error(prepare.message || BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE)
           if (!prepare.typedData || !prepare.authorization) throw new Error("Incomplete Base USDC V5 authorization returned by server")
+          console.info("[Base USDC V5] eip3009-prepare-response", {
+            paymentId,
+            hasTypedData: Boolean(prepare.typedData),
+            hasAuthorization: Boolean(prepare.authorization)
+          })
           setExecStageRef.current("confirm_payment")
           console.log("[BASE UI] awaiting-wallet-confirmation", { paymentId, strategy: "eip3009_relayer" })
           setBaseUsdcV4Status("Authorize USDC payment...")
@@ -1745,6 +1756,12 @@ export default function BaseWalletPayment({
       if (isBaseUsdcV4Unavailable(buildData)) throw new Error(buildData.message || BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE)
       if (!buildData.ok) throw new Error("Failed to build Base USDC V5 allowance payment")
       if (!buildData.paymentTx) throw new Error("Incomplete allowance payment data returned by server")
+      console.info("[Base USDC V5] allowance-build-response", {
+        paymentId,
+        sufficient: Boolean(buildData.sufficient),
+        hasApproveTx: Boolean(buildData.approveTx),
+        hasPaymentTx: Boolean(buildData.paymentTx)
+      })
       const { sufficient, approveTx, paymentTx } = buildData as Required<Pick<BaseUsdcV5AllowancePaymentResponse, "sufficient" | "approveTx" | "paymentTx">>
       // Store both two-step transactions before opening the wallet. If the mobile
       // native handoff is dismissed or WalletConnect transport times out, the UI can
@@ -2295,12 +2312,19 @@ export default function BaseWalletPayment({
         } else {
           setBaseUsdcV4Status("Confirm payment in your wallet...")
         }
-        // For final USDC payment handoff: clear attempt locks so focus/resume handlers
-        // do not restart the payment flow. The active step's Continue button
-        // re-dispatches the stored tx request instead.
-        if (walletKind === "usdc_payment" || walletKind === "usdc_approve") {
+        // For USDC handoffs, clear attempt locks so resume handlers either
+        // re-dispatch the stored transaction action or rebuild/re-dispatch the
+        // typed-data authorization request. Otherwise the checkout can keep
+        // saying "open wallet" with no pending WalletConnect request.
+        if (walletKind === "usdc_payment" || walletKind === "usdc_approve" || walletKind === "usdc_signature") {
           activeBasePaymentAttemptRef.current = null
+          activeBaseUsdcV4PaymentRef.current = null
+          activeBaseUsdcV5PaymentRef.current = null
           autoResumeAttemptedKeyRef.current = null
+          sessionSettleTriggerFiredRef.current = false
+          window.setTimeout(() => {
+            triggerBaseAutoResumeRef.current?.("usdc-handoff")
+          }, 100)
         }
         return
       }
@@ -2739,6 +2763,7 @@ export default function BaseWalletPayment({
     if (autoResumeRetryRef.current) stopAutoResumeRetry()
     tryResumeBaseWalletConnectPayment(source)
   }, [address, connector, intentId, isConnected, isConnecting, refreshPendingState, resumeFromWalletConnectProvider, selectedAsset, stopAutoResumeRetry, terminalStatus, tryResumeBaseWalletConnectPayment])
+  triggerBaseAutoResumeRef.current = startBaseWalletConnectAutoResumeRetry
   useEffect(() => {
     refreshPendingState()
   }, [refreshPendingState])
@@ -3054,6 +3079,28 @@ export default function BaseWalletPayment({
             </div>
           ) : null}
         </div>
+        {execStage !== "payment_submitted" && execStage !== "detecting" && execStage !== "confirmed" ? (
+          (walletHandoffPending || pendingWalletActionReady) && !isOpeningWallet && !pendingWalletActionInFlight ? (
+            <Button
+              fullWidth
+              onClick={() => {
+                void logBase("continue-in-wallet-click", {
+                  intentId: intentId || null,
+                  selectedAsset,
+                  walletRequestKind: pendingActionKindRef.current || pendingWalletRequestKind,
+                  pendingWalletActionReady,
+                })
+                if (pendingActionKindRef.current) {
+                  void dispatchPendingWalletActionRef.current?.("continue-in-wallet-click")
+                  return
+                }
+                triggerBaseAutoResumeRef.current?.("continue-in-wallet-click")
+              }}
+            >
+              Continue in Wallet
+            </Button>
+          ) : null
+        ) : null}
         {execStage !== "payment_submitted" && execStage !== "detecting" && execStage !== "confirmed" ? (
           <button
             type="button"
