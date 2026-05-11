@@ -836,6 +836,11 @@ export default function BaseWalletPayment({
   // ── Base UI execution state machine ────────────────────────────────────────
   const [execStage, setExecStageRaw] = useState<BaseExecutionStage>("idle")
   const [usedEmergencyAllowance, setUsedEmergencyAllowance] = useState(false)
+  // Tracks the brief address-resolution wait after WalletConnect session settles
+  const [isResolvingAccount, setIsResolvingAccount] = useState(false)
+  // Mirrors wagmi address so async callbacks can read latest value without closure staleness
+  const addressRef = useRef<string | undefined>(undefined)
+  addressRef.current = address
   const execStageRef = useRef<BaseExecutionStage>("idle")
   // Stable ref so useCallbacks with [] deps always call the latest setter logic
   const setExecStageRef = useRef<(stage: BaseExecutionStage, opts?: { allowance?: boolean }) => void>(() => {})
@@ -850,6 +855,8 @@ export default function BaseWalletPayment({
       sessionStorage.setItem(`pinetree_base_exec_${intentId ?? "direct"}_${selectedAsset}`, stage)
     } catch {}
   }
+  const setIsResolvingAccountRef = useRef<(v: boolean) => void>(() => {})
+  setIsResolvingAccountRef.current = setIsResolvingAccount
   const isIntentMode = Boolean(intentId)
   const propTerminalStatus = isTerminalPaymentStatus(paymentStatus)
     ? normalizeTerminalPaymentStatus(paymentStatus)
@@ -939,6 +946,7 @@ export default function BaseWalletPayment({
     setLocalError("")
     setIsPreparingPayment(false)
     setIsOpeningWallet(false)
+    setIsResolvingAccount(false)
     execStageRef.current = "idle"
     setExecStageRaw("idle")
   }, [propTerminalStatus])
@@ -1530,9 +1538,42 @@ export default function BaseWalletPayment({
       if (!pendingPaymentMatches(pending, intentId, selectedAsset)) {
         throw new Error("Base WalletConnect payment session expired. Please try again.")
       }
-      const fromAddress = String(connectedAddress || "").trim()
+      let fromAddress = String(connectedAddress || "").trim()
       if (!/^0x[a-fA-F0-9]{40}$/.test(fromAddress)) {
-        throw new Error("Wallet connected, but no wallet address was returned.")
+        // Address not yet available — WalletConnect session may have settled but
+        // wagmi / the provider hasn't propagated the account yet. Show a benign
+        // "Finalizing…" state and poll briefly before giving up.
+        setExecStageRef.current("wallet_connected")
+        setIsResolvingAccountRef.current(true)
+        const ADDR_RESOLVE_DEADLINE = Date.now() + 4000
+        const ADDR_RESOLVE_POLL_MS = 300
+        while (!/^0x[a-fA-F0-9]{40}$/.test(fromAddress) && Date.now() < ADDR_RESOLVE_DEADLINE) {
+          await new Promise<void>((r) => setTimeout(r, ADDR_RESOLVE_POLL_MS))
+          // 1. Try the wagmi address ref (updated on every render)
+          const wagmiAddr = String(addressRef.current || "").trim()
+          if (/^0x[a-fA-F0-9]{40}$/.test(wagmiAddr)) {
+            fromAddress = wagmiAddr
+            break
+          }
+          // 2. Try a direct provider eth_accounts request
+          if (walletConnectConnector) {
+            try {
+              const prov = prefetchedProviderRef.current ?? await getWalletConnectProvider(walletConnectConnector)
+              const accounts = await prov.request({ method: "eth_accounts", params: [] })
+              const provAddr = extractAddressFromConnectResult(accounts)
+              if (/^0x[a-fA-F0-9]{40}$/.test(provAddr)) {
+                fromAddress = provAddr
+                break
+              }
+            } catch {
+              // continue polling
+            }
+          }
+        }
+        setIsResolvingAccountRef.current(false)
+        if (!/^0x[a-fA-F0-9]{40}$/.test(fromAddress)) {
+          throw new Error("Wallet connection could not be completed. Tap Try Again.")
+        }
       }
       console.log("[Base ETH] continue-start", { hasAddress: Boolean(fromAddress) })
       void logBase("continue-start", {
@@ -1876,6 +1917,7 @@ export default function BaseWalletPayment({
     prefetchedTxRequestRef.current = null
     autoResumeAttemptedKeyRef.current = null
     setBaseUsdcV4Status("")
+    setIsResolvingAccount(false)
     clearPendingBaseWalletConnectPayment()
     setHasPendingBaseWcPayment(false)
     execStageRef.current = "idle"
@@ -2426,7 +2468,7 @@ export default function BaseWalletPayment({
   if (execStage === "connecting_wallet" || execStage === "asset_selected") {
     contextMessage = "Opening wallet…"
   } else if (execStage === "wallet_connected" || execStage === "preparing_payment") {
-    contextMessage = "Preparing your payment…"
+    contextMessage = isResolvingAccount ? "Finalizing wallet connection…" : "Preparing payment…"
   } else if (execStage === "authorizing_usdc") {
     contextMessage = "Authorize USDC in your wallet"
   } else if (execStage === "usdc_authorized") {
