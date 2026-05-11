@@ -2488,9 +2488,7 @@ export default function BaseWalletPayment({
               selectedAsset,
             })
           }
-          if (fromAddress) {
-            await continueBasePayment(fromAddress)
-          }
+          await continueBasePayment(fromAddress)
         } else {
           let fromAddress = ""
           try {
