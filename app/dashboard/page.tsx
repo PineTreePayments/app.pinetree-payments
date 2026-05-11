@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 import { AUTO_POLLING_ENABLED } from "@/lib/utils/polling"
 import StatusBadge from "@/components/ui/StatusBadge"
+import { formatTransactionReference } from "./transactionReference"
 
 import {
   LineChart,
@@ -30,14 +31,17 @@ type DashboardOverviewResponse = {
 }
 
 type PaymentSummary = {
+  id?: string | null
   gross_amount?: number | string | null
   status?: string | null
   currency?: string | null
+  provider_reference?: string | null
   created_at?: string | null
 }
 
 type RecentTxRow = {
   id: string
+  payment_id?: string | null
   status: string
   provider?: string | null
   provider_transaction_id?: string | null
@@ -327,7 +331,7 @@ export default function DashboardPage() {
 
               <thead className="text-left text-gray-500 border-b">
                 <tr>
-                  <th className="py-2">Transaction</th>
+                  <th className="py-2">Reference</th>
                   <th className="py-2">Amount</th>
                   <th className="py-2">Network</th>
                   <th className="py-2">Status</th>
@@ -353,7 +357,7 @@ export default function DashboardPage() {
                     <tr key={tx.id} className="border-b last:border-none">
 
                       <td className="py-3 font-mono text-xs text-gray-700">
-                        {tx.id.slice(0,12)}...
+                        {formatTransactionReference(tx)}
                       </td>
 
                       <td className="py-3 text-gray-800 font-medium">

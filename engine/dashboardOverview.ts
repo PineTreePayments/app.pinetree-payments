@@ -4,14 +4,17 @@ import { getWalletOverviewEngine } from "./walletOverview"
 const db = supabaseAdmin || supabase
 
 type PaymentSummary = {
+  id?: string | null
   gross_amount?: number | string | null
   currency?: string | null
   status?: string | null
+  provider_reference?: string | null
   created_at?: string | null
 }
 
 type TransactionRow = {
   id: string
+  payment_id?: string | null
   status: string
   provider?: string | null
   provider_transaction_id?: string | null
@@ -38,16 +41,19 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
     .from("transactions")
     .select(`
       id,
+      payment_id,
       status,
       provider,
       provider_transaction_id,
       network,
       created_at,
       payments (
+        id,
         created_at,
         gross_amount,
         currency,
-        status
+        status,
+        provider_reference
       )
     `)
     .eq("merchant_id", merchantId)

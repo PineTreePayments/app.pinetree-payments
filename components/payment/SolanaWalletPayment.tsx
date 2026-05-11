@@ -578,9 +578,9 @@ export default function SolanaWalletPayment({
                 }`}
               >
                 <span className="flex flex-col items-center gap-2">
-                  <span className="flex h-14 w-14 items-center justify-center rounded-[18px] bg-white shadow-[0_12px_28px_rgba(0,0,0,0.28)] ring-1 ring-white/15 transition group-hover:scale-[1.03]">
+                  <span className="flex h-14 w-14 items-center justify-center rounded-[18px] bg-[#0f172a] shadow-[0_12px_28px_rgba(0,0,0,0.28)] ring-1 ring-white/15 transition group-hover:scale-[1.03]">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={iconPath} alt="" className="h-full w-full rounded-[18px] object-contain p-1" />
+                    <img src={iconPath} alt="" className="h-full w-full rounded-[18px] object-contain p-1.5" />
                   </span>
                   <span className="line-clamp-2 min-h-[34px] text-sm font-semibold leading-tight text-white">
                     {row.name}

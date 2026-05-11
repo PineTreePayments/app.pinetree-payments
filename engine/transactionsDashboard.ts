@@ -3,16 +3,19 @@ import { supabaseAdmin, supabase } from "@/database"
 const db = supabaseAdmin || supabase
 
 type PaymentRow = {
+  id?: string | null
   created_at: string
   gross_amount: number
   merchant_amount: number
   pinetree_fee: number
   currency: string
   status: string
+  provider_reference?: string | null
 }
 
 type TransactionRow = {
   id: string
+  payment_id?: string | null
   provider: string
   status: string
   provider_transaction_id: string
@@ -123,6 +126,7 @@ export async function getTransactionsDashboardEngine(merchantId: string): Promis
     .from("transactions")
     .select(`
       id,
+      payment_id,
       provider,
       status,
       provider_transaction_id,
@@ -131,12 +135,14 @@ export async function getTransactionsDashboardEngine(merchantId: string): Promis
       total_amount,
       created_at,
       payments (
+        id,
         created_at,
         gross_amount,
         merchant_amount,
         pinetree_fee,
         currency,
-        status
+        status,
+        provider_reference
       )
     `)
     .eq("merchant_id", merchantId)

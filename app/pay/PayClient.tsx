@@ -4,11 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { createBrowserClient } from "@supabase/ssr"
 import { ALLOWED_ASSETS, getAvailableAssetsFromValues } from "@/engine/providerMappings"
-import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 import Button from "@/components/ui/Button"
 import Card from "@/components/ui/Card"
 import PageContainer from "@/components/ui/PageContainer"
-import StatusBadge from "@/components/ui/StatusBadge"
 import BaseWalletPayment from "@/components/payment/BaseWalletPayment"
 import SolanaWalletPayment from "@/components/payment/SolanaWalletPayment"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
@@ -1072,22 +1070,17 @@ export default function PayClient() {
   }
 
   if (isIntentMode) {
-    const displayStatus = getPaymentDisplayStatus(
-      normalizedPaymentStatus,
-      new Date().toISOString()
-    )
-
     const amountSummary = (
-      <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm text-gray-800">
+      <div className="rounded-2xl border border-[#0052FF]/10 bg-gradient-to-br from-white via-[#f8fbff] to-[#edf5ff] p-4 text-sm text-gray-800 shadow-sm shadow-[#0052FF]/5">
         <div className="flex items-center justify-between">
           <span className="text-gray-600">Subtotal</span>
           <span className="font-semibold">{formatUsd(Number(intentPayload?.amount || 0))}</span>
         </div>
-        <div className="flex items-center justify-between">
+        <div className="mt-2 flex items-center justify-between">
           <span className="text-gray-600">PineTree Service Fee</span>
           <span className="font-semibold">{formatUsd(Number(intentPayload?.pinetreeFee || 0))}</span>
         </div>
-        <div className="flex items-center justify-between border-t border-gray-200 pt-2">
+        <div className="mt-3 flex items-center justify-between border-t border-[#0052FF]/10 pt-3">
           <span className="font-semibold text-gray-900">Total</span>
           <span className="font-bold text-lg text-gray-900">{formatUsd(displayAmount)}</span>
         </div>
@@ -1106,18 +1099,12 @@ export default function PayClient() {
 
           {amountSummary}
 
-          {!(baseExecutionActive || solanaExecutionActive) && (
-            <div className="flex justify-center">
-              <StatusBadge label={displayStatus.label} classes={`${displayStatus.classes} px-3 py-1.5 text-sm`} />
-            </div>
-          )}
-
           <div className="space-y-3" ref={intentCardsRef}>
             {!(baseExecutionActive || solanaExecutionActive) && (
               <p className="text-xs uppercase tracking-widest text-gray-500">Select an asset to continue:</p>
             )}
 
-            <div className="space-y-2">
+            <div className="space-y-3">
               {getCheckoutAssetOptions(intentPayload?.availableNetworks || []).map((asset) => {
                 const isActive = selectedAssetId === asset.id
 
@@ -1130,7 +1117,9 @@ export default function PayClient() {
                     className={
                       (baseExecutionActive || solanaExecutionActive) && isActive && (asset.network === "base" || asset.network === "solana")
                         ? "overflow-visible rounded-3xl bg-transparent"
-                        : "overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm"
+                        : isActive
+                          ? "overflow-hidden rounded-3xl border border-[#0052FF]/35 bg-gradient-to-br from-white via-[#f7fbff] to-[#eaf3ff] shadow-[0_18px_44px_rgba(0,82,255,0.14)] ring-1 ring-[#0052FF]/10"
+                          : "overflow-hidden rounded-3xl border border-[#0052FF]/15 bg-gradient-to-br from-white via-[#f8fbff] to-[#eef6ff] shadow-[0_12px_30px_rgba(15,23,42,0.07)] ring-1 ring-white/80 transition-all hover:-translate-y-0.5 hover:border-[#0052FF]/30 hover:shadow-[0_18px_40px_rgba(0,82,255,0.12)]"
                     }
                   >
                     {/* Asset selector button — hidden once execution starts */}
@@ -1141,28 +1130,41 @@ export default function PayClient() {
                           selectAsset(asset.id)
                         }}
                         disabled={asset.disabled}
-                        className={`w-full px-4 py-4 text-left transition-all ${
+                        className={`group flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition-all ${
                           asset.disabled
-                            ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                            ? "cursor-not-allowed bg-gray-100 text-gray-400"
                             : isActive
-                              ? "bg-blue-50 shadow-inner"
-                              : "bg-white hover:bg-gray-50"
+                              ? "bg-[#0052FF]/5"
+                              : "bg-white/0 hover:bg-white/45"
                         }`}
                       >
-                        <span className="font-medium text-gray-900">Pay with {asset.label}</span>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {asset.disabled
-                            ? asset.disabledCopy
+                        <span className="min-w-0">
+                          <span className="block font-semibold text-gray-950">Pay with {asset.label}</span>
+                          <span className={`mt-1 block text-xs ${
+                            asset.disabled ? "text-gray-400" : isActive ? "text-[#0052FF]" : "text-gray-500"
+                          }`}>
+                            {asset.disabled
+                              ? asset.disabledCopy
+                              : isActive
+                                ? "Choose a wallet below"
+                                : "Tap to reveal payment options"}
+                          </span>
+                        </span>
+                        <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-2xl border transition-all ${
+                          asset.disabled
+                            ? "border-gray-200 bg-gray-50 text-gray-300"
                             : isActive
-                              ? "Choose a wallet below"
-                              : "Tap to reveal payment options"}
-                        </p>
+                              ? "border-[#0052FF]/25 bg-[#0052FF] text-white shadow-sm shadow-[#0052FF]/25"
+                              : "border-[#0052FF]/15 bg-white/75 text-[#0052FF] shadow-sm group-hover:border-[#0052FF]/30 group-hover:bg-[#0052FF]/8"
+                        }`}>
+                          <span className="text-lg leading-none">{isActive ? "-" : "+"}</span>
+                        </span>
                       </button>
                     )}
 
                     {/* Payment UI — always mounted when active so state is never lost */}
                     {isActive ? (
-                      <div className={`${baseExecutionActive || solanaExecutionActive ? "p-0 bg-transparent" : "px-4 py-4 border-t border-gray-200 bg-white"} space-y-4`}>
+                      <div className={`${baseExecutionActive || solanaExecutionActive ? "p-0 bg-transparent" : "border-t border-[#0052FF]/10 bg-white/70 px-4 py-4 shadow-inner shadow-[#0052FF]/5"} space-y-4`}>
 
                         {/* ── Shift4: hosted checkout redirect ──────────── */}
                         {asset.network === "shift4" ? (

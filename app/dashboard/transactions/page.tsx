@@ -1,10 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 import StatusBadge from "@/components/ui/StatusBadge"
+import { formatTransactionReference } from "../transactionReference"
 
 import {
   ResponsiveContainer,
@@ -18,16 +19,19 @@ import {
 } from "recharts"
 
 type Payment = {
+  id?: string | null
   created_at: string
   gross_amount: number
   merchant_amount: number
   pinetree_fee: number
   currency: string
   status: string
+  provider_reference?: string | null
 }
 
 type Transaction = {
   id: string
+  payment_id?: string | null
   provider: string
   status: string
   provider_transaction_id: string
@@ -83,6 +87,7 @@ function formatChicagoDateTime(value: string | null | undefined) {
 }
 
 export default function TransactionsPage() {
+  const tableRef = useRef<HTMLDivElement | null>(null)
   const [transactions, setTransactions] = useState<Transaction[]>([])
 
   const [todayVolume, setTodayVolume] = useState(0)
@@ -91,6 +96,7 @@ export default function TransactionsPage() {
 
   const [walletFilter, setWalletFilter] = useState("all")
   const [networkFilter, setNetworkFilter] = useState("all")
+  const [channelFilter, setChannelFilter] = useState("all")
 
   const [showChart, setShowChart] = useState(false)
   const [chartRange, setChartRange] = useState("24h")
@@ -104,8 +110,8 @@ export default function TransactionsPage() {
   const [topProvider, setTopProvider] = useState("-")
   const [topNetwork, setTopNetwork] = useState("-")
 
-  const [posPercent, setPosPercent] = useState(0)
-  const [onlinePercent, setOnlinePercent] = useState(0)
+  const [posTransactions, setPosTransactions] = useState(0)
+  const [onlineTransactions, setOnlineTransactions] = useState(0)
   const [aiInsight, setAiInsight] = useState("No insights yet.")
 
   const callTransactionsApi = useCallback(async (method: "GET" | "POST", body?: unknown) => {
@@ -207,12 +213,8 @@ export default function TransactionsPage() {
     setTopProvider(providerName(topP))
     setTopNetwork(networkName(topN))
 
-    const pos = channelMap["pos"] || 0
-    const online = channelMap["online"] || 0
-    const total = pos + online
-
-    setPosPercent(total > 0 ? Math.round((pos / total) * 100) : 0)
-    setOnlinePercent(total > 0 ? Math.round((online / total) * 100) : 0)
+    setPosTransactions(channelMap["pos"] || 0)
+    setOnlineTransactions(channelMap["online"] || 0)
 
     if (topP === "-" || topN === "-") {
       setAiInsight("No insights yet.")
@@ -241,12 +243,12 @@ export default function TransactionsPage() {
     }
   }, [callTransactionsApi, calculateInsights])
 
-  const loadChartData = useCallback(async (range: string) => {
+  const loadChartData = useCallback(async (range: string, mode = chartMode) => {
     try {
       const payload = (await callTransactionsApi("POST", {
         action: "chart",
         range,
-        mode: chartMode
+        mode
       })) as TransactionsChartResponse
 
       setChartData(payload.chartData || [])
@@ -272,8 +274,20 @@ export default function TransactionsPage() {
   const filteredTransactions = transactions.filter((tx) => {
     if (walletFilter !== "all" && tx.provider !== walletFilter) return false
     if (networkFilter !== "all" && tx.network !== networkFilter) return false
+    if (channelFilter === "pos" && tx.channel !== "pos" && tx.provider !== "cash") return false
+    if (channelFilter === "online" && tx.channel !== "online") return false
     return true
   })
+
+  const showChannelTransactions = useCallback((mode: "pos" | "online") => {
+    setChartMode(mode)
+    setChannelFilter(mode)
+    setWalletFilter("all")
+    setNetworkFilter("all")
+    setShowChart(true)
+    tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    void loadChartData(chartRange, mode)
+  }, [chartRange, loadChartData])
 
   return (
     <div className="space-y-6">
@@ -290,7 +304,7 @@ export default function TransactionsPage() {
           onClick={() => {
             setChartMode("all")
             setShowChart(true)
-            void loadChartData(chartRange)
+            void loadChartData(chartRange, "all")
           }}
         />
 
@@ -315,23 +329,15 @@ export default function TransactionsPage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
         <InteractiveAnalyticsCard
-          title="POS Transaction Share"
-          value={`${posPercent}%`}
-          onClick={() => {
-            setChartMode("pos")
-            setShowChart(true)
-            void loadChartData(chartRange)
-          }}
+          title="POS Transactions"
+          value={posTransactions.toString()}
+          onClick={() => showChannelTransactions("pos")}
         />
 
         <InteractiveAnalyticsCard
-          title="Online Transaction Share"
-          value={`${onlinePercent}%`}
-          onClick={() => {
-            setChartMode("online")
-            setShowChart(true)
-            void loadChartData(chartRange)
-          }}
+          title="Online Transactions"
+          value={onlineTransactions.toString()}
+          onClick={() => showChannelTransactions("online")}
         />
       </div>
 
@@ -373,11 +379,21 @@ export default function TransactionsPage() {
           <option value="base">Base</option>
           <option value="ethereum">Ethereum</option>
         </select>
+
+        <select
+          className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:border-blue-400"
+          value={channelFilter}
+          onChange={(e) => setChannelFilter(e.target.value)}
+        >
+          <option value="all">All Channels</option>
+          <option value="pos">POS</option>
+          <option value="online">Online</option>
+        </select>
       </div>
 
       {/* TABLE */}
 
-      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-x-auto">
+      <div ref={tableRef} className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-x-auto">
         <table className="w-full min-w-[860px]">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr className="text-left text-sm text-gray-700">
@@ -438,7 +454,7 @@ export default function TransactionsPage() {
                   </td>
 
                   <td className="px-6 py-4 text-gray-700 font-mono text-xs">
-                    {tx.provider_transaction_id || "—"}
+                    {formatTransactionReference(tx)}
                   </td>
                 </tr>
               )
@@ -475,7 +491,7 @@ export default function TransactionsPage() {
                   key={r}
                   onClick={() => {
                     setChartRange(r)
-                    void loadChartData(r)
+                    void loadChartData(r, chartMode)
                   }}
                   className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition ${chartRange === r ? "bg-[#0052FF] text-white border-[#0052FF]" : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"}`}
                 >
