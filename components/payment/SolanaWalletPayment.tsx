@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import {
@@ -49,7 +49,46 @@ type SolanaPayTransactionResponse = {
   error?: string
 }
 
+type WalletCatalogItem = {
+  id: string
+  name: string
+  aliases?: string[]
+}
+
+type WalletPickerRow = WalletCatalogItem & {
+  detectedWallet?: DetectedSolanaWallet
+  available: boolean
+}
+
 const TERMINAL_PAYMENT_STATUSES = new Set(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "CANCELED"])
+
+const POPULAR_WALLETS: WalletCatalogItem[] = [
+  { id: "phantom", name: "Phantom" },
+  { id: "solflare", name: "Solflare" },
+  { id: "backpack", name: "Backpack" },
+  { id: "glow", name: "Glow" },
+  { id: "trust-wallet", name: "Trust Wallet", aliases: ["trust"] },
+  { id: "coinbase-wallet", name: "Coinbase Wallet", aliases: ["coinbase"] },
+  { id: "okx-wallet", name: "OKX Wallet", aliases: ["okx"] },
+]
+
+const MORE_WALLETS: WalletCatalogItem[] = [
+  { id: "exodus", name: "Exodus" },
+  { id: "ledger", name: "Ledger" },
+  { id: "mathwallet", name: "MathWallet", aliases: ["math wallet"] },
+  { id: "tokenpocket", name: "TokenPocket", aliases: ["token pocket"] },
+  { id: "torus", name: "Torus" },
+  { id: "clover", name: "Clover" },
+  { id: "coin98", name: "Coin98" },
+  { id: "safepal", name: "SafePal", aliases: ["safe pal"] },
+  { id: "bitget-wallet", name: "Bitget Wallet", aliases: ["bitget"] },
+  { id: "brave-wallet", name: "Brave Wallet", aliases: ["brave"] },
+  { id: "nightly", name: "Nightly" },
+  { id: "ultimate", name: "Ultimate" },
+  { id: "salmon", name: "Salmon" },
+  { id: "slope", name: "Slope" },
+  { id: "sollet", name: "Sollet" },
+]
 
 const STAGE_NUM: Record<SolanaExecutionStage, number> = {
   idle: 0,
@@ -87,6 +126,20 @@ function getStepStatus(currentStage: SolanaExecutionStage, doneAt: SolanaExecuti
   return "upcoming"
 }
 
+function normalizeWalletName(value: string): string {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "")
+}
+
+function walletMatchesCatalog(wallet: DetectedSolanaWallet, item: WalletCatalogItem): boolean {
+  const detected = normalizeWalletName(wallet.name)
+  const names = [item.name, ...(item.aliases || [])].map(normalizeWalletName)
+  return names.some((name) => detected === name || detected.includes(name) || name.includes(detected))
+}
+
+function walletInitial(name: string): string {
+  return String(name || "S").trim().slice(0, 1).toUpperCase() || "S"
+}
+
 export default function SolanaWalletPayment({
   intentId,
   selectedAsset = "SOL",
@@ -103,6 +156,9 @@ export default function SolanaWalletPayment({
   const [wallets, setWallets] = useState<DetectedSolanaWallet[]>([])
   const [selectedWalletId, setSelectedWalletId] = useState("")
   const [activeWalletName, setActiveWalletName] = useState("")
+  const [walletPickerOpen, setWalletPickerOpen] = useState(false)
+  const [walletSearch, setWalletSearch] = useState("")
+  const [pendingWalletId, setPendingWalletId] = useState("")
   const [execStage, setExecStage] = useState<SolanaExecutionStage>("idle")
   const [error, setError] = useState(initialError)
   const [paymentData, setPaymentData] = useState<PaymentData | null>(() => {
@@ -117,7 +173,7 @@ export default function SolanaWalletPayment({
     setWallets(detected)
     setSelectedWalletId((current) => {
       if (current && detected.some((wallet) => wallet.id === current)) return current
-      return detected[0]?.id || ""
+      return ""
     })
   }, [])
 
@@ -135,6 +191,48 @@ export default function SolanaWalletPayment({
   useEffect(() => {
     if (terminalStatus === "CONFIRMED") setExecStage("confirmed")
   }, [terminalStatus])
+
+  const walletCatalog = useMemo(() => {
+    const catalogIds = new Set([...POPULAR_WALLETS, ...MORE_WALLETS].map((wallet) => wallet.id))
+    const extraDetectedWallets = wallets
+      .filter((wallet) => ![...POPULAR_WALLETS, ...MORE_WALLETS].some((item) => walletMatchesCatalog(wallet, item)))
+      .map((wallet): WalletCatalogItem => ({
+        id: `detected-${wallet.id}`,
+        name: wallet.name,
+      }))
+
+    return {
+      popular: POPULAR_WALLETS,
+      more: [
+        ...MORE_WALLETS,
+        ...extraDetectedWallets.filter((wallet) => !catalogIds.has(wallet.id)),
+      ],
+    }
+  }, [wallets])
+
+  const walletPickerSections = useMemo(() => {
+    const query = normalizeWalletName(walletSearch)
+    const toRows = (items: WalletCatalogItem[]): WalletPickerRow[] => items
+      .map((item) => {
+        const detectedWallet = wallets.find((wallet) => walletMatchesCatalog(wallet, item))
+        return {
+          ...item,
+          detectedWallet,
+          available: Boolean(detectedWallet),
+        }
+      })
+      .filter((item) => {
+        if (!query) return true
+        return [item.name, ...(item.aliases || [])]
+          .map(normalizeWalletName)
+          .some((name) => name.includes(query) || query.includes(name))
+      })
+
+    return {
+      popular: toRows(walletCatalog.popular),
+      more: toRows(walletCatalog.more),
+    }
+  }, [walletCatalog, wallets, walletSearch])
 
   const getPaymentData = useCallback(async (): Promise<PaymentData> => {
     if (paymentData?.paymentId) return paymentData
@@ -213,6 +311,8 @@ export default function SolanaWalletPayment({
     setError("")
     setSelectedWalletId(wallet.id)
     setActiveWalletName(wallet.name)
+    setPendingWalletId(wallet.id)
+    setWalletPickerOpen(false)
     onExecutionStarted?.()
 
     try {
@@ -234,6 +334,8 @@ export default function SolanaWalletPayment({
       setError(message)
       setExecStage("retryable_error")
       onError?.(message)
+    } finally {
+      setPendingWalletId("")
     }
   }, [getPaymentData, onError, onExecutionStarted, onPaymentCreated])
 
@@ -286,6 +388,67 @@ export default function SolanaWalletPayment({
           {subtext && status === "active" ? (
             <p className="text-xs text-gray-600 mt-1 leading-snug">{subtext}</p>
           ) : null}
+        </div>
+      </div>
+    )
+  }
+
+  function renderWalletPickerSection(title: string, rows: WalletPickerRow[]) {
+    if (rows.length === 0) return null
+
+    return (
+      <div className="space-y-2">
+        <p className="px-1 text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+          {title}
+        </p>
+        <div className="space-y-2">
+          {rows.map((row) => {
+            const available = row.available && row.detectedWallet
+            const active = row.detectedWallet?.id === selectedWalletId || row.detectedWallet?.id === pendingWalletId
+            return (
+              <button
+                key={row.id}
+                type="button"
+                disabled={!available || Boolean(pendingWalletId)}
+                onClick={() => {
+                  if (!row.detectedWallet) return
+                  void startPayment(row.detectedWallet)
+                }}
+                className={`w-full rounded-2xl border px-3.5 py-3 text-left transition-all ${
+                  available
+                    ? active
+                      ? "border-[#0052FF]/35 bg-[#0052FF]/5 shadow-sm shadow-[#0052FF]/10"
+                      : "border-gray-200 bg-white hover:border-[#0052FF]/25 hover:bg-[#0052FF]/5"
+                    : "border-gray-100 bg-gray-50/80 opacity-70"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl text-sm font-bold ${
+                    available
+                      ? "bg-gradient-to-br from-[#0052FF] to-[#0039B8] text-white shadow-sm shadow-[#0052FF]/20"
+                      : "bg-gray-200 text-gray-400"
+                  }`}>
+                    {walletInitial(row.name)}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className={`block truncate text-sm font-semibold ${available ? "text-gray-900" : "text-gray-400"}`}>
+                      {row.name}
+                    </span>
+                    <span className={`mt-0.5 block text-xs ${available ? "text-green-600" : "text-gray-400"}`}>
+                      {available ? "Available" : "Not detected"}
+                    </span>
+                  </span>
+                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                    available
+                      ? "bg-[#0052FF]/10 text-[#0052FF]"
+                      : "bg-gray-100 text-gray-400"
+                  }`}>
+                    {pendingWalletId === row.detectedWallet?.id ? "Opening" : available ? "Connect" : "Unavailable"}
+                  </span>
+                </div>
+              </button>
+            )
+          })}
         </div>
       </div>
     )
@@ -378,56 +541,88 @@ export default function SolanaWalletPayment({
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#EAF2FF] via-white to-[#DCEBFF] p-[1px] shadow-sm shadow-[#0052FF]/10">
         <div className="pointer-events-none absolute -right-16 -top-20 h-40 w-40 rounded-full bg-[#0052FF]/15 blur-3xl" />
         <div className="relative bg-white/95 rounded-3xl overflow-hidden ring-1 ring-white/80">
-        <div className="px-4 pt-4 pb-3 space-y-2.5">
-          {renderStep("Wallet selection", "active", wallets.length ? "Choose an installed Solana wallet" : "No installed Solana wallet detected")}
-          {renderStep("Confirm payment", "upcoming")}
-          {renderStep("Network confirmation", "upcoming")}
-        </div>
-
-        <div className="mx-4 mb-4 space-y-2">
-          {wallets.map((wallet) => (
-            <div
-              key={wallet.id}
-              className={`w-full rounded-2xl border px-3.5 py-3 text-left transition-all ${
-                selectedWalletId === wallet.id
-                  ? "border-[#0052FF]/30 bg-[#0052FF]/5"
-                  : "border-gray-200 bg-white hover:bg-gray-50"
-              }`}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 truncate">{wallet.name}</p>
-                  <p className="text-xs text-gray-500">
-                    {wallet.source === "wallet-standard" ? "Wallet Standard detected" : "Installed wallet detected"}
-                  </p>
-                </div>
-                <span className={`h-3 w-3 rounded-full border ${
-                  selectedWalletId === wallet.id ? "border-[#0052FF] bg-[#0052FF]" : "border-gray-300"
-                }`} />
-              </div>
-              <Button
-                fullWidth
-                className="mt-3"
-                onClick={() => void startPayment(wallet)}
-              >
-                Pay with this wallet
-              </Button>
-            </div>
-          ))}
-
-          {wallets.length === 0 ? (
-            <div className="rounded-2xl bg-gray-50 ring-1 ring-gray-100 px-4 py-3 text-xs text-gray-600 leading-relaxed">
-              No Solana wallet detected. Open this checkout on a device with Phantom, Solflare, Backpack, or another Solana wallet installed.
-            </div>
-          ) : null}
-        </div>
+          <div className="px-4 pt-4 pb-3 space-y-2.5">
+            {renderStep("Wallet selection", "active", wallets.length ? "Choose an installed Solana wallet" : "No installed Solana wallet detected")}
+            {renderStep("Confirm payment", "upcoming")}
+            {renderStep("Network confirmation", "upcoming")}
+          </div>
+          <div className="mx-4 mb-4 rounded-2xl bg-[#0052FF]/5 px-4 py-3 ring-1 ring-[#0052FF]/15">
+            <p className="text-sm font-semibold text-[#0052FF]">
+              Choose your Solana wallet
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-gray-600">
+              PineTree will prepare the payment only after you select a wallet.
+            </p>
+          </div>
         </div>
       </div>
 
-      {wallets.length === 0 ? (
-        <Button fullWidth variant="secondary" onClick={refreshWallets}>
-          Refresh Wallets
-        </Button>
+      <Button
+        fullWidth
+        onClick={() => {
+          refreshWallets()
+          setWalletSearch("")
+          setWalletPickerOpen(true)
+        }}
+      >
+        Pay with {selectedAsset} on Solana
+      </Button>
+
+      {walletPickerOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-gray-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-6"
+          onClick={() => setWalletPickerOpen(false)}
+        >
+          <div
+            className="max-h-[88vh] w-full overflow-hidden rounded-t-3xl bg-white shadow-2xl shadow-gray-950/20 ring-1 ring-gray-200 sm:max-w-md sm:rounded-3xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="border-b border-gray-100 bg-gradient-to-br from-[#F4F8FF] via-white to-[#E8F1FF] px-5 pb-4 pt-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-500">
+                    Solana Wallets
+                  </p>
+                  <h2 className="mt-1 text-lg font-bold text-gray-900">
+                    Choose a wallet
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWalletPickerOpen(false)}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-gray-500 shadow-sm ring-1 ring-gray-200 transition hover:bg-gray-50 hover:text-gray-900"
+                  aria-label="Close wallet picker"
+                >
+                  x
+                </button>
+              </div>
+              <div className="mt-4">
+                <input
+                  value={walletSearch}
+                  onChange={(event) => setWalletSearch(event.target.value)}
+                  placeholder="Search wallets"
+                  className="h-11 w-full rounded-2xl border border-gray-200 bg-white px-4 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-[#0052FF]/40 focus:ring-4 focus:ring-[#0052FF]/10"
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            <div className="max-h-[62vh] space-y-5 overflow-y-auto px-5 py-4">
+              {wallets.length === 0 ? (
+                <div className="rounded-2xl bg-gray-50 px-4 py-3 text-xs leading-relaxed text-gray-600 ring-1 ring-gray-100">
+                  No Solana wallet detected. Open this checkout on a device with Phantom, Solflare, Backpack, or another Solana wallet installed.
+                </div>
+              ) : null}
+              {renderWalletPickerSection("Popular", walletPickerSections.popular)}
+              {renderWalletPickerSection("More wallets", walletPickerSections.more)}
+              {walletPickerSections.popular.length === 0 && walletPickerSections.more.length === 0 ? (
+                <div className="rounded-2xl bg-gray-50 px-4 py-3 text-sm text-gray-500 ring-1 ring-gray-100">
+                  No wallets match your search.
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   )
