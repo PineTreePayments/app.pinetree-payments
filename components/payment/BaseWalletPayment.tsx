@@ -138,6 +138,8 @@ type Eip712TypedData = {
 const BASE_WC_PENDING_KEY = "pinetree_base_wc_pending"
 const BASE_EXEC_STORAGE_PREFIX = "pinetree_base_exec_"
 const BASE_WC_PENDING_TTL_MS = 10 * 60 * 1000
+const BASE_WC_AUTO_RESUME_RETRY_MS = 500
+const BASE_WC_AUTO_RESUME_RETRY_TIMEOUT_MS = 10_000
 const BASE_ETH_TX_REQUEST_TIMEOUT_MS = 90_000
 const BASE_ETH_TX_TIMEOUT_MESSAGE = "Transaction approval was not completed. Tap Pay to try again."
 const BASE_USDC_TX_REQUEST_TIMEOUT_MS = 90_000
@@ -982,7 +984,26 @@ export default function BaseWalletPayment({
       setLocalError("WalletConnect is not configured.")
       return false
     }
-    const fromAddress = String(addressRef.current || "").trim()
+    let provider: WalletConnectProvider | null = null
+    let fromAddress = String(addressRef.current || "").trim()
+    if (!/^0x[a-fA-F0-9]{40}$/.test(fromAddress) && walletConnectConnector) {
+      try {
+        provider = await getWalletConnectProvider(walletConnectConnector)
+        const accounts = await provider.request({ method: "eth_accounts", params: [] })
+        const providerAddress = extractAddressFromConnectResult(accounts)
+        if (/^0x[a-fA-F0-9]{40}$/.test(providerAddress)) {
+          fromAddress = providerAddress
+          addressRef.current = providerAddress
+        }
+      } catch (providerErr) {
+        await logBase("pending-wallet-action-address-resolve-error", {
+          source,
+          kind,
+          paymentId,
+          ...extractErrorDetails(providerErr),
+        })
+      }
+    }
     if (!/^0x[a-fA-F0-9]{40}$/.test(fromAddress)) {
       setLocalError("Wallet disconnected. Reconnect to continue.")
       setPendingWalletActionReady(true)
@@ -1015,10 +1036,9 @@ export default function BaseWalletPayment({
           : "Confirm payment in your wallet..."
     )
 
-    let provider: WalletConnectProvider
     let peerName: string | null = null
     try {
-      provider = await getWalletConnectProvider(walletConnectConnector)
+      provider = provider ?? await getWalletConnectProvider(walletConnectConnector)
       peerName = getWalletConnectPeerName(provider)
     } catch (providerErr) {
       pendingActionInFlightRef.current = false
@@ -2544,30 +2564,28 @@ export default function BaseWalletPayment({
     if (!pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)) return false
     if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return false
     if (!walletConnectConnector) return false
-    if (!isConnected || !address) {
-      await logBase("auto-resume-provider-check-skipped", {
-        source,
-        reason: !isConnected ? "not-connected" : "no-address",
-      })
-      return false
-    }
-    if (!connector || !isWalletConnectConnector(connector)) {
-      await logBase("auto-resume-provider-check-skipped", {
-        source,
-        reason: "active-connector-not-walletconnect",
-      })
-      return false
-    }
     try {
       const provider = await getWalletConnectProvider(walletConnectConnector)
-      const providerAddress = String(address || "").trim()
+      const accounts = await provider.request({ method: "eth_accounts", params: [] })
+      const providerAddress = extractAddressFromConnectResult(accounts) || String(address || "").trim()
+      let providerChainId: number | null = null
+      try {
+        const chainIdResult = await provider.request({ method: "eth_chainId", params: [] })
+        providerChainId = Number(BigInt(String(chainIdResult || "0x0")))
+      } catch {
+        providerChainId = null
+      }
       await logBase("auto-resume-provider-check", {
         source,
         hasProviderAddress: Boolean(providerAddress),
         hasProvider: Boolean(provider),
-        chainId: chain?.id || connectedChainIdRef.current || null,
+        wagmiConnected: isConnected,
+        activeConnectorId: connector?.id || null,
+        chainId: providerChainId || chain?.id || connectedChainIdRef.current || null,
       })
       if (!providerAddress) return false
+      if (providerChainId) connectedChainIdRef.current = providerChainId
+      addressRef.current = providerAddress
       if (!markAutomaticResumeAttempt(source, providerAddress)) return false
       stopAutoResumeRetry()
       void continueBasePayment(providerAddress)
@@ -2656,6 +2674,29 @@ export default function BaseWalletPayment({
     if (selectedAsset !== "ETH" && selectedAsset !== "USDC") return
     if (!pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)) return
     if (isSendingBaseTxRef.current || paymentSubmittedRef.current) return
+    if (pendingActionKindRef.current && !pendingActionInFlightRef.current) {
+      const currentAddress = String(address || addressRef.current || "").trim()
+      if (/^0x[a-fA-F0-9]{40}$/.test(currentAddress)) {
+        addressRef.current = currentAddress
+        stopAutoResumeRetry()
+        void logBase("pending-wallet-action-auto-dispatch", { source, kind: pendingActionKindRef.current })
+        void dispatchPendingWalletActionRef.current?.(source)
+        return
+      }
+      if (!autoResumeRetryRef.current) {
+        autoResumeRetryStartedAtRef.current = Date.now()
+        autoResumeRetryRef.current = setInterval(() => {
+          if (Date.now() - autoResumeRetryStartedAtRef.current > BASE_WC_AUTO_RESUME_RETRY_TIMEOUT_MS) {
+            void logBase("auto-resume-retry-timeout", { source, pendingAction: pendingActionKindRef.current })
+            stopAutoResumeRetry()
+            return
+          }
+          void dispatchPendingWalletActionRef.current?.(`${source}-retry`)
+        }, BASE_WC_AUTO_RESUME_RETRY_MS)
+      }
+      void dispatchPendingWalletActionRef.current?.(source)
+      return
+    }
     if (activeBasePaymentAttemptRef.current !== null) return
     if (activeBaseUsdcV4PaymentRef.current !== null) return
     if (activeBaseUsdcV5PaymentRef.current !== null) return
@@ -2670,7 +2711,6 @@ export default function BaseWalletPayment({
     }
     if (isConnecting) return
     if (!isConnected || !address || !connector || !isWalletConnectConnector(connector)) {
-      stopAutoResumeRetry()
       void logBase("auto-resume-waiting-for-connected-walletconnect", {
         source,
         isConnected,
@@ -2678,10 +2718,27 @@ export default function BaseWalletPayment({
         activeConnectorId: connector?.id || null,
       })
       refreshPendingState()
+      void resumeFromWalletConnectProvider(source)
+      if (!autoResumeRetryRef.current) {
+        autoResumeRetryStartedAtRef.current = Date.now()
+        autoResumeRetryRef.current = setInterval(() => {
+          if (Date.now() - autoResumeRetryStartedAtRef.current > BASE_WC_AUTO_RESUME_RETRY_TIMEOUT_MS) {
+            void logBase("auto-resume-retry-timeout", { source })
+            stopAutoResumeRetry()
+            return
+          }
+          if (pendingActionKindRef.current && !pendingActionInFlightRef.current) {
+            void dispatchPendingWalletActionRef.current?.(`${source}-retry`)
+            return
+          }
+          void resumeFromWalletConnectProvider(`${source}-retry`)
+        }, BASE_WC_AUTO_RESUME_RETRY_MS)
+      }
       return
     }
+    if (autoResumeRetryRef.current) stopAutoResumeRetry()
     tryResumeBaseWalletConnectPayment(source)
-  }, [address, connector, intentId, isConnected, isConnecting, refreshPendingState, selectedAsset, stopAutoResumeRetry, terminalStatus, tryResumeBaseWalletConnectPayment])
+  }, [address, connector, intentId, isConnected, isConnecting, refreshPendingState, resumeFromWalletConnectProvider, selectedAsset, stopAutoResumeRetry, terminalStatus, tryResumeBaseWalletConnectPayment])
   useEffect(() => {
     refreshPendingState()
   }, [refreshPendingState])
@@ -2721,6 +2778,10 @@ export default function BaseWalletPayment({
   useEffect(() => {
     startBaseWalletConnectAutoResumeRetry("state-change")
   }, [startBaseWalletConnectAutoResumeRetry])
+  useEffect(() => {
+    if (!pendingWalletActionReady || pendingWalletActionInFlight) return
+    startBaseWalletConnectAutoResumeRetry("pending-wallet-action-ready")
+  }, [pendingWalletActionInFlight, pendingWalletActionReady, startBaseWalletConnectAutoResumeRetry])
   useEffect(() => {
     const handleFocus = () => startBaseWalletConnectAutoResumeRetry("focus")
     const handleVisibilityChange = () => startBaseWalletConnectAutoResumeRetry("visibilitychange")
@@ -2788,6 +2849,7 @@ export default function BaseWalletPayment({
       void logBase("auto-resume-provider-event-skipped", {
         reason: "no-address-in-event"
       })
+      void resumeFromWalletConnectProvider("provider-event")
     }
     void getWalletConnectProvider(walletConnectConnector)
       .then((resolvedProvider) => {
