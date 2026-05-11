@@ -115,6 +115,12 @@ type WalletConnectProvider = {
   on?: (event: string, handler: (...args: unknown[]) => void) => void
   removeListener?: (event: string, handler: (...args: unknown[]) => void) => void
 }
+type SettledWalletConnectSession = {
+  provider: WalletConnectProvider
+  address: string
+  chainId: number | null
+  peerName: string | null
+}
 type BaseWalletClient = {
   signTypedData: (args: {
     account: string
@@ -140,6 +146,9 @@ const BASE_EXEC_STORAGE_PREFIX = "pinetree_base_exec_"
 const BASE_WC_PENDING_TTL_MS = 10 * 60 * 1000
 const BASE_WC_AUTO_RESUME_RETRY_MS = 500
 const BASE_WC_AUTO_RESUME_RETRY_TIMEOUT_MS = 10_000
+const BASE_WC_SETTLE_TIMEOUT_MS = 8_000
+const BASE_WC_SETTLE_POLL_MS = 250
+const BASE_WC_POST_ACCOUNT_SETTLE_MS = 250
 const BASE_ETH_TX_REQUEST_TIMEOUT_MS = 90_000
 const BASE_ETH_TX_TIMEOUT_MESSAGE = "Transaction approval was not completed. Tap Pay to try again."
 const BASE_USDC_TX_REQUEST_TIMEOUT_MS = 90_000
@@ -897,6 +906,59 @@ export default function BaseWalletPayment({
     () => connectors.find(isWalletConnectConnector) || null,
     [connectors]
   )
+  const waitForWalletConnectSettlement = useCallback(async (source: string): Promise<SettledWalletConnectSession | null> => {
+    if (!walletConnectConnector) return null
+    const startedAt = Date.now()
+    let lastReason = ""
+
+    while (Date.now() - startedAt <= BASE_WC_SETTLE_TIMEOUT_MS) {
+      if (paymentSubmittedRef.current) return null
+      const activeRequest = activeWalletRequestRef.current
+      if (activeRequest?.pending && activeRequest.kind === "connect") {
+        lastReason = "connection-request-pending"
+      } else {
+        try {
+          const provider = await getWalletConnectProvider(walletConnectConnector)
+          const accounts = await provider.request({ method: "eth_accounts", params: [] })
+          const resolvedAddress = extractAddressFromConnectResult(accounts)
+          let providerChainId: number | null = null
+          try {
+            const chainIdResult = await provider.request({ method: "eth_chainId", params: [] })
+            providerChainId = Number(BigInt(String(chainIdResult || "0x0")))
+          } catch {
+            providerChainId = null
+          }
+
+          if (/^0x[a-fA-F0-9]{40}$/.test(resolvedAddress) && (!providerChainId || providerChainId === base.id)) {
+            await new Promise<void>((resolve) => setTimeout(resolve, BASE_WC_POST_ACCOUNT_SETTLE_MS))
+            addressRef.current = resolvedAddress
+            if (providerChainId) connectedChainIdRef.current = providerChainId
+            await logBase("walletconnect-connection-settled", {
+              source,
+              hasAddress: true,
+              chainId: providerChainId,
+            })
+            return {
+              provider,
+              address: resolvedAddress,
+              chainId: providerChainId,
+              peerName: getWalletConnectPeerName(provider),
+            }
+          }
+
+          lastReason = resolvedAddress ? "chain-not-ready" : "no-provider-account"
+        } catch (error) {
+          lastReason = extractErrorMessage(error) || "provider-unavailable"
+        }
+      }
+
+      await logBase("walletconnect-connection-pending", { source, reason: lastReason })
+      await new Promise<void>((resolve) => setTimeout(resolve, BASE_WC_SETTLE_POLL_MS))
+    }
+
+    await logBase("walletconnect-settle-timeout", { source, reason: lastReason })
+    return null
+  }, [walletConnectConnector])
   const beginWalletRequest = useCallback((request: Omit<ActiveWalletRequest, "startedAt" | "pending">) => {
     activeWalletRequestRef.current = {
       ...request,
@@ -985,31 +1047,20 @@ export default function BaseWalletPayment({
       setLocalError("WalletConnect is not configured.")
       return false
     }
-    let provider: WalletConnectProvider | null = null
-    let fromAddress = String(addressRef.current || "").trim()
-    if (!/^0x[a-fA-F0-9]{40}$/.test(fromAddress) && walletConnectConnector) {
-      try {
-        provider = await getWalletConnectProvider(walletConnectConnector)
-        const accounts = await provider.request({ method: "eth_accounts", params: [] })
-        const providerAddress = extractAddressFromConnectResult(accounts)
-        if (/^0x[a-fA-F0-9]{40}$/.test(providerAddress)) {
-          fromAddress = providerAddress
-          addressRef.current = providerAddress
-        }
-      } catch (providerErr) {
-        await logBase("pending-wallet-action-address-resolve-error", {
-          source,
-          kind,
-          paymentId,
-          ...extractErrorDetails(providerErr),
-        })
-      }
-    }
-    if (!/^0x[a-fA-F0-9]{40}$/.test(fromAddress)) {
+    const settledSession = await waitForWalletConnectSettlement(`pending-action:${source}`)
+    if (!settledSession || !/^0x[a-fA-F0-9]{40}$/.test(settledSession.address)) {
+      await logBase("pending-wallet-action-blocked", {
+        source,
+        kind,
+        paymentId,
+        reason: "connection-not-settled",
+      })
       setLocalError("Wallet disconnected. Reconnect to continue.")
       setPendingWalletActionReady(true)
       return false
     }
+    const provider = settledSession.provider
+    const fromAddress = settledSession.address
     const txRequest = kind === "eth_payment"
       ? pendingEthPaymentTxRef.current
       : kind === "usdc_approve"
@@ -1037,27 +1088,10 @@ export default function BaseWalletPayment({
           : "Confirm payment in your wallet..."
     )
 
-    let peerName: string | null = null
-    try {
-      provider = provider ?? await getWalletConnectProvider(walletConnectConnector)
-      peerName = getWalletConnectPeerName(provider)
-    } catch (providerErr) {
-      pendingActionInFlightRef.current = false
-      setPendingWalletActionInFlight(false)
-      setPendingWalletActionReady(true)
-      setIsOpeningWallet(false)
-      await logBase("pending-wallet-action-provider-error", {
-        source,
-        kind,
-        paymentId,
-        ...extractErrorDetails(providerErr),
-      })
-      setLocalError("Wallet connection was interrupted. Tap Continue in wallet to try again.")
-      return false
-    }
+    const peerName = settledSession.peerName
 
     beginWalletRequest({ kind, walletName: peerName })
-    await logBase("pending-wallet-action-dispatch", { source, kind, paymentId })
+    await logBase("pending-wallet-action-dispatch", { source, kind, paymentId, chainId: settledSession.chainId })
     try {
       const txHash = await sendWalletConnectTransactionWithTimeout({
         provider,
@@ -1185,7 +1219,7 @@ export default function BaseWalletPayment({
       setLocalError("")
       return false
     }
-  }, [beginWalletRequest, clearPendingWalletAction, intentId, onError, onSuccess, preservePendingWalletRequestUi, queuePendingWalletAction, rejectWalletRequest, resolveWalletRequest, walletConnectConnector])
+  }, [beginWalletRequest, clearPendingWalletAction, intentId, onError, onSuccess, preservePendingWalletRequestUi, queuePendingWalletAction, rejectWalletRequest, resolveWalletRequest, waitForWalletConnectSettlement, walletConnectConnector])
   dispatchPendingWalletActionRef.current = dispatchPendingWalletAction
   const resolveTerminalStatusBeforeWalletConnect = useCallback(async (): Promise<string> => {
     if (propTerminalStatus) return propTerminalStatus
@@ -1902,7 +1936,14 @@ export default function BaseWalletPayment({
       if (!pendingPaymentMatches(pending, intentId, selectedAsset)) {
         throw new Error("Base WalletConnect payment session expired. Please try again.")
       }
-      let fromAddress = String(connectedAddress || "").trim()
+      setExecStageRef.current("wallet_connected")
+      setIsResolvingAccountRef.current(true)
+      const settledSession = await waitForWalletConnectSettlement("continue-base-payment")
+      setIsResolvingAccountRef.current(false)
+      if (!settledSession) {
+        throw new Error("Wallet connection is still settling. Please return here after approving the wallet connection.")
+      }
+      let fromAddress = settledSession.address || String(connectedAddress || "").trim()
       if (!/^0x[a-fA-F0-9]{40}$/.test(fromAddress)) {
         // Address not yet available — WalletConnect session may have settled but
         // wagmi / the provider hasn't propagated the account yet. Show a benign
@@ -1946,7 +1987,7 @@ export default function BaseWalletPayment({
       })
       // Skip chain switch if wagmi already reports Base or if the WalletConnect session
       // was just established on Base (isOnBase may lag behind the actual connected chain).
-      const alreadyOnBase = isOnBase || connectedChainIdRef.current === base.id
+      const alreadyOnBase = isOnBase || settledSession.chainId === base.id || connectedChainIdRef.current === base.id
       connectedChainIdRef.current = null
       if (!alreadyOnBase) {
         try {
@@ -1977,8 +2018,8 @@ export default function BaseWalletPayment({
         setBaseUsdcV4Status("Step 2 of 2: Confirm payment...")
         console.log("[BASE USDC CHAIN] payment-request-build-ready", { paymentId: storedPaymentId, via: "resume" })
         void logBase("[BASE USDC CHAIN] payment-request-build-ready", { paymentId: storedPaymentId, via: "resume" })
-        const resumeProvider = await getWalletConnectProvider(walletConnectConnector)
-        const resumePeerName = getWalletConnectPeerName(resumeProvider)
+        const resumeProvider = settledSession.provider
+        const resumePeerName = settledSession.peerName
         console.log("[BASE USDC CHAIN] payment-request-dispatch", { paymentId: storedPaymentId, via: "resume" })
         void logBase("[BASE USDC CHAIN] payment-request-dispatch", { paymentId: storedPaymentId, via: "resume" })
         beginWalletRequest({ kind: "usdc_payment", walletName: resumePeerName })
@@ -2063,7 +2104,7 @@ export default function BaseWalletPayment({
       prefetchedProviderRef.current = null
       console.log("[Base ETH] provider-ready", { prefetched: Boolean(cachedProvider) })
       void logBase("provider-ready", { prefetched: Boolean(cachedProvider) })
-      const walletConnectProvider = cachedProvider ?? await getWalletConnectProvider(walletConnectConnector)
+      const walletConnectProvider = settledSession.provider
       // V4 only when the strategy or URL explicitly says so.
       // Everything else (delegated_eoa_batch, allowance_two_step, allowance_direct,
       // v5_eip3009_relayer, unknown) routes to executeBaseUsdcV5Payment which runs
@@ -2338,7 +2379,7 @@ export default function BaseWalletPayment({
     } finally {
       isSendingBaseTxRef.current = false
     }
-  }, [chain?.id, connector?.id, connector?.name, enforceActivePaymentBeforeWalletConnect, executeBaseUsdcV4Payment, executeBaseUsdcV5Payment, intentId, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, switchChainAsync, walletClient, walletConnectConnector])
+  }, [chain?.id, connector?.id, connector?.name, enforceActivePaymentBeforeWalletConnect, executeBaseUsdcV4Payment, executeBaseUsdcV5Payment, intentId, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, switchChainAsync, waitForWalletConnectSettlement, walletClient, walletConnectConnector])
   const resetBasePaymentAttemptForRetry = useCallback(() => {
     activeBasePaymentAttemptRef.current = null
     activeBaseUsdcV4PaymentRef.current = null
@@ -2409,42 +2450,8 @@ export default function BaseWalletPayment({
         })
         beginWalletRequest({ kind: "connect", walletName: null })
         if (selectedAsset === "ETH" || selectedAsset === "USDC") {
-          // Pre-fetch payment data, provider, and connect concurrently so that
-          // splitEth / USDC requests can be dispatched immediately after session settles —
-          // before the mobile OS can suspend the browser's WalletConnect WebSocket.
-          const paymentPromise = resolvePaymentData()
-          const providerPromise = getWalletConnectProvider(walletConnectConnector)
+          // Connect first; payment requests wait for a settled WalletConnect account.
           const connectPromise = connectAsync({ connector: walletConnectConnector, chainId: base.id })
-          void paymentPromise
-            .then((paymentData) => {
-              prefetchedPaymentDataRef.current = paymentData
-              console.log("[Base] payment-prefetched", { paymentId: paymentData.paymentId, selectedAsset })
-              void logBase("payment-prefetched", {
-                paymentId: paymentData.paymentId,
-                hasPaymentUrl: Boolean(paymentData.paymentUrl),
-                selectedAsset,
-              })
-              if (selectedAsset === "ETH") {
-                try {
-                  prefetchedTxRequestRef.current = parseEthereumPaymentUri(paymentData.paymentUrl)
-                } catch {
-                  prefetchedTxRequestRef.current = null
-                }
-              } else {
-                prefetchedTxRequestRef.current = null
-              }
-            })
-            .catch((error) => {
-              void logBase("payment-prefetch-failed", {
-                message: extractErrorMessage(error) || String(error || ""),
-                selectedAsset,
-              })
-            })
-          void providerPromise
-            .then((provider) => {
-              prefetchedProviderRef.current = provider
-            })
-            .catch(() => null)
           let connectResult: Awaited<ReturnType<typeof connectAsync>>
           try {
             connectResult = await connectPromise
