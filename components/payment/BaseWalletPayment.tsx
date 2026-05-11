@@ -842,6 +842,8 @@ export default function BaseWalletPayment({
   const activeBaseUsdcV4PaymentRef = useRef<string | null>(null)
   const activeBaseUsdcV5PaymentRef = useRef<string | null>(null)
   const activeBasePaymentAttemptRef = useRef<string | null>(null)
+  const usdcFinalPaymentTxRef = useRef<EvmTransactionRequest | null>(null)
+  const usdcFinalPaymentIdRef = useRef<string | null>(null)
   // Tracks a live wallet request (connect / sign / send) so we know whether
   // the user is currently in-wallet. While pending=true we never show rejection UI.
   const activeWalletRequestRef = useRef<ActiveWalletRequest | null>(null)
@@ -1201,6 +1203,9 @@ export default function BaseWalletPayment({
     fromAddress: string
     peerName: string | null
     signingContext: Record<string, unknown>
+    connector: Connector
+    finalPaymentTxRef: { current: EvmTransactionRequest | null }
+    finalPaymentIdRef: { current: string | null }
   }): Promise<string> => {
     if (activeBaseUsdcV5PaymentRef.current === input.paymentData.paymentId) {
       throw new Error("Base USDC V5 payment is already in progress. Please wait for the current attempt to finish.")
@@ -1523,21 +1528,58 @@ export default function BaseWalletPayment({
         console.log("[BASE UI] usdc-authorization-confirmed", { paymentId })
         void logBase("usdc-allowance-confirmed", { paymentId })
       }
+      // Store final payment tx in ref before dispatch so resume path can use it
+      // without calling build-allowance-payment again if this attempt is interrupted.
+      input.finalPaymentTxRef.current = paymentTx
+      input.finalPaymentIdRef.current = paymentId
+      console.log("[BASE USDC CHAIN] payment-request-build-ready", { paymentId })
+      void logBase("[BASE USDC CHAIN] payment-request-build-ready", { paymentId })
+      // Re-fetch a fresh WalletConnect provider. The session used for the approve
+      // step may be stale after the mobile browser was suspended during wallet handoff.
+      let freshProvider: WalletConnectProvider
+      let freshPeerName: string | null = input.peerName
+      try {
+        freshProvider = await getWalletConnectProvider(input.connector)
+        freshPeerName = getWalletConnectPeerName(freshProvider)
+      } catch (providerRefreshErr) {
+        void logBase("[BASE USDC CHAIN] payment-request-provider-refresh-failed", {
+          paymentId,
+          error: extractErrorMessage(providerRefreshErr),
+        })
+        freshProvider = input.provider
+      }
       console.log("[BASE USDC CHAIN] payment-start", { paymentId })
       setExecStageRef.current("confirm_payment")
       console.log("[BASE UI] awaiting-wallet-confirmation", { paymentId, strategy: "allowance_two_step" })
       setBaseUsdcV4Status("Step 2 of 2: Confirm payment...")
       void logBase("usdc-payment-requested", { paymentId, isTrustWallet })
-      beginWalletRequest({ kind: "usdc_payment", walletName: input.peerName })
-      const paymentTxHash = await sendWalletConnectTransactionWithTimeout({
-        provider: input.provider,
-        fromAddress: input.fromAddress,
-        txRequest: paymentTx,
-        timeoutMs: BASE_USDC_TX_REQUEST_TIMEOUT_MS,
-        timeoutMessage: "Payment transaction was not completed. Tap Pay to try again."
-      })
+      beginWalletRequest({ kind: "usdc_payment", walletName: freshPeerName })
+      console.log("[BASE USDC CHAIN] payment-request-dispatch", { paymentId })
+      void logBase("[BASE USDC CHAIN] payment-request-dispatch", { paymentId })
+      void logBase("[BASE USDC CHAIN] payment-request-pending", { paymentId })
+      let paymentTxHash: string
+      try {
+        paymentTxHash = await sendWalletConnectTransactionWithTimeout({
+          provider: freshProvider,
+          fromAddress: input.fromAddress,
+          txRequest: paymentTx,
+          timeoutMs: BASE_USDC_TX_REQUEST_TIMEOUT_MS,
+          timeoutMessage: "Payment transaction was not completed. Tap Pay to try again.",
+        })
+      } catch (paymentDispatchErr) {
+        void logBase("[BASE USDC CHAIN] payment-request-error", {
+          paymentId,
+          ...extractErrorDetails(paymentDispatchErr),
+        })
+        throw paymentDispatchErr
+      }
       resolveWalletRequest()
+      input.finalPaymentTxRef.current = null
+      input.finalPaymentIdRef.current = null
+      console.log("[BASE USDC CHAIN] payment-submitted", { paymentId, txHashPrefix: paymentTxHash.slice(0, 10) })
+      void logBase("[BASE USDC CHAIN] payment-submitted", { paymentId, txHashPrefix: paymentTxHash.slice(0, 10) })
       console.log("[BASE USDC CHAIN] final-tx", { paymentId, via: "allowance", txHashPrefix: paymentTxHash.slice(0, 10) })
+      void logBase("[BASE USDC CHAIN] final-tx", { paymentId, txHashPrefix: paymentTxHash.slice(0, 10) })
       setBaseUsdcV4Status("Processing payment...")
       void logBase("usdc-payment-submitted", { paymentId, txHashPrefix: paymentTxHash.slice(0, 10) })
       return paymentTxHash
@@ -1621,6 +1663,71 @@ export default function BaseWalletPayment({
           }
         }
       }
+      // ── Final USDC payment resume path ────────────────────────────────────────
+      // If a final payment tx was stored before a previous failed dispatch (e.g. stale
+      // provider after approve mobile handoff), skip rebuild and dispatch directly.
+      // This satisfies the requirement: no button press, no build-allowance-payment repeat.
+      if (
+        selectedAsset === "USDC" &&
+        usdcFinalPaymentTxRef.current &&
+        usdcFinalPaymentIdRef.current &&
+        (execStageRef.current === "confirm_payment" || execStageRef.current === "usdc_authorized")
+      ) {
+        const storedPaymentTx = usdcFinalPaymentTxRef.current
+        const storedPaymentId = usdcFinalPaymentIdRef.current
+        createdPaymentId = storedPaymentId
+        createdBaseUsdcV5Payment = true
+        activeBasePaymentAttemptRef.current = `${storedPaymentId}:USDC`
+        setExecStageRef.current("confirm_payment")
+        setBaseUsdcV4Status("Step 2 of 2: Confirm payment...")
+        console.log("[BASE USDC CHAIN] payment-request-build-ready", { paymentId: storedPaymentId, via: "resume" })
+        void logBase("[BASE USDC CHAIN] payment-request-build-ready", { paymentId: storedPaymentId, via: "resume" })
+        const resumeProvider = await getWalletConnectProvider(walletConnectConnector)
+        const resumePeerName = getWalletConnectPeerName(resumeProvider)
+        console.log("[BASE USDC CHAIN] payment-request-dispatch", { paymentId: storedPaymentId, via: "resume" })
+        void logBase("[BASE USDC CHAIN] payment-request-dispatch", { paymentId: storedPaymentId, via: "resume" })
+        beginWalletRequest({ kind: "usdc_payment", walletName: resumePeerName })
+        void logBase("[BASE USDC CHAIN] payment-request-pending", { paymentId: storedPaymentId })
+        let resumeTxHash: string
+        try {
+          resumeTxHash = await sendWalletConnectTransactionWithTimeout({
+            provider: resumeProvider,
+            fromAddress,
+            txRequest: storedPaymentTx,
+            timeoutMs: BASE_USDC_TX_REQUEST_TIMEOUT_MS,
+            timeoutMessage: "Payment transaction was not completed. Tap Pay to try again.",
+          })
+        } catch (resumeErr) {
+          void logBase("[BASE USDC CHAIN] payment-request-error", {
+            paymentId: storedPaymentId,
+            via: "resume",
+            ...extractErrorDetails(resumeErr),
+          })
+          throw resumeErr
+        }
+        resolveWalletRequest()
+        usdcFinalPaymentTxRef.current = null
+        usdcFinalPaymentIdRef.current = null
+        console.log("[BASE USDC CHAIN] payment-submitted", { paymentId: storedPaymentId, via: "resume", txHashPrefix: resumeTxHash.slice(0, 10) })
+        void logBase("[BASE USDC CHAIN] payment-submitted", { paymentId: storedPaymentId, txHashPrefix: resumeTxHash.slice(0, 10) })
+        console.log("[BASE USDC CHAIN] final-tx", { paymentId: storedPaymentId, via: "resume", txHashPrefix: resumeTxHash.slice(0, 10) })
+        void logBase("[BASE USDC CHAIN] final-tx", { paymentId: storedPaymentId, txHashPrefix: resumeTxHash.slice(0, 10) })
+        paymentSubmittedRef.current = true
+        activeBasePaymentAttemptRef.current = null
+        activeBaseUsdcV5PaymentRef.current = null
+        setExecStageRef.current("payment_submitted")
+        void logBase("detect-start", { paymentId: storedPaymentId, txHashPrefix: resumeTxHash.slice(0, 10) })
+        setExecStageRef.current("detecting")
+        await onSuccess?.(resumeTxHash, storedPaymentId)
+        void logBase("detect-success", { paymentId: storedPaymentId })
+        clearPendingBaseWalletConnectPayment()
+        setHasPendingBaseWcPayment(false)
+        if (intentId) {
+          window.location.href = `/pay?intent=${encodeURIComponent(intentId)}&status=processing`
+        }
+        return
+      }
+      // ── End final USDC payment resume path ────────────────────────────────────
       setIsOpeningWallet(true)
       setExecStageRef.current("preparing_payment")
       void logBase("resolve-payment-start", { intentId: intentId || null })
@@ -1706,7 +1813,10 @@ export default function BaseWalletPayment({
             connectorName: connector?.name || walletConnectConnector.name || null,
             connectorId: connector?.id || walletConnectConnector.id || null,
             chainId: chain?.id || connectedChainIdRef.current || base.id,
-          }
+          },
+          connector: walletConnectConnector,
+          finalPaymentTxRef: usdcFinalPaymentTxRef,
+          finalPaymentIdRef: usdcFinalPaymentIdRef,
         })
         paymentSubmittedRef.current = true
         activeBasePaymentAttemptRef.current = null
@@ -1927,6 +2037,12 @@ export default function BaseWalletPayment({
         } else {
           setBaseUsdcV4Status("Confirm payment in your wallet...")
         }
+        // For final USDC payment handoff: clear attempt locks so focus/resume handlers
+        // can re-dispatch the stored payment tx without requiring a button press.
+        if (walletKind === "usdc_payment") {
+          activeBasePaymentAttemptRef.current = null
+          autoResumeAttemptedKeyRef.current = null
+        }
         return
       }
       setExecStageRef.current("retryable_error")
@@ -1961,6 +2077,8 @@ export default function BaseWalletPayment({
     setExecStageRaw("idle")
     setUsedEmergencyAllowance(false)
     setWalletHandoffPending(false)
+    usdcFinalPaymentTxRef.current = null
+    usdcFinalPaymentIdRef.current = null
   }, [])
   const startWalletConnectPayment = useCallback(() => {
     void (async () => {
@@ -2342,6 +2460,8 @@ export default function BaseWalletPayment({
     activeWalletRequestRef.current = null
     connectedChainIdRef.current = null
     sessionSettleTriggerFiredRef.current = false
+    usdcFinalPaymentTxRef.current = null
+    usdcFinalPaymentIdRef.current = null
     setWalletRequestUiState("idle")
     setPendingWalletRequestKind(null)
     setWalletHandoffPending(false)
