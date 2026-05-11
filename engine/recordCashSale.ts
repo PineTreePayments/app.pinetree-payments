@@ -1,14 +1,14 @@
 /**
  * PineTree Engine — Cash Sale Recording
  *
- * Handles the full lifecycle of a POS cash sale:
- *   1. Logs the drawer entry (source of truth for cash)
- *   2. Creates a CONFIRMED payment record (makes the sale visible in the dashboard)
- *   3. Creates a CONFIRMED transaction record (ties into reporting)
+ * Handles the full lifecycle of a POS cash sale in strict dependency order:
+ *   1. Creates a CONFIRMED payment row (must exist before transaction FK can resolve)
+ *   2. Creates a CONFIRMED transaction row (FK references payments.id)
+ *   3. Writes ledger entry + drawer log in parallel (both depend on payment; no FK on transaction_id)
  *
- * All three writes run in parallel so the API route stays fast.
- * Extracted here so that the API route is a thin request/response shim
- * and all business logic lives in the engine layer.
+ * Sequencing is required: the transactions_payment_id_fkey constraint means the payments
+ * row must be committed before the transactions INSERT runs.
+ * The drawer log is written last so it only records the sale when persistence succeeds.
  */
 
 import { createPayment } from "@/database/payments"
@@ -39,36 +39,39 @@ export async function recordCashSale(input: RecordCashSaleInput): Promise<Record
   const serviceFee = input.serviceFee ?? 0
   const merchantAmount = saleTotal - serviceFee
 
-  const paymentId = crypto.randomUUID()
+  // Step 1: persist the payment row first — the transaction FK requires it to exist.
+  const payment = await createPayment({
+    id: crypto.randomUUID(),
+    merchant_id: merchantId,
+    merchant_amount: merchantAmount > 0 ? merchantAmount : saleTotal,
+    pinetree_fee: serviceFee,
+    gross_amount: saleTotal,
+    currency: "USD",
+    provider: "cash",
+    status: "CONFIRMED",
+    metadata: { channel: "pos", terminalId, subtotalAmount, cashTendered, changeGiven }
+  })
+
+  const paymentId = payment.id
   const transactionId = crypto.randomUUID()
 
-  // Run all inserts in parallel. The drawer log is the authoritative cash record;
-  // the payment + transaction + ledger records make the sale visible on the dashboard.
+  // Step 2: persist the transaction row — payment row is now committed.
+  await createTransaction({
+    id: transactionId,
+    payment_id: paymentId,
+    merchant_id: merchantId,
+    provider: "cash",
+    network: "cash",
+    channel: "pos",
+    total_amount: Math.round(saleTotal * 100),
+    subtotal_amount: Math.round(subtotalAmount * 100),
+    platform_fee: Math.round(serviceFee * 100),
+    status: "CONFIRMED"
+  })
+
+  // Step 3: ledger entry + drawer log in parallel — both run only after payment + transaction succeed.
   const [entry] = await Promise.all([
     logCashSale(terminalId, merchantId, saleTotal, cashTendered, changeGiven),
-    createPayment({
-      id: paymentId,
-      merchant_id: merchantId,
-      merchant_amount: merchantAmount > 0 ? merchantAmount : saleTotal,
-      pinetree_fee: serviceFee,
-      gross_amount: saleTotal,
-      currency: "USD",
-      provider: "cash",
-      status: "CONFIRMED",
-      metadata: { channel: "pos", terminalId, subtotalAmount, cashTendered, changeGiven }
-    }),
-    createTransaction({
-      id: transactionId,
-      payment_id: paymentId,
-      merchant_id: merchantId,
-      provider: "cash",
-      network: "cash",
-      channel: "pos",
-      total_amount: Math.round(saleTotal * 100),
-      subtotal_amount: Math.round(subtotalAmount * 100),
-      platform_fee: Math.round(serviceFee * 100),
-      status: "CONFIRMED"
-    }),
     upsertLedgerEntry({
       merchant_id: merchantId,
       payment_id: paymentId,

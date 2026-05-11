@@ -56,6 +56,7 @@ type WalletCatalogItem = {
   name: string
   aliases?: string[]
   mobileDeepLink?: "phantom" | "solflare" | "trust" | "coinbase" | "okx"
+  iconPath?: string
   installName?: string
   installUrl: string
 }
@@ -69,31 +70,31 @@ type WalletPickerRow = WalletCatalogItem & {
 const TERMINAL_PAYMENT_STATUSES = new Set(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "CANCELED"])
 
 const POPULAR_WALLETS: WalletCatalogItem[] = [
-  { id: "phantom", name: "Phantom", mobileDeepLink: "phantom", installUrl: "https://phantom.com/download" },
-  { id: "solflare", name: "Solflare", mobileDeepLink: "solflare", installUrl: "https://solflare.com/download" },
-  { id: "backpack", name: "Backpack", installUrl: "https://backpack.app/download" },
-  { id: "glow", name: "Glow", installUrl: "https://glow.app" },
-  { id: "trust-wallet", name: "Trust Wallet", aliases: ["trust"], mobileDeepLink: "trust", installUrl: "https://trustwallet.com/download" },
-  { id: "coinbase-wallet", name: "Coinbase Wallet", aliases: ["coinbase"], mobileDeepLink: "coinbase", installUrl: "https://www.coinbase.com/wallet/downloads" },
-  { id: "okx-wallet", name: "OKX Wallet", aliases: ["okx"], mobileDeepLink: "okx", installUrl: "https://www.okx.com/web3" },
+  { id: "phantom", name: "Phantom", mobileDeepLink: "phantom", iconPath: "/wallet-icons/phantom.svg", installUrl: "https://phantom.com/download" },
+  { id: "solflare", name: "Solflare", mobileDeepLink: "solflare", iconPath: "/wallet-icons/solflare.svg", installUrl: "https://solflare.com/download" },
+  { id: "backpack", name: "Backpack", iconPath: "/wallet-icons/backpack.png", installUrl: "https://backpack.app/download" },
+  { id: "glow", name: "Glow", iconPath: "/wallet-icons/glow.png", installUrl: "https://glow.app" },
+  { id: "trust-wallet", name: "Trust Wallet", aliases: ["trust"], mobileDeepLink: "trust", iconPath: "/wallet-icons/trust-wallet.svg", installUrl: "https://trustwallet.com/download" },
+  { id: "coinbase-wallet", name: "Coinbase Wallet", aliases: ["coinbase"], mobileDeepLink: "coinbase", iconPath: "/wallet-icons/coinbase-wallet.svg", installUrl: "https://www.coinbase.com/wallet/downloads" },
+  { id: "okx-wallet", name: "OKX Wallet", aliases: ["okx"], mobileDeepLink: "okx", iconPath: "/wallet-icons/okx-wallet.png", installUrl: "https://www.okx.com/web3" },
 ]
 
 const MORE_WALLETS: WalletCatalogItem[] = [
-  { id: "exodus", name: "Exodus", installUrl: "https://www.exodus.com/download" },
-  { id: "ledger", name: "Ledger", installUrl: "https://www.ledger.com/ledger-live" },
-  { id: "mathwallet", name: "MathWallet", aliases: ["math wallet"], installUrl: "https://mathwallet.org" },
-  { id: "tokenpocket", name: "TokenPocket", aliases: ["token pocket"], installUrl: "https://www.tokenpocket.pro" },
-  { id: "torus", name: "Torus", installUrl: "https://tor.us" },
-  { id: "clover", name: "Clover", installUrl: "https://clv.org" },
-  { id: "coin98", name: "Coin98", installUrl: "https://coin98.com/wallet" },
-  { id: "safepal", name: "SafePal", aliases: ["safe pal"], installUrl: "https://www.safepal.com/download" },
-  { id: "bitget-wallet", name: "Bitget Wallet", aliases: ["bitget"], installUrl: "https://web3.bitget.com" },
-  { id: "brave-wallet", name: "Brave Wallet", aliases: ["brave"], installUrl: "https://brave.com/wallet" },
-  { id: "nightly", name: "Nightly", installUrl: "https://nightly.app/download" },
-  { id: "ultimate", name: "Ultimate", installUrl: "https://ultimate.app" },
-  { id: "salmon", name: "Salmon", installUrl: "https://www.salmonwallet.io" },
-  { id: "slope", name: "Slope", installUrl: "https://slope.finance" },
-  { id: "sollet", name: "Sollet", installUrl: "https://www.sollet.io" },
+  { id: "exodus", name: "Exodus", iconPath: "/wallet-icons/exodus.svg", installUrl: "https://www.exodus.com/download" },
+  { id: "ledger", name: "Ledger", iconPath: "/wallet-icons/ledger.svg", installUrl: "https://www.ledger.com/ledger-live" },
+  { id: "mathwallet", name: "MathWallet", aliases: ["math wallet"], iconPath: "/wallet-icons/mathwallet.svg", installUrl: "https://mathwallet.org" },
+  { id: "tokenpocket", name: "TokenPocket", aliases: ["token pocket"], iconPath: "/wallet-icons/tokenpocket.svg", installUrl: "https://www.tokenpocket.pro" },
+  { id: "torus", name: "Torus", iconPath: "/wallet-icons/torus.svg", installUrl: "https://tor.us" },
+  { id: "clover", name: "Clover", iconPath: "/wallet-icons/clover.svg", installUrl: "https://clv.org" },
+  { id: "coin98", name: "Coin98", iconPath: "/wallet-icons/coin98.svg", installUrl: "https://coin98.com/wallet" },
+  { id: "safepal", name: "SafePal", aliases: ["safe pal"], iconPath: "/wallet-icons/safepal.png", installUrl: "https://www.safepal.com/download" },
+  { id: "bitget-wallet", name: "Bitget Wallet", aliases: ["bitget"], iconPath: "/wallet-icons/bitget-wallet.svg", installUrl: "https://web3.bitget.com" },
+  { id: "brave-wallet", name: "Brave Wallet", aliases: ["brave"], iconPath: "/wallet-icons/brave-wallet.svg", installUrl: "https://brave.com/wallet" },
+  { id: "nightly", name: "Nightly", iconPath: "/wallet-icons/nightly.svg", installUrl: "https://nightly.app/download" },
+  { id: "ultimate", name: "Ultimate", iconPath: "/wallet-icons/ultimate.png", installUrl: "https://ultimate.app" },
+  { id: "salmon", name: "Salmon", iconPath: "/wallet-icons/salmon.svg", installUrl: "https://www.salmonwallet.io" },
+  { id: "slope", name: "Slope", iconPath: "/wallet-icons/slope.svg", installUrl: "https://slope.finance" },
+  { id: "sollet", name: "Sollet", iconPath: "/wallet-icons/sollet.svg", installUrl: "https://www.sollet.io" },
 ]
 
 const STAGE_NUM: Record<SolanaExecutionStage, number> = {
@@ -140,10 +141,6 @@ function walletMatchesCatalog(wallet: DetectedSolanaWallet, item: WalletCatalogI
   const detected = normalizeWalletName(wallet.name)
   const names = [item.name, ...(item.aliases || [])].map(normalizeWalletName)
   return names.some((name) => detected === name || detected.includes(name) || name.includes(detected))
-}
-
-function walletInitial(name: string): string {
-  return String(name || "S").trim().slice(0, 1).toUpperCase() || "S"
 }
 
 function buildMobileWalletBrowserUrl(wallet: WalletCatalogItem, targetUrl: string): string {
@@ -264,6 +261,7 @@ export default function SolanaWalletPayment({
       .map((wallet): WalletCatalogItem => ({
         id: `detected-${wallet.id}`,
         name: wallet.name,
+        iconPath: "/wallet-icons/solana-wallet.svg",
         installUrl: "https://solana.com/ecosystem/explore?categories=wallet",
       }))
 
@@ -542,11 +540,11 @@ export default function SolanaWalletPayment({
     if (rows.length === 0) return null
 
     return (
-      <div className="space-y-2">
-        <p className="px-1 text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+      <div className="space-y-3">
+        <p className="px-1 text-[11px] font-semibold uppercase tracking-widest text-slate-500">
           {title}
         </p>
-        <div className="space-y-2">
+        <div className="grid grid-cols-2 gap-3 min-[360px]:grid-cols-3 sm:grid-cols-4">
           {rows.map((row) => {
             const available = row.available && row.detectedWallet
             const action: "connect" | "open" | "install" = available
@@ -555,6 +553,8 @@ export default function SolanaWalletPayment({
                 ? "open"
                 : "install"
             const active = row.detectedWallet?.id === selectedWalletId || row.detectedWallet?.id === pendingWalletId
+            const statusLabel = action === "connect" ? "Detected" : action === "open" ? "Open app" : "Install"
+            const iconPath = row.iconPath || "/wallet-icons/solana-wallet.svg"
             return (
               <button
                 key={row.id}
@@ -571,34 +571,28 @@ export default function SolanaWalletPayment({
                   }
                   openInstallPage(row)
                 }}
-                className={`w-full rounded-2xl border px-3.5 py-3 text-left transition-all ${
+                className={`group flex min-h-[136px] flex-col items-center justify-between rounded-[22px] border px-2.5 py-3 text-center transition-all disabled:cursor-wait ${
                   active
-                    ? "border-[#0052FF]/35 bg-[#0052FF]/5 shadow-sm shadow-[#0052FF]/10"
-                    : "border-gray-200 bg-white hover:border-[#0052FF]/25 hover:bg-[#0052FF]/5"
+                    ? "border-[#3b82f6]/70 bg-[#10284d] shadow-[0_18px_44px_rgba(0,82,255,0.22)]"
+                    : "border-white/10 bg-[#151922] shadow-[0_14px_34px_rgba(0,0,0,0.22)] hover:-translate-y-0.5 hover:border-[#3b82f6]/55 hover:bg-[#1b2330] hover:shadow-[0_18px_44px_rgba(0,82,255,0.18)]"
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#0052FF] to-[#0039B8] text-sm font-bold text-white shadow-sm shadow-[#0052FF]/20">
-                    {walletInitial(row.name)}
+                <span className="flex flex-col items-center gap-2">
+                  <span className="flex h-14 w-14 items-center justify-center rounded-[18px] bg-white shadow-[0_12px_28px_rgba(0,0,0,0.28)] ring-1 ring-white/15 transition group-hover:scale-[1.03]">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={iconPath} alt="" className="h-full w-full rounded-[18px] object-contain p-1" />
                   </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold text-gray-900">
-                      {row.name}
-                    </span>
-                    <span className={`mt-0.5 block text-xs ${available ? "text-green-600" : row.mobileOpenable ? "text-[#0052FF]" : "text-gray-500"}`}>
-                      {available ? "Detected" : row.mobileOpenable ? "Open app" : "Install"}
-                    </span>
+                  <span className="line-clamp-2 min-h-[34px] text-sm font-semibold leading-tight text-white">
+                    {row.name}
                   </span>
-                  <span className="rounded-full bg-[#0052FF]/10 px-2.5 py-1 text-[11px] font-semibold text-[#0052FF]">
-                    {pendingWalletId === (row.detectedWallet?.id || row.id)
-                      ? "Opening"
-                      : action === "connect"
-                        ? "Connect"
-                        : action === "open"
-                          ? "Open app"
-                          : "Install"}
-                  </span>
-                </div>
+                </span>
+                <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+                  action === "connect"
+                    ? "bg-emerald-400/15 text-emerald-300 ring-1 ring-emerald-300/20"
+                    : "bg-[#0052FF]/18 text-blue-200 ring-1 ring-blue-300/15"
+                }`}>
+                  {pendingWalletId === (row.detectedWallet?.id || row.id) ? "Opening" : statusLabel}
+                </span>
               </button>
             )
           })}
@@ -704,53 +698,56 @@ export default function SolanaWalletPayment({
 
       {walletPickerOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-gray-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-6"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 backdrop-blur-md sm:items-center sm:p-6"
           onClick={() => setWalletPickerOpen(false)}
         >
           <div
-            className="max-h-[88vh] w-full overflow-hidden rounded-t-3xl bg-white shadow-2xl shadow-gray-950/20 ring-1 ring-gray-200 sm:max-w-md sm:rounded-3xl"
+            className="flex max-h-[88svh] w-full flex-col overflow-hidden rounded-t-[30px] border border-white/10 bg-[#0b0f17] shadow-2xl shadow-black/60 sm:max-w-[520px] sm:rounded-[30px]"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="border-b border-gray-100 bg-gradient-to-br from-[#F4F8FF] via-white to-[#E8F1FF] px-5 pb-4 pt-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-500">
+            <div className="border-b border-white/10 bg-[#0f1420] px-5 pb-4 pt-5 sm:px-6">
+              <div className="relative flex items-center justify-center">
+                <div className="text-center">
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">
                     Solana Wallets
                   </p>
-                  <h2 className="mt-1 text-lg font-bold text-gray-900">
-                    Choose a wallet
+                  <h2 className="mt-1 text-xl font-bold text-white">
+                    All Wallets
                   </h2>
                 </div>
                 <button
                   type="button"
                   onClick={() => setWalletPickerOpen(false)}
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-gray-500 shadow-sm ring-1 ring-gray-200 transition hover:bg-gray-50 hover:text-gray-900"
+                  className="absolute right-0 top-0 flex h-9 w-9 items-center justify-center rounded-full bg-white/8 text-slate-300 ring-1 ring-white/10 transition hover:bg-white/12 hover:text-white"
                   aria-label="Close wallet picker"
                 >
                   x
                 </button>
               </div>
-              <div className="mt-4">
+              <div className="relative mt-5">
+                <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm text-slate-500">
+                  Search
+                </span>
                 <input
                   value={walletSearch}
                   onChange={(event) => setWalletSearch(event.target.value)}
-                  placeholder="Search wallets"
-                  className="h-11 w-full rounded-2xl border border-gray-200 bg-white px-4 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-[#0052FF]/40 focus:ring-4 focus:ring-[#0052FF]/10"
+                  placeholder="Search wallet"
+                  className="h-12 w-full rounded-2xl border border-white/10 bg-[#171d28] px-4 pl-[72px] text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-[#3b82f6]/70 focus:ring-4 focus:ring-[#0052FF]/20"
                   autoFocus
                 />
               </div>
             </div>
 
-            <div className="max-h-[62vh] space-y-5 overflow-y-auto px-5 py-4">
+            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 pb-[calc(env(safe-area-inset-bottom)+24px)] sm:px-6">
               {wallets.length === 0 ? (
-                <div className="rounded-2xl bg-gray-50 px-4 py-3 text-xs leading-relaxed text-gray-600 ring-1 ring-gray-100">
-                  No Solana wallet is detected in this browser. Choose Open wallet for supported mobile wallets or Install to get a wallet.
+                <div className="rounded-2xl bg-white/5 px-4 py-3 text-xs leading-relaxed text-slate-400 ring-1 ring-white/10">
+                  No Solana wallet is detected in this browser. Choose Open app on mobile or Install on desktop.
                 </div>
               ) : null}
               {renderWalletPickerSection("Popular", walletPickerSections.popular)}
               {renderWalletPickerSection("More wallets", walletPickerSections.more)}
               {walletPickerSections.popular.length === 0 && walletPickerSections.more.length === 0 ? (
-                <div className="rounded-2xl bg-gray-50 px-4 py-3 text-sm text-gray-500 ring-1 ring-gray-100">
+                <div className="rounded-2xl bg-white/5 px-4 py-3 text-sm text-slate-400 ring-1 ring-white/10">
                   No wallets match your search.
                 </div>
               ) : null}
