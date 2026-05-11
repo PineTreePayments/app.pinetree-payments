@@ -783,7 +783,20 @@ export default function ProvidersPage() {
   }
 
   function statusClass(status: string) {
-    return status === "Connected" ? "text-blue-600" : "text-black"
+    if (status === "Connected") return "border-blue-200 bg-blue-50 text-blue-700"
+    if (status === "Unsupported provider capability") return "border-amber-200 bg-amber-50 text-amber-800"
+    return "border-gray-200 bg-gray-50 text-gray-600"
+  }
+
+  function parseDetailLine(line: string) {
+    const [label, ...rest] = line.split(":")
+    const value = rest.join(":").trim()
+
+    if (!value) {
+      return { label: "", value: line }
+    }
+
+    return { label: label.trim(), value }
   }
 
   function ProviderCard({
@@ -803,44 +816,72 @@ export default function ProvidersPage() {
     const walletValue = p?.credentials?.wallet || wallet?.wallet_address
     const walletType = p?.credentials?.wallet_type || wallet?.wallet_type || wallet?.asset
     const walletLabel = formatWalletLabel(provider, walletType, wallet?.asset || null)
+    const detailRows = description.map(parseDetailLine)
 
     return (
-      <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm min-h-[240px]">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
-          <h2 className="text-lg font-semibold text-black">{name}</h2>
-          <span className={`text-sm ${statusClass(status)}`}>{status}</span>
+      <div className="relative overflow-hidden rounded-2xl border border-[#0052FF]/15 bg-gradient-to-br from-white via-white to-[#f3f8ff] p-4 shadow-[0_12px_32px_rgba(15,23,42,0.07)] ring-1 ring-white/80 sm:min-h-[240px] sm:p-6">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#0052FF]/70 via-[#6aa7ff]/45 to-transparent" />
+
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <h2 className="min-w-0 text-base font-semibold leading-tight text-gray-950 sm:text-lg">{name}</h2>
+          <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold leading-none sm:text-xs ${statusClass(status)}`}>
+            {status}
+          </span>
         </div>
 
-        <div className="text-black space-y-1 mb-6">
-          {description.map((d, i) => (
-            <p key={i}>{d}</p>
+        <div className="mb-5 space-y-2.5 text-sm leading-snug text-gray-800 sm:mb-6">
+          {detailRows.map((row, i) => (
+            <div
+              key={i}
+              className="grid grid-cols-[82px_1fr] items-start gap-3 border-b border-[#0052FF]/8 pb-2 last:border-b-0 last:pb-0 sm:grid-cols-[96px_1fr]"
+            >
+              {row.label ? (
+                <>
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                    {row.label}
+                  </span>
+                  <span className="min-w-0 text-[13px] leading-snug text-gray-900 sm:text-sm">
+                    {row.value}
+                  </span>
+                </>
+              ) : (
+                <span className="col-span-2 text-[13px] leading-snug text-gray-700 sm:text-sm">
+                  {row.value}
+                </span>
+              )}
+            </div>
           ))}
 
           {walletValue && (
-            <p className="text-sm text-black mt-3 font-medium">
+            <div className="grid grid-cols-[82px_1fr] items-start gap-3 rounded-xl border border-[#0052FF]/10 bg-white/65 px-3 py-2 sm:grid-cols-[96px_1fr]">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                Connected
+              </span>
+              <span className="min-w-0 break-all text-[13px] font-medium leading-snug text-gray-950 sm:text-sm">
               {provider === "solana" || provider === "base"
                 ? `${walletLabel} • ${walletValue.slice(0, 6)}...${walletValue.slice(-4)}`
                 : `${walletValue.slice(0, 6)}...${walletValue.slice(-4)}`}
-            </p>
+              </span>
+            </div>
           )}
         </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-auto">
+        <div className="mt-auto flex items-center justify-between gap-3 border-t border-[#0052FF]/10 pt-4">
           <div className="flex flex-wrap gap-2">
             {connected ? (
               <button
                 onClick={() => disconnect(provider)}
-                className="text-sm bg-red-500 text-white px-3 py-1.5 rounded"
+                className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-600 sm:text-sm"
               >
                 Disconnect
               </button>
             ) : (
               <button
                 onClick={() => openProvider(provider)}
-                className={`text-sm px-3 py-1.5 rounded ${
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold shadow-sm transition sm:text-sm ${
                   provider === "lightning" && status === "Unsupported provider capability"
                     ? "bg-gray-100 text-gray-500 cursor-not-allowed"
-                    : "bg-blue-600 text-white"
+                    : "bg-blue-600 text-white hover:bg-blue-700"
                 }`}
                 disabled={provider === "lightning" && status === "Unsupported provider capability"}
               >
@@ -849,8 +890,8 @@ export default function ProvidersPage() {
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-black">Enabled</span>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="text-xs font-medium text-gray-700 sm:text-sm">Enabled</span>
             <ToggleSwitch
               checked={enabled}
               disabled={!connected}
@@ -957,10 +998,9 @@ export default function ProvidersPage() {
           provider="lightning"
           description={[
             "Network: Bitcoin Lightning",
-            "Settlement: Provider-backed Lightning settlement",
-            "Supports Lightning invoices through a configured PSP/provider.",
-            "PineTree fee must be collected at payment time.",
-            "Requires a provider that supports split settlement/application fees.",
+            "Settlement: Provider-backed",
+            "Supports: Lightning invoices through a configured PSP/provider",
+            "Requires: fee-at-payment-time + split settlement",
           ]}
         />
       </div>
