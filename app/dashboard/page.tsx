@@ -74,10 +74,19 @@ function formatChicagoDateTime(value: string | null) {
 
 function networkName(network: string | null) {
   if (!network) return "-"
+  if (network.toLowerCase() === "cash") return "Cash"
   if (network.toLowerCase() === "solana") return "Solana"
   if (network.toLowerCase() === "base") return "Base"
   if (network.toLowerCase() === "ethereum") return "Ethereum"
   return network.charAt(0).toUpperCase() + network.slice(1).toLowerCase()
+}
+
+function formatUsd(amount: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2
+  }).format(Number.isFinite(amount) ? amount : 0)
 }
 
 export default function DashboardPage() {
@@ -129,48 +138,14 @@ export default function DashboardPage() {
     setChartData(payload.chartData || [])
     setWalletValue(Number(payload.walletValue ?? 0))
     setLastRun(payload.lastRun || null)
+    setRecentTx(payload.recentTx || [])
   }, [])
 
   const loadOverview = useCallback(async () => {
     const payload = await callOverviewApi(false)
 
-    // Metrics only from API — recentTx is NOT applied from here
-    setVolume(Number(payload.volume ?? 0))
-    setTxCount(Number(payload.txCount ?? 0))
-    setSuccessRate(Number(payload.successRate ?? 0))
-    setProviders(Number(payload.providers ?? 0))
-    setChartData(payload.chartData || [])
-    setWalletValue(Number(payload.walletValue ?? 0))
-    setLastRun(payload.lastRun || null)
-
-    // Recent activity from direct Supabase query — single source of truth
-    const { data: { session } } = await supabase.auth.getSession()
-    if (session?.user?.id) {
-      const { data, error } = await supabase
-        .from("transactions")
-        .select(`
-          id,
-          provider,
-          status,
-          provider_transaction_id,
-          network,
-          created_at,
-          payments (
-            created_at,
-            gross_amount,
-            currency,
-            status
-          )
-        `)
-        .eq("merchant_id", session.user.id)
-        .order("created_at", { ascending: false })
-        .limit(10)
-
-      if (!error && data) {
-        setRecentTx(data as RecentTxRow[])
-      }
-    }
-  }, [callOverviewApi])
+    applyOverviewPayload(payload)
+  }, [applyOverviewPayload, callOverviewApi])
 
   async function syncNow() {
     setIsSyncing(true)
@@ -240,7 +215,7 @@ export default function DashboardPage() {
           </p>
 
           <p className="text-3xl font-semibold text-gray-900">
-            ${walletValue.toFixed(2)}
+            {formatUsd(walletValue)}
           </p>
 
           <p className="text-sm text-gray-500 mt-1">
@@ -262,7 +237,7 @@ export default function DashboardPage() {
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm min-w-0">
           <p className="text-sm text-gray-500 mb-1">Total Volume</p>
           <p className="text-3xl font-semibold text-gray-900">
-            ${volume.toFixed(2)}
+            {formatUsd(volume)}
           </p>
         </div>
 
@@ -311,8 +286,11 @@ export default function DashboardPage() {
             >
 
               <XAxis dataKey="date" />
-              <YAxis />
-              <Tooltip />
+              <YAxis tickFormatter={(value) => formatUsd(Number(value))} />
+              <Tooltip
+                formatter={(value) => [formatUsd(Number(value)), "Volume (USD)"]}
+                labelFormatter={(label) => `Date: ${label}`}
+              />
 
               <Line
                 type="monotone"
@@ -379,11 +357,11 @@ export default function DashboardPage() {
                       </td>
 
                       <td className="py-3 text-gray-800 font-medium">
-                        ${Number(payment?.gross_amount ?? 0).toFixed(2)}
+                        {formatUsd(Number(payment?.gross_amount ?? 0))}
                       </td>
 
                       <td className="py-3 text-gray-700">
-                        {networkName(tx.network ?? null)}
+                        {networkName(tx.provider === "cash" ? "cash" : tx.network ?? null)}
                       </td>
 
                       <td className="py-3">

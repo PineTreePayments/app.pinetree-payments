@@ -27,6 +27,13 @@ type TerminalContext = {
   provider: string
 }
 
+type DrawerSession = {
+  balance: number
+  active: boolean
+  lastEntryType: string | null
+  lastEntryAt: string | null
+}
+
 export default function TerminalInner() {
 
   const router = useRouter()
@@ -46,6 +53,7 @@ export default function TerminalInner() {
   const [recoveryBusy, setRecoveryBusy] = useState(false)
   const [shiftStarted, setShiftStarted] = useState(false)
   const [shiftStarting, setShiftStarting] = useState(false)
+  const [drawerSession, setDrawerSession] = useState<DrawerSession | null>(null)
 
   function showToast(message:string,type:"success"|"error"){
 
@@ -80,6 +88,9 @@ export default function TerminalInner() {
 
       const terminalData = payload.terminal as Terminal
       setTerminal(terminalData)
+      const drawer = (payload.drawer || null) as DrawerSession | null
+      setDrawerSession(drawer)
+      setShiftStarted(Boolean(drawer?.active) || Number(terminalData.drawer_starting_amount ?? 0) === 0)
 
       if (terminalData.merchant_id) {
         setTerminalContext({
@@ -147,7 +158,7 @@ export default function TerminalInner() {
     if (!terminal?.id || !terminal.merchant_id) return
     setShiftStarting(true)
     try {
-      await fetch("/api/pos/drawer/open", {
+      const res = await fetch("/api/pos/drawer/open", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -156,11 +167,23 @@ export default function TerminalInner() {
           startingAmount: Number(terminal.drawer_starting_amount ?? 0)
         })
       })
-    } catch {
-      // Non-fatal — drawer logging failure should not block the cashier
+      const payload = await res.json().catch(() => null)
+      if (!res.ok) {
+        throw new Error(payload?.error || "Failed to start shift")
+      }
+      if (payload?.entry) {
+        setDrawerSession({
+          balance: Number(payload.entry.running_balance || 0),
+          active: true,
+          lastEntryType: String(payload.entry.type || "opening_balance"),
+          lastEntryAt: String(payload.entry.created_at || "")
+        })
+      }
+      setShiftStarted(true)
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to start shift", "error")
     } finally {
       setShiftStarting(false)
-      setShiftStarted(true)
     }
   }
 
@@ -277,6 +300,11 @@ export default function TerminalInner() {
           <p className="text-sm text-gray-500">
             Confirm the starting cash in the drawer before beginning your shift.
           </p>
+          {drawerSession?.lastEntryType === "closeout" && drawerSession.lastEntryAt && (
+            <p className="text-xs text-gray-400">
+              Last closeout: {new Date(drawerSession.lastEntryAt).toLocaleString()}
+            </p>
+          )}
           <Button
             fullWidth
             variant="primary"

@@ -1,4 +1,5 @@
 import { supabaseAdmin, supabase } from "@/database"
+import { getDrawerState } from "./cashDrawer"
 
 const db = supabaseAdmin || supabase
 
@@ -13,6 +14,12 @@ export type TerminalSessionData = {
     created_at?: string
   }
   provider: string
+  drawer: {
+    balance: number
+    active: boolean
+    lastEntryType: string | null
+    lastEntryAt: string | null
+  }
 }
 
 export async function getPosTerminalSessionEngine(terminalId: string): Promise<TerminalSessionData> {
@@ -33,6 +40,8 @@ export async function getPosTerminalSessionEngine(terminalId: string): Promise<T
     .limit(1)
     .maybeSingle()
 
+  const drawerState = await getDrawerState(terminal.id)
+
   return {
     terminal: {
       id: terminal.id,
@@ -43,6 +52,12 @@ export async function getPosTerminalSessionEngine(terminalId: string): Promise<T
       drawer_starting_amount: Number(terminal.drawer_starting_amount ?? 0),
       created_at: terminal.created_at
     },
-    provider: wallet?.network || "solana"
+    provider: wallet?.network || "solana",
+    drawer: {
+      balance: drawerState.balance,
+      active: drawerState.active,
+      lastEntryType: drawerState.lastEntry?.type || null,
+      lastEntryAt: drawerState.lastEntry?.created_at || null
+    }
   }
 }

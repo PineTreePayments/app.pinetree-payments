@@ -33,6 +33,7 @@ type DrawerEntry = {
 
 type DrawerBalance = {
   balance: number
+  active?: boolean
   lastEntry: DrawerEntry | null
   log: DrawerEntry[]
 }
@@ -580,6 +581,9 @@ export default function POSPage() {
                     ) : (
                       <p className="text-xs text-gray-400 mt-0.5">No activity yet</p>
                     )}
+                    <p className={`text-xs mt-1 ${drawer?.active ? "text-green-600" : "text-gray-400"}`}>
+                      {drawer?.active ? "Drawer open" : "No active drawer shift"}
+                    </p>
                   </div>
                   <div className="flex items-center gap-4">
                     <div className="text-right">
@@ -590,9 +594,10 @@ export default function POSPage() {
                     </div>
                     <Button
                       variant="secondary"
+                      disabled={!drawer?.active}
                       onClick={() => { setCloseoutTerminalId(t.id); setCloseoutAmount(""); setCloseoutResult(null) }}
                     >
-                      Closeout
+                      Close Drawer
                     </Button>
                   </div>
                 </div>

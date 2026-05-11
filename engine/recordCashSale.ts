@@ -62,6 +62,7 @@ export async function recordCashSale(input: RecordCashSaleInput): Promise<Record
       payment_id: paymentId,
       merchant_id: merchantId,
       provider: "cash",
+      network: "cash",
       channel: "pos",
       total_amount: saleTotal,
       subtotal_amount: subtotalAmount,

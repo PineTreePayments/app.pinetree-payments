@@ -88,6 +88,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
   const [breakdownLoading, setBreakdownLoading] = useState(false)
   const [availableMethods, setAvailableMethods] = useState<AvailableMethods>({ cash: true, crypto: true, card: false })
   const [cashDigits, setCashDigits] = useState("")
+  const [cashRecording, setCashRecording] = useState(false)
 
   const resolvedPaymentIdRef = useRef<string>("")
   const resetTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -110,6 +111,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
     setPaymentError("")
     setBreakdown(null)
     setCashDigits("")
+    setCashRecording(false)
     setAvailableMethods({ cash: true, crypto: true, card: false })
     resolvedPaymentIdRef.current = ""
   }
@@ -329,6 +331,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
   function startCash() {
     setCashDigits("")
+    setPaymentError("")
     setStatus("cash-tender")
   }
 
@@ -570,11 +573,21 @@ export default function POSLayout({ locked, terminalContext }: Props) {
               )}
             </div>
 
+            {paymentError && (
+              <p className="text-center text-sm text-red-500">{paymentError}</p>
+            )}
+
             <Button
               fullWidth
+              disabled={cashRecording}
               onClick={async () => {
-                if (terminalContext?.terminalId && terminalContext?.merchantId) {
-                  fetch("/api/pos/drawer/sale", {
+                if (!terminalContext?.terminalId || !terminalContext?.merchantId) {
+                  setPaymentError("Missing terminal context for cash sale")
+                  return
+                }
+                setCashRecording(true)
+                try {
+                  const res = await fetch("/api/pos/drawer/sale", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -586,12 +599,19 @@ export default function POSLayout({ locked, terminalContext }: Props) {
                       subtotalAmount: breakdown?.subtotalAmount ?? totalDue,
                       serviceFee: breakdown?.serviceFee ?? 0
                     })
-                  }).catch(() => {/* non-fatal */})
+                  })
+                  const payload = await res.json().catch(() => null)
+                  if (!res.ok) {
+                    throw new Error(payload?.error || "Cash sale failed")
+                  }
+                  resetSale()
+                } catch (err) {
+                  setPaymentError(err instanceof Error ? err.message : "Cash sale failed")
+                  setCashRecording(false)
                 }
-                resetSale()
               }}
             >
-              New Sale
+              {cashRecording ? "Recording..." : "New Sale"}
             </Button>
 
           </div>

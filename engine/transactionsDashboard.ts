@@ -18,6 +18,7 @@ type TransactionRow = {
   provider_transaction_id: string
   network: string | null
   channel?: string | null
+  total_amount?: number | string | null
   payments: PaymentRow | PaymentRow[] | null
   created_at?: string
 }
@@ -127,6 +128,7 @@ export async function getTransactionsDashboardEngine(merchantId: string): Promis
       provider_transaction_id,
       network,
       channel,
+      total_amount,
       created_at,
       payments (
         created_at,
@@ -183,6 +185,7 @@ export async function getTransactionsChartEngine(
     .select(`
       provider,
       channel,
+      total_amount,
       created_at,
       payments(gross_amount)
     `)
@@ -196,6 +199,7 @@ export async function getTransactionsChartEngine(
   const rows = (data || []) as Array<{
     provider: string
     channel?: string | null
+    total_amount?: number | string | null
     created_at: string
     payments?: { gross_amount?: number | string | null } | Array<{ gross_amount?: number | string | null }> | null
   }>
@@ -205,7 +209,7 @@ export async function getTransactionsChartEngine(
     if (mode === "online" && tx.channel !== "online") return
 
     const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
-    const amount = Number(payment?.gross_amount || 0)
+    const amount = Number(payment?.gross_amount ?? tx.total_amount ?? 0)
 
     const d = new Date(tx.created_at)
     let label = ""

@@ -5,11 +5,16 @@ const db = supabaseAdmin || supabase
 
 type PaymentSummary = {
   gross_amount?: number | string | null
+  currency?: string | null
+  status?: string | null
+  created_at?: string | null
 }
 
 type TransactionRow = {
   id: string
   status: string
+  provider?: string | null
+  provider_transaction_id?: string | null
   network?: string | null
   created_at: string
   payments?: PaymentSummary | PaymentSummary[] | null
@@ -34,10 +39,15 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
     .select(`
       id,
       status,
+      provider,
+      provider_transaction_id,
       network,
       created_at,
       payments (
-        gross_amount
+        created_at,
+        gross_amount,
+        currency,
+        status
       )
     `)
     .eq("merchant_id", merchantId)

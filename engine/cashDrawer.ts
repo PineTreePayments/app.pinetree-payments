@@ -14,6 +14,11 @@ export async function openDrawerShift(
   merchantId: string,
   startingAmount: number
 ): Promise<DrawerEntry> {
+  const latestEntry = await getLatestDrawerEntry(terminalId)
+  if (latestEntry && latestEntry.type !== "closeout") {
+    return latestEntry
+  }
+
   return logDrawerEntry({
     terminal_id: terminalId,
     merchant_id: merchantId,
@@ -60,6 +65,11 @@ export async function closeDrawerShift(
   merchantId: string,
   actualAmount: number
 ): Promise<{ entry: DrawerEntry; expectedBalance: number; discrepancy: number }> {
+  const latestEntry = await getLatestDrawerEntry(terminalId)
+  if (!latestEntry || latestEntry.type === "closeout") {
+    throw new Error("No active drawer shift to close")
+  }
+
   const expectedBalance = await getDrawerBalance(terminalId)
   const discrepancy = actualAmount - expectedBalance
 
@@ -82,10 +92,11 @@ export async function closeDrawerShift(
 export async function getDrawerState(terminalId: string): Promise<{
   balance: number
   lastEntry: DrawerEntry | null
+  active: boolean
 }> {
   const [balance, lastEntry] = await Promise.all([
     getDrawerBalance(terminalId),
     getLatestDrawerEntry(terminalId)
   ])
-  return { balance, lastEntry }
+  return { balance, lastEntry, active: Boolean(lastEntry && lastEntry.type !== "closeout") }
 }

@@ -18,6 +18,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       balance: state.balance,
+      active: state.active,
       lastEntry: state.lastEntry,
       log
     })

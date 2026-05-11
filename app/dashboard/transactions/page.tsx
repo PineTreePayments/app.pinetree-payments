@@ -148,10 +148,19 @@ export default function TransactionsPage() {
 
   const networkName = useCallback((network: string | null) => {
     if (!network) return "-"
+    if (network.toLowerCase() === "cash") return "Cash"
     if (network.toLowerCase() === "solana") return "Solana"
     if (network.toLowerCase() === "base") return "Base"
     if (network.toLowerCase() === "ethereum") return "Ethereum"
     return network.charAt(0).toUpperCase() + network.slice(1).toLowerCase()
+  }, [])
+
+  const formatUsd = useCallback((amount: number) => {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 2
+    }).format(Number.isFinite(amount) ? amount : 0)
   }, [])
 
   const calculateInsights = useCallback((data: Transaction[]) => {
@@ -224,27 +233,6 @@ export default function TransactionsPage() {
 
       // Use transactions from the API (already merchant-scoped via auth)
       const apiTx = payload.transactions || []
-
-      // Supplement with a direct Supabase query for real-time data if session available
-      const {
-        data: { session }
-      } = await supabase.auth.getSession()
-
-      if (session?.user?.id) {
-        const { data, error } = await supabase
-          .from("transactions")
-          .select(`*, payments (*)`)
-          .eq("merchant_id", session.user.id)
-          .order("created_at", { ascending: false })
-
-        if (!error && data) {
-          const tx = data as Transaction[]
-          setTransactions(tx)
-          calculateInsights(tx)
-          return
-        }
-      }
-
       setTransactions(apiTx)
       calculateInsights(apiTx)
     } catch (error) {
@@ -298,7 +286,7 @@ export default function TransactionsPage() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
         <InteractiveAnalyticsCard
           title="Today&apos;s Volume"
-          value={`$${todayVolume.toFixed(2)}`}
+          value={formatUsd(todayVolume)}
           onClick={() => {
             setChartMode("all")
             setShowChart(true)
@@ -327,7 +315,7 @@ export default function TransactionsPage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
         <InteractiveAnalyticsCard
-          title="POS Payments"
+          title="POS Transaction Share"
           value={`${posPercent}%`}
           onClick={() => {
             setChartMode("pos")
@@ -337,7 +325,7 @@ export default function TransactionsPage() {
         />
 
         <InteractiveAnalyticsCard
-          title="Online Payments"
+          title="Online Transaction Share"
           value={`${onlinePercent}%`}
           onClick={() => {
             setChartMode("online")
@@ -430,7 +418,7 @@ export default function TransactionsPage() {
                   </td>
 
                   <td className="px-6 py-4 font-medium text-gray-900">
-                    {payment ? `$${Number(payment.gross_amount || 0).toFixed(2)}` : "—"}
+                    {payment ? formatUsd(Number(payment.gross_amount || 0)) : "—"}
                   </td>
 
                   <td className="px-6 py-4 text-gray-900">
@@ -438,7 +426,7 @@ export default function TransactionsPage() {
                   </td>
 
                   <td className="px-6 py-4 text-gray-700">
-                    {networkName(tx.network)}
+                    {networkName(tx.provider === "cash" ? "cash" : tx.network)}
                   </td>
 
                   <td className="px-6 py-4 text-gray-900">
@@ -467,10 +455,10 @@ export default function TransactionsPage() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-6">
               <h2 className="text-lg font-semibold text-gray-900">
                 {chartMode === "pos"
-                  ? "POS Payment Volume"
+                  ? "POS Payment Volume (USD)"
                   : chartMode === "online"
-                  ? "Online Payment Volume"
-                  : "Transaction Volume"}
+                  ? "Online-Only Payment Volume (USD)"
+                  : "Transaction Volume (USD)"}
               </h2>
 
               <button
@@ -518,9 +506,12 @@ export default function TransactionsPage() {
                   axisLine={false}
                   tickLine={false}
                   tick={{ fill: "#374151", fontSize: 12 }}
+                  tickFormatter={(value) => formatUsd(Number(value))}
                 />
 
                 <Tooltip
+                  formatter={(value, name) => [formatUsd(Number(value)), `${name} Volume (USD)`]}
+                  labelFormatter={(label) => `Period: ${label}`}
                   contentStyle={{
                     background: "#fff",
                     border: "1px solid #e5e7eb",
@@ -531,11 +522,11 @@ export default function TransactionsPage() {
 
                 <Legend wrapperStyle={{ fontSize: "12px" }} />
 
-                <Bar dataKey="solana" name="Solana Pay" stackId="a" fill="#8b5cf6" radius={[0, 0, 0, 0]} />
-                <Bar dataKey="base" name="Base Pay" stackId="a" fill="#0052FF" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="solana" name="Solana SOL/USDC" stackId="a" fill="#8b5cf6" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="base" name="Base ETH/USDC" stackId="a" fill="#0052FF" radius={[0, 0, 0, 0]} />
                 <Bar dataKey="coinbase" name="Coinbase" stackId="a" fill="#1e40af" radius={[0, 0, 0, 0]} />
-                <Bar dataKey="shift4" name="Shift4" stackId="a" fill="#14b8a6" radius={[0, 0, 0, 0]} />
-                <Bar dataKey="cash" name="Cash" stackId="a" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="shift4" name="Card (Shift4)" stackId="a" fill="#14b8a6" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="cash" name="Cash (USD)" stackId="a" fill="#22c55e" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
