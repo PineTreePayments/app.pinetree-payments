@@ -1,22 +1,29 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Button from "@/components/ui/Button"
+import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import {
-  buildSignAndSendUrl,
-  clearSolflareSession,
-  getStoredSession,
-} from "@/lib/solflareDeeplink"
-import {
-  buildPhantomWalletBrowserUrl,
-  getInjectedPhantomProvider,
+  getDetectedSolanaWallets,
   getSolanaProviderPublicKey,
   getSolanaTransactionSignature,
+  isMobileBrowser,
+  type DetectedSolanaWallet,
   type SolanaBrowserProvider,
 } from "@/lib/wallets/solana"
 
 type SolanaAsset = "SOL" | "USDC"
-type SolanaWalletId = "phantom" | "solflare"
+type StepStatus = "done" | "active" | "upcoming"
+type SolanaExecutionStage =
+  | "idle"
+  | "creating_payment"
+  | "connecting_wallet"
+  | "wallet_connected"
+  | "confirm_payment"
+  | "payment_submitted"
+  | "detecting"
+  | "confirmed"
+  | "retryable_error"
 
 type Props = {
   intentId?: string
@@ -25,81 +32,133 @@ type Props = {
   nativeAmount?: number
   usdAmount: number
   paymentId?: string
+  paymentStatus?: string
   walletOptions?: Array<{ id: string; label: string; url?: string; href?: string }>
   onPaymentCreated?: (paymentId: string) => void
   onError?: (error: string) => void
+  onExecutionStarted?: () => void
   initialError?: string
+}
+
+type PaymentData = {
+  paymentId: string
+  paymentUrl: string
+}
+
+type SolanaPayTransactionResponse = {
+  transaction?: string
+  error?: string
+}
+
+const TERMINAL_PAYMENT_STATUSES = new Set(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "CANCELED"])
+
+const STAGE_NUM: Record<SolanaExecutionStage, number> = {
+  idle: 0,
+  creating_payment: 1,
+  connecting_wallet: 2,
+  wallet_connected: 3,
+  confirm_payment: 4,
+  payment_submitted: 5,
+  detecting: 6,
+  confirmed: 7,
+  retryable_error: -1,
+}
+
+function parsePaymentIdFromUrl(paymentUrl?: string): string {
+  const raw = String(paymentUrl || "").trim()
+  if (!raw) return ""
+  try {
+    const url = new URL(raw)
+    return String(url.searchParams.get("paymentId") || "").trim()
+  } catch {
+    return ""
+  }
+}
+
+function normalizeTerminalStatus(status?: string): string {
+  const normalized = String(status || "").trim().toUpperCase()
+  if (normalized === "CANCELLED") return "CANCELED"
+  return TERMINAL_PAYMENT_STATUSES.has(normalized) ? normalized : ""
+}
+
+function getStepStatus(currentStage: SolanaExecutionStage, doneAt: SolanaExecutionStage, activeAt: SolanaExecutionStage[]): StepStatus {
+  const current = STAGE_NUM[currentStage]
+  if (current >= STAGE_NUM[doneAt]) return "done"
+  if (activeAt.some((stage) => STAGE_NUM[stage] === current)) return "active"
+  return "upcoming"
 }
 
 export default function SolanaWalletPayment({
   intentId,
   selectedAsset = "SOL",
+  paymentUrl: directPaymentUrl,
   usdAmount,
   nativeAmount,
   paymentId: directPaymentId,
+  paymentStatus,
   onPaymentCreated,
   onError,
+  onExecutionStarted,
   initialError = "",
 }: Props) {
-  const [openingWallet, setOpeningWallet] = useState<SolanaWalletId | null>(null)
+  const [wallets, setWallets] = useState<DetectedSolanaWallet[]>([])
+  const [selectedWalletId, setSelectedWalletId] = useState("")
+  const [activeWalletName, setActiveWalletName] = useState("")
+  const [execStage, setExecStage] = useState<SolanaExecutionStage>("idle")
   const [error, setError] = useState(initialError)
-  const [resolvedPaymentId, setResolvedPaymentId] = useState<string | null>(
-    directPaymentId ?? null
+  const [paymentData, setPaymentData] = useState<PaymentData | null>(() => {
+    const paymentId = String(directPaymentId || parsePaymentIdFromUrl(directPaymentUrl)).trim()
+    const paymentUrl = String(directPaymentUrl || "").trim()
+    return paymentId || paymentUrl ? { paymentId, paymentUrl } : null
+  })
+
+  const terminalStatus = normalizeTerminalStatus(paymentStatus)
+  const selectedWallet = useMemo(
+    () => wallets.find((wallet) => wallet.id === selectedWalletId) || null,
+    [selectedWalletId, wallets]
   )
+  const isMobile = useMemo(() => isMobileBrowser(), [])
 
-  async function sendPhantomTransaction(
-    provider: SolanaBrowserProvider,
-    paymentId: string,
-  ): Promise<void> {
-    const connectResult = await provider.connect()
-
-    const walletPublicKey = getSolanaProviderPublicKey(provider, connectResult)
-    if (!walletPublicKey) {
-      throw new Error("Unable to read Phantom wallet public key")
-    }
-
-    const res = await fetch("/api/solana/build-wallet-transaction", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ paymentId, walletPublicKey }),
+  const refreshWallets = useCallback(() => {
+    const detected = getDetectedSolanaWallets()
+    setWallets(detected)
+    setSelectedWalletId((current) => {
+      if (current && detected.some((wallet) => wallet.id === current)) return current
+      return detected[0]?.id || ""
     })
-
-    const data = (await res.json()) as { transaction?: string; error?: string }
-
-    if (!res.ok || !data?.transaction) {
-      throw new Error(data?.error || "Failed to build Solana transaction")
-    }
-
-    const { Transaction } = await import("@solana/web3.js")
-    const tx = Transaction.from(Buffer.from(data.transaction, "base64"))
-
-    const result = await provider.signAndSendTransaction(tx)
-    const signature = getSolanaTransactionSignature(result)
-    if (!signature) {
-      throw new Error("Phantom did not return a transaction signature")
-    }
-
-    await fetch(`/api/payments/${encodeURIComponent(paymentId)}/detect`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ txHash: signature }),
-    }).catch(() => null)
-  }
-
-  // Phantom provider only — Solflare uses the existing Solflare deep link flow
-  const getPhantomProvider = useCallback((): SolanaBrowserProvider | null => {
-    return getInjectedPhantomProvider()
   }, [])
 
-  const getSolflareProvider = useCallback((): SolanaBrowserProvider | null => {
-    const w = window as Window & { solflare?: SolanaBrowserProvider }
-    return w.solflare?.isSolflare === true ? w.solflare : null
-  }, [])
+  useEffect(() => {
+    refreshWallets()
+    window.setTimeout(refreshWallets, 400)
+    window.addEventListener("focus", refreshWallets)
+    return () => window.removeEventListener("focus", refreshWallets)
+  }, [refreshWallets])
 
-  const getPaymentId = useCallback(async (): Promise<string> => {
-    if (resolvedPaymentId) return resolvedPaymentId
-    if (!intentId) throw new Error("Missing payment ID")
+  useEffect(() => {
+    setError(initialError)
+  }, [initialError])
 
+  useEffect(() => {
+    if (terminalStatus === "CONFIRMED") setExecStage("confirmed")
+  }, [terminalStatus])
+
+  const getPaymentData = useCallback(async (): Promise<PaymentData> => {
+    if (paymentData?.paymentId) return paymentData
+
+    const existingPaymentId = String(directPaymentId || parsePaymentIdFromUrl(directPaymentUrl)).trim()
+    const existingPaymentUrl = String(directPaymentUrl || "").trim()
+    if (existingPaymentId) {
+      const next = { paymentId: existingPaymentId, paymentUrl: existingPaymentUrl }
+      setPaymentData(next)
+      return next
+    }
+
+    if (!intentId) {
+      throw new Error("Missing payment ID")
+    }
+
+    setExecStage("creating_payment")
     const res = await fetch(
       `/api/payment-intents/${encodeURIComponent(intentId)}/select-network`,
       {
@@ -114,211 +173,220 @@ export default function SolanaWalletPayment({
       throw new Error(err.error || "Failed to prepare Solana payment")
     }
 
-    const data = (await res.json()) as { paymentId?: string }
-    const id = String(data.paymentId || "").trim()
-    if (!id) throw new Error("No payment ID returned")
+    const data = (await res.json()) as { paymentId?: string; paymentUrl?: string; walletUrl?: string }
+    const paymentId = String(data.paymentId || "").trim()
+    const paymentUrl = String(data.paymentUrl || data.walletUrl || "").trim()
+    if (!paymentId) throw new Error("No payment ID returned")
 
-    setResolvedPaymentId(id)
-    onPaymentCreated?.(id)
-    return id
-  }, [intentId, onPaymentCreated, resolvedPaymentId, selectedAsset])
+    const next = { paymentId, paymentUrl }
+    setPaymentData(next)
+    onPaymentCreated?.(paymentId)
+    return next
+  }, [directPaymentId, directPaymentUrl, intentId, onPaymentCreated, paymentData, selectedAsset])
 
-  // ── Phantom: injected-provider desktop flow + mobile wallet-browser fallback ──
-
-  const launchPhantomWalletBrowser = useCallback((paymentId: string) => {
-    const context = {
-      currentHref: window.location.href,
-      paymentId,
-      intentId,
-      selectedAsset,
-      selectedNetwork: "solana",
+  async function sendWalletTransaction(provider: SolanaBrowserProvider, paymentId: string): Promise<string> {
+    const connectResult = await provider.connect()
+    const walletPublicKey = getSolanaProviderPublicKey(provider, connectResult)
+    if (!walletPublicKey) {
+      throw new Error("Unable to read Solana wallet public key")
     }
 
-    window.location.href = buildPhantomWalletBrowserUrl(context)
-  }, [intentId, selectedAsset])
+    setExecStage("wallet_connected")
+    const res = await fetch(`/api/solana-pay/transaction?paymentId=${encodeURIComponent(paymentId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ account: walletPublicKey }),
+    })
 
-  const handlePhantomClick = useCallback(async () => {
+    const data = (await res.json()) as SolanaPayTransactionResponse
+    if (!res.ok || !data?.transaction) {
+      throw new Error(data?.error || "Failed to build Solana transaction")
+    }
+
+    const { Transaction } = await import("@solana/web3.js")
+    const tx = Transaction.from(Buffer.from(data.transaction, "base64"))
+
+    setExecStage("confirm_payment")
+    const result = await provider.signAndSendTransaction(tx)
+    const signature = getSolanaTransactionSignature(result)
+    if (!signature) {
+      throw new Error("Wallet did not return a transaction signature")
+    }
+
+    return signature
+  }
+
+  const openSolanaPayUri = useCallback((paymentUrl: string) => {
+    const normalizedUrl = String(paymentUrl || "").trim()
+    if (!normalizedUrl) {
+      throw new Error("Solana payment request URL is missing")
+    }
+    window.location.href = `solana:${encodeURIComponent(normalizedUrl)}`
+  }, [])
+
+  const startPayment = useCallback(async (wallet: DetectedSolanaWallet | null) => {
     setError("")
-    setOpeningWallet("phantom")
-    try {
-      const paymentId = await getPaymentId()
-      const provider = getPhantomProvider()
+    setActiveWalletName(wallet?.name || "Solana wallet")
+    onExecutionStarted?.()
 
-      if (!provider) {
-        launchPhantomWalletBrowser(paymentId)
+    try {
+      const preparedPayment = await getPaymentData()
+
+      if (!wallet) {
+        setExecStage("confirm_payment")
+        openSolanaPayUri(preparedPayment.paymentUrl)
         return
       }
 
-      await sendPhantomTransaction(provider, paymentId)
+      setExecStage("connecting_wallet")
+      const signature = await sendWalletTransaction(wallet.provider, preparedPayment.paymentId)
 
-      setError("")
+      setExecStage("payment_submitted")
+      await fetch(`/api/payments/${encodeURIComponent(preparedPayment.paymentId)}/detect`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ txHash: signature }),
+      }).catch(() => null)
+
+      setExecStage("detecting")
+      onPaymentCreated?.(preparedPayment.paymentId)
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to send Solana transaction"
       setError(message)
+      setExecStage("retryable_error")
       onError?.(message)
-      setOpeningWallet(null)
-    } finally {
-      if (getPhantomProvider()) {
-        setOpeningWallet(null)
-      }
     }
-  }, [getPaymentId, getPhantomProvider, launchPhantomWalletBrowser, onError])
+  }, [getPaymentData, onError, onExecutionStarted, onPaymentCreated, openSolanaPayUri])
 
-  // ── Solflare: Universal Link v1 deep link flow ────────────────────────────
-  //
-  // Flow A — no existing session:
-  //   1. getPaymentId() creates the payment and returns the ID
-  //   2. paymentId is saved to sessionStorage (bridges the connect redirect)
-  //   3. navigate → Solflare connect URL
-  //   4. Solflare redirects back to /pay?...&solflare_action=connect_callback
-  //   5. PayClient decrypts connect response, builds tx, navigates to signAndSend
-  //   6. Solflare redirects back to /pay?...&solflare_action=sign_callback
-  //   7. PayClient decrypts signature, calls /detect, shows processing screen
-  //
-  // Flow B — session already in sessionStorage:
-  //   1. getPaymentId() creates/resolves the payment
-  //   2. Build tx via /api/solana/build-wallet-transaction using session.publicKey
-  //   3. navigate → Solflare signAndSendTransaction URL
-  //   4. Solflare redirects back to /pay?...&solflare_action=sign_callback
-  //   5. PayClient handles sign_callback (same as Flow A step 7)
-
-  const handleSolflareDeeplinkClick = useCallback(async () => {
-    setError("")
-    setOpeningWallet("solflare")
-
-    // Strip stale status/error params from URL before navigating to Solflare
-    const currentUrl = new URL(window.location.href)
-    currentUrl.searchParams.delete("status")
-    currentUrl.searchParams.delete("solflare_error")
-    window.history.replaceState({}, "", currentUrl.toString())
-
-    try {
-      const injectedSolflare = getSolflareProvider()
-
-      if (injectedSolflare) {
-        console.log("[Solflare] Using injected Solflare provider")
-
-        const paymentId = await getPaymentId()
-
-        await injectedSolflare.connect()
-
-        const walletPublicKey = injectedSolflare.publicKey?.toString()
-        if (!walletPublicKey) {
-          throw new Error("Unable to read Solflare wallet public key")
-        }
-
-        const res = await fetch("/api/solana/build-wallet-transaction", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ paymentId, walletPublicKey }),
-        })
-
-        const data = (await res.json()) as { transaction?: string; error?: string }
-
-        if (!res.ok || !data?.transaction) {
-          throw new Error(data?.error || "Failed to build Solana transaction")
-        }
-
-        const { Transaction } = await import("@solana/web3.js")
-        const tx = Transaction.from(Buffer.from(data.transaction, "base64"))
-
-        const result = await injectedSolflare.signAndSendTransaction(tx)
-        const signature = getSolanaTransactionSignature(result)
-        if (!signature) {
-          throw new Error("Solflare did not return a transaction signature")
-        }
-
-        await fetch(`/api/payments/${encodeURIComponent(paymentId)}/detect`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ txHash: signature }),
-        }).catch(() => null)
-
-        setError("")
-        return
-      }
-
-      console.log("[Solflare] No injected provider, using deeplink flow")
-
-      const paymentId = await getPaymentId()
-      const session = getStoredSession()
-      const origin = window.location.origin
-      const base = `${origin}/pay?intent=${encodeURIComponent(intentId ?? "")}`
-
-      if (!session) {
-        // Flow A: no session — start server-backed connect
-        console.log("[Solflare] Starting connect deeplink, paymentId:", paymentId)
-        await fetch("/api/debug/solflare", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            stage: "start-connect",
-            payload: { paymentId, intentId: intentId ?? null, selectedAsset },
-          }),
-        }).catch(() => null)
-
-        const startRes = await fetch("/api/solflare/start", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ paymentId, intentId, selectedAsset }),
-        })
-        const startData = (await startRes.json()) as { connectUrl?: string; error?: string }
-
-        if (!startRes.ok || !startData.connectUrl) {
-          throw new Error(startData.error || "Failed to start Solflare flow")
-        }
-
-        window.location.href = startData.connectUrl
-        return // page is navigating away
-      }
-
-      // Flow B: session exists — build tx and send signAndSendTransaction deeplink
-      const res = await fetch("/api/solana/build-wallet-transaction", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentId, walletPublicKey: session.publicKey }),
-      })
-      const txData = (await res.json()) as { transaction?: string; error?: string }
-      if (!res.ok || !txData.transaction) {
-        // Clear stale session so the next tap starts a fresh connect flow
-        clearSolflareSession()
-        throw new Error(txData.error || "Failed to build Solana transaction")
-      }
-
-      const signRedirect = `${base}&solflare_action=sign_callback&solflare_payment_id=${encodeURIComponent(paymentId)}`
-      console.log("[Solflare] Starting signAndSendTransaction deeplink")
-      window.location.href = buildSignAndSendUrl(txData.transaction, session, signRedirect)
-      // page is navigating away — no finally cleanup needed
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to start Solflare payment"
-      setError(message)
-      onError?.(message)
-      setOpeningWallet(null)
+  function renderStepIcon(status: StepStatus) {
+    if (status === "done") {
+      return (
+        <span className="flex-shrink-0 flex items-center justify-center w-7 h-7 rounded-full bg-green-500 shadow-sm shadow-green-500/20">
+          <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2 6l2.5 2.5 5.5-5" />
+          </svg>
+        </span>
+      )
     }
-  }, [getPaymentId, getSolflareProvider, intentId, selectedAsset, onError])
 
-  // ── Render ────────────────────────────────────────────────────────────────
+    if (status === "active") {
+      return (
+        <span className="flex-shrink-0 flex h-7 w-7 items-center justify-center rounded-full bg-[#0052FF] shadow-sm shadow-[#0052FF]/30">
+          <span className="h-3.5 w-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+        </span>
+      )
+    }
+
+    return (
+      <span className="flex-shrink-0 flex h-7 w-7 items-center justify-center rounded-full bg-gray-100 ring-1 ring-gray-200">
+        <span className="h-2 w-2 rounded-full bg-gray-300" />
+      </span>
+    )
+  }
+
+  function renderStep(label: string, status: StepStatus, subtext?: string) {
+    const rowClasses = status === "done"
+      ? "bg-green-50/80 ring-1 ring-green-100"
+      : status === "active"
+        ? "bg-[#0052FF]/5 ring-1 ring-[#0052FF]/20 shadow-sm shadow-[#0052FF]/10"
+        : "bg-gray-50/80 ring-1 ring-gray-100"
+
+    return (
+      <div className={`flex items-start gap-3 rounded-2xl px-3.5 py-3 transition-all ${rowClasses}`}>
+        <div className="mt-0.5">{renderStepIcon(status)}</div>
+        <div className="min-w-0 flex-1">
+          <span className={`text-sm leading-tight ${
+            status === "done"
+              ? "text-green-700 font-medium"
+              : status === "active"
+                ? "text-[#0052FF] font-semibold"
+                : "text-gray-400 font-medium"
+          }`}>
+            {label}
+          </span>
+          {subtext && status === "active" ? (
+            <p className="text-xs text-gray-600 mt-1 leading-snug">{subtext}</p>
+          ) : null}
+        </div>
+      </div>
+    )
+  }
 
   const amountDisplay = (
     <div className="bg-gray-50 rounded-xl px-4 py-3 text-center space-y-1">
       {intentId ? (
         <>
           <p className="text-lg font-bold text-gray-900">${usdAmount.toFixed(2)} USD</p>
-          <p className="text-xs text-gray-500">via Solana · exact {selectedAsset} determined at payment</p>
+          <p className="text-xs text-gray-500">via Solana Network - exact {selectedAsset} determined at payment</p>
         </>
       ) : (
         <>
-          <p className="text-lg font-bold text-gray-900">{nativeAmount} SOL</p>
-          <p className="text-xs text-gray-500">≈ ${usdAmount.toFixed(2)} USD</p>
+          <p className="text-lg font-bold text-gray-900">{nativeAmount} {selectedAsset}</p>
+          <p className="text-xs text-gray-500">approx. ${usdAmount.toFixed(2)} USD</p>
         </>
       )}
     </div>
   )
 
+  if (terminalStatus) {
+    return (
+      <div className="space-y-4" onClick={(event) => event.stopPropagation()}>
+        <div className="text-xs uppercase tracking-widest text-gray-500 text-center font-semibold">
+          Solana Network Payment
+        </div>
+        <PaymentStatusVisual status={terminalStatus} className="py-2" />
+      </div>
+    )
+  }
+
+  const isExecuting = execStage !== "idle" && execStage !== "retryable_error"
+  const walletStatus = getStepStatus(execStage, "wallet_connected", ["creating_payment", "connecting_wallet"])
+  const confirmStatus = getStepStatus(execStage, "payment_submitted", ["wallet_connected", "confirm_payment"])
+  const networkStatus = getStepStatus(execStage, "confirmed", ["payment_submitted", "detecting"])
+  const contextMessage =
+    execStage === "creating_payment"
+      ? "Preparing payment..."
+      : execStage === "connecting_wallet"
+        ? `Connecting ${activeWalletName || "wallet"}...`
+        : execStage === "wallet_connected" || execStage === "confirm_payment"
+          ? "Confirm payment in your wallet"
+          : execStage === "payment_submitted" || execStage === "detecting"
+            ? "Waiting for network confirmation..."
+            : ""
+
+  if (isExecuting) {
+    return (
+      <div className="w-full space-y-3" onClick={(event) => event.stopPropagation()}>
+        <div className="text-xs uppercase tracking-widest text-gray-500 text-center font-semibold">
+          Solana Network Payment
+        </div>
+        {amountDisplay}
+        <div className="bg-white rounded-3xl mt-1 overflow-hidden shadow-sm ring-1 ring-gray-100">
+          <div className="px-4 pt-4 pb-3 space-y-2.5">
+            {renderStep("Wallet connected", walletStatus, walletStatus === "active" ? "Choose and approve your Solana wallet" : undefined)}
+            {renderStep("Confirm payment", confirmStatus, confirmStatus === "active" ? "Approve the prepared transaction in your wallet" : undefined)}
+            {renderStep("Network confirmation", networkStatus)}
+          </div>
+          {contextMessage ? (
+            <div className="mx-4 mb-4 rounded-2xl px-4 py-3.5 bg-[#0052FF]/5 ring-1 ring-[#0052FF]/15">
+              <span className="flex items-center gap-2 text-sm font-semibold text-[#0052FF]">
+                <span className="inline-block h-2 w-2 rounded-full bg-[#0052FF] animate-pulse flex-shrink-0" />
+                {contextMessage}
+              </span>
+              <p className="text-xs text-gray-600 mt-1.5 leading-relaxed">
+                Return here after approving if your wallet does not switch automatically.
+              </p>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
-      <div className="text-xs uppercase tracking-widest text-gray-500 text-center">
-        Pay with {selectedAsset} (Solana)
+    <div className="space-y-3" onClick={(event) => event.stopPropagation()}>
+      <div className="text-xs uppercase tracking-widest text-gray-500 text-center font-semibold">
+        Solana Network Payment
       </div>
       {amountDisplay}
 
@@ -328,22 +396,64 @@ export default function SolanaWalletPayment({
         </div>
       ) : null}
 
-      <div className="space-y-2">
-        <Button
-          fullWidth
-          onClick={() => void handlePhantomClick()}
-          disabled={openingWallet !== null}
-        >
-          {openingWallet === "phantom" ? "Opening..." : "Pay with Phantom"}
-        </Button>
-        <Button
-          fullWidth
-          onClick={() => void handleSolflareDeeplinkClick()}
-          disabled={openingWallet !== null}
-        >
-          {openingWallet === "solflare" ? "Opening Solflare..." : "Pay with Solflare"}
-        </Button>
+      <div className="bg-white rounded-3xl mt-1 overflow-hidden shadow-sm ring-1 ring-gray-100">
+        <div className="px-4 pt-4 pb-3 space-y-2.5">
+          {renderStep("Wallet selection", "active", wallets.length ? "Choose an installed Solana wallet" : "No installed Solana wallet detected")}
+          {renderStep("Confirm payment", "upcoming")}
+          {renderStep("Network confirmation", "upcoming")}
+        </div>
+
+        <div className="mx-4 mb-4 space-y-2">
+          {wallets.map((wallet) => (
+            <button
+              key={wallet.id}
+              type="button"
+              onClick={() => setSelectedWalletId(wallet.id)}
+              className={`w-full rounded-2xl border px-3.5 py-3 text-left transition-all ${
+                selectedWalletId === wallet.id
+                  ? "border-[#0052FF]/30 bg-[#0052FF]/5"
+                  : "border-gray-200 bg-white hover:bg-gray-50"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{wallet.name}</p>
+                  <p className="text-xs text-gray-500">
+                    {wallet.source === "wallet-standard" ? "Wallet Standard detected" : "Installed wallet detected"}
+                  </p>
+                </div>
+                <span className={`h-3 w-3 rounded-full border ${
+                  selectedWalletId === wallet.id ? "border-[#0052FF] bg-[#0052FF]" : "border-gray-300"
+                }`} />
+              </div>
+            </button>
+          ))}
+
+          {wallets.length === 0 ? (
+            <div className="rounded-2xl bg-gray-50 ring-1 ring-gray-100 px-4 py-3 text-xs text-gray-600 leading-relaxed">
+              Open this checkout in an installed Solana wallet browser, then return here to continue.
+            </div>
+          ) : null}
+        </div>
       </div>
+
+      {wallets.length > 0 ? (
+        <Button
+          fullWidth
+          onClick={() => void startPayment(selectedWallet)}
+          disabled={!selectedWallet}
+        >
+          Pay with {selectedWallet?.name || "Solana Wallet"}
+        </Button>
+      ) : isMobile ? (
+        <Button fullWidth onClick={() => void startPayment(null)}>
+          Open Solana Wallet
+        </Button>
+      ) : (
+        <Button fullWidth variant="secondary" onClick={refreshWallets}>
+          Refresh Wallets
+        </Button>
+      )}
     </div>
   )
 }

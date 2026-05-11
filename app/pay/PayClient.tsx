@@ -88,6 +88,11 @@ type AssetOption = {
   disabledCopy?: string
 }
 
+type SolanaPayTransactionResponse = {
+  transaction?: string
+  error?: string
+}
+
 function parsePayload(raw: string | null): SplitPayload | null {
   if (!raw) return null
 
@@ -247,6 +252,7 @@ export default function PayClient() {
 
   // ── Base execution: once Base payment starts, collapse asset selector ──────
   const [baseExecutionActive, setBaseExecutionActive] = useState(false)
+  const [solanaExecutionActive, setSolanaExecutionActive] = useState(false)
 
   const handleBaseCancelPayment = useCallback(() => {
     setBaseExecutionActive(false)
@@ -373,6 +379,7 @@ export default function PayClient() {
 
     clearStaleBaseExecutionSessionStorage()
     setBaseExecutionActive(false)
+    setSolanaExecutionActive(false)
     setSelectedAssetId("")
   }, [isIntentMode, terminalPaymentStatus])
 
@@ -382,7 +389,7 @@ export default function PayClient() {
     if (!selectedAssetId) return
     // Never deselect while Base execution is active — the returning-from-wallet
     // tap would fire mousedown outside intentCardsRef and unmount BaseWalletPayment.
-    if (baseExecutionActive) return
+    if (baseExecutionActive || solanaExecutionActive) return
 
     function handleOutsideClick(event: MouseEvent) {
       const target = event.target as Node | null
@@ -395,7 +402,7 @@ export default function PayClient() {
 
     document.addEventListener("mousedown", handleOutsideClick)
     return () => document.removeEventListener("mousedown", handleOutsideClick)
-  }, [selectedAssetId, baseExecutionActive])
+  }, [selectedAssetId, baseExecutionActive, solanaExecutionActive])
 
   // Strip solflare_error param from URL after reading so it doesn't persist on reload
   useEffect(() => {
@@ -468,13 +475,13 @@ export default function PayClient() {
             throw new Error("Unable to read Phantom wallet public key")
           }
 
-          const res = await fetch("/api/solana/build-wallet-transaction", {
+          const res = await fetch(`/api/solana-pay/transaction?paymentId=${encodeURIComponent(paymentId)}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ paymentId, walletPublicKey }),
+            body: JSON.stringify({ account: walletPublicKey }),
           })
 
-          const data = (await res.json()) as { transaction?: string; error?: string }
+          const data = (await res.json()) as SolanaPayTransactionResponse
 
           if (!data?.transaction) {
             console.error("[Phantom] no transaction returned", data?.error)
@@ -628,15 +635,12 @@ export default function PayClient() {
             paymentId: callbackData.paymentId,
             walletPublicKeyPrefix: callbackData.walletPublicKey.slice(0, 8),
           })
-          const res = await fetch("/api/solana/build-wallet-transaction", {
+          const res = await fetch(`/api/solana-pay/transaction?paymentId=${encodeURIComponent(callbackData.paymentId)}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              paymentId: callbackData.paymentId,
-              walletPublicKey: callbackData.walletPublicKey,
-            }),
+            body: JSON.stringify({ account: callbackData.walletPublicKey }),
           })
-          const txData = (await res.json()) as { transaction?: string; error?: string }
+          const txData = (await res.json()) as SolanaPayTransactionResponse
           await logSolflare("build-tx-response", {
             ok: res.ok,
             status: res.status,
@@ -712,12 +716,12 @@ export default function PayClient() {
           paymentId,
           walletPublicKeyPrefix: session.publicKey.slice(0, 8),
         })
-        const res = await fetch("/api/solana/build-wallet-transaction", {
+        const res = await fetch(`/api/solana-pay/transaction?paymentId=${encodeURIComponent(paymentId)}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ paymentId, walletPublicKey: session.publicKey }),
+          body: JSON.stringify({ account: session.publicKey }),
         })
-        const txData = (await res.json()) as { transaction?: string; error?: string }
+        const txData = (await res.json()) as SolanaPayTransactionResponse
         await logSolflare("build-tx-response", {
           ok: res.ok,
           status: res.status,
@@ -1079,21 +1083,21 @@ export default function PayClient() {
         <Card className="max-w-md w-full space-y-5">
           <div>
             <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">PineTree Checkout</p>
-            {!baseExecutionActive && (
+            {!(baseExecutionActive || solanaExecutionActive) && (
               <h1 className="text-2xl font-bold text-gray-900">Choose Payment Asset</h1>
             )}
           </div>
 
           {amountSummary}
 
-          {!baseExecutionActive && (
+          {!(baseExecutionActive || solanaExecutionActive) && (
             <div className="flex justify-center">
               <StatusBadge label={displayStatus.label} classes={`${displayStatus.classes} px-3 py-1.5 text-sm`} />
             </div>
           )}
 
           <div className="space-y-3" ref={intentCardsRef}>
-            {!baseExecutionActive && (
+            {!(baseExecutionActive || solanaExecutionActive) && (
               <p className="text-xs uppercase tracking-widest text-gray-500">Select an asset to continue:</p>
             )}
 
@@ -1101,20 +1105,20 @@ export default function PayClient() {
               {getCheckoutAssetOptions(intentPayload?.availableNetworks || []).map((asset) => {
                 const isActive = selectedAssetId === asset.id
 
-                // While Base execution is running, hide all non-active asset cards
-                if (baseExecutionActive && !isActive) return null
+                // While wallet execution is running, hide all non-active asset cards
+                if ((baseExecutionActive || solanaExecutionActive) && !isActive) return null
 
                 return (
                   <div
                     key={asset.id}
                     className={
-                      baseExecutionActive && isActive && asset.network === "base"
+                      (baseExecutionActive || solanaExecutionActive) && isActive && (asset.network === "base" || asset.network === "solana")
                         ? "overflow-visible rounded-3xl bg-transparent"
                         : "overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm"
                     }
                   >
                     {/* Asset selector button — hidden once execution starts */}
-                    {!baseExecutionActive && (
+                    {!(baseExecutionActive || solanaExecutionActive) && (
                       <button
                         onClick={() => {
                           if (asset.disabled) return
@@ -1142,7 +1146,7 @@ export default function PayClient() {
 
                     {/* Payment UI — always mounted when active so state is never lost */}
                     {isActive ? (
-                      <div className={`${baseExecutionActive ? "p-0 bg-transparent" : "px-4 py-4 border-t border-gray-200 bg-white"} space-y-4`}>
+                      <div className={`${baseExecutionActive || solanaExecutionActive ? "p-0 bg-transparent" : "px-4 py-4 border-t border-gray-200 bg-white"} space-y-4`}>
 
                         {/* ── Shift4: hosted checkout redirect ──────────── */}
                         {asset.network === "shift4" ? (
@@ -1218,7 +1222,9 @@ export default function PayClient() {
                             intentId={intentId!}
                             selectedAsset={asset.symbol === "USDC" ? "USDC" : "SOL"}
                             usdAmount={displayAmount}
+                            paymentStatus={normalizedPaymentStatus}
                             initialError={getPhantomRetryMessage(phantomError) || getSolflareRetryMessage(solflareError)}
+                            onExecutionStarted={() => setSolanaExecutionActive(true)}
                             onPaymentCreated={() => {
                               void loadIntentCallback()
                             }}
@@ -1241,7 +1247,7 @@ export default function PayClient() {
               })}
             </div>
 
-            {!baseExecutionActive && (
+            {!(baseExecutionActive || solanaExecutionActive) && (
               <Button variant="danger" fullWidth onClick={() => window.close()}>
                 Cancel
               </Button>
@@ -1301,6 +1307,8 @@ export default function PayClient() {
             paymentUrl={String(activePayload?.paymentUrl || "")}
             nativeAmount={nativeAmount}
             usdAmount={usdTotalAmount}
+            selectedAsset={nativeSymbol === "USDC" ? "USDC" : "SOL"}
+            paymentStatus={normalizedPaymentStatus}
             walletOptions={walletOptions}
           />
         ) : null}

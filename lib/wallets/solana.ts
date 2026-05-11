@@ -24,10 +24,18 @@ type WalletStandardProvider = {
 export type SolanaBrowserProvider = {
   isPhantom?: boolean
   isSolflare?: boolean
+  name?: string
   publicKey?: { toString: () => string }
   providers?: SolanaBrowserProvider[]
   connect: () => Promise<unknown>
   signAndSendTransaction: (transaction: unknown) => Promise<{ signature?: string; signatures?: string[] } | string>
+}
+
+export type DetectedSolanaWallet = {
+  id: string
+  name: string
+  provider: SolanaBrowserProvider
+  source: "injected" | "wallet-standard"
 }
 
 type SolanaBrowserWindow = Window & {
@@ -91,9 +99,8 @@ function getWalletStandardProviders(w: SolanaBrowserWindow): WalletStandardProvi
   })
 }
 
-function createWalletStandardPhantomProvider(wallet: WalletStandardProvider): SolanaBrowserProvider | null {
+function createWalletStandardProvider(wallet: WalletStandardProvider): SolanaBrowserProvider | null {
   const name = String(wallet.name || "").toLowerCase()
-  const hasPhantomName = name.includes("phantom")
   const chains = Array.isArray(wallet.chains) ? wallet.chains.map((chain) => String(chain).toLowerCase()) : []
   const supportsSolanaChain = chains.some((chain) => chain.includes("solana"))
   const features = wallet.features || {}
@@ -102,7 +109,7 @@ function createWalletStandardPhantomProvider(wallet: WalletStandardProvider): So
   const connectFeature = features["standard:connect"] as WalletStandardFeature | undefined
   const signAndSendFeature = features["solana:signAndSendTransaction"] as WalletStandardFeature | undefined
 
-  if (!hasPhantomName || (!supportsSolanaChain && !supportsSolanaFeature)) return null
+  if (!name || (!supportsSolanaChain && !supportsSolanaFeature)) return null
   if (typeof connectFeature?.connect !== "function") return null
   if (typeof signAndSendFeature?.signAndSendTransaction !== "function") return null
 
@@ -110,7 +117,9 @@ function createWalletStandardPhantomProvider(wallet: WalletStandardProvider): So
   let connectedPublicKey = accountPublicKeyToString(connectedAccounts[0])
 
   return {
-    isPhantom: true,
+    name: wallet.name,
+    isPhantom: name.includes("phantom"),
+    isSolflare: name.includes("solflare"),
     get publicKey() {
       return connectedPublicKey ? { toString: () => connectedPublicKey } : undefined
     },
@@ -146,6 +155,75 @@ function createWalletStandardPhantomProvider(wallet: WalletStandardProvider): So
       return signature ? { signature } : (result as { signature?: string; signatures?: string[] } | string)
     },
   }
+}
+
+function createWalletStandardPhantomProvider(wallet: WalletStandardProvider): SolanaBrowserProvider | null {
+  const provider = createWalletStandardProvider(wallet)
+  return provider?.isPhantom ? provider : null
+}
+
+function getInjectedProviderName(provider: SolanaBrowserProvider, fallback: string): string {
+  const named = String(provider.name || "").trim()
+  if (named) return named
+  if (provider.isPhantom) return "Phantom"
+  if (provider.isSolflare) return "Solflare"
+  return fallback
+}
+
+function walletId(name: string, source: string, index: number): string {
+  const slug = String(name || "solana-wallet")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+  return `${source}-${slug || "wallet"}-${index}`
+}
+
+export function getDetectedSolanaWallets(): DetectedSolanaWallet[] {
+  const w = getSolanaWindow()
+  if (!w) return []
+
+  const detected: DetectedSolanaWallet[] = []
+  const seenProviders = new Set<SolanaBrowserProvider>()
+  const seenNames = new Set<string>()
+
+  const injectedCandidates = uniqueProviders([
+    isSolanaBrowserProvider(w.phantom?.solana) ? w.phantom?.solana : null,
+    isSolanaBrowserProvider(w.solflare) ? w.solflare : null,
+    isSolanaBrowserProvider(w.solana) ? w.solana : null,
+    ...(w.phantom?.solana?.providers ?? []).filter(isSolanaBrowserProvider),
+    ...(w.solana?.providers ?? []).filter(isSolanaBrowserProvider),
+  ])
+
+  for (const provider of injectedCandidates) {
+    if (seenProviders.has(provider)) continue
+    seenProviders.add(provider)
+    const name = getInjectedProviderName(provider, "Solana Wallet")
+    const normalizedName = name.toLowerCase()
+    seenNames.add(normalizedName)
+    detected.push({
+      id: walletId(name, "injected", detected.length),
+      name,
+      provider,
+      source: "injected",
+    })
+  }
+
+  for (const wallet of getWalletStandardProviders(w)) {
+    const provider = createWalletStandardProvider(wallet)
+    if (!provider) continue
+    const name = String(wallet.name || provider.name || "Solana Wallet").trim()
+    const normalizedName = name.toLowerCase()
+    if (seenNames.has(normalizedName)) continue
+    seenNames.add(normalizedName)
+    detected.push({
+      id: walletId(name, "standard", detected.length),
+      name,
+      provider,
+      source: "wallet-standard",
+    })
+  }
+
+  return detected
 }
 
 export function getInjectedPhantomProvider(): SolanaBrowserProvider | null {
