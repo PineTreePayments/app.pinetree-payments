@@ -476,6 +476,8 @@ function maybeHexTransactionHash(value: unknown): string | null {
   return /^0x[a-fA-F0-9]{64}$/.test(txHash) ? txHash : null
 }
 function extractDirectFinalTxHashFromSendCallsResult(result: unknown): string | null {
+  // Some wallets return the txHash as a plain string from wallet_sendCalls
+  if (typeof result === "string") return maybeHexTransactionHash(result)
   if (!result || typeof result !== "object") return null
   const source = result as {
     txHash?: unknown
@@ -489,6 +491,8 @@ function extractDirectFinalTxHashFromSendCallsResult(result: unknown): string | 
   )
 }
 function extractCallIdFromSendCallsResult(result: unknown): string {
+  // Some wallets return the callId/bundleId as a plain string from wallet_sendCalls
+  if (typeof result === "string") return result.trim()
   if (!result || typeof result !== "object") return ""
   const source = result as {
     id?: unknown
@@ -506,8 +510,10 @@ function extractFinalTxHashFromCallsStatus(result: unknown): string | null {
   }
   const direct = maybeHexTransactionHash(source.transactionHash) || maybeHexTransactionHash(source.txHash)
   if (direct) return direct
-  if (Array.isArray(source.receipts)) {
-    for (const receipt of source.receipts) {
+  if (Array.isArray(source.receipts) && source.receipts.length > 0) {
+    // Iterate in reverse: in a [approve, payment] batch the last receipt is the payment tx
+    for (let i = source.receipts.length - 1; i >= 0; i--) {
+      const receipt = source.receipts[i]
       const txHash = maybeHexTransactionHash(receipt.transactionHash) || maybeHexTransactionHash(receipt.txHash)
       if (txHash) return txHash
     }
@@ -1278,7 +1284,7 @@ export default function BaseWalletPayment({
                   finalTxHash = extractFinalTxHashFromCallsStatus(statusResult)
                   if (finalTxHash) break
                 } catch {
-                  break
+                  // continue polling on transient errors rather than giving up immediately
                 }
                 if (attempt < maxAttempts && !finalTxHash) {
                   await new Promise<void>((resolve) => setTimeout(resolve, delayMs))
