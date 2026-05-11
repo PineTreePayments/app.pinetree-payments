@@ -33,6 +33,13 @@ type ProviderRecord = {
   status: string
   enabled: boolean
   credentials?: ProviderCredentials | null
+  dashboard_status?: "not_configured" | "unsupported_provider_capability" | "connected"
+  capabilities?: {
+    supportsLightningInvoice?: boolean
+    supportsFeeAtPaymentTime?: boolean
+    supportsSplitSettlement?: boolean
+    supportsWebhookConfirmation?: boolean
+  } | null
 }
 
 type WalletRecord = {
@@ -78,6 +85,15 @@ function getConnectedAndEnabledProvidersCount(providers: ProviderRecord[]) {
   return providers.filter(
     (p) => p.enabled && (p.status === "connected" || p.status === "active")
   ).length
+}
+
+function lightningCapabilitiesPass(provider?: ProviderRecord) {
+  const capabilities = provider?.capabilities
+  return Boolean(
+    capabilities?.supportsLightningInvoice &&
+    capabilities?.supportsFeeAtPaymentTime &&
+    capabilities?.supportsSplitSettlement
+  )
 }
 
 function formatWalletLabel(
@@ -329,6 +345,20 @@ export default function ProvidersPage() {
   }
 
   function getStatus(provider: string) {
+    if (provider === "lightning") {
+      const p = getProvider(provider)
+      if (!p || p.dashboard_status === "not_configured") return "Not configured"
+      if (p.dashboard_status === "unsupported_provider_capability") return "Unsupported provider capability"
+      if (
+        p.dashboard_status === "connected" &&
+        (p.status === "connected" || p.status === "active") &&
+        lightningCapabilitiesPass(p)
+      ) {
+        return "Connected"
+      }
+      return "Not configured"
+    }
+
     const wallet = getWallet(provider)
 
     if ((provider === "solana" || provider === "base") && wallet) return "Connected"
@@ -342,6 +372,11 @@ export default function ProvidersPage() {
   }
 
   function isEnabled(provider: string) {
+    if (provider === "lightning") {
+      const p = getProvider(provider)
+      return Boolean(p?.enabled && getStatus(provider) === "Connected")
+    }
+
     const wallet = getWallet(provider)
 
     if ((provider === "solana" || provider === "base") && wallet) {
@@ -640,7 +675,7 @@ export default function ProvidersPage() {
         }
 
         walletAddress = walletAddress.trim()
-      } else if (provider === "coinbase" || provider === "shift4") {
+      } else if (provider === "coinbase" || provider === "shift4" || provider === "lightning") {
         if (!walletAddress) {
           toast.error("Required field missing")
           return
@@ -652,7 +687,7 @@ export default function ProvidersPage() {
         provider,
         walletAddress: provider === "solana" || provider === "base" ? walletAddress : undefined,
         walletType: provider === "solana" || provider === "base" ? walletType : undefined,
-        apiKey: provider === "coinbase" || provider === "shift4" ? walletAddress : undefined
+        apiKey: provider === "coinbase" || provider === "shift4" || provider === "lightning" ? walletAddress : undefined
       })
 
       applyProvidersPayload(payload)
@@ -713,6 +748,11 @@ export default function ProvidersPage() {
   async function toggleProvider(provider: string, value: boolean) {
     if (value && (provider === "solana" || provider === "base") && !getWallet(provider)) {
       toast.error("Connect wallet first")
+      return
+    }
+
+    if (value && provider === "lightning" && getStatus(provider) !== "Connected") {
+      toast.error("Bitcoin Lightning requires a provider that supports fee-at-payment-time and split settlement.")
       return
     }
 
@@ -797,9 +837,14 @@ export default function ProvidersPage() {
             ) : (
               <button
                 onClick={() => openProvider(provider)}
-                className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded"
+                className={`text-sm px-3 py-1.5 rounded ${
+                  provider === "lightning" && status === "Unsupported provider capability"
+                    ? "bg-gray-100 text-gray-500 cursor-not-allowed"
+                    : "bg-blue-600 text-white"
+                }`}
+                disabled={provider === "lightning" && status === "Unsupported provider capability"}
               >
-                Connect
+                {provider === "lightning" ? "Configure provider" : "Connect"}
               </button>
             )}
           </div>
@@ -906,6 +951,18 @@ export default function ProvidersPage() {
             "Use Base Wallet, MetaMask, or Trust Wallet",
           ]}
         />
+
+        <ProviderCard
+          name="Bitcoin Lightning"
+          provider="lightning"
+          description={[
+            "Network: Bitcoin Lightning",
+            "Settlement: Provider-backed Lightning settlement",
+            "Supports Lightning invoices through a configured PSP/provider.",
+            "PineTree fee must be collected at payment time.",
+            "Requires a provider that supports split settlement/application fees.",
+          ]}
+        />
       </div>
 
       {activeProvider && (
@@ -916,6 +973,8 @@ export default function ProvidersPage() {
                 ? "Connect Wallet to Solana Pay"
                 : activeProvider === "base"
                   ? "Connect Wallet to Base Pay"
+                  : activeProvider === "lightning"
+                    ? "Configure Bitcoin Lightning"
                   : `Connect ${activeProvider}`}
             </h2>
 
@@ -951,6 +1010,17 @@ export default function ProvidersPage() {
                 <p className="text-sm text-black mt-2">
                   Complete your Shift4 merchant application and enter your API key below.
                 </p>
+              </div>
+            )}
+
+            {activeProvider === "lightning" && (
+              <div className="mb-4 space-y-3">
+                <p className="text-sm text-black">
+                  Add a Lightning PSP/provider credential only after the provider supports fee-at-payment-time and split settlement for PineTree fees.
+                </p>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Bitcoin Lightning will remain unavailable until capability checks pass.
+                </div>
               </div>
             )}
 
@@ -1084,7 +1154,9 @@ export default function ProvidersPage() {
                       ? "Enter Coinbase API Key"
                       : activeProvider === "shift4"
                         ? "Enter Shift4 API Key"
-                        : "Enter Wallet Address"
+                        : activeProvider === "lightning"
+                          ? "Enter Lightning provider API key"
+                          : "Enter Wallet Address"
                   }
                   className="w-full border border-gray-300 rounded p-2 mb-4 text-black bg-white"
                 />
@@ -1117,7 +1189,7 @@ export default function ProvidersPage() {
                 disabled={loading}
                 className="w-full sm:w-auto px-3 py-1.5 text-sm bg-blue-600 text-white rounded"
               >
-                {loading ? "Saving..." : "Save Wallet"}
+                {loading ? "Saving..." : activeProvider === "lightning" ? "Save Provider" : "Save Wallet"}
               </button>
             </div>
           </div>

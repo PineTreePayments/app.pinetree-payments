@@ -1,5 +1,7 @@
 import { supabaseAdmin, supabase } from "@/database"
 import { refreshWalletBalancesEngine } from "./walletOverview"
+import { loadProviders } from "./loadProviders"
+import { getProviderMetadata, isProviderHealthy } from "./providerRegistry"
 
 const db = supabaseAdmin || supabase
 
@@ -12,6 +14,13 @@ type ProviderRow = {
   status: string
   enabled: boolean
   credentials?: JsonObject | null
+  dashboard_status?: "not_configured" | "unsupported_provider_capability" | "connected"
+  capabilities?: {
+    supportsLightningInvoice?: boolean
+    supportsFeeAtPaymentTime?: boolean
+    supportsSplitSettlement?: boolean
+    supportsWebhookConfirmation?: boolean
+  } | null
 }
 
 type WalletRow = {
@@ -31,6 +40,74 @@ export type ProvidersDashboardData = {
     smart_routing_enabled: boolean
     auto_conversion_enabled: boolean
   }
+}
+
+const LIGHTNING_PROVIDER_ERROR =
+  "Bitcoin Lightning requires a provider that supports fee-at-payment-time and split settlement."
+
+function hasCredential(row?: ProviderRow | null): boolean {
+  const apiKey = String(row?.credentials?.api_key || "").trim()
+  return Boolean(apiKey)
+}
+
+function getLightningCapabilities() {
+  const metadata = getProviderMetadata("lightning")
+  const capabilities = metadata?.capabilities
+
+  return {
+    supportsLightningInvoice: Boolean(capabilities?.supportsLightningInvoice),
+    supportsFeeAtPaymentTime: Boolean(capabilities?.supportsFeeAtPaymentTime),
+    supportsSplitSettlement: Boolean(capabilities?.supportsSplitSettlement),
+    supportsWebhookConfirmation: Boolean(capabilities?.supportsWebhookConfirmation)
+  }
+}
+
+function lightningCapabilityRequirementsPass(): boolean {
+  const capabilities = getLightningCapabilities()
+
+  return Boolean(
+    capabilities.supportsLightningInvoice &&
+    capabilities.supportsFeeAtPaymentTime &&
+    capabilities.supportsSplitSettlement &&
+    isProviderHealthy("lightning")
+  )
+}
+
+function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
+  const providersByKey = new Map(rows.map((row) => [row.provider, row]))
+  const lightning = providersByKey.get("lightning")
+  const lightningConfigured = hasCredential(lightning)
+  const lightningCapabilities = getLightningCapabilities()
+  const lightningStatus: NonNullable<ProviderRow["dashboard_status"]> =
+    !lightningConfigured
+      ? "not_configured"
+      : lightningCapabilityRequirementsPass()
+        ? "connected"
+        : "unsupported_provider_capability"
+
+  const decoratedRows = rows.map((row) => {
+    if (row.provider !== "lightning") return row
+
+    return {
+      ...row,
+      enabled: lightningStatus === "connected" ? Boolean(row.enabled) : false,
+      dashboard_status: lightningStatus,
+      capabilities: lightningCapabilities
+    }
+  })
+
+  if (!providersByKey.has("lightning")) {
+    decoratedRows.push({
+      provider: "lightning",
+      status: "disconnected",
+      enabled: false,
+      credentials: {},
+      dashboard_status: "not_configured",
+      capabilities: lightningCapabilities
+    })
+  }
+
+  return decoratedRows
 }
 
 async function ensureMerchant(merchantId: string) {
@@ -92,6 +169,7 @@ async function ensureMerchantSettings(merchantId: string) {
 }
 
 export async function getProvidersDashboardEngine(merchantId: string): Promise<ProvidersDashboardData> {
+  await loadProviders()
   await ensureMerchant(merchantId)
 
   const [providersRes, walletsRes, settings] = await Promise.all([
@@ -109,7 +187,7 @@ export async function getProvidersDashboardEngine(merchantId: string): Promise<P
   }
 
   return {
-    providers: providersRes.data || [],
+    providers: decorateProviderRows((providersRes.data || []) as ProviderRow[]),
     wallets: walletsRes.data || [],
     settings
   }
@@ -141,6 +219,25 @@ export async function toggleProviderEngine(
   provider: string,
   enabled: boolean
 ) {
+  await loadProviders()
+
+  if (provider === "lightning" && enabled) {
+    const { data, error: lookupError } = await db
+      .from("merchant_providers")
+      .select("provider,status,enabled,credentials")
+      .eq("merchant_id", merchantId)
+      .eq("provider", provider)
+      .maybeSingle()
+
+    if (lookupError) {
+      throw new Error(`Failed checking provider: ${lookupError.message}`)
+    }
+
+    if (!hasCredential(data as ProviderRow | null) || !lightningCapabilityRequirementsPass()) {
+      throw new Error(LIGHTNING_PROVIDER_ERROR)
+    }
+  }
+
   const { error } = await db
     .from("merchant_providers")
     .update({ enabled })
@@ -195,6 +292,7 @@ export async function saveProviderEngine(args: {
   walletType?: string | null
   apiKey?: string
 }) {
+  await loadProviders()
   const { merchantId, provider, walletAddress, walletType, apiKey } = args
 
   let credentials: JsonObject = {}
@@ -257,6 +355,11 @@ export async function saveProviderEngine(args: {
     if (!apiKey) {
       throw new Error("API key required")
     }
+
+    if (provider === "lightning" && !lightningCapabilityRequirementsPass()) {
+      throw new Error(LIGHTNING_PROVIDER_ERROR)
+    }
+
     credentials = { api_key: apiKey }
   }
 
