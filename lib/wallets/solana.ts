@@ -42,6 +42,8 @@ type SolanaBrowserWindow = Window & {
   solana?: SolanaBrowserProvider
   phantom?: { solana?: SolanaBrowserProvider }
   solflare?: SolanaBrowserProvider
+  backpack?: SolanaBrowserProvider
+  glow?: SolanaBrowserProvider
   wallets?: {
     get?: () => WalletStandardProvider[]
   }
@@ -167,6 +169,8 @@ function getInjectedProviderName(provider: SolanaBrowserProvider, fallback: stri
   if (named) return named
   if (provider.isPhantom) return "Phantom"
   if (provider.isSolflare) return "Solflare"
+  if (provider === getSolanaWindow()?.backpack) return "Backpack"
+  if (provider === getSolanaWindow()?.glow) return "Glow"
   return fallback
 }
 
@@ -189,6 +193,8 @@ export function getDetectedSolanaWallets(): DetectedSolanaWallet[] {
   const injectedCandidates = uniqueProviders([
     isSolanaBrowserProvider(w.phantom?.solana) ? w.phantom?.solana : null,
     isSolanaBrowserProvider(w.solflare) ? w.solflare : null,
+    isSolanaBrowserProvider(w.backpack) ? w.backpack : null,
+    isSolanaBrowserProvider(w.glow) ? w.glow : null,
     isSolanaBrowserProvider(w.solana) ? w.solana : null,
     ...(w.phantom?.solana?.providers ?? []).filter(isSolanaBrowserProvider),
     ...(w.solana?.providers ?? []).filter(isSolanaBrowserProvider),

@@ -1,13 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import {
   getDetectedSolanaWallets,
   getSolanaProviderPublicKey,
   getSolanaTransactionSignature,
-  isMobileBrowser,
   type DetectedSolanaWallet,
   type SolanaBrowserProvider,
 } from "@/lib/wallets/solana"
@@ -113,12 +112,6 @@ export default function SolanaWalletPayment({
   })
 
   const terminalStatus = normalizeTerminalStatus(paymentStatus)
-  const selectedWallet = useMemo(
-    () => wallets.find((wallet) => wallet.id === selectedWalletId) || null,
-    [selectedWalletId, wallets]
-  )
-  const isMobile = useMemo(() => isMobileBrowser(), [])
-
   const refreshWallets = useCallback(() => {
     const detected = getDetectedSolanaWallets()
     setWallets(detected)
@@ -216,28 +209,14 @@ export default function SolanaWalletPayment({
     return signature
   }
 
-  const openSolanaPayUri = useCallback((paymentUrl: string) => {
-    const normalizedUrl = String(paymentUrl || "").trim()
-    if (!normalizedUrl) {
-      throw new Error("Solana payment request URL is missing")
-    }
-    window.location.href = `solana:${encodeURIComponent(normalizedUrl)}`
-  }, [])
-
-  const startPayment = useCallback(async (wallet: DetectedSolanaWallet | null) => {
+  const startPayment = useCallback(async (wallet: DetectedSolanaWallet) => {
     setError("")
-    setActiveWalletName(wallet?.name || "Solana wallet")
+    setSelectedWalletId(wallet.id)
+    setActiveWalletName(wallet.name)
     onExecutionStarted?.()
 
     try {
       const preparedPayment = await getPaymentData()
-
-      if (!wallet) {
-        setExecStage("confirm_payment")
-        openSolanaPayUri(preparedPayment.paymentUrl)
-        return
-      }
-
       setExecStage("connecting_wallet")
       const signature = await sendWalletTransaction(wallet.provider, preparedPayment.paymentId)
 
@@ -256,7 +235,7 @@ export default function SolanaWalletPayment({
       setExecStage("retryable_error")
       onError?.(message)
     }
-  }, [getPaymentData, onError, onExecutionStarted, onPaymentCreated, openSolanaPayUri])
+  }, [getPaymentData, onError, onExecutionStarted, onPaymentCreated])
 
   function renderStepIcon(status: StepStatus) {
     if (status === "done") {
@@ -396,7 +375,9 @@ export default function SolanaWalletPayment({
         </div>
       ) : null}
 
-      <div className="bg-white rounded-3xl mt-1 overflow-hidden shadow-sm ring-1 ring-gray-100">
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#EAF2FF] via-white to-[#DCEBFF] p-[1px] shadow-sm shadow-[#0052FF]/10">
+        <div className="pointer-events-none absolute -right-16 -top-20 h-40 w-40 rounded-full bg-[#0052FF]/15 blur-3xl" />
+        <div className="relative bg-white/95 rounded-3xl overflow-hidden ring-1 ring-white/80">
         <div className="px-4 pt-4 pb-3 space-y-2.5">
           {renderStep("Wallet selection", "active", wallets.length ? "Choose an installed Solana wallet" : "No installed Solana wallet detected")}
           {renderStep("Confirm payment", "upcoming")}
@@ -405,10 +386,8 @@ export default function SolanaWalletPayment({
 
         <div className="mx-4 mb-4 space-y-2">
           {wallets.map((wallet) => (
-            <button
+            <div
               key={wallet.id}
-              type="button"
-              onClick={() => setSelectedWalletId(wallet.id)}
               className={`w-full rounded-2xl border px-3.5 py-3 text-left transition-all ${
                 selectedWalletId === wallet.id
                   ? "border-[#0052FF]/30 bg-[#0052FF]/5"
@@ -426,34 +405,30 @@ export default function SolanaWalletPayment({
                   selectedWalletId === wallet.id ? "border-[#0052FF] bg-[#0052FF]" : "border-gray-300"
                 }`} />
               </div>
-            </button>
+              <Button
+                fullWidth
+                className="mt-3"
+                onClick={() => void startPayment(wallet)}
+              >
+                Pay with this wallet
+              </Button>
+            </div>
           ))}
 
           {wallets.length === 0 ? (
             <div className="rounded-2xl bg-gray-50 ring-1 ring-gray-100 px-4 py-3 text-xs text-gray-600 leading-relaxed">
-              Open this checkout in an installed Solana wallet browser, then return here to continue.
+              No Solana wallet detected. Open this checkout on a device with Phantom, Solflare, Backpack, or another Solana wallet installed.
             </div>
           ) : null}
         </div>
+        </div>
       </div>
 
-      {wallets.length > 0 ? (
-        <Button
-          fullWidth
-          onClick={() => void startPayment(selectedWallet)}
-          disabled={!selectedWallet}
-        >
-          Pay with {selectedWallet?.name || "Solana Wallet"}
-        </Button>
-      ) : isMobile ? (
-        <Button fullWidth onClick={() => void startPayment(null)}>
-          Open Solana Wallet
-        </Button>
-      ) : (
+      {wallets.length === 0 ? (
         <Button fullWidth variant="secondary" onClick={refreshWallets}>
           Refresh Wallets
         </Button>
-      )}
+      ) : null}
     </div>
   )
 }
