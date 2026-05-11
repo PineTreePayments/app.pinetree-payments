@@ -36,7 +36,7 @@ const PHANTOM_PROVIDER_RETRY_TIMEOUT_MS = 4000
 const PHANTOM_PROVIDER_RETRY_INTERVAL_MS = 150
 const BASE_WC_PENDING_KEY = "pinetree_base_wc_pending"
 const BASE_EXEC_STORAGE_PREFIX = "pinetree_base_exec_"
-const TERMINAL_PAYMENT_STATUSES = new Set(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED"])
+const TERMINAL_PAYMENT_STATUSES = new Set(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "CANCELED"])
 
 type SplitOutput = {
   address: string
@@ -1105,7 +1105,14 @@ export default function PayClient() {
                 if (baseExecutionActive && !isActive) return null
 
                 return (
-                  <div key={asset.id} className="overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm">
+                  <div
+                    key={asset.id}
+                    className={
+                      baseExecutionActive && isActive && asset.network === "base"
+                        ? "overflow-visible rounded-3xl bg-transparent"
+                        : "overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm"
+                    }
+                  >
                     {/* Asset selector button — hidden once execution starts */}
                     {!baseExecutionActive && (
                       <button
@@ -1135,7 +1142,7 @@ export default function PayClient() {
 
                     {/* Payment UI — always mounted when active so state is never lost */}
                     {isActive ? (
-                      <div className={`${baseExecutionActive ? "p-0" : "px-4 py-4 border-t border-gray-200"} bg-white space-y-4`}>
+                      <div className={`${baseExecutionActive ? "p-0 bg-transparent" : "px-4 py-4 border-t border-gray-200 bg-white"} space-y-4`}>
 
                         {/* ── Shift4: hosted checkout redirect ──────────── */}
                         {asset.network === "shift4" ? (
@@ -1315,7 +1322,7 @@ export default function PayClient() {
           </div>
         ) : null}
 
-        {!isSolanaPayment(activePayload) ? (
+        {!isSolanaPayment(activePayload) && !isBaseContractPayment(activePayload) ? (
         <div className="space-y-3">
           <label className="text-xs uppercase tracking-widest text-gray-500">Select your wallet:</label>
           <select
@@ -1353,13 +1360,13 @@ export default function PayClient() {
         </div>
         ) : null}
 
-        {walletUrl && !isSolanaPayment(activePayload) ? (
+        {walletUrl && !isSolanaPayment(activePayload) && !isBaseContractPayment(activePayload) ? (
           <Button variant="secondary" fullWidth onClick={copyWalletUrl}>
             {copiedLink ? "Copied" : "Copy Wallet Address"}
           </Button>
         ) : null}
 
-        {primaryOpenUrl && !isSolanaPayment(activePayload) ? (
+        {primaryOpenUrl && !isSolanaPayment(activePayload) && !isBaseContractPayment(activePayload) ? (
           <Button fullWidth onClick={() => { window.location.href = primaryOpenUrl }}>
             Open in Wallet App
           </Button>

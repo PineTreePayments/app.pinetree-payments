@@ -145,28 +145,43 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
   /* =========================
      POLLING FALLBACK
-     Triggers the blockchain watcher every 5s while waiting.
-     Realtime handles the UI update once the DB changes.
+     Polls every 3s while waiting or processing.
+     Uses paymentId when available; falls back to intentId so POS updates
+     even if the Supabase realtime intent→payment link event was missed.
   ========================= */
 
   useEffect(() => {
-    if (!activePaymentId || (status !== "waiting" && status !== "processing")) return
+    const pid = activePaymentId
+    const iid = intentId
+    // Build the query param: prefer paymentId, fall back to intentId
+    const pollParam = pid
+      ? `paymentId=${encodeURIComponent(pid)}`
+      : iid
+        ? `intentId=${encodeURIComponent(iid)}`
+        : ""
 
-    const id = activePaymentId
+    if (!pollParam || (status !== "waiting" && status !== "processing")) return
+
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`/api/payments/status?paymentId=${encodeURIComponent(id)}`)
+        const res = await fetch(`/api/payments/status?${pollParam}`)
         if (!res.ok) return
         const data = await res.json()
+        // If polling by intent and we just learned the paymentId, store it so
+        // the direct-payment realtime subscription can start (and future polls
+        // use the faster paymentId path).
+        if (!pid && data.paymentId) {
+          setActivePaymentId(String(data.paymentId))
+        }
         applyPaymentStatus(String(data?.status || ""))
       } catch {
         // non-fatal — realtime is the primary update path
       }
-    }, 5000)
+    }, 3000)
 
     return () => clearInterval(interval)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePaymentId, status])
+  }, [activePaymentId, intentId, status])
 
   /* =========================
      REALTIME: DIRECT PAYMENT
@@ -584,30 +599,30 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
         {/* ── WAITING / PROCESSING ── */}
         {(status === "waiting" || status === "processing") && (
-          <div className="space-y-5">
+          <div className="space-y-3">
 
             {qrCodeUrl ? (
               <div className="flex flex-col items-center">
-                <p className="text-xs uppercase tracking-widest text-gray-500 mb-3">
+                <p className="text-xs uppercase tracking-widest text-gray-500 mb-2">
                   Scan to Pay
                 </p>
                 <Image
                   src={qrCodeUrl}
-                  width={200}
-                  height={200}
+                  width={180}
+                  height={180}
                   alt="QR code"
                   className="rounded-xl"
                 />
               </div>
             ) : (
-              <div className="text-center py-6">
-                <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0052FF] border-t-transparent mx-auto" />
-                <p className="text-sm text-gray-500 mt-3">Preparing payment…</p>
+              <div className="text-center py-4">
+                <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052FF] border-t-transparent mx-auto" />
+                <p className="text-xs text-gray-500 mt-2">Preparing payment…</p>
               </div>
             )}
 
             {breakdown && (
-              <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+              <div className="bg-gray-50 rounded-xl px-3 py-2.5 space-y-1.5 text-sm">
                 <div className="flex justify-between text-gray-700">
                   <span>Subtotal</span>
                   <span>{fmtUsd(breakdown.subtotalAmount)}</span>
@@ -622,7 +637,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
                   <span>Service Fee</span>
                   <span>{fmtUsd(breakdown.serviceFee)}</span>
                 </div>
-                <div className="flex justify-between font-semibold text-gray-900 border-t border-gray-200 pt-2">
+                <div className="flex justify-between font-semibold text-gray-900 border-t border-gray-200 pt-1.5">
                   <span>Total</span>
                   <span>{fmtUsd(breakdown.totalAmount)}</span>
                 </div>
@@ -631,8 +646,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
             <PaymentStatusVisual
               status={status === "waiting" ? "PENDING" : "PROCESSING"}
-              iconSize={34}
-              className="gap-2"
+              size="compact"
             />
 
             <Button variant="danger" fullWidth onClick={resetSale}>
@@ -644,15 +658,15 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
         {/* ── CONFIRMED ── */}
         {status === "confirmed" && (
-          <div className="flex flex-col items-center gap-3 py-6">
-            <PaymentStatusVisual status="CONFIRMED" />
+          <div className="flex flex-col items-center gap-3 py-4">
+            <PaymentStatusVisual status="CONFIRMED" size="compact" />
           </div>
         )}
 
         {/* ── INCOMPLETE ── */}
         {status === "incomplete" && (
-          <div className="flex flex-col items-center gap-3 py-6">
-            <PaymentStatusVisual status="INCOMPLETE" />
+          <div className="flex flex-col items-center gap-3 py-4">
+            <PaymentStatusVisual status="INCOMPLETE" size="compact" />
             <Button variant="secondary" fullWidth onClick={resetSale}>
               Back
             </Button>
@@ -661,9 +675,10 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
         {/* ── FAILED ── */}
         {status === "failed" && (
-          <div className="flex flex-col items-center gap-3 py-6">
+          <div className="flex flex-col items-center gap-3 py-4">
             <PaymentStatusVisual
               status="FAILED"
+              size="compact"
               messageOverride={paymentError || undefined}
             />
             {paymentError && (
@@ -677,8 +692,8 @@ export default function POSLayout({ locked, terminalContext }: Props) {
 
         {/* ── EXPIRED ── */}
         {status === "expired" && (
-          <div className="flex flex-col items-center gap-3 py-6">
-            <PaymentStatusVisual status="EXPIRED" />
+          <div className="flex flex-col items-center gap-3 py-4">
+            <PaymentStatusVisual status="EXPIRED" size="compact" />
             <Button variant="secondary" fullWidth onClick={resetSale}>
               Back
             </Button>

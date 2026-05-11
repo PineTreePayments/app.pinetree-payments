@@ -32,6 +32,8 @@ type Props = {
   labelOverride?: string
   messageOverride?: string
   iconSize?: number
+  /** "compact" reduces icon size and uses smaller text — suited for POS cards. */
+  size?: "default" | "compact"
 }
 
 export function normalizeStandardPaymentStatus(status: string): StandardPaymentStatus {
@@ -107,27 +109,35 @@ export function PaymentStatusVisual({
   showMessage = true,
   labelOverride,
   messageOverride,
-  iconSize = 56,
+  iconSize,
+  size = "default",
 }: Props) {
   const normalizedStatus = normalizeStandardPaymentStatus(status)
   const config = PAYMENT_STATUS_VISUALS[normalizedStatus]
   const Icon = config.Icon
 
+  const isCompact = size === "compact"
+  const resolvedIconSize = iconSize ?? (isCompact ? 28 : 56)
+  const iconPadding = isCompact ? "p-2" : "p-3"
+  const gapClass = isCompact ? "gap-2" : "gap-3"
+  const labelClass = isCompact ? "text-lg font-bold text-gray-900" : "text-2xl font-bold text-gray-900"
+  const messageClass = isCompact ? "text-xs text-gray-500" : "text-sm text-gray-500"
+
   return (
-    <div className={`flex flex-col items-center text-center gap-3 ${className}`}>
-      <div className={`rounded-full p-3 ${config.iconBgClassName}`}>
+    <div className={`flex flex-col items-center text-center ${gapClass} ${className}`}>
+      <div className={`rounded-full ${iconPadding} ${config.iconBgClassName}`}>
         <Icon
-          size={iconSize}
+          size={resolvedIconSize}
           className={`${config.iconClassName} ${config.spin ? "animate-spin" : ""}`}
           strokeWidth={1.8}
         />
       </div>
-      <div className="space-y-1">
-        <h1 className="text-2xl font-bold text-gray-900">
+      <div className="space-y-0.5">
+        <h1 className={labelClass}>
           {labelOverride || config.label}
         </h1>
         {showMessage ? (
-          <p className="text-sm text-gray-500">
+          <p className={messageClass}>
             {messageOverride || config.message}
           </p>
         ) : null}
