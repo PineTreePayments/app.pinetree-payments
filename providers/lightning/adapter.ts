@@ -9,36 +9,70 @@ function envFlag(name: string): boolean {
   return String(process.env[name] || "").toLowerCase().trim() === "true"
 }
 
+function readEnv(...names: string[]): string {
+  for (const name of names) {
+    const value = String(process.env[name] || "").trim()
+    if (value) return value
+  }
+  return ""
+}
+
 function getLightningConfig(): LightningProviderConfig {
-  const providerKey = String(process.env.PINETREE_LIGHTNING_PROVIDER_KEY || "lightning").toLowerCase().trim()
+  // Speed platform credentials — env-only, never per-merchant.
+  // SPEED_* is the canonical name; PINETREE_LIGHTNING_* kept as fallback.
+  const providerKey = readEnv("SPEED_API_KEY", "PINETREE_LIGHTNING_PROVIDER_KEY")
+  const apiBaseUrl =
+    readEnv("SPEED_API_BASE_URL", "PINETREE_LIGHTNING_API_BASE_URL") ||
+    "https://api.tryspeed.com"
+  const webhookSecret = readEnv("SPEED_WEBHOOK_SECRET", "PINETREE_LIGHTNING_WEBHOOK_SECRET") || undefined
+  const environment = readEnv("SPEED_ENVIRONMENT") || "production"
+  const platformAccountId = readEnv("SPEED_PLATFORM_ACCOUNT_ID") || undefined
+
+  const platformConfigured = Boolean(providerKey)
+  const webhookConfigured = Boolean(webhookSecret)
+  const speedAccountTransfersSupported = true
 
   const capabilities: ProviderCapabilities = {
     hostedCheckout: false,
     walletRails: false,
-    webhooks: envFlag("PINETREE_LIGHTNING_SUPPORTS_WEBHOOK_CONFIRMATION"),
-    supportsLightningInvoice: Boolean(providerKey),
-    supportsFeeAtPaymentTime: envFlag("PINETREE_LIGHTNING_SUPPORTS_FEE_AT_PAYMENT_TIME"),
-    supportsSplitSettlement: envFlag("PINETREE_LIGHTNING_SUPPORTS_SPLIT_SETTLEMENT"),
-    supportsWebhookConfirmation: envFlag("PINETREE_LIGHTNING_SUPPORTS_WEBHOOK_CONFIRMATION"),
+    webhooks: webhookConfigured,
+    supportsLightningInvoice: platformConfigured && webhookConfigured,
+    supportsFeeAtPaymentTime:
+      platformConfigured &&
+      webhookConfigured &&
+      speedAccountTransfersSupported &&
+      envFlag("PINETREE_LIGHTNING_SUPPORTS_FEE_AT_PAYMENT_TIME"),
+    supportsSplitSettlement:
+      platformConfigured &&
+      webhookConfigured &&
+      speedAccountTransfersSupported &&
+      envFlag("PINETREE_LIGHTNING_SUPPORTS_SPLIT_SETTLEMENT"),
+    supportsWebhookConfirmation: webhookConfigured,
     requiresKyc: "unknown",
-    custodyModel: "unknown"
+    custodyModel: "provider"
   }
 
   return {
     providerKey,
-    displayName: process.env.PINETREE_LIGHTNING_PROVIDER_DISPLAY_NAME || "Bitcoin Lightning",
-    apiBaseUrl: process.env.PINETREE_LIGHTNING_API_BASE_URL,
-    webhookSecret: process.env.PINETREE_LIGHTNING_WEBHOOK_SECRET,
+    displayName:
+      readEnv("PINETREE_LIGHTNING_PROVIDER_DISPLAY_NAME") || "Bitcoin Lightning",
+    apiBaseUrl,
+    webhookSecret,
+    environment,
+    platformAccountId,
+    speedAccountTransfersSupported,
     capabilities
   }
 }
 
 const config = getLightningConfig()
+
 const lightningEnabled = Boolean(
   config.providerKey &&
   config.capabilities.supportsLightningInvoice &&
   config.capabilities.supportsFeeAtPaymentTime &&
-  config.capabilities.supportsSplitSettlement
+  config.capabilities.supportsSplitSettlement &&
+  config.capabilities.supportsWebhookConfirmation
 )
 
 export const lightningAdapter: ProviderAdapter = {
@@ -46,7 +80,8 @@ export const lightningAdapter: ProviderAdapter = {
     adapterId: "lightning",
     displayName: config.displayName,
     supportedNetworks: lightningEnabled ? [LIGHTNING_NETWORK] : [],
-    credentialKey: "lightning_api_key",
+    // No credentialKey — Speed platform credentials are env-only.
+    // Merchants store only a Speed Account ID and Lightning Address, not a Speed API key.
     feeCaptureMethods: lightningEnabled ? ["invoice_split"] : [],
     capabilities: config.capabilities
   },
@@ -65,8 +100,7 @@ export const lightningAdapter: ProviderAdapter = {
         grossAmount: input.grossAmount,
         currency: input.currency,
         merchantWallet: input.merchantWallet,
-        pinetreeWallet: input.pinetreeWallet,
-        providerApiKey: input.providerApiKey
+        pinetreeWallet: input.pinetreeWallet
       },
       config
     )
@@ -75,16 +109,20 @@ export const lightningAdapter: ProviderAdapter = {
   },
 
   async getLightningInvoiceStatus() {
-    throw new Error("Lightning invoice status polling is not implemented for this PSP yet")
+    throw new Error(
+      "Lightning invoice status polling is not implemented. Speed webhook confirmation is used instead."
+    )
   },
 
   async getPaymentStatus(providerReference: string) {
     void providerReference
-    throw new Error("Lightning payment status polling is not implemented for this PSP yet")
+    throw new Error(
+      "Lightning payment status polling is not implemented. Speed webhook confirmation is used instead."
+    )
   },
 
-  verifyWebhook(payload, signature, rawBody) {
-    return verifyLightningWebhook(payload, signature, rawBody, config)
+  verifyWebhook(payload, signature, rawBody, headers) {
+    return verifyLightningWebhook(payload, signature, rawBody, config, headers)
   },
 
   translateEvent(payload) {

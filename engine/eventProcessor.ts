@@ -66,6 +66,7 @@ function getProviderReferenceCandidates(payload: unknown): string[] {
   const candidates = [
     readPath(payload, ["event", "data", "id"]),
     readPath(payload, ["data", "id"]),
+    readPath(payload, ["data", "object", "id"]),
     readPath(payload, ["payment", "id"]),
     readPath(payload, ["id"]),
     readPath(payload, ["charge_id"]),
@@ -207,12 +208,13 @@ export async function processWebhook({
     headers?.["x-signature"] ||
     headers?.["x-lightning-signature"] ||
     headers?.["x-shift4-signature"] ||
+    headers?.["webhook-signature"] ||
     ""
 
   let verified = true
 
   if (adapter.verifyWebhook) {
-    verified = adapter.verifyWebhook(payload, signature, rawBody)
+    verified = adapter.verifyWebhook(payload, signature, rawBody, headers)
   }
 
   if (!verified) {

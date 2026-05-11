@@ -79,8 +79,11 @@ export default function LightningPayment({
   if (!hasInvoice) {
     return (
       <div className="space-y-3">
-        <p className="text-sm text-gray-700">
-          Pay once with a Lightning wallet. PineTree will only create this invoice when the provider can collect the service fee at payment time.
+        <p className="text-sm text-gray-700 font-medium">
+          Pay with Bitcoin Lightning
+        </p>
+        <p className="text-xs text-gray-500">
+          Use any compatible Lightning wallet.
         </p>
         {error ? (
           <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
@@ -88,7 +91,7 @@ export default function LightningPayment({
           </div>
         ) : null}
         <Button fullWidth disabled={loading} onClick={() => void prepareInvoice()}>
-          {loading ? "Preparing invoice..." : `Create Lightning Invoice (${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(usdAmount)})`}
+          {loading ? "Preparing invoice..." : `Pay with Bitcoin Lightning (${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(usdAmount)})`}
         </Button>
       </div>
     )
@@ -96,6 +99,9 @@ export default function LightningPayment({
 
   return (
     <div className="space-y-4">
+      <p className="text-xs text-gray-500 text-center">
+        Scan or copy the invoice and pay with any compatible Lightning wallet.
+      </p>
       {payment?.qrCodeUrl ? (
         <div className="flex justify-center rounded-xl border border-gray-200 bg-white p-3">
           <img src={payment.qrCodeUrl} alt="Bitcoin Lightning invoice QR code" className="h-56 w-56" />

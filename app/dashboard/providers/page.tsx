@@ -9,6 +9,10 @@ type ProviderCredentials = {
   api_key?: string
   wallet?: string
   wallet_type?: string | null
+  speed_account_id?: string
+  lightning_address?: string
+  lightning_address_verified?: boolean
+  provider_model?: string
   [key: string]: unknown
 }
 
@@ -33,7 +37,7 @@ type ProviderRecord = {
   status: string
   enabled: boolean
   credentials?: ProviderCredentials | null
-  dashboard_status?: "not_configured" | "unsupported_provider_capability" | "connected"
+  dashboard_status?: "not_configured" | "address_needs_verification" | "provider_unavailable" | "connected"
   capabilities?: {
     supportsLightningInvoice?: boolean
     supportsFeeAtPaymentTime?: boolean
@@ -73,6 +77,16 @@ type ProvidersApiResponse = {
   error?: string
 }
 
+const SPEED_LINKS = {
+  signup: "https://app.tryspeed.com/signup",
+  dashboard: "https://app.tryspeed.com",
+  apiKeys: "https://app.tryspeed.com/developer/api-keys",
+  // TODO: Replace with exact Speed account settings deep link if Speed exposes one.
+  accountSettings: "https://app.tryspeed.com/settings",
+  // TODO: Replace with exact Speed Lightning/payment address deep link if Speed exposes one.
+  lightningAddress: "https://app.tryspeed.com/payment-addresses"
+} as const
+
 function getInjectedSolanaProvider() {
   return window.solana as SolanaProviderLike | undefined
 }
@@ -92,7 +106,8 @@ function lightningCapabilitiesPass(provider?: ProviderRecord) {
   return Boolean(
     capabilities?.supportsLightningInvoice &&
     capabilities?.supportsFeeAtPaymentTime &&
-    capabilities?.supportsSplitSettlement
+    capabilities?.supportsSplitSettlement &&
+    capabilities?.supportsWebhookConfirmation
   )
 }
 
@@ -160,6 +175,8 @@ export default function ProvidersPage() {
   const [wallets, setWallets] = useState<WalletRecord[]>([])
   const [activeProvider, setActiveProvider] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState("")
+  const [lightningSpeedAccountId, setLightningSpeedAccountId] = useState("")
+  const [lightningAddress, setLightningAddress] = useState("")
   const [loading, setLoading] = useState(false)
 
   const [smartRouting, setSmartRouting] = useState(false)
@@ -348,14 +365,9 @@ export default function ProvidersPage() {
     if (provider === "lightning") {
       const p = getProvider(provider)
       if (!p || p.dashboard_status === "not_configured") return "Not configured"
-      if (p.dashboard_status === "unsupported_provider_capability") return "Unsupported provider capability"
-      if (
-        p.dashboard_status === "connected" &&
-        (p.status === "connected" || p.status === "active") &&
-        lightningCapabilitiesPass(p)
-      ) {
-        return "Connected"
-      }
+      if (p.dashboard_status === "address_needs_verification") return "Address needs verification"
+      if (p.dashboard_status === "provider_unavailable") return "Provider unavailable"
+      if (p.dashboard_status === "connected") return "Ready"
       return "Not configured"
     }
 
@@ -374,7 +386,7 @@ export default function ProvidersPage() {
   function isEnabled(provider: string) {
     if (provider === "lightning") {
       const p = getProvider(provider)
-      return Boolean(p?.enabled && getStatus(provider) === "Connected")
+      return Boolean(p?.enabled && getStatus(provider) === "Ready")
     }
 
     const wallet = getWallet(provider)
@@ -598,14 +610,26 @@ export default function ProvidersPage() {
       return
     }
 
-    if (p?.credentials?.api_key) {
+    if (provider === "lightning") {
+      setInputValue("")
+      setLightningSpeedAccountId(String(p?.credentials?.speed_account_id || ""))
+      setLightningAddress(String(p?.credentials?.lightning_address || ""))
+    } else if (p?.credentials?.api_key) {
       setInputValue(p.credentials.api_key)
+      setLightningSpeedAccountId("")
+      setLightningAddress("")
     } else if (p?.credentials?.wallet) {
       setInputValue(p.credentials.wallet)
+      setLightningSpeedAccountId("")
+      setLightningAddress("")
     } else if (existingWallet?.wallet_address) {
       setInputValue(existingWallet.wallet_address)
+      setLightningSpeedAccountId("")
+      setLightningAddress("")
     } else {
       setInputValue("")
+      setLightningSpeedAccountId("")
+      setLightningAddress("")
     }
 
     setShowMobileConnect(false)
@@ -675,9 +699,20 @@ export default function ProvidersPage() {
         }
 
         walletAddress = walletAddress.trim()
-      } else if (provider === "coinbase" || provider === "shift4" || provider === "lightning") {
+      } else if (provider === "coinbase" || provider === "shift4") {
         if (!walletAddress) {
           toast.error("Required field missing")
+          return
+        }
+      } else if (provider === "lightning") {
+        walletAddress = lightningSpeedAccountId.trim()
+        if (!walletAddress) {
+          toast.error("Speed Account ID is required")
+          return
+        }
+
+        if (!lightningAddress.trim()) {
+          toast.error("Lightning Address is required (e.g. merchant@getalby.com)")
           return
         }
       }
@@ -687,7 +722,9 @@ export default function ProvidersPage() {
         provider,
         walletAddress: provider === "solana" || provider === "base" ? walletAddress : undefined,
         walletType: provider === "solana" || provider === "base" ? walletType : undefined,
-        apiKey: provider === "coinbase" || provider === "shift4" || provider === "lightning" ? walletAddress : undefined
+        apiKey: provider === "coinbase" || provider === "shift4" ? walletAddress : undefined,
+        lightningAddress: provider === "lightning" ? lightningAddress.trim() : undefined,
+        ...(provider === "lightning" ? { walletAddress } : {})
       })
 
       applyProvidersPayload(payload)
@@ -704,6 +741,8 @@ export default function ProvidersPage() {
 
       setActiveProvider(null)
       setInputValue("")
+      setLightningSpeedAccountId("")
+      setLightningAddress("")
       setShowMobileConnect(false)
       setSelectedWalletType(null)
       setWalletSessionId(null)
@@ -721,7 +760,9 @@ export default function ProvidersPage() {
           ? "Solana wallet connected"
           : provider === "base"
             ? "Base wallet connected"
-            : "Provider connected"
+            : provider === "lightning"
+              ? "Bitcoin Lightning setup verified"
+              : "Provider connected"
       )
     } catch (err: unknown) {
       console.error("SaveProvider crash:", err)
@@ -751,8 +792,8 @@ export default function ProvidersPage() {
       return
     }
 
-    if (value && provider === "lightning" && getStatus(provider) !== "Connected") {
-      toast.error("Bitcoin Lightning requires a provider that supports fee-at-payment-time and split settlement.")
+    if (value && provider === "lightning" && getStatus(provider) !== "Ready") {
+      toast.error("Verify your Speed Account ID and BTC Lightning Address before enabling Bitcoin Lightning.")
       return
     }
 
@@ -783,8 +824,9 @@ export default function ProvidersPage() {
   }
 
   function statusClass(status: string) {
-    if (status === "Connected") return "border-blue-200 bg-blue-50 text-blue-700"
-    if (status === "Unsupported provider capability") return "border-amber-200 bg-amber-50 text-amber-800"
+    if (status === "Connected" || status === "Ready") return "border-blue-200 bg-blue-50 text-blue-700"
+    if (status === "Address needs verification") return "border-amber-200 bg-amber-50 text-amber-800"
+    if (status === "Provider unavailable") return "border-red-200 bg-red-50 text-red-700"
     return "border-gray-200 bg-gray-50 text-gray-600"
   }
 
@@ -809,11 +851,13 @@ export default function ProvidersPage() {
     description: string[]
   }) {
     const status = getStatus(provider)
-    const connected = status === "Connected"
+    const connected = status === "Connected" || status === "Ready"
     const enabled = isEnabled(provider)
     const p = getProvider(provider)
     const wallet = getWallet(provider)
     const walletValue = p?.credentials?.wallet || wallet?.wallet_address
+    const lightningAccountId = String(p?.credentials?.speed_account_id || "")
+    const lightningReceiveAddress = String(p?.credentials?.lightning_address || "")
     const walletType = p?.credentials?.wallet_type || wallet?.wallet_type || wallet?.asset
     const walletLabel = formatWalletLabel(provider, walletType, wallet?.asset || null)
     const detailRows = description.map(parseDetailLine)
@@ -862,6 +906,31 @@ export default function ProvidersPage() {
               </span>
             </div>
           )}
+
+          {provider === "lightning" && (lightningAccountId || lightningReceiveAddress) ? (
+            <div className="space-y-2 rounded-xl border border-gray-200 bg-gray-50/70 px-3 py-2">
+              {lightningAccountId ? (
+                <div className="grid grid-cols-[82px_1fr] items-start gap-3 sm:grid-cols-[96px_1fr]">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                    Speed ID
+                  </span>
+                  <span className="min-w-0 break-all text-[13px] font-medium leading-snug text-gray-950 sm:text-sm">
+                    {lightningAccountId}
+                  </span>
+                </div>
+              ) : null}
+              {lightningReceiveAddress ? (
+                <div className="grid grid-cols-[82px_1fr] items-start gap-3 sm:grid-cols-[96px_1fr]">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                    Address
+                  </span>
+                  <span className="min-w-0 break-all text-[13px] font-medium leading-snug text-gray-950 sm:text-sm">
+                    {lightningReceiveAddress}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-auto flex items-center justify-between gap-3 border-t border-gray-100 pt-4">
@@ -877,13 +946,13 @@ export default function ProvidersPage() {
               <button
                 onClick={() => openProvider(provider)}
                 className={`rounded-md px-3 py-1.5 text-xs font-semibold shadow-sm transition sm:text-sm ${
-                  provider === "lightning" && status === "Unsupported provider capability"
+                  provider === "lightning" && status === "Provider unavailable"
                     ? "bg-gray-100 text-gray-500 cursor-not-allowed"
                     : "bg-blue-600 text-white hover:bg-blue-700"
                 }`}
-                disabled={provider === "lightning" && status === "Unsupported provider capability"}
+                disabled={provider === "lightning" && status === "Provider unavailable"}
               >
-                {provider === "lightning" ? "Configure provider" : "Connect"}
+                {provider === "lightning" ? "Set Up" : "Connect"}
               </button>
             )}
           </div>
@@ -892,7 +961,7 @@ export default function ProvidersPage() {
             <span className="text-xs font-medium text-gray-700 sm:text-sm">Enabled</span>
             <ToggleSwitch
               checked={enabled}
-              disabled={!connected}
+              disabled={provider === "lightning" ? status !== "Ready" : !connected}
               onChange={(v) => toggleProvider(provider, v)}
             />
           </div>
@@ -996,9 +1065,11 @@ export default function ProvidersPage() {
           provider="lightning"
           description={[
             "Network: Bitcoin Lightning",
-            "Settlement: Provider-backed",
-            "Supports: Lightning invoices through a configured PSP/provider",
-            "Requires: fee-at-payment-time + split settlement",
+            "Provider: Speed",
+            "PineTree platform Speed credentials are configured by PineTree.",
+            "Merchants only need Speed Account ID and BTC Lightning Address.",
+            "Customers can pay with any compatible Bitcoin Lightning wallet.",
+            "Speed handles the merchant Lightning account and settlement. PineTree routes checkout, status, and platform fee collection.",
           ]}
         />
       </div>
@@ -1012,9 +1083,83 @@ export default function ProvidersPage() {
                 : activeProvider === "base"
                   ? "Connect Wallet to Base Pay"
                   : activeProvider === "lightning"
-                    ? "Configure Bitcoin Lightning"
+                    ? "Set Up Bitcoin Lightning"
                   : `Connect ${activeProvider}`}
             </h2>
+
+            {activeProvider === "lightning" && (
+              <div className="mb-4 space-y-4">
+                <p className="text-sm text-black">
+                  Customers can pay with any compatible Bitcoin Lightning wallet. Speed handles the merchant Lightning account and settlement. PineTree routes checkout, status, and platform fee collection.
+                </p>
+                <p className="text-xs text-gray-600">
+                  PineTree platform Speed credentials are configured by PineTree. You only need your Speed Account ID and BTC Lightning Address.
+                </p>
+
+                <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Step 1</p>
+                    <p className="text-sm font-medium text-gray-950">Create or open your Speed account.</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <a href={SPEED_LINKS.signup} target="_blank" rel="noopener noreferrer" className={actionButtonClass()}>
+                        Create Speed Account
+                      </a>
+                      <a href={SPEED_LINKS.dashboard} target="_blank" rel="noopener noreferrer" className={actionButtonClass()}>
+                        Open Speed Dashboard
+                      </a>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Step 2</p>
+                    <p className="text-sm font-medium text-gray-950">Verify your Speed account.</p>
+                    <p className="mt-1 text-xs text-gray-600">Speed handles your Lightning payment account and verification.</p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Step 3</p>
+                    <p className="text-sm font-medium text-gray-950">Add Speed Account ID.</p>
+                    <a href={SPEED_LINKS.accountSettings} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-sm font-medium text-blue-600 underline">
+                      Open Account Settings / Account ID
+                    </a>
+                    <input
+                      value={lightningSpeedAccountId}
+                      onChange={(e) => setLightningSpeedAccountId(e.target.value)}
+                      placeholder="Speed Account ID"
+                      className="mt-2 w-full border border-gray-300 rounded p-2 text-black bg-white"
+                    />
+                    <p className="mt-1 text-xs text-gray-600">Used by Speed as the transfer destination for your Lightning proceeds.</p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Step 4</p>
+                    <p className="text-sm font-medium text-gray-950">Add BTC Lightning Address.</p>
+                    <a href={SPEED_LINKS.lightningAddress} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-sm font-medium text-blue-600 underline">
+                      Open Speed Lightning Address
+                    </a>
+                    <input
+                      value={lightningAddress}
+                      onChange={(e) => setLightningAddress(e.target.value)}
+                      placeholder="BTC Lightning Address (e.g. you@getalby.com)"
+                      className="mt-2 w-full border border-gray-300 rounded p-2 text-black bg-white"
+                    />
+                    <p className="mt-1 text-xs text-gray-600">Used to verify your Lightning receiving setup.</p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Step 5</p>
+                    <p className="text-sm font-medium text-gray-950">Verify setup / Enable Bitcoin Lightning.</p>
+                    <button
+                      onClick={() => saveProvider("lightning")}
+                      disabled={loading}
+                      className="mt-2 rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
+                    >
+                      {loading ? "Verifying..." : "Verify Bitcoin Lightning"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {(activeProvider === "solana" || activeProvider === "base") && (
               <p className="text-sm text-black mb-4">
@@ -1048,17 +1193,6 @@ export default function ProvidersPage() {
                 <p className="text-sm text-black mt-2">
                   Complete your Shift4 merchant application and enter your API key below.
                 </p>
-              </div>
-            )}
-
-            {activeProvider === "lightning" && (
-              <div className="mb-4 space-y-3">
-                <p className="text-sm text-black">
-                  Add a Lightning PSP/provider credential only after the provider supports fee-at-payment-time and split settlement for PineTree fees.
-                </p>
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  Bitcoin Lightning will remain unavailable until capability checks pass.
-                </div>
               </div>
             )}
 
@@ -1183,7 +1317,8 @@ export default function ProvidersPage() {
             )}
 
             {activeProvider !== "solana" &&
-              activeProvider !== "base" && (
+              activeProvider !== "base" &&
+              activeProvider !== "lightning" && (
                 <input
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
@@ -1192,9 +1327,7 @@ export default function ProvidersPage() {
                       ? "Enter Coinbase API Key"
                       : activeProvider === "shift4"
                         ? "Enter Shift4 API Key"
-                        : activeProvider === "lightning"
-                          ? "Enter Lightning provider API key"
-                          : "Enter Wallet Address"
+                        : "Enter Wallet Address"
                   }
                   className="w-full border border-gray-300 rounded p-2 mb-4 text-black bg-white"
                 />
@@ -1205,6 +1338,8 @@ export default function ProvidersPage() {
                 onClick={() => {
                   setActiveProvider(null)
                   setInputValue("")
+                  setLightningSpeedAccountId("")
+                  setLightningAddress("")
                   setShowMobileConnect(false)
                   setSelectedWalletType(null)
                   setWalletSessionId(null)
@@ -1227,7 +1362,7 @@ export default function ProvidersPage() {
                 disabled={loading}
                 className="w-full sm:w-auto px-3 py-1.5 text-sm bg-blue-600 text-white rounded"
               >
-                {loading ? "Saving..." : activeProvider === "lightning" ? "Save Provider" : "Save Wallet"}
+                {loading ? "Saving..." : activeProvider === "lightning" ? "Verify Bitcoin Lightning" : "Save Wallet"}
               </button>
             </div>
           </div>

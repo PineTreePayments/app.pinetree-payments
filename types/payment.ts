@@ -25,8 +25,8 @@ export const PAYMENT_ADAPTER_NETWORKS: Readonly<Record<PaymentAdapterId, readonl
 
 export const PAYMENT_ADAPTER_CREDENTIAL_KEYS: Readonly<Partial<Record<PaymentAdapterId, string>>> = {
   coinbase: "coinbase_api_key",
-  shift4: "shift4_api_key",
-  lightning: "lightning_api_key"
+  shift4: "shift4_api_key"
+  // lightning: no per-merchant API key — Speed platform credentials are env-only
 } as const
 
 export function normalizePaymentAdapter(value?: string): PaymentAdapterId | undefined {

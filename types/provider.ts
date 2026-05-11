@@ -45,6 +45,7 @@ export type LightningInvoiceRequest = {
   merchantWallet?: string
   pinetreeWallet?: string
   providerApiKey?: string
+  merchantLightningAddress?: string
   metadata?: Record<string, unknown>
 }
 
@@ -56,6 +57,7 @@ export type LightningInvoice = {
   qrCodeUrl?: string
   expiresAt?: string
   feeCaptureMethod: "invoice_split" | "collection_then_settle"
+  metadata?: Record<string, unknown>
 }
 
 export type LightningInvoiceStatus =
@@ -142,7 +144,12 @@ export interface ProviderAdapter {
   WEBHOOK SUPPORT
   -------------------------------- */
 
-  verifyWebhook?(payload: unknown, signature?: string, rawBody?: string): boolean
+  verifyWebhook?(
+    payload: unknown,
+    signature?: string,
+    rawBody?: string,
+    headers?: Record<string, string>
+  ): boolean
 
   translateEvent?(payload: unknown): StandardPaymentEvent
 

@@ -34,3 +34,22 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Speed Bitcoin Lightning
+
+PineTree uses platform Speed credentials from the server environment. Merchants only enter a Speed Account ID and BTC Lightning Address in the Providers tab. Customers pay with any compatible Bitcoin Lightning wallet.
+
+Add these to `.env.local` for local development, and add them to Vercel Project Settings -> Environment Variables for deployed production. Redeploy Vercel after changing environment variables. Do not commit real secrets.
+
+```bash
+SPEED_API_KEY=
+SPEED_PUBLISHABLE_KEY=
+SPEED_API_BASE_URL=https://api.tryspeed.com
+SPEED_WEBHOOK_SECRET=
+SPEED_ENVIRONMENT=production
+SPEED_PLATFORM_ACCOUNT_ID=
+PINETREE_LIGHTNING_SUPPORTS_FEE_AT_PAYMENT_TIME=true
+PINETREE_LIGHTNING_SUPPORTS_SPLIT_SETTLEMENT=true
+```
+
+`SPEED_API_KEY` and `SPEED_WEBHOOK_SECRET` are server-only secrets. Do not prefix secret keys with `NEXT_PUBLIC_`. `SPEED_PUBLISHABLE_KEY` may be stored for future client-side Speed features, but it is not required by the current checkout flow.

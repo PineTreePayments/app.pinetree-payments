@@ -522,6 +522,9 @@ export async function createPayment(
         ...((providerPayment as { expiresAt?: string } | null)?.expiresAt
           ? { lightningExpiresAt: (providerPayment as { expiresAt?: string }).expiresAt }
           : {}),
+        ...((network === "bitcoin_lightning" && (providerPayment as { metadata?: Record<string, unknown> } | null)?.metadata)
+          ? { lightningProviderMetadata: (providerPayment as { metadata?: Record<string, unknown> }).metadata }
+          : {}),
         ...(baseUsdcStrategy ? { baseUsdcStrategy } : {}),
         ...((network === "solana" || network === "base") && requestedAsset === "USDC" ? { asset: "USDC" } : {})
       }

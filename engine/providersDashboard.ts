@@ -2,6 +2,7 @@ import { supabaseAdmin, supabase } from "@/database"
 import { refreshWalletBalancesEngine } from "./walletOverview"
 import { loadProviders } from "./loadProviders"
 import { getProviderMetadata, isProviderHealthy } from "./providerRegistry"
+import { verifyLightningAddress } from "@/providers/lightning/verifyLightningAddress"
 
 const db = supabaseAdmin || supabase
 
@@ -9,12 +10,18 @@ type JsonPrimitive = string | number | boolean | null
 type JsonValue = JsonPrimitive | JsonObject | JsonValue[]
 type JsonObject = { [key: string]: JsonValue }
 
+type LightningDashboardStatus =
+  | "not_configured"
+  | "address_needs_verification"
+  | "provider_unavailable"
+  | "connected"
+
 type ProviderRow = {
   provider: string
   status: string
   enabled: boolean
   credentials?: JsonObject | null
-  dashboard_status?: "not_configured" | "unsupported_provider_capability" | "connected"
+  dashboard_status?: LightningDashboardStatus | string
   capabilities?: {
     supportsLightningInvoice?: boolean
     supportsFeeAtPaymentTime?: boolean
@@ -43,11 +50,32 @@ export type ProvidersDashboardData = {
 }
 
 const LIGHTNING_PROVIDER_ERROR =
-  "Bitcoin Lightning requires a provider that supports fee-at-payment-time and split settlement."
+  "Bitcoin Lightning requires a Speed Account ID, a verified BTC Lightning Address, and a configured Speed platform."
 
-function hasCredential(row?: ProviderRow | null): boolean {
-  const apiKey = String(row?.credentials?.api_key || "").trim()
-  return Boolean(apiKey)
+// Lightning Address format: user@domain.tld (same RFC as email user@host)
+function isValidLightningAddress(address: string): boolean {
+  return /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(address.trim())
+}
+
+function hasLightningAddress(row?: ProviderRow | null): boolean {
+  const address = String(row?.credentials?.lightning_address || "").trim()
+  return Boolean(address)
+}
+
+function hasSpeedAccountId(row?: ProviderRow | null): boolean {
+  const accountId = String(row?.credentials?.speed_account_id || "").trim()
+  return Boolean(accountId)
+}
+
+function isLightningAddressVerified(row?: ProviderRow | null): boolean {
+  return Boolean(
+    row?.credentials?.lightning_address &&
+    row?.credentials?.lightning_address_verified === true
+  )
+}
+
+function isSpeedMerchantAccountModel(row?: ProviderRow | null): boolean {
+  return String(row?.credentials?.provider_model || "").trim() === "speed_merchant_account"
 }
 
 function getLightningCapabilities() {
@@ -69,21 +97,24 @@ function lightningCapabilityRequirementsPass(): boolean {
     capabilities.supportsLightningInvoice &&
     capabilities.supportsFeeAtPaymentTime &&
     capabilities.supportsSplitSettlement &&
+    capabilities.supportsWebhookConfirmation &&
     isProviderHealthy("lightning")
   )
+}
+
+function getLightningDashboardStatus(row?: ProviderRow | null): LightningDashboardStatus {
+  if (!hasSpeedAccountId(row) || !hasLightningAddress(row)) return "not_configured"
+  if (!isLightningAddressVerified(row)) return "address_needs_verification"
+  if (!isSpeedMerchantAccountModel(row)) return "provider_unavailable"
+  if (!lightningCapabilityRequirementsPass()) return "provider_unavailable"
+  return "connected"
 }
 
 function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
   const providersByKey = new Map(rows.map((row) => [row.provider, row]))
   const lightning = providersByKey.get("lightning")
-  const lightningConfigured = hasCredential(lightning)
   const lightningCapabilities = getLightningCapabilities()
-  const lightningStatus: NonNullable<ProviderRow["dashboard_status"]> =
-    !lightningConfigured
-      ? "not_configured"
-      : lightningCapabilityRequirementsPass()
-        ? "connected"
-        : "unsupported_provider_capability"
+  const lightningStatus = getLightningDashboardStatus(lightning)
 
   const decoratedRows = rows.map((row) => {
     if (row.provider !== "lightning") return row
@@ -102,7 +133,7 @@ function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
       status: "disconnected",
       enabled: false,
       credentials: {},
-      dashboard_status: "not_configured",
+      dashboard_status: "not_configured" as LightningDashboardStatus,
       capabilities: lightningCapabilities
     })
   }
@@ -233,7 +264,22 @@ export async function toggleProviderEngine(
       throw new Error(`Failed checking provider: ${lookupError.message}`)
     }
 
-    if (!hasCredential(data as ProviderRow | null) || !lightningCapabilityRequirementsPass()) {
+    const row = data as ProviderRow | null
+    if (!hasSpeedAccountId(row)) {
+      throw new Error("A Speed Account ID is required before enabling Bitcoin Lightning.")
+    }
+
+    if (!isLightningAddressVerified(row)) {
+      throw new Error(
+        "A verified Lightning Address is required before enabling Bitcoin Lightning."
+      )
+    }
+
+    if (!isSpeedMerchantAccountModel(row)) {
+      throw new Error("Bitcoin Lightning must use the Speed merchant-account provider model.")
+    }
+
+    if (!lightningCapabilityRequirementsPass()) {
       throw new Error(LIGHTNING_PROVIDER_ERROR)
     }
   }
@@ -291,9 +337,10 @@ export async function saveProviderEngine(args: {
   walletAddress?: string
   walletType?: string | null
   apiKey?: string
+  lightningAddress?: string
 }) {
   await loadProviders()
-  const { merchantId, provider, walletAddress, walletType, apiKey } = args
+  const { merchantId, provider, walletAddress, walletType, apiKey, lightningAddress } = args
 
   let credentials: JsonObject = {}
 
@@ -351,13 +398,47 @@ export async function saveProviderEngine(args: {
       wallet: address,
       wallet_type: walletType || null
     }
+  } else if (provider === "lightning") {
+    const speedAccountId = String(walletAddress || "").trim()
+    const address = String(lightningAddress || "").trim()
+
+    if (!speedAccountId) {
+      throw new Error("Speed Account ID is required.")
+    }
+
+    if (!address) {
+      throw new Error("Lightning Address is required (e.g. merchant@getalby.com)")
+    }
+
+    if (!isValidLightningAddress(address)) {
+      throw new Error(
+        "Invalid Lightning Address format. Use user@domain.com (e.g. merchant@getalby.com)"
+      )
+    }
+
+    // LNURL-pay verification (LUD-16): fetch /.well-known/lnurlp/<user> and
+    // confirm the response is a valid payRequest descriptor before marking verified.
+    const verification = await verifyLightningAddress(address)
+
+    if (!verification.verified) {
+      throw new Error(
+        "That Lightning Address could not be verified. Please check the address or try another Lightning wallet."
+      )
+    }
+
+    credentials = {
+      speed_account_id: speedAccountId,
+      lightning_address: address,
+      lightning_address_verified: true,
+      verified_at: new Date().toISOString(),
+      provider_model: "speed_merchant_account",
+      lnurl_domain: verification.domain,
+      lnurl_callback: verification.callbackUrl,
+      verification_method: "lnurl-pay"
+    }
   } else {
     if (!apiKey) {
       throw new Error("API key required")
-    }
-
-    if (provider === "lightning" && !lightningCapabilityRequirementsPass()) {
-      throw new Error(LIGHTNING_PROVIDER_ERROR)
     }
 
     credentials = { api_key: apiKey }
@@ -370,7 +451,7 @@ export async function saveProviderEngine(args: {
         merchant_id: merchantId,
         provider,
         status: "connected",
-        enabled: true,
+        enabled: provider === "lightning" ? false : true,
         credentials
       },
       { onConflict: "merchant_id,provider" }

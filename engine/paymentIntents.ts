@@ -158,6 +158,7 @@ export async function getMerchantAvailableNetworks(merchantId: string): Promise<
         metadata &&
         metadata.supportedNetworks.includes("bitcoin_lightning") &&
         metadata.capabilities?.supportsLightningInvoice &&
+        metadata.capabilities?.supportsWebhookConfirmation &&
         providerSupportsFeeAtPaymentTime(providerId) &&
         isProviderHealthy(providerId)
       )
