@@ -21,7 +21,13 @@ type Props = {
   onExecutionStarted?: () => void
   onCancel?: () => void
 }
-type BaseUsdcStrategy = "v1_approve_splitToken" | "v4_eip3009_relayer" | "v5_eip3009_relayer"
+type BaseUsdcStrategy =
+  | "v1_approve_splitToken"
+  | "v4_eip3009_relayer"
+  | "v5_eip3009_relayer"
+  | "delegated_eoa_batch"
+  | "allowance_two_step"
+  | "allowance_direct"
 type BaseExecutionStage =
   | "idle"
   | "asset_selected"
@@ -684,9 +690,12 @@ function resolveBaseUsdcStrategyFromResponse(result: {
   if (
     strategy === "v5_eip3009_relayer" ||
     strategy === "v4_eip3009_relayer" ||
-    strategy === "v1_approve_splitToken"
+    strategy === "v1_approve_splitToken" ||
+    strategy === "delegated_eoa_batch" ||
+    strategy === "allowance_two_step" ||
+    strategy === "allowance_direct"
   ) {
-    return strategy
+    return strategy as BaseUsdcStrategy
   }
   return undefined
 }
@@ -1202,6 +1211,7 @@ export default function BaseWalletPayment({
     try {
       let authTxHash: string | null = null
       let shouldUseAllowancePath = false
+      console.log("[BASE USDC CHAIN] start", { paymentId, isTrustWallet })
       void logBase("usdc-strategy-selected", {
         paymentId,
         strategy: "delegated-eoa-first",
@@ -1231,6 +1241,7 @@ export default function BaseWalletPayment({
           Array.isArray(delegatedPrepared.calls) &&
           delegatedPrepared.calls.length >= 2
         ) {
+          console.log("[BASE USDC CHAIN] delegated-start", { paymentId })
           console.info("[BASE DELEGATED] batch-start", { paymentId })
           setExecStageRef.current("confirm_payment")
           console.log("[BASE UI] awaiting-wallet-confirmation", { paymentId, strategy: "delegated_eoa_batch" })
@@ -1298,6 +1309,7 @@ export default function BaseWalletPayment({
               paymentId,
               txHashPrefix: finalTxHash.slice(0, 10),
             })
+            console.log("[BASE USDC CHAIN] final-tx", { paymentId, via: "delegated", txHashPrefix: finalTxHash.slice(0, 10) })
             setBaseUsdcV4Status("Processing payment...")
             return normalizeHexTransactionHash(finalTxHash)
           }
@@ -1324,9 +1336,11 @@ export default function BaseWalletPayment({
         }
       }
       // ── Strategy 2: EIP-3009 relayer ────────────────────────────────────────
+      console.log("[BASE USDC CHAIN] delegated-fallthrough", { paymentId, delegatedFallthrough, isTrustWallet })
       if (!isTrustWallet) {
         try {
           setBaseUsdcV4Status("Preparing USDC authorization...")
+          console.log("[BASE USDC CHAIN] eip3009-start", { paymentId })
           console.info("[PineTreeBaseTrace] v5 prepare-authorization start", {
             step: "v5-prepare-start",
             paymentId,
@@ -1433,15 +1447,18 @@ export default function BaseWalletPayment({
         }
       }
       if (authTxHash) {
+        console.log("[BASE USDC CHAIN] final-tx", { paymentId, via: "eip3009-relay", txHashPrefix: authTxHash.slice(0, 10) })
         setBaseUsdcV4Status("Processing payment...")
         return authTxHash
       }
       // ── Allowance path ────────────────────────────────────────────────────────
+      console.log("[BASE USDC CHAIN] eip3009-fallthrough", { paymentId, shouldUseAllowancePath, isTrustWallet })
       console.info("[PineTreeBaseTrace] v5 allowance path start", {
         step: "v5-allowance-start",
         paymentId,
         isTrustWallet
       })
+      console.log("[BASE USDC CHAIN] allowance-check", { paymentId })
       setBaseUsdcV4Status("Preparing USDC payment...")
       const buildRes = await fetch(
         `/api/payments/${encodeURIComponent(paymentId)}/base-usdc-v5/build-allowance-payment`,
@@ -1458,6 +1475,7 @@ export default function BaseWalletPayment({
       if (!buildData.paymentTx) throw new Error("Incomplete allowance payment data returned by server")
       const { sufficient, approveTx, paymentTx } = buildData as Required<Pick<BaseUsdcV5AllowancePaymentResponse, "sufficient" | "approveTx" | "paymentTx">>
       if (!sufficient && approveTx) {
+        console.log("[BASE USDC CHAIN] approve-start", { paymentId })
         setExecStageRef.current("authorizing_usdc", { allowance: true })
         console.log("[BASE UI] usdc-authorization-start", { paymentId })
         setBaseUsdcV4Status("Step 1 of 2: Authorize USDC...")
@@ -1500,10 +1518,12 @@ export default function BaseWalletPayment({
         if (!allowanceSufficient) {
           throw new Error("USDC allowance was not confirmed in time. Please try again.")
         }
+        console.log("[BASE USDC CHAIN] approve-confirmed", { paymentId })
         setExecStageRef.current("usdc_authorized")
         console.log("[BASE UI] usdc-authorization-confirmed", { paymentId })
         void logBase("usdc-allowance-confirmed", { paymentId })
       }
+      console.log("[BASE USDC CHAIN] payment-start", { paymentId })
       setExecStageRef.current("confirm_payment")
       console.log("[BASE UI] awaiting-wallet-confirmation", { paymentId, strategy: "allowance_two_step" })
       setBaseUsdcV4Status("Step 2 of 2: Confirm payment...")
@@ -1517,6 +1537,7 @@ export default function BaseWalletPayment({
         timeoutMessage: "Payment transaction was not completed. Tap Pay to try again."
       })
       resolveWalletRequest()
+      console.log("[BASE USDC CHAIN] final-tx", { paymentId, via: "allowance", txHashPrefix: paymentTxHash.slice(0, 10) })
       setBaseUsdcV4Status("Processing payment...")
       void logBase("usdc-payment-submitted", { paymentId, txHashPrefix: paymentTxHash.slice(0, 10) })
       return paymentTxHash
@@ -1641,11 +1662,15 @@ export default function BaseWalletPayment({
       console.log("[Base ETH] provider-ready", { prefetched: Boolean(cachedProvider) })
       void logBase("provider-ready", { prefetched: Boolean(cachedProvider) })
       const walletConnectProvider = cachedProvider ?? await getWalletConnectProvider(walletConnectConnector)
-      const isBaseUsdcV5 = selectedAsset === "USDC" && (
-        paymentData.baseUsdcStrategy === "v5_eip3009_relayer" ||
-        paymentData.paymentUrl.startsWith("pinetree://base-usdc-v5")
+      // V4 only when the strategy or URL explicitly says so.
+      // Everything else (delegated_eoa_batch, allowance_two_step, allowance_direct,
+      // v5_eip3009_relayer, unknown) routes to executeBaseUsdcV5Payment which runs
+      // the full strategy stack internally.
+      const isBaseUsdcV4 = selectedAsset === "USDC" && (
+        paymentData.baseUsdcStrategy === "v4_eip3009_relayer" ||
+        (!paymentData.baseUsdcStrategy && paymentData.paymentUrl.startsWith("pinetree://base-usdc-v4"))
       )
-      const isBaseUsdcV4 = !isBaseUsdcV5 && selectedAsset === "USDC" && paymentData.baseUsdcStrategy === "v4_eip3009_relayer"
+      const isBaseUsdcV5 = selectedAsset === "USDC" && !isBaseUsdcV4
       createdBaseUsdcV4Payment = isBaseUsdcV4
       createdBaseUsdcV5Payment = isBaseUsdcV5
       console.log("[PineTreeBaseTrace] BaseWalletPayment branch selected", {
@@ -1655,6 +1680,12 @@ export default function BaseWalletPayment({
         isBaseUsdcV4,
         isBaseUsdcV5,
         baseUsdcStrategy: paymentData.baseUsdcStrategy || null
+      })
+      console.log("[BASE USDC CHAIN] start", {
+        paymentId: paymentData.paymentId,
+        baseUsdcStrategy: paymentData.baseUsdcStrategy || null,
+        isBaseUsdcV5,
+        isBaseUsdcV4,
       })
       if (isBaseUsdcV5) {
         console.info("[Base USDC V5] v5-strategy-detected", {
