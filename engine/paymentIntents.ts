@@ -11,8 +11,11 @@ import { createPayment, buildCreatePaymentRequest } from "./createPayment"
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 import { PINETREE_FEE } from "./config"
 import { markPaymentIncomplete } from "./paymentStateActions"
+import { loadProviders } from "./loadProviders"
+import { getMerchantProviders } from "@/database/merchants"
+import { getProviderMetadata, isProviderHealthy, providerSupportsFeeAtPaymentTime } from "./providerRegistry"
 
-const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base", "shift4"]
+const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base", "shift4", "bitcoin_lightning"]
 const PAYMENT_DETAILS_TIMEOUT_MS = Number(process.env.PAYMENT_DETAILS_TIMEOUT_MS || 12000)
 
 async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -45,13 +48,14 @@ type WalletOption = {
   href: string
 }
 
-type PaymentAsset = "SOL" | "USDC" | "ETH"
+type PaymentAsset = "SOL" | "USDC" | "ETH" | "BTC"
 
 function normalizePaymentAsset(value?: string): PaymentAsset | null {
   const normalized = String(value || "").trim().toUpperCase()
   if (normalized === "ETH") return "ETH"
   if (normalized === "SOL") return "SOL"
   if (normalized === "USDC") return "USDC"
+  if (normalized === "BTC") return "BTC"
   return null
 }
 
@@ -60,6 +64,14 @@ function resolveSupportedAssetForNetwork(network: WalletNetwork, asset?: string)
     const normalizedAsset = normalizePaymentAsset(asset) || "ETH"
     if (normalizedAsset !== "ETH" && normalizedAsset !== "USDC") {
       throw new Error("Base payments support ETH and USDC only")
+    }
+    return normalizedAsset
+  }
+
+  if (network === "bitcoin_lightning") {
+    const normalizedAsset = normalizePaymentAsset(asset) || "BTC"
+    if (normalizedAsset !== "BTC") {
+      throw new Error("Bitcoin Lightning payments support BTC only")
     }
     return normalizedAsset
   }
@@ -82,6 +94,7 @@ function buildWalletOptions(walletUrl: string, network?: string): WalletOption[]
   const net = String(network || "").toLowerCase().trim()
   const isSolana = net === "solana"
   const isBase = net === "base"
+  const isLightning = net === "bitcoin_lightning"
 
   const solanaWallets: WalletOption[] = [
     {
@@ -101,10 +114,26 @@ function buildWalletOptions(walletUrl: string, network?: string): WalletOption[]
 
   if (isSolana) return solanaWallets
   if (isBase) return evmWallets
+  if (isLightning) {
+    const lightningUri = normalizedUrl.toLowerCase().startsWith("lightning:")
+      ? normalizedUrl
+      : `lightning:${normalizedUrl}`
+
+    return [
+      {
+        id: "lightning",
+        label: "Open Lightning Wallet",
+        url: lightningUri,
+        href: lightningUri
+      }
+    ]
+  }
   return [...solanaWallets, ...evmWallets]
 }
 
 export async function getMerchantAvailableNetworks(merchantId: string): Promise<WalletNetwork[]> {
+  await loadProviders()
+
   const [wallets, hostedNetworks] = await Promise.all([
     getMerchantWallets(merchantId),
     getConnectedHostedCheckoutNetworks(merchantId)
@@ -118,7 +147,24 @@ export async function getMerchantAvailableNetworks(merchantId: string): Promise<
     .map((n) => normalizeWalletNetwork(n))
     .filter((n): n is WalletNetwork => Boolean(n && SUPPORTED_NETWORKS.includes(n)))
 
-  return uniqueNetworks([...walletNetworks, ...hostedCheckoutNetworks])
+  const providers = await getMerchantProviders(merchantId)
+  const enabledHostedNetworks = hostedCheckoutNetworks.filter((network) => {
+    if (network !== "bitcoin_lightning") return true
+
+    return providers.some((provider) => {
+      const providerId = String(provider.provider || "").toLowerCase().trim()
+      const metadata = getProviderMetadata(providerId)
+      return Boolean(
+        metadata &&
+        metadata.supportedNetworks.includes("bitcoin_lightning") &&
+        metadata.capabilities?.supportsLightningInvoice &&
+        providerSupportsFeeAtPaymentTime(providerId) &&
+        isProviderHealthy(providerId)
+      )
+    })
+  })
+
+  return uniqueNetworks([...walletNetworks, ...enabledHostedNetworks])
 }
 
 export async function createPaymentIntentEngine(input: {

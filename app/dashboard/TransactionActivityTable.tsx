@@ -86,7 +86,7 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
   return (
     <div className="grid grid-cols-1 sm:grid-cols-[150px_1fr] gap-1 sm:gap-4 py-2 border-b border-gray-100 last:border-none">
       <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
-      <div className={`text-sm text-gray-900 break-words ${mono ? "font-mono text-xs" : ""}`}>
+      <div className={`min-w-0 text-sm text-gray-900 whitespace-normal break-all [overflow-wrap:anywhere] ${mono ? "font-mono text-xs leading-relaxed" : ""}`}>
         {value || "-"}
       </div>
     </div>
@@ -225,7 +225,7 @@ export default function TransactionActivityTable({
             role="dialog"
             aria-modal="true"
             aria-label="Transaction details"
-            className="w-full max-w-xl rounded-2xl border border-white/70 bg-white/95 shadow-[0_24px_80px_rgba(15,23,42,0.22)] p-5"
+            className="w-full max-w-xl max-h-[88vh] overflow-y-auto rounded-2xl border border-white/70 bg-white/95 shadow-[0_24px_80px_rgba(15,23,42,0.22)] p-5"
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4 mb-4">

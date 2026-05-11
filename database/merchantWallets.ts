@@ -131,7 +131,7 @@ export async function getConnectedHostedCheckoutNetworks(merchantId: string): Pr
 
   if (error || !data || data.length === 0) return []
 
-  const hostedCheckoutProviders = new Set(["shift4"])
+  const hostedCheckoutProviders = new Set(["shift4", "lightning"])
   const networks: string[] = []
 
   for (const row of data as Array<{ provider?: string | null }>) {

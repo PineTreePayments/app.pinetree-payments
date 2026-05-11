@@ -17,6 +17,54 @@ export type FeeCaptureMethod =
   | "invoice_split"
   | "collection_then_settle"
 
+export type ProviderCustodyModel =
+  | "provider"
+  | "merchant"
+  | "noncustodial"
+  | "unknown"
+
+export type ProviderCapabilities = {
+  hostedCheckout?: boolean
+  walletRails?: boolean
+  webhooks?: boolean
+  supportsLightningInvoice?: boolean
+  supportsFeeAtPaymentTime?: boolean
+  supportsSplitSettlement?: boolean
+  supportsWebhookConfirmation?: boolean
+  requiresKyc?: boolean | "unknown"
+  custodyModel?: ProviderCustodyModel
+}
+
+export type LightningInvoiceRequest = {
+  paymentId: string
+  merchantId: string
+  merchantAmount: number
+  pinetreeFee: number
+  grossAmount: number
+  currency: string
+  merchantWallet?: string
+  pinetreeWallet?: string
+  providerApiKey?: string
+  metadata?: Record<string, unknown>
+}
+
+export type LightningInvoice = {
+  providerReference: string
+  invoice: string
+  paymentHash?: string
+  paymentUrl?: string
+  qrCodeUrl?: string
+  expiresAt?: string
+  feeCaptureMethod: "invoice_split" | "collection_then_settle"
+}
+
+export type LightningInvoiceStatus =
+  | "PENDING"
+  | "PROCESSING"
+  | "CONFIRMED"
+  | "FAILED"
+  | "EXPIRED"
+
 export type StandardPaymentEvent = {
   paymentId: string
   event:
@@ -33,11 +81,7 @@ export interface ProviderAdapterMetadata {
   supportedNetworks: readonly PaymentNetwork[]
   credentialKey?: string
   feeCaptureMethods?: FeeCaptureMethod[]
-  capabilities?: {
-    hostedCheckout?: boolean
-    walletRails?: boolean
-    webhooks?: boolean
-  }
+  capabilities?: ProviderCapabilities
 }
 
 export interface ProviderAdapter {
@@ -82,6 +126,16 @@ export interface ProviderAdapter {
 
   getPaymentStatus?(providerReference: string): Promise<{
     status: PaymentStatus
+  }>
+
+  /* --------------------------------
+  LIGHTNING INVOICE SUPPORT
+  -------------------------------- */
+
+  createLightningInvoice?(input: LightningInvoiceRequest): Promise<LightningInvoice>
+
+  getLightningInvoiceStatus?(providerReference: string): Promise<{
+    status: LightningInvoiceStatus
   }>
 
   /* --------------------------------

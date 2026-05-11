@@ -42,6 +42,24 @@ function getProvidersForNetwork(network: string): string[] {
     .map(([name]) => name)
 }
 
+function providerSupportsFeeAtPaymentTime(name: string): boolean {
+  const metadata = getProviderMetadata(name)
+  const capabilities = metadata?.capabilities
+
+  if (!metadata) return false
+
+  if (metadata.feeCaptureMethods?.includes("atomic_split")) return true
+  if (metadata.feeCaptureMethods?.includes("contract_split")) return true
+  if (metadata.feeCaptureMethods?.includes("invoice_split")) {
+    return Boolean(
+      capabilities?.supportsFeeAtPaymentTime &&
+      capabilities?.supportsSplitSettlement
+    )
+  }
+
+  return false
+}
+
 function isProviderHealthy(name: string): boolean {
   return providerHealth[name] ?? true
 }
@@ -60,6 +78,7 @@ export {
   getAllProviders,
   getProviderMetadata,
   getProvidersForNetwork,
+  providerSupportsFeeAtPaymentTime,
   isProviderHealthy,
   setProviderHealth,
   getProviderHealthStatus

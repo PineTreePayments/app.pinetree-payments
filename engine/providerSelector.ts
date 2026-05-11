@@ -8,13 +8,21 @@
 import { getMerchantDefaultProvider, getMerchantProviders } from "@/database/merchants"
 import type { PaymentAdapterId } from "@/types/payment"
 import { normalizeProvider, normalizeWalletNetwork } from "./providerMappings"
-import { getProviderMetadata, isProviderHealthy } from "./providerRegistry"
+import { getProviderMetadata, isProviderHealthy, providerSupportsFeeAtPaymentTime } from "./providerRegistry"
 import { loadProviders } from "./loadProviders"
 
 // Wallet-rail adapter per network — used when merchant_providers has no rows yet
 const NETWORK_DEFAULT_ADAPTER: Partial<Record<string, PaymentAdapterId>> = {
   solana: "solana",
   base: "base"
+}
+
+function adapterMeetsNetworkRequirements(adapterId: PaymentAdapterId, network: string): boolean {
+  if (network === "bitcoin_lightning") {
+    return providerSupportsFeeAtPaymentTime(adapterId)
+  }
+
+  return true
 }
 
 function sortAdapterIds(
@@ -63,6 +71,9 @@ export async function chooseBestAdapter(input: {
     if (!metadata || !metadata.supportedNetworks.includes(network)) {
       throw new Error(`Requested payment adapter does not support ${network}`)
     }
+    if (!adapterMeetsNetworkRequirements(requestedAdapterId, network)) {
+      throw new Error(`Requested payment adapter cannot collect PineTree fees at payment time on ${network}`)
+    }
     if (!isProviderHealthy(requestedAdapterId)) {
       throw new Error(`Requested payment adapter is unhealthy: ${requestedAdapterId}`)
     }
@@ -74,6 +85,7 @@ export async function chooseBestAdapter(input: {
     return Boolean(
       metadata &&
       metadata.supportedNetworks.includes(network) &&
+      adapterMeetsNetworkRequirements(adapterId, network) &&
       isProviderHealthy(adapterId)
     )
   })

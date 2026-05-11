@@ -6,7 +6,7 @@
  */
 
 import { chooseBestAdapter } from "./providerSelector"
-import { getProvider } from "./providerRegistry"
+import { getProvider, providerSupportsFeeAtPaymentTime } from "./providerRegistry"
 import { type BaseUsdcStrategy, type PaymentAdapterId, getAdapterCredentialKey } from "@/types/payment"
 import {
   createPayment as createPaymentRecord,
@@ -284,15 +284,18 @@ export async function createPayment(
   // Hosted-checkout providers (Shift4) don't use a blockchain wallet address.
   // Skip wallet lookup and treasury assertions — fee capture is handled by the provider.
   const isHostedCheckout = preferredNetwork === "shift4"
+  const isLightning = preferredNetwork === "bitcoin_lightning"
+  const isProviderSettlement = isHostedCheckout || isLightning
 
   let merchantWalletAddress: string
   let network: string
 
   let walletAsset: string | undefined
 
-  if (isHostedCheckout) {
-    merchantWalletAddress = `shift4_${input.merchantId}`
-    network = "shift4"
+  if (isProviderSettlement) {
+    const providerSettlementNetwork = preferredNetwork || "shift4"
+    merchantWalletAddress = `${providerSettlementNetwork}_${input.merchantId}`
+    network = providerSettlementNetwork
   } else {
     const merchantWallet = await selectBestWallet(input.merchantId, preferredNetwork)
 
@@ -319,6 +322,13 @@ export async function createPayment(
     walletAsset = requestedAsset === "USDC" ? "base-usdc" : "eth-base"
   }
 
+  if (network === "bitcoin_lightning") {
+    if (requestedAsset && requestedAsset !== "BTC") {
+      throw new Error("Bitcoin Lightning payments support BTC only")
+    }
+    walletAsset = "btc-lightning"
+  }
+
   /* ---------------------------
      ADAPTER SELECTION
   --------------------------- */
@@ -333,9 +343,19 @@ export async function createPayment(
     throw new Error(`No healthy payment adapter available for network: ${network}`)
   }
 
+  if (network === "bitcoin_lightning" && !providerSupportsFeeAtPaymentTime(providerName)) {
+    throw new Error(
+      `Adapter ${providerName} cannot collect PineTree fees at payment time for Bitcoin Lightning`
+    )
+  }
+
   const provider = getProvider(providerName)
 
-  if (!provider.createPayment) {
+  if (network === "bitcoin_lightning" && !provider.createLightningInvoice && !provider.createPayment) {
+    throw new Error(`Adapter ${providerName} does not implement Lightning invoice creation`)
+  }
+
+  if (network !== "bitcoin_lightning" && !provider.createPayment) {
     throw new Error(`Adapter ${providerName} does not implement createPayment`)
   }
 
@@ -343,11 +363,11 @@ export async function createPayment(
      PINETREE TREASURY WALLET
   --------------------------- */
 
-  if (!isHostedCheckout) {
+  if (!isProviderSettlement) {
     assertTreasuryWalletFormat(network)
     assertSplitRailConfig(network)
   }
-  const pinetreeWallet = isHostedCheckout ? "" : getPineTreeTreasuryWallet(network)
+  const pinetreeWallet = isProviderSettlement ? "" : getPineTreeTreasuryWallet(network)
 
   /* ---------------------------
      CREATE PAYMENT ID
@@ -360,18 +380,31 @@ export async function createPayment(
   // ✅ ENGINE NOW PASSES FULL SPLIT DATA TO PROVIDER
   // No more single amount, provider receives exact split values
   const providerApiKey = await getProviderApiKey(providerName, input.merchantId)
-  const providerPayment = await provider.createPayment({
-    paymentId: paymentId,
-    merchantAmount,
-    pinetreeFee,
-    grossAmount,
-    currency: input.currency,
-    merchantWallet: merchantWalletAddress,
-    pinetreeWallet,
-    merchantId: input.merchantId,
-    network,
-    providerApiKey
-  })
+  const providerPayment = network === "bitcoin_lightning" && provider.createLightningInvoice
+    ? await provider.createLightningInvoice({
+        paymentId,
+        merchantAmount,
+        pinetreeFee,
+        grossAmount,
+        currency: input.currency,
+        merchantWallet: merchantWalletAddress,
+        pinetreeWallet,
+        merchantId: input.merchantId,
+        providerApiKey,
+        metadata: input.metadata
+      })
+    : await provider.createPayment!({
+        paymentId: paymentId,
+        merchantAmount,
+        pinetreeFee,
+        grossAmount,
+        currency: input.currency,
+        merchantWallet: merchantWalletAddress,
+        pinetreeWallet,
+        merchantId: input.merchantId,
+        network,
+        providerApiKey
+      })
 
   // Use the provider's declared feeCaptureMethod if available.
   // This prevents network-based inference from overriding hosted-checkout providers
@@ -449,9 +482,11 @@ export async function createPayment(
   const canonicalPaymentUrl = network === "solana"
     ? enforceNetworkPaymentUrl(network, paymentId, splitPayment.paymentUrl)
     : providerHostedUrl || splitPayment.paymentUrl
-  const canonicalQrCodeUrl = providerHostedUrl
-    ? splitPayment.qrCodeUrl  // QR still points to universalUrl so merchant can scan
-    : splitPayment.qrCodeUrl
+  const canonicalQrCodeUrl = network === "bitcoin_lightning"
+    ? String((providerPayment as { qrCodeUrl?: string } | null)?.qrCodeUrl || splitPayment.qrCodeUrl)
+    : providerHostedUrl
+      ? splitPayment.qrCodeUrl  // QR still points to universalUrl so merchant can scan
+      : splitPayment.qrCodeUrl
 
   await createPaymentRecord({
     id: paymentId,
@@ -467,7 +502,7 @@ export async function createPayment(
     qr_code_url: canonicalQrCodeUrl,
     metadata: {
       ...(input.metadata || {}),
-      selectedAsset: network === "solana" || network === "base" ? requestedAsset : input.asset,
+      selectedAsset: network === "solana" || network === "base" || network === "bitcoin_lightning" ? (requestedAsset || input.asset) : input.asset,
       split: {
         merchantWallet: merchantWalletAddress,
         pinetreeWallet,
@@ -478,6 +513,15 @@ export async function createPayment(
         feeNativeAmount: splitPayment.feeNativeAmount,
         merchantNativeAmountAtomic: splitPayment.merchantNativeAmountAtomic,
         feeNativeAmountAtomic: splitPayment.feeNativeAmountAtomic,
+        ...((providerPayment as { paymentHash?: string } | null)?.paymentHash
+          ? { lightningPaymentHash: (providerPayment as { paymentHash?: string }).paymentHash }
+          : {}),
+        ...((providerPayment as { invoice?: string } | null)?.invoice
+          ? { lightningInvoice: (providerPayment as { invoice?: string }).invoice }
+          : {}),
+        ...((providerPayment as { expiresAt?: string } | null)?.expiresAt
+          ? { lightningExpiresAt: (providerPayment as { expiresAt?: string }).expiresAt }
+          : {}),
         ...(baseUsdcStrategy ? { baseUsdcStrategy } : {}),
         ...((network === "solana" || network === "base") && requestedAsset === "USDC" ? { asset: "USDC" } : {})
       }

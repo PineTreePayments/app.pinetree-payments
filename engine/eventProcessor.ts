@@ -205,6 +205,7 @@ export async function processWebhook({
   const signature =
     headers?.["x-cc-webhook-signature"] ||
     headers?.["x-signature"] ||
+    headers?.["x-lightning-signature"] ||
     headers?.["x-shift4-signature"] ||
     ""
 

@@ -9,6 +9,7 @@ import Card from "@/components/ui/Card"
 import PageContainer from "@/components/ui/PageContainer"
 import BaseWalletPayment from "@/components/payment/BaseWalletPayment"
 import SolanaWalletPayment from "@/components/payment/SolanaWalletPayment"
+import LightningPayment from "@/components/payment/LightningPayment"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import {
   buildSignAndSendUrl,
@@ -1250,9 +1251,21 @@ export default function PayClient() {
                         ) : null}
 
                         {/* ── Other networks: unavailable in hosted checkout ─────── */}
+                        {asset.network === "bitcoin_lightning" ? (
+                          <LightningPayment
+                            intentId={intentId!}
+                            usdAmount={displayAmount}
+                            paymentStatus={normalizedPaymentStatus}
+                            onPaymentCreated={() => {
+                              void loadIntentCallback()
+                            }}
+                          />
+                        ) : null}
+
                         {asset.network !== "shift4" &&
                           asset.network !== "base" &&
-                          asset.network !== "solana" ? (
+                          asset.network !== "solana" &&
+                          asset.network !== "bitcoin_lightning" ? (
                           <div className="text-xs text-gray-500 text-center">
                             This payment method is not available in the hosted checkout.
                           </div>
