@@ -11,7 +11,7 @@ export type SpeedBalanceDiagnostics = {
   baseUrl: string
   speedAccountIdMasked: string
   httpStatus: number | null
-  responseKeys: string[]
+  rawBalanceKeys: string[]
   balancesFound: string[]
   rawNumericAmount: number | null
   satsAmount: number
@@ -102,7 +102,7 @@ function collectBalanceEntries(raw: unknown): Array<Record<string, unknown>> {
 
 function parseBalanceDiagnostics(raw: unknown): Pick<
   SpeedBalanceDiagnostics,
-  "responseKeys" | "balancesFound" | "rawNumericAmount" | "satsAmount" | "btcAmount"
+  "rawBalanceKeys" | "balancesFound" | "rawNumericAmount" | "satsAmount" | "btcAmount"
 > {
   const entries = collectBalanceEntries(raw)
   const balancesFound = Array.from(new Set(
@@ -149,7 +149,7 @@ function parseBalanceDiagnostics(raw: unknown): Pick<
   }
 
   return {
-    responseKeys: objectKeys(raw),
+    rawBalanceKeys: objectKeys(raw),
     balancesFound,
     rawNumericAmount,
     satsAmount,
@@ -163,7 +163,7 @@ function logSpeedBalanceDiagnostics(label: string, diagnostics: SpeedBalanceDiag
     baseUrl: diagnostics.baseUrl,
     speedAccountIdMasked: diagnostics.speedAccountIdMasked,
     httpStatus: diagnostics.httpStatus,
-    responseKeys: diagnostics.responseKeys,
+    rawBalanceKeys: diagnostics.rawBalanceKeys,
     balancesFound: diagnostics.balancesFound,
     rawNumericAmount: diagnostics.rawNumericAmount,
     satsAmount: diagnostics.satsAmount,
@@ -186,7 +186,7 @@ export async function getSpeedAccountBalanceDiagnostics(
     baseUrl,
     speedAccountIdMasked: maskSpeedAccountId(accountId),
     httpStatus: null,
-    responseKeys: [],
+    rawBalanceKeys: [],
     balancesFound: [],
     rawNumericAmount: null,
     satsAmount: 0,
