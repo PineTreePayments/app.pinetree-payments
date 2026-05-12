@@ -147,7 +147,8 @@ export async function getTransactionsDashboardEngine(merchantId: string): Promis
         pinetree_fee,
         currency,
         status,
-        provider_reference
+        provider_reference,
+        metadata
       )
     `)
     .eq("merchant_id", merchantId)

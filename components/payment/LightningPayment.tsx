@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Button from "@/components/ui/Button"
 import WalletPickerModal, { type WalletPickerSection } from "@/components/payment/WalletPickerModal"
 
@@ -144,6 +144,7 @@ export default function LightningPayment({
   const [walletPickerOpen, setWalletPickerOpen] = useState(false)
   const [walletSearch, setWalletSearch] = useState("")
   const [pendingWalletId, setPendingWalletId] = useState("")
+  const autoPrepareStartedRef = useRef(false)
 
   const invoice = String(payment?.paymentUrl || "")
   const invoiceUri = useMemo(() => normalizeLightningUri(invoice), [invoice])
@@ -189,6 +190,12 @@ export default function LightningPayment({
       setLoading(false)
     }
   }, [intentId, onPaymentCreated])
+
+  useEffect(() => {
+    if (autoPrepareStartedRef.current || hasInvoice) return
+    autoPrepareStartedRef.current = true
+    void prepareInvoice()
+  }, [hasInvoice, prepareInvoice])
 
   const openLightningWallet = useCallback((wallet: LightningWallet) => {
     if (!invoiceUri) return
@@ -245,16 +252,14 @@ export default function LightningPayment({
     return (
       <div className="space-y-3">
         <p className="text-sm font-medium text-gray-700">Pay with Bitcoin Lightning</p>
-        <p className="text-xs text-gray-500">Use any compatible Lightning wallet.</p>
+        <p className="text-xs text-gray-500">Preparing your Lightning invoice and payment options.</p>
         {error ? (
           <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
             {error}
           </div>
         ) : null}
-        <Button fullWidth disabled={loading} onClick={() => void prepareInvoice()}>
-          {loading
-            ? "Preparing invoice..."
-            : `Pay with Bitcoin Lightning (${formattedUsdAmount})`}
+        <Button fullWidth disabled={loading || !error} onClick={() => void prepareInvoice()}>
+          {loading ? "Preparing invoice..." : error ? "Retry Lightning invoice" : `Preparing ${formattedUsdAmount}`}
         </Button>
       </div>
     )

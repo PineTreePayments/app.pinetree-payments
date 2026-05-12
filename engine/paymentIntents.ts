@@ -366,6 +366,9 @@ export async function selectPaymentIntentNetworkEngine(input: {
         const reuseSplitContract = String(existingSplit?.splitContract || "").trim() || undefined
         const reusePaymentUrl = String(existingPayment.payment_url || "").trim()
         const reuseWalletUrl = reusePaymentUrl
+        const reuseEstimatedSats = normalizedNetwork === "bitcoin_lightning"
+          ? getLightningEstimatedSats(existingPayment.metadata)
+          : undefined
 
         console.info("[payment-intent] select-network:reuse-existing", {
           intentId: intent.id,
@@ -390,6 +393,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
           universalUrl: undefined,
           nativeAmount: undefined,
           nativeSymbol: undefined,
+          estimatedSats: reuseEstimatedSats,
           baseUsdcStrategy: reuseStrategy,
           metadata: {
             split: {

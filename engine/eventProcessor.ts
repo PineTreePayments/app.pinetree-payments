@@ -62,6 +62,15 @@ function getProviderEventType(payload: unknown): string {
   )
 }
 
+function getProviderStatus(payload: unknown): string {
+  return String(
+    readPath(payload, ["data", "object", "status"]) ||
+      readPath(payload, ["data", "status"]) ||
+      readPath(payload, ["status"]) ||
+      ""
+  ).trim()
+}
+
 function getProviderReferenceCandidates(payload: unknown): string[] {
   const candidates = [
     readPath(payload, ["event", "data", "id"]),
@@ -260,6 +269,15 @@ export async function processWebhook({
   // webhook has arrived. Log and return without writing anything to the database.
   const TERMINAL_STATES = new Set<string>(["CONFIRMED", "FAILED", "INCOMPLETE"])
   const currentStatus = normalizeToStrictPaymentStatus(payment.status)
+  if (provider === "lightning") {
+    console.info("[lightning/confirmation] webhook translated", {
+      paymentId,
+      provider_reference: payment.provider_reference || null,
+      providerStatus: getProviderStatus(payload) || null,
+      translatedPineTreeEvent: event.event,
+      oldPineTreeStatus: currentStatus
+    })
+  }
   if (TERMINAL_STATES.has(currentStatus)) {
     console.info("[eventProcessor] idempotent:terminal_state_skip", {
       provider,
@@ -312,6 +330,20 @@ export async function processWebhook({
       rawPayload: payload
     })
 
+    if (provider === "lightning") {
+      const finalizedPayment = await getPaymentById(paymentId)
+      console.info("[lightning/confirmation] status advanced", {
+        paymentId,
+        provider_reference: payment.provider_reference || null,
+        providerStatus: getProviderStatus(payload) || null,
+        translatedPineTreeEvent: event.event,
+        oldPineTreeStatus: currentStatus,
+        newPineTreeStatus: finalizedPayment
+          ? normalizeToStrictPaymentStatus(finalizedPayment.status)
+          : null
+      })
+    }
+
     if (transaction) {
       await updateTransactionStatus(transaction.id, toTransactionStatus(status))
     }
@@ -345,6 +377,18 @@ export async function processWebhook({
     })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error)
+
+    if (provider === "lightning") {
+      console.warn("[lightning/confirmation] status advance failed", {
+        paymentId,
+        provider_reference: payment.provider_reference || null,
+        providerStatus: getProviderStatus(payload) || null,
+        translatedPineTreeEvent: event.event,
+        oldPineTreeStatus: currentStatus,
+        newPineTreeStatus: null,
+        error: message
+      })
+    }
 
     if (message.includes("Invalid payment transition")) {
       console.warn("Ignoring invalid transition:", {

@@ -73,7 +73,8 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
         gross_amount,
         currency,
         status,
-        provider_reference
+        provider_reference,
+        metadata
       )
     `)
     .eq("merchant_id", merchantId)

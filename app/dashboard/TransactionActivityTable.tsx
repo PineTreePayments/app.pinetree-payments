@@ -17,6 +17,11 @@ export type DashboardPaymentSummary = {
   currency?: string | null
   status?: string | null
   provider_reference?: string | null
+  metadata?: {
+    split?: {
+      lightningInvoice?: string | null
+    } | null
+  } | null
 }
 
 export type DashboardTransactionRow = {
@@ -84,6 +89,12 @@ function getPayment(tx: DashboardTransactionRow) {
   return Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
 }
 
+type DetailDisplayRow = {
+  label: string
+  value: string | null | undefined
+  mono?: boolean
+}
+
 function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-[150px_1fr] gap-1 sm:gap-4 py-2 border-b border-gray-100 last:border-none">
@@ -93,6 +104,79 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
       </div>
     </div>
   )
+}
+
+function buildDetailRows(input: {
+  tx: DashboardTransactionRow
+  payment: DashboardPaymentSummary | null
+  statusLabel: string
+  statusTime: string | null
+  references: ReturnType<typeof getTransactionReferenceParts>
+}): DetailDisplayRow[] {
+  const { tx, payment, statusLabel, statusTime, references } = input
+  const provider = String(tx.provider || "").toLowerCase()
+  const commonRows: DetailDisplayRow[] = [
+    { label: "Reference", value: formatTransactionReference(tx), mono: true },
+    { label: "Payment ID", value: references.paymentId, mono: true },
+    { label: "Transaction ID", value: references.transactionId, mono: true },
+    { label: "Amount", value: formatUsd(Number(payment?.gross_amount ?? 0)) },
+    { label: "Currency", value: payment?.currency || null },
+    { label: "Status", value: statusLabel },
+    { label: "Date / Time", value: formatChicagoDateTime(statusTime) },
+    { label: "Channel", value: tx.channel || null }
+  ]
+
+  if (provider === "cash") {
+    return [
+      ...commonRows.slice(0, 5),
+      { label: "Payment Method", value: "Cash" },
+      ...commonRows.slice(5),
+      { label: "Cash Reference", value: formatTransactionReference(tx), mono: true }
+    ]
+  }
+
+  if (provider === "lightning") {
+    const lightningInvoice = payment?.metadata?.split?.lightningInvoice || null
+    return [
+      ...commonRows.slice(0, 5),
+      { label: "Network", value: "Bitcoin Lightning" },
+      { label: "Provider", value: "Bitcoin Lightning" },
+      ...commonRows.slice(5),
+      { label: "Provider Reference", value: references.providerReference, mono: true },
+      { label: "Lightning Invoice", value: lightningInvoice, mono: true }
+    ]
+  }
+
+  if (provider === "base") {
+    return [
+      ...commonRows.slice(0, 5),
+      { label: "Network", value: "Base" },
+      { label: "Provider", value: "Base Pay" },
+      ...commonRows.slice(5),
+      { label: "Blockchain Transaction", value: references.blockchainReference, mono: true },
+      { label: "Provider Reference", value: references.providerReference, mono: true }
+    ]
+  }
+
+  if (provider === "solana") {
+    return [
+      ...commonRows.slice(0, 5),
+      { label: "Network", value: "Solana" },
+      { label: "Provider", value: "Solana Pay" },
+      ...commonRows.slice(5),
+      { label: "Blockchain Transaction", value: references.blockchainReference, mono: true },
+      { label: "Provider Reference", value: references.providerReference, mono: true }
+    ]
+  }
+
+  return [
+    ...commonRows.slice(0, 5),
+    { label: "Network", value: networkName(tx.network) },
+    { label: "Provider", value: providerName(tx.provider) },
+    ...commonRows.slice(5),
+    { label: "Blockchain Transaction", value: references.blockchainReference, mono: true },
+    { label: "Provider Reference", value: references.providerReference, mono: true }
+  ]
 }
 
 export default function TransactionActivityTable({
@@ -125,6 +209,15 @@ export default function TransactionActivityTable({
       : { status: selectedTx.status, classes: "bg-gray-100 text-gray-700" }
     : null
   const selectedReferences = selectedTx ? getTransactionReferenceParts(selectedTx) : null
+  const selectedDetailRows = selectedTx && selectedStatus && selectedReferences
+    ? buildDetailRows({
+        tx: selectedTx,
+        payment: selectedPayment || null,
+        statusLabel: selectedStatus.status,
+        statusTime: selectedStatusTime,
+        references: selectedReferences
+      }).filter((row) => String(row.value || "").trim().length > 0)
+    : []
 
   return (
     <>
@@ -298,21 +391,14 @@ export default function TransactionActivityTable({
             </div>
 
             <div className="rounded-xl border border-gray-100 bg-white p-4">
-              <DetailRow label="Reference" value={formatTransactionReference(selectedTx)} mono />
-              <DetailRow label="Payment ID" value={selectedReferences.paymentId || "-"} mono />
-              <DetailRow label="Transaction ID" value={selectedReferences.transactionId || "-"} mono />
-              <DetailRow label="Amount" value={formatUsd(Number(selectedPayment?.gross_amount ?? 0))} />
-              <DetailRow label="Currency" value={selectedPayment?.currency || "-"} />
-              <DetailRow label="Network" value={networkName(selectedTx.provider === "cash" ? "cash" : selectedTx.network)} />
-              <DetailRow label="Provider" value={providerName(selectedTx.provider)} />
-              <DetailRow label="Status" value={selectedStatus.status} />
-              <DetailRow label="Date / Time" value={formatChicagoDateTime(selectedStatusTime)} />
-              <DetailRow label="Channel" value={selectedTx.channel || "-"} />
-              <DetailRow label="Blockchain Tx" value={selectedReferences.blockchainReference || "-"} mono />
-              <DetailRow label="Provider Ref" value={selectedReferences.providerReference || "-"} mono />
-              {selectedTx.provider === "cash" && (
-                <DetailRow label="Cash Ref" value={formatTransactionReference(selectedTx)} mono />
-              )}
+              {selectedDetailRows.map((row) => (
+                <DetailRow
+                  key={row.label}
+                  label={row.label}
+                  value={String(row.value || "")}
+                  mono={row.mono}
+                />
+              ))}
             </div>
           </div>
         </div>
