@@ -96,6 +96,7 @@ type LightningSelectionResult = {
   paymentId?: string
   paymentUrl?: string
   qrCodeUrl?: string
+  estimatedSats?: number | string | null
 }
 
 function normalizeLightningUri(invoice: string): string {
@@ -137,7 +138,7 @@ export default function LightningPayment({
 }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
-  const [copied, setCopied] = useState(false)
+  const [copiedField, setCopiedField] = useState<"invoice" | "amount" | "sats" | "">("")
   const [payment, setPayment] = useState<LightningSelectionResult | null>(null)
   const [showDetails, setShowDetails] = useState(false)
   const [walletPickerOpen, setWalletPickerOpen] = useState(false)
@@ -148,11 +149,20 @@ export default function LightningPayment({
   const invoiceUri = useMemo(() => normalizeLightningUri(invoice), [invoice])
   const hasInvoice = Boolean(invoiceUri)
   const status = String(paymentStatus || "").toUpperCase()
+  const formattedUsdAmount = useMemo(() => new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(usdAmount), [usdAmount])
+  const estimatedSats = Number(payment?.estimatedSats)
+  const hasEstimatedSats = Number.isFinite(estimatedSats) && estimatedSats > 0
+  const formattedSats = hasEstimatedSats
+    ? new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(estimatedSats)
+    : ""
 
   const prepareInvoice = useCallback(async () => {
     setLoading(true)
     setError("")
-    setCopied(false)
+    setCopiedField("")
 
     try {
       const res = await fetch(
@@ -224,11 +234,11 @@ export default function LightningPayment({
     return [{ title: "Popular", wallets }]
   }, [openLightningWallet, pendingWalletId, walletSearch])
 
-  async function copyInvoice() {
-    if (!invoiceUri) return
-    await navigator.clipboard.writeText(invoiceUri)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1800)
+  async function copyValue(field: "invoice" | "amount" | "sats", value: string) {
+    if (!value) return
+    await navigator.clipboard.writeText(value)
+    setCopiedField(field)
+    window.setTimeout(() => setCopiedField(""), 1800)
   }
 
   if (!hasInvoice) {
@@ -244,10 +254,7 @@ export default function LightningPayment({
         <Button fullWidth disabled={loading} onClick={() => void prepareInvoice()}>
           {loading
             ? "Preparing invoice..."
-            : `Pay with Bitcoin Lightning (${new Intl.NumberFormat("en-US", {
-                style: "currency",
-                currency: "USD",
-              }).format(usdAmount)})`}
+            : `Pay with Bitcoin Lightning (${formattedUsdAmount})`}
         </Button>
       </div>
     )
@@ -300,9 +307,53 @@ export default function LightningPayment({
         onClose={() => setWalletPickerOpen(false)}
       />
 
-      <Button variant="secondary" fullWidth onClick={() => void copyInvoice()}>
-        {copied ? "Copied" : "Copy Invoice"}
-      </Button>
+      <section className="space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
+        <div>
+          <p className="text-sm font-semibold text-gray-900">Manual Lightning payment</p>
+          <p className="mt-0.5 text-xs text-gray-600">
+            Use this if your wallet does not open automatically.
+          </p>
+        </div>
+
+        <div className="grid gap-3 text-sm sm:grid-cols-2">
+          <div className="rounded-lg border border-gray-200 bg-white p-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Amount</p>
+            <p className="mt-1 font-semibold text-gray-900">{formattedUsdAmount}</p>
+          </div>
+
+          {hasEstimatedSats ? (
+            <div className="rounded-lg border border-gray-200 bg-white p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Sats</p>
+              <p className="mt-1 font-semibold text-gray-900">{formattedSats}</p>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Lightning invoice</p>
+          <div className="overflow-x-auto whitespace-nowrap rounded-lg border border-gray-200 bg-white px-3 py-2 font-mono text-xs text-gray-800">
+            {invoiceUri}
+          </div>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-3">
+          <Button variant="secondary" fullWidth onClick={() => void copyValue("invoice", invoiceUri)}>
+            {copiedField === "invoice" ? "Copied" : "Copy Invoice"}
+          </Button>
+          <Button variant="secondary" fullWidth onClick={() => void copyValue("amount", formattedUsdAmount)}>
+            {copiedField === "amount" ? "Copied" : "Copy Amount"}
+          </Button>
+          {hasEstimatedSats ? (
+            <Button variant="secondary" fullWidth onClick={() => void copyValue("sats", String(estimatedSats))}>
+              {copiedField === "sats" ? "Copied" : "Copy Sats"}
+            </Button>
+          ) : null}
+        </div>
+
+        <p className="text-xs leading-relaxed text-gray-600">
+          Open your Lightning wallet, paste the invoice, and confirm the exact amount.
+        </p>
+      </section>
 
       {status ? (
         <div className="text-center text-xs uppercase tracking-widest text-gray-500">

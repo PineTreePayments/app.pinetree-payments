@@ -42,6 +42,31 @@ function uniqueNetworks(networks: WalletNetwork[]) {
   return [...new Set(networks)]
 }
 
+function readPath(input: unknown, path: string[]): unknown {
+  let cursor: unknown = input
+
+  for (const key of path) {
+    if (!cursor || typeof cursor !== "object") return undefined
+    cursor = (cursor as Record<string, unknown>)[key]
+  }
+
+  return cursor
+}
+
+function getLightningEstimatedSats(metadata: unknown): number | undefined {
+  const rawProviderPayment = readPath(metadata, ["lightningProviderMetadata", "speedPayment"])
+  const targetCurrency = String(readPath(rawProviderPayment, ["target_currency"]) || "")
+    .trim()
+    .toUpperCase()
+  const targetAmount = Number(readPath(rawProviderPayment, ["target_amount"]))
+
+  if (targetCurrency !== "SATS" || !Number.isFinite(targetAmount) || targetAmount <= 0) {
+    return undefined
+  }
+
+  return targetAmount
+}
+
 type WalletOption = {
   id: string
   label: string
@@ -456,6 +481,9 @@ export async function selectPaymentIntentNetworkEngine(input: {
           ? "v1_approve_splitToken"
           : payment.baseUsdcStrategy
     const persistedSplitContract = String(persistedSplit?.splitContract || payment.address || "").trim() || undefined
+    const estimatedSats = normalizedNetwork === "bitcoin_lightning"
+      ? getLightningEstimatedSats(persistedPayment.metadata)
+      : undefined
 
     return {
       intentId: intent.id,
@@ -472,6 +500,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
       universalUrl: payment.universalUrl,
       nativeAmount: payment.nativeAmount,
       nativeSymbol: payment.nativeSymbol,
+      estimatedSats,
       baseUsdcStrategy: persistedBaseUsdcStrategy,
       metadata: {
         split: {
