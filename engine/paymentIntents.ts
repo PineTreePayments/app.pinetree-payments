@@ -2,6 +2,7 @@ import {
   createPaymentIntent as createPaymentIntentRecord,
   getPaymentIntentById,
   markPaymentIntentSelected,
+  expirePaymentIntent,
   getMerchantWallets,
   getConnectedHostedCheckoutNetworks,
   getPaymentById
@@ -291,6 +292,10 @@ export async function selectPaymentIntentNetworkEngine(input: {
   const intent = await getPaymentIntentById(input.intentId)
   if (!intent) throw new Error("Payment intent not found")
 
+  if (intent.status === "EXPIRED") {
+    throw new Error("This payment session has been canceled")
+  }
+
   const normalizedNetwork = normalizeWalletNetwork(input.network)
   if (!normalizedNetwork || !SUPPORTED_NETWORKS.includes(normalizedNetwork)) {
     throw new Error("Unsupported network selection")
@@ -492,4 +497,21 @@ export async function selectPaymentIntentNetworkEngine(input: {
 
     throw error
   }
+}
+
+export async function cancelPaymentIntentEngine(intentId: string): Promise<void> {
+  const intent = await getPaymentIntentById(intentId)
+  if (!intent) throw new Error("Payment intent not found")
+
+  // Mark the linked payment INCOMPLETE before expiring the intent so the
+  // realtime subscription on the hosted checkout fires immediately.
+  if (intent.payment_id) {
+    await markPaymentIncomplete(intent.payment_id, {
+      providerEvent: "terminal_cancel",
+      rawPayload: { reason: "merchant_canceled", intentId }
+    })
+  }
+
+  // Expire the intent so any subsequent select-network calls are rejected.
+  await expirePaymentIntent(intentId)
 }

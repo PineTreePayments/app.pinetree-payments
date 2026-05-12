@@ -69,6 +69,7 @@ type IntentPayload = {
   selectedAsset?: string | null
   paymentId?: string | null
   paymentStatus?: string | null
+  status?: string | null
   checkoutUrl?: string
 }
 
@@ -315,7 +316,13 @@ export default function PayClient() {
       const intent = data as IntentPayload
       setIntentPayload(intent)
       setIntentLoadError("")
-      setPaymentStatus(String(intent.paymentStatus || ""))
+      // If the intent itself was expired (merchant cancel) and no payment was
+      // ever created, synthesize CANCELED so the terminal-status screen fires.
+      if (intent.status === "EXPIRED" && !intent.paymentId) {
+        setPaymentStatus("CANCELED")
+      } else {
+        setPaymentStatus(String(intent.paymentStatus || ""))
+      }
       const selectedNetwork = String(intent.selectedNetwork || "").toLowerCase()
       const selectedAsset = String(intent.selectedAsset || "").toUpperCase()
       const activeStatus = String(intent.paymentStatus || "").toUpperCase()
@@ -438,6 +445,21 @@ export default function PayClient() {
     if (!intentPayload?.paymentId) return
     const isTerminal = isTerminalPaymentStatus(normalizedPaymentStatus)
     if (isTerminal) return
+
+    const interval = setInterval(() => {
+      void loadIntentCallback()
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [intentId, loadIntentCallback, intentPayload?.paymentId, normalizedPaymentStatus])
+
+  // ── Poll intent when no payment exists yet (catches merchant cancel before
+  //    the customer selects a network) ────────────────────────────────────────
+
+  useEffect(() => {
+    if (!intentId) return
+    if (intentPayload?.paymentId) return
+    if (isTerminalPaymentStatus(normalizedPaymentStatus)) return
 
     const interval = setInterval(() => {
       void loadIntentCallback()
@@ -1043,12 +1065,18 @@ export default function PayClient() {
   }
 
   if (isIntentMode && terminalPaymentStatus) {
+    const isMerchantCanceled =
+      terminalPaymentStatus === "INCOMPLETE" || terminalPaymentStatus === "CANCELED"
     return (
       <PageContainer>
         <Card className="max-w-md w-full text-center space-y-4" padding={false}>
           <div className="p-8 space-y-5">
             <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
-            <PaymentStatusVisual status={terminalPaymentStatus} />
+            <PaymentStatusVisual
+              status={terminalPaymentStatus}
+              labelOverride={isMerchantCanceled ? "Sale canceled" : undefined}
+              messageOverride={isMerchantCanceled ? "This payment was canceled by the merchant." : undefined}
+            />
           </div>
         </Card>
       </PageContainer>

@@ -89,6 +89,7 @@ export default function POSLayout({ locked, terminalContext }: Props) {
   const [availableMethods, setAvailableMethods] = useState<AvailableMethods>({ cash: true, crypto: true, card: false })
   const [cashDigits, setCashDigits] = useState("")
   const [cashRecording, setCashRecording] = useState(false)
+  const [canceling, setCanceling] = useState(false)
 
   const resolvedPaymentIdRef = useRef<string>("")
   const resetTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -114,6 +115,22 @@ export default function POSLayout({ locked, terminalContext }: Props) {
     setCashRecording(false)
     setAvailableMethods({ cash: true, crypto: true, card: false })
     resolvedPaymentIdRef.current = ""
+  }
+
+  async function cancelSale() {
+    if (intentId) {
+      setCanceling(true)
+      try {
+        await fetch(`/api/payment-intents/${encodeURIComponent(intentId)}/cancel`, {
+          method: "POST"
+        })
+      } catch {
+        // best-effort — always reset local state even if the API call fails
+      } finally {
+        setCanceling(false)
+      }
+    }
+    resetSale()
   }
 
   function applyPaymentStatus(dbStatus: string) {
@@ -669,8 +686,8 @@ export default function POSLayout({ locked, terminalContext }: Props) {
               size="compact"
             />
 
-            <Button variant="danger" fullWidth onClick={resetSale}>
-              Cancel Sale
+            <Button variant="danger" fullWidth disabled={canceling} onClick={() => void cancelSale()}>
+              {canceling ? "Canceling…" : "Cancel Sale"}
             </Button>
 
           </div>

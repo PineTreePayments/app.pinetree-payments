@@ -71,6 +71,18 @@ export async function getPaymentIntentById(intentId: string) {
   return data as PaymentIntent
 }
 
+export async function expirePaymentIntent(intentId: string): Promise<void> {
+  const { error } = await db
+    .from("payment_intents")
+    .update({ status: "EXPIRED", updated_at: new Date().toISOString() })
+    .eq("id", intentId)
+    .neq("status", "EXPIRED")
+
+  if (error) {
+    throw new Error(`Failed to expire payment intent: ${error.message}`)
+  }
+}
+
 export async function markPaymentIntentSelected(input: {
   id: string
   selected_network: string
