@@ -4,9 +4,13 @@ import {
   getMerchantAssetBalances,
   upsertMerchantAssetBalances,
   setSystemLastRun,
-  getSystemLastRun
+  getSystemLastRun,
+  supabaseAdmin,
+  supabase
 } from "@/database"
 import { getMarketPricesUSD } from "./marketPrices"
+
+const db = supabaseAdmin || supabase
 
 type WalletNetwork = "solana" | "base" | "ethereum"
 
@@ -26,8 +30,20 @@ export type WalletOverviewItem = {
   usdValue: number
 }
 
+export type WalletOverviewPaymentRail = {
+  id: string
+  type: "bitcoin_lightning"
+  provider: "Speed"
+  status: "Connected"
+  speedAccountId: string
+  paymentAddress: string
+  lightningAddressVerified: boolean
+  providerModel: "speed_merchant_account"
+}
+
 export type WalletOverviewResult = {
   wallets: WalletOverviewItem[]
+  paymentRails: WalletOverviewPaymentRail[]
   totalUsd: number
   totalsByAsset: { SOL: number; ETH: number }
   prices: { SOL: number; ETH: number }
@@ -44,6 +60,65 @@ function normalizeNetwork(network: string): WalletNetwork | null {
 
 function networkAsset(network: WalletNetwork): "SOL" | "ETH" {
   return network === "solana" ? "SOL" : "ETH"
+}
+
+async function getLightningPaymentRails(merchantId: string): Promise<WalletOverviewPaymentRail[]> {
+  const { data, error } = await db
+    .from("merchant_providers")
+    .select(`
+      id,
+      provider,
+      status,
+      enabled,
+      speed_account_id:credentials->>speed_account_id,
+      lightning_address:credentials->>lightning_address,
+      lightning_address_verified:credentials->>lightning_address_verified,
+      provider_model:credentials->>provider_model
+    `)
+    .eq("merchant_id", merchantId)
+    .eq("provider", "lightning")
+    .eq("enabled", true)
+    .in("status", ["connected", "active"])
+
+  if (error || !data) return []
+
+  return (data as Array<{
+    id?: string | null
+    speed_account_id?: string | null
+    lightning_address?: string | null
+    lightning_address_verified?: boolean | string | null
+    provider_model?: string | null
+  }>)
+    .map((row) => {
+      const speedAccountId = String(row.speed_account_id || "").trim()
+      const paymentAddress = String(row.lightning_address || "").trim()
+      const providerModel = String(row.provider_model || "").trim()
+      const lightningAddressVerified =
+        row.lightning_address_verified === true ||
+        String(row.lightning_address_verified || "").toLowerCase() === "true"
+
+      if (
+        !row.id ||
+        !speedAccountId ||
+        !paymentAddress ||
+        !lightningAddressVerified ||
+        providerModel !== "speed_merchant_account"
+      ) {
+        return null
+      }
+
+      return {
+        id: row.id,
+        type: "bitcoin_lightning",
+        provider: "Speed",
+        status: "Connected",
+        speedAccountId,
+        paymentAddress,
+        lightningAddressVerified,
+        providerModel
+      } satisfies WalletOverviewPaymentRail
+    })
+    .filter(Boolean) as WalletOverviewPaymentRail[]
 }
 
 async function getSolanaBalance(address: string): Promise<number> {
@@ -216,7 +291,10 @@ export async function getWalletOverviewEngine(
   const refresh = options?.refresh === true
   const prices = await getMarketPricesUSD()
 
-  const walletRows = await getMerchantWalletRows(merchantId)
+  const [walletRows, paymentRails] = await Promise.all([
+    getMerchantWalletRows(merchantId),
+    getLightningPaymentRails(merchantId)
+  ])
 
   const walletBalancesById: Record<string, number> = {}
   let totalsByAsset: Record<"SOL" | "ETH", number> = { SOL: 0, ETH: 0 }
@@ -295,6 +373,7 @@ export async function getWalletOverviewEngine(
 
   return {
     wallets,
+    paymentRails,
     totalUsd,
     totalsByAsset,
     prices,

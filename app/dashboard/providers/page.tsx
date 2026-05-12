@@ -81,10 +81,8 @@ const SPEED_LINKS = {
   signup: "https://app.tryspeed.com/signup",
   dashboard: "https://app.tryspeed.com",
   apiKeys: "https://app.tryspeed.com/developer/api-keys",
-  // TODO: Replace with exact Speed account settings deep link if Speed exposes one.
-  accountSettings: "https://app.tryspeed.com/settings",
-  // TODO: Replace with exact Speed Lightning/payment address deep link if Speed exposes one.
-  lightningAddress: "https://app.tryspeed.com/payment-addresses"
+  associatedAccounts: "https://app.tryspeed.com/settings/associated-accounts",
+  paymentAddresses: "https://app.tryspeed.com/payment-addresses"
 } as const
 
 function getInjectedSolanaProvider() {
@@ -715,7 +713,7 @@ export default function ProvidersPage() {
         }
 
         if (!lightningAddress.trim()) {
-          toast.error("Lightning Address is required (e.g. merchant@getalby.com)")
+          toast.error("BTC Lightning Address is required (e.g. username@tryspeed.com)")
           return
         }
       }
@@ -1083,8 +1081,8 @@ export default function ProvidersPage() {
           description={[
             "Network: Bitcoin Lightning",
             "Provider: Speed",
-            "Setup: Speed Account + BTC Lightning Address",
-            "Customer Wallets: Any compatible Lightning wallet",
+            "Setup: Speed Account ID + BTC Payment Address",
+            "Customer Wallets: Any Lightning wallet",
             "Settlement: Speed merchant account",
           ]}
         />
@@ -1124,10 +1122,10 @@ export default function ProvidersPage() {
                           Step 1 of 3
                         </p>
                         <h3 className="mt-2 text-xl font-semibold leading-tight text-gray-950">
-                          Connect Speed
+                          Open Speed
                         </h3>
                         <p className="mt-2 text-sm leading-6 text-gray-600">
-                          Speed handles the Bitcoin Lightning account and settlement. PineTree handles checkout, status, and the platform fee.
+                          Create or open your Speed account. Speed handles your Lightning account and verification.
                         </p>
                       </div>
 
@@ -1156,10 +1154,10 @@ export default function ProvidersPage() {
                           Step 2 of 3
                         </p>
                         <h3 className="mt-2 text-xl font-semibold leading-tight text-gray-950">
-                          Add Speed Account ID
+                          Copy Account ID
                         </h3>
                         <p className="mt-2 text-sm leading-6 text-gray-600">
-                          Paste your Speed Account ID so Speed knows where to send your Lightning proceeds.
+                          Open Associated Accounts and copy your Account ID.
                         </p>
                       </div>
 
@@ -1174,9 +1172,9 @@ export default function ProvidersPage() {
                       </label>
 
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <p className="text-xs text-gray-500">Find this in Speed account settings.</p>
-                        <a href={SPEED_LINKS.accountSettings} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
-                          Open Account Settings
+                        <p className="text-xs text-gray-500">Copy the Account ID from your Associated Accounts page.</p>
+                        <a href={SPEED_LINKS.associatedAccounts} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
+                          Open Associated Accounts
                         </a>
                       </div>
 
@@ -1204,10 +1202,10 @@ export default function ProvidersPage() {
                           Step 3 of 3
                         </p>
                         <h3 className="mt-2 text-xl font-semibold leading-tight text-gray-950">
-                          Add BTC Lightning Address
+                          Create BTC Payment Address
                         </h3>
                         <p className="mt-2 text-sm leading-6 text-gray-600">
-                          Paste your BTC Lightning Address so PineTree can verify your Lightning receiving setup.
+                          Create a BTC Payment Address in Speed, then paste the username@tryspeed.com address here.
                         </p>
                       </div>
 
@@ -1216,15 +1214,15 @@ export default function ProvidersPage() {
                         <input
                           value={lightningAddress}
                           onChange={(e) => setLightningAddress(e.target.value)}
-                          placeholder="merchant@getalby.com"
+                          placeholder="username@tryspeed.com"
                           className={lightningInputClass()}
                         />
                       </label>
 
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <p className="text-xs text-gray-500">Example: merchant@getalby.com</p>
-                        <a href={SPEED_LINKS.lightningAddress} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
-                          Open Speed Lightning Address
+                        <p className="text-xs text-gray-500">Choose BTC, keep tryspeed.com as the domain, enter a username, then create the address. Paste the full username@tryspeed.com address here.</p>
+                        <a href={SPEED_LINKS.paymentAddresses} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
+                          Open Payment Addresses
                         </a>
                       </div>
 
