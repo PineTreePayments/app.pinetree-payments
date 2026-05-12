@@ -3,6 +3,18 @@
 import { useCallback, useMemo, useState } from "react"
 import Button from "@/components/ui/Button"
 
+const LIGHTNING_WALLETS = [
+  { id: "cash-app",           label: "Cash App" },
+  { id: "strike",             label: "Strike" },
+  { id: "wallet-of-satoshi",  label: "Wallet of Satoshi" },
+  { id: "muun",               label: "Muun" },
+  { id: "phoenix",            label: "Phoenix" },
+  { id: "zeus",               label: "Zeus" },
+  { id: "breez",              label: "Breez" },
+  { id: "bluewallet",         label: "BlueWallet" },
+  { id: "other",              label: "Other Lightning Wallet" },
+] as const
+
 type Props = {
   intentId: string
   usdAmount: number
@@ -28,12 +40,13 @@ export default function LightningPayment({
   intentId,
   usdAmount,
   paymentStatus,
-  onPaymentCreated
+  onPaymentCreated,
 }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [copied, setCopied] = useState(false)
   const [payment, setPayment] = useState<LightningSelectionResult | null>(null)
+  const [showDetails, setShowDetails] = useState(false)
 
   const invoice = String(payment?.paymentUrl || "")
   const invoiceUri = useMemo(() => normalizeLightningUri(invoice), [invoice])
@@ -79,19 +92,20 @@ export default function LightningPayment({
   if (!hasInvoice) {
     return (
       <div className="space-y-3">
-        <p className="text-sm text-gray-700 font-medium">
-          Pay with Bitcoin Lightning
-        </p>
-        <p className="text-xs text-gray-500">
-          Use any compatible Lightning wallet.
-        </p>
+        <p className="text-sm font-medium text-gray-700">Pay with Bitcoin Lightning</p>
+        <p className="text-xs text-gray-500">Use any compatible Lightning wallet.</p>
         {error ? (
           <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
             {error}
           </div>
         ) : null}
         <Button fullWidth disabled={loading} onClick={() => void prepareInvoice()}>
-          {loading ? "Preparing invoice..." : `Pay with Bitcoin Lightning (${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(usdAmount)})`}
+          {loading
+            ? "Preparing invoice..."
+            : `Pay with Bitcoin Lightning (${new Intl.NumberFormat("en-US", {
+                style: "currency",
+                currency: "USD",
+              }).format(usdAmount)})`}
         </Button>
       </div>
     )
@@ -99,17 +113,37 @@ export default function LightningPayment({
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-gray-500 text-center">
-        Scan or copy the invoice and pay with any compatible Lightning wallet.
-      </p>
+      <div>
+        <p className="text-sm font-semibold text-gray-900">Pay with Bitcoin Lightning</p>
+        <p className="mt-0.5 text-xs text-gray-500">Choose a Lightning wallet</p>
+      </div>
+
+      {/* QR code — desktop only. Hidden on mobile because the QR is on the same
+          device that needs to scan it. */}
       {payment?.qrCodeUrl ? (
-        <div className="flex justify-center rounded-xl border border-gray-200 bg-white p-3">
-          <img src={payment.qrCodeUrl} alt="Bitcoin Lightning invoice QR code" className="h-56 w-56" />
+        <div className="hidden md:flex justify-center rounded-xl border border-gray-200 bg-white p-3">
+          <img
+            src={payment.qrCodeUrl}
+            alt="Bitcoin Lightning invoice QR code"
+            className="h-56 w-56"
+          />
         </div>
       ) : null}
 
-      <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-mono text-gray-800 break-all">
-        {invoiceUri}
+      {/* Wallet launcher grid — all buttons navigate to the standard lightning: URI.
+          The phone OS routes to whichever compatible Lightning app is installed. */}
+      <div className="grid grid-cols-2 gap-2">
+        {LIGHTNING_WALLETS.map((wallet) => (
+          <button
+            key={wallet.id}
+            onClick={() => { window.location.href = invoiceUri }}
+            className={`rounded-xl border border-[#0052FF]/20 bg-white px-3 py-3 text-sm font-medium text-gray-800 shadow-sm transition-all hover:border-[#0052FF]/40 hover:bg-[#0052FF]/5 active:scale-95 ${
+              wallet.id === "other" ? "col-span-2" : ""
+            }`}
+          >
+            {wallet.label}
+          </button>
+        ))}
       </div>
 
       {status ? (
@@ -118,14 +152,24 @@ export default function LightningPayment({
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-2">
-        <Button variant="secondary" onClick={() => void copyInvoice()}>
-          {copied ? "Copied" : "Copy Invoice"}
-        </Button>
-        <Button onClick={() => { window.location.href = invoiceUri }}>
-          Open Wallet
-        </Button>
-      </div>
+      {/* Copy invoice fallback */}
+      <Button variant="secondary" fullWidth onClick={() => void copyInvoice()}>
+        {copied ? "Copied" : "Copy Invoice"}
+      </Button>
+
+      {/* Collapsed raw invoice — opt-in only */}
+      <button
+        onClick={() => setShowDetails((v) => !v)}
+        className="w-full text-center text-xs text-gray-400 transition-colors hover:text-gray-600"
+      >
+        {showDetails ? "Hide invoice details" : "Show invoice details"}
+      </button>
+
+      {showDetails ? (
+        <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-mono text-gray-800 break-all">
+          {invoiceUri}
+        </div>
+      ) : null}
     </div>
   )
 }
