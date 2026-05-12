@@ -182,7 +182,6 @@ export default function LightningPayment({
 
       setPayment(data)
       setWalletSearch("")
-      setWalletPickerOpen(true)
       onPaymentCreated?.()
     } catch (err) {
       setError((err as Error).message || "Unable to prepare Lightning invoice")
