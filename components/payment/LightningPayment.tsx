@@ -22,6 +22,7 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/app/cash-app/id711923939",
     androidStoreUrl: "https://play.google.com/store/apps/details?id=com.squareup.cash",
     universalUrl: "https://cash.app/download",
+    openUrlBuilder: () => "cashapp://",
   },
   {
     id: "strike",
@@ -30,6 +31,7 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/app/strike-btc-global-money/id1488724463",
     androidStoreUrl: "https://play.google.com/store/search?q=Strike%20Bitcoin&c=apps",
     universalUrl: "https://strike.me/download",
+    openUrlBuilder: () => "strike://",
   },
   {
     id: "wallet-of-satoshi",
@@ -38,6 +40,7 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/search?term=Wallet%20of%20Satoshi",
     androidStoreUrl: "https://play.google.com/store/apps/details?id=com.livingroomofsatoshi.wallet",
     universalUrl: "https://www.walletofsatoshi.com",
+    openUrlBuilder: () => "walletofsatoshi://",
   },
   {
     id: "muun",
@@ -46,6 +49,7 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/search?term=Muun%20Bitcoin%20Lightning",
     androidStoreUrl: "https://play.google.com/store/search?q=Muun%20Bitcoin%20Lightning&c=apps",
     universalUrl: "https://muun.com",
+    openUrlBuilder: () => "muun://",
   },
   {
     id: "phoenix",
@@ -63,6 +67,7 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/app/zeus-wallet/id1456038895",
     androidStoreUrl: "https://play.google.com/store/search?q=ZEUS%20Wallet&c=apps",
     universalUrl: "https://zeusln.app",
+    openUrlBuilder: () => "zeusln://",
   },
   {
     id: "breez",
@@ -71,6 +76,7 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/search?term=Breez%20Lightning%20Wallet",
     androidStoreUrl: "https://play.google.com/store/search?q=Breez%20Lightning%20Wallet&c=apps",
     universalUrl: "https://breez.technology",
+    openUrlBuilder: () => "breez://",
   },
   {
     id: "bluewallet",
@@ -79,6 +85,7 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/search?term=BlueWallet",
     androidStoreUrl: "https://play.google.com/store/search?q=BlueWallet&c=apps",
     universalUrl: "https://bluewallet.io",
+    openUrlBuilder: () => "bluewallet://",
   },
   {
     id: "other",
@@ -129,6 +136,29 @@ function getStoreFallbackUrl(wallet: LightningWallet): string {
   if (platform === "ios" && wallet.iosStoreUrl) return wallet.iosStoreUrl
   if (platform === "android" && wallet.androidStoreUrl) return wallet.androidStoreUrl
   return wallet.universalUrl || wallet.iosStoreUrl || wallet.androidStoreUrl || ""
+}
+
+function openAppWithStoreFallback(appUrl: string, storeUrl?: string) {
+  let didLeavePage = false
+
+  const markLeft = () => {
+    didLeavePage = true
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) markLeft()
+  }, { once: true })
+
+  window.addEventListener("pagehide", markLeft, { once: true })
+  window.location.href = appUrl
+
+  if (storeUrl) {
+    window.setTimeout(() => {
+      if (!didLeavePage && !document.hidden) {
+        window.location.href = storeUrl
+      }
+    }, 1400)
+  }
 }
 
 export default function LightningPayment({
@@ -197,24 +227,11 @@ export default function LightningPayment({
     const fallbackUrl = getStoreFallbackUrl(wallet)
     const targetUrl = wallet.openUrlBuilder?.(getBolt11Invoice(invoiceUri)) || ""
     if (!targetUrl) {
-      if (fallbackUrl) {
-        window.location.href = fallbackUrl
-      } else {
-        setPendingWalletId("")
-      }
+      setPendingWalletId("")
       return
     }
 
-    const fallbackTimer = window.setTimeout(() => {
-      if (fallbackUrl && document.visibilityState === "visible") {
-        window.location.href = fallbackUrl
-        return
-      }
-      setPendingWalletId("")
-    }, 1400)
-
-    window.addEventListener("pagehide", () => window.clearTimeout(fallbackTimer), { once: true })
-    window.location.href = targetUrl
+    openAppWithStoreFallback(targetUrl, fallbackUrl)
   }, [invoiceUri])
 
   const walletPickerSections: WalletPickerSection[] = useMemo(() => {
