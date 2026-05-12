@@ -11,6 +11,7 @@ type ProviderCredentials = {
   wallet_type?: string | null
   speed_account_id?: string
   lightning_address?: string
+  payment_address_id?: string
   lightning_address_verified?: boolean
   provider_model?: string
   [key: string]: unknown
@@ -175,6 +176,7 @@ export default function ProvidersPage() {
   const [inputValue, setInputValue] = useState("")
   const [lightningSpeedAccountId, setLightningSpeedAccountId] = useState("")
   const [lightningAddress, setLightningAddress] = useState("")
+  const [lightningPaymentAddressId, setLightningPaymentAddressId] = useState("")
   const [lightningSetupStep, setLightningSetupStep] = useState<1 | 2 | 3>(1)
   const [loading, setLoading] = useState(false)
 
@@ -191,6 +193,26 @@ export default function ProvidersPage() {
   const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const didToastSyncRef = useRef(false)
   const pollStopAtRef = useRef<number | null>(null)
+
+  const closeProviderModal = useCallback(() => {
+    setActiveProvider(null)
+    setInputValue("")
+    setLightningSpeedAccountId("")
+    setLightningAddress("")
+    setLightningPaymentAddressId("")
+    setLightningSetupStep(1)
+    setShowMobileConnect(false)
+    setSelectedWalletType(null)
+    setWalletSessionId(null)
+    setWalletSessionStatus(null)
+    setWalletMobileDeeplink(null)
+    didToastSyncRef.current = false
+
+    if (pollerRef.current) {
+      clearInterval(pollerRef.current)
+      pollerRef.current = null
+    }
+  }, [])
 
   const callProvidersApi = useCallback(async (method: "GET" | "POST", body?: unknown) => {
     const { data: { session } } = await supabase.auth.getSession()
@@ -246,6 +268,17 @@ export default function ProvidersPage() {
       if (pollerRef.current) clearInterval(pollerRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    if (!activeProvider) return
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") closeProviderModal()
+    }
+
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [activeProvider, closeProviderModal])
 
   useEffect(() => {
     if (!walletSessionId || !activeProvider || !showMobileConnect) return
@@ -614,23 +647,28 @@ export default function ProvidersPage() {
       setInputValue("")
       setLightningSpeedAccountId(String(p?.credentials?.speed_account_id || ""))
       setLightningAddress(String(p?.credentials?.lightning_address || ""))
+      setLightningPaymentAddressId(String(p?.credentials?.payment_address_id || ""))
       setLightningSetupStep(1)
     } else if (p?.credentials?.api_key) {
       setInputValue(p.credentials.api_key)
       setLightningSpeedAccountId("")
       setLightningAddress("")
+      setLightningPaymentAddressId("")
     } else if (p?.credentials?.wallet) {
       setInputValue(p.credentials.wallet)
       setLightningSpeedAccountId("")
       setLightningAddress("")
+      setLightningPaymentAddressId("")
     } else if (existingWallet?.wallet_address) {
       setInputValue(existingWallet.wallet_address)
       setLightningSpeedAccountId("")
       setLightningAddress("")
+      setLightningPaymentAddressId("")
     } else {
       setInputValue("")
       setLightningSpeedAccountId("")
       setLightningAddress("")
+      setLightningPaymentAddressId("")
     }
 
     setShowMobileConnect(false)
@@ -716,13 +754,23 @@ export default function ProvidersPage() {
           toast.error("BTC Lightning Address is required (e.g. username@tryspeed.com)")
           return
         }
+
+        if (!lightningPaymentAddressId.trim()) {
+          toast.error("Payment Address ID is required (e.g. pa_...)")
+          return
+        }
       }
 
       const payload = await callProvidersApi("POST", {
         action: "saveProvider",
         provider,
         walletAddress: provider === "solana" || provider === "base" ? walletAddress : undefined,
-        walletType: provider === "solana" || provider === "base" ? walletType : undefined,
+        walletType:
+          provider === "solana" || provider === "base"
+            ? walletType
+            : provider === "lightning"
+              ? lightningPaymentAddressId.trim()
+              : undefined,
         apiKey: provider === "coinbase" || provider === "shift4" ? walletAddress : undefined,
         lightningAddress: provider === "lightning" ? lightningAddress.trim() : undefined,
         ...(provider === "lightning" ? { walletAddress } : {})
@@ -744,6 +792,7 @@ export default function ProvidersPage() {
       setInputValue("")
       setLightningSpeedAccountId("")
       setLightningAddress("")
+      setLightningPaymentAddressId("")
       setLightningSetupStep(1)
       setShowMobileConnect(false)
       setSelectedWalletType(null)
@@ -856,6 +905,12 @@ export default function ProvidersPage() {
     return { label: label.trim(), value }
   }
 
+  function formatCredentialPart(value: string, leading = 8, trailing = 4) {
+    const trimmed = value.trim()
+    if (trimmed.length <= leading + trailing + 3) return trimmed
+    return `${trimmed.slice(0, leading)}...${trimmed.slice(-trailing)}`
+  }
+
   function ProviderCard({
     name,
     provider,
@@ -875,7 +930,18 @@ export default function ProvidersPage() {
     const lightningReceiveAddress = String(p?.credentials?.lightning_address || "")
     const walletType = p?.credentials?.wallet_type || wallet?.wallet_type || wallet?.asset
     const walletLabel = formatWalletLabel(provider, walletType, wallet?.asset || null)
-    const detailRows = description.map(parseDetailLine)
+    const detailRows =
+      provider === "lightning"
+        ? [
+            parseDetailLine("Network: Bitcoin Lightning"),
+            parseDetailLine("Settlement: Speed merchant account"),
+            { label: "", value: "Customers can pay with any compatible Lightning wallet." }
+          ]
+        : description.map(parseDetailLine)
+    const lightningCredentialLine =
+      provider === "lightning" && lightningAccountId && lightningReceiveAddress
+        ? `Speed • ${formatCredentialPart(lightningAccountId)} • ${lightningReceiveAddress}`
+        : ""
 
     return (
       <div className="relative overflow-hidden rounded-2xl border border-gray-200 bg-white/95 p-4 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_18px_50px_rgba(15,23,42,0.11),0_0_34px_rgba(37,99,235,0.16)] focus-within:-translate-y-0.5 focus-within:border-blue-200 focus-within:shadow-[0_18px_50px_rgba(15,23,42,0.11),0_0_34px_rgba(37,99,235,0.16)] sm:min-h-[240px] sm:p-6">
@@ -922,28 +988,17 @@ export default function ProvidersPage() {
             </div>
           )}
 
-          {provider === "lightning" && (lightningAccountId || lightningReceiveAddress) ? (
-            <div className="space-y-2 rounded-xl border border-gray-200 bg-gray-50/70 px-3 py-2">
-              {lightningAccountId ? (
-                <div className="grid grid-cols-[82px_1fr] items-start gap-3 sm:grid-cols-[96px_1fr]">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                    Speed ID
-                  </span>
-                  <span className="min-w-0 break-all text-[13px] font-medium leading-snug text-gray-950 sm:text-sm">
-                    {lightningAccountId}
-                  </span>
-                </div>
-              ) : null}
-              {lightningReceiveAddress ? (
-                <div className="grid grid-cols-[82px_1fr] items-start gap-3 sm:grid-cols-[96px_1fr]">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                    Address
-                  </span>
-                  <span className="min-w-0 break-all text-[13px] font-medium leading-snug text-gray-950 sm:text-sm">
-                    {lightningReceiveAddress}
-                  </span>
-                </div>
-              ) : null}
+          {lightningCredentialLine ? (
+            <div className="grid grid-cols-[82px_1fr] items-start gap-3 rounded-xl border border-gray-200 bg-gray-50/70 px-3 py-2 sm:grid-cols-[96px_1fr]">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                Connected
+              </span>
+              <span
+                className="min-w-0 truncate text-[13px] font-medium leading-snug text-gray-950 sm:text-sm"
+                title={`Speed • ${lightningAccountId} • ${lightningReceiveAddress}`}
+              >
+                {lightningCredentialLine}
+              </span>
             </div>
           ) : null}
         </div>
@@ -1080,26 +1135,44 @@ export default function ProvidersPage() {
           provider="lightning"
           description={[
             "Network: Bitcoin Lightning",
-            "Provider: Speed",
-            "Setup: Speed Account ID + BTC Payment Address",
-            "Customer Wallets: Any Lightning wallet",
             "Settlement: Speed merchant account",
+            "Customers can pay with any compatible Lightning wallet.",
           ]}
         />
       </div>
 
       {activeProvider && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-3">
-          <div className="bg-white p-4 sm:p-6 rounded-lg w-full max-w-[520px] max-h-[90vh] overflow-y-auto shadow-lg">
-            <h2 className="text-lg font-semibold mb-2 text-black">
-              {activeProvider === "solana"
-                ? "Connect Wallet to Solana Pay"
-                : activeProvider === "base"
-                  ? "Connect Wallet to Base Pay"
-                  : activeProvider === "lightning"
-                    ? "Set Up Bitcoin Lightning"
-                  : `Connect ${activeProvider}`}
-            </h2>
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-3"
+          onMouseDown={closeProviderModal}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Provider setup"
+            className="relative bg-white p-4 sm:p-6 rounded-lg w-full max-w-[520px] max-h-[90vh] overflow-y-auto shadow-lg"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <h2 className="text-lg font-semibold text-black">
+                {activeProvider === "solana"
+                  ? "Connect Wallet to Solana Pay"
+                  : activeProvider === "base"
+                    ? "Connect Wallet to Base Pay"
+                    : activeProvider === "lightning"
+                      ? "Set Up Bitcoin Lightning"
+                    : `Connect ${activeProvider}`}
+              </h2>
+
+              <button
+                type="button"
+                onClick={closeProviderModal}
+                aria-label="Close setup modal"
+                className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-sm font-semibold leading-none text-gray-600 shadow-sm transition hover:bg-gray-50 hover:text-gray-900"
+              >
+                X
+              </button>
+            </div>
 
             {activeProvider === "lightning" && (
               <div className="mb-2">
@@ -1143,6 +1216,14 @@ export default function ProvidersPage() {
                         className={`${primaryButtonClass()} w-full`}
                       >
                         I have a Speed account
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={closeProviderModal}
+                        className={`${secondaryButtonClass()} w-full`}
+                      >
+                        Cancel
                       </button>
                     </div>
                   )}
@@ -1205,22 +1286,34 @@ export default function ProvidersPage() {
                           Create BTC Payment Address
                         </h3>
                         <p className="mt-2 text-sm leading-6 text-gray-600">
-                          Create a BTC Payment Address in Speed, then paste the username@tryspeed.com address here.
+                          Create a BTC Payment Address in Speed, then paste the username@tryspeed.com address and Payment Address ID here.
                         </p>
                       </div>
 
-                      <label className="block">
-                        <span className="text-sm font-semibold text-gray-900">BTC Lightning Address</span>
-                        <input
-                          value={lightningAddress}
-                          onChange={(e) => setLightningAddress(e.target.value)}
-                          placeholder="username@tryspeed.com"
-                          className={lightningInputClass()}
-                        />
-                      </label>
+                      <div className="space-y-4">
+                        <label className="block">
+                          <span className="text-sm font-semibold text-gray-900">BTC Payment Address</span>
+                          <input
+                            value={lightningAddress}
+                            onChange={(e) => setLightningAddress(e.target.value)}
+                            placeholder="username@tryspeed.com"
+                            className={lightningInputClass()}
+                          />
+                        </label>
+
+                        <label className="block">
+                          <span className="text-sm font-semibold text-gray-900">Payment Address ID</span>
+                          <input
+                            value={lightningPaymentAddressId}
+                            onChange={(e) => setLightningPaymentAddressId(e.target.value)}
+                            placeholder="pa_..."
+                            className={lightningInputClass()}
+                          />
+                        </label>
+                      </div>
 
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <p className="text-xs text-gray-500">Choose BTC, keep tryspeed.com as the domain, enter a username, then create the address. Paste the full username@tryspeed.com address here.</p>
+                        <p className="text-xs text-gray-500">Choose BTC, keep tryspeed.com as the domain, enter a username, then create the address. Speed shows both on the Payment Address details page.</p>
                         <a href={SPEED_LINKS.paymentAddresses} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
                           Open Payment Addresses
                         </a>
@@ -1229,24 +1322,7 @@ export default function ProvidersPage() {
                       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
                         <div className="flex flex-col-reverse gap-2 sm:flex-row">
                           <button
-                            onClick={() => {
-                              setActiveProvider(null)
-                              setInputValue("")
-                              setLightningSpeedAccountId("")
-                              setLightningAddress("")
-                              setLightningSetupStep(1)
-                              setShowMobileConnect(false)
-                              setSelectedWalletType(null)
-                              setWalletSessionId(null)
-                              setWalletSessionStatus(null)
-                              setWalletMobileDeeplink(null)
-                              didToastSyncRef.current = false
-
-                              if (pollerRef.current) {
-                                clearInterval(pollerRef.current)
-                                pollerRef.current = null
-                              }
-                            }}
+                            onClick={closeProviderModal}
                             className={`${secondaryButtonClass()} w-full sm:w-auto`}
                           >
                             Cancel
@@ -1447,24 +1523,7 @@ export default function ProvidersPage() {
             {activeProvider !== "lightning" && (
             <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
               <button
-                onClick={() => {
-                  setActiveProvider(null)
-                  setInputValue("")
-                  setLightningSpeedAccountId("")
-                  setLightningAddress("")
-                  setLightningSetupStep(1)
-                  setShowMobileConnect(false)
-                  setSelectedWalletType(null)
-                  setWalletSessionId(null)
-                  setWalletSessionStatus(null)
-      setWalletMobileDeeplink(null)
-                  didToastSyncRef.current = false
-
-                  if (pollerRef.current) {
-                    clearInterval(pollerRef.current)
-                    pollerRef.current = null
-                  }
-                }}
+                onClick={closeProviderModal}
                 className="w-full sm:w-auto px-3 py-1.5 text-sm border rounded bg-white text-black"
               >
                 Cancel

@@ -30,6 +30,7 @@ export type SpeedCreatePaymentMetadata = {
   grossAmount: number
   speedAccountId: string
   merchantLightningAddress: string
+  paymentAddressId?: string
   settlementMode: "speed_merchant_account"
   feeCaptureMethod: "invoice_split"
   provider: "speed"

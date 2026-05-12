@@ -82,6 +82,58 @@ function buildSpeedAuthHeader(apiKey: string): string {
   return `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`
 }
 
+function roundSpeedPercentage(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  const bounded = Math.max(0, Math.min(100, value))
+  return Number(bounded.toFixed(8))
+}
+
+function sanitizeForLog(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeForLog)
+
+  if (!value || typeof value !== "object") return value
+
+  const sanitized: Record<string, unknown> = {}
+  const secretKeys = new Set([
+    "authorization",
+    "api_key",
+    "apikey",
+    "providerkey",
+    "secret",
+    "webhook_secret",
+    "signature"
+  ])
+
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    const normalizedKey = key.toLowerCase().replace(/[^a-z0-9_]/g, "")
+    sanitized[key] = secretKeys.has(normalizedKey) ? "[redacted]" : sanitizeForLog(entry)
+  }
+
+  return sanitized
+}
+
+async function readSpeedResponseBody(response: Response): Promise<unknown> {
+  const text = await response.text().catch(() => "")
+  if (!text) return null
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    return { raw: text.slice(0, 1200) }
+  }
+}
+
+function extractSpeedErrorMessage(data: unknown): string {
+  const message =
+    readPath(data, ["message"]) ||
+    readPath(data, ["error", "message"]) ||
+    readPath(data, ["errors", "0", "message"]) ||
+    readPath(data, ["error_description"]) ||
+    readPath(data, ["raw"])
+
+  return String(message || "Speed Create Payment API error").trim()
+}
+
 export function buildSpeedCreatePaymentRequest(input: {
   paymentId: string
   merchantId: string
@@ -91,16 +143,29 @@ export function buildSpeedCreatePaymentRequest(input: {
   currency: string
   speedAccountId: string
   merchantLightningAddress: string
+  paymentAddressId?: string
 }): SpeedCreatePaymentRequest {
   const grossAmount = Number(input.grossAmount)
   const merchantAmount = Number(input.merchantAmount)
+  const pineTreeFee = Number(input.pinetreeFee)
+
+  if (!Number.isFinite(grossAmount) || grossAmount <= 0) {
+    throw new Error("Invalid Speed payment amount: grossAmount must be greater than zero.")
+  }
+
+  if (!Number.isFinite(merchantAmount) || merchantAmount < 0) {
+    throw new Error("Invalid Speed payment amount: merchantAmount must be zero or greater.")
+  }
+
+  if (!Number.isFinite(pineTreeFee) || pineTreeFee < 0) {
+    throw new Error("Invalid Speed payment amount: pineTreeFee must be zero or greater.")
+  }
+
   const merchantTransferPercentage =
-    grossAmount > 0
-      ? Math.max(0, Math.min(100, Number(((merchantAmount / grossAmount) * 100).toFixed(8))))
-      : 0
+    roundSpeedPercentage((merchantAmount / grossAmount) * 100)
 
   return {
-    currency: input.currency || "USD",
+    currency: String(input.currency || "USD").toUpperCase(),
     amount: grossAmount,
     target_currency: "SATS",
     payment_methods: ["lightning"],
@@ -109,10 +174,11 @@ export function buildSpeedCreatePaymentRequest(input: {
       pineTreePaymentId: input.paymentId,
       merchantId: input.merchantId,
       merchantAmount,
-      pineTreeFee: Number(input.pinetreeFee),
+      pineTreeFee,
       grossAmount,
       speedAccountId: input.speedAccountId,
       merchantLightningAddress: input.merchantLightningAddress,
+      paymentAddressId: input.paymentAddressId || undefined,
       settlementMode: "speed_merchant_account",
       feeCaptureMethod: "invoice_split",
       provider: "speed",
@@ -180,7 +246,7 @@ export async function parseSpeedPaymentResponse(
 
 async function getMerchantSpeedSetup(
   merchantId: string
-): Promise<{ speedAccountId: string; lightningAddress: string } | null> {
+): Promise<{ speedAccountId: string; lightningAddress: string; paymentAddressId?: string } | null> {
   try {
     const { supabaseAdmin, supabase } = await import("@/database/supabase")
     const db = supabaseAdmin || supabase
@@ -198,11 +264,12 @@ async function getMerchantSpeedSetup(
     const creds = data.credentials as Record<string, unknown>
     const speedAccountId = String(creds.speed_account_id || "").trim()
     const lightningAddress = String(creds.lightning_address || "").trim()
+    const paymentAddressId = String(creds.payment_address_id || "").trim()
     const providerModel = String(creds.provider_model || "").trim()
 
     if (providerModel !== "speed_merchant_account") return null
     if (!speedAccountId || !lightningAddress) return null
-    return { speedAccountId, lightningAddress }
+    return { speedAccountId, lightningAddress, paymentAddressId: paymentAddressId || undefined }
   } catch {
     return null
   }
@@ -227,6 +294,7 @@ export async function createLightningInvoice(
     input.merchantLightningAddress ||
     merchantSetup?.lightningAddress ||
     ""
+  const paymentAddressId = merchantSetup?.paymentAddressId || ""
 
   if (!speedAccountId) {
     throw new Error(
@@ -250,7 +318,8 @@ export async function createLightningInvoice(
     grossAmount: input.grossAmount,
     currency: input.currency,
     speedAccountId,
-    merchantLightningAddress
+    merchantLightningAddress,
+    paymentAddressId
   })
 
   // Speed documents transfers[] with destination_account pointing to an existing
@@ -272,20 +341,29 @@ export async function createLightningInvoice(
     headers["speed-account"] = config.platformAccountId
   }
 
+  console.info("[lightning/speed] create payment request", sanitizeForLog(body))
+
   const response = await fetch(`${normalizeApiBaseUrl(config.apiBaseUrl)}/payments`, {
     method: "POST",
     headers,
     body: JSON.stringify(body)
   })
 
-  const data = await response.json().catch(() => null)
+  const data = await readSpeedResponseBody(response)
   if (!response.ok) {
-    const message =
-      readPath(data, ["message"]) ||
-      readPath(data, ["error", "message"]) ||
-      "Speed Create Payment API error"
-    throw new Error(String(message))
+    console.error("[lightning/speed] create payment failed", {
+      status: response.status,
+      body: sanitizeForLog(data)
+    })
+
+    const message = extractSpeedErrorMessage(data)
+    throw new Error(`Speed Create Payment API error (${response.status}): ${message}`)
   }
+
+  console.info("[lightning/speed] create payment response", {
+    status: response.status,
+    body: sanitizeForLog(data)
+  })
 
   return parseSpeedPaymentResponse(data)
 }

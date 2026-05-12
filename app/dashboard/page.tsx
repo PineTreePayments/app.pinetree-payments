@@ -62,6 +62,7 @@ function networkName(network: string | null) {
   if (network.toLowerCase() === "solana") return "Solana"
   if (network.toLowerCase() === "base") return "Base"
   if (network.toLowerCase() === "ethereum") return "Ethereum"
+  if (network.toLowerCase() === "bitcoin_lightning" || network.toLowerCase() === "bitcoin lightning") return "Bitcoin Lightning"
   return network.charAt(0).toUpperCase() + network.slice(1).toLowerCase()
 }
 

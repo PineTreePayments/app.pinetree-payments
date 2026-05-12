@@ -50,7 +50,7 @@ export type ProvidersDashboardData = {
 }
 
 const LIGHTNING_PROVIDER_ERROR =
-  "Bitcoin Lightning requires a Speed Account ID, a verified BTC Lightning Address, and a configured Speed platform."
+  "Bitcoin Lightning requires a Speed Account ID, a verified BTC Payment Address, and a configured Speed platform."
 
 // Lightning Address format: user@domain.tld (same RFC as email user@host)
 function isValidLightningAddress(address: string): boolean {
@@ -65,6 +65,11 @@ function hasLightningAddress(row?: ProviderRow | null): boolean {
 function hasSpeedAccountId(row?: ProviderRow | null): boolean {
   const accountId = String(row?.credentials?.speed_account_id || "").trim()
   return Boolean(accountId)
+}
+
+function hasPaymentAddressId(row?: ProviderRow | null): boolean {
+  const paymentAddressId = String(row?.credentials?.payment_address_id || "").trim()
+  return Boolean(paymentAddressId)
 }
 
 function isLightningAddressVerified(row?: ProviderRow | null): boolean {
@@ -103,7 +108,7 @@ function lightningCapabilityRequirementsPass(): boolean {
 }
 
 function getLightningDashboardStatus(row?: ProviderRow | null): LightningDashboardStatus {
-  if (!hasSpeedAccountId(row) || !hasLightningAddress(row)) return "not_configured"
+  if (!hasSpeedAccountId(row) || !hasLightningAddress(row) || !hasPaymentAddressId(row)) return "not_configured"
   if (!isLightningAddressVerified(row)) return "address_needs_verification"
   if (!isSpeedMerchantAccountModel(row)) return "provider_unavailable"
   if (!lightningCapabilityRequirementsPass()) return "provider_unavailable"
@@ -271,8 +276,12 @@ export async function toggleProviderEngine(
 
     if (!isLightningAddressVerified(row)) {
       throw new Error(
-        "A verified Lightning Address is required before enabling Bitcoin Lightning."
+        "A verified BTC Payment Address is required before enabling Bitcoin Lightning."
       )
+    }
+
+    if (!hasPaymentAddressId(row)) {
+      throw new Error("A Payment Address ID is required before enabling Bitcoin Lightning.")
     }
 
     if (!isSpeedMerchantAccountModel(row)) {
@@ -401,19 +410,26 @@ export async function saveProviderEngine(args: {
   } else if (provider === "lightning") {
     const speedAccountId = String(walletAddress || "").trim()
     const address = String(lightningAddress || "").trim()
+    // app/api/providers forwards this existing field; for Lightning setup it
+    // carries Speed's Payment Address ID, not a wallet type.
+    const paymentAddressId = String(walletType || "").trim()
 
     if (!speedAccountId) {
       throw new Error("Speed Account ID is required.")
     }
 
     if (!address) {
-      throw new Error("Lightning Address is required (e.g. merchant@getalby.com)")
+      throw new Error("BTC Payment Address is required (e.g. username@tryspeed.com)")
     }
 
     if (!isValidLightningAddress(address)) {
       throw new Error(
-        "Invalid Lightning Address format. Use user@domain.com (e.g. merchant@getalby.com)"
+        "Invalid BTC Payment Address format. Use username@tryspeed.com."
       )
+    }
+
+    if (!paymentAddressId) {
+      throw new Error("Payment Address ID is required (e.g. pa_...).")
     }
 
     // LNURL-pay verification (LUD-16): fetch /.well-known/lnurlp/<user> and
@@ -422,13 +438,14 @@ export async function saveProviderEngine(args: {
 
     if (!verification.verified) {
       throw new Error(
-        "That Lightning Address could not be verified. Please check the address or try another Lightning wallet."
+        "That BTC Payment Address could not be verified as a Lightning Address. Please check the address in Speed and try again."
       )
     }
 
     credentials = {
       speed_account_id: speedAccountId,
       lightning_address: address,
+      payment_address_id: paymentAddressId,
       lightning_address_verified: true,
       verified_at: new Date().toISOString(),
       provider_model: "speed_merchant_account",

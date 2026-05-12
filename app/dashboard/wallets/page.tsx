@@ -67,6 +67,10 @@ function formatSpeedAccountId(accountId: string) {
   return `${trimmed.slice(0, 8)}...${trimmed.slice(-4)}`
 }
 
+function formatLightningCredentialLine(rail: PaymentRailItem) {
+  return `Speed • ${formatSpeedAccountId(rail.speedAccountId)} • ${rail.paymentAddress}`
+}
+
 export default function WalletsPage() {
   const [wallets, setWallets] = useState<WalletItem[]>([])
   const [paymentRails, setPaymentRails] = useState<PaymentRailItem[]>([])
@@ -176,56 +180,26 @@ export default function WalletsPage() {
           {paymentRails.map((rail) => (
             <div key={rail.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white border border-gray-200 rounded-2xl p-5 sm:p-6 min-h-[90px] shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_20px_60px_rgba(15,23,42,0.12),0_0_40px_rgba(37,99,235,0.18)] focus-within:-translate-y-1 focus-within:border-blue-200 focus-within:shadow-[0_20px_60px_rgba(15,23,42,0.12),0_0_40px_rgba(37,99,235,0.18)]">
               <div className="min-w-0 flex-1">
-                <div className="mb-3 flex flex-wrap items-center gap-2">
-                  <p className="text-base font-semibold text-gray-900">
-                    Bitcoin Lightning
-                  </p>
-                  <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold leading-none text-blue-700">
-                    {rail.status}
-                  </span>
-                </div>
+                <p className="text-base font-semibold text-gray-800 mb-1">
+                  Bitcoin Lightning
+                </p>
 
                 <p className="text-sm font-medium text-gray-600">
                   Speed merchant account
                 </p>
+
+                <p
+                  className="mt-2 max-w-full truncate text-base font-semibold text-black"
+                  title={`Speed • ${rail.speedAccountId} • ${rail.paymentAddress}`}
+                >
+                  {formatLightningCredentialLine(rail)}
+                </p>
               </div>
 
-              <div className="grid w-full gap-2 text-left sm:w-auto sm:min-w-[260px]">
-                <div className="grid grid-cols-[112px_1fr] items-start gap-3">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                    Provider
-                  </span>
-                  <span className="min-w-0 text-sm font-semibold text-gray-950">
-                    {rail.provider}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-[112px_1fr] items-start gap-3">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                    Account
-                  </span>
-                  <span className="min-w-0 break-all text-sm font-semibold text-gray-950" title={rail.speedAccountId}>
-                    {formatSpeedAccountId(rail.speedAccountId)}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-[112px_1fr] items-start gap-3">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                    Payment Address
-                  </span>
-                  <span className="min-w-0 break-all text-sm font-semibold text-gray-950" title={rail.paymentAddress}>
-                    {rail.paymentAddress}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-[112px_1fr] items-start gap-3">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                    Status
-                  </span>
-                  <span className="min-w-0 text-sm font-semibold text-gray-950">
-                    {rail.status}
-                  </span>
-                </div>
+              <div className="shrink-0">
+                <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold leading-none text-blue-700">
+                  {rail.status}
+                </span>
               </div>
             </div>
           ))}

@@ -6,6 +6,27 @@ type ReportInput = {
   endDate: string
 }
 
+function displayProviderName(provider: string) {
+  const normalized = String(provider || "").toLowerCase().trim()
+  if (normalized === "lightning") return "Speed"
+  if (normalized === "solana") return "Solana Pay"
+  if (normalized === "base") return "Base Pay"
+  if (normalized === "coinbase") return "Coinbase Business"
+  if (normalized === "shift4") return "Shift4"
+  if (normalized === "cash") return "Cash"
+  return provider || "unknown"
+}
+
+function displayNetworkName(network: string) {
+  const normalized = String(network || "").toLowerCase().trim()
+  if (normalized === "bitcoin_lightning") return "Bitcoin Lightning"
+  if (normalized === "solana") return "Solana"
+  if (normalized === "base") return "Base"
+  if (normalized === "ethereum") return "Ethereum"
+  if (normalized === "cash") return "Cash"
+  return network || "unknown"
+}
+
 export async function generateReportEngine(input: ReportInput) {
   const payments = await getMerchantPaymentsForReport(input)
 
@@ -42,9 +63,9 @@ export async function generateReportEngine(input: ReportInput) {
     totalVolume += amount
     platformFeesInternal += fee
 
-    const provider = String(tx.provider || "unknown")
+    const provider = displayProviderName(String(tx.provider || "unknown"))
     const channel = String(tx.channel || "unknown")
-    const network = String(tx.network || "unknown")
+    const network = displayNetworkName(String(tx.network || "unknown"))
 
     providerTotals[provider] = (providerTotals[provider] || 0) + amount
     channelTotals[channel] = (channelTotals[channel] || 0) + amount

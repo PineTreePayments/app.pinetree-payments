@@ -65,6 +65,7 @@ export function providerName(provider: string | null | undefined) {
   if (provider === "solana") return "Solana Pay"
   if (provider === "shift4") return "Shift4"
   if (provider === "base") return "Base Pay"
+  if (provider === "lightning") return "Speed"
   if (provider === "cash") return "Cash"
   return provider || "-"
 }
@@ -75,6 +76,7 @@ export function networkName(network: string | null | undefined) {
   if (network.toLowerCase() === "solana") return "Solana"
   if (network.toLowerCase() === "base") return "Base"
   if (network.toLowerCase() === "ethereum") return "Ethereum"
+  if (network.toLowerCase() === "bitcoin_lightning" || network.toLowerCase() === "bitcoin lightning") return "Bitcoin Lightning"
   return network.charAt(0).toUpperCase() + network.slice(1).toLowerCase()
 }
 

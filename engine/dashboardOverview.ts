@@ -24,6 +24,17 @@ type TransactionRow = {
   payments?: PaymentSummary | PaymentSummary[] | null
 }
 
+function displayNetworkName(network: string | null | undefined) {
+  const normalized = String(network || "").toLowerCase().trim()
+  if (!normalized) return network || null
+  if (normalized === "cash") return "Cash"
+  if (normalized === "solana") return "Solana"
+  if (normalized === "base") return "Base"
+  if (normalized === "ethereum") return "Ethereum"
+  if (normalized === "bitcoin_lightning") return "Bitcoin Lightning"
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+}
+
 export type DashboardOverviewResult = {
   volume: number
   txCount: number
@@ -91,7 +102,7 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
   // Normalize network names with proper capitalization
   const normalizedRecentTx = rows.slice(0, 10).map(tx => ({
     ...tx,
-    network: tx.network ? tx.network.charAt(0).toUpperCase() + tx.network.slice(1).toLowerCase() : tx.network
+    network: displayNetworkName(tx.network)
   }))
 
   return {
