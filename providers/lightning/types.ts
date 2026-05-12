@@ -29,9 +29,11 @@ export type SpeedCreatePaymentMetadata = {
   pineTreeFee: number
   grossAmount: number
   speedAccountId: string
+  settlementAccountId?: string
+  settlementAccountSource?: "db_credentials" | "platform_account_fallback"
   merchantLightningAddress: string
   paymentAddressId?: string
-  settlementMode: "speed_merchant_account"
+  settlementMode: "speed_merchant_account" | "speed_platform_account_fallback"
   feeCaptureMethod: "invoice_split"
   provider: "speed"
   network: "bitcoin_lightning"

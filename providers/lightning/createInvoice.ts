@@ -5,6 +5,11 @@ import type {
   LightningProviderConfig,
   SpeedCreatePaymentRequest
 } from "./types"
+import {
+  getSpeedAccountBalanceDiagnostics,
+  maskSpeedAccountId,
+  type SpeedBalanceDiagnostics
+} from "./getBalance"
 
 const SPEED_SPLIT_SETTLEMENT_UNSUPPORTED_ERROR =
   "Speed Lightning split settlement is not wired yet. Confirm Speed transfers[] destination_account behavior before enabling live payments."
@@ -86,6 +91,10 @@ function isDevelopment() {
   return process.env.NODE_ENV === "development"
 }
 
+function envFlag(name: string): boolean {
+  return String(process.env[name] || "").toLowerCase().trim() === "true"
+}
+
 function formatSpeedPercentage(value: number): number {
   if (!Number.isFinite(value)) return 0
   const bounded = Math.max(0, Math.min(100, value))
@@ -107,10 +116,22 @@ function sanitizeForLog(value: unknown): unknown {
     "webhook_secret",
     "signature"
   ])
+  const accountKeys = new Set([
+    "speedaccountid",
+    "speed_account_id",
+    "settlementaccountid",
+    "settlement_account_id",
+    "destinationaccount",
+    "destination_account"
+  ])
 
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
     const normalizedKey = key.toLowerCase().replace(/[^a-z0-9_]/g, "")
-    sanitized[key] = secretKeys.has(normalizedKey) ? "[redacted]" : sanitizeForLog(entry)
+    sanitized[key] = secretKeys.has(normalizedKey)
+      ? "[redacted]"
+      : accountKeys.has(normalizedKey)
+        ? maskSpeedAccountId(String(entry || ""))
+        : sanitizeForLog(entry)
   }
 
   return sanitized
@@ -146,6 +167,9 @@ export function buildSpeedCreatePaymentRequest(input: {
   grossAmount: number
   currency: string
   speedAccountId: string
+  includeTransfers?: boolean
+  settlementAccountId?: string
+  settlementAccountSource?: "db_credentials" | "platform_account_fallback"
   merchantLightningAddress: string
   paymentAddressId?: string
 }): SpeedCreatePaymentRequest {
@@ -167,8 +191,13 @@ export function buildSpeedCreatePaymentRequest(input: {
 
   const merchantTransferPercentage =
     formatSpeedPercentage((merchantAmount / grossAmount) * 100)
+  const includeTransfers = input.includeTransfers !== false
+  const settlementAccountId = String(input.settlementAccountId || input.speedAccountId || "").trim()
+  const settlementMode = includeTransfers
+    ? "speed_merchant_account"
+    : "speed_platform_account_fallback"
 
-  return {
+  const request: SpeedCreatePaymentRequest = {
     currency: String(input.currency || "USD").toUpperCase(),
     amount: grossAmount,
     target_currency: "SATS",
@@ -181,21 +210,29 @@ export function buildSpeedCreatePaymentRequest(input: {
       pineTreeFee,
       grossAmount,
       speedAccountId: input.speedAccountId,
+      settlementAccountId: settlementAccountId || undefined,
+      settlementAccountSource: input.settlementAccountSource || (includeTransfers ? "db_credentials" : "platform_account_fallback"),
       merchantLightningAddress: input.merchantLightningAddress,
       paymentAddressId: input.paymentAddressId || undefined,
-      settlementMode: "speed_merchant_account",
+      settlementMode,
       feeCaptureMethod: "invoice_split",
       provider: "speed",
       network: "bitcoin_lightning"
     },
-    transfers: [
+    transfers: includeTransfers && settlementAccountId ? [
       {
-        destination_account: input.speedAccountId,
+        destination_account: settlementAccountId,
         percentage: merchantTransferPercentage,
         description: `PineTree merchant settlement ${input.paymentId}`
       }
-    ]
+    ] : undefined
   }
+
+  if (!request.transfers) {
+    delete request.transfers
+  }
+
+  return request
 }
 
 export async function parseSpeedPaymentResponse(
@@ -250,7 +287,7 @@ export async function parseSpeedPaymentResponse(
 
 async function getMerchantSpeedSetup(
   merchantId: string
-): Promise<{ speedAccountId: string; lightningAddress: string; paymentAddressId?: string } | null> {
+): Promise<{ speedAccountId: string; lightningAddress: string; paymentAddressId?: string; accountSource: "db_credentials" } | null> {
   try {
     const { supabaseAdmin, supabase } = await import("@/database/supabase")
     const db = supabaseAdmin || supabase
@@ -273,9 +310,48 @@ async function getMerchantSpeedSetup(
 
     if (providerModel !== "speed_merchant_account") return null
     if (!speedAccountId || !lightningAddress) return null
-    return { speedAccountId, lightningAddress, paymentAddressId: paymentAddressId || undefined }
+    return {
+      speedAccountId,
+      lightningAddress,
+      paymentAddressId: paymentAddressId || undefined,
+      accountSource: "db_credentials"
+    }
   } catch {
     return null
+  }
+}
+
+function resolveInvoiceAccount(args: {
+  merchantSetup: { speedAccountId: string; accountSource: "db_credentials" }
+  balance: SpeedBalanceDiagnostics
+}): {
+  speedAccountId: string
+  includeTransfers: boolean
+  settlementAccountId?: string
+  settlementAccountSource: "db_credentials" | "platform_account_fallback"
+} {
+  if (args.balance.balanceSource === "merchant_account") {
+    return {
+      speedAccountId: args.merchantSetup.speedAccountId,
+      includeTransfers: true,
+      settlementAccountId: args.merchantSetup.speedAccountId,
+      settlementAccountSource: args.merchantSetup.accountSource
+    }
+  }
+
+  if (args.balance.balanceSource === "platform_account_fallback") {
+    return {
+      speedAccountId: args.merchantSetup.speedAccountId,
+      includeTransfers: false,
+      settlementAccountSource: "platform_account_fallback"
+    }
+  }
+
+  return {
+    speedAccountId: args.merchantSetup.speedAccountId,
+    includeTransfers: true,
+    settlementAccountId: args.merchantSetup.speedAccountId,
+    settlementAccountSource: args.merchantSetup.accountSource
   }
 }
 
@@ -293,14 +369,14 @@ export async function createLightningInvoice(
   }
 
   const merchantSetup = await getMerchantSpeedSetup(input.merchantId)
-  const speedAccountId = merchantSetup?.speedAccountId || ""
+  const dbSpeedAccountId = merchantSetup?.speedAccountId || ""
   const merchantLightningAddress =
     input.merchantLightningAddress ||
     merchantSetup?.lightningAddress ||
     ""
   const paymentAddressId = merchantSetup?.paymentAddressId || ""
 
-  if (!speedAccountId) {
+  if (!dbSpeedAccountId) {
     throw new Error(
       "Merchant Speed Account ID is not configured. " +
       "The merchant must save a Speed Account ID before accepting Bitcoin Lightning payments."
@@ -314,6 +390,27 @@ export async function createLightningInvoice(
     )
   }
 
+  const balance = await getSpeedAccountBalanceDiagnostics(dbSpeedAccountId)
+  const invoiceAccount = resolveInvoiceAccount({
+    merchantSetup: merchantSetup!,
+    balance
+  })
+
+  console.info("[lightning/speed] invoice account selection", {
+    paymentId: input.paymentId,
+    merchantId: input.merchantId,
+    dbSpeedAccountIdMasked: maskSpeedAccountId(dbSpeedAccountId),
+    invoiceAccountIdMasked: invoiceAccount.settlementAccountId
+      ? maskSpeedAccountId(invoiceAccount.settlementAccountId)
+      : "",
+    invoiceAccountSource: invoiceAccount.settlementAccountSource,
+    balanceAccountIdMasked: balance.speedAccountIdMasked,
+    balanceSource: balance.balanceSource,
+    merchantContextStatus: balance.merchantContextStatus,
+    platformFallbackStatus: balance.platformFallbackStatus,
+    includeTransfers: invoiceAccount.includeTransfers
+  })
+
   const body = buildSpeedCreatePaymentRequest({
     paymentId: input.paymentId,
     merchantId: input.merchantId,
@@ -321,7 +418,10 @@ export async function createLightningInvoice(
     pinetreeFee: input.pinetreeFee,
     grossAmount: input.grossAmount,
     currency: input.currency,
-    speedAccountId,
+    speedAccountId: invoiceAccount.speedAccountId,
+    includeTransfers: invoiceAccount.includeTransfers,
+    settlementAccountId: invoiceAccount.settlementAccountId,
+    settlementAccountSource: invoiceAccount.settlementAccountSource,
     merchantLightningAddress,
     paymentAddressId
   })
@@ -330,7 +430,7 @@ export async function createLightningInvoice(
   // Speed account. PineTree never places arbitrary Lightning Addresses in this
   // field; the merchant Lightning Address is stored only as verified setup
   // metadata and as a merchant-facing receive reference.
-  if (!config.speedAccountTransfersSupported) {
+  if (invoiceAccount.includeTransfers && !config.speedAccountTransfersSupported) {
     void body
     throw new Error(SPEED_SPLIT_SETTLEMENT_UNSUPPORTED_ERROR)
   }
@@ -341,7 +441,7 @@ export async function createLightningInvoice(
     "speed-version": "2022-10-15"
   }
 
-  if (config.platformAccountId) {
+  if (config.platformAccountId && envFlag("SPEED_USE_PLATFORM_ACCOUNT_HEADER")) {
     headers["speed-account"] = config.platformAccountId
   }
 
@@ -359,6 +459,11 @@ export async function createLightningInvoice(
   if (!response.ok) {
     console.error("[lightning/speed] create payment failed", {
       status: response.status,
+      invoiceAccountIdMasked: invoiceAccount.settlementAccountId
+        ? maskSpeedAccountId(invoiceAccount.settlementAccountId)
+        : "",
+      invoiceAccountSource: invoiceAccount.settlementAccountSource,
+      includeTransfers: invoiceAccount.includeTransfers,
       body: sanitizeForLog(data)
     })
 
