@@ -893,17 +893,6 @@ export default function ProvidersPage() {
     return "border-gray-200 bg-gray-50 text-gray-600"
   }
 
-  function parseDetailLine(line: string) {
-    const [label, ...rest] = line.split(":")
-    const value = rest.join(":").trim()
-
-    if (!value) {
-      return { label: "", value: line }
-    }
-
-    return { label: label.trim(), value }
-  }
-
   function formatCredentialPart(value: string, leading = 8, trailing = 4) {
     const trimmed = value.trim()
     if (trimmed.length <= leading + trailing + 3) return trimmed
@@ -913,11 +902,15 @@ export default function ProvidersPage() {
   function ProviderCard({
     name,
     provider,
+    networks,
+    settlement,
     description,
   }: {
     name: string
     provider: string
-    description: string[]
+    networks?: string
+    settlement?: string
+    description: string
   }) {
     const status = getStatus(provider)
     const connected = status === "Connected"
@@ -928,64 +921,70 @@ export default function ProvidersPage() {
     const lightningAccountId = String(p?.credentials?.speed_account_id || "")
     const walletType = p?.credentials?.wallet_type || wallet?.wallet_type || wallet?.asset
     const walletLabel = formatWalletLabel(provider, walletType, wallet?.asset || null)
-    const detailRows = description.map(parseDetailLine)
+    const connectedCredentialLine = walletValue
+      ? provider === "solana" || provider === "base"
+        ? `${walletLabel} • ${formatCredentialPart(walletValue, 6, 4)}`
+        : `${name} • ${formatCredentialPart(walletValue, 6, 4)}`
+      : provider === "lightning" && lightningAccountId
+        ? `Speed • ${formatCredentialPart(lightningAccountId)}`
+        : ""
+    const primaryActionLabel = connected
+      ? "Disconnect"
+      : provider === "lightning"
+        ? "Set Up"
+        : "Connect"
     const lightningCredentialLine =
       provider === "lightning" && lightningAccountId
         ? `Speed • ${formatCredentialPart(lightningAccountId)}`
         : ""
 
     return (
-      <div className="relative overflow-hidden rounded-2xl border border-gray-200 bg-white/95 p-4 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_18px_50px_rgba(15,23,42,0.11),0_0_34px_rgba(37,99,235,0.16)] focus-within:-translate-y-0.5 focus-within:border-blue-200 focus-within:shadow-[0_18px_50px_rgba(15,23,42,0.11),0_0_34px_rgba(37,99,235,0.16)] sm:min-h-[240px] sm:p-6">
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <h2 className="min-w-0 text-base font-semibold leading-tight text-gray-950 sm:text-lg">{name}</h2>
+      <div className="flex min-h-[248px] flex-col rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="min-w-0 text-base font-semibold leading-tight text-gray-950">{name}</h2>
           <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold leading-none sm:text-xs ${statusClass(status)}`}>
             {status}
           </span>
         </div>
 
-        <div className="mb-5 space-y-2.5 text-sm leading-snug text-gray-800 sm:mb-6">
-          {detailRows.map((row, i) => (
-            <div
-              key={i}
-              className="grid grid-cols-[82px_1fr] items-start gap-3 border-b border-gray-100 pb-2 last:border-b-0 last:pb-0 sm:grid-cols-[96px_1fr]"
-            >
-              {row.label ? (
-                <>
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                    {row.label}
-                  </span>
-                  <span className="min-w-0 text-[13px] leading-snug text-gray-900 sm:text-sm">
-                    {row.value}
-                  </span>
-                </>
-              ) : (
-                <span className="col-span-2 text-[13px] leading-snug text-gray-700 sm:text-sm">
-                  {row.value}
-                </span>
-              )}
+        <div className="mt-4 space-y-2.5">
+          {networks ? (
+            <div className="grid grid-cols-[92px_1fr] items-center gap-3">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Networks</span>
+              <span className="min-w-0 text-sm leading-snug text-gray-900">{networks}</span>
             </div>
-          ))}
+          ) : null}
 
-          {walletValue && (
-            <div className="grid grid-cols-[82px_1fr] items-start gap-3 rounded-xl border border-gray-200 bg-gray-50/70 px-3 py-2 sm:grid-cols-[96px_1fr]">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+          {settlement ? (
+            <div className="grid grid-cols-[92px_1fr] items-center gap-3">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Settlement</span>
+              <span className="min-w-0 text-sm leading-snug text-gray-900">{settlement}</span>
+            </div>
+          ) : null}
+
+          <p className="pt-1 text-sm leading-5 text-gray-600">{description}</p>
+        </div>
+
+        <div className="mt-4 min-h-[50px]">
+
+          {connectedCredentialLine && !lightningCredentialLine && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+              <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                 Connected
               </span>
-              <span className="min-w-0 break-all text-[13px] font-medium leading-snug text-gray-950 sm:text-sm">
-              {provider === "solana" || provider === "base"
-                ? `${walletLabel} • ${walletValue.slice(0, 6)}...${walletValue.slice(-4)}`
-                : `${walletValue.slice(0, 6)}...${walletValue.slice(-4)}`}
+              <span className="mt-1 block min-w-0 truncate text-sm font-medium leading-snug text-gray-950">
+                {connectedCredentialLine}
               </span>
             </div>
           )}
 
           {lightningCredentialLine ? (
-            <div className="grid grid-cols-[82px_1fr] items-start gap-3 rounded-xl border border-gray-200 bg-gray-50/70 px-3 py-2 sm:grid-cols-[96px_1fr]">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+              <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                 Connected
               </span>
               <span
-                className="min-w-0 truncate text-[13px] font-medium leading-snug text-gray-950 sm:text-sm"
+                className="mt-1 block min-w-0 truncate text-sm font-medium leading-snug text-gray-950"
                 title={`Speed • ${lightningAccountId}`}
               >
                 {lightningCredentialLine}
@@ -995,31 +994,22 @@ export default function ProvidersPage() {
         </div>
 
         <div className="mt-auto flex items-center justify-between gap-3 border-t border-gray-100 pt-4">
-          <div className="flex flex-wrap gap-2">
-            {connected ? (
-              <button
-                onClick={() => disconnect(provider)}
-                className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-600 sm:text-sm"
-              >
-                Disconnect
-              </button>
-            ) : (
-              <button
-                onClick={() => openProvider(provider)}
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold shadow-sm transition sm:text-sm ${
-                  provider === "lightning" && status === "Provider unavailable"
-                    ? "bg-gray-100 text-gray-500 cursor-not-allowed"
-                    : "bg-blue-600 text-white hover:bg-blue-700"
-                }`}
-                disabled={provider === "lightning" && status === "Provider unavailable"}
-              >
-                {provider === "lightning" ? "Set Up" : "Connect"}
-              </button>
-            )}
-          </div>
+          <button
+            onClick={() => connected ? disconnect(provider) : openProvider(provider)}
+            className={`h-9 rounded-md px-3.5 text-sm font-semibold shadow-sm transition ${
+              connected
+                ? "border border-red-200 bg-white text-red-600 hover:bg-red-50"
+                : provider === "lightning" && status === "Provider unavailable"
+                  ? "cursor-not-allowed border border-gray-200 bg-gray-100 text-gray-500"
+                  : "border border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
+            }`}
+            disabled={provider === "lightning" && status === "Provider unavailable"}
+          >
+            {primaryActionLabel}
+          </button>
 
           <div className="flex shrink-0 items-center gap-2">
-            <span className="text-xs font-medium text-gray-700 sm:text-sm">Enabled</span>
+            <span className="text-sm font-medium text-gray-700">Enabled</span>
             <ToggleSwitch
               checked={enabled}
               disabled={provider === "lightning" ? status !== "Connected" : !connected}
@@ -1084,43 +1074,41 @@ export default function ProvidersPage() {
         <ProviderCard
           name="Coinbase Business"
           provider="coinbase"
-          description={[
-            "Networks: Base, Ethereum",
-            "Settlement: Coinbase account",
-            "Connect your Coinbase Business account",
-          ]}
+          networks="Base, Ethereum"
+          settlement="Coinbase account"
+          description="Connect your Coinbase Business account."
         />
 
         <ProviderCard
           name="Solana Pay"
           provider="solana"
-          description={[
-            "Supports Solana-compatible wallets.",
-          ]}
+          networks="Solana"
+          settlement="Connected wallet"
+          description="Accept Solana wallet payments."
         />
 
         <ProviderCard
           name="Shift4"
           provider="shift4"
-          description={[
-            "Crypto payments with optional auto conversion.",
-          ]}
+          networks="Card, crypto"
+          settlement="Shift4 account"
+          description="Accept card and crypto payments."
         />
 
         <ProviderCard
           name="Base Pay"
           provider="base"
-          description={[
-            "Supports WalletConnect-compatible EVM wallets.",
-          ]}
+          networks="Base"
+          settlement="Connected wallet"
+          description="Accept Base wallet payments."
         />
 
         <ProviderCard
           name="Bitcoin Lightning"
           provider="lightning"
-          description={[
-            "Supports compatible Lightning wallets through Speed.",
-          ]}
+          networks="Bitcoin Lightning"
+          settlement="Lightning account"
+          description="Accept Lightning wallet payments."
         />
       </div>
 
