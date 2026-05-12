@@ -11,6 +11,9 @@ export type SpeedBalanceDiagnostics = {
   baseUrl: string
   speedAccountIdMasked: string
   httpStatus: number | null
+  merchantContextStatus: number | null
+  platformFallbackStatus: number | null
+  balanceSource: "merchant_account" | "platform_account_fallback" | "none"
   rawBalanceKeys: string[]
   balancesFound: string[]
   rawNumericAmount: number | null
@@ -163,6 +166,9 @@ function logSpeedBalanceDiagnostics(label: string, diagnostics: SpeedBalanceDiag
     baseUrl: diagnostics.baseUrl,
     speedAccountIdMasked: diagnostics.speedAccountIdMasked,
     httpStatus: diagnostics.httpStatus,
+    merchantContextStatus: diagnostics.merchantContextStatus,
+    platformFallbackStatus: diagnostics.platformFallbackStatus,
+    balanceSource: diagnostics.balanceSource,
     rawBalanceKeys: diagnostics.rawBalanceKeys,
     balancesFound: diagnostics.balancesFound,
     rawNumericAmount: diagnostics.rawNumericAmount,
@@ -170,6 +176,47 @@ function logSpeedBalanceDiagnostics(label: string, diagnostics: SpeedBalanceDiag
     btcAmount: diagnostics.btcAmount,
     error: diagnostics.error
   })
+}
+
+async function fetchSpeedBalance(args: {
+  baseUrl: string
+  providerKey: string
+  speedAccountId?: string
+}): Promise<{
+  status: number
+  ok: boolean
+  parsed: Pick<
+    SpeedBalanceDiagnostics,
+    "rawBalanceKeys" | "balancesFound" | "rawNumericAmount" | "satsAmount" | "btcAmount"
+  >
+}> {
+  const headers: Record<string, string> = {
+    Authorization: buildSpeedAuthHeader(args.providerKey),
+    "Content-Type": "application/json",
+    "speed-version": "2022-10-15"
+  }
+
+  if (args.speedAccountId) {
+    headers["speed-account"] = args.speedAccountId
+  }
+
+  const response = await fetch(`${args.baseUrl}/balances`, {
+    method: "GET",
+    headers,
+    cache: "no-store"
+  })
+
+  const data = await response.json().catch(() => null)
+
+  return {
+    status: response.status,
+    ok: response.ok,
+    parsed: parseBalanceDiagnostics(data)
+  }
+}
+
+function isAuthFailure(status: number | null): boolean {
+  return status === 401 || status === 403
 }
 
 export async function getSpeedAccountBalanceDiagnostics(
@@ -186,6 +233,9 @@ export async function getSpeedAccountBalanceDiagnostics(
     baseUrl,
     speedAccountIdMasked: maskSpeedAccountId(accountId),
     httpStatus: null,
+    merchantContextStatus: null,
+    platformFallbackStatus: null,
+    balanceSource: "none",
     rawBalanceKeys: [],
     balancesFound: [],
     rawNumericAmount: null,
@@ -202,24 +252,41 @@ export async function getSpeedAccountBalanceDiagnostics(
   }
 
   try {
-    const response = await fetch(`${baseUrl}/balances`, {
-      method: "GET",
-      headers: {
-        Authorization: buildSpeedAuthHeader(providerKey),
-        "Content-Type": "application/json",
-        "speed-version": "2022-10-15",
-        "speed-account": accountId
-      },
-      cache: "no-store"
+    const merchantAttempt = await fetchSpeedBalance({
+      baseUrl,
+      providerKey,
+      speedAccountId: accountId
     })
 
-    const data = await response.json().catch(() => null)
-    const parsed = parseBalanceDiagnostics(data)
+    if (merchantAttempt.ok || !isAuthFailure(merchantAttempt.status)) {
+      const diagnostics: SpeedBalanceDiagnostics = {
+        ...baseline,
+        ...merchantAttempt.parsed,
+        httpStatus: merchantAttempt.status,
+        merchantContextStatus: merchantAttempt.status,
+        balanceSource: merchantAttempt.ok ? "merchant_account" : "none",
+        error: merchantAttempt.ok ? undefined : "Speed balance lookup failed"
+      }
+
+      logSpeedBalanceDiagnostics("[lightning/speed] balance diagnostics", diagnostics)
+      return diagnostics
+    }
+
+    const platformAttempt = await fetchSpeedBalance({
+      baseUrl,
+      providerKey
+    })
+
     const diagnostics: SpeedBalanceDiagnostics = {
       ...baseline,
-      ...parsed,
-      httpStatus: response.status,
-      error: response.ok ? undefined : "Speed balance lookup failed"
+      ...platformAttempt.parsed,
+      httpStatus: platformAttempt.status,
+      merchantContextStatus: merchantAttempt.status,
+      platformFallbackStatus: platformAttempt.status,
+      balanceSource: platformAttempt.ok ? "platform_account_fallback" : "none",
+      error: platformAttempt.ok
+        ? undefined
+        : "Speed balance lookup failed after merchant context auth failure"
     }
 
     logSpeedBalanceDiagnostics("[lightning/speed] balance diagnostics", diagnostics)

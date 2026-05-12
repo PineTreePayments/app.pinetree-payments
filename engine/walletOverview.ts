@@ -9,7 +9,11 @@ import {
   supabase
 } from "@/database"
 import { getMarketPricesUSD } from "./marketPrices"
-import { getSpeedAccountBalanceBtc, maskSpeedAccountId } from "@/providers/lightning/getBalance"
+import {
+  getSpeedAccountBalanceDiagnostics,
+  maskSpeedAccountId,
+  type SpeedBalanceDiagnostics
+} from "@/providers/lightning/getBalance"
 
 const db = supabaseAdmin || supabase
 
@@ -40,6 +44,7 @@ export type WalletOverviewPaymentRail = {
   assetSymbol: "BTC"
   nativeBalance: number
   usdValue: number
+  balanceSource?: SpeedBalanceDiagnostics["balanceSource"]
 }
 
 export type WalletOverviewResult = {
@@ -107,11 +112,13 @@ async function getLightningPaymentRails(
 
   const hydratedRails = await Promise.all(
     rails.map(async (rail) => {
-      const nativeBalance = await getSpeedAccountBalanceBtc(rail.speedAccountId)
+      const balance = await getSpeedAccountBalanceDiagnostics(rail.speedAccountId)
+      const nativeBalance = balance.btcAmount
       return {
         ...rail,
         nativeBalance,
-        usdValue: nativeBalance * prices.BTC
+        usdValue: nativeBalance * prices.BTC,
+        balanceSource: balance.balanceSource
       }
     })
   )
@@ -125,7 +132,8 @@ async function getLightningPaymentRails(
       speedAccountIdMasked: maskSpeedAccountId(rail.speedAccountId),
       assetSymbol: rail.assetSymbol,
       nativeBalance: rail.nativeBalance,
-      usdValue: rail.usdValue
+      usdValue: rail.usdValue,
+      balanceSource: rail.balanceSource
     }))
   })
 

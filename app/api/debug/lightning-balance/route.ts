@@ -47,7 +47,8 @@ export async function GET(req: NextRequest) {
       asset: "BTC",
       network: "Bitcoin Lightning",
       nativeBalance: diagnostics.btcAmount,
-      usdBalance: usdAmount
+      usdBalance: usdAmount,
+      balanceSource: diagnostics.balanceSource
     } : null
 
     console.info("[lightning/debug-balance] result", {
@@ -56,6 +57,9 @@ export async function GET(req: NextRequest) {
       hasApiKey: diagnostics.hasApiKey,
       baseUrl: diagnostics.baseUrl,
       httpStatus: diagnostics.httpStatus,
+      merchantContextStatus: diagnostics.merchantContextStatus,
+      platformFallbackStatus: diagnostics.platformFallbackStatus,
+      balanceSource: diagnostics.balanceSource,
       rawBalanceKeys: diagnostics.rawBalanceKeys,
       balancesFound: diagnostics.balancesFound,
       rawNumericAmount: diagnostics.rawNumericAmount,
@@ -71,6 +75,9 @@ export async function GET(req: NextRequest) {
       baseUrl: diagnostics.baseUrl,
       speedAccountIdMasked: diagnostics.speedAccountIdMasked,
       httpStatus: diagnostics.httpStatus,
+      merchantContextStatus: diagnostics.merchantContextStatus,
+      platformFallbackStatus: diagnostics.platformFallbackStatus,
+      balanceSource: diagnostics.balanceSource,
       balancesFound: diagnostics.balancesFound,
       rawBalanceKeys: diagnostics.rawBalanceKeys,
       satsAmount: diagnostics.satsAmount,
@@ -86,6 +93,9 @@ export async function GET(req: NextRequest) {
         baseUrl: "",
         speedAccountIdMasked: "",
         httpStatus: null,
+        merchantContextStatus: null,
+        platformFallbackStatus: null,
+        balanceSource: "none",
         balancesFound: [],
         rawBalanceKeys: [],
         satsAmount: 0,
