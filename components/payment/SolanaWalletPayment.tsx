@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
+import WalletPickerModal, { type WalletPickerSection } from "@/components/payment/WalletPickerModal"
 import {
   buildPhantomWalletBrowserUrl,
   getDetectedSolanaWallets,
@@ -536,70 +537,52 @@ export default function SolanaWalletPayment({
     )
   }
 
-  function renderWalletPickerSection(title: string, rows: WalletPickerRow[]) {
-    if (rows.length === 0) return null
+  const walletPickerModalSections: WalletPickerSection[] = useMemo(() => {
+    const toCards = (rows: WalletPickerRow[]) => rows.map((row) => {
+      const available = row.available && row.detectedWallet
+      const action: "connect" | "open" | "install" = available
+        ? "connect"
+        : row.mobileOpenable
+          ? "open"
+          : "install"
+      const active = row.detectedWallet?.id === selectedWalletId || row.detectedWallet?.id === pendingWalletId
+      const statusLabel = action === "connect" ? "Detected" : action === "open" ? "Open app" : "Install"
 
-    return (
-      <div className="space-y-3">
-        <p className="px-1 text-[11px] font-semibold uppercase tracking-widest text-slate-500">
-          {title}
-        </p>
-        <div className="grid grid-cols-2 gap-3 min-[360px]:grid-cols-3 sm:grid-cols-4">
-          {rows.map((row) => {
-            const available = row.available && row.detectedWallet
-            const action: "connect" | "open" | "install" = available
-              ? "connect"
-              : row.mobileOpenable
-                ? "open"
-                : "install"
-            const active = row.detectedWallet?.id === selectedWalletId || row.detectedWallet?.id === pendingWalletId
-            const statusLabel = action === "connect" ? "Detected" : action === "open" ? "Open app" : "Install"
-            const iconPath = row.iconPath || "/wallet-icons/solana-wallet.svg"
-            return (
-              <button
-                key={row.id}
-                type="button"
-                disabled={Boolean(pendingWalletId)}
-                onClick={() => {
-                  if (action === "connect" && row.detectedWallet) {
-                    void startPayment(row.detectedWallet)
-                    return
-                  }
-                  if (action === "open") {
-                    void openMobileWalletBrowser(row)
-                    return
-                  }
-                  openInstallPage(row)
-                }}
-                className={`group flex min-h-[136px] flex-col items-center justify-between rounded-[22px] border px-2.5 py-3 text-center transition-all disabled:cursor-wait ${
-                  active
-                    ? "border-[#3b82f6]/70 bg-[#10284d] shadow-[0_18px_44px_rgba(0,82,255,0.22)]"
-                    : "border-white/10 bg-[#151922] shadow-[0_14px_34px_rgba(0,0,0,0.22)] hover:-translate-y-0.5 hover:border-[#3b82f6]/55 hover:bg-[#1b2330] hover:shadow-[0_18px_44px_rgba(0,82,255,0.18)]"
-                }`}
-              >
-                <span className="flex flex-col items-center gap-2">
-                  <span className="flex h-14 w-14 items-center justify-center rounded-[18px] bg-[#0f172a] shadow-[0_12px_28px_rgba(0,0,0,0.28)] ring-1 ring-white/15 transition group-hover:scale-[1.03]">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={iconPath} alt="" className="h-full w-full rounded-[18px] object-contain p-1.5" />
-                  </span>
-                  <span className="line-clamp-2 min-h-[34px] text-sm font-semibold leading-tight text-white">
-                    {row.name}
-                  </span>
-                </span>
-                <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${
-                  action === "connect"
-                    ? "bg-emerald-400/15 text-emerald-300 ring-1 ring-emerald-300/20"
-                    : "bg-[#0052FF]/18 text-blue-200 ring-1 ring-blue-300/15"
-                }`}>
-                  {pendingWalletId === (row.detectedWallet?.id || row.id) ? "Opening" : statusLabel}
-                </span>
-              </button>
-            )
-          })}
-        </div>
-      </div>
-    )
-  }
+      return {
+        id: row.id,
+        name: row.name,
+        iconPath: row.iconPath || "/wallet-icons/solana-wallet.svg",
+        badgeLabel: pendingWalletId === (row.detectedWallet?.id || row.id) ? "Opening" : statusLabel,
+        badgeTone: action === "connect" ? "green" as const : "blue" as const,
+        active,
+        disabled: Boolean(pendingWalletId),
+        onSelect: () => {
+          if (action === "connect" && row.detectedWallet) {
+            void startPayment(row.detectedWallet)
+            return
+          }
+          if (action === "open") {
+            void openMobileWalletBrowser(row)
+            return
+          }
+          openInstallPage(row)
+        },
+      }
+    })
+
+    return [
+      { title: "Popular", wallets: toCards(walletPickerSections.popular) },
+      { title: "More wallets", wallets: toCards(walletPickerSections.more) },
+    ]
+  }, [
+    openInstallPage,
+    openMobileWalletBrowser,
+    pendingWalletId,
+    selectedWalletId,
+    startPayment,
+    walletPickerSections.more,
+    walletPickerSections.popular,
+  ])
 
   const amountDisplay = (
     <div className="bg-gray-50 rounded-xl px-4 py-3 text-center space-y-1">
@@ -696,65 +679,20 @@ export default function SolanaWalletPayment({
         Pay with {selectedAsset} on Solana
       </Button>
 
-      {walletPickerOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 backdrop-blur-md sm:items-center sm:p-6"
-          onClick={() => setWalletPickerOpen(false)}
-        >
-          <div
-            className="flex max-h-[88svh] w-full flex-col overflow-hidden rounded-t-[30px] border border-white/10 bg-[#0b0f17] shadow-2xl shadow-black/60 sm:max-w-[520px] sm:rounded-[30px]"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="border-b border-white/10 bg-[#0f1420] px-5 pb-4 pt-5 sm:px-6">
-              <div className="relative flex items-center justify-center">
-                <div className="text-center">
-                  <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">
-                    Solana Wallets
-                  </p>
-                  <h2 className="mt-1 text-xl font-bold text-white">
-                    All Wallets
-                  </h2>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setWalletPickerOpen(false)}
-                  className="absolute right-0 top-0 flex h-9 w-9 items-center justify-center rounded-full bg-white/8 text-slate-300 ring-1 ring-white/10 transition hover:bg-white/12 hover:text-white"
-                  aria-label="Close wallet picker"
-                >
-                  x
-                </button>
-              </div>
-              <div className="relative mt-5">
-                <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm text-slate-500">
-                  Search
-                </span>
-                <input
-                  value={walletSearch}
-                  onChange={(event) => setWalletSearch(event.target.value)}
-                  placeholder="Search wallet"
-                  className="h-12 w-full rounded-2xl border border-white/10 bg-[#171d28] px-4 pl-[72px] text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-[#3b82f6]/70 focus:ring-4 focus:ring-[#0052FF]/20"
-                  autoFocus
-                />
-              </div>
-            </div>
-
-            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 pb-[calc(env(safe-area-inset-bottom)+24px)] sm:px-6">
-              {wallets.length === 0 ? (
-                <div className="rounded-2xl bg-white/5 px-4 py-3 text-xs leading-relaxed text-slate-400 ring-1 ring-white/10">
-                  No Solana wallet is detected in this browser. Choose Open app on mobile or Install on desktop.
-                </div>
-              ) : null}
-              {renderWalletPickerSection("Popular", walletPickerSections.popular)}
-              {renderWalletPickerSection("More wallets", walletPickerSections.more)}
-              {walletPickerSections.popular.length === 0 && walletPickerSections.more.length === 0 ? (
-                <div className="rounded-2xl bg-white/5 px-4 py-3 text-sm text-slate-400 ring-1 ring-white/10">
-                  No wallets match your search.
-                </div>
-              ) : null}
-            </div>
+      <WalletPickerModal
+        open={walletPickerOpen}
+        eyebrow="Solana Wallets"
+        title="All Wallets"
+        searchValue={walletSearch}
+        sections={walletPickerModalSections}
+        notice={wallets.length === 0 ? (
+          <div className="rounded-2xl bg-white/5 px-4 py-3 text-xs leading-relaxed text-slate-400 ring-1 ring-white/10">
+            No Solana wallet is detected in this browser. Choose Open app on mobile or Install on desktop.
           </div>
-        </div>
-      ) : null}
+        ) : null}
+        onSearchChange={setWalletSearch}
+        onClose={() => setWalletPickerOpen(false)}
+      />
     </div>
   )
 }
