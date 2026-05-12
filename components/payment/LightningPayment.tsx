@@ -11,7 +11,7 @@ type LightningWallet = {
   iosStoreUrl?: string
   androidStoreUrl?: string
   universalUrl?: string
-  schemeBuilder?: (invoiceUri: string) => string
+  openUrlBuilder?: (invoiceBolt11: string) => string
 }
 
 const LIGHTNING_WALLETS: LightningWallet[] = [
@@ -22,7 +22,6 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/app/cash-app/id711923939",
     androidStoreUrl: "https://play.google.com/store/apps/details?id=com.squareup.cash",
     universalUrl: "https://cash.app/download",
-    schemeBuilder: (invoiceUri) => invoiceUri,
   },
   {
     id: "strike",
@@ -31,7 +30,6 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/app/strike-btc-global-money/id1488724463",
     androidStoreUrl: "https://play.google.com/store/search?q=Strike%20Bitcoin&c=apps",
     universalUrl: "https://strike.me/download",
-    schemeBuilder: (invoiceUri) => invoiceUri,
   },
   {
     id: "wallet-of-satoshi",
@@ -40,7 +38,6 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/search?term=Wallet%20of%20Satoshi",
     androidStoreUrl: "https://play.google.com/store/apps/details?id=com.livingroomofsatoshi.wallet",
     universalUrl: "https://www.walletofsatoshi.com",
-    schemeBuilder: (invoiceUri) => invoiceUri,
   },
   {
     id: "muun",
@@ -49,7 +46,6 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/search?term=Muun%20Bitcoin%20Lightning",
     androidStoreUrl: "https://play.google.com/store/search?q=Muun%20Bitcoin%20Lightning&c=apps",
     universalUrl: "https://muun.com",
-    schemeBuilder: (invoiceUri) => invoiceUri,
   },
   {
     id: "phoenix",
@@ -58,7 +54,7 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/search?term=Phoenix%20Wallet%20Bitcoin",
     androidStoreUrl: "https://play.google.com/store/search?q=Phoenix%20Wallet%20Bitcoin&c=apps",
     universalUrl: "https://phoenix.acinq.co",
-    schemeBuilder: (invoiceUri) => invoiceUri,
+    openUrlBuilder: (invoiceBolt11) => `phoenix:lightning:${invoiceBolt11}`,
   },
   {
     id: "zeus",
@@ -67,7 +63,6 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/app/zeus-wallet/id1456038895",
     androidStoreUrl: "https://play.google.com/store/search?q=ZEUS%20Wallet&c=apps",
     universalUrl: "https://zeusln.app",
-    schemeBuilder: (invoiceUri) => invoiceUri,
   },
   {
     id: "breez",
@@ -76,7 +71,6 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/search?term=Breez%20Lightning%20Wallet",
     androidStoreUrl: "https://play.google.com/store/search?q=Breez%20Lightning%20Wallet&c=apps",
     universalUrl: "https://breez.technology",
-    schemeBuilder: (invoiceUri) => invoiceUri,
   },
   {
     id: "bluewallet",
@@ -85,7 +79,6 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/search?term=BlueWallet",
     androidStoreUrl: "https://play.google.com/store/search?q=BlueWallet&c=apps",
     universalUrl: "https://bluewallet.io",
-    schemeBuilder: (invoiceUri) => invoiceUri,
   },
   {
     id: "other",
@@ -113,6 +106,10 @@ function normalizeLightningUri(invoice: string): string {
   return normalized.toLowerCase().startsWith("lightning:")
     ? normalized
     : `lightning:${normalized}`
+}
+
+function getBolt11Invoice(invoiceUri: string): string {
+  return invoiceUri.replace(/^lightning:/i, "")
 }
 
 function normalizeWalletName(value: string): string {
@@ -188,7 +185,6 @@ export default function LightningPayment({
   const openLightningWallet = useCallback((wallet: LightningWallet) => {
     if (!invoiceUri) return
 
-    const targetUrl = wallet.schemeBuilder?.(invoiceUri) || invoiceUri
     setPendingWalletId(wallet.id)
     setWalletPickerOpen(false)
 
@@ -199,6 +195,16 @@ export default function LightningPayment({
     }
 
     const fallbackUrl = getStoreFallbackUrl(wallet)
+    const targetUrl = wallet.openUrlBuilder?.(getBolt11Invoice(invoiceUri)) || ""
+    if (!targetUrl) {
+      if (fallbackUrl) {
+        window.location.href = fallbackUrl
+      } else {
+        setPendingWalletId("")
+      }
+      return
+    }
+
     const fallbackTimer = window.setTimeout(() => {
       if (fallbackUrl && document.visibilityState === "visible") {
         window.location.href = fallbackUrl
