@@ -399,7 +399,7 @@ export default function ProvidersPage() {
       if (!p || p.dashboard_status === "not_configured") return "Not configured"
       if (p.dashboard_status === "address_needs_verification") return "Needs verification"
       if (p.dashboard_status === "provider_unavailable") return "Provider unavailable"
-      if (p.dashboard_status === "connected") return p.enabled ? "Enabled" : "Ready"
+      if (p.dashboard_status === "connected") return "Connected"
       return "Not configured"
     }
 
@@ -419,7 +419,7 @@ export default function ProvidersPage() {
     if (provider === "lightning") {
       const p = getProvider(provider)
       const status = getStatus(provider)
-      return Boolean(p?.enabled && (status === "Ready" || status === "Enabled"))
+      return Boolean(p?.enabled && status === "Connected")
     }
 
     const wallet = getWallet(provider)
@@ -843,8 +843,8 @@ export default function ProvidersPage() {
       return
     }
 
-    if (value && provider === "lightning" && getStatus(provider) !== "Ready") {
-      toast.error("Verify your Speed Account ID and BTC Lightning Address before enabling Bitcoin Lightning.")
+    if (value && provider === "lightning" && getStatus(provider) !== "Connected") {
+      toast.error("Connect Speed before enabling Bitcoin Lightning.")
       return
     }
 
@@ -887,8 +887,7 @@ export default function ProvidersPage() {
   }
 
   function statusClass(status: string) {
-    if (status === "Connected" || status === "Ready") return "border-blue-200 bg-blue-50 text-blue-700"
-    if (status === "Enabled") return "border-emerald-200 bg-emerald-50 text-emerald-700"
+    if (status === "Connected") return "border-blue-200 bg-blue-50 text-blue-700"
     if (status === "Needs verification") return "border-amber-200 bg-amber-50 text-amber-800"
     if (status === "Provider unavailable") return "border-red-200 bg-red-50 text-red-700"
     return "border-gray-200 bg-gray-50 text-gray-600"
@@ -921,26 +920,18 @@ export default function ProvidersPage() {
     description: string[]
   }) {
     const status = getStatus(provider)
-    const connected = status === "Connected" || status === "Ready" || status === "Enabled"
+    const connected = status === "Connected"
     const enabled = isEnabled(provider)
     const p = getProvider(provider)
     const wallet = getWallet(provider)
     const walletValue = p?.credentials?.wallet || wallet?.wallet_address
     const lightningAccountId = String(p?.credentials?.speed_account_id || "")
-    const lightningReceiveAddress = String(p?.credentials?.lightning_address || "")
     const walletType = p?.credentials?.wallet_type || wallet?.wallet_type || wallet?.asset
     const walletLabel = formatWalletLabel(provider, walletType, wallet?.asset || null)
-    const detailRows =
-      provider === "lightning"
-        ? [
-            parseDetailLine("Network: Bitcoin Lightning"),
-            parseDetailLine("Settlement: Speed merchant account"),
-            { label: "", value: "Customers can pay with any compatible Lightning wallet." }
-          ]
-        : description.map(parseDetailLine)
+    const detailRows = description.map(parseDetailLine)
     const lightningCredentialLine =
-      provider === "lightning" && lightningAccountId && lightningReceiveAddress
-        ? `Speed • ${formatCredentialPart(lightningAccountId)} • ${lightningReceiveAddress}`
+      provider === "lightning" && lightningAccountId
+        ? `Speed • ${formatCredentialPart(lightningAccountId)}`
         : ""
 
     return (
@@ -995,7 +986,7 @@ export default function ProvidersPage() {
               </span>
               <span
                 className="min-w-0 truncate text-[13px] font-medium leading-snug text-gray-950 sm:text-sm"
-                title={`Speed • ${lightningAccountId} • ${lightningReceiveAddress}`}
+                title={`Speed • ${lightningAccountId}`}
               >
                 {lightningCredentialLine}
               </span>
@@ -1031,7 +1022,7 @@ export default function ProvidersPage() {
             <span className="text-xs font-medium text-gray-700 sm:text-sm">Enabled</span>
             <ToggleSwitch
               checked={enabled}
-              disabled={provider === "lightning" ? status !== "Ready" && status !== "Enabled" : !connected}
+              disabled={provider === "lightning" ? status !== "Connected" : !connected}
               onChange={(v) => toggleProvider(provider, v)}
             />
           </div>
@@ -1104,9 +1095,7 @@ export default function ProvidersPage() {
           name="Solana Pay"
           provider="solana"
           description={[
-            "Network: Solana",
-            "Settlement: Direct wallet",
-            "Supports Phantom, Solflare, Backpack, Glow, and other Solana-compatible wallets.",
+            "Supports Solana-compatible wallets.",
           ]}
         />
 
@@ -1114,9 +1103,7 @@ export default function ProvidersPage() {
           name="Shift4"
           provider="shift4"
           description={[
-            "Crypto payments via PineTree",
-            "Settlement: Crypto or Fiat",
-            "Optional auto conversion",
+            "Crypto payments with optional auto conversion.",
           ]}
         />
 
@@ -1124,9 +1111,7 @@ export default function ProvidersPage() {
           name="Base Pay"
           provider="base"
           description={[
-            "Network: Base",
-            "Settlement: Direct wallet",
-            "Supports Base Wallet, MetaMask, Trust Wallet, Phantom, Coinbase Wallet, and other WalletConnect-compatible EVM wallets.",
+            "Supports WalletConnect-compatible EVM wallets.",
           ]}
         />
 
@@ -1134,9 +1119,7 @@ export default function ProvidersPage() {
           name="Bitcoin Lightning"
           provider="lightning"
           description={[
-            "Network: Bitcoin Lightning",
-            "Settlement: Speed merchant account",
-            "Customers can pay with any compatible Lightning wallet.",
+            "Supports compatible Lightning wallets through Speed.",
           ]}
         />
       </div>

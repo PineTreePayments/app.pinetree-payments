@@ -1,7 +1,7 @@
 import { supabaseAdmin, supabase } from "@/database"
 import { refreshWalletBalancesEngine } from "./walletOverview"
 import { loadProviders } from "./loadProviders"
-import { getProviderMetadata, isProviderHealthy } from "./providerRegistry"
+import { getProviderMetadata } from "./providerRegistry"
 import { verifyLightningAddress } from "@/providers/lightning/verifyLightningAddress"
 
 const db = supabaseAdmin || supabase
@@ -49,17 +49,9 @@ export type ProvidersDashboardData = {
   }
 }
 
-const LIGHTNING_PROVIDER_ERROR =
-  "Bitcoin Lightning requires a Speed Account ID, a verified BTC Payment Address, and a configured Speed platform."
-
 // Lightning Address format: user@domain.tld (same RFC as email user@host)
 function isValidLightningAddress(address: string): boolean {
   return /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(address.trim())
-}
-
-function hasLightningAddress(row?: ProviderRow | null): boolean {
-  const address = String(row?.credentials?.lightning_address || "").trim()
-  return Boolean(address)
 }
 
 function hasSpeedAccountId(row?: ProviderRow | null): boolean {
@@ -67,20 +59,12 @@ function hasSpeedAccountId(row?: ProviderRow | null): boolean {
   return Boolean(accountId)
 }
 
-function hasPaymentAddressId(row?: ProviderRow | null): boolean {
-  const paymentAddressId = String(row?.credentials?.payment_address_id || "").trim()
-  return Boolean(paymentAddressId)
-}
+function hasSpeedConnection(row?: ProviderRow | null): boolean {
+  if (!row) return false
+  if (hasSpeedAccountId(row)) return true
 
-function isLightningAddressVerified(row?: ProviderRow | null): boolean {
-  return Boolean(
-    row?.credentials?.lightning_address &&
-    row?.credentials?.lightning_address_verified === true
-  )
-}
-
-function isSpeedMerchantAccountModel(row?: ProviderRow | null): boolean {
-  return String(row?.credentials?.provider_model || "").trim() === "speed_merchant_account"
+  const status = String(row.status || "").toLowerCase().trim()
+  return status === "connected" || status === "active"
 }
 
 function getLightningCapabilities() {
@@ -95,23 +79,8 @@ function getLightningCapabilities() {
   }
 }
 
-function lightningCapabilityRequirementsPass(): boolean {
-  const capabilities = getLightningCapabilities()
-
-  return Boolean(
-    capabilities.supportsLightningInvoice &&
-    capabilities.supportsFeeAtPaymentTime &&
-    capabilities.supportsSplitSettlement &&
-    capabilities.supportsWebhookConfirmation &&
-    isProviderHealthy("lightning")
-  )
-}
-
 function getLightningDashboardStatus(row?: ProviderRow | null): LightningDashboardStatus {
-  if (!hasSpeedAccountId(row) || !hasLightningAddress(row) || !hasPaymentAddressId(row)) return "not_configured"
-  if (!isLightningAddressVerified(row)) return "address_needs_verification"
-  if (!isSpeedMerchantAccountModel(row)) return "provider_unavailable"
-  if (!lightningCapabilityRequirementsPass()) return "provider_unavailable"
+  if (!hasSpeedConnection(row)) return "not_configured"
   return "connected"
 }
 
@@ -270,26 +239,8 @@ export async function toggleProviderEngine(
     }
 
     const row = data as ProviderRow | null
-    if (!hasSpeedAccountId(row)) {
+    if (!hasSpeedConnection(row)) {
       throw new Error("A Speed Account ID is required before enabling Bitcoin Lightning.")
-    }
-
-    if (!isLightningAddressVerified(row)) {
-      throw new Error(
-        "A verified BTC Payment Address is required before enabling Bitcoin Lightning."
-      )
-    }
-
-    if (!hasPaymentAddressId(row)) {
-      throw new Error("A Payment Address ID is required before enabling Bitcoin Lightning.")
-    }
-
-    if (!isSpeedMerchantAccountModel(row)) {
-      throw new Error("Bitcoin Lightning must use the Speed merchant-account provider model.")
-    }
-
-    if (!lightningCapabilityRequirementsPass()) {
-      throw new Error(LIGHTNING_PROVIDER_ERROR)
     }
   }
 

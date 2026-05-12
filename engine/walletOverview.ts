@@ -36,9 +36,9 @@ export type WalletOverviewPaymentRail = {
   provider: "Speed"
   status: "Connected"
   speedAccountId: string
-  paymentAddress: string
-  lightningAddressVerified: boolean
-  providerModel: "speed_merchant_account"
+  assetSymbol: "BTC"
+  nativeBalance: number
+  usdValue: number
 }
 
 export type WalletOverviewResult = {
@@ -69,15 +69,10 @@ async function getLightningPaymentRails(merchantId: string): Promise<WalletOverv
       id,
       provider,
       status,
-      enabled,
-      speed_account_id:credentials->>speed_account_id,
-      lightning_address:credentials->>lightning_address,
-      lightning_address_verified:credentials->>lightning_address_verified,
-      provider_model:credentials->>provider_model
+      speed_account_id:credentials->>speed_account_id
     `)
     .eq("merchant_id", merchantId)
     .eq("provider", "lightning")
-    .eq("enabled", true)
     .in("status", ["connected", "active"])
 
   if (error || !data) return []
@@ -85,25 +80,11 @@ async function getLightningPaymentRails(merchantId: string): Promise<WalletOverv
   return (data as Array<{
     id?: string | null
     speed_account_id?: string | null
-    lightning_address?: string | null
-    lightning_address_verified?: boolean | string | null
-    provider_model?: string | null
   }>)
     .map((row) => {
       const speedAccountId = String(row.speed_account_id || "").trim()
-      const paymentAddress = String(row.lightning_address || "").trim()
-      const providerModel = String(row.provider_model || "").trim()
-      const lightningAddressVerified =
-        row.lightning_address_verified === true ||
-        String(row.lightning_address_verified || "").toLowerCase() === "true"
 
-      if (
-        !row.id ||
-        !speedAccountId ||
-        !paymentAddress ||
-        !lightningAddressVerified ||
-        providerModel !== "speed_merchant_account"
-      ) {
+      if (!row.id || !speedAccountId) {
         return null
       }
 
@@ -113,9 +94,9 @@ async function getLightningPaymentRails(merchantId: string): Promise<WalletOverv
         provider: "Speed",
         status: "Connected",
         speedAccountId,
-        paymentAddress,
-        lightningAddressVerified,
-        providerModel
+        assetSymbol: "BTC",
+        nativeBalance: 0,
+        usdValue: 0
       } satisfies WalletOverviewPaymentRail
     })
     .filter(Boolean) as WalletOverviewPaymentRail[]

@@ -20,7 +20,9 @@ type PaymentRailItem = {
   provider: "Speed"
   status: "Connected"
   speedAccountId: string
-  paymentAddress: string
+  assetSymbol: "BTC"
+  nativeBalance: number
+  usdValue: number
 }
 
 type WalletOverviewResponse = {
@@ -65,10 +67,6 @@ function formatSpeedAccountId(accountId: string) {
   if (trimmed.length <= 16) return trimmed
 
   return `${trimmed.slice(0, 8)}...${trimmed.slice(-4)}`
-}
-
-function formatLightningCredentialLine(rail: PaymentRailItem) {
-  return `Speed • ${formatSpeedAccountId(rail.speedAccountId)} • ${rail.paymentAddress}`
 }
 
 export default function WalletsPage() {
@@ -184,22 +182,24 @@ export default function WalletsPage() {
                   Bitcoin Lightning
                 </p>
 
-                <p className="text-sm font-medium text-gray-600">
-                  Speed merchant account
-                </p>
-
                 <p
-                  className="mt-2 max-w-full truncate text-base font-semibold text-black"
-                  title={`Speed • ${rail.speedAccountId} • ${rail.paymentAddress}`}
+                  className="max-w-full truncate text-base font-semibold text-black"
+                  title={rail.speedAccountId}
                 >
-                  {formatLightningCredentialLine(rail)}
+                  {formatSpeedAccountId(rail.speedAccountId)}
                 </p>
               </div>
 
-              <div className="shrink-0">
-                <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold leading-none text-blue-700">
-                  {rail.status}
-                </span>
+              <div className="text-left sm:text-right shrink-0">
+                <p className="text-sm text-blue-600 mb-1">Balance</p>
+
+                <p className="text-lg text-black font-semibold">
+                  {Number(rail.nativeBalance ?? 0).toFixed(8)} {rail.assetSymbol}
+                </p>
+
+                <p className="text-xs text-gray-500 mt-1">
+                  ${Number(rail.usdValue ?? 0).toFixed(2)} USD
+                </p>
               </div>
             </div>
           ))}
