@@ -24,6 +24,12 @@ type TransactionRow = {
   payments?: PaymentSummary | PaymentSummary[] | null
 }
 
+type OverviewPaymentRow = {
+  created_at: string
+  gross_amount?: number | string | null
+  status?: string | null
+}
+
 function displayNetworkName(network: string | null | undefined) {
   const normalized = String(network || "").toLowerCase().trim()
   if (!normalized) return network || null
@@ -49,7 +55,8 @@ export type DashboardOverviewResult = {
 export async function getDashboardOverviewEngine(merchantId: string): Promise<DashboardOverviewResult> {
   const walletOverview = await getWalletOverviewEngine(merchantId, { refresh: false })
 
-  const { data: tx } = await db
+  const [{ data: tx }, { data: payments, error: paymentError }] = await Promise.all([
+    db
     .from("transactions")
     .select(`
       id,
@@ -70,22 +77,31 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
       )
     `)
     .eq("merchant_id", merchantId)
-    .order("created_at", { ascending: false })
+    .order("created_at", { ascending: false }),
+    db
+      .from("payments")
+      .select("created_at,gross_amount,status")
+      .eq("merchant_id", merchantId)
+      .order("created_at", { ascending: false })
+  ])
+
+  if (paymentError) {
+    throw new Error(`Failed to load dashboard payment aggregates: ${paymentError.message}`)
+  }
 
   const rows = (tx || []) as TransactionRow[]
-  const totalTx = rows.length
-  const successTx = rows.filter((t) => t.status === "CONFIRMED")
+  const paymentRows = (payments || []) as OverviewPaymentRow[]
+  const totalTx = paymentRows.length
+  const successTx = paymentRows.filter((payment) => payment.status === "CONFIRMED")
 
-  const totalVolume = rows.reduce((sum: number, t) => {
-    const payment = Array.isArray(t.payments) ? t.payments[0] : t.payments
-    return sum + Number(payment?.gross_amount ?? 0)
+  const totalVolume = paymentRows.reduce((sum: number, payment) => {
+    return sum + Number(payment.gross_amount ?? 0)
   }, 0)
 
   const byDate: Record<string, number> = {}
-  rows.forEach((t) => {
-    const payment = Array.isArray(t.payments) ? t.payments[0] : t.payments
-    const date = new Date(t.created_at).toLocaleDateString()
-    byDate[date] = (byDate[date] || 0) + Number(payment?.gross_amount ?? 0)
+  paymentRows.forEach((payment) => {
+    const date = new Date(payment.created_at).toLocaleDateString()
+    byDate[date] = (byDate[date] || 0) + Number(payment.gross_amount ?? 0)
   })
 
   const chartData = Object.keys(byDate).map((date) => ({

@@ -9,8 +9,11 @@ type PaymentRow = {
   merchant_amount: number
   pinetree_fee: number
   currency: string
+  provider?: string | null
+  network?: string | null
   status: string
   provider_reference?: string | null
+  metadata?: Record<string, unknown> | null
 }
 
 type TransactionRow = {
@@ -188,38 +191,55 @@ export async function getTransactionsChartEngine(
 ) {
   const { buckets, start } = buildBuckets(range)
 
-  const { data, error } = await db
-    .from("transactions")
-    .select(`
-      provider,
-      channel,
-      total_amount,
-      created_at,
-      payments(gross_amount)
-    `)
+  const { data: paymentData, error: paymentError } = await db
+    .from("payments")
+    .select("id,provider,network,created_at,gross_amount,metadata")
     .eq("merchant_id", merchantId)
     .gte("created_at", start.toISOString())
 
-  if (error) {
-    throw new Error(`Failed to load chart data: ${error.message}`)
+  if (paymentError) {
+    throw new Error(`Failed to load chart payment data: ${paymentError.message}`)
   }
 
-  const rows = (data || []) as Array<{
-    provider: string
-    channel?: string | null
-    total_amount?: number | string | null
-    created_at: string
-    payments?: { gross_amount?: number | string | null } | Array<{ gross_amount?: number | string | null }> | null
-  }>
+  const payments = (paymentData || []) as PaymentRow[]
+  const paymentIds = payments
+    .map((payment) => String(payment.id || "").trim())
+    .filter(Boolean)
 
-  rows.forEach((tx) => {
-    if (mode === "pos" && tx.channel !== "pos") return
-    if (mode === "online" && tx.channel !== "online") return
+  const channelByPaymentId = new Map<string, string | null>()
 
-    const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
-    const amount = Number(payment?.gross_amount ?? tx.total_amount ?? 0)
+  if (paymentIds.length) {
+    const { data: transactionData, error: transactionError } = await db
+      .from("transactions")
+      .select("payment_id,channel")
+      .eq("merchant_id", merchantId)
+      .in("payment_id", paymentIds)
 
-    const d = new Date(tx.created_at)
+    if (transactionError) {
+      throw new Error(`Failed to load chart transaction channels: ${transactionError.message}`)
+    }
+
+    ;(transactionData || []).forEach((tx) => {
+      const paymentId = String(tx.payment_id || "").trim()
+      if (!paymentId || channelByPaymentId.has(paymentId)) return
+      channelByPaymentId.set(paymentId, tx.channel || null)
+    })
+  }
+
+  payments.forEach((payment) => {
+    const paymentId = String(payment.id || "").trim()
+    const metadataChannel =
+      payment.metadata && typeof payment.metadata === "object"
+        ? String(payment.metadata.channel || "").trim() || null
+        : null
+    const channel = channelByPaymentId.get(paymentId) || metadataChannel
+
+    if (mode === "pos" && channel !== "pos") return
+    if (mode === "online" && channel !== "online") return
+
+    const amount = Number(payment.gross_amount ?? 0)
+
+    const d = new Date(payment.created_at)
     let label = ""
 
     if (range === "24h") label = `${d.getHours()}:00`
@@ -232,12 +252,12 @@ export async function getTransactionsChartEngine(
 
     if (!buckets[label]) return
 
-    if (tx.provider === "solana") buckets[label].solana += amount
-    if (tx.provider === "base") buckets[label].base += amount
-    if (tx.provider === "lightning") buckets[label].lightning += amount
-    if (tx.provider === "coinbase") buckets[label].coinbase += amount
-    if (tx.provider === "shift4") buckets[label].shift4 += amount
-    if (tx.provider === "cash") buckets[label].cash += amount
+    if (payment.provider === "solana") buckets[label].solana += amount
+    if (payment.provider === "base") buckets[label].base += amount
+    if (payment.provider === "lightning") buckets[label].lightning += amount
+    if (payment.provider === "coinbase") buckets[label].coinbase += amount
+    if (payment.provider === "shift4") buckets[label].shift4 += amount
+    if (payment.provider === "cash") buckets[label].cash += amount
   })
 
   return Object.values(buckets)

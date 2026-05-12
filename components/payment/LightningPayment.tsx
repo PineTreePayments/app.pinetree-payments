@@ -11,6 +11,7 @@ type LightningWallet = {
   iosStoreUrl?: string
   androidStoreUrl?: string
   universalUrl?: string
+  invoiceUrlBuilder?: (invoiceBolt11: string) => string
 }
 
 const LIGHTNING_WALLETS: LightningWallet[] = [
@@ -53,6 +54,7 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/search?term=Phoenix%20Wallet%20Bitcoin",
     androidStoreUrl: "https://play.google.com/store/search?q=Phoenix%20Wallet%20Bitcoin&c=apps",
     universalUrl: "https://phoenix.acinq.co",
+    invoiceUrlBuilder: (invoiceBolt11) => `phoenix:lightning:${invoiceBolt11}`,
   },
   {
     id: "zeus",
@@ -61,6 +63,7 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/app/zeus-wallet/id1456038895",
     androidStoreUrl: "https://play.google.com/store/search?q=ZEUS%20Wallet&c=apps",
     universalUrl: "https://zeusln.app",
+    invoiceUrlBuilder: (invoiceBolt11) => `zeusln:${invoiceBolt11}`,
   },
   {
     id: "breez",
@@ -69,6 +72,7 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/search?term=Breez%20Lightning%20Wallet",
     androidStoreUrl: "https://play.google.com/store/search?q=Breez%20Lightning%20Wallet&c=apps",
     universalUrl: "https://breez.technology",
+    invoiceUrlBuilder: (invoiceBolt11) => `breez:${invoiceBolt11}`,
   },
   {
     id: "bluewallet",
@@ -77,11 +81,7 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/search?term=BlueWallet",
     androidStoreUrl: "https://play.google.com/store/search?q=BlueWallet&c=apps",
     universalUrl: "https://bluewallet.io",
-  },
-  {
-    id: "other",
-    name: "Other Lightning Wallet",
-    iconPath: "/wallets/lightning/lightning-wallet.png",
+    invoiceUrlBuilder: (invoiceBolt11) => `bluewallet:lightning:${invoiceBolt11}`,
   },
 ]
 
@@ -104,6 +104,10 @@ function normalizeLightningUri(invoice: string): string {
   return normalized.toLowerCase().startsWith("lightning:")
     ? normalized
     : `lightning:${normalized}`
+}
+
+function getBolt11Invoice(invoiceUri: string): string {
+  return invoiceUri.replace(/^lightning:/i, "")
 }
 
 function normalizeWalletName(value: string): string {
@@ -182,19 +186,20 @@ export default function LightningPayment({
     setPendingWalletId(wallet.id)
     setWalletPickerOpen(false)
 
-    if (wallet.id === "other") {
-      window.location.href = invoiceUri
+    if (wallet.invoiceUrlBuilder) {
+      window.location.href = wallet.invoiceUrlBuilder(getBolt11Invoice(invoiceUri))
       window.setTimeout(() => setPendingWalletId(""), 1200)
       return
     }
 
-    const targetUrl = wallet.universalUrl || getStoreFallbackUrl(wallet)
-    if (!targetUrl) {
+    const installUrl = getStoreFallbackUrl(wallet)
+    if (!installUrl) {
       setPendingWalletId("")
       return
     }
 
-    window.location.href = targetUrl
+    window.open(installUrl, "_blank", "noopener,noreferrer")
+    setPendingWalletId("")
   }, [invoiceUri])
 
   const walletPickerSections: WalletPickerSection[] = useMemo(() => {
@@ -205,7 +210,11 @@ export default function LightningPayment({
         id: wallet.id,
         name: wallet.name,
         iconPath: wallet.iconPath,
-        badgeLabel: pendingWalletId === wallet.id ? "Opening" : "Open app",
+        badgeLabel: pendingWalletId === wallet.id
+          ? "Opening"
+          : wallet.invoiceUrlBuilder
+            ? "Pay invoice"
+            : "Install",
         badgeTone: "blue" as const,
         active: pendingWalletId === wallet.id,
         disabled: Boolean(pendingWalletId),
@@ -270,6 +279,10 @@ export default function LightningPayment({
         }}
       >
         Choose Lightning Wallet
+      </Button>
+
+      <Button fullWidth onClick={() => { window.location.href = invoiceUri }}>
+        Pay with installed Lightning wallet
       </Button>
 
       <WalletPickerModal
