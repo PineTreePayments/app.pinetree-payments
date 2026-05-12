@@ -65,7 +65,7 @@ export function providerName(provider: string | null | undefined) {
   if (provider === "solana") return "Solana Pay"
   if (provider === "shift4") return "Shift4"
   if (provider === "base") return "Base Pay"
-  if (provider === "lightning") return "Speed"
+  if (provider === "lightning") return "Bitcoin Lightning"
   if (provider === "cash") return "Cash"
   return provider || "-"
 }

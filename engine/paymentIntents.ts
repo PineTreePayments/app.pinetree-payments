@@ -86,6 +86,23 @@ function resolveSupportedAssetForNetwork(network: WalletNetwork, asset?: string)
   return normalizedAsset
 }
 
+function walletNetworkToProviderKey(network: WalletNetwork): string | null {
+  if (network === "solana") return "solana"
+  if (network === "base") return "base"
+  if (network === "shift4") return "shift4"
+  if (network === "bitcoin_lightning") return "lightning"
+  return null
+}
+
+function isProviderAvailableForCheckout(
+  network: WalletNetwork,
+  enabledProviders: Set<string>
+): boolean {
+  const providerKey = walletNetworkToProviderKey(network)
+  if (!providerKey) return false
+  return enabledProviders.has(providerKey)
+}
+
 function buildWalletOptions(walletUrl: string, network?: string): WalletOption[] {
   const normalizedUrl = String(walletUrl || "").trim()
   if (!normalizedUrl) return []
@@ -134,21 +151,35 @@ function buildWalletOptions(walletUrl: string, network?: string): WalletOption[]
 export async function getMerchantAvailableNetworks(merchantId: string): Promise<WalletNetwork[]> {
   await loadProviders()
 
-  const [wallets, hostedNetworks] = await Promise.all([
+  const [wallets, hostedNetworks, providers] = await Promise.all([
     getMerchantWallets(merchantId),
-    getConnectedHostedCheckoutNetworks(merchantId)
+    getConnectedHostedCheckoutNetworks(merchantId),
+    getMerchantProviders(merchantId)
   ])
+
+  // Build the set of provider keys that are both connected and enabled.
+  // Rows with enabled=null/undefined (pre-toggle legacy rows) are treated as enabled
+  // to preserve backward compatibility for existing merchants.
+  const enabledProviders = new Set(
+    providers
+      .filter((p) => p.enabled !== false)
+      .map((p) => String(p.provider || "").toLowerCase().trim())
+  )
 
   const walletNetworks = wallets
     .map((w) => normalizeWalletNetwork(w.network))
-    .filter((n): n is WalletNetwork => Boolean(n && SUPPORTED_NETWORKS.includes(n)))
+    .filter((n): n is WalletNetwork => {
+      if (!n || !SUPPORTED_NETWORKS.includes(n)) return false
+      return isProviderAvailableForCheckout(n, enabledProviders)
+    })
 
   const hostedCheckoutNetworks = hostedNetworks
     .map((n) => normalizeWalletNetwork(n))
     .filter((n): n is WalletNetwork => Boolean(n && SUPPORTED_NETWORKS.includes(n)))
 
-  const providers = await getMerchantProviders(merchantId)
   const enabledHostedNetworks = hostedCheckoutNetworks.filter((network) => {
+    if (!isProviderAvailableForCheckout(network, enabledProviders)) return false
+
     if (network !== "bitcoin_lightning") return true
 
     return providers.some((provider) => {

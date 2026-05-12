@@ -147,7 +147,7 @@ export default function TransactionsPage() {
     if (provider === "solana") return "Solana Pay"
     if (provider === "shift4") return "Shift4"
     if (provider === "base") return "Base Pay"
-    if (provider === "lightning") return "Speed"
+    if (provider === "lightning") return "Bitcoin Lightning"
     if (provider === "cash") return "Cash"
     return provider || "-"
   }, [])
@@ -367,7 +367,7 @@ export default function TransactionsPage() {
           <option value="coinbase">Coinbase Business</option>
           <option value="shift4">Shift4</option>
           <option value="base">Base Pay</option>
-          <option value="lightning">Speed</option>
+          <option value="lightning">Bitcoin Lightning</option>
           <option value="cash">Cash</option>
         </select>
 
@@ -477,7 +477,7 @@ export default function TransactionsPage() {
 
                 <Bar dataKey="solana" name="Solana SOL/USDC" stackId="a" fill="#8b5cf6" radius={[0, 0, 0, 0]} />
                 <Bar dataKey="base" name="Base ETH/USDC" stackId="a" fill="#0052FF" radius={[0, 0, 0, 0]} />
-                <Bar dataKey="lightning" name="Bitcoin Lightning (Speed)" stackId="a" fill="#f59e0b" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="lightning" name="Bitcoin Lightning" stackId="a" fill="#f59e0b" radius={[0, 0, 0, 0]} />
                 <Bar dataKey="coinbase" name="Coinbase" stackId="a" fill="#1e40af" radius={[0, 0, 0, 0]} />
                 <Bar dataKey="shift4" name="Card (Shift4)" stackId="a" fill="#14b8a6" radius={[0, 0, 0, 0]} />
                 <Bar dataKey="cash" name="Cash (USD)" stackId="a" fill="#22c55e" radius={[4, 4, 0, 0]} />

@@ -82,10 +82,14 @@ function buildSpeedAuthHeader(apiKey: string): string {
   return `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`
 }
 
-function roundSpeedPercentage(value: number): number {
+function isDevelopment() {
+  return process.env.NODE_ENV === "development"
+}
+
+function formatSpeedPercentage(value: number): number {
   if (!Number.isFinite(value)) return 0
   const bounded = Math.max(0, Math.min(100, value))
-  return Number(bounded.toFixed(8))
+  return Number(bounded.toFixed(2))
 }
 
 function sanitizeForLog(value: unknown): unknown {
@@ -162,7 +166,7 @@ export function buildSpeedCreatePaymentRequest(input: {
   }
 
   const merchantTransferPercentage =
-    roundSpeedPercentage((merchantAmount / grossAmount) * 100)
+    formatSpeedPercentage((merchantAmount / grossAmount) * 100)
 
   return {
     currency: String(input.currency || "USD").toUpperCase(),
@@ -341,7 +345,9 @@ export async function createLightningInvoice(
     headers["speed-account"] = config.platformAccountId
   }
 
-  console.info("[lightning/speed] create payment request", sanitizeForLog(body))
+  if (isDevelopment()) {
+    console.info("[lightning/speed] create payment request", sanitizeForLog(body))
+  }
 
   const response = await fetch(`${normalizeApiBaseUrl(config.apiBaseUrl)}/payments`, {
     method: "POST",
@@ -360,10 +366,12 @@ export async function createLightningInvoice(
     throw new Error(`Speed Create Payment API error (${response.status}): ${message}`)
   }
 
-  console.info("[lightning/speed] create payment response", {
-    status: response.status,
-    body: sanitizeForLog(data)
-  })
+  if (isDevelopment()) {
+    console.info("[lightning/speed] create payment response", {
+      status: response.status,
+      body: sanitizeForLog(data)
+    })
+  }
 
   return parseSpeedPaymentResponse(data)
 }
