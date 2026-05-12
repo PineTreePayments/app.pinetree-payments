@@ -7,13 +7,15 @@
 export type MarketPricesUSD = {
   SOL: number
   ETH: number
+  BTC: number
 }
 
 const PRICE_CACHE_TTL_MS = 60_000
 
 const FALLBACK_PRICES_USD: MarketPricesUSD = {
   SOL: Number(process.env.FALLBACK_SOL_USD || 80),
-  ETH: Number(process.env.FALLBACK_ETH_USD || 2000)
+  ETH: Number(process.env.FALLBACK_ETH_USD || 2000),
+  BTC: Number(process.env.FALLBACK_BTC_USD || 60000)
 }
 
 let cachedPrices: { value: MarketPricesUSD; updatedAt: number } | null = null
@@ -25,10 +27,12 @@ function isValidPrice(value: number) {
 function normalizePrices(input?: Partial<MarketPricesUSD> | null): MarketPricesUSD {
   const sol = Number(input?.SOL ?? 0)
   const eth = Number(input?.ETH ?? 0)
+  const btc = Number(input?.BTC ?? 0)
 
   return {
     SOL: isValidPrice(sol) ? sol : FALLBACK_PRICES_USD.SOL,
-    ETH: isValidPrice(eth) ? eth : FALLBACK_PRICES_USD.ETH
+    ETH: isValidPrice(eth) ? eth : FALLBACK_PRICES_USD.ETH,
+    BTC: isValidPrice(btc) ? btc : FALLBACK_PRICES_USD.BTC
   }
 }
 
@@ -56,7 +60,7 @@ export async function getMarketPricesUSD(): Promise<MarketPricesUSD> {
     const timeout = setTimeout(() => controller.abort(), 4500)
 
     const res = await fetch(
-      "https://api.coingecko.com/api/v3/simple/price?ids=solana,ethereum&vs_currencies=usd",
+      "https://api.coingecko.com/api/v3/simple/price?ids=solana,ethereum,bitcoin&vs_currencies=usd",
       {
         cache: "no-store",
         signal: controller.signal,
@@ -74,8 +78,9 @@ export async function getMarketPricesUSD(): Promise<MarketPricesUSD> {
 
     const sol = Number(data?.solana?.usd ?? 0)
     const eth = Number(data?.ethereum?.usd ?? 0)
+    const btc = Number(data?.bitcoin?.usd ?? 0)
 
-    const resolved = normalizePrices({ SOL: sol, ETH: eth })
+    const resolved = normalizePrices({ SOL: sol, ETH: eth, BTC: btc })
     updateCache(resolved)
 
     return resolved

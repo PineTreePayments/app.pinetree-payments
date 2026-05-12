@@ -20,9 +20,11 @@ export async function POST(req: NextRequest) {
       timestamp: refreshed.timestamp,
       balances: [
         { asset: "SOL", balance: refreshed.totalsByAsset.SOL },
-        { asset: "ETH", balance: refreshed.totalsByAsset.ETH }
+        { asset: "ETH", balance: refreshed.totalsByAsset.ETH },
+        { asset: "BTC", balance: refreshed.totalsByAsset.BTC }
       ],
       wallets: overview.wallets,
+      paymentRails: overview.paymentRails,
       totalUsd: overview.totalUsd,
       prices: overview.prices
     })

@@ -9,6 +9,7 @@ import {
   supabase
 } from "@/database"
 import { getMarketPricesUSD } from "./marketPrices"
+import { getSpeedAccountBalanceBtc } from "@/providers/lightning/getBalance"
 
 const db = supabaseAdmin || supabase
 
@@ -45,8 +46,8 @@ export type WalletOverviewResult = {
   wallets: WalletOverviewItem[]
   paymentRails: WalletOverviewPaymentRail[]
   totalUsd: number
-  totalsByAsset: { SOL: number; ETH: number }
-  prices: { SOL: number; ETH: number }
+  totalsByAsset: { SOL: number; ETH: number; BTC: number }
+  prices: { SOL: number; ETH: number; BTC: number }
   lastRun: string | null
 }
 
@@ -62,7 +63,10 @@ function networkAsset(network: WalletNetwork): "SOL" | "ETH" {
   return network === "solana" ? "SOL" : "ETH"
 }
 
-async function getLightningPaymentRails(merchantId: string): Promise<WalletOverviewPaymentRail[]> {
+async function getLightningPaymentRails(
+  merchantId: string,
+  prices: { BTC: number }
+): Promise<WalletOverviewPaymentRail[]> {
   const { data, error } = await db
     .from("merchant_providers")
     .select(`
@@ -77,7 +81,7 @@ async function getLightningPaymentRails(merchantId: string): Promise<WalletOverv
 
   if (error || !data) return []
 
-  return (data as Array<{
+  const rails = (data as Array<{
     id?: string | null
     speed_account_id?: string | null
   }>)
@@ -100,6 +104,17 @@ async function getLightningPaymentRails(merchantId: string): Promise<WalletOverv
       } satisfies WalletOverviewPaymentRail
     })
     .filter(Boolean) as WalletOverviewPaymentRail[]
+
+  return Promise.all(
+    rails.map(async (rail) => {
+      const nativeBalance = await getSpeedAccountBalanceBtc(rail.speedAccountId)
+      return {
+        ...rail,
+        nativeBalance,
+        usdValue: nativeBalance * prices.BTC
+      }
+    })
+  )
 }
 
 async function getSolanaBalance(address: string): Promise<number> {
@@ -203,13 +218,20 @@ async function scanWalletBalances(
 export async function refreshWalletBalancesEngine(merchantId: string) {
   const walletRows = await getMerchantWalletRows(merchantId)
   const now = new Date().toISOString()
-  const { perWallet, totalsByAsset } = await scanWalletBalances(walletRows)
+  const prices = await getMarketPricesUSD()
+  const [{ perWallet, totalsByAsset }, paymentRails] = await Promise.all([
+    scanWalletBalances(walletRows),
+    getLightningPaymentRails(merchantId, prices)
+  ])
+
+  const btcBalance = paymentRails.reduce((sum, rail) => sum + rail.nativeBalance, 0)
 
   await upsertMerchantAssetBalances(
     merchantId,
     [
       { asset: "SOL", balance: totalsByAsset.SOL },
-      { asset: "ETH", balance: totalsByAsset.ETH }
+      { asset: "ETH", balance: totalsByAsset.ETH },
+      { asset: "BTC", balance: btcBalance }
     ],
     now
   )
@@ -219,7 +241,11 @@ export async function refreshWalletBalancesEngine(merchantId: string) {
   return {
     timestamp: now,
     perWallet,
-    totalsByAsset
+    paymentRails,
+    totalsByAsset: {
+      ...totalsByAsset,
+      BTC: btcBalance
+    }
   }
 }
 
@@ -243,13 +269,19 @@ export async function refreshAllWalletBalancesEngine() {
   }
 
   for (const [merchantId, merchantWallets] of walletsByMerchant.entries()) {
-    const { totalsByAsset } = await scanWalletBalances(merchantWallets)
+    const prices = await getMarketPricesUSD()
+    const [{ totalsByAsset }, paymentRails] = await Promise.all([
+      scanWalletBalances(merchantWallets),
+      getLightningPaymentRails(merchantId, prices)
+    ])
+    const btcBalance = paymentRails.reduce((sum, rail) => sum + rail.nativeBalance, 0)
 
     await upsertMerchantAssetBalances(
       merchantId,
       [
         { asset: "SOL", balance: totalsByAsset.SOL },
-        { asset: "ETH", balance: totalsByAsset.ETH }
+        { asset: "ETH", balance: totalsByAsset.ETH },
+        { asset: "BTC", balance: btcBalance }
       ],
       now
     )
@@ -274,11 +306,12 @@ export async function getWalletOverviewEngine(
 
   const [walletRows, paymentRails] = await Promise.all([
     getMerchantWalletRows(merchantId),
-    getLightningPaymentRails(merchantId)
+    getLightningPaymentRails(merchantId, prices)
   ])
+  let activePaymentRails = paymentRails
 
   const walletBalancesById: Record<string, number> = {}
-  let totalsByAsset: Record<"SOL" | "ETH", number> = { SOL: 0, ETH: 0 }
+  let totalsByAsset: Record<"SOL" | "ETH" | "BTC", number> = { SOL: 0, ETH: 0, BTC: 0 }
   let timestamp: string | null = null
 
   if (refresh) {
@@ -290,6 +323,7 @@ export async function getWalletOverviewEngine(
     }
 
     totalsByAsset = refreshed.totalsByAsset
+    activePaymentRails = refreshed.paymentRails
   } else {
     const scanned = await scanWalletBalances(walletRows)
 
@@ -297,12 +331,12 @@ export async function getWalletOverviewEngine(
       walletBalancesById[row.id] = row.balance
     }
 
-    totalsByAsset = scanned.totalsByAsset
+    totalsByAsset = { ...scanned.totalsByAsset, BTC: 0 }
 
     const allZero = scanned.perWallet.length > 0 && scanned.perWallet.every((w) => w.balance === 0)
     if (allZero) {
       const balances = await getMerchantAssetBalances(merchantId)
-      const fallbackTotals: Record<"SOL" | "ETH", number> = { SOL: 0, ETH: 0 }
+      const fallbackTotals: Record<"SOL" | "ETH" | "BTC", number> = { SOL: 0, ETH: 0, BTC: 0 }
 
       for (const b of balances) {
         const asset = String(b.asset || "").toUpperCase().trim()
@@ -310,6 +344,7 @@ export async function getWalletOverviewEngine(
 
         if (asset === "SOL" || asset === "SOLANA") fallbackTotals.SOL += value
         if (asset === "ETH" || asset === "ETHEREUM" || asset === "BASE") fallbackTotals.ETH += value
+        if (asset === "BTC" || asset === "BITCOIN" || asset === "BITCOIN_LIGHTNING") fallbackTotals.BTC += value
       }
 
       totalsByAsset = fallbackTotals
@@ -339,10 +374,12 @@ export async function getWalletOverviewEngine(
     })
     .filter(Boolean) as WalletOverviewItem[]
 
-  const totalUsd = wallets.reduce((sum, w) => sum + w.usdValue, 0)
+  const totalUsd =
+    wallets.reduce((sum, w) => sum + w.usdValue, 0) +
+    activePaymentRails.reduce((sum, rail) => sum + rail.usdValue, 0)
 
   if (wallets.length > 0) {
-    totalsByAsset = wallets.reduce(
+    const walletTotals = wallets.reduce(
       (acc, wallet) => {
         if (wallet.assetSymbol === "SOL") acc.SOL += wallet.nativeBalance
         if (wallet.assetSymbol === "ETH") acc.ETH += wallet.nativeBalance
@@ -350,11 +387,15 @@ export async function getWalletOverviewEngine(
       },
       { SOL: 0, ETH: 0 }
     )
+    totalsByAsset.SOL = walletTotals.SOL
+    totalsByAsset.ETH = walletTotals.ETH
   }
+
+  totalsByAsset.BTC = activePaymentRails.reduce((sum, rail) => sum + rail.nativeBalance, 0)
 
   return {
     wallets,
-    paymentRails,
+    paymentRails: activePaymentRails,
     totalUsd,
     totalsByAsset,
     prices,
