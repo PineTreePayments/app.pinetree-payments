@@ -254,10 +254,7 @@ export function ChartCard({
     <div className={cx(surfaceClass, "rounded-2xl p-4 sm:p-5", className)}>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
-            Volume
-          </p>
-          <h2 className="mt-1 text-base font-semibold text-gray-950 md:text-lg">{title}</h2>
+          <h2 className="text-base font-semibold text-gray-950 md:text-lg">{title}</h2>
           {subtitle && <p className="mt-1 text-sm text-gray-500">{subtitle}</p>}
         </div>
         {action}

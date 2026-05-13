@@ -172,7 +172,7 @@ export default function ReportsPage() {
 
       {summary && <PineTreeInsightsCard insights={insights} />}
 
-      <DashboardSection title="Financial Reports" eyebrow="Exports">
+      <DashboardSection title="Financial Reports">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4 xl:grid-cols-3">
           <ReportCard title="Today's Report"    description="Summary of today's transactions and totals"          loading={loading} action={() => generateReport("today")} />
           <ReportCard title="Yesterday's Report" description="Detailed summary of yesterday's transactions"       loading={loading} action={() => generateReport("yesterday")} />
@@ -180,7 +180,7 @@ export default function ReportsPage() {
         </div>
       </DashboardSection>
 
-      <DashboardSection title="Tax & Compliance" eyebrow="Accounting">
+      <DashboardSection title="Tax & Compliance">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4 xl:grid-cols-3">
           <ReportCard title="Tax Report"         description="Generate tax summary for accounting or filing"      loading={loading} action={() => generateReport("month")} />
           <ReportCard title="Yearly Summary"     description="Annual financial summary report"                    loading={loading} action={() => generateReport("year")} />

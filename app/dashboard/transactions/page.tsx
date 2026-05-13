@@ -337,7 +337,7 @@ export default function TransactionsPage() {
 
       <PineTreeInsightsCard insights={[aiInsight === "No insights yet." ? "" : aiInsight]} />
 
-      <DashboardSection title="Transaction Ledger" eyebrow="Filters">
+      <DashboardSection title="Transaction Ledger">
         <div className="grid grid-cols-1 gap-2 rounded-2xl border border-gray-200 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:grid-cols-3">
           <select
             aria-label="Wallet filter"

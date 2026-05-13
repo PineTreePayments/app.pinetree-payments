@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
-import Button from "@/components/ui/Button"
 import {
   CompactMetricTile,
   DashboardHeroCard,
@@ -150,17 +149,20 @@ export default function WalletsPage() {
 
   return (
     <div className="w-full space-y-5 md:space-y-7">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Wallets</h1>
         </div>
 
-        <Button
+        <button
+          type="button"
           onClick={() => loadOverview(true)}
           disabled={isRefreshing}
+          className="inline-flex min-h-8 shrink-0 items-center justify-center rounded-full bg-blue-600 px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-10 sm:rounded-xl sm:px-4 sm:text-sm"
         >
-          {isRefreshing ? "Refreshing..." : "Refresh Balances"}
-        </Button>
+          <span className="sm:hidden">{isRefreshing ? "Refreshing" : "Refresh"}</span>
+          <span className="hidden sm:inline">{isRefreshing ? "Refreshing..." : "Refresh Balances"}</span>
+        </button>
       </div>
 
       {refreshError && (

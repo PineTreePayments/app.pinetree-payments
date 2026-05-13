@@ -230,7 +230,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-5 md:space-y-7">
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">
             Overview
@@ -240,9 +240,10 @@ export default function DashboardPage() {
         <button
           onClick={syncNow}
           disabled={isSyncing}
-          className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex min-h-8 shrink-0 items-center justify-center rounded-full bg-blue-600 px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-10 sm:rounded-xl sm:px-4 sm:text-sm"
         >
-          {isSyncing ? "Syncing..." : "Sync Now"}
+          <span className="sm:hidden">{isSyncing ? "Syncing" : "Sync"}</span>
+          <span className="hidden sm:inline">{isSyncing ? "Syncing..." : "Sync Now"}</span>
         </button>
       </div>
 
@@ -279,7 +280,7 @@ export default function DashboardPage() {
 
       <ChartCard
         title="Transaction Volume"
-        subtitle="Dashboard volume from existing overview data"
+        subtitle="Recent confirmed payment volume"
         action={
           <div className="inline-flex rounded-full border border-gray-200 bg-gray-50 p-1">
             <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-blue-700 shadow-sm">
@@ -288,7 +289,7 @@ export default function DashboardPage() {
           </div>
         }
       >
-        <div className="h-52 sm:h-64">
+        <div className="h-44 pb-1 sm:h-64 sm:pb-0">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart
               data={
@@ -299,7 +300,7 @@ export default function DashboardPage() {
                   { date:"", volume:0 }
                 ]
               }
-              margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+              margin={{ top: 10, right: 12, left: -8, bottom: 8 }}
             >
               <defs>
                 <linearGradient id="overviewVolumeGradient" x1="0" y1="0" x2="0" y2="1">
@@ -307,19 +308,20 @@ export default function DashboardPage() {
                   <stop offset="100%" stopColor="#2563eb" stopOpacity={0.02} />
                 </linearGradient>
               </defs>
-              <CartesianGrid stroke="#e5e7eb" strokeDasharray="4 4" vertical={false} />
+              <CartesianGrid stroke="#eef2f7" strokeDasharray="3 6" vertical={false} />
               <XAxis
                 dataKey="date"
                 axisLine={false}
                 tickLine={false}
-                tick={{ fill: "#6b7280", fontSize: 11 }}
+                tick={{ fill: "#64748b", fontSize: 10 }}
                 minTickGap={20}
+                dy={6}
               />
               <YAxis
                 axisLine={false}
                 tickLine={false}
-                width={64}
-                tick={{ fill: "#6b7280", fontSize: 11 }}
+                width={58}
+                tick={{ fill: "#64748b", fontSize: 10 }}
                 tickFormatter={(value) => formatUsd(Number(value))}
               />
               <Tooltip
@@ -337,7 +339,7 @@ export default function DashboardPage() {
                 type="monotone"
                 dataKey="volume"
                 stroke="#2563eb"
-                strokeWidth={3}
+                strokeWidth={2.5}
                 fill="url(#overviewVolumeGradient)"
                 dot={false}
                 activeDot={{ r: 4, strokeWidth: 0, fill: "#1d4ed8" }}
@@ -349,7 +351,7 @@ export default function DashboardPage() {
 
       <PineTreeInsightsCard insights={overviewInsights} />
 
-      <DashboardSection title="Recent Activity" eyebrow="Payments">
+      <DashboardSection title="Recent Activity">
         <TransactionActivityTable
           transactions={recentTx}
           emptyMessage="No transactions yet."

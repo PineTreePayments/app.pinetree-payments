@@ -1038,7 +1038,7 @@ export default function ProvidersPage() {
         />
       </MetricGrid>
 
-      <DashboardSection title="Engine Settings" eyebrow="Controls">
+      <DashboardSection title="Engine Settings">
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
 
         <div className="space-y-4">
@@ -1081,7 +1081,7 @@ export default function ProvidersPage() {
       </div>
       </DashboardSection>
 
-      <DashboardSection title="Payment Providers" eyebrow="Connections">
+      <DashboardSection title="Payment Providers">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
         <ProviderCard
           name="Coinbase Business"

@@ -15,7 +15,7 @@ export default function RoutingPage() {
         </h1>
       </div>
 
-      <DashboardSection title="Routing Controls" eyebrow="Engine">
+      <DashboardSection title="Routing Controls">
         <div className="rounded-2xl border border-gray-200 bg-white p-4 text-sm leading-6 text-gray-700 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
           Configure smart routing here.
         </div>
