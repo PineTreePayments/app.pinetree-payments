@@ -4,6 +4,7 @@ import {
   type MerchantReportContext,
   type MerchantReportPaymentRow
 } from "@/database/reports"
+import { normalizeReportNetwork, normalizeReportStatus } from "./reportDisplayNormalization"
 
 export type ReportType =
   | "today"
@@ -142,15 +143,6 @@ function displayProviderName(provider: string) {
   return provider || "Unknown"
 }
 
-function displayNetworkName(network: string) {
-  const normalized = String(network || "").toLowerCase().trim()
-  if (normalized === "bitcoin_lightning" || normalized === "lightning") return "Bitcoin Lightning"
-  if (normalized === "solana") return "Solana"
-  if (normalized === "base") return "Base"
-  if (normalized === "ethereum") return "Ethereum"
-  if (normalized === "cash") return "Cash"
-  return network || "Unknown"
-}
 
 function displayChannelName(channel: string) {
   const normalized = String(channel || "").toLowerCase().trim()
@@ -196,7 +188,10 @@ function addTotal(target: Record<string, number>, key: string, value: number) {
 function buildLedgerRow(payment: MerchantReportPaymentRow): ReportLedgerRow {
   const tx = primaryTransaction(payment)
   const metadata = payment.metadata || {}
-  const status = String(payment.status || tx?.status || "UNKNOWN").toUpperCase()
+  const status = normalizeReportStatus(
+    String(payment.status || tx?.status || "UNKNOWN"),
+    payment.created_at
+  )
   const gross = money(payment.gross_amount) || centsToDollars(tx?.total_amount)
   const pinetreeFee = money(payment.pinetree_fee) || centsToDollars(tx?.platform_fee)
   const metadataSubtotal = getMetadataNumber(metadata, "subtotalAmount") || getMetadataNumber(metadata, "merchantAmount")
@@ -204,8 +199,9 @@ function buildLedgerRow(payment: MerchantReportPaymentRow): ReportLedgerRow {
   const subtotal = metadataSubtotal || transactionSubtotal || Math.max(0, money(payment.merchant_amount) - getMetadataNumber(metadata, "taxAmount"))
   const metadataTax = getMetadataNumber(metadata, "taxAmount")
   const tax = metadataTax || Math.max(0, money(payment.merchant_amount) - subtotal)
-  const provider = displayProviderName(String(tx?.provider || payment.provider || "unknown"))
-  const network = displayNetworkName(String(tx?.network || payment.network || "unknown"))
+  const rawProvider = String(tx?.provider || payment.provider || "")
+  const provider = displayProviderName(rawProvider || "unknown")
+  const network = normalizeReportNetwork(tx?.network || payment.network, rawProvider)
   const channel = displayChannelName(String(tx?.channel || metadata.channel || "online"))
   const reference = String(tx?.provider_transaction_id || payment.provider_reference || payment.id)
 
