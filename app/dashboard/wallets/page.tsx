@@ -186,7 +186,7 @@ export default function WalletsPage() {
         <CompactMetricTile label="Payment Rails" value={paymentRails.length} tone="slate" />
       </MetricGrid>
 
-      <DashboardSection title="Connected Wallets">
+      <DashboardSection title="Connected Wallets" titleTone="blue">
         <div className="space-y-3">
           {wallets.length === 0 && paymentRails.length === 0 && (
             <div className="rounded-2xl border border-gray-200 bg-white px-4 py-10 text-center text-sm text-gray-500 shadow-sm">
@@ -197,17 +197,24 @@ export default function WalletsPage() {
           {paymentRails.map((rail) => (
             <div key={rail.id} className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:border-blue-200 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0 flex-1">
-                <div className="mb-2 flex flex-wrap items-center gap-2">
+                <div className="mb-2 flex items-start justify-between gap-3">
                   <p className="text-base font-semibold text-gray-950">Bitcoin Lightning</p>
-                  <NetworkStatusPill label="Connected" tone="blue" />
+                  <NetworkStatusPill
+                    label={rail.speedAccountId ? "Connected" : "Not Connected"}
+                    tone={rail.speedAccountId ? "blue" : "slate"}
+                    className="shrink-0"
+                  />
                 </div>
 
-                <p
-                  className="max-w-full truncate font-mono text-xs text-gray-500"
-                  title={rail.speedAccountId}
-                >
-                  {formatSpeedAccountId(rail.speedAccountId)}
-                </p>
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <p
+                    className="max-w-full truncate font-mono text-xs text-gray-500"
+                    title={rail.speedAccountId}
+                  >
+                    {formatSpeedAccountId(rail.speedAccountId)}
+                  </p>
+                  <NetworkStatusPill label="Speed" tone="slate" className="min-h-6 px-2 text-[10px]" />
+                </div>
               </div>
 
               <div className="shrink-0 text-left sm:text-right">
@@ -227,19 +234,26 @@ export default function WalletsPage() {
           {wallets.map((w) => (
           <div key={w.id} className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:border-blue-200 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0 flex-1">
-                <div className="mb-2 flex flex-wrap items-center gap-2">
+                <div className="mb-2 flex items-start justify-between gap-3">
                   <p className="text-base font-semibold text-gray-950">
                     {formatProvider(w.provider, w.network)}
                   </p>
-                  <NetworkStatusPill label={w.network} tone="blue" />
+                  <NetworkStatusPill
+                    label={w.wallet_address ? "Connected" : "Not Connected"}
+                    tone={w.wallet_address ? "blue" : "slate"}
+                    className="shrink-0"
+                  />
                 </div>
 
-                <p
-                  className="max-w-full truncate font-mono text-xs text-gray-500"
-                  title={w.wallet_address}
-                >
-                  {formatWalletAddress(w.wallet_address)}
-                </p>
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <p
+                    className="max-w-full truncate font-mono text-xs text-gray-500"
+                    title={w.wallet_address}
+                  >
+                    {formatWalletAddress(w.wallet_address)}
+                  </p>
+                  <NetworkStatusPill label={w.network} tone="slate" className="min-h-6 px-2 text-[10px]" />
+                </div>
               </div>
 
               <div className="shrink-0 text-left sm:text-right">

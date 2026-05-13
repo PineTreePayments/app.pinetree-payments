@@ -7,6 +7,7 @@ import {
   CompactMetricTile,
   DashboardHeroCard,
   DashboardSection,
+  GroupedMetricSurface,
   MetricGrid,
   PineTreeInsightsCard
 } from "@/components/dashboard/DashboardPrimitives"
@@ -173,19 +174,23 @@ export default function ReportsPage() {
       {summary && <PineTreeInsightsCard insights={insights} />}
 
       <DashboardSection title="Financial Reports">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4 xl:grid-cols-3">
+        <GroupedMetricSurface>
+          <div className="grid grid-cols-1 divide-y divide-gray-100 md:grid-cols-3 md:divide-x md:divide-y-0">
           <ReportCard title="Today's Report"    description="Summary of today's transactions and totals"          loading={loading} action={() => generateReport("today")} />
           <ReportCard title="Yesterday's Report" description="Detailed summary of yesterday's transactions"       loading={loading} action={() => generateReport("yesterday")} />
           <ReportCard title="Monthly Report"    description="Complete monthly financial summary"                  loading={loading} action={() => generateReport("month")} />
-        </div>
+          </div>
+        </GroupedMetricSurface>
       </DashboardSection>
 
       <DashboardSection title="Tax & Compliance">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4 xl:grid-cols-3">
+        <GroupedMetricSurface>
+          <div className="grid grid-cols-1 divide-y divide-gray-100 md:grid-cols-3 md:divide-x md:divide-y-0">
           <ReportCard title="Tax Report"         description="Generate tax summary for accounting or filing"      loading={loading} action={() => generateReport("month")} />
           <ReportCard title="Yearly Summary"     description="Annual financial summary report"                    loading={loading} action={() => generateReport("year")} />
           <ReportCard title="Transaction Export" description="Download full transaction history for bookkeeping"  loading={loading} action={() => generateReport("month")} />
-        </div>
+          </div>
+        </GroupedMetricSurface>
       </DashboardSection>
     </div>
   )
@@ -198,13 +203,13 @@ function ReportCard({ title, description, action, loading }: {
   loading: boolean
 }) {
   return (
-    <div className="min-w-0 space-y-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] md:p-5">
-      <div className="text-base font-semibold text-gray-950">{title}</div>
-      <div className="text-sm leading-6 text-gray-600">{description}</div>
+    <div className="min-w-0 p-3 md:p-4">
+      <div className="text-sm font-semibold text-gray-950">{title}</div>
+      <div className="mt-1 min-h-10 text-sm leading-5 text-gray-600">{description}</div>
       <button
         onClick={action}
         disabled={loading}
-        className="inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50 sm:w-auto"
+        className="mt-3 inline-flex min-h-10 w-fit items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
       >
         {loading ? "Generating..." : "Generate PDF"}
       </button>

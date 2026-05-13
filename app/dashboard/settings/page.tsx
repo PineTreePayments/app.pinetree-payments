@@ -201,7 +201,7 @@ export default function SettingsPage() {
         <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Settings</h1>
       </div>
 
-      <DashboardSection title="Account">
+      <DashboardSection title="Account" titleTone="blue">
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -295,7 +295,7 @@ export default function SettingsPage() {
       </div>
       </DashboardSection>
 
-      <DashboardSection title="Tax Configuration">
+      <DashboardSection title="Tax Configuration" titleTone="blue">
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -330,7 +330,7 @@ export default function SettingsPage() {
       </div>
       </DashboardSection>
 
-      <DashboardSection title="Reporting">
+      <DashboardSection title="Reporting" titleTone="blue">
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

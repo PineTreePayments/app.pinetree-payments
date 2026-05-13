@@ -280,6 +280,7 @@ export default function DashboardPage() {
 
       <ChartCard
         title="Transaction Volume"
+        titleTone="blue"
         subtitle="Recent confirmed payment volume"
         className="overflow-hidden pb-5 sm:pb-5"
       >

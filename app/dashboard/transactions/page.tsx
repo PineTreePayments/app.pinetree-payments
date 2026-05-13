@@ -319,7 +319,7 @@ export default function TransactionsPage() {
           </div>
         </button>
 
-        <GroupedMetricSurface title="Activity Breakdown">
+        <GroupedMetricSurface title="Activity Breakdown" titleTone="blue">
           <div className="grid grid-cols-2 gap-x-4 gap-y-0">
             <InlineMetric label="Peak Hour" value={peakHour} className="border-b border-gray-100 pb-3" />
             <InlineMetric label="Peak Day" value={peakDay} className="border-b border-gray-100 pb-3" />
@@ -328,7 +328,7 @@ export default function TransactionsPage() {
           </div>
         </GroupedMetricSurface>
 
-        <GroupedMetricSurface title="Channel Mix" className="lg:col-span-2">
+        <GroupedMetricSurface title="Channel Mix" titleTone="blue" className="lg:col-span-2">
           <div className="grid grid-cols-2 divide-x divide-gray-100">
             <button
               type="button"
@@ -399,7 +399,13 @@ export default function TransactionsPage() {
 
       {showChart && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3">
-          <div className="max-h-[90vh] w-full max-w-[900px] overflow-y-auto rounded-2xl bg-white shadow-xl">
+          <div className="relative max-h-[90vh] w-full max-w-[900px] overflow-y-auto rounded-2xl bg-white shadow-xl">
+            <button
+              onClick={() => setShowChart(false)}
+              className="absolute right-3 top-3 z-10 inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 sm:min-h-10 sm:px-4"
+            >
+              Close
+            </button>
             <ChartCard
               title={
                 chartMode === "pos"
@@ -409,15 +415,7 @@ export default function TransactionsPage() {
                     : "Transaction Volume"
               }
               subtitle="USD volume by provider from the existing transactions chart endpoint"
-              action={
-              <button
-                onClick={() => setShowChart(false)}
-                className="inline-flex min-h-9 items-center rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50"
-              >
-                Close
-              </button>
-              }
-              className="border-0 shadow-none"
+              className="border-0 pt-14 shadow-none"
             >
 
             <div className="flex flex-wrap gap-2 mb-6">

@@ -14,14 +14,21 @@ export function DashboardSection({
   eyebrow,
   action,
   children,
+  titleTone = "default",
   className = ""
 }: {
   title?: string
   eyebrow?: string
   action?: ReactNode
   children: ReactNode
+  titleTone?: "default" | "blue"
   className?: string
 }) {
+  const titleClass =
+    titleTone === "blue"
+      ? "mt-0.5 text-base font-semibold text-blue-700 md:text-lg"
+      : "mt-0.5 text-base font-semibold text-gray-950 md:text-lg"
+
   return (
     <section className={cx("space-y-3 md:space-y-4", className)}>
       {(title || eyebrow || action) && (
@@ -33,7 +40,7 @@ export function DashboardSection({
               </p>
             )}
             {title && (
-              <h2 className="mt-0.5 text-base font-semibold text-gray-950 md:text-lg">
+              <h2 className={titleClass}>
                 {title}
               </h2>
             )}
@@ -130,16 +137,23 @@ export function MetricGrid({
 export function GroupedMetricSurface({
   title,
   children,
+  titleTone = "default",
   className = ""
 }: {
   title?: string
   children: ReactNode
+  titleTone?: "default" | "blue"
   className?: string
 }) {
   return (
     <div className={cx(surfaceClass, "rounded-2xl p-4 sm:p-5", className)}>
       {title && (
-        <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">
+        <p
+          className={cx(
+            "mb-3 text-[11px] font-semibold uppercase tracking-[0.14em]",
+            titleTone === "blue" ? "text-blue-700" : "text-gray-500"
+          )}
+        >
           {title}
         </p>
       )}
@@ -287,19 +301,28 @@ export function ChartCard({
   subtitle,
   action,
   children,
+  titleTone = "default",
   className = ""
 }: {
   title: string
   subtitle?: string
   action?: ReactNode
   children: ReactNode
+  titleTone?: "default" | "blue"
   className?: string
 }) {
   return (
     <div className={cx(surfaceClass, "rounded-2xl p-4 sm:p-5", className)}>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-base font-semibold text-gray-950 md:text-lg">{title}</h2>
+          <h2
+            className={cx(
+              "text-base font-semibold md:text-lg",
+              titleTone === "blue" ? "text-blue-700" : "text-gray-950"
+            )}
+          >
+            {title}
+          </h2>
           {subtitle && <p className="mt-1 text-sm text-gray-500">{subtitle}</p>}
         </div>
         {action}
