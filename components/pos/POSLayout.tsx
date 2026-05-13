@@ -698,15 +698,15 @@ export default function POSLayout({ terminalContext }: Props) {
 
         {/* ── CONFIRMED ── */}
         {status === "confirmed" && (
-          <div className="flex flex-col items-center gap-3 py-4">
-            <PaymentStatusVisual status="CONFIRMED" size="compact" />
+          <div className="py-3">
+            <PaymentStatusVisual status="CONFIRMED" variant="card" />
           </div>
         )}
 
         {/* ── INCOMPLETE ── */}
         {status === "incomplete" && (
-          <div className="flex flex-col items-center gap-3 py-4">
-            <PaymentStatusVisual status="INCOMPLETE" size="compact" />
+          <div className="flex flex-col items-center gap-3 py-3">
+            <PaymentStatusVisual status="INCOMPLETE" variant="card" />
             <Button variant="secondary" fullWidth onClick={resetSale}>
               Back
             </Button>
@@ -715,10 +715,10 @@ export default function POSLayout({ terminalContext }: Props) {
 
         {/* ── FAILED ── */}
         {status === "failed" && (
-          <div className="flex flex-col items-center gap-3 py-4">
+          <div className="flex flex-col items-center gap-3 py-3">
             <PaymentStatusVisual
               status="FAILED"
-              size="compact"
+              variant="card"
               messageOverride={paymentError || undefined}
             />
             {paymentError && (
@@ -732,8 +732,8 @@ export default function POSLayout({ terminalContext }: Props) {
 
         {/* ── EXPIRED ── */}
         {status === "expired" && (
-          <div className="flex flex-col items-center gap-3 py-4">
-            <PaymentStatusVisual status="EXPIRED" size="compact" />
+          <div className="flex flex-col items-center gap-3 py-3">
+            <PaymentStatusVisual status="EXPIRED" variant="card" />
             <Button variant="secondary" fullWidth onClick={resetSale}>
               Back
             </Button>

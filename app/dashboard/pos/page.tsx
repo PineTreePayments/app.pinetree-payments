@@ -498,7 +498,7 @@ export default function POSPage() {
             <div
               key={t.id}
               ref={expandedTerminalId === t.id ? detailsRef : null}
-              className="relative flex flex-col gap-4 rounded-2xl border border-gray-200/80 bg-gradient-to-br from-white to-gray-50/70 p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:border-blue-200 md:flex-row md:items-center md:justify-between"
+              className="relative flex flex-col gap-4 rounded-2xl bg-gray-50/70 p-4 shadow-[0_8px_24px_rgba(15,23,42,0.035)] transition hover:bg-blue-50/40 md:flex-row md:items-center md:justify-between"
             >
 
               <div>
@@ -542,7 +542,7 @@ export default function POSPage() {
               </div>
 
               {expandedTerminalId === t.id && (
-                <div className="md:absolute md:right-4 md:top-14 z-20 w-full md:w-72 bg-white border border-gray-200 rounded-xl shadow-xl p-3 text-xs text-gray-600 space-y-1">
+                <div className="md:absolute md:right-4 md:top-14 z-20 w-full md:w-72 rounded-xl bg-white p-3 text-xs text-gray-600 shadow-xl shadow-gray-900/10 ring-1 ring-gray-100 space-y-1">
                   <div><span className="font-medium text-gray-800">Auto-lock:</span> {formatAutoLock(t.autolock)}</div>
                   <div><span className="font-medium text-gray-800">Merchant:</span> {t.merchant_id || "-"}</div>
                   <div>
@@ -575,7 +575,7 @@ export default function POSPage() {
               const balance = drawer?.balance ?? null
               const lastEntry = drawer?.lastEntry
               return (
-                <div key={t.id} className="flex flex-col gap-3 rounded-2xl border border-gray-200/80 bg-gradient-to-br from-white to-gray-50/70 p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:flex-row sm:items-center sm:justify-between">
+                <div key={t.id} className="flex flex-col gap-3 rounded-2xl bg-gray-50/70 p-4 shadow-[0_8px_24px_rgba(15,23,42,0.035)] transition hover:bg-blue-50/40 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="font-semibold text-gray-950">{t.name}</p>
                     {lastEntry ? (

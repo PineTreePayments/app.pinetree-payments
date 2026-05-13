@@ -1069,16 +1069,15 @@ export default function PayClient() {
       terminalPaymentStatus === "INCOMPLETE" || terminalPaymentStatus === "CANCELED"
     return (
       <PageContainer>
-        <Card className="max-w-md w-full text-center space-y-4" padding={false}>
-          <div className="p-8 space-y-5">
-            <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
-            <PaymentStatusVisual
-              status={terminalPaymentStatus}
-              labelOverride={isMerchantCanceled ? "Sale canceled" : undefined}
-              messageOverride={isMerchantCanceled ? "This payment was canceled by the merchant." : undefined}
-            />
-          </div>
-        </Card>
+        <div className="w-full max-w-md space-y-3 text-center">
+          <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
+          <PaymentStatusVisual
+            status={terminalPaymentStatus}
+            variant="card"
+            labelOverride={isMerchantCanceled ? "Sale canceled" : undefined}
+            messageOverride={isMerchantCanceled ? "This payment was canceled by the merchant." : undefined}
+          />
+        </div>
       </PageContainer>
     )
   }
@@ -1090,10 +1089,10 @@ export default function PayClient() {
   ) {
     return (
       <PageContainer>
-        <Card className="max-w-md w-full text-center space-y-4">
+        <div className="w-full max-w-md space-y-3 text-center">
           <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
-          <PaymentStatusVisual status="PROCESSING" />
-        </Card>
+          <PaymentStatusVisual status="PROCESSING" variant="card" />
+        </div>
       </PageContainer>
     )
   }

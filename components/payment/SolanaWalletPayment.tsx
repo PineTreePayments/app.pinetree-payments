@@ -602,11 +602,11 @@ export default function SolanaWalletPayment({
 
   if (terminalStatus) {
     return (
-      <div className="space-y-4" onClick={(event) => event.stopPropagation()}>
-        <div className="text-xs uppercase tracking-widest text-gray-500 text-center font-semibold">
+      <div className="space-y-3" onClick={(event) => event.stopPropagation()}>
+        <div className="text-center text-xs font-semibold uppercase tracking-widest text-[#0052FF]">
           Solana Network Payment
         </div>
-        <PaymentStatusVisual status={terminalStatus} className="py-2" />
+        <PaymentStatusVisual status={terminalStatus} variant="card" />
       </div>
     )
   }

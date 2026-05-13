@@ -2904,11 +2904,11 @@ export default function BaseWalletPayment({
   // ── Render helpers ────────────────────────────────────────────────────────
   if (terminalStatus) {
     return (
-      <div className="space-y-4">
-        <div className="text-xs uppercase tracking-widest text-gray-500 text-center">
+      <div className="space-y-3">
+        <div className="text-center text-xs font-semibold uppercase tracking-widest text-[#0052FF]">
           Base Network Payment
         </div>
-        <PaymentStatusVisual status={terminalStatus} className="py-2" />
+        <PaymentStatusVisual status={terminalStatus} variant="card" />
       </div>
     )
   }
