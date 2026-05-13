@@ -49,6 +49,42 @@ type WebhookConfig = {
   enabled: boolean
 } | null
 
+type ApiKeyListItem = {
+  id: string
+  name: string | null
+  prefix: string
+  permissions: string[]
+  lastUsedAt: string | null
+  createdAt: string
+}
+
+type CreatedApiKey = {
+  id: string
+  name: string | null
+  key: string
+  prefix: string
+  permissions: string[]
+  createdAt: string
+}
+
+type WebhookDelivery = {
+  id: string
+  event: string
+  status: string
+  response_status: number | null
+  attempt_count: number
+  created_at: string
+}
+
+type TestSession = {
+  sessionId: string
+  token: string
+  checkoutUrl: string
+  amount: number
+  currency: string
+  expiresAt: string | null
+} | null
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const EXPIRATION_LABELS: Record<Expiration, string> = {
@@ -82,6 +118,15 @@ function fmtDate(iso: string) {
     month: "short",
     day: "numeric",
     year: "numeric",
+  })
+}
+
+function fmtDateTime(iso: string) {
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   })
 }
 
@@ -300,7 +345,29 @@ export default function OnlineCheckoutPage() {
   const [webhookSaving, setWebhookSaving] = useState(false)
   const [showSecret, setShowSecret] = useState(false)
 
-  // Form state
+  // Webhook deliveries
+  const [deliveries, setDeliveries] = useState<WebhookDelivery[]>([])
+  const [deliveriesLoading, setDeliveriesLoading] = useState(false)
+
+  // API keys
+  const [apiKeys, setApiKeys] = useState<ApiKeyListItem[]>([])
+  const [apiKeysLoading, setApiKeysLoading] = useState(false)
+  const apiKeysLoadedRef = useRef(false)
+  const [newKeyName, setNewKeyName] = useState("")
+  const [creatingKey, setCreatingKey] = useState(false)
+  const [revealedKey, setRevealedKey] = useState<CreatedApiKey | null>(null)
+  const [revokingKeyId, setRevokingKeyId] = useState<string | null>(null)
+
+  // Test checkout session
+  const [testAmount, setTestAmount] = useState("")
+  const [testOrderId, setTestOrderId] = useState("")
+  const [testEmail, setTestEmail] = useState("")
+  const [testSuccessUrl, setTestSuccessUrl] = useState("")
+  const [testCancelUrl, setTestCancelUrl] = useState("")
+  const [testSessionLoading, setTestSessionLoading] = useState(false)
+  const [testSession, setTestSession] = useState<TestSession>(null)
+
+  // Create payment link form
   const [name, setName] = useState("")
   const [amount, setAmount] = useState("")
   const [description, setDescription] = useState("")
@@ -379,6 +446,44 @@ export default function OnlineCheckoutPage() {
     }
   }, [getToken])
 
+  const fetchDeliveries = useCallback(async () => {
+    setDeliveriesLoading(true)
+    try {
+      const token = await getToken()
+      if (!token) return
+      const res = await fetch("/api/merchant/webhook-deliveries", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      })
+      if (!res.ok) return
+      const data = (await res.json()) as { deliveries: WebhookDelivery[] }
+      setDeliveries(data.deliveries ?? [])
+    } catch {
+      // silent
+    } finally {
+      setDeliveriesLoading(false)
+    }
+  }, [getToken])
+
+  const fetchApiKeys = useCallback(async () => {
+    setApiKeysLoading(true)
+    try {
+      const token = await getToken()
+      if (!token) return
+      const res = await fetch("/api/merchant/api-keys", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      })
+      if (!res.ok) return
+      const data = (await res.json()) as { keys: ApiKeyListItem[] }
+      setApiKeys(data.keys ?? [])
+    } catch {
+      // silent
+    } finally {
+      setApiKeysLoading(false)
+    }
+  }, [getToken])
+
   useEffect(() => {
     void fetchLinks()
     void fetchStats()
@@ -387,8 +492,13 @@ export default function OnlineCheckoutPage() {
   useEffect(() => {
     if (tab === "webhooks") {
       void fetchWebhookConfig()
+      void fetchDeliveries()
     }
-  }, [tab, fetchWebhookConfig])
+    if (tab === "developer" && !apiKeysLoadedRef.current) {
+      apiKeysLoadedRef.current = true
+      void fetchApiKeys()
+    }
+  }, [tab, fetchWebhookConfig, fetchDeliveries, fetchApiKeys])
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
@@ -520,6 +630,98 @@ export default function OnlineCheckoutPage() {
     )
   }
 
+  async function handleCreateApiKey(e: React.FormEvent) {
+    e.preventDefault()
+    setCreatingKey(true)
+    try {
+      const token = await getToken()
+      const res = await fetch("/api/merchant/api-keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: newKeyName.trim() || undefined }),
+      })
+      const data = (await res.json()) as { key?: CreatedApiKey; error?: string }
+      if (!res.ok) throw new Error(data.error || "Failed to create API key")
+      if (data.key) {
+        setRevealedKey(data.key)
+        setApiKeys((prev) => [
+          {
+            id: data.key!.id,
+            name: data.key!.name,
+            prefix: data.key!.prefix,
+            permissions: data.key!.permissions,
+            lastUsedAt: null,
+            createdAt: data.key!.createdAt,
+          },
+          ...prev,
+        ])
+        setNewKeyName("")
+        toast.success("API key created — copy it now")
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create API key")
+    } finally {
+      setCreatingKey(false)
+    }
+  }
+
+  async function handleRevokeApiKey(id: string) {
+    setRevokingKeyId(id)
+    try {
+      const token = await getToken()
+      const res = await fetch(`/api/merchant/api-keys/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string }
+        throw new Error(data.error || "Failed to revoke key")
+      }
+      setApiKeys((prev) => prev.filter((k) => k.id !== id))
+      if (revealedKey?.id === id) setRevealedKey(null)
+      toast.success("API key revoked")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to revoke key")
+    } finally {
+      setRevokingKeyId(null)
+    }
+  }
+
+  async function handleCreateTestSession(e: React.FormEvent) {
+    e.preventDefault()
+    const parsedAmount = parseFloat(testAmount)
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      toast.error("Enter a valid amount")
+      return
+    }
+    setTestSessionLoading(true)
+    setTestSession(null)
+    try {
+      const token = await getToken()
+      const body: Record<string, unknown> = { amount: parsedAmount, currency: "USD" }
+      if (testOrderId.trim()) body.orderId = testOrderId.trim()
+      if (testEmail.trim()) body.customerEmail = testEmail.trim()
+      if (testSuccessUrl.trim()) body.successUrl = testSuccessUrl.trim()
+      if (testCancelUrl.trim()) body.cancelUrl = testCancelUrl.trim()
+
+      const res = await fetch("/api/checkout/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      })
+      const data = (await res.json()) as { session?: TestSession; error?: string }
+      if (!res.ok) throw new Error(data.error || "Failed to create session")
+      if (data.session) {
+        setTestSession(data.session)
+        toast.success("Test session created")
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create session")
+    } finally {
+      setTestSessionLoading(false)
+    }
+  }
+
   // ── Derived ─────────────────────────────────────────────────────────────────
   const activeLinks = links.filter((l) => l.resolvedStatus === "active").length
   const isLoading = loading || statsLoading
@@ -535,32 +737,56 @@ export default function OnlineCheckoutPage() {
   const sessionEndpoint = `${APP_BASE}/api/checkout/session`
   const checkoutUrlPattern = `${APP_BASE}/checkout/{token}`
 
-  const htmlSnippet = `<!-- PineTree: link your existing checkout button to a payment link -->
+  const htmlSnippet = `<!-- Option 1: Static link to a payment link (no backend needed).
+     Replace YOUR_LINK_TOKEN with the token from the Payment Links tab. -->
 <a href="${APP_BASE}/checkout/YOUR_LINK_TOKEN" target="_blank">
   <button>Pay with Crypto</button>
-</a>`
+</a>
 
-  const jsSnippet = `// PineTree: create a session from your backend and redirect
-const res = await fetch('${sessionEndpoint}', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': 'Bearer <your_token>'
-  },
-  body: JSON.stringify({
-    amount: 49.99,
-    currency: 'USD',
-    orderId: 'order_1042',
-    customerEmail: 'customer@example.com',
-    successUrl: 'https://yourstore.com/success',
-    cancelUrl: 'https://yourstore.com/cancel'
+<!-- Option 2: Dynamic session — your frontend calls YOUR backend.
+     NEVER call PineTree with your pt_live_ key from the browser. -->
+<button onclick="startCheckout()">Pay with Crypto</button>
+<script>
+  async function startCheckout() {
+    const res = await fetch('/api/your-checkout-handler', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: 49.99, orderId: 'order_1042' })
+    })
+    const { checkoutUrl } = await res.json()
+    window.location.href = checkoutUrl
+  }
+</script>`
+
+  const nodeSnippet = `// Node.js / Express — backend endpoint that creates a PineTree session.
+// Your pt_live_ API key stays here, never in the browser.
+const express = require('express')
+const app = express()
+app.use(express.json())
+
+app.post('/api/your-checkout-handler', async (req, res) => {
+  const response = await fetch('${sessionEndpoint}', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer pt_live_YOUR_API_KEY'
+    },
+    body: JSON.stringify({
+      amount: req.body.amount,
+      currency: 'USD',
+      orderId: req.body.orderId,
+      customerEmail: req.body.email,
+      successUrl: 'https://yourstore.com/success',
+      cancelUrl: 'https://yourstore.com/cancel'
+    })
   })
-})
-const { session } = await res.json()
-window.location.href = session.checkoutUrl`
+  const { session } = await response.json()
+  res.json({ checkoutUrl: session.checkoutUrl })
+})`
 
-  const curlSnippet = `curl -X POST ${sessionEndpoint} \\
-  -H "Authorization: Bearer <your_token>" \\
+  const curlSnippet = `# Server-side only — never expose pt_live_ keys in browser code
+curl -X POST ${sessionEndpoint} \\
+  -H "Authorization: Bearer pt_live_YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
     "amount": 49.99,
@@ -581,6 +807,29 @@ export default function CheckoutPage() {
       orderId="order_1042"
       onSuccess={(session) => router.push('/success')}
     />
+  )
+}`
+
+  const webhookVerifySnippet = `const crypto = require('crypto')
+
+// IMPORTANT: pass the raw request body — not JSON.stringify(req.body).
+// Any whitespace difference will break the signature.
+function verifyPineTreeWebhook(rawBody, headers, secret) {
+  const signature = headers['x-pinetree-signature'] // "sha256=<hex>"
+  const timestamp  = headers['x-pinetree-timestamp']  // ISO string
+
+  // Reject stale events (replay attack protection — 5 min window)
+  const ageMs = Date.now() - new Date(timestamp).getTime()
+  if (ageMs > 5 * 60 * 1000) throw new Error('Webhook timestamp too old')
+
+  const expected = 'sha256=' + crypto
+    .createHmac('sha256', secret)
+    .update(rawBody)   // rawBody must be the original Buffer or string
+    .digest('hex')
+
+  return crypto.timingSafeEqual(
+    Buffer.from(expected),
+    Buffer.from(signature)
   )
 }`
 
@@ -626,7 +875,7 @@ export default function CheckoutPage() {
     {
       id: "rest-api",
       title: "REST API",
-      description: "Full server-side control: create sessions, list links, query payment status. Auth via bearer token.",
+      description: "Full server-side control: create sessions, list links, query payment status. Auth via API key.",
       useCase: "Custom integrations, marketplaces",
       difficulty: "Advanced",
       status: "preview",
@@ -913,9 +1162,16 @@ export default function CheckoutPage() {
           <div className="rounded-2xl border border-amber-200/80 bg-amber-50/60 px-4 py-3.5">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">Authentication</p>
             <p className="mt-1.5 text-sm leading-relaxed text-gray-700">
-              All API calls require a valid Supabase session token in the{" "}
-              <code className="rounded bg-amber-100 px-1 font-mono text-[11px]">Authorization: Bearer &lt;token&gt;</code>{" "}
-              header. Dedicated API keys for server-to-server use are on the roadmap.
+              API calls from your server must use a{" "}
+              <code className="rounded bg-amber-100 px-1 font-mono text-[11px]">pt_live_...</code>{" "}
+              API key in the{" "}
+              <code className="rounded bg-amber-100 px-1 font-mono text-[11px]">Authorization: Bearer</code>{" "}
+              header. Create and manage keys in the{" "}
+              <button type="button" onClick={() => setTab("developer")}
+                className="font-semibold underline text-amber-800 hover:text-amber-900">
+                Developer tab
+              </button>.{" "}
+              Never expose API keys in frontend JavaScript — they must remain server-side only.
             </p>
           </div>
         </div>
@@ -977,11 +1233,21 @@ export default function CheckoutPage() {
             <DashboardSection title="Signing Secret">
               <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
                 <div className="p-5 sm:p-6">
-                  <p className="mb-4 text-xs leading-relaxed text-gray-500">
-                    Verify incoming webhook calls using HMAC-SHA256. Compare the{" "}
+                  <p className="mb-3 text-xs leading-relaxed text-gray-500">
+                    Verify incoming webhook requests using HMAC-SHA256. Compare the{" "}
                     <code className="rounded bg-gray-100 px-1 font-mono text-[11px]">X-PineTree-Signature</code>{" "}
-                    header against a local signature built with this secret.
+                    header against a local signature built from the <strong>raw request body</strong> and this secret.
+                    Also check <code className="rounded bg-gray-100 px-1 font-mono text-[11px]">X-PineTree-Timestamp</code>{" "}
+                    to reject replayed events.
                   </p>
+                  <div className="mb-4 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3.5 py-2.5">
+                    <p className="text-[11px] font-semibold text-amber-700">Verify the raw request body — before any JSON parsing</p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-amber-800">
+                      Pass the original body bytes to HMAC, not{" "}
+                      <code className="font-mono">JSON.stringify(req.body)</code>.
+                      Whitespace differences will produce a different signature and verification will fail silently.
+                    </p>
+                  </div>
                   <div className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50/60 px-3.5 py-2.5">
                     <div className="min-w-0 flex-1">
                       <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">Signing Secret</p>
@@ -1010,18 +1276,7 @@ export default function CheckoutPage() {
                 <div className="border-t border-gray-100 bg-gray-50/60 px-5 py-4 sm:px-6">
                   <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-400">Verification example (Node.js)</p>
                   <CodeBlock
-                    code={`const crypto = require('crypto')
-
-function verifyPineTreeWebhook(body, signature, secret) {
-  const expected = 'sha256=' + crypto
-    .createHmac('sha256', secret)
-    .update(body)
-    .digest('hex')
-  return crypto.timingSafeEqual(
-    Buffer.from(expected),
-    Buffer.from(signature)
-  )
-}`}
+                    code={webhookVerifySnippet}
                     fieldId="verify_snippet"
                     copiedField={copiedField}
                     onCopy={handleCopyField}
@@ -1032,13 +1287,75 @@ function verifyPineTreeWebhook(body, signature, secret) {
             </DashboardSection>
           )}
 
-          <div className="rounded-2xl border border-blue-200/80 bg-blue-50/60 px-4 py-3.5">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">Delivery Status</p>
-            <p className="mt-1.5 text-sm leading-relaxed text-gray-700">
-              Webhook delivery logs are stored in the database. Automatic retries and a delivery history UI are on the roadmap.
-              For now, configure your endpoint and PineTree will attempt delivery on each payment event.
-            </p>
-          </div>
+          {/* ── Webhook Delivery Log ──────────────────────────────────────── */}
+          <DashboardSection title="Delivery Log">
+            <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+              <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-950">Recent Webhook Deliveries</h3>
+                  <p className="mt-0.5 text-xs text-gray-500">Last 50 delivery attempts across all events.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void fetchDeliveries()}
+                  disabled={deliveriesLoading}
+                  className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-600 hover:text-[#0052FF] disabled:opacity-50"
+                >
+                  {deliveriesLoading ? "Loading…" : "Refresh"}
+                </button>
+              </div>
+
+              {deliveriesLoading ? (
+                <div className="flex items-center justify-center py-10">
+                  <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
+                </div>
+              ) : deliveries.length === 0 ? (
+                <div className="px-5 py-10 text-center">
+                  <p className="text-sm text-gray-400">No webhook deliveries yet.</p>
+                  <p className="mt-1 text-xs text-gray-400">Deliveries appear here after payment events are triggered.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100">
+                        {["Event", "Status", "HTTP", "Attempts", "Time"].map((h) => (
+                          <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-500">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {deliveries.map((d) => (
+                        <tr key={d.id} className="transition-colors hover:bg-gray-50/60">
+                          <td className="px-5 py-3.5">
+                            <code className="font-mono text-[11px] text-gray-800">{d.event}</code>
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                              d.status === "delivered"
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-red-200 bg-red-50 text-red-700"
+                            }`}>
+                              {d.status}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3.5 font-mono text-[12px] text-gray-500">
+                            {d.response_status ?? "—"}
+                          </td>
+                          <td className="px-5 py-3.5 text-[12px] text-gray-500">
+                            {d.attempt_count}
+                          </td>
+                          <td className="px-5 py-3.5 text-[12px] text-gray-500">
+                            {fmtDateTime(d.created_at)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </DashboardSection>
         </div>
       )}
 
@@ -1048,42 +1365,237 @@ function verifyPineTreeWebhook(body, signature, secret) {
       {tab === "developer" && (
         <div className="space-y-6">
 
-          <DashboardSection title="HTML Button">
+          {/* ── API Keys ──────────────────────────────────────────────────── */}
+          <DashboardSection title="API Keys">
             <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-950">Static HTML Button</h3>
-                  <p className="mt-0.5 text-xs text-gray-500">Link any button to an active payment link — no backend needed.</p>
+                  <h3 className="text-sm font-semibold text-gray-950">Secret API Keys</h3>
+                  <p className="mt-0.5 text-xs text-gray-500">For server-to-server requests. Never expose in frontend code.</p>
                 </div>
                 <LiveBadge />
               </div>
-              <div className="p-5">
+
+              <div className="space-y-5 p-5">
+                {/* Create key form */}
+                <form onSubmit={(e) => void handleCreateApiKey(e)} className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newKeyName}
+                    onChange={(e) => setNewKeyName(e.target.value)}
+                    placeholder="Key name (e.g. Production, Staging)"
+                    className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 outline-none focus:border-[#0052FF] focus:ring-2 focus:ring-[#0052FF]/10"
+                  />
+                  <Button type="submit" disabled={creatingKey}>
+                    {creatingKey ? "Creating…" : "Create Key"}
+                  </Button>
+                </form>
+
+                {/* One-time key reveal */}
+                {revealedKey && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <p className="text-xs font-semibold text-emerald-800">
+                        Store this key now — you will not be able to view it again.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setRevealedKey(null)}
+                        className="shrink-0 text-[11px] text-emerald-600 hover:text-emerald-800"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3 py-2">
+                      <code className="flex-1 break-all font-mono text-[11px] text-gray-900">{revealedKey.key}</code>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyField("revealed_key", revealedKey.key)}
+                        className="shrink-0 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-600 hover:text-[#0052FF]"
+                      >
+                        {copiedField === "revealed_key" ? "Copied ✓" : "Copy"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Key list */}
+                {apiKeysLoading ? (
+                  <div className="flex items-center justify-center py-6">
+                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
+                  </div>
+                ) : apiKeys.length === 0 ? (
+                  <p className="py-4 text-center text-xs text-gray-400">No API keys yet. Create one above.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-100">
+                          {["Name", "Prefix", "Created", "Last Used", ""].map((h) => (
+                            <th key={h} className={`py-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-500 ${h === "" ? "text-right" : "text-left pr-4"}`}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {apiKeys.map((k) => (
+                          <tr key={k.id} className="transition-colors hover:bg-gray-50/60">
+                            <td className="py-3 pr-4 font-medium text-gray-900">
+                              {k.name ?? <span className="italic text-gray-400">Unnamed</span>}
+                            </td>
+                            <td className="py-3 pr-4">
+                              <code className="font-mono text-[11px] text-gray-600">{k.prefix}…</code>
+                            </td>
+                            <td className="py-3 pr-4 text-[12px] text-gray-500">{fmtDate(k.createdAt)}</td>
+                            <td className="py-3 pr-4 text-[12px] text-gray-500">
+                              {k.lastUsedAt ? fmtDate(k.lastUsedAt) : "Never"}
+                            </td>
+                            <td className="py-3 text-right">
+                              <button
+                                type="button"
+                                onClick={() => void handleRevokeApiKey(k.id)}
+                                disabled={revokingKeyId === k.id}
+                                className="rounded-lg border border-red-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                              >
+                                {revokingKeyId === k.id ? "…" : "Revoke"}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </DashboardSection>
+
+          {/* ── Test Checkout Session ─────────────────────────────────────── */}
+          <DashboardSection title="Test Checkout Session">
+            <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+              <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-950">Create a Test Session</h3>
+                  <p className="mt-0.5 text-xs text-gray-500">Verify the session API works end-to-end before integrating externally.</p>
+                </div>
+                <PreviewBadge />
+              </div>
+              <div className="space-y-4 p-5">
+                <form onSubmit={(e) => void handleCreateTestSession(e)} className="space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label className={labelClass}>Amount (USD) <span className="text-red-400">*</span></label>
+                      <input type="number" value={testAmount} onChange={(e) => setTestAmount(e.target.value)}
+                        placeholder="49.99" min="0.01" step="0.01" className={inputClass} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className={labelClass}>Order / Reference</label>
+                      <input type="text" value={testOrderId} onChange={(e) => setTestOrderId(e.target.value)}
+                        placeholder="order_1042" className={inputClass} />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className={labelClass}>Customer Email</label>
+                    <input type="email" value={testEmail} onChange={(e) => setTestEmail(e.target.value)}
+                      placeholder="customer@example.com" className={inputClass} />
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label className={labelClass}>Success URL</label>
+                      <input type="url" value={testSuccessUrl} onChange={(e) => setTestSuccessUrl(e.target.value)}
+                        placeholder="https://yourstore.com/success" className={inputClass} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className={labelClass}>Cancel URL</label>
+                      <input type="url" value={testCancelUrl} onChange={(e) => setTestCancelUrl(e.target.value)}
+                        placeholder="https://yourstore.com/cancel" className={inputClass} />
+                    </div>
+                  </div>
+                  <div className="pt-1">
+                    <Button type="submit" disabled={testSessionLoading}>
+                      {testSessionLoading ? (
+                        <><span className="mr-2 inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin" />Creating…</>
+                      ) : "Create Test Checkout Session"}
+                    </Button>
+                  </div>
+                </form>
+
+                {testSession && (
+                  <div className="space-y-3 rounded-xl border border-[#0052FF]/20 bg-[#0052FF]/5 p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#0052FF]">Session Created</p>
+                    <div className="space-y-2">
+                      <CopyRow label="Checkout URL" value={testSession.checkoutUrl}
+                        fieldId="test_checkout_url" copiedField={copiedField} onCopy={handleCopyField} />
+                      <CopyRow label="Token" value={testSession.token}
+                        fieldId="test_token" copiedField={copiedField} onCopy={handleCopyField} />
+                      <div className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50/60 px-3.5 py-2.5">
+                        <div className="min-w-0 flex-1">
+                          <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">Expires At</p>
+                          <p className="text-xs text-gray-800">
+                            {testSession.expiresAt ? fmtDateTime(testSession.expiresAt) : "No expiry"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <a
+                      href={testSession.checkoutUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-[#0052FF]/30 bg-[#0052FF]/8 px-4 py-2 text-xs font-semibold text-[#0052FF] hover:bg-[#0052FF]/15"
+                    >
+                      Open Checkout ↗
+                    </a>
+                  </div>
+                )}
+              </div>
+            </div>
+          </DashboardSection>
+
+          {/* ── HTML / Frontend ───────────────────────────────────────────── */}
+          <DashboardSection title="HTML / Frontend">
+            <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+              <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-950">Frontend Integration</h3>
+                  <p className="mt-0.5 text-xs text-gray-500">Static link to a payment link, or a button that calls your backend.</p>
+                </div>
+                <LiveBadge />
+              </div>
+              <div className="space-y-3 p-5">
+                <div className="rounded-xl border border-amber-200/80 bg-amber-50/60 px-3.5 py-2.5">
+                  <p className="text-[11px] font-semibold text-amber-700">Never put API keys in frontend code</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-amber-800">
+                    Your <code className="font-mono">pt_live_...</code> key must stay on your server.
+                    For dynamic sessions, the browser calls your backend, which calls PineTree.
+                  </p>
+                </div>
                 <CodeBlock code={htmlSnippet} fieldId="html_snippet" copiedField={copiedField} onCopy={handleCopyField} lang="html" />
               </div>
             </div>
           </DashboardSection>
 
-          <DashboardSection title="JavaScript Checkout Session">
+          {/* ── Node.js / Express Backend ─────────────────────────────────── */}
+          <DashboardSection title="Node.js / Express Backend">
             <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-950">Create Session & Redirect</h3>
-                  <p className="mt-0.5 text-xs text-gray-500">Create a hosted session from your server and send the customer to the returned URL.</p>
+                  <h3 className="text-sm font-semibold text-gray-950">Server-Side Session Creation</h3>
+                  <p className="mt-0.5 text-xs text-gray-500">Create a PineTree session from your server and redirect the customer to the returned URL.</p>
                 </div>
                 <PreviewBadge />
               </div>
               <div className="p-5">
-                <CodeBlock code={jsSnippet} fieldId="js_snippet" copiedField={copiedField} onCopy={handleCopyField} lang="javascript" />
+                <CodeBlock code={nodeSnippet} fieldId="node_snippet" copiedField={copiedField} onCopy={handleCopyField} lang="node.js" />
               </div>
             </div>
           </DashboardSection>
 
+          {/* ── REST API — cURL ───────────────────────────────────────────── */}
           <DashboardSection title="REST API — cURL">
             <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
                 <div>
                   <h3 className="text-sm font-semibold text-gray-950">POST /api/checkout/session</h3>
-                  <p className="mt-0.5 text-xs text-gray-500">Create a checkout session from any backend and redirect to <code className="rounded bg-gray-100 px-1 font-mono text-[10px]">session.checkoutUrl</code>.</p>
+                  <p className="mt-0.5 text-xs text-gray-500">Create a checkout session and redirect to <code className="rounded bg-gray-100 px-1 font-mono text-[10px]">session.checkoutUrl</code>.</p>
                 </div>
                 <PreviewBadge />
               </div>
@@ -1095,10 +1607,12 @@ function verifyPineTreeWebhook(body, signature, secret) {
                     <code>{`{
   "session": {
     "sessionId": "...",
+    "token": "...",
     "checkoutUrl": "${APP_BASE}/checkout/{token}",
     "amount": 49.99,
     "currency": "USD",
-    "status": "active"
+    "status": "active",
+    "expiresAt": "2026-05-14T12:00:00.000Z"
   }
 }`}</code>
                   </pre>
@@ -1107,6 +1621,7 @@ function verifyPineTreeWebhook(body, signature, secret) {
             </div>
           </DashboardSection>
 
+          {/* ── React SDK ────────────────────────────────────────────────── */}
           <DashboardSection title="React SDK">
             <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
@@ -1125,22 +1640,28 @@ function verifyPineTreeWebhook(body, signature, secret) {
             </div>
           </DashboardSection>
 
+          {/* ── API Reference ─────────────────────────────────────────────── */}
           <div className="rounded-2xl border border-gray-100 bg-gray-50/60 px-4 py-3.5">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">API Reference</p>
             <div className="mt-2 space-y-1.5 text-xs text-gray-600">
               {[
-                { method: "GET", path: "/api/checkout-links", desc: "List all payment links", status: "Live" },
-                { method: "POST", path: "/api/checkout-links", desc: "Create a payment link", status: "Live" },
-                { method: "PATCH", path: "/api/checkout-links/:id", desc: "Disable a payment link", status: "Live" },
-                { method: "POST", path: "/api/checkout/session", desc: "Create a checkout session", status: "Preview" },
-                { method: "GET", path: "/api/checkout/stats", desc: "Online payment stats", status: "Preview" },
-                { method: "GET", path: "/api/merchant/webhooks", desc: "Get webhook config", status: "Preview" },
-                { method: "POST", path: "/api/merchant/webhooks", desc: "Save webhook config", status: "Preview" },
+                { method: "GET",    path: "/api/checkout-links",               desc: "List all payment links",       status: "Live" },
+                { method: "POST",   path: "/api/checkout-links",               desc: "Create a payment link",        status: "Live" },
+                { method: "PATCH",  path: "/api/checkout-links/:id",           desc: "Disable a payment link",       status: "Live" },
+                { method: "POST",   path: "/api/checkout/session",             desc: "Create a checkout session",    status: "Preview" },
+                { method: "GET",    path: "/api/checkout/stats",               desc: "Online payment stats",         status: "Preview" },
+                { method: "GET",    path: "/api/merchant/webhooks",            desc: "Get webhook config",           status: "Preview" },
+                { method: "POST",   path: "/api/merchant/webhooks",            desc: "Save webhook config",          status: "Preview" },
+                { method: "GET",    path: "/api/merchant/api-keys",            desc: "List API keys",                status: "Live" },
+                { method: "POST",   path: "/api/merchant/api-keys",            desc: "Create an API key",            status: "Live" },
+                { method: "DELETE", path: "/api/merchant/api-keys/:id",        desc: "Revoke an API key",            status: "Live" },
+                { method: "GET",    path: "/api/merchant/webhook-deliveries",  desc: "List webhook deliveries",      status: "Live" },
               ].map((r) => (
                 <div key={r.path} className="flex items-center gap-3">
-                  <span className={`w-10 shrink-0 rounded px-1 py-0.5 text-center text-[10px] font-bold ${
-                    r.method === "GET" ? "bg-emerald-100 text-emerald-700" :
-                    r.method === "POST" ? "bg-blue-100 text-blue-700" :
+                  <span className={`w-12 shrink-0 rounded px-1 py-0.5 text-center text-[10px] font-bold ${
+                    r.method === "GET"    ? "bg-emerald-100 text-emerald-700" :
+                    r.method === "POST"   ? "bg-blue-100 text-blue-700" :
+                    r.method === "DELETE" ? "bg-red-100 text-red-700" :
                     "bg-amber-100 text-amber-700"
                   }`}>{r.method}</span>
                   <code className="flex-1 font-mono text-[11px] text-gray-800">{r.path}</code>

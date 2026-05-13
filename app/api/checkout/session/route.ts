@@ -6,6 +6,7 @@ type SessionBody = {
   amount: number
   currency?: string
   orderId?: string
+  reference?: string
   customerEmail?: string
   description?: string
   successUrl?: string
@@ -15,7 +16,9 @@ type SessionBody = {
 
 export async function POST(req: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(req)
+    // API key callers must have checkout.sessions:create permission.
+    // Dashboard session callers are always permitted (permission param is ignored for JWTs).
+    const merchantId = await requireMerchantIdFromRequest(req, "checkout.sessions:create")
     const body = (await req.json()) as SessionBody
 
     const amount = Number(body.amount)
@@ -27,7 +30,7 @@ export async function POST(req: NextRequest) {
       merchantId,
       amount,
       currency: body.currency,
-      orderId: body.orderId ? String(body.orderId).trim() : undefined,
+      orderId: body.orderId ? String(body.orderId).trim() : body.reference ? String(body.reference).trim() : undefined,
       customerEmail: body.customerEmail ? String(body.customerEmail).trim() : undefined,
       description: body.description ? String(body.description).trim() : undefined,
       successUrl: body.successUrl ? String(body.successUrl).trim() : undefined,

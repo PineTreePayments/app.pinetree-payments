@@ -1,7 +1,10 @@
 /**
  * PineTree Payment Status Update
- * 
+ *
  * Handles payment status transitions with proper state machine validation.
+ * After each terminal-relevant transition (CONFIRMED, FAILED, INCOMPLETE),
+ * fires the corresponding merchant webhook in a fire-and-forget fashion so
+ * that webhook delivery failures never block the payment status update.
  */
 
 import {
@@ -15,12 +18,17 @@ import {
   createPaymentEvent,
   PaymentEventType
 } from "@/database"
+import { deliverWebhook, type WebhookPaymentData } from "./webhookDelivery"
+import type { WebhookEvent } from "@/database/merchantWebhooks"
+
+const STATUS_TO_WEBHOOK_EVENT: Partial<Record<PaymentStatus, WebhookEvent>> = {
+  CONFIRMED: "payment.confirmed",
+  FAILED: "payment.failed",
+  INCOMPLETE: "payment.incomplete",
+}
+
 /**
  * Update payment status with state machine validation
- * 
- * @param paymentId - The payment ID to update
- * @param nextStatus - The new status to transition to
- * @param metadata - Optional metadata for the event
  */
 export async function updatePaymentStatus(
   paymentId: string,
@@ -52,14 +60,6 @@ export async function updatePaymentStatus(
           String(split?.pinetreeWallet || "").trim()
         )
 
-    // Fee capture is considered validated when:
-    //   invoice_split / collection_then_settle → the webhook itself IS the confirmation
-    //   atomic_split (Solana)                  → watcher verified both on-chain outputs
-    //   contract_split (EVM)                   → watcher verified tx to split contract
-    //
-    // In the watcher path (atomic_split / contract_split) the rawPayload always contains
-    // feeCaptureValidated=true once the on-chain checks pass.
-    // In the webhook path (invoice_split / collection_then_settle) we trust the provider.
     const feeCaptureValidated =
       providerSettledFeeCapture ||
       feeCaptureMethod === "direct" ||
@@ -83,7 +83,7 @@ export async function updatePaymentStatus(
   // Create a payment event for audit trail
   const eventType = statusToEventType(nextStatus)
   const eventId = crypto.randomUUID()
-  
+
   await createPaymentEvent({
     id: eventId,
     payment_id: paymentId,
@@ -92,12 +92,33 @@ export async function updatePaymentStatus(
     raw_payload: metadata?.rawPayload
   })
 
+  // ── Webhook delivery ───────────────────────────────────────────────────────
+  // Fire after the DB write succeeds. Use fire-and-forget so webhook delivery
+  // failures never roll back or block the authoritative status update.
+  const webhookEvent = STATUS_TO_WEBHOOK_EVENT[nextStatus]
+  if (webhookEvent) {
+    const meta = (payment.metadata ?? null) as Record<string, unknown> | null
+    const webhookData: WebhookPaymentData = {
+      paymentId: payment.id,
+      merchantId: payment.merchant_id,
+      amount: Number(payment.merchant_amount || 0),
+      currency: payment.currency,
+      status: nextStatus,
+      network: payment.network,
+      reference: String(meta?.reference || "").trim() || undefined,
+      checkoutLinkId: String(meta?.checkoutLinkId || "").trim() || undefined,
+      confirmedAt: nextStatus === "CONFIRMED" ? new Date().toISOString() : undefined,
+      metadata: meta ?? undefined,
+    }
+
+    void deliverWebhook(payment.merchant_id, webhookEvent, webhookData).catch((err) => {
+      console.error("[webhook] delivery failed after status update:", err)
+    })
+  }
+
   return updatedPayment
 }
 
-/**
- * Convert payment status to event type
- */
 function statusToEventType(status: PaymentStatus): PaymentEventType {
   const mapping: Record<PaymentStatus, PaymentEventType> = {
     CREATED: "payment.created",
@@ -111,9 +132,6 @@ function statusToEventType(status: PaymentStatus): PaymentEventType {
   return mapping[status]
 }
 
-/**
- * Mark a payment as confirmed
- */
 export async function confirmPayment(
   paymentId: string,
   metadata?: { providerEvent?: string; rawPayload?: unknown }
@@ -121,9 +139,6 @@ export async function confirmPayment(
   return updatePaymentStatus(paymentId, "CONFIRMED", metadata)
 }
 
-/**
- * Mark a payment as failed
- */
 export async function failPayment(
   paymentId: string,
   metadata?: { providerEvent?: string; rawPayload?: unknown }
@@ -131,9 +146,6 @@ export async function failPayment(
   return updatePaymentStatus(paymentId, "FAILED", metadata)
 }
 
-/**
- * Mark a payment as processing
- */
 export async function startProcessingPayment(
   paymentId: string,
   metadata?: { providerEvent?: string; rawPayload?: unknown }
@@ -141,13 +153,9 @@ export async function startProcessingPayment(
   return updatePaymentStatus(paymentId, "PROCESSING", metadata)
 }
 
-/**
- * Mark a payment as expired
- */
 export async function expirePayment(
   paymentId: string,
   metadata?: { providerEvent?: string; rawPayload?: unknown }
 ) {
   return updatePaymentStatus(paymentId, "INCOMPLETE", metadata)
 }
-

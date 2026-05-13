@@ -229,6 +229,8 @@ export default function PayClient() {
   const solflareAction = searchParams.get("solflare_action")
   const solflareError = searchParams.get("solflare_error")
   const phantomError = searchParams.get("phantom_error")
+  const successUrl = searchParams.get("success_url")
+  const cancelUrl = searchParams.get("cancel_url")
   const isWalletBrowserMode =
     walletBrowserMode === "wallet-browser" &&
     walletBrowserWallet === "phantom" &&
@@ -1067,6 +1069,9 @@ export default function PayClient() {
   if (isIntentMode && terminalPaymentStatus) {
     const isMerchantCanceled =
       terminalPaymentStatus === "INCOMPLETE" || terminalPaymentStatus === "CANCELED"
+    const isConfirmed = terminalPaymentStatus === "CONFIRMED"
+    const returnUrl = isConfirmed ? successUrl : cancelUrl
+    const returnLabel = isConfirmed ? "Return to merchant" : "Return to store"
     return (
       <PageContainer>
         <div className="w-full max-w-md space-y-3 text-center">
@@ -1077,6 +1082,14 @@ export default function PayClient() {
             labelOverride={isMerchantCanceled ? "Sale canceled" : undefined}
             messageOverride={isMerchantCanceled ? "This payment was canceled by the merchant." : undefined}
           />
+          {returnUrl && (
+            <a
+              href={returnUrl}
+              className="inline-block rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:border-[#0052FF]/30 hover:text-[#0052FF]"
+            >
+              {returnLabel}
+            </a>
+          )}
         </div>
       </PageContainer>
     )

@@ -1,5 +1,6 @@
 import { createCheckoutLinkEngine } from "./checkoutLinks"
 import type { CheckoutLinkWithUrl } from "./checkoutLinks"
+import { deliverWebhook, type WebhookPaymentData } from "./webhookDelivery"
 
 export type CreateCheckoutSessionInput = {
   merchantId: string
@@ -15,10 +16,12 @@ export type CreateCheckoutSessionInput = {
 
 export type CheckoutSession = {
   sessionId: string
+  token: string
   checkoutUrl: string
   amount: number
   currency: string
   status: "active"
+  expiresAt: string | null
 }
 
 function validateUrl(url: string, field: string): void {
@@ -66,11 +69,28 @@ export async function createCheckoutSessionEngine(
     metadata: sessionMetadata,
   })
 
+  // Fire checkout.session.created webhook — fire-and-forget, non-blocking
+  const webhookData: WebhookPaymentData = {
+    paymentId: link.id,
+    merchantId,
+    amount,
+    currency,
+    status: "active",
+    reference: input.orderId,
+    checkoutLinkId: link.id,
+    metadata: sessionMetadata,
+  }
+  void deliverWebhook(merchantId, "checkout.session.created", webhookData).catch((err) => {
+    console.error("[webhook] checkout.session.created delivery failed:", err)
+  })
+
   return {
     sessionId: link.id,
+    token: link.public_token,
     checkoutUrl: link.checkoutUrl,
     amount,
     currency,
     status: "active",
+    expiresAt: link.expires_at ?? null,
   }
 }

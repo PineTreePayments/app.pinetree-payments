@@ -19,24 +19,35 @@ export type WebhookPaymentData = {
   metadata?: Record<string, unknown>
 }
 
+function generateEventId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(12))
+  const hex = Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+  return `evt_${hex}`
+}
+
 function buildEventPayload(
   event: WebhookEvent,
   data: WebhookPaymentData
-): Record<string, unknown> {
+): { payload: Record<string, unknown>; timestamp: string } {
+  const timestamp = new Date().toISOString()
   return {
-    event,
-    created: new Date().toISOString(),
-    data: {
-      id: data.paymentId,
-      merchant_id: data.merchantId,
-      amount: data.amount,
-      currency: data.currency,
-      status: data.status,
-      network: data.network ?? null,
-      reference: data.reference ?? null,
-      checkout_link_id: data.checkoutLinkId ?? null,
-      confirmed_at: data.confirmedAt ?? null,
-      metadata: data.metadata ?? null,
+    timestamp,
+    payload: {
+      id: generateEventId(),
+      type: event,
+      created: timestamp,
+      merchantId: data.merchantId,
+      data: {
+        paymentId: data.paymentId,
+        checkoutLinkId: data.checkoutLinkId ?? null,
+        amount: data.amount,
+        currency: data.currency,
+        status: data.status,
+        reference: data.reference ?? null,
+        metadata: data.metadata ?? null,
+      },
     },
   }
 }
@@ -72,7 +83,7 @@ export async function deliverWebhook(
   if (!webhookConfig || !webhookConfig.enabled) return
   if (!webhookConfig.events.includes(event)) return
 
-  const payload = buildEventPayload(event, data)
+  const { payload, timestamp } = buildEventPayload(event, data)
   const payloadJson = JSON.stringify(payload)
 
   let signature = ""
@@ -95,8 +106,9 @@ export async function deliverWebhook(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-PineTree-Signature": `sha256=${signature}`,
         "X-PineTree-Event": event,
+        "X-PineTree-Signature": `sha256=${signature}`,
+        "X-PineTree-Timestamp": timestamp,
       },
       body: payloadJson,
       signal: controller.signal,
