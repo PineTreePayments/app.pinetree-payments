@@ -109,19 +109,14 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
               <!-- Stats row -->
               <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
                 <tr>
-                  <td style="padding:14px 16px;border:1px solid #e5e7eb;border-radius:8px;text-align:center;width:31%;">
+                  <td style="padding:14px 16px;border:1px solid #e5e7eb;border-radius:8px;text-align:center;">
                     <div style="font-size:11px;color:#9ba3af;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Transactions</div>
                     <div style="font-size:20px;font-weight:800;color:#0f1728;margin-top:4px;">${report.transactionCount}</div>
                   </td>
-                  <td width="10"></td>
-                  <td style="padding:14px 16px;border:1px solid #e5e7eb;border-radius:8px;text-align:center;width:31%;">
+                  <td width="16"></td>
+                  <td style="padding:14px 16px;border:1px solid #e5e7eb;border-radius:8px;text-align:center;">
                     <div style="font-size:11px;color:#9ba3af;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Success Rate</div>
                     <div style="font-size:20px;font-weight:800;color:#0f1728;margin-top:4px;">${report.successRate}%</div>
-                  </td>
-                  <td width="10"></td>
-                  <td style="padding:14px 16px;border:1px solid #e5e7eb;border-radius:8px;text-align:center;width:31%;">
-                    <div style="font-size:11px;color:#9ba3af;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">PineTree Fees</div>
-                    <div style="font-size:20px;font-weight:800;color:#0f1728;margin-top:4px;">${currency(report.pineTreeFees)}</div>
                   </td>
                 </tr>
               </table>
@@ -134,14 +129,15 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
               </div>
               ` : ""}
 
-              <!-- Attachment callout -->
-              <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:16px 20px;margin-bottom:28px;display:flex;align-items:center;">
-                <span style="font-size:20px;margin-right:12px;vertical-align:middle;">&#128196;</span>
-                <div style="display:inline-block;vertical-align:middle;">
-                  <div style="font-size:13px;font-weight:700;color:#1d4ed8;">${filename}</div>
-                  <div style="font-size:12px;color:#6b7280;margin-top:2px;">Attached to this email &mdash; open with your preferred application.</div>
-                </div>
-              </div>
+              <!-- Attachment CTA -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+                <tr>
+                  <td bgcolor="#0052FF" style="background-color:#0052FF;border-radius:10px;padding:20px 24px;text-align:center;">
+                    <p style="margin:0;font-size:15px;font-weight:700;color:#ffffff;letter-spacing:-0.2px;">Open Attached Report</p>
+                    <p style="margin:6px 0 0;font-size:12px;color:rgba(255,255,255,0.8);">${filename}</p>
+                  </td>
+                </tr>
+              </table>
 
               <!-- Generated at -->
               <p style="font-size:12px;color:#9ba3af;margin:0;">
