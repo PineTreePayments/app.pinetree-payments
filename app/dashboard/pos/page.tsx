@@ -475,7 +475,10 @@ export default function POSPage() {
             Active Terminals
           </h2>
 
-          <Button onClick={()=>setCreating(true)}>
+          <Button
+            onClick={()=>setCreating(true)}
+            className="h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm"
+          >
             + New Terminal
           </Button>
 

@@ -240,7 +240,7 @@ export default function DashboardPage() {
         <button
           onClick={syncNow}
           disabled={isSyncing}
-          className="inline-flex min-h-8 shrink-0 items-center justify-center rounded-full bg-blue-600 px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-10 sm:rounded-xl sm:px-4 sm:text-sm"
+          className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-10 sm:px-4"
         >
           <span className="sm:hidden">{isSyncing ? "Syncing" : "Sync"}</span>
           <span className="hidden sm:inline">{isSyncing ? "Syncing..." : "Sync Now"}</span>
@@ -264,7 +264,7 @@ export default function DashboardPage() {
         action={
           <button
             onClick={()=>router.push("/dashboard/wallets")}
-            className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+            className="inline-flex min-h-9 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 sm:min-h-10 sm:px-4"
           >
             View Wallets
           </button>
@@ -281,15 +281,9 @@ export default function DashboardPage() {
       <ChartCard
         title="Transaction Volume"
         subtitle="Recent confirmed payment volume"
-        action={
-          <div className="inline-flex rounded-full border border-gray-200 bg-gray-50 p-1">
-            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-blue-700 shadow-sm">
-              Live
-            </span>
-          </div>
-        }
+        className="overflow-hidden pb-5 sm:pb-5"
       >
-        <div className="h-44 pb-1 sm:h-64 sm:pb-0">
+        <div className="h-36 pb-3 sm:h-64 sm:pb-0">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart
               data={
@@ -300,7 +294,7 @@ export default function DashboardPage() {
                   { date:"", volume:0 }
                 ]
               }
-              margin={{ top: 10, right: 12, left: -8, bottom: 8 }}
+              margin={{ top: 8, right: 8, left: -12, bottom: 16 }}
             >
               <defs>
                 <linearGradient id="overviewVolumeGradient" x1="0" y1="0" x2="0" y2="1">
@@ -308,20 +302,21 @@ export default function DashboardPage() {
                   <stop offset="100%" stopColor="#2563eb" stopOpacity={0.02} />
                 </linearGradient>
               </defs>
-              <CartesianGrid stroke="#eef2f7" strokeDasharray="3 6" vertical={false} />
+              <CartesianGrid stroke="#f1f5f9" strokeDasharray="2 8" vertical={false} />
               <XAxis
                 dataKey="date"
                 axisLine={false}
                 tickLine={false}
-                tick={{ fill: "#64748b", fontSize: 10 }}
-                minTickGap={20}
-                dy={6}
+                tick={{ fill: "#64748b", fontSize: 9 }}
+                interval="preserveStartEnd"
+                minTickGap={36}
+                dy={8}
               />
               <YAxis
                 axisLine={false}
                 tickLine={false}
-                width={58}
-                tick={{ fill: "#64748b", fontSize: 10 }}
+                width={52}
+                tick={{ fill: "#64748b", fontSize: 9 }}
                 tickFormatter={(value) => formatUsd(Number(value))}
               />
               <Tooltip
@@ -339,7 +334,7 @@ export default function DashboardPage() {
                 type="monotone"
                 dataKey="volume"
                 stroke="#2563eb"
-                strokeWidth={2.5}
+                strokeWidth={2.25}
                 fill="url(#overviewVolumeGradient)"
                 dot={false}
                 activeDot={{ r: 4, strokeWidth: 0, fill: "#1d4ed8" }}

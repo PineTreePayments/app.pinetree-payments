@@ -158,7 +158,7 @@ export default function WalletsPage() {
           type="button"
           onClick={() => loadOverview(true)}
           disabled={isRefreshing}
-          className="inline-flex min-h-8 shrink-0 items-center justify-center rounded-full bg-blue-600 px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-10 sm:rounded-xl sm:px-4 sm:text-sm"
+          className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-10 sm:px-4"
         >
           <span className="sm:hidden">{isRefreshing ? "Refreshing" : "Refresh"}</span>
           <span className="hidden sm:inline">{isRefreshing ? "Refreshing..." : "Refresh Balances"}</span>

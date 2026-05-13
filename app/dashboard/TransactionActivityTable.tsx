@@ -181,12 +181,15 @@ function buildDetailRows(input: {
 
 export default function TransactionActivityTable({
   transactions,
-  emptyMessage = "No transactions found."
+  emptyMessage = "No transactions found.",
+  mobileInitialCount = 10
 }: {
   transactions: DashboardTransactionRow[]
   emptyMessage?: string
+  mobileInitialCount?: number
 }) {
   const [selectedTx, setSelectedTx] = useState<DashboardTransactionRow | null>(null)
+  const [visibleMobileCount, setVisibleMobileCount] = useState(mobileInitialCount)
 
   const closeDetail = useCallback(() => setSelectedTx(null), [])
 
@@ -218,17 +221,19 @@ export default function TransactionActivityTable({
         references: selectedReferences
       }).filter((row) => String(row.value || "").trim().length > 0)
     : []
+  const visibleMobileTransactions = transactions.slice(0, visibleMobileCount)
+  const hasMoreMobileTransactions = visibleMobileCount < transactions.length
 
   return (
     <>
       {/* Mobile card list — shown below md breakpoint */}
-      <div className="md:hidden space-y-2">
+      <div className="md:hidden overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
         {transactions.length === 0 && (
-          <div className="bg-white border border-gray-200 rounded-2xl shadow-sm px-4 py-12 text-center text-gray-700 text-sm">
+          <div className="px-4 py-12 text-center text-sm text-gray-700">
             {emptyMessage}
           </div>
         )}
-        {transactions.map((tx) => {
+        {visibleMobileTransactions.map((tx) => {
           const payment = getPayment(tx)
           const statusTime = tx.created_at || payment?.created_at || null
           const displayStatus = payment
@@ -241,7 +246,7 @@ export default function TransactionActivityTable({
               key={tx.id}
               type="button"
               onClick={() => setSelectedTx(tx)}
-              className="w-full text-left bg-white border border-gray-200 rounded-2xl shadow-sm px-4 py-3 hover:bg-gray-50 focus:outline-none focus:bg-blue-50/60"
+              className="w-full border-b border-gray-100 bg-white px-4 py-3 text-left last:border-b-0 hover:bg-gray-50 focus:bg-blue-50/60 focus:outline-none"
             >
               <div className="flex items-center justify-between gap-2 mb-1">
                 <span className="text-sm font-medium text-gray-900">
@@ -266,6 +271,17 @@ export default function TransactionActivityTable({
             </button>
           )
         })}
+        {hasMoreMobileTransactions && (
+          <div className="border-t border-gray-100 bg-gray-50/70 p-3">
+            <button
+              type="button"
+              onClick={() => setVisibleMobileCount((current) => Math.min(current + mobileInitialCount, transactions.length))}
+              className="inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-blue-200 bg-white px-4 text-sm font-semibold text-blue-700 shadow-sm transition hover:bg-blue-50"
+            >
+              Show More Transactions
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Desktop table — hidden below md breakpoint */}
