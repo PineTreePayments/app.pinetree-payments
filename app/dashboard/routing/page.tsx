@@ -1,16 +1,33 @@
 "use client"
 
+import {
+  DashboardSection,
+  PineTreeInsightsCard
+} from "@/components/dashboard/DashboardPrimitives"
+
 export default function RoutingPage() {
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 md:space-y-7">
 
-      <h1 className="text-2xl md:text-[26px] font-semibold text-gray-900">
-        Routing Engine
-      </h1>
-
-      <div className="bg-[#111827] rounded-xl border border-[#1e2636] p-5 md:p-8 text-white">
-        Configure PineTree smart routing here.
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
+          Payment Infrastructure
+        </p>
+        <h1 className="mt-1 text-2xl font-semibold text-gray-950 md:text-3xl">
+          Routing Engine
+        </h1>
       </div>
+
+      <DashboardSection title="Routing Controls" eyebrow="Engine">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 text-sm leading-6 text-gray-700 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+          Configure PineTree smart routing here.
+        </div>
+      </DashboardSection>
+
+      <PineTreeInsightsCard
+        insights={[]}
+        emptyText="Routing insights will appear when provider routing data is available."
+      />
 
     </div>
   )

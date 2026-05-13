@@ -3,6 +3,13 @@
 import { useEffect, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import Button from "@/components/ui/Button"
+import {
+  CompactMetricTile,
+  DashboardHeroCard,
+  DashboardSection,
+  MetricGrid,
+  NetworkStatusPill
+} from "@/components/dashboard/DashboardPrimitives"
 
 type WalletItem = {
   id: string
@@ -139,10 +146,17 @@ export default function WalletsPage() {
     })
   }
 
+  const totalConnections = wallets.length + paymentRails.length
+
   return (
-    <div className="w-full px-4 md:px-8 py-6 md:py-10">
-      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-8">
-        <h1 className="text-2xl md:text-3xl font-semibold text-black">Wallets</h1>
+    <div className="w-full space-y-5 md:space-y-7">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
+            Settlement Layer
+          </p>
+          <h1 className="mt-1 text-2xl font-semibold text-gray-950 md:text-3xl">Wallets</h1>
+        </div>
 
         <Button
           onClick={() => loadOverview(true)}
@@ -156,44 +170,51 @@ export default function WalletsPage() {
         <p className="text-sm text-red-600 mb-4">Refresh error: {refreshError}</p>
       )}
 
-      {lastRefreshAt && !refreshError && (
-        <p className="text-xs text-gray-500 mb-4">
-          Last wallet sync: {formatChicagoDateTime(lastRefreshAt)} (America/Chicago)
-        </p>
-      )}
+      <DashboardHeroCard
+        eyebrow="Total Balance"
+        title="Connected wallet and payment rail value"
+        value={`$${totalBalance.toFixed(2)}`}
+        detail={
+          lastRefreshAt && !refreshError
+            ? `Last wallet sync: ${formatChicagoDateTime(lastRefreshAt)} (America/Chicago)`
+            : "Balances update from the wallet overview endpoint."
+        }
+      />
 
-      <div className="bg-white border border-gray-200 rounded-2xl p-5 md:p-8 mb-6 md:mb-8 shadow-sm w-full">
-        <p className="text-sm text-blue-600 mb-2">Total Balance</p>
-        <p className="text-4xl font-semibold text-black">${totalBalance.toFixed(2)}</p>
-      </div>
+      <MetricGrid columns="three">
+        <CompactMetricTile label="Connections" value={totalConnections} tone="blue" />
+        <CompactMetricTile label="Wallets" value={wallets.length} />
+        <CompactMetricTile label="Payment Rails" value={paymentRails.length} tone="slate" />
+      </MetricGrid>
 
-      <div className="bg-white border border-gray-200 rounded-2xl p-5 md:p-8 shadow-sm w-full">
-        <h2 className="text-lg font-semibold text-black mb-6">Connected Wallets</h2>
-
-        <div className="space-y-5">
+      <DashboardSection title="Connected Wallets" eyebrow="Balances">
+        <div className="space-y-3">
           {wallets.length === 0 && paymentRails.length === 0 && (
-            <p className="text-gray-400 text-sm">No wallets connected yet</p>
+            <div className="rounded-2xl border border-gray-200 bg-white px-4 py-10 text-center text-sm text-gray-500 shadow-sm">
+              No wallets connected yet
+            </div>
           )}
 
           {paymentRails.map((rail) => (
-            <div key={rail.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white border border-gray-200 rounded-2xl p-5 sm:p-6 min-h-[90px] shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_20px_60px_rgba(15,23,42,0.12),0_0_40px_rgba(37,99,235,0.18)] focus-within:-translate-y-1 focus-within:border-blue-200 focus-within:shadow-[0_20px_60px_rgba(15,23,42,0.12),0_0_40px_rgba(37,99,235,0.18)]">
+            <div key={rail.id} className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:border-blue-200 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0 flex-1">
-                <p className="text-base font-semibold text-gray-800 mb-1">
-                  Bitcoin Lightning
-                </p>
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <p className="text-base font-semibold text-gray-950">Bitcoin Lightning</p>
+                  <NetworkStatusPill label="Connected" tone="blue" />
+                </div>
 
                 <p
-                  className="max-w-full truncate text-base font-semibold text-black"
+                  className="max-w-full truncate font-mono text-xs text-gray-500"
                   title={rail.speedAccountId}
                 >
                   {formatSpeedAccountId(rail.speedAccountId)}
                 </p>
               </div>
 
-              <div className="text-left sm:text-right shrink-0">
-                <p className="text-sm text-blue-600 mb-1">Balance</p>
+              <div className="shrink-0 text-left sm:text-right">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-500">Balance</p>
 
-                <p className="text-lg text-black font-semibold">
+                <p className="mt-1 text-lg font-semibold text-gray-950">
                   {Number(rail.nativeBalance ?? 0).toFixed(8)} {rail.assetSymbol}
                 </p>
 
@@ -205,24 +226,27 @@ export default function WalletsPage() {
           ))}
 
           {wallets.map((w) => (
-          <div key={w.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white border border-gray-200 rounded-2xl p-5 sm:p-6 min-h-[90px] shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_20px_60px_rgba(15,23,42,0.12),0_0_40px_rgba(37,99,235,0.18)] focus-within:-translate-y-1 focus-within:border-blue-200 focus-within:shadow-[0_20px_60px_rgba(15,23,42,0.12),0_0_40px_rgba(37,99,235,0.18)]">
+          <div key={w.id} className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:border-blue-200 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0 flex-1">
-                <p className="text-base font-semibold text-gray-800 mb-1">
-                  {formatProvider(w.provider, w.network)}
-                </p>
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <p className="text-base font-semibold text-gray-950">
+                    {formatProvider(w.provider, w.network)}
+                  </p>
+                  <NetworkStatusPill label={w.network} tone="blue" />
+                </div>
 
                 <p
-                  className="max-w-full truncate text-base font-semibold text-black"
+                  className="max-w-full truncate font-mono text-xs text-gray-500"
                   title={w.wallet_address}
                 >
                   {formatWalletAddress(w.wallet_address)}
                 </p>
               </div>
 
-              <div className="text-left sm:text-right shrink-0">
-                <p className="text-sm text-blue-600 mb-1">Balance</p>
+              <div className="shrink-0 text-left sm:text-right">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-500">Balance</p>
 
-                <p className="text-lg text-black font-semibold">
+                <p className="mt-1 text-lg font-semibold text-gray-950">
                   {Number(w.nativeBalance ?? 0).toFixed(6)} {w.assetSymbol}
                 </p>
 
@@ -233,7 +257,7 @@ export default function WalletsPage() {
             </div>
           ))}
         </div>
-      </div>
+      </DashboardSection>
     </div>
   )
 }

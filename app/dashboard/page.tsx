@@ -9,13 +9,22 @@ import TransactionActivityTable, {
 } from "./TransactionActivityTable"
 
 import {
-  LineChart,
-  Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   Tooltip,
-  ResponsiveContainer
+  ResponsiveContainer,
+  CartesianGrid
 } from "recharts"
+import {
+  ChartCard,
+  CompactMetricTile,
+  DashboardHeroCard,
+  DashboardSection,
+  MetricGrid,
+  PineTreeInsightsCard
+} from "@/components/dashboard/DashboardPrimitives"
 
 type DashboardOverviewResponse = {
   success?: boolean
@@ -66,12 +75,62 @@ function networkName(network: string | null) {
   return network.charAt(0).toUpperCase() + network.slice(1).toLowerCase()
 }
 
+function providerName(provider: string | null) {
+  if (provider === "coinbase") return "Coinbase Business"
+  if (provider === "solana") return "Solana Pay"
+  if (provider === "shift4") return "Shift4"
+  if (provider === "base") return "Base Pay"
+  if (provider === "lightning") return "Bitcoin Lightning"
+  if (provider === "cash") return "Cash"
+  return provider || "-"
+}
+
 function formatUsd(amount: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     maximumFractionDigits: 2
   }).format(Number.isFinite(amount) ? amount : 0)
+}
+
+function getOverviewInsights(input: {
+  recentTx: DashboardTransactionRow[]
+  providers: number
+  successRate: number
+  volume: number
+}) {
+  const providerCounts: Record<string, number> = {}
+  const networkCounts: Record<string, number> = {}
+
+  input.recentTx.forEach((tx) => {
+    if (tx.provider) providerCounts[tx.provider] = (providerCounts[tx.provider] || 0) + 1
+    if (tx.network) networkCounts[tx.network] = (networkCounts[tx.network] || 0) + 1
+  })
+
+  const maxKey = (obj: Record<string, number>) =>
+    Object.entries(obj).sort((a, b) => b[1] - a[1])[0]?.[0] || ""
+
+  const topProvider = maxKey(providerCounts)
+  const topNetwork = maxKey(networkCounts)
+  const insights: string[] = []
+
+  if (topProvider) {
+    insights.push(`${providerName(topProvider)} is your most used provider in recent activity.`)
+  }
+
+  if (topNetwork) {
+    insights.push(`${networkName(topNetwork)} is leading recent network activity.`)
+  }
+
+  if (input.providers > 0) {
+    insights.push(`${input.providers} payment ${input.providers === 1 ? "provider is" : "providers are"} active for routing.`)
+  }
+
+  if (input.volume > 0 && input.successRate > 0) {
+    insights.push(`Current success rate is ${input.successRate}% across tracked dashboard volume.`)
+  }
+
+  return insights
 }
 
 export default function DashboardPage() {
@@ -166,23 +225,25 @@ export default function DashboardPage() {
 
 
 
+  const overviewInsights = getOverviewInsights({ recentTx, providers, successRate, volume })
+
   return (
-    <div className="p-3 sm:p-4 md:p-8 bg-gray-100 min-h-screen">
+    <div className="space-y-5 md:space-y-7">
 
-      <h1 className="text-2xl font-semibold text-gray-900 mb-2">
-        Overview
-      </h1>
-
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <p className="text-sm text-gray-500">
-          Last system update: {formatChicagoDateTime(lastRun)}
-          <span className="text-gray-400 ml-2">(America/Chicago)</span>
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
+            PineTree Infrastructure
+          </p>
+          <h1 className="mt-1 text-2xl font-semibold text-gray-950 md:text-3xl">
+            Overview
+          </h1>
+        </div>
 
         <button
           onClick={syncNow}
           disabled={isSyncing}
-          className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isSyncing ? "Syncing..." : "Sync Now"}
         </button>
@@ -192,74 +253,47 @@ export default function DashboardPage() {
         <p className="text-sm text-red-600 mb-4">Sync error: {syncError}</p>
       )}
 
-      <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6 shadow-sm mb-6 md:mb-10 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
+      <DashboardHeroCard
+        eyebrow="Live Balance"
+        title="Combined balance across connected wallets"
+        value={formatUsd(walletValue)}
+        detail={
+          <>
+            Last system update: {formatChicagoDateTime(lastRun)}
+            <span className="text-gray-400"> (America/Chicago)</span>
+          </>
+        }
+        action={
+          <button
+            onClick={()=>router.push("/dashboard/wallets")}
+            className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+          >
+            View Wallets
+          </button>
+        }
+      />
 
-        <div>
-          <p className="text-sm text-gray-500 mb-1">
-            Wallet Balance
-          </p>
+      <MetricGrid>
+        <CompactMetricTile label="Total Volume" value={formatUsd(volume)} tone="blue" />
+        <CompactMetricTile label="Transactions" value={txCount} />
+        <CompactMetricTile label="Success Rate" value={`${successRate}%`} tone="green" />
+        <CompactMetricTile label="Active Providers" value={providers} tone="slate" />
+      </MetricGrid>
 
-          <p className="text-3xl font-semibold text-gray-900">
-            {formatUsd(walletValue)}
-          </p>
-
-          <p className="text-sm text-gray-500 mt-1">
-            Combined balance across connected wallets
-          </p>
-        </div>
-
-        <button
-          onClick={()=>router.push("/dashboard/wallets")}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
-        >
-          View Wallets
-        </button>
-
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-6 mb-6 md:mb-10">
-
-        <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm min-w-0">
-          <p className="text-sm text-gray-500 mb-1">Total Volume</p>
-          <p className="text-3xl font-semibold text-gray-900">
-            {formatUsd(volume)}
-          </p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6 shadow-sm min-w-0">
-          <p className="text-sm text-gray-500 mb-1">Transactions</p>
-          <p className="text-3xl font-semibold text-gray-900">
-            {txCount}
-          </p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6 shadow-sm min-w-0">
-          <p className="text-sm text-gray-500 mb-1">Success Rate</p>
-          <p className="text-3xl font-semibold text-gray-900">
-            {successRate}%
-          </p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6 shadow-sm min-w-0">
-          <p className="text-sm text-gray-500 mb-1">Active Providers</p>
-          <p className="text-3xl font-semibold text-gray-900">
-            {providers}
-          </p>
-        </div>
-
-      </div>
-
-      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm mb-6 md:mb-10">
-
-        <h2 className="text-lg font-semibold text-gray-900 mb-6">
-          Transaction Volume
-        </h2>
-
-        <div className="h-64">
-
+      <ChartCard
+        title="Transaction Volume"
+        subtitle="Dashboard volume from existing overview data"
+        action={
+          <div className="inline-flex rounded-full border border-gray-200 bg-gray-50 p-1">
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-blue-700 shadow-sm">
+              Live
+            </span>
+          </div>
+        }
+      >
+        <div className="h-52 sm:h-64">
           <ResponsiveContainer width="100%" height="100%">
-
-            <LineChart
+            <AreaChart
               data={
                 chartData.length > 0
                 ? chartData
@@ -268,43 +302,62 @@ export default function DashboardPage() {
                   { date:"", volume:0 }
                 ]
               }
+              margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
             >
-
-              <XAxis dataKey="date" />
-              <YAxis tickFormatter={(value) => formatUsd(Number(value))} />
+              <defs>
+                <linearGradient id="overviewVolumeGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#2563eb" stopOpacity={0.28} />
+                  <stop offset="100%" stopColor="#2563eb" stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke="#e5e7eb" strokeDasharray="4 4" vertical={false} />
+              <XAxis
+                dataKey="date"
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: "#6b7280", fontSize: 11 }}
+                minTickGap={20}
+              />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                width={64}
+                tick={{ fill: "#6b7280", fontSize: 11 }}
+                tickFormatter={(value) => formatUsd(Number(value))}
+              />
               <Tooltip
                 formatter={(value) => [formatUsd(Number(value)), "Volume (USD)"]}
                 labelFormatter={(label) => `Date: ${label}`}
+                contentStyle={{
+                  background: "#fff",
+                  border: "1px solid #dbeafe",
+                  borderRadius: "12px",
+                  boxShadow: "0 18px 50px rgba(15,23,42,0.12)",
+                  fontSize: "12px"
+                }}
               />
-
-              <Line
+              <Area
                 type="monotone"
                 dataKey="volume"
                 stroke="#2563eb"
                 strokeWidth={3}
+                fill="url(#overviewVolumeGradient)"
                 dot={false}
+                activeDot={{ r: 4, strokeWidth: 0, fill: "#1d4ed8" }}
               />
-
-            </LineChart>
-
+            </AreaChart>
           </ResponsiveContainer>
-
         </div>
+      </ChartCard>
 
-      </div>
+      <PineTreeInsightsCard insights={overviewInsights} />
 
-      <div>
-
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">
-          Recent Activity
-        </h2>
-
+      <DashboardSection title="Recent Activity" eyebrow="Payments">
         <TransactionActivityTable
           transactions={recentTx}
           emptyMessage="No transactions yet."
         />
-
-      </div>
+      </DashboardSection>
 
     </div>
   )

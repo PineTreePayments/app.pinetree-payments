@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
+import {
+  CompactMetricTile,
+  DashboardHeroCard,
+  DashboardSection,
+  MetricGrid,
+  PineTreeInsightsCard
+} from "@/components/dashboard/DashboardPrimitives"
 
 type ReportSummary = {
   totalVolume: number
@@ -95,54 +102,94 @@ export default function ReportsPage() {
   }
 
   const fmt = (n: number) => `$${n.toFixed(2)}`
+  const successfulPayments = summary
+    ? Math.max(0, summary.transactionCount - summary.failedPayments)
+    : 0
+  const successRate = summary && summary.transactionCount > 0
+    ? Math.round((successfulPayments / summary.transactionCount) * 100)
+    : 0
+  const topProvider = summary
+    ? Object.entries(summary.providerTotals || {}).sort((a, b) => b[1] - a[1])[0]
+    : null
+  const topNetwork = summary
+    ? Object.entries(summary.networkTotals || {}).sort((a, b) => b[1] - a[1])[0]
+    : null
+  const insights = [
+    topProvider ? `${topProvider[0]} leads provider volume for this reporting period.` : "",
+    topNetwork ? `${topNetwork[0]} is the highest-volume network in the current summary.` : "",
+    summary && summary.transactionCount > 0 ? `${successRate}% of tracked payments are confirmed or successful in this summary.` : ""
+  ]
 
   return (
-    <div className="space-y-8 md:space-y-10">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl md:text-3xl font-semibold text-gray-900">Reports</h1>
+    <div className="space-y-5 md:space-y-7">
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
+          Financial Operations
+        </p>
+        <h1 className="mt-1 text-2xl font-semibold text-gray-950 md:text-3xl">Reports</h1>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 md:gap-6">
-        <SummaryCard title="Gross Volume"       value={summary ? fmt(summary.totalVolume)    : "$0.00"} />
-        <SummaryCard title="Transactions"        value={summary ? String(summary.transactionCount) : "0"} />
-        <SummaryCard title="Net Settlements"     value={summary ? fmt(summary.merchantNet)    : "$0.00"} />
-        <SummaryCard title="Estimated Taxes"     value={summary ? fmt(summary.estimatedTax)   : "$0.00"} />
-      </div>
+      <DashboardHeroCard
+        eyebrow="Month To Date"
+        title="Financial summary"
+        value={summary ? fmt(summary.totalVolume) : "$0.00"}
+        detail="Gross volume across the current report window."
+        secondary={
+          <div className="grid w-full grid-cols-2 gap-2 sm:w-auto sm:min-w-[280px]">
+            <CompactMetricTile
+              label="Net Settlements"
+              value={summary ? fmt(summary.merchantNet) : "$0.00"}
+              className="p-3 shadow-none"
+            />
+            <CompactMetricTile
+              label="Est. Taxes"
+              value={summary ? fmt(summary.estimatedTax) : "$0.00"}
+              tone="amber"
+              className="p-3 shadow-none"
+            />
+          </div>
+        }
+      />
 
-      {summary && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">
-          <SummaryCard title="Avg Transaction"      value={fmt(summary.avgTransaction)} />
-          <SummaryCard title="Failed Payments"      value={String(summary.failedPayments)} />
-          <SummaryCard title="Successful Payments"  value={String(Math.max(0, summary.transactionCount - summary.failedPayments))} />
-        </div>
-      )}
+      <MetricGrid columns="four">
+        <CompactMetricTile
+          label="Transactions"
+          value={summary ? String(summary.transactionCount) : "0"}
+        />
+        <CompactMetricTile
+          label="Avg Transaction"
+          value={summary ? fmt(summary.avgTransaction) : "$0.00"}
+          tone="blue"
+        />
+        <CompactMetricTile
+          label="Failed"
+          value={summary ? String(summary.failedPayments) : "0"}
+          tone={summary?.failedPayments ? "red" : "green"}
+        />
+        <CompactMetricTile
+          label="Success Rate"
+          value={`${successRate}%`}
+          tone="green"
+        />
+      </MetricGrid>
 
-      <div className="space-y-6">
-        <h2 className="text-xl font-semibold text-gray-900">Financial Reports</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6">
+      {summary && <PineTreeInsightsCard insights={insights} />}
+
+      <DashboardSection title="Financial Reports" eyebrow="Exports">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4 xl:grid-cols-3">
           <ReportCard title="Today's Report"    description="Summary of today's transactions and totals"          loading={loading} action={() => generateReport("today")} />
           <ReportCard title="Yesterday's Report" description="Detailed summary of yesterday's transactions"       loading={loading} action={() => generateReport("yesterday")} />
           <ReportCard title="Monthly Report"    description="Complete monthly financial summary"                  loading={loading} action={() => generateReport("month")} />
         </div>
-      </div>
+      </DashboardSection>
 
-      <div className="space-y-6">
-        <h2 className="text-xl font-semibold text-gray-900">Tax & Compliance</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6">
+      <DashboardSection title="Tax & Compliance" eyebrow="Accounting">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4 xl:grid-cols-3">
           <ReportCard title="Tax Report"         description="Generate tax summary for accounting or filing"      loading={loading} action={() => generateReport("month")} />
           <ReportCard title="Yearly Summary"     description="Annual financial summary report"                    loading={loading} action={() => generateReport("year")} />
           <ReportCard title="Transaction Export" description="Download full transaction history for bookkeeping"  loading={loading} action={() => generateReport("month")} />
         </div>
-      </div>
-    </div>
-  )
-}
-
-function SummaryCard({ title, value }: { title: string; value: string }) {
-  return (
-    <div className="bg-white border border-gray-200 rounded-lg p-4 md:p-5 shadow-sm min-w-0">
-      <div className="text-sm text-gray-500">{title}</div>
-      <div className="text-2xl font-semibold text-gray-900 mt-1">{value}</div>
+      </DashboardSection>
     </div>
   )
 }
@@ -154,13 +201,13 @@ function ReportCard({ title, description, action, loading }: {
   loading: boolean
 }) {
   return (
-    <div className="border border-gray-200 rounded-lg p-4 md:p-6 bg-white shadow-sm space-y-4 min-w-0">
-      <div className="text-lg font-semibold text-gray-900">{title}</div>
-      <div className="text-sm text-gray-600">{description}</div>
+    <div className="min-w-0 space-y-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] md:p-5">
+      <div className="text-base font-semibold text-gray-950">{title}</div>
+      <div className="text-sm leading-6 text-gray-600">{description}</div>
       <button
         onClick={action}
         disabled={loading}
-        className="w-full sm:w-auto bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition disabled:opacity-50"
+        className="inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50 sm:w-auto"
       >
         {loading ? "Generating..." : "Generate PDF"}
       </button>

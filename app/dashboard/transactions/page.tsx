@@ -4,6 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import TransactionActivityTable from "../TransactionActivityTable"
+import {
+  ChartCard,
+  CompactMetricTile,
+  DashboardSection,
+  MetricGrid,
+  PineTreeInsightsCard
+} from "@/components/dashboard/DashboardPrimitives"
 
 import {
   ResponsiveContainer,
@@ -67,22 +74,6 @@ type TransactionsChartResponse = {
 function parseTimestamp(value: string) {
   const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(value)
   return new Date(hasTimezone ? value : `${value}Z`)
-}
-
-function formatChicagoDateTime(value: string | null | undefined) {
-  if (!value) return "—"
-  const date = parseTimestamp(value)
-  if (Number.isNaN(date.getTime())) return "—"
-
-  return date.toLocaleString("en-US", {
-    timeZone: "America/Chicago",
-    month: "numeric",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit"
-  })
 }
 
 export default function TransactionsPage() {
@@ -291,17 +282,22 @@ export default function TransactionsPage() {
   }, [chartRange, loadChartData])
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-gray-900 mb-6">
-        Transactions
-      </h1>
+    <div className="space-y-5 md:space-y-7">
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
+          Payment Activity
+        </p>
+        <h1 className="mt-1 text-2xl font-semibold text-gray-950 md:text-3xl">
+          Transactions
+        </h1>
+      </div>
 
-      {/* SUMMARY */}
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
-        <InteractiveAnalyticsCard
-          title="Today&apos;s Volume"
+      <MetricGrid columns="three">
+        <CompactMetricTile
+          label="Today's Volume"
           value={formatUsd(todayVolume)}
+          tone="blue"
+          interactive
           onClick={() => {
             setChartMode("all")
             setShowChart(true)
@@ -309,118 +305,110 @@ export default function TransactionsPage() {
           }}
         />
 
-        <AnalyticsCard title="Transactions" value={todayTransactions.toString()} />
+        <CompactMetricTile label="Transactions" value={todayTransactions.toString()} />
 
-        <AnalyticsCard
-          title="Confirmed Rate"
+        <CompactMetricTile
+          label="Confirmed Rate"
           value={`${confirmedRate}%`}
+          tone="green"
         />
-      </div>
+      </MetricGrid>
 
-      {/* INSIGHTS */}
+      <MetricGrid columns="four">
+        <CompactMetricTile label="Peak Hour" value={peakHour} />
+        <CompactMetricTile label="Peak Day" value={peakDay} />
+        <CompactMetricTile label="Top Provider" value={topProvider} tone="blue" />
+        <CompactMetricTile label="Top Network" value={topNetwork} tone="slate" />
+      </MetricGrid>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-10">
-        <AnalyticsCard title="Peak Hour" value={peakHour} />
-        <AnalyticsCard title="Peak Day" value={peakDay} />
-        <AnalyticsCard title="Top Provider" value={topProvider} />
-        <AnalyticsCard title="Top Network" value={topNetwork} />
-      </div>
-
-      {/* CHANNEL MIX */}
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
-        <InteractiveAnalyticsCard
-          title="POS Transactions"
+      <MetricGrid columns="two">
+        <CompactMetricTile
+          label="POS Transactions"
           value={posTransactions.toString()}
+          interactive
           onClick={() => showChannelTransactions("pos")}
         />
 
-        <InteractiveAnalyticsCard
-          title="Online Transactions"
+        <CompactMetricTile
+          label="Online Transactions"
           value={onlineTransactions.toString()}
+          tone="blue"
+          interactive
           onClick={() => showChannelTransactions("online")}
         />
-      </div>
+      </MetricGrid>
 
-      {/* AI INSIGHT */}
+      <PineTreeInsightsCard insights={[aiInsight === "No insights yet." ? "" : aiInsight]} />
 
-      <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6 mb-10">
-        <div className="text-sm text-blue-700 font-medium mb-1">
-          PineTree Insights
+      <DashboardSection title="Transaction Ledger" eyebrow="Filters">
+        <div className="grid grid-cols-1 gap-2 rounded-2xl border border-gray-200 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:grid-cols-3">
+          <select
+            aria-label="Wallet filter"
+            className="min-h-11 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 focus:border-blue-400 focus:bg-white focus:outline-none"
+            value={walletFilter}
+            onChange={(e) => setWalletFilter(e.target.value)}
+          >
+            <option value="all">All Wallets</option>
+            <option value="solana">Solana Pay</option>
+            <option value="coinbase">Coinbase Business</option>
+            <option value="shift4">Shift4</option>
+            <option value="base">Base Pay</option>
+            <option value="lightning">Bitcoin Lightning</option>
+            <option value="cash">Cash</option>
+          </select>
+
+          <select
+            aria-label="Network filter"
+            className="min-h-11 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 focus:border-blue-400 focus:bg-white focus:outline-none"
+            value={networkFilter}
+            onChange={(e) => setNetworkFilter(e.target.value)}
+          >
+            <option value="all">All Networks</option>
+            <option value="solana">Solana</option>
+            <option value="base">Base</option>
+            <option value="ethereum">Ethereum</option>
+            <option value="bitcoin_lightning">Bitcoin Lightning</option>
+          </select>
+
+          <select
+            aria-label="Channel filter"
+            className="min-h-11 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 focus:border-blue-400 focus:bg-white focus:outline-none"
+            value={channelFilter}
+            onChange={(e) => setChannelFilter(e.target.value)}
+          >
+            <option value="all">All Channels</option>
+            <option value="pos">POS</option>
+            <option value="online">Online</option>
+          </select>
         </div>
 
-        <div className="text-gray-900 text-sm">
-          {aiInsight}
-        </div>
-      </div>
-
-      {/* FILTERS */}
-
-      <div className="flex flex-wrap gap-4 mb-6">
-        <select
-          className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:border-blue-400"
-          value={walletFilter}
-          onChange={(e) => setWalletFilter(e.target.value)}
-        >
-          <option value="all">All Wallets</option>
-          <option value="solana">Solana Pay</option>
-          <option value="coinbase">Coinbase Business</option>
-          <option value="shift4">Shift4</option>
-          <option value="base">Base Pay</option>
-          <option value="lightning">Bitcoin Lightning</option>
-          <option value="cash">Cash</option>
-        </select>
-
-        <select
-          className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:border-blue-400"
-          value={networkFilter}
-          onChange={(e) => setNetworkFilter(e.target.value)}
-        >
-          <option value="all">All Networks</option>
-          <option value="solana">Solana</option>
-          <option value="base">Base</option>
-          <option value="ethereum">Ethereum</option>
-          <option value="bitcoin_lightning">Bitcoin Lightning</option>
-        </select>
-
-        <select
-          className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:border-blue-400"
-          value={channelFilter}
-          onChange={(e) => setChannelFilter(e.target.value)}
-        >
-          <option value="all">All Channels</option>
-          <option value="pos">POS</option>
-          <option value="online">Online</option>
-        </select>
-      </div>
-
-      {/* TABLE */}
-
-      <div ref={tableRef}>
+      <div ref={tableRef} className="mt-3">
         <TransactionActivityTable transactions={filteredTransactions} />
       </div>
-
-      {/* CHART */}
+      </DashboardSection>
 
       {showChart && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-3">
-          <div className="bg-white w-full max-w-[900px] max-h-[90vh] overflow-y-auto p-4 sm:p-6 rounded-2xl shadow-xl">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-6">
-              <h2 className="text-lg font-semibold text-gray-900">
-                {chartMode === "pos"
-                  ? "POS Payment Volume (USD)"
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3">
+          <div className="max-h-[90vh] w-full max-w-[900px] overflow-y-auto rounded-2xl bg-white shadow-xl">
+            <ChartCard
+              title={
+                chartMode === "pos"
+                  ? "POS Payment Volume"
                   : chartMode === "online"
-                  ? "Online-Only Payment Volume (USD)"
-                  : "Transaction Volume (USD)"}
-              </h2>
-
+                    ? "Online Payment Volume"
+                    : "Transaction Volume"
+              }
+              subtitle="USD volume by provider from the existing transactions chart endpoint"
+              action={
               <button
                 onClick={() => setShowChart(false)}
-                className="text-gray-600"
+                className="inline-flex min-h-9 items-center rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50"
               >
                 Close
               </button>
-            </div>
+              }
+              className="border-0 shadow-none"
+            >
 
             <div className="flex flex-wrap gap-2 mb-6">
               {["24h", "7d", "1m", "3m", "6m", "1y"].map((r) => (
@@ -437,7 +425,8 @@ export default function TransactionsPage() {
               ))}
             </div>
 
-            <ResponsiveContainer width="100%" height={350}>
+            <div className="h-[300px] sm:h-[350px]">
+            <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={chartData}
                 margin={{ top: 20, right: 20, left: 0, bottom: 10 }}
@@ -483,39 +472,11 @@ export default function TransactionsPage() {
                 <Bar dataKey="cash" name="Cash (USD)" stackId="a" fill="#22c55e" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
+            </div>
+            </ChartCard>
           </div>
         </div>
       )}
     </div>
-  )
-}
-
-function AnalyticsCard({ title, value }: { title: string, value: string }) {
-  return (
-    <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
-      <div className="text-xs uppercase tracking-widest text-gray-500 mb-1">{title}</div>
-      <div className="text-xl font-bold text-gray-900">{value}</div>
-    </div>
-  )
-}
-
-function InteractiveAnalyticsCard({
-  title,
-  value,
-  onClick
-}: {
-  title: string
-  value: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="text-left bg-white border border-gray-200 rounded-2xl p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_20px_60px_rgba(0,0,0,0.12),0_0_40px_rgba(125,63,224,0.25)] focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-    >
-      <div className="text-xs uppercase tracking-widest text-gray-500 mb-1">{title}</div>
-      <div className="text-xl font-bold text-gray-900">{value}</div>
-    </button>
   )
 }

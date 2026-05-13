@@ -126,7 +126,7 @@ export default function DashboardLayout({
             transform transition-transform duration-300 ease-in-out
             ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
             lg:translate-x-0 lg:flex lg:flex-col
-            min-h-screen
+            min-h-screen pt-[env(safe-area-inset-top)]
           `}
         >
           <div className="px-6 py-7 border-b border-gray-100">
@@ -135,7 +135,7 @@ export default function DashboardLayout({
             </h1>
           </div>
 
-          <nav className="flex-1 px-4 py-5 space-y-2 overflow-y-auto">
+          <nav className="flex-1 space-y-1.5 overflow-y-auto px-3 py-4">
             {nav.map((item) => {
               const active = pathname === item.href
 
@@ -144,7 +144,7 @@ export default function DashboardLayout({
                   key={item.href}
                   href={item.href}
                   onClick={() => setSidebarOpen(false)}
-                  className={`block rounded-xl px-4 py-3 text-base lg:text-sm font-medium transition ${
+                  className={`block rounded-xl px-4 py-3 text-base font-medium transition lg:text-sm ${
                     active
                       ? "bg-blue-50 text-blue-600"
                       : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
@@ -160,7 +160,7 @@ export default function DashboardLayout({
         {/* MAIN */}
         <div className="flex min-w-0 flex-1 flex-col lg:ml-64">
           {/* TOP BAR */}
-          <header className="sticky top-0 z-20 h-16 bg-blue-600 flex items-center justify-between px-4 lg:px-8 shadow-sm relative">
+          <header className="sticky top-0 z-20 flex min-h-16 items-center justify-between bg-blue-600 px-3 pt-[env(safe-area-inset-top)] shadow-sm sm:px-4 lg:px-8">
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setSidebarOpen(true)}
@@ -194,12 +194,15 @@ export default function DashboardLayout({
                   />
                 </svg>
               </button>
+              <span className="text-sm font-semibold text-white/95 lg:hidden">
+                PineTree
+              </span>
             </div>
 
             <div ref={accountMenuRef} className="relative">
               <button
                 onClick={() => setMenuOpen((prev) => !prev)}
-                className="text-sm font-medium text-white cursor-pointer hover:opacity-80"
+                className="inline-flex min-h-10 items-center rounded-xl px-2 text-sm font-medium text-white hover:bg-white/10"
               >
                 Account
               </button>
@@ -226,7 +229,7 @@ export default function DashboardLayout({
           </header>
 
           {/* PAGE CONTENT */}
-          <main className="flex-1 p-4 sm:p-6 lg:p-10 overflow-x-hidden">
+          <main className="flex-1 overflow-x-hidden px-3 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 sm:px-6 sm:pb-[calc(1.5rem+env(safe-area-inset-bottom))] sm:pt-6 lg:p-10">
             <div className="mx-auto w-full max-w-6xl">
               {children}
             </div>

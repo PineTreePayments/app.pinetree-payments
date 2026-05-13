@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
+import { DashboardSection } from "@/components/dashboard/DashboardPrimitives"
 
 type MerchantSettingsPayload = {
   business_name: string | null
@@ -185,9 +186,9 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="space-y-10">
-        <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
-        <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm text-gray-700">
+      <div className="space-y-5 md:space-y-7">
+        <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Settings</h1>
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 text-gray-700 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
           Loading settings...
         </div>
       </div>
@@ -195,13 +196,18 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="space-y-8 md:space-y-10">
-      <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
+    <div className="space-y-5 md:space-y-7">
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
+          Merchant Console
+        </p>
+        <h1 className="mt-1 text-2xl font-semibold text-gray-950 md:text-3xl">Settings</h1>
+      </div>
 
-      <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-gray-900 mb-6">Account</h2>
+      <DashboardSection title="Account" eyebrow="Business">
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
             <label className="text-sm text-gray-700">Business Name</label>
             <input
@@ -290,11 +296,12 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+      </DashboardSection>
 
-      <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-gray-900 mb-6">Tax Configuration</h2>
+      <DashboardSection title="Tax Configuration" eyebrow="Compliance">
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="flex items-center gap-3">
             <input
               type="checkbox"
@@ -324,11 +331,12 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+      </DashboardSection>
 
-      <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-gray-900 mb-6">Reporting</h2>
+      <DashboardSection title="Reporting" eyebrow="Closeout">
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
             <label className="text-sm text-gray-700">Business Day Closeout Time</label>
             <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -380,12 +388,13 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+      </DashboardSection>
 
       <div>
         <button
           onClick={saveSettings}
           disabled={saving}
-          className="w-full sm:w-auto bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-60"
+          className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-blue-600 px-6 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-60 sm:w-auto"
         >
           {saving ? "Saving..." : "Save Settings"}
         </button>
