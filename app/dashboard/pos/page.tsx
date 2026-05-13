@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import Button from "@/components/ui/Button"
 import Card from "@/components/ui/Card"
+import { DashboardSection } from "@/components/dashboard/DashboardPrimitives"
 
 type Terminal = {
   id: string
@@ -272,7 +273,7 @@ export default function POSPage() {
 
   return (
 
-    <div className="space-y-8 relative">
+    <div className="relative space-y-5 md:space-y-7">
 
       {/* DELETE CONFIRM MODAL */}
 
@@ -320,11 +321,11 @@ export default function POSPage() {
 
       <div>
 
-        <h1 className="text-2xl font-semibold text-gray-900">
+        <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">
           Point of Sale
         </h1>
 
-        <p className="text-sm text-gray-500 mt-1">
+        <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
           Manage POS terminals and launch checkout.
         </p>
 
@@ -467,22 +468,20 @@ export default function POSPage() {
 
       {/* TERMINAL LIST */}
 
-      <Card>
-
-        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
-
-          <h2 className="text-lg font-semibold text-gray-900">
-            Active Terminals
-          </h2>
-
+      <DashboardSection
+        title="Active Terminals"
+        titleTone="blue"
+        action={
           <Button
             onClick={()=>setCreating(true)}
             className="h-9 self-start rounded-xl px-3 text-xs shadow-sm sm:h-10 sm:self-auto sm:px-4 sm:text-sm"
           >
             + New Terminal
           </Button>
+        }
+      >
 
-        </div>
+        <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
 
         {terminals.length === 0 && (
 
@@ -559,14 +558,16 @@ export default function POSPage() {
 
         </div>
 
-      </Card>
+        </div>
+
+      </DashboardSection>
 
       {/* DRAWER BALANCES */}
 
       {terminals.length > 0 && (
-        <Card>
+        <DashboardSection title="Drawer Balances" titleTone="blue">
 
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Drawer Balances</h2>
+          <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
 
           <div className="space-y-3">
             {terminals.map((t) => {
@@ -608,7 +609,9 @@ export default function POSPage() {
             })}
           </div>
 
-      </Card>
+          </div>
+
+        </DashboardSection>
       )}
 
       {/* CLOSEOUT MODAL */}

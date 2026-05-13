@@ -268,11 +268,11 @@ export default function TransactionsPage() {
   }, [chartRange, loadChartData])
 
   const filterRowClass =
-    "shrink-0"
+    "min-w-0"
   const filterLabelClass =
     "sr-only"
   const filterSelectClass =
-    "h-9 w-[132px] rounded-full border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-900 shadow-sm outline-none transition focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100 sm:w-full sm:text-sm"
+    "h-8 w-full min-w-0 truncate rounded-full border border-gray-200 bg-white px-2 text-[10px] font-semibold text-gray-900 shadow-sm outline-none transition focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100 sm:h-9 sm:px-3 sm:text-sm"
 
   return (
     <div className="space-y-5 md:space-y-7">
@@ -335,7 +335,7 @@ export default function TransactionsPage() {
               onClick={() => showChannelTransactions("online")}
               className="min-w-0 rounded-r-xl p-3 text-left transition hover:bg-blue-50/70 focus:outline-none focus:ring-4 focus:ring-blue-100"
             >
-              <InlineMetric label="Online Txns" value={onlineTransactions.toString()} />
+              <InlineMetric label="Online Payments" value={onlineTransactions.toString()} />
             </button>
           </div>
         </GroupedMetricSurface>
@@ -350,8 +350,8 @@ export default function TransactionsPage() {
       />
 
       <DashboardSection title="Transaction Ledger" titleTone="blue">
-        <div className="overflow-x-auto rounded-2xl border border-gray-200/80 bg-white p-2.5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-          <div className="flex min-w-max gap-2 sm:grid sm:min-w-0 sm:grid-cols-3 sm:gap-3">
+        <div className="rounded-2xl border border-gray-200/80 bg-white p-2 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-2.5">
+          <div className="grid min-w-0 grid-cols-3 gap-1.5 sm:gap-3">
           <label className={filterRowClass}>
             <span className={filterLabelClass}>Wallet</span>
             <select
