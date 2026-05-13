@@ -87,6 +87,7 @@ export default function WalletsPage() {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [refreshError, setRefreshError] = useState<string | null>(null)
   const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null)
+  const [connectionsOpen, setConnectionsOpen] = useState(false)
 
   useEffect(() => {
     loadOverview(false)
@@ -164,6 +165,30 @@ export default function WalletsPage() {
       ? `Visible wallet and account balances total $${totalBalance.toFixed(2)}.`
       : ""
   ]
+  const connectionRows = [
+    ...paymentRails.map((rail) => ({
+      id: rail.id,
+      name: "Bitcoin Lightning",
+      provider: formatDashboardProvider(rail.provider),
+      network: "Bitcoin Lightning",
+      reference: formatSpeedAccountId(rail.speedAccountId),
+      referenceTitle: rail.speedAccountId,
+      status: rail.speedAccountId ? "Connected" : "Not Connected",
+      balance: `${Number(rail.nativeBalance ?? 0).toFixed(8)} ${rail.assetSymbol}`,
+      usdValue: `$${Number(rail.usdValue ?? 0).toFixed(2)} USD`
+    })),
+    ...wallets.map((wallet) => ({
+      id: wallet.id,
+      name: formatProvider(wallet.provider, wallet.network),
+      provider: formatProvider(wallet.provider, wallet.network),
+      network: formatDashboardNetwork(wallet.network),
+      reference: formatWalletAddress(wallet.wallet_address),
+      referenceTitle: wallet.wallet_address,
+      status: wallet.wallet_address ? "Connected" : "Not Connected",
+      balance: `${Number(wallet.nativeBalance ?? 0).toFixed(6)} ${wallet.assetSymbol}`,
+      usdValue: `$${Number(wallet.usdValue ?? 0).toFixed(2)} USD`
+    }))
+  ]
 
   return (
     <div className="w-full space-y-5 md:space-y-7">
@@ -199,7 +224,13 @@ export default function WalletsPage() {
       />
 
       <MetricGrid columns="two">
-        <CompactMetricTile label="Connections" value={totalConnections} tone="blue" />
+        <CompactMetricTile
+          label="Connections"
+          value={totalConnections}
+          tone="blue"
+          interactive
+          onClick={() => setConnectionsOpen(true)}
+        />
         <CompactMetricTile label="Total Value" value={`$${totalBalance.toFixed(2)}`} tone="slate" />
       </MetricGrid>
 
@@ -293,6 +324,80 @@ export default function WalletsPage() {
           ))}
         </div>
       </DashboardSection>
+
+      {connectionsOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3"
+          onMouseDown={() => setConnectionsOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Connected wallets and payment accounts"
+            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/70 bg-white p-4 shadow-[0_24px_80px_rgba(15,23,42,0.22)] sm:p-5"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
+                  Connections
+                </p>
+                <p className="mt-1 text-sm text-gray-500">
+                  Connected wallets and payment accounts in this balance view.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConnectionsOpen(false)}
+                className="inline-flex h-8 items-center justify-center rounded-full bg-[#0052FF] px-3 text-[11px] font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-100"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {connectionRows.length === 0 && (
+                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 px-4 py-8 text-center text-sm text-gray-500">
+                  No connected wallets or payment accounts yet.
+                </div>
+              )}
+
+              {connectionRows.map((connection) => (
+                <div
+                  key={connection.id}
+                  className="rounded-2xl border border-gray-200/80 bg-gradient-to-br from-white to-gray-50/70 p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-gray-950">{connection.name}</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <NetworkStatusPill label={connection.provider} tone="slate" className="min-h-6 px-2 text-[10px]" />
+                        <NetworkStatusPill label={connection.network} tone="slate" className="min-h-6 px-2 text-[10px]" />
+                      </div>
+                    </div>
+                    <NetworkStatusPill
+                      label={connection.status}
+                      tone={connection.status === "Connected" ? "blue" : "slate"}
+                      className="shrink-0"
+                    />
+                  </div>
+
+                  <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                    <p className="min-w-0 truncate font-mono text-xs text-gray-500" title={connection.referenceTitle}>
+                      {connection.reference || "-"}
+                    </p>
+                    <div className="text-left sm:text-right">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-500">Balance</p>
+                      <p className="mt-1 text-sm font-semibold text-gray-950">{connection.balance}</p>
+                      <p className="mt-0.5 text-xs text-gray-500">{connection.usdValue}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

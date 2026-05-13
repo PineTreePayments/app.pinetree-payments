@@ -76,7 +76,7 @@ function digitsToDisplay(d: string): string {
   return `${d}.00`                           // "12" → "12.00"
 }
 
-export default function POSLayout({ locked, terminalContext }: Props) {
+export default function POSLayout({ terminalContext }: Props) {
 
   const [digits, setDigits] = useState("")
   const [status, setStatus] = useState<Status>("ready")
@@ -639,27 +639,35 @@ export default function POSLayout({ locked, terminalContext }: Props) {
           <div className="space-y-3">
 
             {qrCodeUrl ? (
-              <div className="flex flex-col items-center">
-                <p className="text-xs uppercase tracking-widest text-gray-500 mb-2">
+              <div className="flex flex-col items-center rounded-2xl border border-blue-100/70 bg-gradient-to-br from-white to-blue-50/40 px-4 py-4 shadow-[0_12px_32px_rgba(0,82,255,0.08)]">
+                <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
                   Scan to Pay
                 </p>
                 <Image
                   src={qrCodeUrl}
-                  width={180}
-                  height={180}
+                  width={172}
+                  height={172}
                   alt="QR code"
-                  className="rounded-xl"
+                  className="rounded-xl shadow-sm"
+                />
+                <PaymentStatusVisual
+                  status={status === "waiting" ? "PENDING" : "PROCESSING"}
+                  size="compact"
+                  iconSize={18}
+                  showMessage={false}
+                  labelClassName="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]"
+                  className="mt-3 gap-1.5"
                 />
               </div>
             ) : (
-              <div className="text-center py-4">
-                <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052FF] border-t-transparent mx-auto" />
-                <p className="text-xs text-gray-500 mt-2">Preparing payment…</p>
+              <div className="rounded-2xl border border-blue-100/70 bg-blue-50/50 px-4 py-4 text-center">
+                <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
+                <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Preparing payment…</p>
               </div>
             )}
 
             {breakdown && (
-              <div className="bg-gray-50 rounded-xl px-3 py-2.5 space-y-1.5 text-sm">
+              <div className="space-y-1.5 rounded-2xl border border-gray-100 bg-gray-50/80 px-3.5 py-3 text-sm shadow-inner shadow-white">
                 <div className="flex justify-between text-gray-700">
                   <span>Subtotal</span>
                   <span>{fmtUsd(breakdown.subtotalAmount)}</span>
@@ -680,11 +688,6 @@ export default function POSLayout({ locked, terminalContext }: Props) {
                 </div>
               </div>
             )}
-
-            <PaymentStatusVisual
-              status={status === "waiting" ? "PENDING" : "PROCESSING"}
-              size="compact"
-            />
 
             <Button variant="danger" fullWidth disabled={canceling} onClick={() => void cancelSale()}>
               {canceling ? "Canceling…" : "Cancel Sale"}

@@ -31,6 +31,7 @@ type Props = {
   showMessage?: boolean
   labelOverride?: string
   messageOverride?: string
+  labelClassName?: string
   iconSize?: number
   /** "compact" reduces icon size and uses smaller text — suited for POS cards. */
   size?: "default" | "compact"
@@ -109,6 +110,7 @@ export function PaymentStatusVisual({
   showMessage = true,
   labelOverride,
   messageOverride,
+  labelClassName,
   iconSize,
   size = "default",
 }: Props) {
@@ -120,7 +122,7 @@ export function PaymentStatusVisual({
   const resolvedIconSize = iconSize ?? (isCompact ? 28 : 56)
   const iconPadding = isCompact ? "p-2" : "p-3"
   const gapClass = isCompact ? "gap-2" : "gap-3"
-  const labelClass = isCompact ? "text-lg font-bold text-gray-900" : "text-2xl font-bold text-gray-900"
+  const labelClass = labelClassName || (isCompact ? "text-lg font-bold text-gray-900" : "text-2xl font-bold text-gray-900")
   const messageClass = isCompact ? "text-xs text-gray-500" : "text-sm text-gray-500"
 
   return (

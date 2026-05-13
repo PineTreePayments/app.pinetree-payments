@@ -987,7 +987,7 @@ export default function PayClient() {
     return (
       <PageContainer>
         <Card className="max-w-md w-full text-center space-y-4">
-          <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
           <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0052FF] border-t-transparent mx-auto" />
           <h1 className="text-lg font-bold text-gray-900">Processing Solflare payment...</h1>
           <p className="text-sm text-gray-500">Please wait while we confirm your transaction.</p>
@@ -1002,7 +1002,7 @@ export default function PayClient() {
         <Card className="max-w-md w-full text-center space-y-4">
           {intentLoadError ? (
             <>
-              <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+              <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
               <h1 className="text-xl font-bold text-gray-900">Unable to Load Payment</h1>
               <p className="text-sm text-gray-500">{intentLoadError}</p>
               <Button onClick={() => { setIntentLoadError(""); void loadIntent() }} className="mt-2">
@@ -1011,7 +1011,7 @@ export default function PayClient() {
             </>
           ) : (
             <>
-              <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+              <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
               <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0052FF] border-t-transparent mx-auto" />
               <h1 className="text-lg font-bold text-gray-900">Loading payment…</h1>
             </>
@@ -1025,7 +1025,7 @@ export default function PayClient() {
     return (
       <PageContainer>
         <Card className="max-w-md w-full text-center space-y-4">
-          <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
           <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0052FF] border-t-transparent mx-auto" />
           <h1 className="text-lg font-bold text-gray-900">Opening transaction in Phantom...</h1>
           <p className="text-sm text-gray-500">Please approve the transaction in your Phantom wallet.</p>
@@ -1038,7 +1038,7 @@ export default function PayClient() {
     return (
       <PageContainer>
         <Card className="max-w-md w-full text-center space-y-3">
-          <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
           <h1 className="text-xl font-bold text-gray-900">Invalid Payment Link</h1>
           <p className="text-sm text-gray-500">This payment link payload is missing or malformed.</p>
         </Card>
@@ -1056,7 +1056,7 @@ export default function PayClient() {
     return (
       <PageContainer>
         <Card className="max-w-md w-full text-center space-y-3">
-          <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
           <h1 className="text-xl font-bold text-gray-900">No Payment Methods Available</h1>
           <p className="text-sm text-gray-500">This merchant has no payment methods enabled.</p>
         </Card>
@@ -1071,7 +1071,7 @@ export default function PayClient() {
       <PageContainer>
         <Card className="max-w-md w-full text-center space-y-4" padding={false}>
           <div className="p-8 space-y-5">
-            <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
             <PaymentStatusVisual
               status={terminalPaymentStatus}
               labelOverride={isMerchantCanceled ? "Sale canceled" : undefined}
@@ -1091,7 +1091,7 @@ export default function PayClient() {
     return (
       <PageContainer>
         <Card className="max-w-md w-full text-center space-y-4">
-          <p className="text-xs uppercase tracking-widest text-gray-500">PineTree Checkout</p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
           <PaymentStatusVisual status="PROCESSING" />
         </Card>
       </PageContainer>
@@ -1120,7 +1120,7 @@ export default function PayClient() {
       <PageContainer>
         <Card className="max-w-md w-full space-y-5">
           <div>
-            <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">PineTree Checkout</p>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
             {!(baseExecutionActive || solanaExecutionActive) && (
               <h1 className="text-2xl font-bold text-gray-900">Choose Payment Asset</h1>
             )}
@@ -1130,7 +1130,7 @@ export default function PayClient() {
 
           <div className="space-y-3" ref={intentCardsRef}>
             {!(baseExecutionActive || solanaExecutionActive) && (
-              <p className="text-xs uppercase tracking-widest text-gray-500">Select an asset to continue:</p>
+              <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">Select an asset to continue:</p>
             )}
 
             <div className="space-y-3">
