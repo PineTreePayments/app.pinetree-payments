@@ -127,6 +127,51 @@ export function MetricGrid({
   return <div className={cx("grid gap-3 md:gap-4", columnsClass, className)}>{children}</div>
 }
 
+export function GroupedMetricSurface({
+  title,
+  children,
+  className = ""
+}: {
+  title?: string
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={cx(surfaceClass, "rounded-2xl p-4 sm:p-5", className)}>
+      {title && (
+        <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">
+          {title}
+        </p>
+      )}
+      {children}
+    </div>
+  )
+}
+
+export function InlineMetric({
+  label,
+  value,
+  detail,
+  className = ""
+}: {
+  label: string
+  value: ReactNode
+  detail?: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={cx("min-w-0", className)}>
+      <p className="truncate text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">
+        {label}
+      </p>
+      <div className="mt-1 min-w-0 text-lg font-semibold leading-tight text-gray-950 sm:text-xl">
+        {value}
+      </div>
+      {detail && <div className="mt-1 text-xs leading-5 text-gray-500">{detail}</div>}
+    </div>
+  )
+}
+
 export function DashboardHeroCard({
   eyebrow,
   title,

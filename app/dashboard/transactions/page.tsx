@@ -6,9 +6,9 @@ import { supabase } from "@/lib/supabaseClient"
 import TransactionActivityTable from "../TransactionActivityTable"
 import {
   ChartCard,
-  CompactMetricTile,
   DashboardSection,
-  MetricGrid,
+  GroupedMetricSurface,
+  InlineMetric,
   PineTreeInsightsCard
 } from "@/components/dashboard/DashboardPrimitives"
 
@@ -289,51 +289,64 @@ export default function TransactionsPage() {
         </h1>
       </div>
 
-      <MetricGrid columns="three">
-        <CompactMetricTile
-          label="Today's Volume"
-          value={formatUsd(todayVolume)}
-          tone="blue"
-          interactive
+      <div className="grid gap-3 md:gap-4 lg:grid-cols-[1.18fr_0.82fr]">
+        <button
+          type="button"
           onClick={() => {
             setChartMode("all")
             setShowChart(true)
             void loadChartData(chartRange, "all")
           }}
-        />
+          className="min-w-0 rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.14),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_54%,#eef5ff_100%)] p-4 text-left shadow-[0_14px_44px_rgba(37,99,235,0.11)] transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-[0_18px_54px_rgba(37,99,235,0.16)] focus:outline-none focus:ring-4 focus:ring-blue-100 sm:p-5"
+        >
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">
+            Today&apos;s Volume
+          </p>
+          <div className="mt-2 text-4xl font-semibold tracking-normal text-gray-950 sm:text-5xl">
+            {formatUsd(todayVolume)}
+          </div>
+          <div className="mt-4 grid grid-cols-2 divide-x divide-blue-100 rounded-xl border border-blue-100/80 bg-white/72">
+            <InlineMetric
+              label="Transactions"
+              value={todayTransactions.toString()}
+              className="p-3 sm:p-3.5"
+            />
+            <InlineMetric
+              label="Confirmed Rate"
+              value={`${confirmedRate}%`}
+              className="p-3 sm:p-3.5"
+            />
+          </div>
+        </button>
 
-        <CompactMetricTile label="Transactions" value={todayTransactions.toString()} />
+        <GroupedMetricSurface title="Activity Breakdown">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-0">
+            <InlineMetric label="Peak Hour" value={peakHour} className="border-b border-gray-100 pb-3" />
+            <InlineMetric label="Peak Day" value={peakDay} className="border-b border-gray-100 pb-3" />
+            <InlineMetric label="Top Provider" value={topProvider} className="pt-3" />
+            <InlineMetric label="Top Network" value={topNetwork} className="pt-3" />
+          </div>
+        </GroupedMetricSurface>
 
-        <CompactMetricTile
-          label="Confirmed Rate"
-          value={`${confirmedRate}%`}
-          tone="green"
-        />
-      </MetricGrid>
-
-      <MetricGrid columns="four">
-        <CompactMetricTile label="Peak Hour" value={peakHour} />
-        <CompactMetricTile label="Peak Day" value={peakDay} />
-        <CompactMetricTile label="Top Provider" value={topProvider} tone="blue" />
-        <CompactMetricTile label="Top Network" value={topNetwork} tone="slate" />
-      </MetricGrid>
-
-      <MetricGrid columns="two">
-        <CompactMetricTile
-          label="POS Transactions"
-          value={posTransactions.toString()}
-          interactive
-          onClick={() => showChannelTransactions("pos")}
-        />
-
-        <CompactMetricTile
-          label="Online Transactions"
-          value={onlineTransactions.toString()}
-          tone="blue"
-          interactive
-          onClick={() => showChannelTransactions("online")}
-        />
-      </MetricGrid>
+        <GroupedMetricSurface title="Channel Mix" className="lg:col-span-2">
+          <div className="grid grid-cols-2 divide-x divide-gray-100">
+            <button
+              type="button"
+              onClick={() => showChannelTransactions("pos")}
+              className="min-w-0 rounded-l-xl p-3 text-left transition hover:bg-gray-50 focus:outline-none focus:ring-4 focus:ring-blue-100"
+            >
+              <InlineMetric label="POS Transactions" value={posTransactions.toString()} />
+            </button>
+            <button
+              type="button"
+              onClick={() => showChannelTransactions("online")}
+              className="min-w-0 rounded-r-xl p-3 text-left transition hover:bg-blue-50/70 focus:outline-none focus:ring-4 focus:ring-blue-100"
+            >
+              <InlineMetric label="Online Transactions" value={onlineTransactions.toString()} />
+            </button>
+          </div>
+        </GroupedMetricSurface>
+      </div>
 
       <PineTreeInsightsCard insights={[aiInsight === "No insights yet." ? "" : aiInsight]} />
 

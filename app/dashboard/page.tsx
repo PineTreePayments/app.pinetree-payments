@@ -264,7 +264,7 @@ export default function DashboardPage() {
         action={
           <button
             onClick={()=>router.push("/dashboard/wallets")}
-            className="inline-flex min-h-9 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 sm:min-h-10 sm:px-4"
+            className="inline-flex min-h-10 w-fit self-start items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 sm:self-auto md:px-5"
           >
             View Wallets
           </button>
