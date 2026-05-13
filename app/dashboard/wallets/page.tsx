@@ -150,18 +150,15 @@ export default function WalletsPage() {
     })
   }
 
-  const connectedRails = paymentRails.filter((rail) => Boolean(rail.speedAccountId))
-  const railsWithBalances = connectedRails.filter(
-    (rail) => Number(rail.nativeBalance ?? 0) > 0 || Number(rail.usdValue ?? 0) > 0
+  const balancedRails = paymentRails.filter(
+    (rail) =>
+      Boolean(rail.speedAccountId) &&
+      (Number(rail.nativeBalance ?? 0) > 0 || Number(rail.usdValue ?? 0) > 0)
   )
-  const totalConnections = wallets.length + connectedRails.length
-  const walletCount = wallets.length + railsWithBalances.length
+  const totalConnections = wallets.length + balancedRails.length
   const walletInsights = [
     totalConnections > 0
-      ? `${totalConnections} connected ${totalConnections === 1 ? "wallet or account is" : "wallets and accounts are"} included in this balance view.`
-      : "",
-    walletCount > 0
-      ? `${walletCount} ${walletCount === 1 ? "connection has" : "connections have"} a tracked wallet/account balance.`
+      ? `${totalConnections} connected ${totalConnections === 1 ? "wallet or payment account is" : "wallets and payment accounts are"} included in this balance view.`
       : "",
     totalBalance > 0
       ? `Visible wallet and account balances total $${totalBalance.toFixed(2)}.`
@@ -201,9 +198,8 @@ export default function WalletsPage() {
         }
       />
 
-      <MetricGrid columns="three">
+      <MetricGrid columns="two">
         <CompactMetricTile label="Connections" value={totalConnections} tone="blue" />
-        <CompactMetricTile label="Wallets / Accounts" value={walletCount} />
         <CompactMetricTile label="Total Value" value={`$${totalBalance.toFixed(2)}`} tone="slate" />
       </MetricGrid>
 

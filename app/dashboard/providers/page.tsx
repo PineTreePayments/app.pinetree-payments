@@ -1030,7 +1030,7 @@ export default function ProvidersPage() {
 
       <MetricGrid columns="three">
         <CompactMetricTile label="Connected" value={connectedAndEnabledProvidersCount} tone="blue" />
-        <CompactMetricTile label="Available Rails" value="5" />
+        <CompactMetricTile label="Payment Options" value="5" />
         <CompactMetricTile
           label="Smart Routing"
           value={smartRouting ? "On" : "Off"}
