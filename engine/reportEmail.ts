@@ -85,6 +85,31 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${report.title}</title>
+  <style type="text/css">
+    /* Stack the two metric cards vertically on narrow screens.
+       Apple Mail (WebKit), iOS Mail, and most modern clients honour this. */
+    @media only screen and (max-width: 480px) {
+      .pt-metric-col {
+        display: block !important;
+        width: 100% !important;
+        padding-right: 0 !important;
+      }
+      .pt-metric-col + .pt-metric-col {
+        padding-top: 10px !important;
+      }
+      .pt-metric-gap {
+        display: none !important;
+        width: 0 !important;
+        max-width: 0 !important;
+        overflow: hidden !important;
+        mso-hide: all !important;
+      }
+      .pt-body {
+        padding-left: 20px !important;
+        padding-right: 20px !important;
+      }
+    }
+  </style>
 </head>
 <body style="margin:0;padding:0;background:#f0f4f8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f8;padding:40px 16px;">
@@ -102,7 +127,7 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
 
           <!-- Body -->
           <tr>
-            <td style="padding:36px 36px 28px;">
+            <td class="pt-body" style="padding:36px 32px 28px;">
 
               <!-- Title block -->
               <h1 style="margin:0 0 6px;font-size:26px;font-weight:800;color:#0f1728;letter-spacing:-0.5px;">${report.title}</h1>
@@ -112,17 +137,32 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
               </p>
 
               ${isExport ? "" : `
-              <!-- Key metrics -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+              <!-- Key metrics: two cards side-by-side on desktop, stacked on mobile -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;border-collapse:collapse;">
                 <tr>
-                  <td style="padding:18px 20px;background:#eff6ff;border-radius:10px;border:1px solid #dbeafe;">
-                    <div style="font-size:11px;font-weight:700;color:#3b82f6;text-transform:uppercase;letter-spacing:0.8px;">Gross Volume</div>
-                    <div style="font-size:28px;font-weight:800;color:#0f1728;margin-top:6px;letter-spacing:-0.5px;">${currency(report.grossVolume)}</div>
+                  <!-- Gross Volume card -->
+                  <td class="pt-metric-col" valign="top" style="width:48%;padding:0;vertical-align:top;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="padding:16px 18px;background:#eff6ff;border-radius:10px;border:1px solid #dbeafe;">
+                          <div style="font-size:11px;font-weight:700;color:#3b82f6;text-transform:uppercase;letter-spacing:0.8px;">Gross Volume</div>
+                          <div style="font-size:26px;font-weight:800;color:#0f1728;margin-top:6px;letter-spacing:-0.5px;">${currency(report.grossVolume)}</div>
+                        </td>
+                      </tr>
+                    </table>
                   </td>
-                  <td width="12"></td>
-                  <td style="padding:18px 20px;background:#f0fdf4;border-radius:10px;border:1px solid #d1fae5;">
-                    <div style="font-size:11px;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:0.8px;">Net Settlements</div>
-                    <div style="font-size:28px;font-weight:800;color:#0f1728;margin-top:6px;letter-spacing:-0.5px;">${currency(report.netSettlements)}</div>
+                  <!-- Gutter -->
+                  <td class="pt-metric-gap" width="16" style="width:16px;min-width:16px;">&nbsp;</td>
+                  <!-- Net Settlements card -->
+                  <td class="pt-metric-col" valign="top" style="width:48%;padding:0;vertical-align:top;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="padding:16px 18px;background:#f0fdf4;border-radius:10px;border:1px solid #d1fae5;">
+                          <div style="font-size:11px;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:0.8px;">Net Settlements</div>
+                          <div style="font-size:26px;font-weight:800;color:#0f1728;margin-top:6px;letter-spacing:-0.5px;">${currency(report.netSettlements)}</div>
+                        </td>
+                      </tr>
+                    </table>
                   </td>
                 </tr>
               </table>

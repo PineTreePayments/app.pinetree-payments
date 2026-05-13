@@ -101,6 +101,7 @@ export default function DashboardLayout({
   const nav = [
     { name: "Overview", href: "/dashboard" },
     { name: "POS", href: "/dashboard/pos" },
+    { name: "Online Checkout", href: "/dashboard/checkout" },
     { name: "Transactions", href: "/dashboard/transactions" },
     { name: "Reports", href: "/dashboard/reports" },
     { name: "Wallets", href: "/dashboard/wallets" },

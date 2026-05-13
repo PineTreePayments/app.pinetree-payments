@@ -156,6 +156,12 @@ export async function buildCreatePaymentRequest(
     throw new Error("Missing required payment fields")
   }
 
+  // Propagate channel from metadata so online checkout links are tagged correctly
+  const metadataChannel = String(input.metadata?.channel || "").trim() as
+    | "pos" | "online" | "api" | "invoice" | ""
+  const channel: "pos" | "online" | "api" | "invoice" | undefined =
+    metadataChannel || undefined
+
   let taxAmount = 0
 
   try {
@@ -179,6 +185,7 @@ export async function buildCreatePaymentRequest(
         merchantId,
         preferredNetwork: input.preferredNetwork,
         asset: input.asset,
+        channel,
         metadata: {
           ...(input.metadata || {}),
           terminalId: input.terminalId,
@@ -214,6 +221,7 @@ export async function buildCreatePaymentRequest(
         merchantId,
         preferredNetwork: input.preferredNetwork,
         asset: input.asset,
+        channel,
         metadata: {
           ...(input.metadata || {}),
           terminalId: input.terminalId,
