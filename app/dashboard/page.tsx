@@ -232,10 +232,7 @@ export default function DashboardPage() {
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
-            PineTree Infrastructure
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold text-gray-950 md:text-3xl">
+          <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">
             Overview
           </h1>
         </div>

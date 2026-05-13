@@ -284,10 +284,7 @@ export default function TransactionsPage() {
   return (
     <div className="space-y-5 md:space-y-7">
       <div>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
-          Payment Activity
-        </p>
-        <h1 className="mt-1 text-2xl font-semibold text-gray-950 md:text-3xl">
+        <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">
           Transactions
         </h1>
       </div>

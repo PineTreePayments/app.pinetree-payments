@@ -374,7 +374,7 @@ export default function TransactionActivityTable({
             <div className="flex items-start justify-between gap-4 mb-4">
               <div>
                 <div className="text-xs uppercase tracking-widest text-blue-700 font-medium">
-                  PineTree Transaction
+                  Transaction
                 </div>
                 <h3 className="text-lg font-semibold text-gray-900 mt-1">
                   Activity Details

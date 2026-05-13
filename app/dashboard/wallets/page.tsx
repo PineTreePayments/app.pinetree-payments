@@ -152,10 +152,7 @@ export default function WalletsPage() {
     <div className="w-full space-y-5 md:space-y-7">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
-            Settlement Layer
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold text-gray-950 md:text-3xl">Wallets</h1>
+          <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Wallets</h1>
         </div>
 
         <Button
@@ -187,7 +184,7 @@ export default function WalletsPage() {
         <CompactMetricTile label="Payment Rails" value={paymentRails.length} tone="slate" />
       </MetricGrid>
 
-      <DashboardSection title="Connected Wallets" eyebrow="Balances">
+      <DashboardSection title="Connected Wallets">
         <div className="space-y-3">
           {wallets.length === 0 && paymentRails.length === 0 && (
             <div className="rounded-2xl border border-gray-200 bg-white px-4 py-10 text-center text-sm text-gray-500 shadow-sm">

@@ -179,16 +179,21 @@ export function InsightCard({
   const visibleInsights = insights.filter((insight) => insight.trim().length > 0)
 
   return (
-    <div className={cx(surfaceClass, "rounded-2xl bg-blue-50/55 p-4 sm:p-5", className)}>
+    <div
+      className={cx(
+        "rounded-2xl border border-blue-200/80 bg-blue-50/80 px-3.5 py-3 shadow-[0_8px_24px_rgba(37,99,235,0.07)] backdrop-blur sm:px-4 sm:py-3.5",
+        className
+      )}
+    >
       <div className="flex items-center justify-between gap-3">
         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
           {title}
         </p>
         <span className="h-2 w-2 rounded-full bg-blue-600 shadow-[0_0_18px_rgba(37,99,235,0.7)]" />
       </div>
-      <div className="mt-3 space-y-2">
+      <div className="mt-2 space-y-1.5">
         {(visibleInsights.length ? visibleInsights : [emptyText]).map((insight) => (
-          <p key={insight} className="text-sm leading-6 text-gray-800">
+          <p key={insight} className="text-[13px] leading-5 text-gray-800 sm:text-sm">
             {insight}
           </p>
         ))}
@@ -250,7 +255,7 @@ export function ChartCard({
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
-            Infrastructure Volume
+            Volume
           </p>
           <h2 className="mt-1 text-base font-semibold text-gray-950 md:text-lg">{title}</h2>
           {subtitle && <p className="mt-1 text-sm text-gray-500">{subtitle}</p>}

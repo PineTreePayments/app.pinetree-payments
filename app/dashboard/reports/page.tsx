@@ -123,10 +123,7 @@ export default function ReportsPage() {
   return (
     <div className="space-y-5 md:space-y-7">
       <div>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
-          Financial Operations
-        </p>
-        <h1 className="mt-1 text-2xl font-semibold text-gray-950 md:text-3xl">Reports</h1>
+        <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Reports</h1>
       </div>
 
       <DashboardHeroCard
