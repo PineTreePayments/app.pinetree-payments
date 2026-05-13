@@ -9,6 +9,9 @@ function cx(...classes: Array<string | false | null | undefined>) {
 const surfaceClass =
   "border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
 
+const premiumBlueTitleClass =
+  "text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]"
+
 export function DashboardSection({
   title,
   eyebrow,
@@ -26,7 +29,7 @@ export function DashboardSection({
 }) {
   const titleClass =
     titleTone === "blue"
-      ? "mt-0.5 text-base font-semibold text-blue-700 md:text-lg"
+      ? premiumBlueTitleClass
       : "mt-0.5 text-base font-semibold text-gray-950 md:text-lg"
 
   return (
@@ -317,8 +320,7 @@ export function ChartCard({
         <div>
           <h2
             className={cx(
-              "text-base font-semibold md:text-lg",
-              titleTone === "blue" ? "text-blue-700" : "text-gray-950"
+              titleTone === "blue" ? premiumBlueTitleClass : "text-base font-semibold text-gray-950 md:text-lg"
             )}
           >
             {title}

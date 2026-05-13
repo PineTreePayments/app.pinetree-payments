@@ -173,7 +173,7 @@ export default function ReportsPage() {
 
       {summary && <PineTreeInsightsCard insights={insights} />}
 
-      <DashboardSection title="Financial Reports">
+      <DashboardSection title="Financial Reports" titleTone="blue">
         <GroupedMetricSurface>
           <div className="grid grid-cols-1 divide-y divide-gray-100 md:grid-cols-3 md:divide-x md:divide-y-0">
           <ReportCard title="Today's Report"    description="Summary of today's transactions and totals"          loading={loading} action={() => generateReport("today")} />
@@ -183,7 +183,7 @@ export default function ReportsPage() {
         </GroupedMetricSurface>
       </DashboardSection>
 
-      <DashboardSection title="Tax & Compliance">
+      <DashboardSection title="Tax & Compliance" titleTone="blue">
         <GroupedMetricSurface>
           <div className="grid grid-cols-1 divide-y divide-gray-100 md:grid-cols-3 md:divide-x md:divide-y-0">
           <ReportCard title="Tax Report"         description="Generate tax summary for accounting or filing"      loading={loading} action={() => generateReport("month")} />

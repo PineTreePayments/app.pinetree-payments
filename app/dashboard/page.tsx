@@ -347,7 +347,7 @@ export default function DashboardPage() {
 
       <PineTreeInsightsCard insights={overviewInsights} />
 
-      <DashboardSection title="Recent Activity">
+      <DashboardSection title="Recent Activity" titleTone="blue">
         <TransactionActivityTable
           transactions={recentTx}
           emptyMessage="No transactions yet."
