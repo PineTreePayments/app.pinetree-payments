@@ -481,7 +481,7 @@ export default function POSPage() {
         }
       >
 
-        <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+        <div className="rounded-[1.35rem] border border-gray-200/80 bg-white p-3.5 shadow-[0_14px_44px_rgba(15,23,42,0.06)] sm:p-5">
 
         {terminals.length === 0 && (
 
@@ -491,33 +491,33 @@ export default function POSPage() {
 
         )}
 
-        <div className="space-y-4">
+        <div className="space-y-3">
 
           {terminals.map((t)=>(
 
             <div
               key={t.id}
               ref={expandedTerminalId === t.id ? detailsRef : null}
-              className="border border-gray-200 rounded-xl p-4 flex flex-col md:flex-row md:justify-between md:items-center gap-4 relative"
+              className="relative flex flex-col gap-4 rounded-2xl border border-gray-200/80 bg-gradient-to-br from-white to-gray-50/70 p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:border-blue-200 md:flex-row md:items-center md:justify-between"
             >
 
               <div>
 
-                <div className="font-semibold text-gray-900">
+                <div className="font-semibold text-gray-950">
                   {t.name}
                 </div>
 
-                <div className="text-sm text-gray-500">
+                <div className="mt-0.5 font-mono text-xs text-gray-500">
                   {t.id}
                 </div>
 
-                <div className="text-sm text-green-600 mt-1">
+                <div className="mt-2 text-xs font-semibold uppercase tracking-[0.13em] text-green-600">
                   ● Active
                 </div>
 
               </div>
 
-              <div className="flex flex-wrap gap-2 items-center md:justify-end">
+              <div className="flex flex-wrap items-center gap-2 md:justify-end">
 
                 <Button variant="secondary" onClick={() => toggleTerminalDetails(t.id)}>
                   {expandedTerminalId === t.id ? "Hide details" : "Details"}
@@ -567,7 +567,7 @@ export default function POSPage() {
       {terminals.length > 0 && (
         <DashboardSection title="Drawer Balances" titleTone="blue">
 
-          <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+          <div className="rounded-[1.35rem] border border-gray-200/80 bg-white p-3.5 shadow-[0_14px_44px_rgba(15,23,42,0.06)] sm:p-5">
 
           <div className="space-y-3">
             {terminals.map((t) => {
@@ -575,9 +575,9 @@ export default function POSPage() {
               const balance = drawer?.balance ?? null
               const lastEntry = drawer?.lastEntry
               return (
-                <div key={t.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-gray-200 rounded-xl p-4">
+                <div key={t.id} className="flex flex-col gap-3 rounded-2xl border border-gray-200/80 bg-gradient-to-br from-white to-gray-50/70 p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="font-medium text-gray-900">{t.name}</p>
+                    <p className="font-semibold text-gray-950">{t.name}</p>
                     {lastEntry ? (
                       <p className="text-xs text-gray-500 mt-0.5">
                         Last activity: {new Date(lastEntry.created_at).toLocaleString()} · {lastEntry.type.replace("_", " ")}
@@ -589,9 +589,9 @@ export default function POSPage() {
                       {drawer?.active ? "Drawer open" : "No active drawer shift"}
                     </p>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <p className="text-xs uppercase tracking-widest text-gray-400">Expected Balance</p>
+                  <div className="flex items-center justify-between gap-4 sm:justify-end">
+                    <div className="text-left sm:text-right">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-500">Expected Balance</p>
                       <p className={`text-xl font-bold ${balance !== null ? "text-gray-900" : "text-gray-300"}`}>
                         {balance !== null ? fmtUsd(balance) : "—"}
                       </p>

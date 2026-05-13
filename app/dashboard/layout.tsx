@@ -144,10 +144,10 @@ export default function DashboardLayout({
                   key={item.href}
                   href={item.href}
                   onClick={() => setSidebarOpen(false)}
-                  className={`block rounded-xl px-4 py-3 text-base font-medium transition lg:text-sm ${
+                  className={`block rounded-xl px-4 py-3 text-base font-medium outline-none transition focus-visible:ring-4 focus-visible:ring-blue-100 lg:text-sm ${
                     active
-                      ? "bg-blue-50 text-blue-600"
-                      : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+                      ? "bg-blue-50 text-blue-600 shadow-[inset_0_0_0_1px_rgba(0,82,255,0.08)]"
+                      : "text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus-visible:bg-blue-50/70 focus-visible:text-blue-700"
                   }`}
                 >
                   {item.name}

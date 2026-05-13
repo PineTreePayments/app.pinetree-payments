@@ -277,7 +277,7 @@ export default function TransactionActivityTable({
       </div>
 
       {/* Desktop table — hidden below md breakpoint */}
-      <div className="hidden md:block bg-white border border-gray-200 rounded-2xl shadow-sm overflow-x-auto">
+      <div className="hidden max-h-[640px] overflow-auto rounded-xl border border-gray-100 bg-white md:block">
         <table className="w-full min-w-[980px] table-fixed">
           <colgroup>
             <col className="w-[190px]" />
@@ -289,7 +289,7 @@ export default function TransactionActivityTable({
             <col />
           </colgroup>
 
-          <thead className="bg-gray-50 border-b border-gray-200">
+          <thead className="sticky top-0 z-10 border-b border-gray-200 bg-gray-50">
             <tr className="text-left text-sm text-gray-700">
               <th className="px-4 py-3 font-medium">Date / Time</th>
               <th className="px-4 py-3 font-medium">Amount</th>

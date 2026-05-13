@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { AUTO_POLLING_ENABLED } from "@/lib/utils/polling"
@@ -50,6 +50,8 @@ type ChartPoint = {
   volume: number
 }
 
+type ChartRange = "7D" | "30D" | "90D" | "ALL"
+
 function parseTimestamp(value: string) {
   const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(value)
   return new Date(hasTimezone ? value : `${value}Z`)
@@ -77,6 +79,35 @@ function formatUsd(amount: number) {
     currency: "USD",
     maximumFractionDigits: 2
   }).format(Number.isFinite(amount) ? amount : 0)
+}
+
+function getChartWindow(data: ChartPoint[], range: ChartRange) {
+  if (range === "ALL" || data.length === 0) return data
+
+  const daysByRange: Record<Exclude<ChartRange, "ALL">, number> = {
+    "7D": 7,
+    "30D": 30,
+    "90D": 90
+  }
+  const days = daysByRange[range]
+  const datedRows = data
+    .map((point) => ({ point, date: parseTimestamp(point.date) }))
+    .filter((row) => !Number.isNaN(row.date.getTime()))
+
+  if (!datedRows.length) {
+    return data.slice(Math.max(data.length - days, 0))
+  }
+
+  const latest = new Date(Math.max(...datedRows.map((row) => row.date.getTime())))
+  const cutoff = new Date(latest)
+  cutoff.setDate(cutoff.getDate() - (days - 1))
+  cutoff.setHours(0, 0, 0, 0)
+
+  const filtered = datedRows
+    .filter((row) => row.date >= cutoff)
+    .map((row) => row.point)
+
+  return filtered.length ? filtered : data
 }
 
 function getOverviewInsights(input: {
@@ -127,6 +158,8 @@ export default function DashboardPage() {
   const [lastRun,setLastRun] = useState<string | null>(null)
   const [isSyncing,setIsSyncing] = useState(false)
   const [syncError,setSyncError] = useState<string | null>(null)
+  const [chartRange, setChartRange] = useState<ChartRange>("30D")
+  const [chartExpanded, setChartExpanded] = useState(false)
 
   const callOverviewApi = useCallback(async (sync: boolean) => {
     const { data: { session } } = await supabase.auth.getSession()
@@ -206,6 +239,99 @@ export default function DashboardPage() {
 
 
   const overviewInsights = getOverviewInsights({ recentTx, providers, successRate, volume })
+  const visibleChartData = useMemo(
+    () => getChartWindow(chartData, chartRange),
+    [chartData, chartRange]
+  )
+  const chartDisplayData = visibleChartData.length > 0
+    ? visibleChartData
+    : [
+      { date:"", volume:0 },
+      { date:"", volume:0 }
+    ]
+
+  const renderChartControls = (showExpand = true) => (
+    <div className="flex flex-wrap items-center gap-2">
+      {(["7D", "30D", "90D", "ALL"] as ChartRange[]).map((range) => (
+        <button
+          key={range}
+          type="button"
+          onClick={() => setChartRange(range)}
+          className={`inline-flex h-8 items-center justify-center rounded-full border px-3 text-[11px] font-semibold transition focus:outline-none focus:ring-4 focus:ring-blue-100 ${
+            chartRange === range
+              ? "border-[#0052FF] bg-[#0052FF] text-white"
+              : "border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+          }`}
+        >
+          {range === "ALL" ? "All" : range}
+        </button>
+      ))}
+      {showExpand && (
+        <button
+          type="button"
+          onClick={() => setChartExpanded(true)}
+          className="inline-flex h-8 items-center justify-center rounded-full border border-gray-200 bg-white px-3 text-[11px] font-semibold text-gray-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-100"
+        >
+          Expand
+        </button>
+      )}
+    </div>
+  )
+
+  const renderVolumeChart = (className: string, gradientId = "overviewVolumeGradient") => (
+    <div className={className}>
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart
+          data={chartDisplayData}
+          margin={{ top: 8, right: 8, left: -12, bottom: 16 }}
+        >
+          <defs>
+            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#2563eb" stopOpacity={0.28} />
+              <stop offset="100%" stopColor="#2563eb" stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid stroke="#f1f5f9" strokeDasharray="2 8" vertical={false} />
+          <XAxis
+            dataKey="date"
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: "#64748b", fontSize: 9 }}
+            interval="preserveStartEnd"
+            minTickGap={36}
+            dy={8}
+          />
+          <YAxis
+            axisLine={false}
+            tickLine={false}
+            width={52}
+            tick={{ fill: "#64748b", fontSize: 9 }}
+            tickFormatter={(value) => formatUsd(Number(value))}
+          />
+          <Tooltip
+            formatter={(value) => [formatUsd(Number(value)), "Volume (USD)"]}
+            labelFormatter={(label) => `Date: ${label}`}
+            contentStyle={{
+              background: "#fff",
+              border: "1px solid #dbeafe",
+              borderRadius: "12px",
+              boxShadow: "0 18px 50px rgba(15,23,42,0.12)",
+              fontSize: "12px"
+            }}
+          />
+          <Area
+            type="monotone"
+            dataKey="volume"
+            stroke="#2563eb"
+            strokeWidth={2.25}
+            fill={`url(#${gradientId})`}
+            dot={false}
+            activeDot={{ r: 4, strokeWidth: 0, fill: "#1d4ed8" }}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  )
 
   return (
     <div className="space-y-5 md:space-y-7">
@@ -262,68 +388,60 @@ export default function DashboardPage() {
         title="Transaction Volume"
         titleTone="blue"
         subtitle="Recent confirmed payment volume"
+        action={renderChartControls()}
         className="overflow-hidden pb-5 sm:pb-5"
       >
-        <div className="h-36 pb-3 sm:h-64 sm:pb-0">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart
-              data={
-                chartData.length > 0
-                ? chartData
-                : [
-                  { date:"", volume:0 },
-                  { date:"", volume:0 }
-                ]
-              }
-              margin={{ top: 8, right: 8, left: -12, bottom: 16 }}
-            >
-              <defs>
-                <linearGradient id="overviewVolumeGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#2563eb" stopOpacity={0.28} />
-                  <stop offset="100%" stopColor="#2563eb" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid stroke="#f1f5f9" strokeDasharray="2 8" vertical={false} />
-              <XAxis
-                dataKey="date"
-                axisLine={false}
-                tickLine={false}
-                tick={{ fill: "#64748b", fontSize: 9 }}
-                interval="preserveStartEnd"
-                minTickGap={36}
-                dy={8}
-              />
-              <YAxis
-                axisLine={false}
-                tickLine={false}
-                width={52}
-                tick={{ fill: "#64748b", fontSize: 9 }}
-                tickFormatter={(value) => formatUsd(Number(value))}
-              />
-              <Tooltip
-                formatter={(value) => [formatUsd(Number(value)), "Volume (USD)"]}
-                labelFormatter={(label) => `Date: ${label}`}
-                contentStyle={{
-                  background: "#fff",
-                  border: "1px solid #dbeafe",
-                  borderRadius: "12px",
-                  boxShadow: "0 18px 50px rgba(15,23,42,0.12)",
-                  fontSize: "12px"
-                }}
-              />
-              <Area
-                type="monotone"
-                dataKey="volume"
-                stroke="#2563eb"
-                strokeWidth={2.25}
-                fill="url(#overviewVolumeGradient)"
-                dot={false}
-                activeDot={{ r: 4, strokeWidth: 0, fill: "#1d4ed8" }}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setChartExpanded(true)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault()
+              setChartExpanded(true)
+            }
+          }}
+          className="cursor-pointer rounded-xl outline-none transition focus:ring-4 focus:ring-blue-100"
+          aria-label="Expand transaction volume chart"
+        >
+          {renderVolumeChart("h-36 pb-3 sm:h-64 sm:pb-0", "overviewVolumeGradient")}
         </div>
       </ChartCard>
+
+      {chartExpanded && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3"
+          onMouseDown={() => setChartExpanded(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Expanded transaction volume chart"
+            className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-white/70 bg-white p-4 shadow-[0_24px_80px_rgba(15,23,42,0.22)] sm:p-5"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
+                  Transaction Volume
+                </p>
+                <p className="mt-1 text-sm text-gray-500">Recent confirmed payment volume</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {renderChartControls(false)}
+                <button
+                  type="button"
+                  onClick={() => setChartExpanded(false)}
+                  className="inline-flex h-8 items-center justify-center rounded-full bg-[#0052FF] px-3 text-[11px] font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-100"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            {renderVolumeChart("h-[320px] sm:h-[520px]", "overviewVolumeGradientExpanded")}
+          </div>
+        </div>
+      )}
 
       <PineTreeInsightsCard insights={overviewInsights} />
 

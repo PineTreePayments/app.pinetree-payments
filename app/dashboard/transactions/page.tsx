@@ -272,7 +272,7 @@ export default function TransactionsPage() {
   const filterLabelClass =
     "sr-only"
   const filterSelectClass =
-    "h-8 w-full min-w-0 truncate rounded-full border border-gray-200 bg-white px-2 text-[10px] font-semibold text-gray-900 shadow-sm outline-none transition focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100 sm:h-9 sm:px-3 sm:text-sm"
+    "h-8 w-full min-w-0 truncate rounded-full border border-gray-200 bg-white px-2 text-[10px] font-medium text-gray-900 shadow-sm outline-none transition focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100 sm:h-9 sm:px-3 sm:text-sm sm:font-normal"
 
   return (
     <div className="space-y-5 md:space-y-7">
@@ -402,7 +402,10 @@ export default function TransactionsPage() {
           </div>
         </div>
 
-      <div ref={tableRef} className="mt-3">
+      <div
+        ref={tableRef}
+        className="mt-3 md:rounded-2xl md:border md:border-gray-200/80 md:bg-white md:p-2.5 md:shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+      >
         <TransactionActivityTable transactions={filteredTransactions} />
       </div>
       </DashboardSection>
