@@ -16,6 +16,9 @@ export type CheckoutLink = {
   reference: string | null
   status: CheckoutLinkStatus
   expires_at: string | null
+  success_url: string | null
+  cancel_url: string | null
+  link_metadata: Record<string, unknown> | null
   created_at: string
   updated_at: string
 }
@@ -32,6 +35,9 @@ export type CreateCheckoutLinkInput = {
   reference?: string | null
   status?: CheckoutLinkStatus
   expires_at?: string | null
+  success_url?: string | null
+  cancel_url?: string | null
+  link_metadata?: Record<string, unknown> | null
 }
 
 export async function insertCheckoutLink(input: CreateCheckoutLinkInput): Promise<CheckoutLink> {
@@ -49,6 +55,9 @@ export async function insertCheckoutLink(input: CreateCheckoutLinkInput): Promis
       reference: input.reference ?? null,
       status: input.status ?? "active",
       expires_at: input.expires_at ?? null,
+      success_url: input.success_url ?? null,
+      cancel_url: input.cancel_url ?? null,
+      link_metadata: input.link_metadata ?? null,
     })
     .select()
     .single()

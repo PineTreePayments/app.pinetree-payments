@@ -27,21 +27,32 @@ export default async function CheckoutTokenPage({ params }: Props) {
   }
 
   if (result.resolvedStatus === "disabled") {
-    return <CheckoutErrorScreen message="This checkout link has been deactivated by the merchant." />
+    return <CheckoutErrorScreen message="This checkout link has been deactivated by the merchant." cancelUrl={result.cancelUrl} />
   }
 
   if (result.resolvedStatus === "expired") {
-    return <CheckoutErrorScreen message="This checkout link has expired." />
+    return <CheckoutErrorScreen message="This checkout link has expired." cancelUrl={result.cancelUrl} />
   }
 
   if (!result.intentId) {
     return <CheckoutErrorScreen message="Unable to prepare this payment. Please try again." />
   }
 
-  redirect(`/pay?intent=${encodeURIComponent(result.intentId)}`)
+  const payUrl = new URL("/pay", "https://placeholder.invalid")
+  payUrl.searchParams.set("intent", result.intentId)
+  if (result.successUrl) payUrl.searchParams.set("success_url", result.successUrl)
+  if (result.cancelUrl) payUrl.searchParams.set("cancel_url", result.cancelUrl)
+
+  redirect(`/pay?${payUrl.searchParams.toString()}`)
 }
 
-function CheckoutErrorScreen({ message }: { message: string }) {
+function CheckoutErrorScreen({
+  message,
+  cancelUrl,
+}: {
+  message: string
+  cancelUrl?: string | null
+}) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-white via-[#f8fbff] to-[#edf5ff] px-4">
       <div className="w-full max-w-sm rounded-3xl border border-gray-200/80 bg-white p-8 shadow-[0_18px_60px_rgba(15,23,42,0.10)] text-center space-y-4">
@@ -56,6 +67,14 @@ function CheckoutErrorScreen({ message }: { message: string }) {
         </div>
         <h1 className="text-xl font-bold text-gray-900">Link Unavailable</h1>
         <p className="text-sm text-gray-500 leading-relaxed">{message}</p>
+        {cancelUrl && (
+          <a
+            href={cancelUrl}
+            className="inline-block rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:border-[#0052FF]/30 hover:text-[#0052FF]"
+          >
+            Return to Store
+          </a>
+        )}
       </div>
     </div>
   )
