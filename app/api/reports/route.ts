@@ -12,15 +12,14 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const startDate = searchParams.get("startDate")
     const endDate = searchParams.get("endDate")
+    const type = searchParams.get("type") || undefined
 
-    if (!startDate || !endDate) {
-      return NextResponse.json(
-        { error: "Missing startDate or endDate" },
-        { status: 400 }
-      )
-    }
-
-    const report = await generateReportEngine({ merchantId, startDate, endDate })
+    const report = await generateReportEngine({
+      merchantId,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+      type
+    })
     return NextResponse.json(report)
   } catch (error: unknown) {
     console.error("Report error:", error)
