@@ -55,6 +55,27 @@ function formatDateTime(value: string) {
   })
 }
 
+function buildInsightText(report: ReportSummary, isExport: boolean): string {
+  if (isExport) {
+    const n = report.transactionCount
+    return `This export includes ${n} transaction${n !== 1 ? "s" : ""} for the selected period.`
+  }
+  const parts: string[] = []
+  if (report.transactionCount > 0) {
+    parts.push(
+      `This report covers ${report.transactionCount} tracked transaction${report.transactionCount !== 1 ? "s" : ""} with a ${report.successRate}% success rate.`
+    )
+  }
+  if (report.grossVolume > 0) {
+    parts.push(
+      `Gross volume for this period was ${currency(report.grossVolume)} with net settlements of ${currency(report.netSettlements)}.`
+    )
+  }
+  return parts.length > 0
+    ? parts.join(" ")
+    : "No confirmed transactions were recorded in this report period."
+}
+
 function buildEmailHtml(report: ReportSummary, filename: string): string {
   const isExport = report.reportType === "transactions"
 
@@ -129,12 +150,12 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
               </div>
               ` : ""}
 
-              <!-- Attachment CTA -->
+              <!-- PineTree Insights -->
               <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
                 <tr>
-                  <td bgcolor="#0052FF" style="background-color:#0052FF;border-radius:10px;padding:20px 24px;text-align:center;">
-                    <p style="margin:0;font-size:15px;font-weight:700;color:#ffffff;letter-spacing:-0.2px;">Open Attached Report</p>
-                    <p style="margin:6px 0 0;font-size:12px;color:rgba(255,255,255,0.8);">${filename}</p>
+                  <td style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:18px 20px;">
+                    <p style="margin:0 0 6px;font-size:10px;font-weight:700;color:#0052FF;text-transform:uppercase;letter-spacing:1px;">PineTree Insights</p>
+                    <p style="margin:0;font-size:13px;color:#374151;line-height:1.6;">${buildInsightText(report, isExport)}</p>
                   </td>
                 </tr>
               </table>
