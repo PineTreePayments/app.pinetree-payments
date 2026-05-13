@@ -25,6 +25,12 @@ import {
   MetricGrid,
   PineTreeInsightsCard
 } from "@/components/dashboard/DashboardPrimitives"
+import {
+  countBy,
+  formatDashboardNetwork,
+  formatDashboardProvider,
+  mostFrequentKey
+} from "@/components/dashboard/displayHelpers"
 
 type DashboardOverviewResponse = {
   success?: boolean
@@ -65,26 +71,6 @@ function formatChicagoDateTime(value: string | null) {
   })
 }
 
-function networkName(network: string | null) {
-  if (!network) return "-"
-  if (network.toLowerCase() === "cash") return "Cash"
-  if (network.toLowerCase() === "solana") return "Solana"
-  if (network.toLowerCase() === "base") return "Base"
-  if (network.toLowerCase() === "ethereum") return "Ethereum"
-  if (network.toLowerCase() === "bitcoin_lightning" || network.toLowerCase() === "bitcoin lightning") return "Bitcoin Lightning"
-  return network.charAt(0).toUpperCase() + network.slice(1).toLowerCase()
-}
-
-function providerName(provider: string | null) {
-  if (provider === "coinbase") return "Coinbase Business"
-  if (provider === "solana") return "Solana Pay"
-  if (provider === "shift4") return "Shift4"
-  if (provider === "base") return "Base Pay"
-  if (provider === "lightning") return "Bitcoin Lightning"
-  if (provider === "cash") return "Cash"
-  return provider || "-"
-}
-
 function formatUsd(amount: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -99,27 +85,21 @@ function getOverviewInsights(input: {
   successRate: number
   volume: number
 }) {
-  const providerCounts: Record<string, number> = {}
-  const networkCounts: Record<string, number> = {}
-
-  input.recentTx.forEach((tx) => {
-    if (tx.provider) providerCounts[tx.provider] = (providerCounts[tx.provider] || 0) + 1
-    if (tx.network) networkCounts[tx.network] = (networkCounts[tx.network] || 0) + 1
-  })
-
-  const maxKey = (obj: Record<string, number>) =>
-    Object.entries(obj).sort((a, b) => b[1] - a[1])[0]?.[0] || ""
-
-  const topProvider = maxKey(providerCounts)
-  const topNetwork = maxKey(networkCounts)
+  const providerCounts = countBy(input.recentTx, (tx) => tx.provider)
+  const networkCounts = countBy(
+    input.recentTx,
+    (tx) => tx.provider === "cash" ? null : tx.network
+  )
+  const topProvider = mostFrequentKey(providerCounts)
+  const topNetwork = mostFrequentKey(networkCounts)
   const insights: string[] = []
 
   if (topProvider) {
-    insights.push(`${providerName(topProvider)} is your most used provider in recent activity.`)
+    insights.push(`${formatDashboardProvider(topProvider)} is your most used provider in recent activity.`)
   }
 
   if (topNetwork) {
-    insights.push(`${networkName(topNetwork)} is leading recent network activity.`)
+    insights.push(`${formatDashboardNetwork(topNetwork)} is leading recent network activity.`)
   }
 
   if (input.providers > 0) {

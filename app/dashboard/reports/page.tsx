@@ -11,6 +11,10 @@ import {
   MetricGrid,
   PineTreeInsightsCard
 } from "@/components/dashboard/DashboardPrimitives"
+import {
+  formatDashboardNetwork,
+  formatDashboardProvider
+} from "@/components/dashboard/displayHelpers"
 
 type ReportSummary = {
   totalVolume: number
@@ -116,8 +120,8 @@ export default function ReportsPage() {
     ? Object.entries(summary.networkTotals || {}).sort((a, b) => b[1] - a[1])[0]
     : null
   const insights = [
-    topProvider ? `${topProvider[0]} leads provider volume for this reporting period.` : "",
-    topNetwork ? `${topNetwork[0]} is the highest-volume network in the current summary.` : "",
+    topProvider && topProvider[1] > 0 ? `${formatDashboardProvider(topProvider[0])} leads provider volume for this reporting period.` : "",
+    topNetwork && topNetwork[1] > 0 ? `${formatDashboardNetwork(topNetwork[0])} is the highest-volume network in the current summary.` : "",
     summary && summary.transactionCount > 0 ? `${successRate}% of tracked payments are confirmed or successful in this summary.` : ""
   ]
 
@@ -171,7 +175,12 @@ export default function ReportsPage() {
         />
       </MetricGrid>
 
-      {summary && <PineTreeInsightsCard insights={insights} />}
+      {summary && (
+        <PineTreeInsightsCard
+          insights={insights}
+          emptyText="Report insights will appear when the current summary includes transaction volume."
+        />
+      )}
 
       <DashboardSection title="Financial Reports" titleTone="blue">
         <GroupedMetricSurface>

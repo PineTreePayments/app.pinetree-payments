@@ -7,6 +7,10 @@ import {
   formatTransactionReference,
   getTransactionReferenceParts
 } from "./transactionReference"
+import {
+  formatDashboardNetwork,
+  formatDashboardProvider
+} from "@/components/dashboard/displayHelpers"
 
 export type DashboardPaymentSummary = {
   id?: string | null
@@ -66,23 +70,11 @@ export function formatUsd(amount: number) {
 }
 
 export function providerName(provider: string | null | undefined) {
-  if (provider === "coinbase") return "Coinbase Business"
-  if (provider === "solana") return "Solana Pay"
-  if (provider === "shift4") return "Shift4"
-  if (provider === "base") return "Base Pay"
-  if (provider === "lightning") return "Bitcoin Lightning"
-  if (provider === "cash") return "Cash"
-  return provider || "-"
+  return formatDashboardProvider(provider)
 }
 
 export function networkName(network: string | null | undefined) {
-  if (!network) return "-"
-  if (network.toLowerCase() === "cash") return "Cash"
-  if (network.toLowerCase() === "solana") return "Solana"
-  if (network.toLowerCase() === "base") return "Base"
-  if (network.toLowerCase() === "ethereum") return "Ethereum"
-  if (network.toLowerCase() === "bitcoin_lightning" || network.toLowerCase() === "bitcoin lightning") return "Bitcoin Lightning"
-  return network.charAt(0).toUpperCase() + network.slice(1).toLowerCase()
+  return formatDashboardNetwork(network)
 }
 
 function getPayment(tx: DashboardTransactionRow) {

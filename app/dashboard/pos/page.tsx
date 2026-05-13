@@ -477,7 +477,7 @@ export default function POSPage() {
 
           <Button
             onClick={()=>setCreating(true)}
-            className="h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm"
+            className="h-9 self-start rounded-xl px-3 text-xs shadow-sm sm:h-10 sm:self-auto sm:px-4 sm:text-sm"
           >
             + New Terminal
           </Button>

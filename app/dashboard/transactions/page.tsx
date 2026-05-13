@@ -11,6 +11,13 @@ import {
   InlineMetric,
   PineTreeInsightsCard
 } from "@/components/dashboard/DashboardPrimitives"
+import {
+  buildNeutralInsight,
+  countBy,
+  formatDashboardNetwork,
+  formatDashboardProvider,
+  mostFrequentKey
+} from "@/components/dashboard/displayHelpers"
 
 import {
   ResponsiveContainer,
@@ -102,7 +109,7 @@ export default function TransactionsPage() {
 
   const [posTransactions, setPosTransactions] = useState(0)
   const [onlineTransactions, setOnlineTransactions] = useState(0)
-  const [aiInsight, setAiInsight] = useState("No insights yet.")
+  const [transactionInsight, setTransactionInsight] = useState("")
 
   const callTransactionsApi = useCallback(async (method: "GET" | "POST", body?: unknown) => {
     const {
@@ -133,26 +140,6 @@ export default function TransactionsPage() {
     return payload
   }, [])
 
-  const providerName = useCallback((provider: string) => {
-    if (provider === "coinbase") return "Coinbase Business"
-    if (provider === "solana") return "Solana Pay"
-    if (provider === "shift4") return "Shift4"
-    if (provider === "base") return "Base Pay"
-    if (provider === "lightning") return "Bitcoin Lightning"
-    if (provider === "cash") return "Cash"
-    return provider || "-"
-  }, [])
-
-  const networkName = useCallback((network: string | null) => {
-    if (!network) return "-"
-    if (network.toLowerCase() === "cash") return "Cash"
-    if (network.toLowerCase() === "solana") return "Solana"
-    if (network.toLowerCase() === "base") return "Base"
-    if (network.toLowerCase() === "ethereum") return "Ethereum"
-    if (network.toLowerCase() === "bitcoin_lightning" || network.toLowerCase() === "bitcoin lightning") return "Bitcoin Lightning"
-    return network.charAt(0).toUpperCase() + network.slice(1).toLowerCase()
-  }, [])
-
   const formatUsd = useCallback((amount: number) => {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
@@ -164,8 +151,6 @@ export default function TransactionsPage() {
   const calculateInsights = useCallback((data: Transaction[]) => {
     const hourMap: Record<string, number> = {}
     const dayMap: Record<string, number> = {}
-    const providerMap: Record<string, number> = {}
-    const networkMap: Record<string, number> = {}
     const channelMap: Record<string, number> = {}
 
     data.forEach((tx) => {
@@ -183,39 +168,40 @@ export default function TransactionsPage() {
 
       hourMap[hour] = (hourMap[hour] || 0) + 1
       dayMap[day] = (dayMap[day] || 0) + 1
-      providerMap[tx.provider] = (providerMap[tx.provider] || 0) + 1
-      networkMap[tx.network || "unknown"] = (networkMap[tx.network || "unknown"] || 0) + 1
 
       const channel = tx.channel || "pos"
       channelMap[channel] = (channelMap[channel] || 0) + 1
     })
 
-    function maxKey(obj: Record<string, number>) {
-      const sorted = Object.entries(obj).sort((a, b) => b[1] - a[1])
-      return sorted[0]?.[0] || "-"
-    }
+    const providerMap = countBy(data, (tx) => tx.provider)
+    const networkMap = countBy(data, (tx) => tx.network)
+    const peakH = mostFrequentKey(hourMap)
+    const peakD = mostFrequentKey(dayMap)
+    const topP = mostFrequentKey(providerMap)
+    const topN = mostFrequentKey(networkMap)
 
-    const peakH = maxKey(hourMap)
-    const peakD = maxKey(dayMap)
-    const topP = maxKey(providerMap)
-    const topN = maxKey(networkMap)
-
-    setPeakHour(peakH === "-" ? "-" : `${peakH}:00`)
-    setPeakDay(peakD)
-    setTopProvider(providerName(topP))
-    setTopNetwork(networkName(topN))
+    setPeakHour(peakH ? `${peakH}:00` : "-")
+    setPeakDay(peakD || "-")
+    setTopProvider(topP ? formatDashboardProvider(topP) : "-")
+    setTopNetwork(topN ? formatDashboardNetwork(topN) : "-")
 
     setPosTransactions(channelMap["pos"] || 0)
     setOnlineTransactions(channelMap["online"] || 0)
 
-    if (topP === "-" || topN === "-") {
-      setAiInsight("No insights yet.")
-    } else {
-      setAiInsight(
-        `Your busiest hour is ${peakH}:00. ${providerName(topP)} is your most used provider, and ${networkName(topN)} is your most used network.`
+    if (!data.length) {
+      setTransactionInsight("")
+    } else if (topP && topN && peakH) {
+      setTransactionInsight(
+        `Based on the current ledger, ${peakH}:00 is the busiest hour, ${formatDashboardProvider(topP)} leads provider activity, and ${formatDashboardNetwork(topN)} leads network activity.`
       )
+    } else if (topP) {
+      setTransactionInsight(
+        `${formatDashboardProvider(topP)} leads provider activity in the current ledger. Network mix will appear as more network-tagged transactions arrive.`
+      )
+    } else {
+      setTransactionInsight("")
     }
-  }, [providerName, networkName])
+  }, [])
 
   const loadDashboardData = useCallback(async () => {
     try {
@@ -282,11 +268,11 @@ export default function TransactionsPage() {
   }, [chartRange, loadChartData])
 
   const filterRowClass =
-    "grid grid-cols-[88px_minmax(0,1fr)] items-center gap-3 rounded-xl bg-gray-50/80 px-3 py-2 ring-1 ring-gray-100 sm:block sm:bg-transparent sm:p-0 sm:ring-0"
+    "shrink-0"
   const filterLabelClass =
-    "text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-500 sm:mb-1.5 sm:block"
+    "sr-only"
   const filterSelectClass =
-    "h-9 w-full min-w-0 rounded-full border border-gray-200 bg-white px-3 text-sm font-medium text-gray-900 shadow-sm outline-none transition focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+    "h-9 w-[132px] rounded-full border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-900 shadow-sm outline-none transition focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100 sm:w-full sm:text-sm"
 
   return (
     <div className="space-y-5 md:space-y-7">
@@ -349,16 +335,23 @@ export default function TransactionsPage() {
               onClick={() => showChannelTransactions("online")}
               className="min-w-0 rounded-r-xl p-3 text-left transition hover:bg-blue-50/70 focus:outline-none focus:ring-4 focus:ring-blue-100"
             >
-              <InlineMetric label="Online Transactions" value={onlineTransactions.toString()} />
+              <InlineMetric label="Online Txns" value={onlineTransactions.toString()} />
             </button>
           </div>
         </GroupedMetricSurface>
       </div>
 
-      <PineTreeInsightsCard insights={[aiInsight === "No insights yet." ? "" : aiInsight]} />
+      <PineTreeInsightsCard
+        insights={[transactionInsight]}
+        emptyText={buildNeutralInsight(
+          transactions.length > 0,
+          "Ledger insights will appear as provider and network activity builds."
+        ) || "Ledger activity is available; additional network-tagged transactions will sharpen insights."}
+      />
 
       <DashboardSection title="Transaction Ledger" titleTone="blue">
-        <div className="grid gap-2 rounded-2xl border border-gray-200/80 bg-white p-2.5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:grid-cols-3 sm:gap-3 sm:p-3">
+        <div className="overflow-x-auto rounded-2xl border border-gray-200/80 bg-white p-2.5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <div className="flex min-w-max gap-2 sm:grid sm:min-w-0 sm:grid-cols-3 sm:gap-3">
           <label className={filterRowClass}>
             <span className={filterLabelClass}>Wallet</span>
             <select
@@ -406,6 +399,7 @@ export default function TransactionsPage() {
               <option value="online">Online</option>
             </select>
           </label>
+          </div>
         </div>
 
       <div ref={tableRef} className="mt-3">

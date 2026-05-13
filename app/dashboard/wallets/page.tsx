@@ -7,8 +7,13 @@ import {
   DashboardHeroCard,
   DashboardSection,
   MetricGrid,
-  NetworkStatusPill
+  NetworkStatusPill,
+  PineTreeInsightsCard
 } from "@/components/dashboard/DashboardPrimitives"
+import {
+  formatDashboardNetwork,
+  formatDashboardProvider
+} from "@/components/dashboard/displayHelpers"
 
 type WalletItem = {
   id: string
@@ -58,7 +63,7 @@ function formatProvider(name?: string | null, network?: string) {
   if (network === "base") return "Base Wallet"
   if (network === "ethereum") return "MetaMask"
 
-  return "Connected"
+  return formatDashboardProvider(name)
 }
 
 function formatWalletAddress(address: string) {
@@ -145,7 +150,23 @@ export default function WalletsPage() {
     })
   }
 
-  const totalConnections = wallets.length + paymentRails.length
+  const connectedRails = paymentRails.filter((rail) => Boolean(rail.speedAccountId))
+  const railsWithBalances = connectedRails.filter(
+    (rail) => Number(rail.nativeBalance ?? 0) > 0 || Number(rail.usdValue ?? 0) > 0
+  )
+  const totalConnections = wallets.length + connectedRails.length
+  const walletCount = wallets.length + railsWithBalances.length
+  const walletInsights = [
+    totalConnections > 0
+      ? `${totalConnections} connected ${totalConnections === 1 ? "wallet or account is" : "wallets and accounts are"} included in this balance view.`
+      : "",
+    walletCount > 0
+      ? `${walletCount} ${walletCount === 1 ? "connection has" : "connections have"} a tracked wallet/account balance.`
+      : "",
+    totalBalance > 0
+      ? `Visible wallet and account balances total $${totalBalance.toFixed(2)}.`
+      : ""
+  ]
 
   return (
     <div className="w-full space-y-5 md:space-y-7">
@@ -171,7 +192,7 @@ export default function WalletsPage() {
 
       <DashboardHeroCard
         eyebrow="Total Balance"
-        title="Connected wallet and payment rail value"
+        title="Connected wallet and account value"
         value={`$${totalBalance.toFixed(2)}`}
         detail={
           lastRefreshAt && !refreshError
@@ -182,9 +203,14 @@ export default function WalletsPage() {
 
       <MetricGrid columns="three">
         <CompactMetricTile label="Connections" value={totalConnections} tone="blue" />
-        <CompactMetricTile label="Wallets" value={wallets.length} />
-        <CompactMetricTile label="Payment Rails" value={paymentRails.length} tone="slate" />
+        <CompactMetricTile label="Wallets / Accounts" value={walletCount} />
+        <CompactMetricTile label="Total Value" value={`$${totalBalance.toFixed(2)}`} tone="slate" />
       </MetricGrid>
+
+      <PineTreeInsightsCard
+        insights={walletInsights}
+        emptyText="Wallet insights will appear when connected wallets or account balances are available."
+      />
 
       <DashboardSection title="Connected Wallets" titleTone="blue">
         <div className="space-y-3">
@@ -213,7 +239,7 @@ export default function WalletsPage() {
                   >
                     {formatSpeedAccountId(rail.speedAccountId)}
                   </p>
-                  <NetworkStatusPill label="Speed" tone="slate" className="min-h-6 px-2 text-[10px]" />
+                  <NetworkStatusPill label={formatDashboardProvider(rail.provider)} tone="slate" className="min-h-6 px-2 text-[10px]" />
                 </div>
               </div>
 
@@ -252,7 +278,7 @@ export default function WalletsPage() {
                   >
                     {formatWalletAddress(w.wallet_address)}
                   </p>
-                  <NetworkStatusPill label={w.network} tone="slate" className="min-h-6 px-2 text-[10px]" />
+                  <NetworkStatusPill label={formatDashboardNetwork(w.network)} tone="slate" className="min-h-6 px-2 text-[10px]" />
                 </div>
               </div>
 
