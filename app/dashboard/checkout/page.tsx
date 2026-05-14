@@ -950,16 +950,16 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
 
       {/* ── Tab bar ──────────────────────────────────────────────────────── */}
       <div className="w-full max-w-full overflow-hidden">
-        <div className="grid max-w-full grid-cols-2 gap-1 rounded-[16px] border border-blue-100/70 bg-gradient-to-br from-white via-blue-50/50 to-white p-0.5 shadow-[0_8px_22px_rgba(0,82,255,0.07)] backdrop-blur-sm sm:inline-grid sm:w-auto sm:grid-cols-4">
+        <div className="grid max-w-full grid-cols-2 gap-1.5 rounded-[18px] border border-gray-200/80 bg-white/85 p-1.5 shadow-[0_12px_34px_rgba(15,23,42,0.08)] backdrop-blur-sm sm:inline-grid sm:w-auto sm:grid-cols-4">
           {TABS.map((t) => (
             <button
               key={t.id}
               type="button"
               onClick={() => setTab(t.id)}
-              className={`min-w-0 rounded-[14px] px-2.5 py-1.5 text-center text-sm font-semibold transition-all duration-200 ease-out sm:px-3 ${
+              className={`min-w-0 rounded-[13px] border px-3 py-2 text-center text-sm font-semibold transition-all duration-200 ease-out sm:px-3.5 sm:py-2 ${
                 tab === t.id
-                  ? "bg-[#0052FF] text-white shadow-[0_8px_18px_rgba(0,82,255,0.25)]"
-                  : "text-gray-600 hover:bg-white/80 hover:text-gray-800"
+                  ? "border-[#0052FF] bg-[#0052FF] text-white shadow-[0_8px_18px_rgba(0,82,255,0.22)]"
+                  : "border-gray-200/70 bg-white/70 text-slate-600 shadow-sm hover:border-blue-100 hover:bg-white hover:text-slate-900"
               }`}
             >
               {t.label}

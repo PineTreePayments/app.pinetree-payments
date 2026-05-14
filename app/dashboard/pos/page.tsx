@@ -474,12 +474,18 @@ export default function POSPage() {
         action={
           <Button
             onClick={()=>setCreating(true)}
-            className="h-9 self-start rounded-xl px-3 text-xs shadow-sm sm:h-10 sm:self-auto sm:px-4 sm:text-sm"
+            className="hidden h-9 self-start rounded-xl px-3 text-xs shadow-sm sm:inline-flex sm:h-10 sm:self-auto sm:px-4 sm:text-sm"
           >
             + New Terminal
           </Button>
         }
       >
+        <Button
+          onClick={()=>setCreating(true)}
+          className="w-full justify-center rounded-xl text-sm shadow-sm sm:hidden"
+        >
+          + New Terminal
+        </Button>
 
         <div className="rounded-[1.35rem] border border-gray-200/80 bg-white p-3.5 shadow-[0_14px_44px_rgba(15,23,42,0.06)] sm:p-5">
 
