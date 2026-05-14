@@ -14,6 +14,12 @@ import {
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import { helpArticles, helpCategories, type HelpArticle } from "@/lib/help/helpContent"
+import { searchHelpArticles, type HelpSearchResult } from "@/lib/help/retrieval"
+import {
+  feedbackTypes,
+  supportTicketCategories,
+  supportTicketPriorities
+} from "@/lib/help/supportOptions"
 import {
   DashboardHeroCard,
   DashboardSection,
@@ -45,28 +51,6 @@ type FeedbackForm = {
   message: string
   rating: string
 }
-
-const ticketCategories = [
-  "Payment Issue",
-  "Wallet Connection",
-  "Dashboard Issue",
-  "Settlement Question",
-  "POS Issue",
-  "Feature Request",
-  "API Support",
-  "General Support"
-]
-
-const priorities = ["Low", "Normal", "High", "Urgent"]
-
-const feedbackTypes = [
-  "Product Feedback",
-  "Documentation Feedback",
-  "Payment Experience",
-  "Dashboard Experience",
-  "Feature Request",
-  "Other"
-]
 
 const suggestedQuestions = [
   "Why is my payment pending?",
@@ -118,6 +102,7 @@ export default function HelpCenterPage() {
   const [ticketError, setTicketError] = useState<string | null>(null)
   const [submittingTicket, setSubmittingTicket] = useState(false)
   const [submittingFeedback, setSubmittingFeedback] = useState(false)
+  const [assistantQuestion, setAssistantQuestion] = useState("")
 
   const filteredArticles = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
@@ -128,6 +113,10 @@ export default function HelpCenterPage() {
       return categoryMatch && queryMatch
     })
   }, [query, selectedCategory])
+
+  const assistantResults = useMemo<HelpSearchResult[]>(() => {
+    return searchHelpArticles(assistantQuestion, 3)
+  }, [assistantQuestion])
 
   useEffect(() => {
     if (filteredArticles.length === 0) {
@@ -394,7 +383,7 @@ export default function HelpCenterPage() {
                   onChange={(event) => setTicketForm((current) => ({ ...current, category: event.target.value }))}
                   className="form-field"
                 >
-                  {ticketCategories.map((category) => <option key={category}>{category}</option>)}
+                  {supportTicketCategories.map((category) => <option key={category}>{category}</option>)}
                 </select>
               </Field>
               <Field label="Priority">
@@ -403,7 +392,7 @@ export default function HelpCenterPage() {
                   onChange={(event) => setTicketForm((current) => ({ ...current, priority: event.target.value }))}
                   className="form-field"
                 >
-                  {priorities.map((priority) => <option key={priority}>{priority}</option>)}
+                  {supportTicketPriorities.map((priority) => <option key={priority}>{priority}</option>)}
                 </select>
               </Field>
               <Field label="Subject">
@@ -437,7 +426,7 @@ export default function HelpCenterPage() {
                 type="button"
                 onClick={() => void submitTicket()}
                 disabled={submittingTicket}
-                className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
+                className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50 sm:w-auto"
               >
                 <Send size={16} />
                 {submittingTicket ? "Opening..." : "Open Ticket"}
@@ -457,7 +446,12 @@ export default function HelpCenterPage() {
               </button>
             </div>
 
-            {ticketsLoading && <p className="text-sm text-gray-600">Loading support tickets...</p>}
+            {ticketsLoading && (
+              <div className="space-y-2">
+                <div className="h-16 animate-pulse rounded-xl bg-gray-100" />
+                <div className="h-16 animate-pulse rounded-xl bg-gray-100" />
+              </div>
+            )}
             {!ticketsLoading && ticketError && (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
                 {ticketError}
@@ -473,6 +467,7 @@ export default function HelpCenterPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <ProviderStatusPill label={ticket.status} tone="blue" />
                       <span className="text-xs font-medium text-gray-500">{ticket.category}</span>
+                      <span className="text-xs font-medium text-gray-500">{ticket.priority}</span>
                       <span className="text-xs text-gray-400">{formatDate(ticket.created_at)}</span>
                     </div>
                     <div className="mt-2 text-sm font-semibold text-gray-950">{ticket.subject}</div>
@@ -494,7 +489,7 @@ export default function HelpCenterPage() {
                     <h2 className="text-lg font-semibold text-gray-950">Ask PineTree Assistant</h2>
                   </div>
                   <p className="mt-2 text-sm leading-6 text-gray-600">
-                    Private beta placeholder. Future responses will be based only on PineTree documentation, transaction states, and merchant account context.
+                    Private beta placeholder. When enabled, answers will be grounded in PineTree help docs, transaction states, and merchant account context.
                   </p>
                 </div>
                 <ProviderStatusPill label="Coming Soon" tone="blue" />
@@ -502,19 +497,48 @@ export default function HelpCenterPage() {
 
               <div className="mt-4 space-y-2">
                 {suggestedQuestions.map((question) => (
-                  <div key={question} className="rounded-xl border border-blue-100 bg-white/80 px-3 py-2 text-sm text-gray-700">
+                  <button
+                    key={question}
+                    type="button"
+                    onClick={() => setAssistantQuestion(question)}
+                    className="w-full rounded-xl border border-blue-100 bg-white/80 px-3 py-2 text-left text-sm text-gray-700 transition hover:border-[#0052FF] hover:bg-blue-50"
+                  >
                     {question}
-                  </div>
+                  </button>
                 ))}
               </div>
 
               <div className="mt-4 flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
                 <Sparkles className="h-4 w-4 text-[#0052FF]" />
                 <input
-                  disabled
-                  placeholder="Assistant integration is not enabled"
-                  className="min-h-9 flex-1 bg-transparent text-sm text-gray-500 outline-none placeholder:text-gray-400"
+                  value={assistantQuestion}
+                  onChange={(event) => setAssistantQuestion(event.target.value)}
+                  placeholder="Search PineTree help docs"
+                  className="min-h-9 flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
                 />
+              </div>
+
+              <div className="mt-3 rounded-xl border border-blue-100 bg-white/75 p-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.13em] text-[#0052FF]">
+                  Local docs preview
+                </p>
+                <div className="mt-2 space-y-2">
+                  {assistantResults.map((result) => (
+                    <button
+                      key={result.article.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedCategory(result.article.category)
+                        setActiveArticle(result.article)
+                        setQuery("")
+                      }}
+                      className="block w-full rounded-lg px-2 py-1.5 text-left transition hover:bg-blue-50"
+                    >
+                      <span className="block text-sm font-semibold text-gray-950">{result.article.title}</span>
+                      <span className="mt-0.5 block text-xs leading-5 text-gray-600">{result.snippet}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </DashboardSection>

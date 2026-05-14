@@ -27,6 +27,21 @@ function scoreArticle(article: HelpArticle, terms: string[]) {
   }, 0)
 }
 
+function buildSnippet(article: HelpArticle, terms: string[]) {
+  const body = article.body.trim()
+  const normalizedBody = normalize(body)
+  const firstMatch = terms
+    .map((term) => normalizedBody.indexOf(term))
+    .filter((index) => index >= 0)
+    .sort((a, b) => a - b)[0]
+
+  if (firstMatch === undefined) return article.description
+
+  const start = Math.max(0, firstMatch - 48)
+  const snippet = body.slice(start, start + 180).trim()
+  return `${start > 0 ? "... " : ""}${snippet}${start + 180 < body.length ? " ..." : ""}`
+}
+
 export function searchHelpArticles(query: string, limit = 5): HelpSearchResult[] {
   const terms = normalize(query)
     .split(/\s+/)
@@ -41,11 +56,14 @@ export function searchHelpArticles(query: string, limit = 5): HelpSearchResult[]
   }
 
   return helpArticles
-    .map((article) => ({
-      article,
-      score: scoreArticle(article, terms),
-      snippet: article.description
-    }))
+    .map((article) => {
+      const score = scoreArticle(article, terms)
+      return {
+        article,
+        score,
+        snippet: buildSnippet(article, terms)
+      }
+    })
     .filter((result) => result.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
