@@ -917,9 +917,8 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
 
       {/* ── Page header ───────────────────────────────────────────────────── */}
       <div>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Online Checkout</p>
-        <h1 className="mt-1 text-xl font-semibold tracking-tight text-[#0052FF] sm:text-2xl">Online Payments</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <h1 className="text-xl font-semibold tracking-tight text-gray-950 sm:text-2xl">Online Payments</h1>
+        <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
           Payment links, website integration, webhooks, and developer tools.
         </p>
       </div>
@@ -960,7 +959,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
               className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200 ease-out ${
                 tab === t.id
                   ? "bg-[#0052FF] text-white shadow-[0_2px_8px_rgba(0,82,255,0.3)]"
-                  : "text-gray-400 hover:text-gray-600"
+                  : "text-gray-500 hover:text-gray-800"
               }`}
             >
               {t.label}
@@ -1133,7 +1132,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {tab === "integration" && (
         <div className="space-y-6">
-          <DashboardSection title="Integration Options">
+          <DashboardSection title="Integration Options" titleTone="blue">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {INTEGRATION_OPTIONS.map((opt) => (
                 <IntegrationCard key={opt.id} option={opt} onAction={handleIntegrationAction} />
@@ -1141,7 +1140,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
             </div>
           </DashboardSection>
 
-          <DashboardSection title="Your Setup">
+          <DashboardSection title="Your Setup" titleTone="blue">
             <div className="space-y-2.5">
               {merchantId ? (
                 <CopyRow label="Merchant ID" value={merchantId} fieldId="merchant_id"
@@ -1187,7 +1186,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           <div className="rounded-2xl border border-gray-200/80 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-6">
             <div className="mb-5 flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-sm font-semibold text-gray-950">Webhook Endpoint</h2>
+                <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Webhook Endpoint</h2>
                 <p className="mt-0.5 text-xs text-gray-500">PineTree will POST signed event payloads to this URL.</p>
               </div>
               <PreviewBadge />
@@ -1232,7 +1231,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           </div>
 
           {webhookConfig?.secret && (
-            <DashboardSection title="Signing Secret">
+            <DashboardSection title="Signing Secret" titleTone="blue">
               <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
                 <div className="p-5 sm:p-6">
                   <p className="mb-3 text-xs leading-relaxed text-gray-500">
@@ -1290,7 +1289,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           )}
 
           {/* ── Webhook Delivery Log ──────────────────────────────────────── */}
-          <DashboardSection title="Delivery Log">
+          <DashboardSection title="Delivery Log" titleTone="blue">
             <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
                 <div>
@@ -1368,7 +1367,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
         <div className="space-y-6">
 
           {/* ── API Keys ──────────────────────────────────────────────────── */}
-          <DashboardSection title="API Keys">
+          <DashboardSection title="API Keys" titleTone="blue">
             <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
                 <div>
@@ -1472,7 +1471,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           </DashboardSection>
 
           {/* ── Test Checkout Session ─────────────────────────────────────── */}
-          <DashboardSection title="Test Checkout Session">
+          <DashboardSection title="Test Checkout Session" titleTone="blue">
             <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
                 <div>
@@ -1553,7 +1552,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           </DashboardSection>
 
           {/* ── HTML / Frontend ───────────────────────────────────────────── */}
-          <DashboardSection title="HTML / Frontend">
+          <DashboardSection title="HTML / Frontend" titleTone="blue">
             <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
                 <div>
@@ -1576,7 +1575,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           </DashboardSection>
 
           {/* ── Node.js / Express Backend ─────────────────────────────────── */}
-          <DashboardSection title="Node.js / Express Backend">
+          <DashboardSection title="Node.js / Express Backend" titleTone="blue">
             <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
                 <div>
@@ -1592,7 +1591,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           </DashboardSection>
 
           {/* ── REST API — cURL ───────────────────────────────────────────── */}
-          <DashboardSection title="REST API — cURL">
+          <DashboardSection title="REST API — cURL" titleTone="blue">
             <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
                 <div>
@@ -1624,7 +1623,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           </DashboardSection>
 
           {/* ── React SDK ────────────────────────────────────────────────── */}
-          <DashboardSection title="React SDK">
+          <DashboardSection title="React SDK" titleTone="blue">
             <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
                 <div>
@@ -1644,7 +1643,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
 
           {/* ── API Reference ─────────────────────────────────────────────── */}
           <div className="rounded-2xl border border-gray-100 bg-gray-50/60 px-4 py-3.5">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">API Reference</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">API Reference</p>
             <div className="mt-2 space-y-1.5 text-xs text-gray-600">
               {[
                 { method: "GET",    path: "/api/checkout-links",               desc: "List all payment links",       status: "Live" },
