@@ -49,7 +49,17 @@ function field(label: string, value: string | number | null | undefined) {
   `
 }
 
-function buildShell(title: string, rows: string, messageLabel: string, message: string) {
+function buildShell(
+  title: string,
+  rows: string,
+  messageLabel: string,
+  message: string,
+  footerNote?: string
+) {
+  const noteSection = footerNote
+    ? `<div style="margin-top:14px;padding:12px 14px;background:#fffbeb;border:1px solid #fef3c7;border-radius:10px;color:#92400e;font-size:12px;line-height:1.55;"><strong>Note:</strong> ${escapeHtml(footerNote)}</div>`
+    : ""
+
   return `<!doctype html>
 <html>
   <body style="margin:0;background:#f4f7fb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;">
@@ -72,6 +82,7 @@ function buildShell(title: string, rows: string, messageLabel: string, message: 
                   <div style="margin-bottom:8px;color:#0052FF;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">${escapeHtml(messageLabel)}</div>
                   <div style="white-space:pre-wrap;border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;padding:14px 16px;color:#111827;font-size:14px;line-height:1.6;">${escapeHtml(message)}</div>
                 </div>
+                ${noteSection}
               </td>
             </tr>
           </table>
@@ -82,44 +93,21 @@ function buildShell(title: string, rows: string, messageLabel: string, message: 
 </html>`
 }
 
-async function sendSupportEmail(input: {
-  subject: string
-  html: string
-}): Promise<SupportNotificationResult> {
-  const config = getSupportEmailConfig()
-
-  if (!config.configured) {
-    return {
-      sent: false,
-      warning: config.warning
-    }
-  }
-
-  const resend = new Resend(config.apiKey)
-  const { data, error } = await resend.emails.send({
-    from: config.from,
-    to: config.to,
-    subject: input.subject,
-    html: input.html
-  })
-
-  if (error) {
-    throw new Error(`Email notification failed: ${error.message}`)
-  }
-
-  return {
-    sent: true,
-    emailId: data?.id ?? ""
-  }
-}
-
 export async function sendSupportTicketNotification(
   ticket: SupportTicketRecord
 ): Promise<SupportNotificationResult> {
+  const config = getSupportEmailConfig()
+
+  if (!config.configured) {
+    return { sent: false, warning: config.warning }
+  }
+
   const subject = `New PineTree Support Ticket: ${ticket.subject}`
   const rows = [
     field("Ticket ID", ticket.id),
     field("Merchant ID", ticket.merchant_id),
+    field("Business Name", ticket.merchant_business_name),
+    field("Merchant Email", ticket.merchant_email),
     field("Category", ticket.category),
     field("Priority", ticket.priority),
     field("Subject", ticket.subject),
@@ -127,15 +115,44 @@ export async function sendSupportTicketNotification(
     field("Created At", ticket.created_at)
   ].join("")
 
-  return sendSupportEmail({
+  const replyNote =
+    "Reply-to is set to the merchant email for human follow-up only. " +
+    "Replying to this email does not automatically update the ticket thread. " +
+    "Ticket-thread replies require the admin dashboard or an inbound email webhook."
+
+  const html = buildShell(subject, rows, "Description", ticket.description, replyNote)
+
+  const resend = new Resend(config.apiKey)
+
+  const sendOptions: Parameters<typeof resend.emails.send>[0] = {
+    from: config.from,
+    to: config.to,
     subject,
-    html: buildShell(subject, rows, "Description", ticket.description)
-  })
+    html
+  }
+
+  if (ticket.merchant_email) {
+    sendOptions.replyTo = ticket.merchant_email
+  }
+
+  const { data, error } = await resend.emails.send(sendOptions)
+
+  if (error) {
+    throw new Error(`Email notification failed: ${error.message}`)
+  }
+
+  return { sent: true, emailId: data?.id ?? "" }
 }
 
 export async function sendFeedbackNotification(
   feedback: MerchantFeedbackRecord
 ): Promise<SupportNotificationResult> {
+  const config = getSupportEmailConfig()
+
+  if (!config.configured) {
+    return { sent: false, warning: config.warning }
+  }
+
   const subject = `New PineTree Feedback: ${feedback.type}`
   const rows = [
     field("Feedback ID", feedback.id),
@@ -145,8 +162,19 @@ export async function sendFeedbackNotification(
     field("Created At", feedback.created_at)
   ].join("")
 
-  return sendSupportEmail({
+  const html = buildShell(subject, rows, "Message", feedback.message)
+
+  const resend = new Resend(config.apiKey)
+  const { data, error } = await resend.emails.send({
+    from: config.from,
+    to: config.to,
     subject,
-    html: buildShell(subject, rows, "Message", feedback.message)
+    html
   })
+
+  if (error) {
+    throw new Error(`Email notification failed: ${error.message}`)
+  }
+
+  return { sent: true, emailId: data?.id ?? "" }
 }

@@ -5,6 +5,8 @@ import {
   Bot,
   BookOpen,
   CheckCircle2,
+  ChevronRight,
+  Clock,
   LifeBuoy,
   MessageSquare,
   Search,
@@ -27,6 +29,8 @@ import {
   ProviderStatusPill
 } from "@/components/dashboard/DashboardPrimitives"
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 type TicketRecord = {
   id: string
   category: string
@@ -35,6 +39,22 @@ type TicketRecord = {
   priority: string
   status: string
   related_payment_id: string | null
+  created_at: string
+  updated_at: string
+  resolved_at: string | null
+  archived_at: string | null
+  last_response_at: string | null
+  merchant_business_name: string | null
+}
+
+type TicketMessage = {
+  id: string
+  ticket_id: string
+  merchant_id: string
+  sender_type: "merchant" | "pinetree" | "system"
+  sender_name: string | null
+  sender_email: string | null
+  message: string
   created_at: string
 }
 
@@ -51,6 +71,8 @@ type FeedbackForm = {
   message: string
   rating: string
 }
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const suggestedQuestions = [
   "Why is my payment pending?",
@@ -76,6 +98,27 @@ const emptyFeedbackForm: FeedbackForm = {
 const DEFAULT_VISIBLE_ARTICLES = 6
 const SUPPORT_STORAGE_DISABLED_MESSAGE =
   "Support storage is not enabled yet. Apply the Help Center database migration to view and create tickets."
+
+const TICKET_FILTERS = ["All", "Open", "In Review", "Resolved", "Archived"] as const
+type TicketFilter = typeof TICKET_FILTERS[number]
+
+const TICKET_STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
+  open: { label: "Open", cls: "bg-blue-50 text-[#0052FF] border-blue-200" },
+  in_review: { label: "In Review", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  waiting_on_merchant: { label: "Waiting on You", cls: "bg-orange-50 text-orange-700 border-orange-200" },
+  resolved: { label: "Resolved", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  archived: { label: "Archived", cls: "bg-gray-100 text-gray-500 border-gray-200" }
+}
+
+const STATUS_DESCRIPTION: Record<string, string> = {
+  open: "PineTree has received your ticket.",
+  in_review: "PineTree is reviewing your ticket.",
+  waiting_on_merchant: "PineTree needs more information from you.",
+  resolved: "PineTree has marked this issue resolved.",
+  archived: "This ticket is closed and retained for history."
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function searchableText(article: HelpArticle) {
   return [
@@ -112,6 +155,17 @@ function normalizeSupportErrorMessage(error: unknown, fallback: string) {
   return message
 }
 
+function matchesTicketFilter(ticket: TicketRecord, filter: TicketFilter): boolean {
+  if (filter === "All") return true
+  if (filter === "Open") return ticket.status === "open"
+  if (filter === "In Review") return ticket.status === "in_review" || ticket.status === "waiting_on_merchant"
+  if (filter === "Resolved") return ticket.status === "resolved"
+  if (filter === "Archived") return ticket.status === "archived"
+  return true
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
 export default function HelpCenterPage() {
   const [query, setQuery] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<string>("All")
@@ -125,10 +179,14 @@ export default function HelpCenterPage() {
   const [submittingTicket, setSubmittingTicket] = useState(false)
   const [submittingFeedback, setSubmittingFeedback] = useState(false)
   const [assistantQuestion, setAssistantQuestion] = useState("")
+  const [ticketFilter, setTicketFilter] = useState<TicketFilter>("All")
+  const [selectedTicket, setSelectedTicket] = useState<TicketRecord | null>(null)
+  const [ticketDetailMessages, setTicketDetailMessages] = useState<TicketMessage[]>([])
+  const [ticketDetailLoading, setTicketDetailLoading] = useState(false)
+  const [ticketDetailError, setTicketDetailError] = useState<string | null>(null)
 
   const filteredArticles = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
-
     return helpArticles.filter((article) => {
       const categoryMatch = selectedCategory === "All" || article.category === selectedCategory
       const queryMatch = !normalizedQuery || searchableText(article).includes(normalizedQuery)
@@ -152,6 +210,10 @@ export default function HelpCenterPage() {
   const assistantResults = useMemo<HelpSearchResult[]>(() => {
     return searchHelpArticles(assistantQuestion, 3)
   }, [assistantQuestion])
+
+  const filteredTickets = useMemo(() => {
+    return tickets.filter((ticket) => matchesTicketFilter(ticket, ticketFilter))
+  }, [tickets, ticketFilter])
 
   const getAccessToken = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession()
@@ -189,28 +251,108 @@ export default function HelpCenterPage() {
     }
   }, [getAccessToken])
 
+  const loadTicketDetail = useCallback(async (ticketId: string) => {
+    try {
+      setTicketDetailLoading(true)
+      setTicketDetailError(null)
+      const token = await getAccessToken()
+      if (!token) {
+        setTicketDetailError("Sign in to view ticket details.")
+        return
+      }
+
+      const res = await fetch(`/api/support/tickets/${ticketId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+        cache: "no-store"
+      })
+      const payload = (await res.json().catch(() => null)) as {
+        ticket?: TicketRecord
+        messages?: TicketMessage[]
+        error?: string
+      } | null
+
+      if (!res.ok) {
+        throw new Error(payload?.error || "Failed to load ticket details.")
+      }
+
+      if (payload?.ticket) {
+        setSelectedTicket(payload.ticket)
+      }
+      setTicketDetailMessages(payload?.messages || [])
+    } catch (error) {
+      setTicketDetailError(normalizeSupportErrorMessage(error, "Failed to load ticket details."))
+    } finally {
+      setTicketDetailLoading(false)
+    }
+  }, [getAccessToken])
+
   useEffect(() => {
     void loadTickets()
   }, [loadTickets])
 
   useEffect(() => {
     if (!selectedArticle) return
-
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setSelectedArticle(null)
-      }
+      if (event.key === "Escape") setSelectedArticle(null)
     }
-
-    const previousOverflow = document.body.style.overflow
+    const prev = document.body.style.overflow
     document.body.style.overflow = "hidden"
     document.addEventListener("keydown", handleKeyDown)
-
     return () => {
-      document.body.style.overflow = previousOverflow
+      document.body.style.overflow = prev
       document.removeEventListener("keydown", handleKeyDown)
     }
   }, [selectedArticle])
+
+  useEffect(() => {
+    if (!selectedTicket) return
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setSelectedTicket(null)
+    }
+    const prev = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    document.addEventListener("keydown", handleKeyDown)
+    return () => {
+      document.body.style.overflow = prev
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [selectedTicket])
+
+  function openTicketDetail(ticket: TicketRecord) {
+    setSelectedTicket(ticket)
+    setTicketDetailMessages([])
+    setTicketDetailError(null)
+    void loadTicketDetail(ticket.id)
+  }
+
+  async function sendFollowUpMessage(message: string) {
+    if (!selectedTicket) return
+    const token = await getAccessToken()
+    if (!token) {
+      toast.error("Sign in to reply.")
+      return
+    }
+    const res = await fetch(`/api/support/tickets/${selectedTicket.id}/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      credentials: "include",
+      body: JSON.stringify({ message })
+    })
+    const payload = (await res.json().catch(() => null)) as {
+      message?: TicketMessage
+      error?: string
+    } | null
+    if (!res.ok) {
+      throw new Error(payload?.error || "Failed to send message.")
+    }
+    if (payload?.message) {
+      setTicketDetailMessages((current) => [...current, payload.message as TicketMessage])
+    }
+  }
 
   async function submitTicket() {
     const subject = ticketForm.subject.trim()
@@ -439,31 +581,31 @@ export default function HelpCenterPage() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {visibleArticles.map((article) => (
-              <button
-                key={article.id}
-                type="button"
-                onClick={() => setSelectedArticle(article)}
-                className="group min-h-[142px] rounded-2xl border border-gray-200/80 bg-gray-50/50 p-3.5 text-left outline-none transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-white hover:shadow-[0_14px_34px_rgba(15,23,42,0.08)] focus-visible:ring-4 focus-visible:ring-blue-100"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <BookOpen className="mt-0.5 h-5 w-5 shrink-0 text-[#0052FF]" />
-                  <ProviderStatusPill label={article.category} tone="blue" />
-                </div>
-                <h2 className="mt-3 text-base font-semibold text-gray-950">{article.title}</h2>
-                <p className="mt-2 text-sm leading-5 text-gray-600">{article.description}</p>
-                <span className="mt-4 inline-flex items-center text-xs font-semibold text-[#0052FF]">
-                  Read guide
-                  <span className="ml-1 transition group-hover:translate-x-0.5">-&gt;</span>
-                </span>
-              </button>
-            ))}
+              {visibleArticles.map((article) => (
+                <button
+                  key={article.id}
+                  type="button"
+                  onClick={() => setSelectedArticle(article)}
+                  className="group min-h-[142px] rounded-2xl border border-gray-200/80 bg-gray-50/50 p-3.5 text-left outline-none transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-white hover:shadow-[0_14px_34px_rgba(15,23,42,0.08)] focus-visible:ring-4 focus-visible:ring-blue-100"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <BookOpen className="mt-0.5 h-5 w-5 shrink-0 text-[#0052FF]" />
+                    <ProviderStatusPill label={article.category} tone="blue" />
+                  </div>
+                  <h2 className="mt-3 text-base font-semibold text-gray-950">{article.title}</h2>
+                  <p className="mt-2 text-sm leading-5 text-gray-600">{article.description}</p>
+                  <span className="mt-4 inline-flex items-center text-xs font-semibold text-[#0052FF]">
+                    Read guide
+                    <span className="ml-1 transition group-hover:translate-x-0.5">-&gt;</span>
+                  </span>
+                </button>
+              ))}
 
-            {filteredArticles.length === 0 && (
-              <div className="rounded-2xl border border-gray-200 bg-white p-5 text-sm text-gray-600 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:col-span-2 xl:col-span-3">
-                No help articles matched your search. Try a payment status, provider name, or report term.
-              </div>
-            )}
+              {filteredArticles.length === 0 && (
+                <div className="rounded-2xl border border-gray-200 bg-white p-5 text-sm text-gray-600 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:col-span-2 xl:col-span-3">
+                  No help articles matched your search. Try a payment status, provider name, or report term.
+                </div>
+              )}
             </div>
 
             {(hasMoreArticles || articlesExpanded) && (
@@ -485,6 +627,7 @@ export default function HelpCenterPage() {
         {/* Left column: Support tickets + Feedback */}
         <div className="space-y-4 md:space-y-5">
           <DashboardSection title="Support" titleTone="blue" className="min-w-0">
+            {/* Open a Ticket form */}
             <div id="support-ticket" className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -554,6 +697,7 @@ export default function HelpCenterPage() {
               </div>
             </div>
 
+            {/* Recent Tickets window */}
             <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <h2 className="text-lg font-semibold text-gray-950">Recent Tickets</h2>
@@ -566,33 +710,95 @@ export default function HelpCenterPage() {
                 </button>
               </div>
 
+              {/* Status filter chips */}
+              <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1">
+                {TICKET_FILTERS.map((filter) => {
+                  const active = filter === ticketFilter
+                  return (
+                    <button
+                      key={filter}
+                      type="button"
+                      onClick={() => setTicketFilter(filter)}
+                      className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                        active
+                          ? "border-[#0052FF] bg-[#0052FF] text-white shadow-sm"
+                          : "border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:bg-blue-50"
+                      }`}
+                    >
+                      {filter}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Loading skeletons */}
               {ticketsLoading && (
                 <div className="space-y-2">
-                  <div className="h-16 animate-pulse rounded-xl bg-gray-100" />
-                  <div className="h-16 animate-pulse rounded-xl bg-gray-100" />
+                  <div className="h-[72px] animate-pulse rounded-xl bg-gray-100" />
+                  <div className="h-[72px] animate-pulse rounded-xl bg-gray-100" />
                 </div>
               )}
+
+              {/* Error */}
               {!ticketsLoading && ticketError && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
                   {ticketError}
                 </div>
               )}
-              {!ticketsLoading && !ticketError && tickets.length === 0 && (
-                <p className="text-sm text-gray-600">No support tickets yet.</p>
+
+              {/* Empty state */}
+              {!ticketsLoading && !ticketError && filteredTickets.length === 0 && (
+                <div className="flex flex-col items-center gap-3 py-8 text-center">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-full border border-blue-100 bg-blue-50">
+                    <LifeBuoy className="h-5 w-5 text-[#0052FF]" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-950">
+                      {ticketFilter === "All" ? "No support tickets yet" : `No ${ticketFilter.toLowerCase()} tickets`}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {ticketFilter === "All"
+                        ? "Open a ticket above to get help from PineTree."
+                        : "Change the filter to see other tickets."}
+                    </p>
+                  </div>
+                </div>
               )}
-              {!ticketsLoading && tickets.length > 0 && (
-                <div className="divide-y divide-gray-100">
-                  {tickets.map((ticket) => (
-                    <div key={ticket.id} className="py-3 first:pt-0 last:pb-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <ProviderStatusPill label={ticket.status} tone="blue" />
-                        <span className="text-xs font-medium text-gray-500">{ticket.category}</span>
-                        <span className="text-xs font-medium text-gray-500">{ticket.priority}</span>
-                        <span className="text-xs text-gray-400">{formatDate(ticket.created_at)}</span>
+
+              {/* Ticket rows */}
+              {!ticketsLoading && !ticketError && filteredTickets.length > 0 && (
+                <div className="space-y-1.5">
+                  {filteredTickets.map((ticket) => (
+                    <button
+                      key={ticket.id}
+                      type="button"
+                      onClick={() => openTicketDetail(ticket)}
+                      className={`w-full rounded-xl border p-3 text-left outline-none transition hover:border-blue-200 hover:bg-blue-50/30 focus-visible:ring-4 focus-visible:ring-blue-100 ${
+                        ticket.status === "archived"
+                          ? "border-gray-100 bg-gray-50/60 opacity-80"
+                          : "border-gray-100 bg-white hover:shadow-[0_4px_14px_rgba(0,82,255,0.06)]"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <TicketStatusPill status={ticket.status} />
+                          <span className="text-xs text-gray-500">{ticket.category}</span>
+                          <span className="text-gray-300" aria-hidden>·</span>
+                          <span className="text-xs text-gray-500">{ticket.priority}</span>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <span className="text-[11px] text-gray-400">{formatDate(ticket.created_at)}</span>
+                          <ChevronRight className="h-3.5 w-3.5 text-gray-400" />
+                        </div>
                       </div>
-                      <div className="mt-2 text-sm font-semibold text-gray-950">{ticket.subject}</div>
-                      <p className="mt-1 line-clamp-2 text-sm leading-5 text-gray-600">{ticket.description}</p>
-                    </div>
+                      <div className="mt-1.5 text-sm font-semibold text-gray-950">{ticket.subject}</div>
+                      {ticket.last_response_at && (
+                        <div className="mt-1 flex items-center gap-1 text-[11px] text-gray-500">
+                          <Clock className="h-3 w-3 shrink-0" />
+                          Last response {formatDate(ticket.last_response_at)}
+                        </div>
+                      )}
+                    </button>
                   ))}
                 </div>
               )}
@@ -661,7 +867,7 @@ export default function HelpCenterPage() {
           </DashboardSection>
         </div>
 
-        {/* Right column: Assistant — flex-col cascades height so the card fills the grid row */}
+        {/* Right column: Assistant */}
         <div className="xl:flex xl:flex-col">
           <DashboardSection title="Assistant" titleTone="blue" className="xl:flex xl:flex-col xl:flex-1">
             <div className="xl:flex xl:flex-col xl:flex-1 rounded-2xl border border-blue-200/80 bg-[linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-5 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
@@ -728,6 +934,7 @@ export default function HelpCenterPage() {
         </div>
       </div>
 
+      {/* Article modal */}
       {selectedArticle && (
         <ArticleModal
           article={selectedArticle}
@@ -735,9 +942,284 @@ export default function HelpCenterPage() {
           onOpenArticle={setSelectedArticle}
         />
       )}
+
+      {/* Ticket detail modal */}
+      {selectedTicket && (
+        <TicketDetailModal
+          ticket={selectedTicket}
+          messages={ticketDetailMessages}
+          loading={ticketDetailLoading}
+          error={ticketDetailError}
+          onClose={() => setSelectedTicket(null)}
+          onSendMessage={sendFollowUpMessage}
+        />
+      )}
     </div>
   )
 }
+
+// ─── TicketStatusPill ─────────────────────────────────────────────────────────
+
+function TicketStatusPill({ status }: { status: string }) {
+  const config = TICKET_STATUS_CONFIG[status] ?? {
+    label: status,
+    cls: "bg-gray-100 text-gray-600 border-gray-200"
+  }
+  return (
+    <span className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${config.cls}`}>
+      {config.label}
+    </span>
+  )
+}
+
+// ─── TicketDetailModal ────────────────────────────────────────────────────────
+
+function TicketDetailModal({
+  ticket,
+  messages,
+  loading,
+  error,
+  onClose,
+  onSendMessage
+}: {
+  ticket: TicketRecord
+  messages: TicketMessage[]
+  loading: boolean
+  error: string | null
+  onClose: () => void
+  onSendMessage: (message: string) => Promise<void>
+}) {
+  const [followUp, setFollowUp] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+
+  const canReply = ["open", "in_review", "waiting_on_merchant"].includes(ticket.status)
+  const statusDesc = STATUS_DESCRIPTION[ticket.status] ?? ""
+
+  async function handleSend() {
+    const text = followUp.trim()
+    if (!text) return
+    try {
+      setSubmitting(true)
+      await onSendMessage(text)
+      setFollowUp("")
+      toast.success("Message sent.")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to send message.")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ticket-detail-title"
+        className="flex h-[100dvh] w-full flex-col overflow-hidden rounded-t-[1.35rem] border border-white/70 bg-white/95 shadow-[0_28px_90px_rgba(15,23,42,0.30)] sm:h-auto sm:max-h-[88vh] sm:max-w-2xl sm:rounded-[1.35rem]"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4 border-b border-gray-100 bg-white/90 px-4 py-4 sm:px-6">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <TicketStatusPill status={ticket.status} />
+              <span className="text-xs text-gray-500">{ticket.category}</span>
+            </div>
+            <h2 id="ticket-detail-title" className="mt-2 text-lg font-semibold leading-snug text-gray-950 sm:text-xl">
+              {ticket.subject}
+            </h2>
+            {statusDesc && (
+              <p className="mt-1 text-xs text-gray-500">{statusDesc}</p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close ticket"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 shadow-sm transition hover:border-blue-200 hover:text-[#0052FF] focus:outline-none focus:ring-4 focus:ring-blue-100"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+          {/* Meta cells */}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <MetaCell label="Priority" value={ticket.priority} />
+            <MetaCell label="Created" value={formatDate(ticket.created_at)} />
+            {ticket.last_response_at && (
+              <MetaCell label="Last Response" value={formatDate(ticket.last_response_at)} />
+            )}
+            {ticket.resolved_at && (
+              <MetaCell label="Resolved" value={formatDate(ticket.resolved_at)} />
+            )}
+            {ticket.archived_at && (
+              <MetaCell label="Archived" value={formatDate(ticket.archived_at)} />
+            )}
+            {ticket.related_payment_id && (
+              <MetaCell label="Payment ID" value={ticket.related_payment_id} mono />
+            )}
+          </div>
+
+          {/* Original description */}
+          <div className="mt-4">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+              Description
+            </p>
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm leading-6 text-gray-700 whitespace-pre-wrap">
+              {ticket.description}
+            </div>
+          </div>
+
+          {/* Message thread */}
+          <div className="mt-5">
+            <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+              Responses
+            </p>
+
+            {loading && (
+              <div className="h-16 animate-pulse rounded-xl bg-gray-100" />
+            )}
+
+            {!loading && error && (
+              <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+                {error}
+              </div>
+            )}
+
+            {!loading && !error && messages.length === 0 && (
+              <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-gray-200 bg-gray-50/80 px-4 py-7 text-center">
+                <MessageSquare className="h-5 w-5 text-gray-300" />
+                <p className="text-sm text-gray-500">
+                  No responses yet. PineTree will reply here when your ticket is reviewed.
+                </p>
+              </div>
+            )}
+
+            {!loading && messages.length > 0 && (
+              <div className="space-y-4">
+                {messages.map((msg) => (
+                  <TicketMessageBubble key={msg.id} message={msg} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        {canReply ? (
+          <div className="border-t border-gray-100 bg-white/95 px-4 py-3 sm:px-6">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-400">
+              Add a follow-up message
+            </p>
+            <div className="flex items-end gap-2">
+              <textarea
+                value={followUp}
+                onChange={(event) => setFollowUp(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                    void handleSend()
+                  }
+                }}
+                placeholder="Provide additional context or updates..."
+                rows={2}
+                className="form-field min-h-[60px] flex-1 resize-none text-sm"
+              />
+              <button
+                type="button"
+                onClick={() => void handleSend()}
+                disabled={submitting || !followUp.trim()}
+                className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
+              >
+                <Send size={14} />
+                {submitting ? "Sending..." : "Send"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="border-t border-gray-100 bg-gray-50/80 px-4 py-3 text-center text-xs text-gray-500 sm:px-6">
+            {ticket.status === "resolved"
+              ? "This ticket is resolved. Open a new ticket if you need further help."
+              : "This ticket is archived and closed."}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── MetaCell ─────────────────────────────────────────────────────────────────
+
+function MetaCell({
+  label,
+  value,
+  mono = false
+}: {
+  label: string
+  value: string
+  mono?: boolean
+}) {
+  return (
+    <div className="rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">{label}</p>
+      <p className={`mt-0.5 truncate text-sm font-medium text-gray-950 ${mono ? "font-mono text-xs" : ""}`}>
+        {value}
+      </p>
+    </div>
+  )
+}
+
+// ─── TicketMessageBubble ──────────────────────────────────────────────────────
+
+function TicketMessageBubble({ message }: { message: TicketMessage }) {
+  const isPineTree = message.sender_type === "pinetree"
+  const isSystem = message.sender_type === "system"
+  const isMerchant = message.sender_type === "merchant"
+
+  return (
+    <div className={`flex gap-3 ${isMerchant ? "flex-row-reverse" : ""}`}>
+      <div
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold ${
+          isPineTree
+            ? "border-blue-200 bg-blue-50 text-[#0052FF]"
+            : isSystem
+              ? "border-gray-200 bg-gray-100 text-gray-500"
+              : "border-gray-200 bg-gray-100 text-gray-700"
+        }`}
+      >
+        {isPineTree ? "PT" : isSystem ? "SYS" : "ME"}
+      </div>
+      <div className={`flex-1 ${isMerchant ? "flex flex-col items-end" : ""}`}>
+        <div className={`mb-1 flex items-center gap-2 ${isMerchant ? "flex-row-reverse" : ""}`}>
+          <span className="text-xs font-semibold text-gray-700">
+            {message.sender_name ?? (isPineTree ? "PineTree" : isSystem ? "System" : "You")}
+          </span>
+          <span className="text-[10px] text-gray-400">{formatDate(message.created_at)}</span>
+        </div>
+        <div
+          className={`max-w-[85%] rounded-xl border px-3 py-2 text-sm leading-6 text-gray-700 whitespace-pre-wrap ${
+            isPineTree
+              ? "border-blue-100 bg-blue-50/60"
+              : isSystem
+                ? "border-gray-200 bg-gray-50"
+                : "border-gray-200 bg-white"
+          }`}
+        >
+          {message.message}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── ArticleModal ─────────────────────────────────────────────────────────────
 
 function getRelatedArticles(article: HelpArticle) {
   const articleTags = new Set(article.tags.map((tag) => tag.toLowerCase()))
@@ -887,6 +1369,8 @@ function ArticleModal({
     </div>
   )
 }
+
+// ─── Primitives ───────────────────────────────────────────────────────────────
 
 function QuickAction({ label, icon, href }: { label: string; icon: ReactNode; href: string }) {
   return (

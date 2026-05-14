@@ -20,6 +20,8 @@ export type CreateSupportTicketInput = {
   description: string
   priority?: string
   relatedPaymentId?: string | null
+  merchantEmail?: string | null
+  merchantBusinessName?: string | null
 }
 
 function normalizeChoice<T extends readonly string[]>(value: string | undefined, choices: T, fallback: T[number]) {
@@ -63,6 +65,8 @@ export async function createSupportTicket(input: CreateSupportTicketInput): Prom
     description,
     priority: priority.toLowerCase(),
     status: "open",
-    relatedPaymentId
+    relatedPaymentId,
+    merchantEmail: input.merchantEmail ?? null,
+    merchantBusinessName: input.merchantBusinessName ?? null
   })
 }

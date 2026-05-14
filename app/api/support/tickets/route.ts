@@ -6,6 +6,7 @@ import {
   requireMerchantIdFromRequest
 } from "@/lib/api/merchantAuth"
 import { sendSupportTicketNotification } from "@/lib/email/sendSupportNotification"
+import { getMerchantById } from "@/database/merchants"
 
 type TicketBody = {
   category?: string
@@ -62,13 +63,17 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const merchant = await getMerchantById(merchantId)
+
     const ticket = await createSupportTicket({
       merchantId,
       category: body.category,
       subject: body.subject,
       description: body.description,
       priority: body.priority,
-      relatedPaymentId: body.relatedPaymentId
+      relatedPaymentId: body.relatedPaymentId,
+      merchantEmail: merchant?.email ?? null,
+      merchantBusinessName: merchant?.business_name ?? null
     })
 
     let warning: string | undefined
