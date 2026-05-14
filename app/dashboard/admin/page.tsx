@@ -287,11 +287,13 @@ function MetricCard({
   value,
   sub,
   accent = "gray",
+  className,
 }: {
   label: string
   value: string
   sub?: string
   accent?: "blue" | "green" | "amber" | "red" | "gray"
+  className?: string
 }) {
   const border: Record<string, string> = {
     blue: "border-[#0052FF]/15",
@@ -316,10 +318,10 @@ function MetricCard({
   }
 
   return (
-    <div className={`rounded-xl border ${border[accent]} bg-white px-4 py-4 shadow-sm`}>
+    <div className={`rounded-xl border ${border[accent]} bg-white px-4 py-4 shadow-sm min-h-[88px]${className ? ` ${className}` : ""}`}>
       <div className="flex items-center gap-1.5 mb-2.5">
         <span className={`h-1.5 w-1.5 rounded-full ${dot[accent]}`} />
-        <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">{label}</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">{label}</p>
       </div>
       <p className={`text-2xl font-bold leading-none ${val[accent]}`}>{value}</p>
       {sub && <p className="mt-1.5 text-xs text-gray-400">{sub}</p>}
@@ -702,14 +704,14 @@ export default function AdminPage() {
           {loadingOverview ? (
             <Spinner />
           ) : (
-            <div className="space-y-6">
+            <div className="space-y-5 pb-8">
 
               {/* Payment metrics */}
-              <section>
-                <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+              <section className="rounded-2xl border border-gray-100 bg-white p-4 sm:p-5 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
+                <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
                   Payments — All Time
                 </p>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-3 sm:gap-4">
                   <MetricCard label="Total" value={m ? fmt(m.totalTransactions) : "—"} accent="gray" />
                   <MetricCard label="Confirmed" value={m ? fmt(m.confirmedTransactions) : "—"} accent="green" />
                   <MetricCard label="Pending" value={m ? fmt(m.pendingTransactions) : "—"} accent="amber" />
@@ -720,12 +722,12 @@ export default function AdminPage() {
               </section>
 
               {/* Platform + growth */}
-              <div className="grid gap-6 lg:grid-cols-2">
-                <section>
-                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+              <div className="grid gap-4 lg:grid-cols-2 lg:gap-5">
+                <section className="rounded-2xl border border-gray-100 bg-white p-4 sm:p-5 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
+                  <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
                     Platform
                   </p>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-3 sm:gap-4">
                     <MetricCard
                       label="Total Users"
                       value={m ? fmt(m.totalUsers) : "—"}
@@ -738,20 +740,23 @@ export default function AdminPage() {
                       sub="Status: active"
                       accent="green"
                     />
-                    <MetricCard
-                      label="Providers"
-                      value={m ? fmt(m.connectedProviders) : "—"}
-                      sub="Connections"
-                      accent="gray"
-                    />
+                    <div className="col-span-2 sm:col-span-1">
+                      <MetricCard
+                        label="Providers"
+                        value={m ? fmt(m.connectedProviders) : "—"}
+                        sub="Connections"
+                        accent="gray"
+                        className="h-full"
+                      />
+                    </div>
                   </div>
                 </section>
 
-                <section>
-                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+                <section className="rounded-2xl border border-gray-100 bg-white p-4 sm:p-5 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
+                  <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
                     This Month — {monthLabel}
                   </p>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-3 sm:gap-4">
                     <MetricCard
                       label="New Users"
                       value={g ? fmt(g.usersThisMonth) : "—"}
@@ -762,22 +767,25 @@ export default function AdminPage() {
                       value={g ? fmt(g.transactionsThisMonth) : "—"}
                       accent="gray"
                     />
-                    <MetricCard
-                      label="Volume"
-                      value={g ? fmtUSD(g.volumeThisMonth) : "—"}
-                      sub="Confirmed"
-                      accent="green"
-                    />
+                    <div className="col-span-2 sm:col-span-1">
+                      <MetricCard
+                        label="Volume"
+                        value={g ? fmtUSD(g.volumeThisMonth) : "—"}
+                        sub="Confirmed"
+                        accent="green"
+                        className="h-full"
+                      />
+                    </div>
                   </div>
                 </section>
               </div>
 
               {/* Quick links */}
               <section>
-                <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+                <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
                   Navigate
                 </p>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-3 sm:gap-4">
                   {[
                     { label: "Support Queue", desc: "Tickets & replies", onClick: () => { setActiveTab("support"); setSelectedTicketId(null) } },
                     { label: "Feedback", desc: "Merchant ratings", onClick: () => setActiveTab("feedback") },
@@ -814,7 +822,7 @@ export default function AdminPage() {
               {/* Recent transactions */}
               <section>
                 <div className="mb-3 flex items-center justify-between">
-                  <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
                     Recent Transactions
                   </p>
                   <Link
@@ -877,7 +885,7 @@ export default function AdminPage() {
               <div className="grid gap-6 lg:grid-cols-2">
                 <section>
                   <div className="mb-3 flex items-center justify-between">
-                    <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
                       Recent Tickets
                     </p>
                     <button
@@ -920,7 +928,7 @@ export default function AdminPage() {
 
                 <section>
                   <div className="mb-3 flex items-center justify-between">
-                    <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
                       Recent Feedback
                     </p>
                     <button
@@ -986,7 +994,7 @@ export default function AdminPage() {
               >
                 <div className="flex items-center gap-1.5 mb-2">
                   <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
-                  <span className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
                     {s.label}
                   </span>
                 </div>
@@ -1304,7 +1312,7 @@ export default function AdminPage() {
 
                 {/* Status quick actions */}
                 <div className="flex-none border-t border-gray-100 px-6 py-3">
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
                     Set Status
                   </p>
                   <div className="flex flex-wrap gap-1.5">
@@ -1327,7 +1335,7 @@ export default function AdminPage() {
 
                 {/* Reply box */}
                 <div className="flex-none border-t border-gray-200 bg-gray-50 px-6 py-5">
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
                     Reply as PineTree Support
                   </p>
                   <textarea
