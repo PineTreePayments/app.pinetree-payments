@@ -7,7 +7,6 @@ import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import Button from "@/components/ui/Button"
 import Card from "@/components/ui/Card"
-import { DashboardSection } from "@/components/dashboard/DashboardPrimitives"
 
 type Terminal = {
   id: string
@@ -273,7 +272,7 @@ export default function POSPage() {
 
   return (
 
-    <div className="relative space-y-5 md:space-y-7">
+    <div className="relative space-y-4 md:space-y-6">
 
       {/* DELETE CONFIRM MODAL */}
 
@@ -319,15 +318,19 @@ export default function POSPage() {
 
       {/* HEADER */}
 
-      <div>
+      <div className="flex items-center justify-between gap-3">
 
         <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">
           Point of Sale
         </h1>
 
-        <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
-          Manage POS terminals and launch checkout.
-        </p>
+        <button
+          onClick={() => setCreating(true)}
+          style={{ boxShadow: "0 10px 24px rgba(0,82,255,0.18)" }}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-[18px] bg-[#1652f0] px-[18px] py-2.5 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.98]"
+        >
+          + New Terminal
+        </button>
 
       </div>
 
@@ -468,156 +471,155 @@ export default function POSPage() {
 
       {/* TERMINAL LIST */}
 
-      <DashboardSection
-        title="Active Terminals"
-        titleTone="blue"
-        action={
-          <Button
-            onClick={()=>setCreating(true)}
-            className="hidden h-9 self-start rounded-xl px-3 text-xs shadow-sm sm:inline-flex sm:h-10 sm:self-auto sm:px-4 sm:text-sm"
-          >
-            + New Terminal
-          </Button>
-        }
-      >
-        <Button
-          onClick={()=>setCreating(true)}
-          className="w-full justify-center rounded-xl text-sm shadow-sm sm:hidden"
-        >
-          + New Terminal
-        </Button>
+      <section className="space-y-3">
+
+        <p className="text-[13px] font-bold uppercase tracking-[0.18em] text-[#2f5cff]">
+          Active Terminals
+        </p>
 
         <div className="rounded-[1.35rem] border border-gray-200/80 bg-white p-3.5 shadow-[0_14px_44px_rgba(15,23,42,0.06)] sm:p-5">
 
-        {terminals.length === 0 && (
+          {terminals.length === 0 && (
+            <div className="text-sm text-gray-500">
+              No terminals created yet.
+            </div>
+          )}
 
-          <div className="text-sm text-gray-500">
-            No terminals created yet.
-          </div>
+          <div className="space-y-3">
 
-        )}
+            {terminals.map((t)=>(
 
-        <div className="space-y-3">
+              <div
+                key={t.id}
+                ref={expandedTerminalId === t.id ? detailsRef : null}
+                className="relative flex flex-col gap-3 rounded-2xl bg-gray-50/70 p-4 shadow-[0_8px_24px_rgba(15,23,42,0.035)] transition hover:bg-blue-50/40 md:flex-row md:items-center md:justify-between"
+              >
 
-          {terminals.map((t)=>(
+                <div>
 
-            <div
-              key={t.id}
-              ref={expandedTerminalId === t.id ? detailsRef : null}
-              className="relative flex flex-col gap-4 rounded-2xl bg-gray-50/70 p-4 shadow-[0_8px_24px_rgba(15,23,42,0.035)] transition hover:bg-blue-50/40 md:flex-row md:items-center md:justify-between"
-            >
+                  <div className="font-semibold text-gray-950">
+                    {t.name}
+                  </div>
 
-              <div>
+                  <div className="mt-0.5 font-mono text-xs text-gray-500">
+                    {t.id}
+                  </div>
 
-                <div className="font-semibold text-gray-950">
-                  {t.name}
+                  <div className="mt-1.5 text-xs font-semibold uppercase tracking-[0.13em] text-green-600">
+                    ● Active
+                  </div>
+
                 </div>
 
-                <div className="mt-0.5 font-mono text-xs text-gray-500">
-                  {t.id}
-                </div>
+                <div className="flex items-center gap-2 md:justify-end">
 
-                <div className="mt-2 text-xs font-semibold uppercase tracking-[0.13em] text-green-600">
-                  ● Active
-                </div>
-
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 md:justify-end">
-
-                <Button variant="secondary" onClick={() => toggleTerminalDetails(t.id)}>
-                  {expandedTerminalId === t.id ? "Hide details" : "Details"}
-                </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => toggleTerminalDetails(t.id)}
+                    className="rounded-xl px-3 text-xs"
+                  >
+                    {expandedTerminalId === t.id ? "Hide" : "Details"}
+                  </Button>
 
                   <Link href={`/terminal?tid=${t.id}`} className="inline-block">
-                    <Button fullWidth variant="primary">
+                    <Button variant="primary" className="rounded-xl px-5">
                       Launch
                     </Button>
                   </Link>
 
-                <Button
-                  variant="danger"
-                  onClick={()=>{
-                    setTerminalToDelete(t.id)
-                    setConfirmDelete(true)
-                  }}
-                >
-                  Delete
-                </Button>
+                  <Button
+                    variant="danger"
+                    onClick={()=>{
+                      setTerminalToDelete(t.id)
+                      setConfirmDelete(true)
+                    }}
+                    className="rounded-xl px-3 text-xs"
+                  >
+                    Delete
+                  </Button>
+
+                </div>
+
+                {expandedTerminalId === t.id && (
+                  <div className="md:absolute md:right-4 md:top-14 z-20 w-full md:w-72 rounded-xl bg-white p-3 text-xs text-gray-600 shadow-xl shadow-gray-900/10 ring-1 ring-gray-100 space-y-1">
+                    <div><span className="font-medium text-gray-800">Auto-lock:</span> {formatAutoLock(t.autolock)}</div>
+                    <div><span className="font-medium text-gray-800">Merchant:</span> {t.merchant_id || "-"}</div>
+                    <div>
+                      <span className="font-medium text-gray-800">Created:</span>{" "}
+                      {t.created_at ? new Date(t.created_at).toLocaleString() : "-"}
+                    </div>
+                  </div>
+                )}
 
               </div>
 
-              {expandedTerminalId === t.id && (
-                <div className="md:absolute md:right-4 md:top-14 z-20 w-full md:w-72 rounded-xl bg-white p-3 text-xs text-gray-600 shadow-xl shadow-gray-900/10 ring-1 ring-gray-100 space-y-1">
-                  <div><span className="font-medium text-gray-800">Auto-lock:</span> {formatAutoLock(t.autolock)}</div>
-                  <div><span className="font-medium text-gray-800">Merchant:</span> {t.merchant_id || "-"}</div>
-                  <div>
-                    <span className="font-medium text-gray-800">Created:</span>{" "}
-                    {t.created_at ? new Date(t.created_at).toLocaleString() : "-"}
-                  </div>
-                </div>
-              )}
+            ))}
 
-            </div>
-
-          ))}
+          </div>
 
         </div>
 
-        </div>
-
-      </DashboardSection>
+      </section>
 
       {/* DRAWER BALANCES */}
 
       {terminals.length > 0 && (
-        <DashboardSection title="Drawer Balances" titleTone="blue">
+
+        <section className="space-y-3">
+
+          <p className="text-[13px] font-bold uppercase tracking-[0.18em] text-[#2f5cff]">
+            Drawer Balances
+          </p>
 
           <div className="rounded-[1.35rem] border border-gray-200/80 bg-white p-3.5 shadow-[0_14px_44px_rgba(15,23,42,0.06)] sm:p-5">
 
-          <div className="space-y-3">
-            {terminals.map((t) => {
-              const drawer = drawerBalances[t.id]
-              const balance = drawer?.balance ?? null
-              const lastEntry = drawer?.lastEntry
-              return (
-                <div key={t.id} className="flex flex-col gap-3 rounded-2xl bg-gray-50/70 p-4 shadow-[0_8px_24px_rgba(15,23,42,0.035)] transition hover:bg-blue-50/40 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="font-semibold text-gray-950">{t.name}</p>
-                    {lastEntry ? (
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        Last activity: {new Date(lastEntry.created_at).toLocaleString()} · {lastEntry.type.replace("_", " ")}
-                      </p>
-                    ) : (
-                      <p className="text-xs text-gray-400 mt-0.5">No activity yet</p>
-                    )}
-                    <p className={`text-xs mt-1 ${drawer?.active ? "text-green-600" : "text-gray-400"}`}>
-                      {drawer?.active ? "Drawer open" : "No active drawer shift"}
-                    </p>
-                  </div>
-                  <div className="flex items-center justify-between gap-4 sm:justify-end">
-                    <div className="text-left sm:text-right">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-500">Expected Balance</p>
-                      <p className={`text-xl font-bold ${balance !== null ? "text-gray-900" : "text-gray-300"}`}>
-                        {balance !== null ? fmtUsd(balance) : "—"}
+            <div className="space-y-3">
+              {terminals.map((t) => {
+                const drawer = drawerBalances[t.id]
+                const balance = drawer?.balance ?? null
+                const lastEntry = drawer?.lastEntry
+                return (
+                  <div key={t.id} className="flex flex-col gap-3 rounded-2xl bg-gray-50/70 p-4 shadow-[0_8px_24px_rgba(15,23,42,0.035)] transition hover:bg-blue-50/40 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="font-semibold text-gray-950">{t.name}</p>
+                      {lastEntry ? (
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          Last: {new Date(lastEntry.created_at).toLocaleString()} · {lastEntry.type.replace("_", " ")}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-gray-400 mt-0.5">No activity yet</p>
+                      )}
+                      <p className={`text-xs mt-1 ${drawer?.active ? "text-green-600" : "text-gray-400"}`}>
+                        {drawer?.active ? "Drawer open" : "No active drawer shift"}
                       </p>
                     </div>
-                    <Button
-                      variant="secondary"
-                      disabled={!drawer?.active}
-                      onClick={() => { setCloseoutTerminalId(t.id); setCloseoutAmount(""); setCloseoutResult(null) }}
-                    >
-                      Close Drawer
-                    </Button>
+                    <div className="flex items-center justify-between gap-4 sm:justify-end">
+                      <div className="text-left sm:text-right">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">
+                          Expected
+                        </p>
+                        <p className={`mt-0.5 text-2xl font-bold leading-none ${balance !== null ? "text-gray-900" : "text-gray-300"}`}>
+                          {balance !== null ? fmtUsd(balance) : "—"}
+                        </p>
+                      </div>
+                      <Button
+                        variant="secondary"
+                        disabled={!drawer?.active}
+                        onClick={() => { setCloseoutTerminalId(t.id); setCloseoutAmount(""); setCloseoutResult(null) }}
+                        className="rounded-xl"
+                      >
+                        Close Drawer
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              )
-            })}
-          </div>
+                )
+              })}
+            </div>
 
           </div>
 
-        </DashboardSection>
+        </section>
+
       )}
 
       {/* CLOSEOUT MODAL */}
