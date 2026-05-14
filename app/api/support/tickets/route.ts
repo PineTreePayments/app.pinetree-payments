@@ -5,6 +5,7 @@ import {
   getRouteErrorStatus,
   requireMerchantIdFromRequest
 } from "@/lib/api/merchantAuth"
+import { sendSupportTicketNotification } from "@/lib/email/sendSupportNotification"
 
 type TicketBody = {
   category?: string
@@ -70,7 +71,19 @@ export async function POST(req: NextRequest) {
       relatedPaymentId: body.relatedPaymentId
     })
 
-    return NextResponse.json({ ticket }, { status: 201 })
+    let warning: string | undefined
+    try {
+      const notification = await sendSupportTicketNotification(ticket)
+      warning = notification.warning
+    } catch (emailError) {
+      console.error("[support:tickets] email notification failed", {
+        ticketId: ticket.id,
+        error: emailError instanceof Error ? emailError.message : String(emailError)
+      })
+      warning = "Saved, but email notification failed."
+    }
+
+    return NextResponse.json({ ticket, warning }, { status: 201 })
   } catch (error: unknown) {
     const apiError = getSupportApiError(error, "Failed to create support ticket")
     return NextResponse.json(

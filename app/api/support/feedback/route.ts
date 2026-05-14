@@ -4,6 +4,7 @@ import {
   getRouteErrorStatus,
   requireMerchantIdFromRequest
 } from "@/lib/api/merchantAuth"
+import { sendFeedbackNotification } from "@/lib/email/sendSupportNotification"
 
 type FeedbackBody = {
   type?: string
@@ -48,7 +49,19 @@ export async function POST(req: NextRequest) {
       rating: body.rating
     })
 
-    return NextResponse.json({ feedback }, { status: 201 })
+    let warning: string | undefined
+    try {
+      const notification = await sendFeedbackNotification(feedback)
+      warning = notification.warning
+    } catch (emailError) {
+      console.error("[support:feedback] email notification failed", {
+        feedbackId: feedback.id,
+        error: emailError instanceof Error ? emailError.message : String(emailError)
+      })
+      warning = "Saved, but email notification failed."
+    }
+
+    return NextResponse.json({ feedback, warning }, { status: 201 })
   } catch (error: unknown) {
     const apiError = getFeedbackApiError(error, "Failed to save feedback")
     return NextResponse.json(

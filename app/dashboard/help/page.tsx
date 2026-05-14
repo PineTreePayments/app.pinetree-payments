@@ -243,7 +243,7 @@ export default function HelpCenterPage() {
           relatedPaymentId: ticketForm.relatedPaymentId.trim() || null
         })
       })
-      const payload = (await res.json().catch(() => null)) as { ticket?: TicketRecord; error?: string } | null
+      const payload = (await res.json().catch(() => null)) as { ticket?: TicketRecord; error?: string; warning?: string } | null
 
       if (!res.ok || !payload?.ticket) {
         throw new Error(payload?.error || "Failed to open support ticket.")
@@ -252,7 +252,11 @@ export default function HelpCenterPage() {
       setTickets((current) => [payload.ticket as TicketRecord, ...current])
       setTicketForm(emptyTicketForm)
       setTicketError(null)
-      toast.success("Support ticket opened.")
+      if (payload.warning) {
+        toast.warning(payload.warning)
+      } else {
+        toast.success("Support ticket opened.")
+      }
     } catch (error) {
       toast.error(normalizeSupportErrorMessage(error, "Failed to open support ticket."))
     } finally {
@@ -288,14 +292,18 @@ export default function HelpCenterPage() {
           rating: feedbackForm.rating ? Number(feedbackForm.rating) : null
         })
       })
-      const payload = (await res.json().catch(() => null)) as { error?: string } | null
+      const payload = (await res.json().catch(() => null)) as { error?: string; warning?: string } | null
 
       if (!res.ok) {
         throw new Error(payload?.error || "Failed to send feedback.")
       }
 
       setFeedbackForm(emptyFeedbackForm)
-      toast.success("Feedback sent.")
+      if (payload?.warning) {
+        toast.warning(payload.warning)
+      } else {
+        toast.success("Feedback sent.")
+      }
     } catch (error) {
       toast.error(normalizeSupportErrorMessage(error, "Failed to send feedback."))
     } finally {
@@ -657,18 +665,18 @@ export default function HelpCenterPage() {
 
       <DashboardSection title="Feedback" titleTone="blue">
         <div id="feedback" className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
-          <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)_auto] lg:items-end">
-            <div className="min-w-0">
+          <div className="grid gap-4 lg:grid-cols-[200px_190px_minmax(0,1fr)] lg:items-start lg:gap-5">
+            <div>
               <div className="flex items-center gap-2">
                 <MessageSquare className="h-5 w-5 shrink-0 text-[#0052FF]" />
                 <h2 className="text-base font-semibold text-gray-950">General Feedback</h2>
               </div>
-              <p className="mt-1 text-sm leading-5 text-gray-600">
+              <p className="mt-1.5 text-sm leading-5 text-gray-500">
                 Share product, documentation, payment, or dashboard feedback.
               </p>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-[180px_160px_minmax(0,1fr)]">
+            <div className="grid gap-3">
               <Field label="Type">
                 <select
                   value={feedbackForm.type}
@@ -692,25 +700,27 @@ export default function HelpCenterPage() {
                   <option value="1">1 - Poor</option>
                 </select>
               </Field>
+            </div>
+
+            <div className="flex flex-col gap-3">
               <Field label="Message">
                 <textarea
                   value={feedbackForm.message}
                   onChange={(event) => setFeedbackForm((current) => ({ ...current, message: event.target.value }))}
-                  className="form-field min-h-11 resize-y lg:max-h-28"
+                  className="form-field min-h-[88px] resize-y"
                   placeholder="Tell us what would make PineTree clearer or easier to use."
                 />
               </Field>
+              <button
+                type="button"
+                onClick={() => void submitFeedback()}
+                disabled={submittingFeedback}
+                className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50 lg:w-auto lg:self-end"
+              >
+                <CheckCircle2 size={16} />
+                {submittingFeedback ? "Sending..." : "Send Feedback"}
+              </button>
             </div>
-
-            <button
-              type="button"
-              onClick={() => void submitFeedback()}
-              disabled={submittingFeedback}
-              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50 lg:w-auto"
-            >
-              <CheckCircle2 size={16} />
-              {submittingFeedback ? "Sending..." : "Send Feedback"}
-            </button>
           </div>
         </div>
       </DashboardSection>
