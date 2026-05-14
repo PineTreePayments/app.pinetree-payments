@@ -7,6 +7,7 @@ export type HelpCategory =
   | "Developer/API"
   | "Provider Connections"
   | "Troubleshooting"
+  | "PineTree Assistant"
 
 export type HelpArticle = {
   id: string
@@ -15,6 +16,7 @@ export type HelpArticle = {
   description: string
   body: string
   tags: string[]
+  keywords?: string[]
 }
 
 export const helpCategories: HelpCategory[] = [
@@ -25,96 +27,495 @@ export const helpCategories: HelpCategory[] = [
   "Reports & Analytics",
   "Developer/API",
   "Provider Connections",
-  "Troubleshooting"
+  "Troubleshooting",
+  "PineTree Assistant"
 ]
 
 export const helpArticles: HelpArticle[] = [
   {
-    id: "what-is-pinetree-engine",
-    title: "What is PineTree Engine?",
+    id: "what-pinetree-is",
+    title: "What PineTree is",
     category: "Getting Started",
-    description: "A simple explanation of the backend layer that coordinates payment creation and status changes.",
-    body: "PineTree Engine is the internal payment coordination layer. It validates payment requests, routes work to the right provider, and keeps payment status updates flowing through a single controlled path. Merchants do not need to manage the engine directly, but it is why the dashboard can show a consistent payment timeline across different providers and payment methods.",
-    tags: ["engine", "payments", "status", "architecture"]
+    description: "PineTree is a merchant dashboard for accepting, tracking, and reporting payments across supported rails.",
+    body: "PineTree helps merchants create payment requests, connect supported providers and wallets, review transaction activity, and generate reports from one dashboard.\n\nWhat this means: PineTree is not just a wallet screen. It coordinates payment creation, provider selection, payment status tracking, checkout links, POS terminals, wallet balances, and reporting views.\n\nWhat to check: Before accepting real payments, review Providers, Wallets, Online Checkout, POS terminals, and Reports so you know which rails are connected and how completed payments will appear.",
+    tags: ["overview", "dashboard", "merchant", "payments"],
+    keywords: ["pinetree", "getting started", "merchant dashboard"]
   },
   {
-    id: "payment-status-pending",
-    title: "What does Pending mean?",
-    category: "Transaction Statuses",
-    description: "Pending means PineTree created the payment and is waiting for customer or provider activity.",
-    body: "A Pending payment has been created in PineTree, but PineTree has not yet seen enough provider activity to mark it as processing or confirmed. For wallet payments, the customer may still need to approve the transaction. For hosted checkout, the buyer may still be on the checkout page.",
-    tags: ["pending", "status", "wallet", "checkout"]
+    id: "dashboard-overview",
+    title: "Dashboard overview",
+    category: "Getting Started",
+    description: "The dashboard groups payment operations into POS, checkout, transactions, reports, wallets, providers, settings, and help.",
+    body: "The PineTree dashboard is organized by workflow. POS is for in-person terminal setup and checkout. Online Checkout is for payment links, checkout sessions, webhooks, and API keys. Transactions shows ledger activity, filters, and channel mix. Reports creates PDF or CSV exports. Wallets shows connected wallet and payment-account balances. Providers is where payment rails are configured.\n\nWhat this means: Most merchant tasks start from one of those sections rather than from a hidden settings page.\n\nWhat to check: If a payment method is not showing up, start with Providers. If a balance is missing, start with Wallets. If a payment happened but numbers look off, start with Transactions and Reports.",
+    tags: ["dashboard", "navigation", "overview"],
+    keywords: ["sidebar", "overview", "reports", "transactions"]
   },
   {
-    id: "payment-status-processing",
-    title: "What does Processing mean?",
-    category: "Transaction Statuses",
-    description: "Processing means PineTree has detected payment activity and is waiting for final confirmation.",
-    body: "A Processing payment usually means PineTree or a provider has detected activity for the payment, but final confirmation has not been completed yet. This can happen while a blockchain transaction is confirming or while a provider is finalizing the payment result.",
-    tags: ["processing", "status", "confirmation", "provider"]
+    id: "first-setup-checklist",
+    title: "First setup checklist",
+    category: "Getting Started",
+    description: "A practical checklist before sending a customer through PineTree.",
+    body: "Start by connecting at least one supported provider or wallet. For Solana or Base wallet rails, save the merchant wallet in Providers. For Bitcoin Lightning, complete the Speed account setup fields. For Shift4, add the provider credentials required by your account. Then create a small checkout link or POS test sale and confirm that the payment status updates as expected.\n\nWhat this means: PineTree needs a configured route before it can create a live customer payment.\n\nWhat to check: Confirm provider status, wallet address, supported asset, test amount, payment status, transaction row, and report visibility. Do not rely on a payment method until a small end-to-end test succeeds.",
+    tags: ["setup", "test", "providers", "wallets"],
+    keywords: ["first setup", "checklist", "test payment"]
   },
   {
-    id: "payment-status-confirmed",
-    title: "What does Confirmed mean?",
-    category: "Transaction Statuses",
-    description: "Confirmed means the payment reached PineTree's final successful status.",
-    body: "A Confirmed payment has completed successfully according to PineTree's payment state flow. The transaction should appear in reporting once it is included in the relevant report window. If something looks different between a provider portal and PineTree, compare the payment ID, timestamp, network, and provider reference.",
-    tags: ["confirmed", "status", "reports", "success"]
+    id: "merchants-providers-wallets",
+    title: "Understanding merchants, providers, and wallets",
+    category: "Getting Started",
+    description: "How the main PineTree account concepts fit together.",
+    body: "A merchant is the account using PineTree. A provider is a supported payment service or rail, such as Solana Pay, Base Pay, Shift4, or Bitcoin Lightning through Speed. A wallet is a merchant-controlled address used by wallet rails like Solana and Base.\n\nWhat this means: Provider setup and wallet setup are related, but they are not the same thing. Some rails use a wallet address. Other rails use provider credentials or provider-hosted payment sessions.\n\nWhat to check: In Providers, review connection state. In Wallets, review visible wallet or payment-account balances. In Transactions, review which provider and network handled a payment.",
+    tags: ["merchant", "providers", "wallets", "accounts"],
+    keywords: ["merchant id", "provider", "wallet address"]
   },
   {
-    id: "why-payment-failed",
-    title: "What Failed means",
-    category: "Troubleshooting",
-    description: "Failed means PineTree could not complete the payment successfully.",
-    body: "A Failed payment did not complete successfully. Common causes include customer cancellation, wallet approval not completed, provider rejection, network transaction failure, or timeout before confirmation. Start by checking the payment ID, provider, network, amount, timestamp, and any provider reference shown in the dashboard.",
-    tags: ["failed", "troubleshooting", "provider", "wallet"]
+    id: "what-to-test-before-real-payments",
+    title: "What to test before accepting real payments",
+    category: "Getting Started",
+    description: "Run a small test through each payment path you plan to offer.",
+    body: "Use a small amount to test each payment method you plan to show customers. For POS, create or open a terminal and complete a test flow. For hosted checkout, create a payment link or test checkout session. For wallet rails, verify that the wallet opens, the amount looks right, and the payment status updates.\n\nWhat this means: A provider can appear configured while a specific customer path still needs verification on your device, wallet, or account.\n\nWhat to check: Amount breakdown, PineTree service fee line, wallet opening behavior, provider redirect, final status, transaction row, and report export.",
+    tags: ["testing", "go live", "checkout", "pos"],
+    keywords: ["before going live", "test checkout"]
   },
   {
-    id: "how-pinetree-pos-works",
+    id: "how-pos-works",
     title: "How PineTree POS works",
     category: "Accepting Payments",
-    description: "PineTree POS helps create in-person payment requests from the dashboard or terminal flow.",
-    body: "PineTree POS is designed for in-person checkout. A merchant enters an amount, selects an available payment path, and PineTree creates a payment request for the customer to complete. PineTree then tracks the payment status in the dashboard. If a POS payment does not complete, check the related payment ID, selected method, customer approval step, and transaction status.",
-    tags: ["pos", "terminal", "in person", "payments"]
+    description: "PineTree POS supports terminal setup, amount entry, cash handling, crypto payment creation, and status updates.",
+    body: "PineTree POS is built for in-person checkout. In the POS dashboard, merchants create terminals with a register name, recovery phrase, four-digit PIN, optional auto-lock, and optional starting cash amount. Launching a terminal opens the terminal checkout flow.\n\nWhat this means: In the terminal, the cashier enters an amount, reviews the total, and chooses an available payment method. Cash can be recorded through the drawer flow. Crypto creates a payment request and shows a QR while PineTree watches for status updates.\n\nWhat to check: Terminal ID, selected payment method, drawer state for cash, QR visibility for crypto, and whether the payment reaches confirmed, failed, incomplete, or expired.",
+    tags: ["pos", "terminal", "cash", "qr"],
+    keywords: ["point of sale", "cash drawer", "terminal"]
   },
   {
-    id: "wallet-connections",
-    title: "How wallet connections work",
-    category: "Wallet Connections",
-    description: "How PineTree uses wallet connections for merchant setup and customer payments.",
-    body: "Wallet connections let PineTree work with supported wallet-based payment methods and merchant account configuration. Customer wallet payment approval still happens inside the customer's wallet. PineTree tracks the payment request and waits for the provider or network activity that updates the transaction status.",
-    tags: ["wallets", "connections", "solana", "base"]
-  },
-  {
-    id: "hosted-checkout",
+    id: "hosted-checkout-works",
     title: "How hosted checkout works",
     category: "Accepting Payments",
-    description: "Hosted checkout gives customers a PineTree payment page for online transactions.",
-    body: "Hosted checkout lets a merchant send a customer to a PineTree checkout page. PineTree creates or loads the checkout session, presents available payment options, and records the resulting payment status. The dashboard can then show checkout volume alongside other payment channels.",
-    tags: ["checkout", "online", "payment link", "session"]
+    description: "Hosted checkout sends customers to a PineTree payment page where they choose an available asset or provider path.",
+    body: "Hosted checkout uses PineTree pages to guide a customer through payment. A checkout link resolves to a payment intent, then redirects to the PineTree payment screen. The customer sees the amount, PineTree service fee, total, and available payment assets based on the configured networks.\n\nWhat this means: The checkout page does not complete payment by itself. The customer still needs to choose a payment method and approve the provider or wallet step.\n\nWhat to check: Link status, expiration, selected asset, wallet/provider handoff, success or cancel URL, and final payment status.",
+    tags: ["hosted checkout", "checkout", "pay page", "customer"],
+    keywords: ["checkout link", "payment intent", "success url", "cancel url"]
   },
   {
-    id: "transaction-reports",
-    title: "How reports are calculated",
-    category: "Reports & Analytics",
-    description: "Reports summarize payment activity for selected time windows.",
-    body: "PineTree reports summarize payment volume, fees, taxes, provider totals, and transaction rows for the selected report window. Confirmed payments count toward successful volume. Failed, incomplete, or pending payments may appear in transaction detail without being treated as completed volume. Reports are based on PineTree payment and transaction records, so the most useful troubleshooting details are payment ID, provider, network, amount, status, and timestamp.",
-    tags: ["reports", "analytics", "transactions", "csv", "pdf"]
+    id: "online-checkout-links",
+    title: "How online checkout links work",
+    category: "Accepting Payments",
+    description: "Online Checkout creates shareable links with amount, name, description, customer email, reference, and expiration options.",
+    body: "The Online Checkout page can create payment links for fixed amounts. Links can include a name, description, optional customer email, optional reference, and expiration such as never, 24 hours, 7 days, or 30 days. Active links point customers into PineTree checkout.\n\nWhat this means: A disabled or expired link will not prepare a customer payment. PineTree shows a link-unavailable screen instead of sending the customer into payment.\n\nWhat to check: Link status, checkout URL, amount, expiration, customer reference, and whether the link has been disabled.",
+    tags: ["payment links", "online checkout", "links"],
+    keywords: ["checkout links", "active", "disabled", "expired"]
   },
   {
-    id: "provider-connections",
-    title: "What provider connections mean",
+    id: "what-customers-see-checkout",
+    title: "What customers see during checkout",
+    category: "Accepting Payments",
+    description: "Customers see a PineTree Checkout card with amount details and payment asset choices.",
+    body: "During hosted checkout, customers see PineTree Checkout, subtotal, PineTree Service Fee, total, and supported asset choices such as SOL, USDC on Solana, ETH on Base, USDC on Base, Shift4, or Bitcoin Lightning when those rails are available.\n\nWhat this means: The visible choices depend on merchant configuration and the networks available for the payment intent.\n\nWhat to check: If a customer does not see the expected option, review Providers and Wallets first. Then check whether the selected rail supports the asset you expect.",
+    tags: ["customer", "checkout", "assets", "service fee"],
+    keywords: ["customer view", "asset selector", "fee display"]
+  },
+  {
+    id: "after-customer-pays",
+    title: "What happens after a customer pays",
+    category: "Accepting Payments",
+    description: "PineTree waits for provider, wallet, webhook, or watcher signals before finalizing status.",
+    body: "After the customer approves a payment, PineTree updates status through provider webhooks, wallet callbacks, transaction detection, or a bounded status check depending on the rail. Confirmed payments appear as successful activity in the dashboard and reports.\n\nWhat this means: There can be a short gap between customer action and final status. Pending and Processing are normal intermediate states.\n\nWhat to check: Payment ID, provider reference, network, transaction hash if available, and whether the payment is still pending, processing, confirmed, failed, or incomplete.",
+    tags: ["after payment", "status", "webhooks", "watcher"],
+    keywords: ["customer paid", "confirmation", "transaction hash"]
+  },
+  {
+    id: "fee-display",
+    title: "How PineTree fee display works",
+    category: "Accepting Payments",
+    description: "Checkout and POS can show subtotal, taxes when configured, service fee, and total.",
+    body: "PineTree calculates a merchant amount and PineTree service fee when creating payment requests. POS can also include tax settings when available. Hosted checkout displays the subtotal, PineTree Service Fee, and total before the customer chooses a payment asset.\n\nWhat this means: The customer-facing total may be higher than the merchant amount because it includes the service fee and any applicable tax from merchant settings.\n\nWhat to check: Subtotal, tax line, service fee line, total due, and the report row after confirmation.",
+    tags: ["fees", "service fee", "tax", "amount"],
+    keywords: ["pinetree fee", "gross amount", "subtotal"]
+  },
+  {
+    id: "when-to-retry-payment",
+    title: "When to retry a payment",
+    category: "Accepting Payments",
+    description: "Retry when a payment fails, expires, is canceled, or never reaches a wallet/provider approval step.",
+    body: "Retry a payment when the customer closed checkout before approving, the wallet did not open, the provider declined the session, the payment expired, or the payment clearly failed. Avoid asking the customer to pay twice if the payment is Processing unless you have checked the transaction details.\n\nWhat this means: Processing can mean PineTree saw activity and is waiting for final confirmation. Retrying too early can create duplicate attempts.\n\nWhat to check: Current status, payment ID, provider reference, customer wallet transaction, and whether the original attempt is terminal.",
+    tags: ["retry", "failed", "expired", "processing"],
+    keywords: ["try again", "duplicate", "cancel"]
+  },
+  {
+    id: "wallet-page-overview",
+    title: "Wallet page overview",
+    category: "Wallet Connections",
+    description: "The Wallets page summarizes connected wallets and Speed Lightning account balances visible to PineTree.",
+    body: "The Wallets page shows total connected wallet and payment-account value, last sync time, connection count, and individual rows for wallets or payment rails. It includes Solana/Base wallet addresses and Bitcoin Lightning account rows when present.\n\nWhat this means: Wallets is a balance and connection overview. It does not by itself create payments or move funds.\n\nWhat to check: Connected status, shortened address or Speed account ID, native balance, USD value, and last refresh time.",
+    tags: ["wallets", "balances", "overview"],
+    keywords: ["wallet overview", "refresh balances", "connections"]
+  },
+  {
+    id: "connected-wallets-explained",
+    title: "Connected wallets explained",
+    category: "Wallet Connections",
+    description: "Connected wallets are saved merchant addresses used by wallet payment rails.",
+    body: "A connected wallet is a merchant address stored for a supported network, currently shown for Solana or Base wallet rails. PineTree uses the saved address when it creates payment requests for that network.\n\nWhat this means: Connecting a wallet identifies where merchant-side payment value should go for that rail. It is not the same as a customer connecting their wallet at checkout.\n\nWhat to check: Network, wallet type, address, and whether the provider row is enabled.",
+    tags: ["connected wallets", "merchant wallet", "base", "solana"],
+    keywords: ["wallet address", "merchant wallet"]
+  },
+  {
+    id: "solana-wallet-payment-behavior",
+    title: "Solana wallet and payment behavior",
+    category: "Wallet Connections",
+    description: "Solana supports Phantom and Solflare setup, SOL and USDC checkout choices, and Solana Pay transaction requests.",
+    body: "In Providers, Solana can be connected through Phantom or Solflare on the current device, a mobile wallet bridge, or a pasted address. In checkout, Solana payments use SOL or USDC options when available. The payment flow builds a Solana Pay transaction request and wallet approval happens in the customer's wallet.\n\nWhat this means: The wallet button starts the payment path. PineTree then tracks status through its Solana payment flow and watcher checks.\n\nWhat to check: Connected Solana wallet, selected asset, wallet opening behavior, payment ID, and whether the transaction reaches Processing or Confirmed.",
+    tags: ["solana", "phantom", "solflare", "solana pay", "usdc"],
+    keywords: ["SOL", "Solana USDC", "transaction request"]
+  },
+  {
+    id: "base-wallet-payment-behavior",
+    title: "Base wallet and payment behavior",
+    category: "Wallet Connections",
+    description: "Base supports Base Wallet, MetaMask, and Trust Wallet setup, with ETH or USDC checkout options when configured.",
+    body: "In Providers, Base can be connected with Base Wallet, MetaMask, or Trust Wallet on the current device, a mobile wallet bridge, or a pasted address. In checkout, Base payments can use ETH or USDC options when available. Base wallet execution happens in the customer wallet, while PineTree tracks the payment record and status.\n\nWhat this means: The merchant wallet is saved in PineTree, but the customer still approves their own transaction during checkout.\n\nWhat to check: Connected Base wallet, selected asset, wallet approval, transaction hash if available, and whether the status advances.",
+    tags: ["base", "base wallet", "metamask", "trust wallet", "usdc"],
+    keywords: ["ETH", "Base USDC", "wallet execution"]
+  },
+  {
+    id: "walletconnect-behavior",
+    title: "WalletConnect behavior",
+    category: "Wallet Connections",
+    description: "WalletConnect-related code supports Base wallet execution where enabled, while provider setup uses direct or mobile wallet paths.",
+    body: "The current app includes WalletConnect-related Base wallet payment support and wallet session helpers. Provider setup itself offers current-device connection, mobile wallet opening, or pasted address paths for Solana and Base.\n\nWhat this means: If a wallet handoff does not behave as expected, the exact path matters: provider setup, hosted checkout payment, or mobile bridge return.\n\nWhat to check: Browser wallet availability, mobile return page, session status, selected wallet type, and whether the customer returned to PineTree after wallet approval.",
+    tags: ["walletconnect", "base", "mobile", "wallet session"],
+    keywords: ["wallet connect", "mobile wallet", "base return"]
+  },
+  {
+    id: "withdrawals-support-status",
+    title: "Withdrawals and transfers status",
+    category: "Wallet Connections",
+    description: "The current Wallets page is a connection and balance overview, not a withdrawal screen.",
+    body: "The current dashboard shows wallet and payment-account balances but does not present a merchant withdrawal workflow in the Wallets page.\n\nWhat this means: Do not treat the Wallets page as a funds-transfer tool. It is for visibility into connected balances and accounts.\n\nWhat to check: If you need movement of funds, confirm what your provider or wallet supports outside PineTree and open a support ticket if dashboard balances appear incorrect.",
+    tags: ["wallets", "withdrawals", "balances"],
+    keywords: ["withdraw", "transfer", "settlement"]
+  },
+  {
+    id: "providers-page-overview",
+    title: "Providers page overview",
     category: "Provider Connections",
-    description: "Providers are external payment services PineTree can route supported payments through.",
-    body: "Provider connections represent external services or networks that PineTree can use for supported payment methods. A provider connection does not guarantee that every payment method is enabled for every merchant. If a provider-backed payment is not available, check provider setup, account status, and readiness in the dashboard.",
-    tags: ["providers", "base", "solana", "shift4", "readiness"]
+    description: "Providers is where merchants connect payment rails and manage routing settings.",
+    body: "The Providers page lists payment providers including Coinbase Business, Solana Pay, Shift4, Base Pay, and Bitcoin Lightning. It also shows smart routing and auto-convert settings, with toggles constrained by provider connection state.\n\nWhat this means: Provider status controls which rails can be used when PineTree creates payments.\n\nWhat to check: Provider status, enabled toggle, wallet rows for Solana/Base, Lightning setup state, and whether Shift4 credentials are present when using Shift4.",
+    tags: ["providers", "routing", "settings"],
+    keywords: ["payment providers", "smart routing", "auto conversion"]
   },
   {
-    id: "when-to-open-support-ticket",
+    id: "shift4-provider-status",
+    title: "Shift4 provider status",
+    category: "Provider Connections",
+    description: "Shift4 uses provider credentials and a hosted checkout redirect path in the current code.",
+    body: "Shift4 is represented as a provider that can create hosted payment sessions when a merchant API key is configured. In checkout, the customer is redirected to a secure provider checkout page when Shift4 is selected.\n\nWhat this means: If Shift4 is not configured, PineTree cannot prepare the Shift4 payment path for the customer.\n\nWhat to check: Provider connection state, API key entry, hosted checkout URL returned by the provider, and webhook/status mapping for completed, failed, or declined payments.",
+    tags: ["shift4", "hosted checkout", "credentials"],
+    keywords: ["card", "fiat", "api key", "redirect"]
+  },
+  {
+    id: "lightning-speed-provider-status",
+    title: "Bitcoin Lightning and Speed provider status",
+    category: "Provider Connections",
+    description: "Lightning setup uses Speed account details and a BTC payment address verification step.",
+    body: "Bitcoin Lightning setup walks through Speed account creation, Speed Account ID entry, BTC Payment Address entry, and Payment Address ID entry. PineTree verifies the Lightning Address format before marking it connected. The Lightning adapter relies on Speed platform configuration and webhook confirmation.\n\nWhat this means: Merchants do not paste a Speed API key into the dashboard. They provide account and payment address details while platform credentials are configured server-side.\n\nWhat to check: Speed Account ID, BTC Payment Address, Payment Address ID, provider status, and whether Lightning support is enabled by platform configuration.",
+    tags: ["lightning", "speed", "bitcoin", "btc"],
+    keywords: ["TrySpeed", "Speed", "Lightning Address", "payment address id"]
+  },
+  {
+    id: "base-provider-behavior",
+    title: "Base provider behavior",
+    category: "Provider Connections",
+    description: "Base Pay is a wallet rail that uses a saved merchant wallet and customer wallet execution.",
+    body: "Base Pay connects a merchant wallet address and uses wallet execution for supported Base assets. The Base adapter is a wallet rail, not a provider-hosted checkout page. PineTree generates payment data and tracks status after wallet action.\n\nWhat this means: Base requires a connected merchant wallet and a customer wallet approval step.\n\nWhat to check: Saved Base wallet address, wallet type, ETH or USDC asset selection, transaction hash, and final status.",
+    tags: ["base", "wallet rail", "eth", "usdc"],
+    keywords: ["Base Pay", "contract split", "wallet"]
+  },
+  {
+    id: "solana-provider-behavior",
+    title: "Solana Pay provider behavior",
+    category: "Provider Connections",
+    description: "Solana Pay is a wallet rail using transaction requests, wallet approval, and watcher confirmation.",
+    body: "Solana Pay connects a merchant Solana wallet and uses PineTree's Solana payment path for SOL or USDC. The Solana adapter relies on transaction request generation and blockchain confirmation rather than provider-hosted checkout.\n\nWhat this means: A customer must approve the Solana transaction in their wallet, and PineTree waits for on-chain evidence before final confirmation.\n\nWhat to check: Merchant Solana wallet, customer wallet app, selected asset, memo/reference matching, and status updates.",
+    tags: ["solana", "solana pay", "wallet rail"],
+    keywords: ["phantom", "solflare", "memo", "on-chain"]
+  },
+  {
+    id: "connected-unconnected-provider-status",
+    title: "What connected and unconnected provider status means",
+    category: "Provider Connections",
+    description: "Connected means PineTree has the required account, credential, or wallet reference for that provider row.",
+    body: "A connected provider has the configuration PineTree needs for that rail, such as a saved wallet address, provider API key, or verified Lightning account details. Unconnected means setup is missing or incomplete.\n\nWhat this means: Connected does not guarantee every customer payment will succeed. It means PineTree has enough configuration to attempt that rail.\n\nWhat to check: Enabled toggle, wallet address, credentials, provider-specific setup fields, and a small test payment.",
+    tags: ["connected", "unconnected", "provider status"],
+    keywords: ["status", "enabled", "not connected"]
+  },
+  {
+    id: "credentials-and-ids",
+    title: "What credentials and IDs mean",
+    category: "Provider Connections",
+    description: "Some provider fields identify accounts or payment addresses; others are secrets and should be treated carefully.",
+    body: "The dashboard may ask for provider-specific values such as a Shift4 API key, Speed Account ID, BTC Payment Address, Payment Address ID, or wallet address. API keys are sensitive. Wallet addresses and account IDs identify where or how PineTree should route payments.\n\nWhat this means: Enter values exactly as shown by the provider. Do not share API keys in support tickets unless PineTree specifically provides a secure process.\n\nWhat to check: Field label, provider dashboard source, copied value, and whether the provider status updates after saving.",
+    tags: ["credentials", "api key", "ids", "security"],
+    keywords: ["Speed Account ID", "Shift4 API key", "wallet address"]
+  },
+  {
+    id: "status-created",
+    title: "What Created means",
+    category: "Transaction Statuses",
+    description: "Created is the initial internal status before PineTree presents the payment as pending.",
+    body: "Created means PineTree has created the payment record. In the current engine, new payments are then advanced to Pending after the payment is presented.\n\nWhat this means: Merchants may not see Created for long because it is an early internal lifecycle step.\n\nWhat to check: If a payment stays Created, collect the payment ID and open a support ticket because the normal create-to-pending path may not have completed.",
+    tags: ["created", "status", "lifecycle"],
+    keywords: ["initial status", "payment created"]
+  },
+  {
+    id: "status-pending",
+    title: "What Pending means",
+    category: "Transaction Statuses",
+    description: "Pending means PineTree created and presented the payment but has not yet detected final activity.",
+    body: "Pending means the payment exists and PineTree is waiting for customer action, provider activity, wallet approval, or a first detection signal. For POS crypto, the customer may still need to scan and approve. For hosted checkout, the customer may still be choosing an asset or approving in a wallet.\n\nWhat this means: Pending is normal before a customer completes the payment step.\n\nWhat to check: Whether the customer opened the wallet/provider page, whether the checkout was closed, and whether a provider reference or payment ID exists.",
+    tags: ["pending", "status", "checkout", "wallet"],
+    keywords: ["waiting", "payment pending"]
+  },
+  {
+    id: "status-processing",
+    title: "What Processing means",
+    category: "Transaction Statuses",
+    description: "Processing means PineTree has detected activity and is waiting for final confirmation.",
+    body: "Processing means PineTree has seen a signal that the payment is underway. For blockchain rails, this can mean transaction activity was detected but final validation is still pending. For provider rails, it can mean the provider reported an in-progress state.\n\nWhat this means: Do not immediately retry just because a payment is Processing. It may still confirm.\n\nWhat to check: Transaction hash, provider reference, elapsed time, network activity, and whether the status eventually becomes Confirmed or Failed.",
+    tags: ["processing", "status", "confirmation"],
+    keywords: ["in progress", "detected", "watcher"]
+  },
+  {
+    id: "status-confirmed",
+    title: "What Confirmed means",
+    category: "Transaction Statuses",
+    description: "Confirmed means PineTree reached the successful terminal payment state.",
+    body: "Confirmed means PineTree considers the payment successfully completed. Confirmed payments are counted as successful volume in report summaries and can write ledger activity.\n\nWhat this means: This is the successful final state for the payment lifecycle.\n\nWhat to check: Transaction row, report window, provider reference, and amount if the customer or provider dashboard shows a different result.",
+    tags: ["confirmed", "success", "status", "reports"],
+    keywords: ["successful", "complete", "ledger"]
+  },
+  {
+    id: "status-failed",
+    title: "What Failed means",
+    category: "Transaction Statuses",
+    description: "Failed means PineTree or the provider could not complete the payment successfully.",
+    body: "Failed means the payment reached an unsuccessful terminal state. This can happen when a provider declines or fails a payment, the wallet flow errors, or detection rejects the transaction.\n\nWhat this means: A failed payment usually needs a new attempt if the customer still wants to pay.\n\nWhat to check: Payment ID, provider reference, network, customer wallet result, error message, and whether the customer attempted another payment.",
+    tags: ["failed", "status", "declined", "error"],
+    keywords: ["payment failed", "declined", "try again"]
+  },
+  {
+    id: "status-incomplete",
+    title: "What Incomplete means",
+    category: "Transaction Statuses",
+    description: "Incomplete means the payment did not complete and is treated as an unfinished terminal state.",
+    body: "Incomplete is used when a payment cannot continue through the normal lifecycle, such as an expired or canceled path that maps into PineTree's strict payment state model.\n\nWhat this means: The payment is not successful, but it may not have failed due to provider rejection. It may simply have been abandoned, expired, or canceled.\n\nWhat to check: Customer behavior, checkout close/cancel action, expiration, and whether a new payment should be created.",
+    tags: ["incomplete", "expired", "canceled", "status"],
+    keywords: ["cancelled", "canceled", "expired"]
+  },
+  {
+    id: "payment-mismatch-incorrect-amount",
+    title: "Payment mismatch or incorrect amount",
+    category: "Transaction Statuses",
+    description: "PineTree validates expected payment references, amounts, and fee evidence for wallet rails where applicable.",
+    body: "Some wallet payments require PineTree to match the expected payment ID, amount, merchant leg, and PineTree fee leg. For Solana split payments, the watcher looks for matching wallet activity and a memo/reference. For split EVM payments, PineTree requires enough evidence before final confirmation.\n\nWhat this means: A transaction can be real on-chain activity but still not be enough to confirm the PineTree payment if the amount or reference does not match.\n\nWhat to check: Exact amount, selected asset, payment ID or memo, receiving wallet, fee capture evidence, and transaction hash.",
+    tags: ["mismatch", "incorrect amount", "reference", "fee"],
+    keywords: ["underpaid", "wrong amount", "memo", "fee capture"]
+  },
+  {
+    id: "stuck-payments",
+    title: "What to do for stuck payments",
+    category: "Transaction Statuses",
+    description: "Use status, time, provider reference, and transaction evidence to decide whether to wait, retry, or open a ticket.",
+    body: "If a payment is stuck Pending, confirm the customer actually opened and approved the payment. If it is stuck Processing, check whether a transaction or provider reference exists and allow time for confirmation. If a terminal state never arrives, open a support ticket.\n\nWhat this means: Pending usually means no strong completion signal yet. Processing means PineTree saw activity and may still be validating it.\n\nWhat to check: Payment ID, status, elapsed time, provider/network, wallet transaction, customer screenshot if available, and whether the customer retried.",
+    tags: ["stuck", "pending", "processing", "support"],
+    keywords: ["stuck pending", "stuck processing"]
+  },
+  {
+    id: "overview-metrics",
+    title: "Overview metrics",
+    category: "Reports & Analytics",
+    description: "Dashboard metrics summarize visible payment activity from PineTree records.",
+    body: "Dashboard metrics are built from PineTree payment and transaction records. Pages such as Transactions, Reports, Wallets, and Online Checkout each show their own operational metrics and insights.\n\nWhat this means: Metrics depend on the report window, merchant scope, and which payments reached a status that should count for that view.\n\nWhat to check: Date range, channel, provider, network filter, confirmed status, and whether the payment exists in the transaction ledger.",
+    tags: ["metrics", "overview", "dashboard"],
+    keywords: ["analytics", "summary", "volume"]
+  },
+  {
+    id: "transactions-page",
+    title: "Transactions page",
+    category: "Reports & Analytics",
+    description: "Transactions shows ledger rows, today volume, confirmed rate, channel mix, and provider/network filters.",
+    body: "The Transactions page loads merchant-scoped transaction data and shows today's volume, transaction count, confirmed rate, activity breakdown, channel mix, and a transaction ledger. Filters include wallet/provider, network, and channel.\n\nWhat this means: This is the best place to investigate individual payment activity before generating reports.\n\nWhat to check: Provider, network, channel, payment ID, provider transaction ID, status, and created time.",
+    tags: ["transactions", "ledger", "filters", "channel mix"],
+    keywords: ["transaction ledger", "confirmed rate", "POS", "online"]
+  },
+  {
+    id: "reports-page",
+    title: "Reports page",
+    category: "Reports & Analytics",
+    description: "Reports can generate PDF summaries and CSV transaction exports for common time windows.",
+    body: "The Reports page summarizes financial activity and can generate today's, yesterday's, weekly, monthly, tax, yearly, and transaction export reports. Transaction Export downloads CSV. Other report actions download PDFs and can be emailed.\n\nWhat this means: Reports are generated from PineTree records for the selected report type or date range.\n\nWhat to check: Report type, date window, confirmed count, failed count, net settlements, taxes, provider totals, and channel totals.",
+    tags: ["reports", "pdf", "csv", "email"],
+    keywords: ["download report", "tax report", "transaction export"]
+  },
+  {
+    id: "wallet-balances",
+    title: "Wallet balances",
+    category: "Reports & Analytics",
+    description: "Wallet balances show visible connected-wallet and payment-account value, with refresh support.",
+    body: "The Wallets page shows total visible value from connected wallets and payment accounts, including native balance and USD value rows where available. Merchants can refresh balances from the wallet overview endpoint.\n\nWhat this means: Wallet balances are operational visibility, not the same as a completed-payment report.\n\nWhat to check: Last sync time, connection count, individual wallet rows, native balance, USD value, and refresh errors.",
+    tags: ["wallet balances", "refresh", "usd value"],
+    keywords: ["balance", "last sync", "refresh"]
+  },
+  {
+    id: "channel-mix-activity",
+    title: "Channel mix and activity breakdown",
+    category: "Reports & Analytics",
+    description: "Transactions can separate POS and online activity and show provider/network patterns.",
+    body: "The Transactions page includes channel mix for POS and online payments, plus peak hour, peak day, top provider, and top network. It can open a chart view for transaction volume by provider over common time ranges.\n\nWhat this means: Use this view to understand where payments are coming from and which rails are most active.\n\nWhat to check: Channel filter, provider filter, network filter, chart range, and whether the underlying transactions are confirmed or still pending.",
+    tags: ["channel mix", "activity", "charts", "provider"],
+    keywords: ["peak hour", "top provider", "top network"]
+  },
+  {
+    id: "api-keys",
+    title: "API keys",
+    category: "Developer/API",
+    description: "Online Checkout includes API key creation, listing, and revocation for server-side integrations.",
+    body: "The Online Checkout developer area can create API keys, list existing keys by prefix, show created time and last used time, and revoke keys. Newly created keys are shown once for copying.\n\nWhat this means: API keys are for server-side use. Do not put live keys in frontend code.\n\nWhat to check: Key name, prefix, permissions, last used time, and whether a key has been revoked.",
+    tags: ["api keys", "developer", "security"],
+    keywords: ["pt_live", "server side", "revoke"]
+  },
+  {
+    id: "payment-links-api",
+    title: "Payment links and checkout session API",
+    category: "Developer/API",
+    description: "The app includes payment link endpoints and a checkout session preview endpoint.",
+    body: "Online Checkout lists payment-link endpoints for creating, listing, and disabling links. It also includes a preview checkout session endpoint for server-side session creation and redirecting customers to a PineTree checkout URL.\n\nWhat this means: Static links are useful for fixed offers. Dynamic checkout sessions are better when your backend creates a payment for a specific order.\n\nWhat to check: Amount, currency, checkout URL, token, success URL, cancel URL, and whether your backend keeps API keys secret.",
+    tags: ["payment links", "checkout session", "api"],
+    keywords: ["/api/checkout/session", "/api/checkout-links", "token"]
+  },
+  {
+    id: "webhooks",
+    title: "Webhooks",
+    category: "Developer/API",
+    description: "Online Checkout includes merchant webhook configuration and delivery history views.",
+    body: "The Online Checkout page can configure a webhook URL and selected events such as payment.confirmed, payment.failed, payment.incomplete, and checkout.session.created. It also shows webhook delivery history when available.\n\nWhat this means: Webhooks let your backend react to PineTree events, but your system should still verify state from PineTree instead of trusting a single delivery blindly.\n\nWhat to check: Webhook URL, enabled events, secret handling, delivery status, response status, and attempt count.",
+    tags: ["webhooks", "events", "developer"],
+    keywords: ["payment.confirmed", "payment.failed", "deliveries"]
+  },
+  {
+    id: "event-model",
+    title: "Event model",
+    category: "Developer/API",
+    description: "PineTree maps provider and watcher signals into payment events and status changes.",
+    body: "PineTree receives signals from providers, webhooks, wallet flows, and bounded watcher checks. Those signals are translated into events such as payment.pending, payment.processing, payment.confirmed, or payment.failed before the engine applies status changes.\n\nWhat this means: Integrations should treat PineTree payment status as the source of truth rather than trying to infer final state from a customer browser action alone.\n\nWhat to check: Payment status, provider reference, webhook delivery, and transaction row.",
+    tags: ["events", "status", "developer", "webhooks"],
+    keywords: ["event processor", "payment event", "source of truth"]
+  },
+  {
+    id: "pinetree-engine-safe",
+    title: "PineTree Engine",
+    category: "Developer/API",
+    description: "PineTree Engine is the internal layer that validates payment creation, provider routing, and status transitions.",
+    body: "PineTree Engine is the internal coordination layer behind payment creation and status updates. It validates inputs, calculates fee-aware amounts, chooses providers, creates records, and applies status transitions through one controlled path.\n\nWhat this means: UI pages and API routes should not directly decide final payment status. The engine keeps payment state consistent across providers.\n\nWhat to check: For developer support, provide the payment ID, provider, network, status, and any provider reference rather than internal secrets.",
+    tags: ["engine", "developer", "status", "architecture"],
+    keywords: ["UI API ENGINE DATABASE", "state machine"]
+  },
+  {
+    id: "payment-stuck-pending",
+    title: "Payment stuck pending",
+    category: "Troubleshooting",
+    description: "Pending usually means PineTree is still waiting for the customer or provider to start completing the payment.",
+    body: "A payment stuck Pending may mean the customer did not approve the wallet request, closed checkout, scanned the wrong thing, or the provider did not return a usable activity signal.\n\nWhat this means: PineTree has a payment record, but it may not have enough evidence to move forward.\n\nWhat to check: Customer action, wallet/provider page, payment ID, selected asset, checkout link status, and whether the customer retried.",
+    tags: ["pending", "stuck", "troubleshooting"],
+    keywords: ["stuck pending", "customer closed"]
+  },
+  {
+    id: "payment-stuck-processing",
+    title: "Payment stuck processing",
+    category: "Troubleshooting",
+    description: "Processing means activity was detected, but final confirmation has not been applied yet.",
+    body: "A Processing payment may be waiting for on-chain validation, provider completion, webhook delivery, or final state transition. This is especially important for wallet rails where PineTree may need to verify amount, reference, and fee evidence.\n\nWhat this means: Do not immediately create a second payment until you have checked whether the first one may still confirm.\n\nWhat to check: Transaction hash, provider reference, network explorer evidence, provider dashboard, elapsed time, and support ticket details if it remains unresolved.",
+    tags: ["processing", "stuck", "confirmation"],
+    keywords: ["stuck processing", "transaction hash"]
+  },
+  {
+    id: "wallet-did-not-open",
+    title: "Wallet did not open",
+    category: "Troubleshooting",
+    description: "Wallet opening depends on device, installed wallet, browser context, and selected wallet type.",
+    body: "If a wallet does not open, the selected wallet may not be installed, the page may be in the wrong browser context, the mobile deep link may have been blocked, or the wallet provider may not be injected on the device.\n\nWhat this means: The payment may never leave Pending because the customer did not reach the wallet approval step.\n\nWhat to check: Wallet installed, selected wallet type, mobile return behavior, browser permissions, and whether the customer can open the checkout page inside the wallet browser.",
+    tags: ["wallet", "mobile", "deeplink", "troubleshooting"],
+    keywords: ["Phantom", "Solflare", "MetaMask", "Base Wallet"]
+  },
+  {
+    id: "customer-closed-checkout",
+    title: "Customer closed checkout",
+    category: "Troubleshooting",
+    description: "Closing checkout before approval can leave the payment pending, incomplete, canceled, or expired depending on the path.",
+    body: "If a customer closes checkout before approving a payment, PineTree may never receive a completion signal. In some flows a canceled or expired status can be shown. In others, the payment may remain Pending until a retry or timeout path handles it.\n\nWhat this means: Customer browser behavior matters. A closed tab is not the same as a successful payment.\n\nWhat to check: Whether the customer approved the payment, whether a transaction hash exists, link expiration, and whether a new checkout attempt was created.",
+    tags: ["checkout", "closed", "cancel", "expired"],
+    keywords: ["closed tab", "abandoned checkout"]
+  },
+  {
+    id: "provider-not-connected",
+    title: "Provider not connected",
+    category: "Troubleshooting",
+    description: "A missing provider connection can prevent a payment method from appearing or being prepared.",
+    body: "If a provider is not connected, PineTree may not show that payment option or may fail to create the payment. Solana and Base need saved wallets. Shift4 needs credentials. Lightning needs Speed setup and platform support.\n\nWhat this means: The checkout experience is driven by configured rails.\n\nWhat to check: Providers page status, enabled toggle, wallet address, credentials, Lightning setup fields, and a small test payment after saving.",
+    tags: ["provider", "not connected", "setup"],
+    keywords: ["missing payment method", "provider unavailable"]
+  },
+  {
+    id: "wallet-connected-payment-not-complete",
+    title: "Wallet connected but payment did not complete",
+    category: "Troubleshooting",
+    description: "A merchant wallet connection does not guarantee customer approval or successful on-chain/payment-provider confirmation.",
+    body: "A saved merchant wallet only tells PineTree where to route supported wallet-rail payments. The customer must still open their wallet, review the amount, approve the transaction, and return enough evidence for PineTree to confirm.\n\nWhat this means: Wallet setup can be correct while an individual customer payment still fails or stalls.\n\nWhat to check: Customer approval, selected asset, exact amount, network, transaction hash, payment ID, and whether the status is Pending, Processing, or Failed.",
+    tags: ["wallet", "connected", "payment failed"],
+    keywords: ["wallet connected", "did not complete"]
+  },
+  {
+    id: "dashboard-numbers-look-off",
+    title: "Dashboard numbers look off",
+    category: "Troubleshooting",
+    description: "Different pages summarize different slices of payment, transaction, report, and wallet-balance data.",
+    body: "If dashboard numbers look different across pages, compare what each page is counting. Transactions may show rows across statuses. Reports emphasize confirmed volume for the selected window. Wallets shows connected balance visibility, not sales volume.\n\nWhat this means: A balance, a transaction count, and a report total are related but not the same measurement.\n\nWhat to check: Date window, status, channel, provider, network, time zone, failed/incomplete rows, and whether the payment is confirmed.",
+    tags: ["dashboard", "numbers", "reports", "transactions"],
+    keywords: ["numbers wrong", "metrics", "volume"]
+  },
+  {
+    id: "open-support-ticket",
     title: "When to open a support ticket",
     category: "Troubleshooting",
-    description: "Open a ticket when the dashboard details are not enough to resolve a payment or account issue.",
-    body: "Open a support ticket when a payment remains unclear after checking status, provider, network, amount, timestamp, and payment ID. Tickets are also useful for dashboard issues, settlement questions, wallet connection problems, provider setup questions, POS issues, API support, and feature requests. Include the related payment ID when you have one.",
-    tags: ["support", "ticket", "help", "troubleshooting"]
+    description: "Open a ticket when the dashboard does not give enough detail to resolve a payment or setup issue.",
+    body: "Open a support ticket when a payment stays unclear after you check status, provider, network, amount, timestamp, and payment ID. Tickets are also useful for dashboard issues, settlement questions, wallet connection problems, provider setup questions, POS issues, API support, and feature requests.\n\nWhat this means: The fastest tickets include specific evidence instead of only a general description.\n\nWhat to check: Include payment ID, related payment ID field if available, provider, network, amount, customer action, timestamp, screenshots if useful, and what you expected to happen.",
+    tags: ["support", "ticket", "troubleshooting"],
+    keywords: ["open ticket", "support", "help"]
+  },
+  {
+    id: "assistant-what-it-will-do",
+    title: "What PineTree Assistant will do",
+    category: "PineTree Assistant",
+    description: "The planned assistant will help answer PineTree questions from approved documentation and merchant context.",
+    body: "PineTree Assistant is planned as a guided support helper for PineTree documentation, transaction states, and merchant account context. It should help explain statuses, suggest what to check, and point merchants to relevant documentation.\n\nWhat this means: The assistant should be grounded in PineTree data instead of free-form guesses.\n\nWhat to check: For now, use the local docs preview and support ticket form for real support needs.",
+    tags: ["assistant", "private beta", "docs"],
+    keywords: ["AI assistant", "help assistant"]
+  },
+  {
+    id: "assistant-local-docs-only",
+    title: "Current Assistant status",
+    category: "PineTree Assistant",
+    description: "The current Help Center assistant panel is local-docs-only and does not call an external AI provider.",
+    body: "The current assistant panel searches local PineTree help documentation and shows matching articles. It does not call OpenAI, Claude, or any external model provider.\n\nWhat this means: It can help you find documentation faster, but it is not generating support answers or reading live account data yet.\n\nWhat to check: Search terms, matching docs, and whether a support ticket is better for account-specific problems.",
+    tags: ["assistant", "local docs", "no external ai"],
+    keywords: ["private beta", "local search", "OpenAI", "Claude"]
+  },
+  {
+    id: "assistant-boundaries",
+    title: "What PineTree Assistant can and cannot answer",
+    category: "PineTree Assistant",
+    description: "Future assistant answers should stay inside PineTree docs, transaction states, and merchant context.",
+    body: "When enabled, PineTree Assistant should answer questions about PineTree workflows, help docs, payment statuses, and merchant account context. It should not invent provider behavior, expose secrets, provide legal or tax advice, or claim a payment is complete unless PineTree status supports that.\n\nWhat this means: Assistant responses need clear boundaries and source grounding before a real AI provider is connected.\n\nWhat to check: Source docs, merchant scope, whether the question needs live account data, and whether a human support ticket is more appropriate.",
+    tags: ["assistant", "boundaries", "safety"],
+    keywords: ["AI boundaries", "grounded answers", "merchant context"]
   }
 ]

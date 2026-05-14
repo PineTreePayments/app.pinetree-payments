@@ -16,13 +16,16 @@ function scoreArticle(article: HelpArticle, terms: string[]) {
     article.category,
     article.description,
     article.body,
-    article.tags.join(" ")
+    article.tags.join(" "),
+    article.keywords?.join(" ") || ""
   ].join(" "))
 
   return terms.reduce((score, term) => {
     if (!term) return score
     if (normalize(article.title).includes(term)) return score + 5
     if (normalize(article.tags.join(" ")).includes(term)) return score + 3
+    if (normalize(article.keywords?.join(" ") || "").includes(term)) return score + 3
+    if (normalize(article.category).includes(term)) return score + 2
     return haystack.includes(term) ? score + 1 : score
   }, 0)
 }

@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import {
   Bot,
+  BookOpen,
   CheckCircle2,
-  FileText,
   LifeBuoy,
   MessageSquare,
   Search,
   Send,
-  Sparkles
+  Sparkles,
+  X
 } from "lucide-react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
@@ -79,7 +80,8 @@ function searchableText(article: HelpArticle) {
     article.category,
     article.description,
     article.body,
-    article.tags.join(" ")
+    article.tags.join(" "),
+    article.keywords?.join(" ") || ""
   ].join(" ").toLowerCase()
 }
 
@@ -94,7 +96,7 @@ function formatDate(value: string) {
 export default function HelpCenterPage() {
   const [query, setQuery] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<string>("All")
-  const [activeArticle, setActiveArticle] = useState<HelpArticle | null>(helpArticles[0] ?? null)
+  const [selectedArticle, setSelectedArticle] = useState<HelpArticle | null>(null)
   const [ticketForm, setTicketForm] = useState<TicketForm>(emptyTicketForm)
   const [feedbackForm, setFeedbackForm] = useState<FeedbackForm>(emptyFeedbackForm)
   const [tickets, setTickets] = useState<TicketRecord[]>([])
@@ -117,17 +119,6 @@ export default function HelpCenterPage() {
   const assistantResults = useMemo<HelpSearchResult[]>(() => {
     return searchHelpArticles(assistantQuestion, 3)
   }, [assistantQuestion])
-
-  useEffect(() => {
-    if (filteredArticles.length === 0) {
-      setActiveArticle(null)
-      return
-    }
-
-    if (!activeArticle || !filteredArticles.some((article) => article.id === activeArticle.id)) {
-      setActiveArticle(filteredArticles[0])
-    }
-  }, [activeArticle, filteredArticles])
 
   const getAccessToken = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession()
@@ -168,6 +159,25 @@ export default function HelpCenterPage() {
   useEffect(() => {
     void loadTickets()
   }, [loadTickets])
+
+  useEffect(() => {
+    if (!selectedArticle) return
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setSelectedArticle(null)
+      }
+    }
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    document.addEventListener("keydown", handleKeyDown)
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [selectedArticle])
 
   async function submitTicket() {
     const subject = ticketForm.subject.trim()
@@ -264,16 +274,16 @@ export default function HelpCenterPage() {
     <div className="space-y-5 md:space-y-7">
       <div>
         <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Help Center</h1>
-        <p className="mt-1 text-sm leading-6 text-gray-600">
-          Find answers, troubleshoot payments, and contact PineTree support.
+        <p className="mt-1 text-sm font-semibold leading-6 text-[#0052FF]">
+          PineTree Insight for payments, wallets, checkout, and merchant support.
         </p>
       </div>
 
       <DashboardHeroCard
         eyebrow="Merchant Support"
-        title="Documentation and support requests"
-        value="Help Center"
-        detail="Search PineTree payment concepts, open support tickets, and leave product feedback from one dashboard workspace."
+        title="Docs, tickets, and feedback"
+        value="Support workspace"
+        detail="Search payment concepts, review merchant workflows, open support tickets, and leave product feedback."
         secondary={
           <div className="grid w-full grid-cols-2 gap-2 sm:w-auto sm:min-w-[320px]">
             <QuickAction label="Open a Ticket" icon={<LifeBuoy size={18} />} href="#support-ticket" />
@@ -315,51 +325,32 @@ export default function HelpCenterPage() {
       </GroupedMetricSurface>
 
       <DashboardSection title="Documentation" titleTone="blue">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {filteredArticles.map((article) => (
               <button
                 key={article.id}
                 type="button"
-                onClick={() => setActiveArticle(article)}
-                className={`min-h-[148px] rounded-2xl border bg-white p-4 text-left shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-blue-200 ${
-                  activeArticle?.id === article.id ? "border-[#0052FF] ring-4 ring-blue-100" : "border-gray-200/80"
-                }`}
+                onClick={() => setSelectedArticle(article)}
+                className="group min-h-[172px] rounded-2xl border border-gray-200/80 bg-white p-4 text-left shadow-[0_10px_30px_rgba(15,23,42,0.05)] outline-none transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_18px_46px_rgba(15,23,42,0.09),0_0_26px_rgba(0,82,255,0.08)] focus-visible:ring-4 focus-visible:ring-blue-100"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <FileText className="mt-0.5 h-5 w-5 shrink-0 text-[#0052FF]" />
+                  <BookOpen className="mt-0.5 h-5 w-5 shrink-0 text-[#0052FF]" />
                   <ProviderStatusPill label={article.category} tone="blue" />
                 </div>
                 <h2 className="mt-3 text-base font-semibold text-gray-950">{article.title}</h2>
                 <p className="mt-2 text-sm leading-5 text-gray-600">{article.description}</p>
+                <span className="mt-4 inline-flex items-center text-xs font-semibold text-[#0052FF]">
+                  Read guide
+                  <span className="ml-1 transition group-hover:translate-x-0.5">-&gt;</span>
+                </span>
               </button>
             ))}
 
             {filteredArticles.length === 0 && (
-              <div className="rounded-2xl border border-gray-200 bg-white p-5 text-sm text-gray-600 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:col-span-2">
+              <div className="rounded-2xl border border-gray-200 bg-white p-5 text-sm text-gray-600 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:col-span-2 xl:col-span-3">
                 No help articles matched your search. Try a payment status, provider name, or report term.
               </div>
             )}
-          </div>
-
-          <div className="rounded-2xl border border-gray-200/80 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-            {activeArticle ? (
-              <>
-                <ProviderStatusPill label={activeArticle.category} tone="blue" />
-                <h2 className="mt-3 text-xl font-semibold text-gray-950">{activeArticle.title}</h2>
-                <p className="mt-3 text-sm leading-6 text-gray-700">{activeArticle.body}</p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {activeArticle.tags.map((tag) => (
-                    <span key={tag} className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-600">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <p className="text-sm text-gray-600">Select an article to preview details.</p>
-            )}
-          </div>
         </div>
       </DashboardSection>
 
@@ -529,7 +520,7 @@ export default function HelpCenterPage() {
                       type="button"
                       onClick={() => {
                         setSelectedCategory(result.article.category)
-                        setActiveArticle(result.article)
+                        setSelectedArticle(result.article)
                         setQuery("")
                       }}
                       className="block w-full rounded-lg px-2 py-1.5 text-left transition hover:bg-blue-50"
@@ -601,6 +592,163 @@ export default function HelpCenterPage() {
             </div>
           </DashboardSection>
         </div>
+      </div>
+
+      {selectedArticle && (
+        <ArticleModal
+          article={selectedArticle}
+          onClose={() => setSelectedArticle(null)}
+          onOpenArticle={setSelectedArticle}
+        />
+      )}
+    </div>
+  )
+}
+
+function getRelatedArticles(article: HelpArticle) {
+  const articleTags = new Set(article.tags.map((tag) => tag.toLowerCase()))
+
+  return helpArticles
+    .filter((candidate) => candidate.id !== article.id)
+    .map((candidate) => {
+      const sharedTags = candidate.tags.filter((tag) => articleTags.has(tag.toLowerCase())).length
+      const categoryScore = candidate.category === article.category ? 2 : 0
+      return { article: candidate, score: sharedTags + categoryScore }
+    })
+    .filter((result) => result.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map((result) => result.article)
+}
+
+function shouldShowTicketCta(article: HelpArticle) {
+  const text = [
+    article.category,
+    article.title,
+    article.description,
+    article.tags.join(" ")
+  ].join(" ").toLowerCase()
+
+  return text.includes("troubleshooting") ||
+    text.includes("payment") ||
+    text.includes("failed") ||
+    text.includes("stuck") ||
+    text.includes("support")
+}
+
+function ArticleModal({
+  article,
+  onClose,
+  onOpenArticle
+}: {
+  article: HelpArticle
+  onClose: () => void
+  onOpenArticle: (article: HelpArticle) => void
+}) {
+  const relatedArticles = getRelatedArticles(article)
+  const paragraphs = article.body.split(/\n{2,}/).map((part) => part.trim()).filter(Boolean)
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="help-article-title"
+        className="flex h-[100dvh] w-full flex-col overflow-hidden rounded-t-[1.35rem] border border-white/70 bg-white/95 shadow-[0_28px_90px_rgba(15,23,42,0.30)] sm:h-auto sm:max-h-[88vh] sm:max-w-2xl sm:rounded-[1.35rem]"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-gray-100 bg-white/90 px-4 py-4 sm:px-6">
+          <div className="min-w-0">
+            <ProviderStatusPill label={article.category} tone="blue" />
+            <h2 id="help-article-title" className="mt-3 text-xl font-semibold text-gray-950 sm:text-2xl">
+              {article.title}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-gray-600">
+              {article.description}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close article"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 shadow-sm transition hover:border-blue-200 hover:text-[#0052FF] focus:outline-none focus:ring-4 focus:ring-blue-100"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+          <div className="space-y-4">
+            {paragraphs.map((paragraph) => {
+              const [label, rest] = paragraph.split(": ")
+              const isLabeled = label === "What this means" || label === "What to check"
+
+              return (
+                <div
+                  key={paragraph}
+                  className={isLabeled ? "rounded-2xl border border-blue-100 bg-blue-50/55 p-4" : ""}
+                >
+                  {isLabeled ? (
+                    <>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#0052FF]">
+                        {label}
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-gray-700">{rest}</p>
+                    </>
+                  ) : (
+                    <p className="text-sm leading-6 text-gray-700">{paragraph}</p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="mt-6 flex flex-wrap gap-2">
+            {article.tags.map((tag) => (
+              <span key={tag} className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600">
+                {tag}
+              </span>
+            ))}
+          </div>
+
+          {relatedArticles.length > 0 && (
+            <div className="mt-6">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#0052FF]">
+                Related docs
+              </p>
+              <div className="mt-3 grid gap-2">
+                {relatedArticles.map((related) => (
+                  <button
+                    key={related.id}
+                    type="button"
+                    onClick={() => onOpenArticle(related)}
+                    className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50/50 focus:outline-none focus:ring-4 focus:ring-blue-100"
+                  >
+                    <span className="block text-sm font-semibold text-gray-950">{related.title}</span>
+                    <span className="mt-1 block text-xs leading-5 text-gray-600">{related.description}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {shouldShowTicketCta(article) && (
+          <div className="border-t border-gray-100 bg-white/92 px-4 py-3 sm:px-6">
+            <a
+              href="#support-ticket"
+              onClick={onClose}
+              className="inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 sm:w-auto"
+            >
+              Open a ticket
+            </a>
+          </div>
+        )}
       </div>
     </div>
   )
