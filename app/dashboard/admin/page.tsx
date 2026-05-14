@@ -14,6 +14,12 @@ import {
   Star,
   X,
 } from "lucide-react"
+import {
+  CompactMetricTile,
+  DashboardSection,
+  GroupedMetricSurface,
+  MetricGrid,
+} from "@/components/dashboard/DashboardPrimitives"
 
 // ─── Overview types ────────────────────────────────────────────────────────────
 
@@ -279,53 +285,6 @@ function StatusPill({
     >
       {label}
     </span>
-  )
-}
-
-function MetricCard({
-  label,
-  value,
-  sub,
-  accent = "gray",
-  className,
-}: {
-  label: string
-  value: string
-  sub?: string
-  accent?: "blue" | "green" | "amber" | "red" | "gray"
-  className?: string
-}) {
-  const border: Record<string, string> = {
-    blue: "border-[#0052FF]/15",
-    green: "border-emerald-200/60",
-    amber: "border-amber-200/60",
-    red: "border-red-200/60",
-    gray: "border-gray-200",
-  }
-  const dot: Record<string, string> = {
-    blue: "bg-[#0052FF]",
-    green: "bg-emerald-500",
-    amber: "bg-amber-500",
-    red: "bg-red-500",
-    gray: "bg-gray-400",
-  }
-  const val: Record<string, string> = {
-    blue: "text-[#0052FF]",
-    green: "text-emerald-600",
-    amber: "text-amber-600",
-    red: "text-red-600",
-    gray: "text-gray-800",
-  }
-
-  return (
-    <div className={`rounded-xl border ${border[accent]} bg-white px-4 py-4 shadow-sm min-h-[88px]${className ? ` ${className}` : ""}`}>
-      <div className="flex items-center gap-1.5 mb-2.5">
-        <span className={`h-1.5 w-1.5 rounded-full ${dot[accent]}`} />
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">{label}</p>
-      </div>
-      <p className={`text-2xl font-bold leading-none ${val[accent]}`}>{value}</p>
-      {sub && <p className="mt-1.5 text-xs text-gray-400">{sub}</p>}
-    </div>
   )
 }
 
@@ -631,35 +590,38 @@ export default function AdminPage() {
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
 
-      {/* ── Page header ──────────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#0052FF]/8">
-            <div className="h-3 w-3 rounded-sm bg-[#0052FF]" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-gray-900">Admin</h1>
-              <span className="inline-flex items-center rounded-full bg-[#0052FF]/8 px-2 py-0.5 text-[11px] font-semibold text-[#0052FF]">
-                PineTree Internal
-              </span>
-            </div>
-            <p className="mt-0.5 text-sm text-gray-500">
-              Platform overview, support queue, and merchant feedback
+      {/* ── Hero card ────────────────────────────────────────────────────────── */}
+      <div className="relative overflow-hidden rounded-[1.35rem] border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.16),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] p-5 shadow-[0_18px_60px_rgba(37,99,235,0.13)] sm:p-6 md:p-7">
+        <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/80 to-transparent" />
+        <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <span className="inline-flex items-center rounded-full border border-blue-200/60 bg-blue-100/80 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.12em] text-blue-700">
+              PineTree Internal
+            </span>
+            <h1 className="mt-2.5 text-2xl font-semibold text-gray-950 sm:text-3xl">
+              Admin Command Center
+            </h1>
+            <p className="mt-1.5 text-sm text-gray-600">
+              Platform overview, support operations, and merchant feedback
             </p>
           </div>
+          {overview?.generatedAt && (
+            <div className="shrink-0 sm:text-right">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
+                Last Updated
+              </p>
+              <p className="mt-0.5 text-sm text-gray-600">
+                {fmtDateTime(overview.generatedAt)}
+              </p>
+            </div>
+          )}
         </div>
-        {overview?.generatedAt && (
-          <p className="shrink-0 text-xs text-gray-400 mt-1">
-            Updated {fmtDateTime(overview.generatedAt)}
-          </p>
-        )}
       </div>
 
       {/* ── Tab bar ──────────────────────────────────────────────────────────── */}
-      <div className="flex gap-1 rounded-xl border border-gray-200 bg-gray-50 p-1 w-fit">
+      <div className="flex gap-1 rounded-2xl border border-gray-200/80 bg-white/90 p-1 w-fit shadow-[0_2px_8px_rgba(15,23,42,0.06)]">
         {(
           [
             { key: "overview" as AdminTab, label: "Overview" },
@@ -674,10 +636,10 @@ export default function AdminPage() {
               setSelectedTicketId(null)
               setDetail(null)
             }}
-            className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+            className={`flex items-center gap-1.5 rounded-xl px-5 py-2 text-sm font-medium transition-all ${
               activeTab === tab.key
-                ? "bg-white text-gray-900 shadow-sm"
-                : "text-gray-500 hover:text-gray-700"
+                ? "bg-[#0052FF] text-white shadow-sm"
+                : "text-gray-500 hover:text-gray-800"
             }`}
           >
             {tab.label}
@@ -685,8 +647,8 @@ export default function AdminPage() {
               <span
                 className={`rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${
                   activeTab === tab.key
-                    ? "bg-[#0052FF]/10 text-[#0052FF]"
-                    : "bg-gray-200 text-gray-500"
+                    ? "bg-white/20 text-white"
+                    : "bg-gray-100 text-gray-500"
                 }`}
               >
                 {tab.badge}
@@ -704,91 +666,104 @@ export default function AdminPage() {
           {loadingOverview ? (
             <Spinner />
           ) : (
-            <div className="space-y-5 pb-8">
+            <div className="space-y-6 pb-8">
 
-              {/* Payment metrics */}
-              <section className="rounded-2xl border border-gray-100 bg-white p-4 sm:p-5 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
-                <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
-                  Payments — All Time
-                </p>
-                <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-3 sm:gap-4">
-                  <MetricCard label="Total" value={m ? fmt(m.totalTransactions) : "—"} accent="gray" />
-                  <MetricCard label="Confirmed" value={m ? fmt(m.confirmedTransactions) : "—"} accent="green" />
-                  <MetricCard label="Pending" value={m ? fmt(m.pendingTransactions) : "—"} accent="amber" />
-                  <MetricCard label="Failed" value={m ? fmt(m.failedTransactions) : "—"} accent="red" />
-                  <MetricCard label="Conf. Volume" value={m ? fmtUSD(m.totalConfirmedVolume) : "—"} accent="blue" />
-                  <MetricCard label="Fees" value={m ? fmtUSD(m.totalFeesCollected) : "—"} accent="blue" />
-                </div>
-              </section>
+              {/* Payments — All Time */}
+              <DashboardSection title="Payments — All Time" titleTone="blue">
+                <MetricGrid columns="three">
+                  <CompactMetricTile
+                    label="Total"
+                    value={m ? fmt(m.totalTransactions) : "—"}
+                  />
+                  <CompactMetricTile
+                    label="Confirmed"
+                    value={m ? fmt(m.confirmedTransactions) : "—"}
+                    tone="green"
+                  />
+                  <CompactMetricTile
+                    label="Pending"
+                    value={m ? fmt(m.pendingTransactions) : "—"}
+                    tone="amber"
+                  />
+                  <CompactMetricTile
+                    label="Failed"
+                    value={m ? fmt(m.failedTransactions) : "—"}
+                    tone="red"
+                  />
+                  <CompactMetricTile
+                    label="Confirmed Volume"
+                    value={m ? fmtUSD(m.totalConfirmedVolume) : "—"}
+                    tone="blue"
+                  />
+                  <CompactMetricTile
+                    label="Fees Collected"
+                    value={m ? fmtUSD(m.totalFeesCollected) : "—"}
+                    tone="blue"
+                  />
+                </MetricGrid>
+              </DashboardSection>
 
-              {/* Platform + growth */}
-              <div className="grid gap-4 lg:grid-cols-2 lg:gap-5">
-                <section className="rounded-2xl border border-gray-100 bg-white p-4 sm:p-5 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
-                  <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
-                    Platform
-                  </p>
-                  <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-3 sm:gap-4">
-                    <MetricCard
-                      label="Total Users"
-                      value={m ? fmt(m.totalUsers) : "—"}
-                      sub="All merchants"
-                      accent="blue"
-                    />
-                    <MetricCard
-                      label="Active"
-                      value={m ? fmt(m.activeMerchants) : "—"}
-                      sub="Status: active"
-                      accent="green"
-                    />
-                    <div className="col-span-2 sm:col-span-1">
-                      <MetricCard
-                        label="Providers"
-                        value={m ? fmt(m.connectedProviders) : "—"}
-                        sub="Connections"
-                        accent="gray"
-                        className="h-full"
-                      />
-                    </div>
+              {/* Platform Health + Month Snapshot */}
+              <div className="grid gap-4 lg:grid-cols-2">
+                <GroupedMetricSurface title="Platform Health" titleTone="blue">
+                  <div className="divide-y divide-gray-100">
+                    {[
+                      { label: "Total Users", value: m ? fmt(m.totalUsers) : "—", color: "text-[#0052FF]" },
+                      { label: "Active Merchants", value: m ? fmt(m.activeMerchants) : "—", color: "text-emerald-600" },
+                      { label: "Connected Providers", value: m ? fmt(m.connectedProviders) : "—", color: "text-gray-950" },
+                    ].map((row) => (
+                      <div
+                        key={row.label}
+                        className="flex items-center justify-between py-3 first:pt-0 last:pb-0"
+                      >
+                        <span className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">
+                          {row.label}
+                        </span>
+                        <span className={`text-lg font-bold leading-none ${row.color}`}>
+                          {row.value}
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                </section>
+                </GroupedMetricSurface>
 
-                <section className="rounded-2xl border border-gray-100 bg-white p-4 sm:p-5 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
-                  <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
-                    This Month — {monthLabel}
-                  </p>
-                  <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-3 sm:gap-4">
-                    <MetricCard
-                      label="New Users"
-                      value={g ? fmt(g.usersThisMonth) : "—"}
-                      accent="blue"
-                    />
-                    <MetricCard
-                      label="Transactions"
-                      value={g ? fmt(g.transactionsThisMonth) : "—"}
-                      accent="gray"
-                    />
-                    <div className="col-span-2 sm:col-span-1">
-                      <MetricCard
-                        label="Volume"
-                        value={g ? fmtUSD(g.volumeThisMonth) : "—"}
-                        sub="Confirmed"
-                        accent="green"
-                        className="h-full"
-                      />
-                    </div>
+                <GroupedMetricSurface title={`Month Snapshot — ${monthLabel}`} titleTone="blue">
+                  <div className="divide-y divide-gray-100">
+                    {[
+                      { label: "New Users", value: g ? fmt(g.usersThisMonth) : "—", color: "text-[#0052FF]" },
+                      { label: "Transactions", value: g ? fmt(g.transactionsThisMonth) : "—", color: "text-gray-950" },
+                      { label: "Confirmed Volume", value: g ? fmtUSD(g.volumeThisMonth) : "—", color: "text-emerald-600" },
+                    ].map((row) => (
+                      <div
+                        key={row.label}
+                        className="flex items-center justify-between py-3 first:pt-0 last:pb-0"
+                      >
+                        <span className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">
+                          {row.label}
+                        </span>
+                        <span className={`text-lg font-bold leading-none ${row.color}`}>
+                          {row.value}
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                </section>
+                </GroupedMetricSurface>
               </div>
 
-              {/* Quick links */}
-              <section>
-                <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
-                  Navigate
-                </p>
+              {/* Navigate */}
+              <DashboardSection title="Navigate" titleTone="blue">
                 <div className="grid grid-cols-2 gap-3 sm:gap-4">
                   {[
-                    { label: "Support Queue", desc: "Tickets & replies", onClick: () => { setActiveTab("support"); setSelectedTicketId(null) } },
-                    { label: "Feedback", desc: "Merchant ratings", onClick: () => setActiveTab("feedback") },
+                    {
+                      label: "Support Queue",
+                      desc: "Tickets & replies",
+                      onClick: () => { setActiveTab("support"); setSelectedTicketId(null) },
+                    },
+                    {
+                      label: "Feedback",
+                      desc: "Merchant ratings",
+                      onClick: () => setActiveTab("feedback"),
+                    },
                     { label: "Transactions", href: "/dashboard/transactions", desc: "All payments" },
                     { label: "Reports", href: "/dashboard/reports", desc: "Revenue reports" },
                   ].map((link) =>
@@ -796,50 +771,66 @@ export default function AdminPage() {
                       <button
                         key={link.label}
                         onClick={link.onClick}
-                        className="group rounded-xl border border-gray-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-[#0052FF]/25 hover:shadow-[0_0_0_1px_rgba(0,82,255,0.12),0_4px_12px_rgba(0,82,255,0.06)]"
+                        className="group relative rounded-2xl border border-gray-200/80 bg-white px-4 py-5 text-left shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_18px_50px_rgba(15,23,42,0.10),0_0_36px_rgba(37,99,235,0.14)] focus:outline-none sm:px-5"
                       >
-                        <p className="text-sm font-semibold text-gray-900 group-hover:text-[#0052FF]">
-                          {link.label}
-                        </p>
-                        <p className="mt-0.5 text-xs text-gray-400">{link.desc}</p>
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-semibold text-gray-900 transition-colors group-hover:text-[#0052FF]">
+                              {link.label}
+                            </p>
+                            <p className="mt-1 text-xs text-gray-500">{link.desc}</p>
+                          </div>
+                          <ChevronRight
+                            size={14}
+                            className="mt-0.5 shrink-0 text-gray-400 transition-colors group-hover:text-[#0052FF]"
+                          />
+                        </div>
                       </button>
                     ) : (
                       <Link
                         key={link.label}
                         href={link.href!}
-                        className="group rounded-xl border border-gray-200 bg-white px-4 py-3.5 shadow-sm transition-all hover:border-[#0052FF]/25 hover:shadow-[0_0_0_1px_rgba(0,82,255,0.12),0_4px_12px_rgba(0,82,255,0.06)]"
+                        className="group relative rounded-2xl border border-gray-200/80 bg-white px-4 py-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_18px_50px_rgba(15,23,42,0.10),0_0_36px_rgba(37,99,235,0.14)] focus:outline-none sm:px-5"
                       >
-                        <p className="text-sm font-semibold text-gray-900 group-hover:text-[#0052FF]">
-                          {link.label}
-                        </p>
-                        <p className="mt-0.5 text-xs text-gray-400">{link.desc}</p>
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-semibold text-gray-900 transition-colors group-hover:text-[#0052FF]">
+                              {link.label}
+                            </p>
+                            <p className="mt-1 text-xs text-gray-500">{link.desc}</p>
+                          </div>
+                          <ChevronRight
+                            size={14}
+                            className="mt-0.5 shrink-0 text-gray-400 transition-colors group-hover:text-[#0052FF]"
+                          />
+                        </div>
                       </Link>
                     )
                   )}
                 </div>
-              </section>
+              </DashboardSection>
 
-              {/* Recent transactions */}
-              <section>
-                <div className="mb-3 flex items-center justify-between">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
-                    Recent Transactions
-                  </p>
+              {/* Recent Transactions */}
+              <DashboardSection
+                title="Recent Transactions"
+                titleTone="blue"
+                action={
                   <Link
                     href="/dashboard/transactions"
                     className="text-xs font-medium text-[#0052FF] hover:underline"
                   >
                     View all
                   </Link>
-                </div>
-                <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+                }
+              >
+                <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
                   {!overview?.recentTransactions.length ? (
                     <p className="px-5 py-10 text-center text-sm text-gray-400">
                       No transactions yet.
                     </p>
                   ) : (
                     <div className="divide-y divide-gray-100">
-                      <div className="hidden grid-cols-[1fr_120px_110px_130px_100px] gap-4 bg-gray-50 px-5 py-2.5 sm:grid">
+                      <div className="hidden grid-cols-[1fr_120px_110px_130px_100px] gap-4 bg-gray-50/60 px-5 py-2.5 sm:grid">
                         {["Payment ID", "Provider", "Network", "Amount", "Status"].map((h) => (
                           <div
                             key={h}
@@ -879,25 +870,27 @@ export default function AdminPage() {
                     </div>
                   )}
                 </div>
-              </section>
+              </DashboardSection>
 
-              {/* Recent tickets + feedback preview */}
+              {/* Recent Tickets + Feedback */}
               <div className="grid gap-6 lg:grid-cols-2">
-                <section>
-                  <div className="mb-3 flex items-center justify-between">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
-                      Recent Tickets
-                    </p>
+                <DashboardSection
+                  title="Recent Tickets"
+                  titleTone="blue"
+                  action={
                     <button
                       onClick={() => { setActiveTab("support"); setSelectedTicketId(null) }}
                       className="text-xs font-medium text-[#0052FF] hover:underline"
                     >
                       View all
                     </button>
-                  </div>
-                  <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+                  }
+                >
+                  <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
                     {!overview?.recentTickets.length ? (
-                      <p className="px-5 py-10 text-center text-sm text-gray-400">No tickets yet.</p>
+                      <p className="px-5 py-10 text-center text-sm text-gray-400">
+                        No tickets yet.
+                      </p>
                     ) : (
                       <div className="divide-y divide-gray-100">
                         {overview.recentTickets.map((t) => (
@@ -924,21 +917,21 @@ export default function AdminPage() {
                       </div>
                     )}
                   </div>
-                </section>
+                </DashboardSection>
 
-                <section>
-                  <div className="mb-3 flex items-center justify-between">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
-                      Recent Feedback
-                    </p>
+                <DashboardSection
+                  title="Recent Feedback"
+                  titleTone="blue"
+                  action={
                     <button
                       onClick={() => setActiveTab("feedback")}
                       className="text-xs font-medium text-[#0052FF] hover:underline"
                     >
                       View all
                     </button>
-                  </div>
-                  <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+                  }
+                >
+                  <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
                     {!overview?.recentFeedback.length ? (
                       <p className="px-5 py-10 text-center text-sm text-gray-400">
                         No feedback yet.
@@ -958,7 +951,9 @@ export default function AdminPage() {
                                 </span>
                               )}
                             </div>
-                            <p className="mt-2 line-clamp-1 text-sm text-gray-700">{fb.message}</p>
+                            <p className="mt-2 line-clamp-1 text-sm text-gray-700">
+                              {fb.message}
+                            </p>
                             <p className="mt-1 text-xs text-gray-400">
                               {fb.merchant_id.slice(0, 12)}… · {fmtDate(fb.created_at)}
                             </p>
@@ -967,7 +962,7 @@ export default function AdminPage() {
                       </div>
                     )}
                   </div>
-                </section>
+                </DashboardSection>
               </div>
             </div>
           )}
@@ -978,7 +973,7 @@ export default function AdminPage() {
           SUPPORT TAB
       ════════════════════════════════════════════════════════════════════════ */}
       {activeTab === "support" && (
-        <div className="space-y-5">
+        <div className="space-y-5 pb-8">
 
           {/* Stat cards */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
@@ -990,7 +985,7 @@ export default function AdminPage() {
                     STATUS_FILTERS.find((f) => f.value === s.key)?.value ?? ""
                   )
                 }
-                className="rounded-xl border border-gray-200 bg-white px-4 py-4 text-left shadow-sm transition-colors hover:border-[#0052FF]/20 hover:bg-[#0052FF]/[0.02]"
+                className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 text-left shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_18px_50px_rgba(15,23,42,0.10),0_0_36px_rgba(37,99,235,0.14)] focus:outline-none"
               >
                 <div className="flex items-center gap-1.5 mb-2">
                   <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
@@ -1059,7 +1054,7 @@ export default function AdminPage() {
           </div>
 
           {/* Ticket list */}
-          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
             {loadingTickets ? (
               <Spinner />
             ) : filteredTickets.length === 0 ? (
@@ -1074,7 +1069,7 @@ export default function AdminPage() {
               </div>
             ) : (
               <div className="divide-y divide-gray-100">
-                <div className="hidden grid-cols-[1fr_190px_100px_120px_110px_28px] gap-4 bg-gray-50 px-5 py-2.5 sm:grid">
+                <div className="hidden grid-cols-[1fr_190px_100px_120px_110px_28px] gap-4 bg-gray-50/60 px-5 py-2.5 sm:grid">
                   {["Subject", "Merchant", "Priority", "Status", "Date", ""].map((h) => (
                     <div
                       key={h}
@@ -1133,11 +1128,11 @@ export default function AdminPage() {
           FEEDBACK TAB
       ════════════════════════════════════════════════════════════════════════ */}
       {activeTab === "feedback" && (
-        <div className="space-y-3">
+        <div className="space-y-3 pb-8">
           {loadingFeedback ? (
             <Spinner />
           ) : feedback.length === 0 ? (
-            <div className="rounded-xl border border-gray-200 bg-white p-12 text-center shadow-sm">
+            <div className="rounded-2xl border border-gray-200/80 bg-white p-12 text-center shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <Star size={30} className="mx-auto text-gray-300" />
               <p className="mt-3 font-medium text-gray-900">No feedback yet</p>
               <p className="mt-1 text-sm text-gray-500">
@@ -1148,7 +1143,7 @@ export default function AdminPage() {
             feedback.map((fb) => (
               <div
                 key={fb.id}
-                className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-[0_0_0_1px_rgba(0,82,255,0.08),0_4px_12px_rgba(0,82,255,0.05)]"
+                className="rounded-2xl border border-gray-200/80 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_18px_50px_rgba(15,23,42,0.10),0_0_36px_rgba(37,99,235,0.14)]"
               >
                 <div className="flex items-start gap-4">
                   <div className="min-w-0 flex-1">
@@ -1158,7 +1153,9 @@ export default function AdminPage() {
                       </span>
                       <StarRating rating={fb.rating} />
                     </div>
-                    <p className="mt-3 whitespace-pre-wrap text-sm text-gray-700">{fb.message}</p>
+                    <p className="mt-3 whitespace-pre-wrap text-sm text-gray-700">
+                      {fb.message}
+                    </p>
                     <p className="mt-2 text-xs text-gray-400">
                       Merchant: {fb.merchant_id.slice(0, 12)}… · {fmtDate(fb.created_at)}
                     </p>
