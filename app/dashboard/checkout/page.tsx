@@ -918,7 +918,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       {/* ── Page header ───────────────────────────────────────────────────── */}
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Online Checkout</p>
-        <h1 className="mt-1 text-xl font-semibold tracking-tight text-gray-950 sm:text-2xl">Online Payments</h1>
+        <h1 className="mt-1 text-xl font-semibold tracking-tight text-[#0052FF] sm:text-2xl">Online Payments</h1>
         <p className="mt-1 text-sm text-gray-500">
           Payment links, website integration, webhooks, and developer tools.
         </p>
@@ -950,21 +950,23 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       </MetricGrid>
 
       {/* ── Tab bar ──────────────────────────────────────────────────────── */}
-      <div className="flex gap-1 rounded-xl border border-gray-200 bg-gray-50/80 p-1 w-fit">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={`rounded-lg px-4 py-2 text-sm font-semibold transition-all ${
-              tab === t.id
-                ? "bg-white text-gray-950 shadow-sm ring-1 ring-gray-200/80"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className="w-full overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none]">
+        <div className="inline-flex min-w-0 gap-0.5 rounded-xl border border-gray-150/80 bg-white/70 p-1 shadow-[inset_0_1px_3px_rgba(0,0,0,0.04)] backdrop-blur-sm">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200 ease-out ${
+                tab === t.id
+                  ? "bg-[#0052FF] text-white shadow-[0_2px_8px_rgba(0,82,255,0.3)]"
+                  : "text-gray-400 hover:text-gray-600"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════ */}
@@ -972,7 +974,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {tab === "links" && (
         <>
-          <DashboardSection title="New Payment Link">
+          <DashboardSection title="New Payment Link" titleTone="blue">
             <div className="rounded-2xl border border-gray-200/80 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-6">
               <form onSubmit={(e) => void handleCreate(e)} className="space-y-4">
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -1033,7 +1035,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
             </div>
           </DashboardSection>
 
-          <DashboardSection title="Your Payment Links">
+          <DashboardSection title="Your Payment Links" titleTone="blue">
             {loading ? (
               <div className="rounded-2xl border border-gray-200/80 bg-white p-8 shadow-[0_10px_30px_rgba(15,23,42,0.05)] text-center">
                 <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
