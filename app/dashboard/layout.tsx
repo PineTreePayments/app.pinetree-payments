@@ -106,6 +106,7 @@ export default function DashboardLayout({
     { name: "Reports", href: "/dashboard/reports" },
     { name: "Wallets", href: "/dashboard/wallets" },
     { name: "Providers", href: "/dashboard/providers" },
+    { name: "Help Center", href: "/dashboard/help" },
     { name: "Settings", href: "/dashboard/settings" },
   ]
 

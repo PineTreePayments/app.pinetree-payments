@@ -32,3 +32,26 @@ body {
 .animate-fadeIn {
   animation:fadeIn .25s ease;
 }
+
+.form-field {
+  min-height: 2.75rem;
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  padding: 0.625rem 0.875rem;
+  font-size: 0.875rem;
+  color: #111827;
+  outline: none;
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.form-field::placeholder {
+  color: #9ca3af;
+}
+
+.form-field:focus {
+  border-color: #0052ff;
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(0, 82, 255, 0.12);
+}
