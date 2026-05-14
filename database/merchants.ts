@@ -9,6 +9,7 @@ export type Merchant = {
   created_at: string
   updated_at: string
   status: "active" | "suspended"
+  role?: string | null
 }
 
 export type MerchantSettings = {

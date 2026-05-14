@@ -15,6 +15,7 @@ export default function DashboardLayout({
   const router = useRouter()
 
   const [userEmail, setUserEmail] = useState("")
+  const [isAdmin, setIsAdmin] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const accountMenuRef = useRef<HTMLDivElement | null>(null)
@@ -44,6 +45,14 @@ export default function DashboardLayout({
       }
 
       setUserEmail(data.session.user.email ?? "")
+
+      const { data: merchantData } = await supabase
+        .from("merchants")
+        .select("role")
+        .eq("id", data.session.user.id)
+        .maybeSingle()
+
+      setIsAdmin(merchantData?.role === "admin")
     }
 
     checkSession()
@@ -108,6 +117,7 @@ export default function DashboardLayout({
     { name: "Providers", href: "/dashboard/providers" },
     { name: "Help Center", href: "/dashboard/help" },
     { name: "Settings", href: "/dashboard/settings" },
+    ...(isAdmin ? [{ name: "Admin Support", href: "/dashboard/admin/support" }] : []),
   ]
 
   return (
