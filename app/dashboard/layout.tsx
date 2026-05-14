@@ -46,13 +46,17 @@ export default function DashboardLayout({
 
       setUserEmail(data.session.user.email ?? "")
 
-      const { data: merchantData } = await supabase
-        .from("merchants")
-        .select("role")
-        .eq("id", data.session.user.id)
-        .maybeSingle()
-
-      setIsAdmin(merchantData?.role === "admin")
+      try {
+        const meRes = await fetch("/api/admin/me", {
+          headers: { Authorization: `Bearer ${data.session.access_token}` },
+        })
+        if (meRes.ok) {
+          const meData = await meRes.json()
+          setIsAdmin(meData.isAdmin === true)
+        }
+      } catch {
+        // non-critical: sidebar admin item stays hidden
+      }
     }
 
     checkSession()
