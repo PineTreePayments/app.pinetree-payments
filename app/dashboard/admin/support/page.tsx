@@ -96,6 +96,14 @@ const PRIORITY_STYLES: Record<string, string> = {
   Urgent: "bg-red-50 text-red-700 border-red-200",
 }
 
+const STAT_CONFIG = [
+  { key: "open", label: "Open", color: "text-[#0052FF]", dot: "bg-[#0052FF]", glow: "hover:border-blue-300 hover:shadow-[0_0_0_1px_rgba(0,82,255,0.12),0_2px_12px_rgba(0,82,255,0.08)]" },
+  { key: "in_review", label: "In Review", color: "text-amber-600", dot: "bg-amber-500", glow: "hover:border-amber-200 hover:shadow-[0_2px_8px_rgba(245,158,11,0.08)]" },
+  { key: "waiting_on_merchant", label: "Waiting", color: "text-orange-600", dot: "bg-orange-500", glow: "hover:border-orange-200 hover:shadow-[0_2px_8px_rgba(249,115,22,0.08)]" },
+  { key: "resolved", label: "Resolved", color: "text-emerald-600", dot: "bg-emerald-500", glow: "hover:border-emerald-200 hover:shadow-[0_2px_8px_rgba(16,185,129,0.08)]" },
+  { key: "archived", label: "Archived", color: "text-gray-400", dot: "bg-gray-300", glow: "hover:border-gray-300" },
+] as const
+
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtDate(iso: string) {
@@ -172,25 +180,21 @@ export default function AdminSupportPage() {
   const [unauthorized, setUnauthorized] = useState(false)
   const [activeTab, setActiveTab] = useState<"tickets" | "feedback">("tickets")
 
-  // Tickets
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [loadingTickets, setLoadingTickets] = useState(true)
   const [statusFilter, setStatusFilter] = useState("")
   const [priorityFilter, setPriorityFilter] = useState("")
   const [search, setSearch] = useState("")
 
-  // Selected ticket detail
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null)
   const [detail, setDetail] = useState<{ ticket: Ticket; messages: Message[] } | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
 
-  // Reply
   const [replyText, setReplyText] = useState("")
   const [replyStatus, setReplyStatus] = useState("waiting_on_merchant")
   const [submitting, setSubmitting] = useState(false)
   const [updatingStatus, setUpdatingStatus] = useState(false)
 
-  // Feedback
   const [feedback, setFeedback] = useState<Feedback[]>([])
   const [loadingFeedback, setLoadingFeedback] = useState(false)
   const [feedbackLoaded, setFeedbackLoaded] = useState(false)
@@ -403,8 +407,10 @@ export default function AdminSupportPage() {
   if (unauthorized) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
-        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-red-50 text-3xl">
-          🔒
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-red-50">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2C9.24 2 7 4.24 7 7v2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-2V7c0-2.76-2.24-5-5-5zm0 13a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm3-8H9V7a3 3 0 1 1 6 0v2z" fill="#ef4444"/>
+          </svg>
         </div>
         <h1 className="text-xl font-semibold text-gray-900">Admin Access Required</h1>
         <p className="max-w-xs text-sm text-gray-500">
@@ -424,54 +430,64 @@ export default function AdminSupportPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-600">
-            Admin
-          </p>
-          <h1 className="mt-0.5 text-xl font-semibold text-gray-900">Support Dashboard</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Manage all merchant support tickets and feedback
-          </p>
+      {/* ── Command header ────────────────────────────────────────────────── */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#0052FF] to-[#003FCC] px-6 py-5 text-white shadow-[0_4px_24px_rgba(0,82,255,0.28)]">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.06]"
+          style={{
+            backgroundImage:
+              "repeating-linear-gradient(90deg,#fff 0,#fff 1px,transparent 1px,transparent 40px),repeating-linear-gradient(0deg,#fff 0,#fff 1px,transparent 1px,transparent 40px)",
+          }}
+        />
+        <div className="relative flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-200">
+              PineTree Internal
+            </p>
+            <h1 className="mt-0.5 text-xl font-bold">Support Dashboard</h1>
+            <p className="mt-1 text-sm text-blue-200">
+              Manage all merchant support tickets and feedback
+            </p>
+          </div>
+          <button
+            onClick={() => token && fetchTickets(token)}
+            disabled={loadingTickets}
+            className="mt-3 inline-flex items-center gap-2 self-start rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium text-white backdrop-blur-sm hover:bg-white/20 disabled:opacity-50 sm:mt-0 sm:self-auto"
+          >
+            <RefreshCw size={14} className={loadingTickets ? "animate-spin" : ""} />
+            Refresh
+          </button>
         </div>
-        <button
-          onClick={() => token && fetchTickets(token)}
-          disabled={loadingTickets}
-          className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-600 shadow-sm hover:bg-gray-50 disabled:opacity-50"
-        >
-          <RefreshCw size={14} className={loadingTickets ? "animate-spin" : ""} />
-          Refresh
-        </button>
       </div>
 
-      {/* Stats row */}
+      {/* ── Stat cards ───────────────────────────────────────────────────── */}
       {activeTab === "tickets" && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-          {[
-            { label: "Open", value: stats.open, color: "text-blue-600" },
-            { label: "In Review", value: stats.in_review, color: "text-amber-600" },
-            { label: "Waiting", value: stats.waiting_on_merchant, color: "text-orange-600" },
-            { label: "Resolved", value: stats.resolved, color: "text-emerald-600" },
-            { label: "Archived", value: stats.archived, color: "text-gray-400" },
-          ].map((s) => (
+          {STAT_CONFIG.map((s) => (
             <button
-              key={s.label}
+              key={s.key}
               onClick={() =>
                 setStatusFilter(
-                  STATUS_FILTERS.find((f) => f.label === s.label)?.value ?? ""
+                  STATUS_FILTERS.find((f) => f.label === s.label || f.value === s.key)?.value ?? ""
                 )
               }
-              className="rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-colors hover:border-blue-200 hover:bg-blue-50/30"
+              className={`rounded-2xl border border-gray-200 bg-white px-4 py-4 text-left shadow-sm transition-all ${s.glow}`}
             >
-              <div className={`text-2xl font-bold ${s.color}`}>{s.value}</div>
-              <div className="mt-0.5 text-xs font-medium text-gray-500">{s.label}</div>
+              <div className="flex items-center gap-1.5 mb-2">
+                <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
+                <span className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+                  {s.label}
+                </span>
+              </div>
+              <div className={`text-2xl font-bold leading-none ${s.color}`}>
+                {stats[s.key]}
+              </div>
             </button>
           ))}
         </div>
       )}
 
-      {/* Tabs */}
+      {/* ── Tabs ─────────────────────────────────────────────────────────── */}
       <div className="flex gap-1 rounded-xl border border-gray-200 bg-gray-50 p-1 w-fit">
         {(["tickets", "feedback"] as const).map((tab) => (
           <button
@@ -488,7 +504,7 @@ export default function AdminSupportPage() {
               <span
                 className={`ml-2 rounded-full px-1.5 py-0.5 text-xs ${
                   activeTab === "tickets"
-                    ? "bg-blue-100 text-blue-700"
+                    ? "bg-[#0052FF]/10 text-[#0052FF]"
                     : "bg-gray-200 text-gray-500"
                 }`}
               >
@@ -499,7 +515,7 @@ export default function AdminSupportPage() {
         ))}
       </div>
 
-      {/* ── Tickets tab ─────────────────────────────────────────────────────── */}
+      {/* ── Tickets tab ──────────────────────────────────────────────────── */}
       {activeTab === "tickets" && (
         <>
           {/* Filters */}
@@ -511,7 +527,7 @@ export default function AdminSupportPage() {
                   onClick={() => setStatusFilter(s.value)}
                   className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                     statusFilter === s.value
-                      ? "border-blue-500 bg-blue-500 text-white"
+                      ? "border-[#0052FF] bg-[#0052FF] text-white"
                       : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
                   }`}
                 >
@@ -524,7 +540,7 @@ export default function AdminSupportPage() {
               <select
                 value={priorityFilter}
                 onChange={(e) => setPriorityFilter(e.target.value)}
-                className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-[#0052FF]/40 focus:outline-none focus:ring-2 focus:ring-[#0052FF]/10"
               >
                 <option value="">All Priorities</option>
                 <option value="Urgent">Urgent</option>
@@ -543,14 +559,14 @@ export default function AdminSupportPage() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search tickets..."
-                  className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-9 pr-3 text-sm shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  className="w-full rounded-xl border border-gray-200 bg-white py-2 pl-9 pr-3 text-sm shadow-sm focus:border-[#0052FF]/40 focus:outline-none focus:ring-2 focus:ring-[#0052FF]/10"
                 />
               </div>
             </div>
           </div>
 
           {/* Ticket list */}
-          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
             {loadingTickets ? (
               <Spinner />
             ) : filteredTickets.length === 0 ? (
@@ -566,11 +582,11 @@ export default function AdminSupportPage() {
             ) : (
               <div className="divide-y divide-gray-100">
                 {/* Table header */}
-                <div className="hidden grid-cols-[1fr_190px_100px_120px_110px_28px] gap-4 bg-gray-50 px-5 py-3 sm:grid">
+                <div className="hidden grid-cols-[1fr_190px_100px_120px_110px_28px] gap-4 bg-gray-50/80 px-5 py-3 sm:grid">
                   {["Subject", "Merchant", "Priority", "Status", "Date", ""].map((h) => (
                     <div
                       key={h}
-                      className="text-xs font-semibold uppercase tracking-wider text-gray-400"
+                      className="text-[11px] font-semibold uppercase tracking-wider text-gray-400"
                     >
                       {h}
                     </div>
@@ -581,17 +597,15 @@ export default function AdminSupportPage() {
                   <button
                     key={ticket.id}
                     onClick={() => openTicket(ticket.id, token)}
-                    className="w-full text-left transition-colors hover:bg-blue-50/40 focus:outline-none"
+                    className="w-full text-left transition-colors hover:bg-[#0052FF]/[0.03] focus:outline-none"
                   >
                     <div className="flex items-center gap-3 px-5 py-4 sm:grid sm:grid-cols-[1fr_190px_100px_120px_110px_28px] sm:gap-4">
-                      {/* Subject */}
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-gray-900">
                           {ticket.subject}
                         </p>
                         <p className="mt-0.5 text-xs text-gray-400">{ticket.category}</p>
                       </div>
-                      {/* Merchant */}
                       <div className="hidden min-w-0 sm:block">
                         <p className="truncate text-sm text-gray-700">
                           {ticket.merchant_email || ticket.merchant_id.slice(0, 12) + "…"}
@@ -602,19 +616,15 @@ export default function AdminSupportPage() {
                           </p>
                         )}
                       </div>
-                      {/* Priority */}
                       <div className="hidden sm:block">
                         <PriorityBadge priority={ticket.priority} />
                       </div>
-                      {/* Status */}
                       <div>
                         <StatusBadge status={ticket.status} />
                       </div>
-                      {/* Date */}
                       <div className="hidden text-xs text-gray-400 sm:block">
                         {fmtDate(ticket.created_at)}
                       </div>
-                      {/* Arrow */}
                       <div className="ml-auto sm:ml-0">
                         <ChevronRight size={15} className="text-gray-400" />
                       </div>
@@ -627,13 +637,13 @@ export default function AdminSupportPage() {
         </>
       )}
 
-      {/* ── Feedback tab ────────────────────────────────────────────────────── */}
+      {/* ── Feedback tab ─────────────────────────────────────────────────── */}
       {activeTab === "feedback" && (
         <div className="space-y-3">
           {loadingFeedback ? (
             <Spinner />
           ) : feedback.length === 0 ? (
-            <div className="rounded-xl border border-gray-200 bg-white p-12 text-center shadow-sm">
+            <div className="rounded-2xl border border-gray-200 bg-white p-12 text-center shadow-sm">
               <Star size={32} className="mx-auto text-gray-300" />
               <p className="mt-3 font-medium text-gray-900">No feedback yet</p>
               <p className="mt-1 text-sm text-gray-500">
@@ -644,7 +654,7 @@ export default function AdminSupportPage() {
             feedback.map((fb) => (
               <div
                 key={fb.id}
-                className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
+                className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-[0_0_0_1px_rgba(0,82,255,0.08),0_4px_12px_rgba(0,82,255,0.06)]"
               >
                 <div className="flex items-start gap-4">
                   <div className="min-w-0 flex-1">
@@ -666,19 +676,17 @@ export default function AdminSupportPage() {
         </div>
       )}
 
-      {/* ── Ticket detail panel ─────────────────────────────────────────────── */}
+      {/* ── Ticket detail panel ───────────────────────────────────────────── */}
       {selectedTicketId && (
         <>
-          {/* Backdrop */}
           <div
-            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px]"
+            className="fixed inset-0 z-40 bg-black/25 backdrop-blur-[2px]"
             onClick={() => {
               setSelectedTicketId(null)
               setDetail(null)
             }}
           />
 
-          {/* Side panel */}
           <div className="fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-white shadow-2xl sm:w-[600px] lg:w-[660px]">
             {loadingDetail ? (
               <Spinner />
@@ -708,7 +716,6 @@ export default function AdminSupportPage() {
                     </button>
                   </div>
 
-                  {/* Ticket metadata */}
                   <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                     <div>
                       <p className="text-gray-400">Ticket ID</p>
@@ -753,8 +760,7 @@ export default function AdminSupportPage() {
 
                 {/* Message thread */}
                 <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
-                  {/* Original description */}
-                  <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+                  <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
                     <div className="mb-2 flex items-center justify-between">
                       <span className="text-xs font-semibold text-gray-500">Original Message</span>
                       <span className="text-xs text-gray-400">
@@ -766,7 +772,6 @@ export default function AdminSupportPage() {
                     </p>
                   </div>
 
-                  {/* Follow-up messages */}
                   {detail.messages.map((msg) => (
                     <div
                       key={msg.id}
@@ -777,7 +782,7 @@ export default function AdminSupportPage() {
                       <div
                         className={`max-w-[88%] rounded-2xl px-4 py-3 ${
                           msg.sender_type === "pinetree"
-                            ? "bg-blue-600 text-white"
+                            ? "bg-[#0052FF] text-white"
                             : msg.sender_type === "system"
                             ? "bg-gray-100 text-gray-500 text-xs italic"
                             : "bg-gray-100 text-gray-800"
@@ -808,7 +813,7 @@ export default function AdminSupportPage() {
 
                 {/* Status quick actions */}
                 <div className="flex-none border-t border-gray-100 px-6 py-3">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-gray-400">
                     Set Status
                   </p>
                   <div className="flex flex-wrap gap-1.5">
@@ -819,7 +824,7 @@ export default function AdminSupportPage() {
                         disabled={updatingStatus || detail.ticket.status === s.value}
                         className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                           detail.ticket.status === s.value
-                            ? "border-blue-500 bg-blue-500 text-white"
+                            ? "border-[#0052FF] bg-[#0052FF] text-white"
                             : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50"
                         }`}
                       >
@@ -831,7 +836,7 @@ export default function AdminSupportPage() {
 
                 {/* Reply box */}
                 <div className="flex-none border-t border-gray-200 bg-gray-50 px-6 py-5">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-gray-400">
                     Reply as PineTree Support
                   </p>
                   <textarea
@@ -839,13 +844,13 @@ export default function AdminSupportPage() {
                     onChange={(e) => setReplyText(e.target.value)}
                     placeholder="Write your reply to the merchant..."
                     rows={3}
-                    className="w-full resize-none rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    className="w-full resize-none rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 shadow-sm focus:border-[#0052FF]/40 focus:outline-none focus:ring-2 focus:ring-[#0052FF]/10"
                   />
                   <div className="mt-3 flex items-center gap-3">
                     <select
                       value={replyStatus}
                       onChange={(e) => setReplyStatus(e.target.value)}
-                      className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-blue-400 focus:outline-none"
+                      className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-[#0052FF]/40 focus:outline-none"
                     >
                       {ACTION_STATUSES.map((s) => (
                         <option key={s.value} value={s.value}>
@@ -856,7 +861,7 @@ export default function AdminSupportPage() {
                     <button
                       onClick={sendReply}
                       disabled={submitting || !replyText.trim()}
-                      className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex items-center gap-2 rounded-xl bg-[#0052FF] px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#003FCC] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Send size={14} />
                       {submitting ? "Sending…" : "Send Reply"}
