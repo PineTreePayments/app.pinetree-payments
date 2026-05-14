@@ -918,7 +918,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       {/* ── Page header ───────────────────────────────────────────────────── */}
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-gray-950 sm:text-2xl">Online Payments</h1>
-        <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
+        <p className="mt-1 text-[10px] font-semibold uppercase leading-[1.55] tracking-[0.11em] text-[#0052FF] sm:text-[11px] sm:leading-normal sm:tracking-[0.16em]">
           Payment links, website integration, webhooks, and developer tools.
         </p>
       </div>
@@ -949,17 +949,17 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       </MetricGrid>
 
       {/* ── Tab bar ──────────────────────────────────────────────────────── */}
-      <div className="w-full overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none]">
-        <div className="inline-flex min-w-0 gap-0.5 rounded-xl border border-gray-150/80 bg-white/70 p-1 shadow-[inset_0_1px_3px_rgba(0,0,0,0.04)] backdrop-blur-sm">
+      <div className="w-full max-w-full overflow-hidden">
+        <div className="grid max-w-full grid-cols-2 gap-1 rounded-[22px] border border-blue-100/70 bg-gradient-to-br from-white via-blue-50/60 to-white p-1 shadow-[0_12px_30px_rgba(0,82,255,0.08)] backdrop-blur-sm sm:inline-grid sm:w-auto sm:grid-cols-4">
           {TABS.map((t) => (
             <button
               key={t.id}
               type="button"
               onClick={() => setTab(t.id)}
-              className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200 ease-out ${
+              className={`min-w-0 rounded-[18px] px-3 py-2 text-center text-sm font-semibold transition-all duration-200 ease-out ${
                 tab === t.id
-                  ? "bg-[#0052FF] text-white shadow-[0_2px_8px_rgba(0,82,255,0.3)]"
-                  : "text-gray-500 hover:text-gray-800"
+                  ? "bg-[#0052FF] text-white shadow-[0_8px_18px_rgba(0,82,255,0.25)]"
+                  : "text-gray-600 hover:bg-white/80 hover:text-gray-950"
               }`}
             >
               {t.label}

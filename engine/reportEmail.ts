@@ -86,27 +86,26 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${report.title}</title>
   <style type="text/css">
-    /* Stack the two metric cards vertically on narrow screens.
-       Apple Mail (WebKit), iOS Mail, and most modern clients honour this. */
+    /* Keep report metric tiles compact in mobile previews where supported. */
     @media only screen and (max-width: 480px) {
       .pt-metric-col {
-        display: block !important;
-        width: 100% !important;
-        padding-right: 0 !important;
-      }
-      .pt-metric-col + .pt-metric-col {
-        padding-top: 10px !important;
+        width: 50% !important;
       }
       .pt-metric-gap {
-        display: none !important;
-        width: 0 !important;
-        max-width: 0 !important;
-        overflow: hidden !important;
-        mso-hide: all !important;
+        width: 10px !important;
+        min-width: 10px !important;
       }
       .pt-body {
-        padding-left: 20px !important;
-        padding-right: 20px !important;
+        padding-left: 16px !important;
+        padding-right: 16px !important;
+      }
+      .pt-stat-tile {
+        padding: 14px 12px !important;
+        height: 104px !important;
+      }
+      .pt-stat-value {
+        font-size: 20px !important;
+        line-height: 1.15 !important;
       }
     }
   </style>
@@ -137,29 +136,29 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
               </p>
 
               ${isExport ? "" : `
-              <!-- Key metrics: two cards side-by-side on desktop, stacked on mobile -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;border-collapse:collapse;">
+              <!-- Key metrics -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:12px;border-collapse:separate;border-spacing:0;">
                 <tr>
                   <!-- Gross Volume card -->
-                  <td class="pt-metric-col" valign="top" style="width:48%;padding:0;vertical-align:top;">
+                  <td class="pt-metric-col" valign="top" width="50%" style="width:50%;padding:0;vertical-align:top;">
                     <table width="100%" cellpadding="0" cellspacing="0">
                       <tr>
-                        <td style="padding:16px 18px;background:#eff6ff;border-radius:10px;border:1px solid #dbeafe;">
-                          <div style="font-size:11px;font-weight:700;color:#3b82f6;text-transform:uppercase;letter-spacing:0.8px;">Gross Volume</div>
-                          <div style="font-size:26px;font-weight:800;color:#0f1728;margin-top:6px;letter-spacing:-0.5px;">${currency(report.grossVolume)}</div>
+                        <td class="pt-stat-tile" height="112" style="height:112px;padding:16px 16px;background:#101827;border-radius:14px;border:1px solid #1d4ed8;vertical-align:top;">
+                          <div style="font-size:10px;font-weight:800;color:#60a5fa;text-transform:uppercase;letter-spacing:0.7px;line-height:1.25;">Gross Volume</div>
+                          <div class="pt-stat-value" style="font-size:24px;font-weight:850;color:#ffffff;margin-top:12px;letter-spacing:-0.4px;line-height:1.12;">${currency(report.grossVolume)}</div>
                         </td>
                       </tr>
                     </table>
                   </td>
                   <!-- Gutter -->
-                  <td class="pt-metric-gap" width="16" style="width:16px;min-width:16px;">&nbsp;</td>
+                  <td class="pt-metric-gap" width="12" style="width:12px;min-width:12px;">&nbsp;</td>
                   <!-- Net Settlements card -->
-                  <td class="pt-metric-col" valign="top" style="width:48%;padding:0;vertical-align:top;">
+                  <td class="pt-metric-col" valign="top" width="50%" style="width:50%;padding:0;vertical-align:top;">
                     <table width="100%" cellpadding="0" cellspacing="0">
                       <tr>
-                        <td style="padding:16px 18px;background:#f0fdf4;border-radius:10px;border:1px solid #d1fae5;">
-                          <div style="font-size:11px;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:0.8px;">Net Settlements</div>
-                          <div style="font-size:26px;font-weight:800;color:#0f1728;margin-top:6px;letter-spacing:-0.5px;">${currency(report.netSettlements)}</div>
+                        <td class="pt-stat-tile" height="112" style="height:112px;padding:16px 16px;background:#101827;border-radius:14px;border:1px solid #047857;vertical-align:top;">
+                          <div style="font-size:10px;font-weight:800;color:#34d399;text-transform:uppercase;letter-spacing:0.7px;line-height:1.25;">Net Settlements</div>
+                          <div class="pt-stat-value" style="font-size:24px;font-weight:850;color:#ffffff;margin-top:12px;letter-spacing:-0.4px;line-height:1.12;">${currency(report.netSettlements)}</div>
                         </td>
                       </tr>
                     </table>
@@ -168,16 +167,28 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
               </table>
 
               <!-- Stats row -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;border-collapse:separate;border-spacing:0;">
                 <tr>
-                  <td style="padding:14px 16px;border:1px solid #e5e7eb;border-radius:8px;text-align:center;">
-                    <div style="font-size:11px;color:#9ba3af;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Transactions</div>
-                    <div style="font-size:20px;font-weight:800;color:#0f1728;margin-top:4px;">${report.transactionCount}</div>
+                  <td class="pt-metric-col" valign="top" width="50%" style="width:50%;padding:0;vertical-align:top;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td class="pt-stat-tile" height="100" style="height:100px;padding:15px 16px;background:#101827;border:1px solid #263449;border-radius:14px;vertical-align:top;text-align:left;">
+                          <div style="font-size:10px;color:#a8b0bd;font-weight:800;text-transform:uppercase;letter-spacing:0.7px;line-height:1.25;">Transactions</div>
+                          <div class="pt-stat-value" style="font-size:22px;font-weight:850;color:#ffffff;margin-top:10px;line-height:1.12;">${report.transactionCount}</div>
+                        </td>
+                      </tr>
+                    </table>
                   </td>
-                  <td width="16"></td>
-                  <td style="padding:14px 16px;border:1px solid #e5e7eb;border-radius:8px;text-align:center;">
-                    <div style="font-size:11px;color:#9ba3af;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Success Rate</div>
-                    <div style="font-size:20px;font-weight:800;color:#0f1728;margin-top:4px;">${report.successRate}%</div>
+                  <td class="pt-metric-gap" width="12" style="width:12px;min-width:12px;">&nbsp;</td>
+                  <td class="pt-metric-col" valign="top" width="50%" style="width:50%;padding:0;vertical-align:top;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td class="pt-stat-tile" height="100" style="height:100px;padding:15px 16px;background:#101827;border:1px solid #263449;border-radius:14px;vertical-align:top;text-align:left;">
+                          <div style="font-size:10px;color:#a8b0bd;font-weight:800;text-transform:uppercase;letter-spacing:0.7px;line-height:1.25;">Success Rate</div>
+                          <div class="pt-stat-value" style="font-size:22px;font-weight:850;color:#ffffff;margin-top:10px;line-height:1.12;">${report.successRate}%</div>
+                        </td>
+                      </tr>
+                    </table>
                   </td>
                 </tr>
               </table>
