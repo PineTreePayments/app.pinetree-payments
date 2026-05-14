@@ -4,11 +4,12 @@ import { resolveCheckoutLinkForCustomer } from "@/engine/checkoutLinks"
 export const dynamic = "force-dynamic"
 
 type Props = {
-  params: { token: string }
+  params: Promise<{ token: string }>
 }
 
 export default async function CheckoutTokenPage({ params }: Props) {
-  const token = decodeURIComponent(params.token || "")
+  const { token: rawToken } = await params
+  const token = decodeURIComponent(rawToken || "")
 
   if (!token) {
     return <CheckoutErrorScreen message="Invalid checkout link." />
