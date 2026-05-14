@@ -11,6 +11,27 @@ type FeedbackBody = {
   rating?: number | null
 }
 
+function getFeedbackApiError(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : fallback
+  const missingStorage =
+    message.includes("merchant_feedback") ||
+    message.includes("schema cache") ||
+    message.includes("Could not find the table")
+
+  if (missingStorage) {
+    console.error("[support:feedback] storage unavailable", { error: message })
+    return {
+      message: "Support storage is not enabled yet. Apply the Help Center database migration to send feedback.",
+      status: 503
+    }
+  }
+
+  return {
+    message,
+    status: getRouteErrorStatus(error)
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
@@ -29,9 +50,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ feedback }, { status: 201 })
   } catch (error: unknown) {
+    const apiError = getFeedbackApiError(error, "Failed to save feedback")
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to save feedback" },
-      { status: getRouteErrorStatus(error) }
+      { error: apiError.message },
+      { status: apiError.status }
     )
   }
 }

@@ -22,7 +22,6 @@ import {
   supportTicketPriorities
 } from "@/lib/help/supportOptions"
 import {
-  DashboardHeroCard,
   DashboardSection,
   GroupedMetricSurface,
   ProviderStatusPill
@@ -74,6 +73,10 @@ const emptyFeedbackForm: FeedbackForm = {
   rating: ""
 }
 
+const DEFAULT_VISIBLE_ARTICLES = 6
+const SUPPORT_STORAGE_DISABLED_MESSAGE =
+  "Support storage is not enabled yet. Apply the Help Center database migration to view and create tickets."
+
 function searchableText(article: HelpArticle) {
   return [
     article.title,
@@ -93,9 +96,26 @@ function formatDate(value: string) {
   }).format(new Date(value))
 }
 
+function normalizeSupportErrorMessage(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : fallback
+  const storageMissing =
+    message.includes("support_tickets") ||
+    message.includes("merchant_feedback") ||
+    message.includes("schema cache") ||
+    message.includes("Could not find the table")
+
+  if (storageMissing) {
+    console.error("[help-center] support storage unavailable", { error: message })
+    return SUPPORT_STORAGE_DISABLED_MESSAGE
+  }
+
+  return message
+}
+
 export default function HelpCenterPage() {
   const [query, setQuery] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<string>("All")
+  const [articlesExpanded, setArticlesExpanded] = useState(false)
   const [selectedArticle, setSelectedArticle] = useState<HelpArticle | null>(null)
   const [ticketForm, setTicketForm] = useState<TicketForm>(emptyTicketForm)
   const [feedbackForm, setFeedbackForm] = useState<FeedbackForm>(emptyFeedbackForm)
@@ -115,6 +135,19 @@ export default function HelpCenterPage() {
       return categoryMatch && queryMatch
     })
   }, [query, selectedCategory])
+
+  const categorySummaries = useMemo(() => {
+    return helpCategories.map((category) => ({
+      category,
+      count: helpArticles.filter((article) => article.category === category).length,
+      sample: helpArticles.find((article) => article.category === category)?.description || "Browse PineTree help docs."
+    }))
+  }, [])
+
+  const visibleLimit = articlesExpanded ? filteredArticles.length : DEFAULT_VISIBLE_ARTICLES
+  const visibleArticles = filteredArticles.slice(0, visibleLimit)
+  const hasMoreArticles = filteredArticles.length > visibleArticles.length
+  const hasSearch = query.trim().length > 0
 
   const assistantResults = useMemo<HelpSearchResult[]>(() => {
     return searchHelpArticles(assistantQuestion, 3)
@@ -150,7 +183,7 @@ export default function HelpCenterPage() {
       setTickets(payload?.tickets || [])
     } catch (error) {
       setTickets([])
-      setTicketError(error instanceof Error ? error.message : "Failed to load support tickets.")
+      setTicketError(normalizeSupportErrorMessage(error, "Failed to load support tickets."))
     } finally {
       setTicketsLoading(false)
     }
@@ -221,7 +254,7 @@ export default function HelpCenterPage() {
       setTicketError(null)
       toast.success("Support ticket opened.")
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to open support ticket.")
+      toast.error(normalizeSupportErrorMessage(error, "Failed to open support ticket."))
     } finally {
       setSubmittingTicket(false)
     }
@@ -264,7 +297,7 @@ export default function HelpCenterPage() {
       setFeedbackForm(emptyFeedbackForm)
       toast.success("Feedback sent.")
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to send feedback.")
+      toast.error(normalizeSupportErrorMessage(error, "Failed to send feedback."))
     } finally {
       setSubmittingFeedback(false)
     }
@@ -274,30 +307,40 @@ export default function HelpCenterPage() {
     <div className="space-y-5 md:space-y-7">
       <div>
         <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Help Center</h1>
-        <p className="mt-1 text-sm font-semibold leading-6 text-[#0052FF]">
+        <p className="mt-1 text-[12px] font-semibold leading-5 tracking-[0.01em] text-[#0052FF] sm:text-sm">
           PineTree Insight for payments, wallets, checkout, and merchant support.
         </p>
       </div>
 
-      <DashboardHeroCard
-        eyebrow="Merchant Support"
-        title="Docs, tickets, and feedback"
-        value="Support workspace"
-        detail="Search payment concepts, review merchant workflows, open support tickets, and leave product feedback."
-        secondary={
-          <div className="grid w-full grid-cols-2 gap-2 sm:w-auto sm:min-w-[320px]">
+      <div className="rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.10),transparent_32%),linear-gradient(135deg,#ffffff_0%,#f8fbff_58%,#eef5ff_100%)] p-4 shadow-[0_12px_36px_rgba(0,82,255,0.10)] sm:p-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
+              Merchant Support
+            </p>
+            <h2 className="mt-1.5 text-xl font-semibold leading-tight text-gray-950 sm:text-2xl">
+              Support workspace
+            </h2>
+            <p className="mt-1 text-sm leading-5 text-gray-600">
+              Search docs, open tickets, and send feedback from one compact support panel.
+            </p>
+          </div>
+          <div className="grid w-full grid-cols-2 gap-2 md:w-auto md:min-w-[300px]">
             <QuickAction label="Open a Ticket" icon={<LifeBuoy size={18} />} href="#support-ticket" />
             <QuickAction label="General Feedback" icon={<MessageSquare size={18} />} href="#feedback" />
           </div>
-        }
-      />
+        </div>
+      </div>
 
-      <GroupedMetricSurface>
+      <GroupedMetricSurface className="p-3 sm:p-4">
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <input
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value)
+              setArticlesExpanded(false)
+            }}
             placeholder="Search help articles, statuses, providers, or reports"
             className="min-h-12 w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-[#0052FF] focus:bg-white focus:ring-4 focus:ring-blue-100"
           />
@@ -310,7 +353,10 @@ export default function HelpCenterPage() {
               <button
                 key={category}
                 type="button"
-                onClick={() => setSelectedCategory(category)}
+                onClick={() => {
+                  setSelectedCategory(category)
+                  setArticlesExpanded(false)
+                }}
                 className={`shrink-0 rounded-full border px-3 py-2 text-xs font-semibold transition ${
                   active
                     ? "border-[#0052FF] bg-[#0052FF] text-white shadow-sm"
@@ -325,13 +371,72 @@ export default function HelpCenterPage() {
       </GroupedMetricSurface>
 
       <DashboardSection title="Documentation" titleTone="blue">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {filteredArticles.map((article) => (
+        <div className="space-y-3">
+          {!hasSearch && (
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {categorySummaries.map(({ category, count, sample }) => {
+                const active = selectedCategory === category
+                return (
+                  <button
+                    key={category}
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategory(category)
+                      setArticlesExpanded(false)
+                    }}
+                    className={`rounded-2xl border bg-white p-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] outline-none transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50/30 focus-visible:ring-4 focus-visible:ring-blue-100 ${
+                      active ? "border-[#0052FF] ring-4 ring-blue-100" : "border-gray-200/80"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-semibold text-gray-950">{category}</span>
+                      <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-[#0052FF]">
+                        {count}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-gray-600">{sample}</p>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-4">
+            <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-950">
+                  {hasSearch
+                    ? `Search results for "${query.trim()}"`
+                    : selectedCategory === "All"
+                      ? "Recommended docs"
+                      : selectedCategory}
+                </p>
+                <p className="text-xs text-gray-500">
+                  Showing {visibleArticles.length} of {filteredArticles.length} articles
+                </p>
+              </div>
+              {(selectedCategory !== "All" || hasSearch) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCategory("All")
+                    setQuery("")
+                    setArticlesExpanded(false)
+                  }}
+                  className="self-start rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 transition hover:bg-gray-50 sm:self-auto"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {visibleArticles.map((article) => (
               <button
                 key={article.id}
                 type="button"
                 onClick={() => setSelectedArticle(article)}
-                className="group min-h-[172px] rounded-2xl border border-gray-200/80 bg-white p-4 text-left shadow-[0_10px_30px_rgba(15,23,42,0.05)] outline-none transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_18px_46px_rgba(15,23,42,0.09),0_0_26px_rgba(0,82,255,0.08)] focus-visible:ring-4 focus-visible:ring-blue-100"
+                className="group min-h-[142px] rounded-2xl border border-gray-200/80 bg-gray-50/50 p-3.5 text-left outline-none transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-white hover:shadow-[0_14px_34px_rgba(15,23,42,0.08)] focus-visible:ring-4 focus-visible:ring-blue-100"
               >
                 <div className="flex items-start justify-between gap-3">
                   <BookOpen className="mt-0.5 h-5 w-5 shrink-0 text-[#0052FF]" />
@@ -351,6 +456,20 @@ export default function HelpCenterPage() {
                 No help articles matched your search. Try a payment status, provider name, or report term.
               </div>
             )}
+            </div>
+
+            {(hasMoreArticles || articlesExpanded) && (
+              <div className="mt-3 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setArticlesExpanded((current) => !current)}
+                  className="inline-flex min-h-10 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-[#0052FF] transition hover:border-[#0052FF] hover:bg-blue-100"
+                >
+                  {articlesExpanded ? "Show fewer articles" : `View more articles (${filteredArticles.length - visibleArticles.length})`}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </DashboardSection>
 
@@ -533,66 +652,68 @@ export default function HelpCenterPage() {
               </div>
             </div>
           </DashboardSection>
-
-          <DashboardSection title="Feedback" titleTone="blue">
-            <div id="feedback" className="rounded-2xl border border-gray-200/80 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-950">General Feedback</h2>
-                  <p className="mt-1 text-sm leading-6 text-gray-600">
-                    Share product, documentation, payment, or dashboard feedback.
-                  </p>
-                </div>
-                <MessageSquare className="h-6 w-6 shrink-0 text-[#0052FF]" />
-              </div>
-
-              <div className="mt-4 space-y-3">
-                <Field label="Type">
-                  <select
-                    value={feedbackForm.type}
-                    onChange={(event) => setFeedbackForm((current) => ({ ...current, type: event.target.value }))}
-                    className="form-field"
-                  >
-                    {feedbackTypes.map((type) => <option key={type}>{type}</option>)}
-                  </select>
-                </Field>
-                <Field label="Rating">
-                  <select
-                    value={feedbackForm.rating}
-                    onChange={(event) => setFeedbackForm((current) => ({ ...current, rating: event.target.value }))}
-                    className="form-field"
-                  >
-                    <option value="">Optional</option>
-                    <option value="5">5 - Excellent</option>
-                    <option value="4">4 - Good</option>
-                    <option value="3">3 - Neutral</option>
-                    <option value="2">2 - Needs work</option>
-                    <option value="1">1 - Poor</option>
-                  </select>
-                </Field>
-                <Field label="Message">
-                  <textarea
-                    value={feedbackForm.message}
-                    onChange={(event) => setFeedbackForm((current) => ({ ...current, message: event.target.value }))}
-                    className="form-field min-h-24 resize-y"
-                    placeholder="Tell us what would make PineTree clearer or easier to use."
-                  />
-                </Field>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => void submitFeedback()}
-                disabled={submittingFeedback}
-                className="mt-4 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
-              >
-                <CheckCircle2 size={16} />
-                {submittingFeedback ? "Sending..." : "Send Feedback"}
-              </button>
-            </div>
-          </DashboardSection>
         </div>
       </div>
+
+      <DashboardSection title="Feedback" titleTone="blue">
+        <div id="feedback" className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+          <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)_auto] lg:items-end">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="h-5 w-5 shrink-0 text-[#0052FF]" />
+                <h2 className="text-base font-semibold text-gray-950">General Feedback</h2>
+              </div>
+              <p className="mt-1 text-sm leading-5 text-gray-600">
+                Share product, documentation, payment, or dashboard feedback.
+              </p>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-[180px_160px_minmax(0,1fr)]">
+              <Field label="Type">
+                <select
+                  value={feedbackForm.type}
+                  onChange={(event) => setFeedbackForm((current) => ({ ...current, type: event.target.value }))}
+                  className="form-field"
+                >
+                  {feedbackTypes.map((type) => <option key={type}>{type}</option>)}
+                </select>
+              </Field>
+              <Field label="Rating">
+                <select
+                  value={feedbackForm.rating}
+                  onChange={(event) => setFeedbackForm((current) => ({ ...current, rating: event.target.value }))}
+                  className="form-field"
+                >
+                  <option value="">Optional</option>
+                  <option value="5">5 - Excellent</option>
+                  <option value="4">4 - Good</option>
+                  <option value="3">3 - Neutral</option>
+                  <option value="2">2 - Needs work</option>
+                  <option value="1">1 - Poor</option>
+                </select>
+              </Field>
+              <Field label="Message">
+                <textarea
+                  value={feedbackForm.message}
+                  onChange={(event) => setFeedbackForm((current) => ({ ...current, message: event.target.value }))}
+                  className="form-field min-h-11 resize-y lg:max-h-28"
+                  placeholder="Tell us what would make PineTree clearer or easier to use."
+                />
+              </Field>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => void submitFeedback()}
+              disabled={submittingFeedback}
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50 lg:w-auto"
+            >
+              <CheckCircle2 size={16} />
+              {submittingFeedback ? "Sending..." : "Send Feedback"}
+            </button>
+          </div>
+        </div>
+      </DashboardSection>
 
       {selectedArticle && (
         <ArticleModal

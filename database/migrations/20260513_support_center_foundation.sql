@@ -1,4 +1,6 @@
-create table if not exists support_tickets (
+create extension if not exists pgcrypto;
+
+create table if not exists public.support_tickets (
   id uuid primary key default gen_random_uuid(),
   merchant_id uuid not null,
   user_id uuid null,
@@ -13,18 +15,18 @@ create table if not exists support_tickets (
 );
 
 create index if not exists support_tickets_merchant_id_idx
-  on support_tickets (merchant_id);
+  on public.support_tickets (merchant_id);
 
 create index if not exists support_tickets_status_idx
-  on support_tickets (status);
+  on public.support_tickets (status);
 
 create index if not exists support_tickets_created_at_idx
-  on support_tickets (created_at);
+  on public.support_tickets (created_at);
 
 create index if not exists support_tickets_related_payment_id_idx
-  on support_tickets (related_payment_id);
+  on public.support_tickets (related_payment_id);
 
-create table if not exists merchant_feedback (
+create table if not exists public.merchant_feedback (
   id uuid primary key default gen_random_uuid(),
   merchant_id uuid not null,
   user_id uuid null,
@@ -35,7 +37,7 @@ create table if not exists merchant_feedback (
 );
 
 create index if not exists merchant_feedback_merchant_id_idx
-  on merchant_feedback (merchant_id);
+  on public.merchant_feedback (merchant_id);
 
 create index if not exists merchant_feedback_created_at_idx
-  on merchant_feedback (created_at);
+  on public.merchant_feedback (created_at);

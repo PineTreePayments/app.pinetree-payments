@@ -14,15 +14,37 @@ type TicketBody = {
   relatedPaymentId?: string | null
 }
 
+function getSupportApiError(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : fallback
+  const missingStorage =
+    message.includes("support_tickets") ||
+    message.includes("schema cache") ||
+    message.includes("Could not find the table")
+
+  if (missingStorage) {
+    console.error("[support:tickets] storage unavailable", { error: message })
+    return {
+      message: "Support storage is not enabled yet. Apply the Help Center database migration to view and create tickets.",
+      status: 503
+    }
+  }
+
+  return {
+    message,
+    status: getRouteErrorStatus(error)
+  }
+}
+
 export async function GET(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
     const tickets = await getSupportTickets({ merchantId })
     return NextResponse.json({ tickets })
   } catch (error: unknown) {
+    const apiError = getSupportApiError(error, "Failed to load support tickets")
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load support tickets" },
-      { status: getRouteErrorStatus(error) }
+      { error: apiError.message },
+      { status: apiError.status }
     )
   }
 }
@@ -50,9 +72,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ticket }, { status: 201 })
   } catch (error: unknown) {
+    const apiError = getSupportApiError(error, "Failed to create support ticket")
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create support ticket" },
-      { status: getRouteErrorStatus(error) }
+      { error: apiError.message },
+      { status: apiError.status }
     )
   }
 }
