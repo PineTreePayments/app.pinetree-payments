@@ -10,6 +10,7 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     const status = getRouteErrorStatus(err)
     const message = err instanceof Error ? err.message : "Internal server error"
+    console.error("[admin/overview] error", { status, message, err })
     return NextResponse.json({ error: message }, { status })
   }
 }
