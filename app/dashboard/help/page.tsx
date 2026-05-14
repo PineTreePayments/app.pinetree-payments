@@ -482,124 +482,189 @@ export default function HelpCenterPage() {
       </DashboardSection>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <DashboardSection title="Support" titleTone="blue" className="min-w-0">
-          <div id="support-ticket" className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-950">Open a Ticket</h2>
-                <p className="mt-1 text-sm leading-6 text-gray-600">
-                  Send PineTree the details needed to investigate payment, dashboard, settlement, or API issues.
-                </p>
+        {/* Left column: Support tickets + Feedback */}
+        <div className="space-y-4 md:space-y-5">
+          <DashboardSection title="Support" titleTone="blue" className="min-w-0">
+            <div id="support-ticket" className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-950">Open a Ticket</h2>
+                  <p className="mt-1 text-sm leading-6 text-gray-600">
+                    Send PineTree the details needed to investigate payment, dashboard, settlement, or API issues.
+                  </p>
+                </div>
+                <LifeBuoy className="h-6 w-6 shrink-0 text-[#0052FF]" />
               </div>
-              <LifeBuoy className="h-6 w-6 shrink-0 text-[#0052FF]" />
-            </div>
 
-            <div className="mt-5 grid gap-3 md:grid-cols-2">
-              <Field label="Category">
-                <select
-                  value={ticketForm.category}
-                  onChange={(event) => setTicketForm((current) => ({ ...current, category: event.target.value }))}
-                  className="form-field"
+              <div className="mt-5 grid gap-3 md:grid-cols-2">
+                <Field label="Category">
+                  <select
+                    value={ticketForm.category}
+                    onChange={(event) => setTicketForm((current) => ({ ...current, category: event.target.value }))}
+                    className="form-field"
+                  >
+                    {supportTicketCategories.map((category) => <option key={category}>{category}</option>)}
+                  </select>
+                </Field>
+                <Field label="Priority">
+                  <select
+                    value={ticketForm.priority}
+                    onChange={(event) => setTicketForm((current) => ({ ...current, priority: event.target.value }))}
+                    className="form-field"
+                  >
+                    {supportTicketPriorities.map((priority) => <option key={priority}>{priority}</option>)}
+                  </select>
+                </Field>
+                <Field label="Subject">
+                  <input
+                    value={ticketForm.subject}
+                    onChange={(event) => setTicketForm((current) => ({ ...current, subject: event.target.value }))}
+                    className="form-field"
+                    placeholder="Payment is still pending"
+                  />
+                </Field>
+                <Field label="Related Payment ID">
+                  <input
+                    value={ticketForm.relatedPaymentId}
+                    onChange={(event) => setTicketForm((current) => ({ ...current, relatedPaymentId: event.target.value }))}
+                    className="form-field"
+                    placeholder="Optional"
+                  />
+                </Field>
+                <Field label="Description" className="md:col-span-2">
+                  <textarea
+                    value={ticketForm.description}
+                    onChange={(event) => setTicketForm((current) => ({ ...current, description: event.target.value }))}
+                    className="form-field min-h-28 resize-y"
+                    placeholder="Include what happened, the approximate time, provider, network, amount, and any payment reference you have."
+                  />
+                </Field>
+              </div>
+
+              <div className="mt-4 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => void submitTicket()}
+                  disabled={submittingTicket}
+                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50 sm:w-auto"
                 >
-                  {supportTicketCategories.map((category) => <option key={category}>{category}</option>)}
-                </select>
-              </Field>
-              <Field label="Priority">
-                <select
-                  value={ticketForm.priority}
-                  onChange={(event) => setTicketForm((current) => ({ ...current, priority: event.target.value }))}
-                  className="form-field"
+                  <Send size={16} />
+                  {submittingTicket ? "Opening..." : "Open Ticket"}
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-gray-950">Recent Tickets</h2>
+                <button
+                  type="button"
+                  onClick={() => void loadTickets()}
+                  className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
                 >
-                  {supportTicketPriorities.map((priority) => <option key={priority}>{priority}</option>)}
-                </select>
-              </Field>
-              <Field label="Subject">
-                <input
-                  value={ticketForm.subject}
-                  onChange={(event) => setTicketForm((current) => ({ ...current, subject: event.target.value }))}
-                  className="form-field"
-                  placeholder="Payment is still pending"
-                />
-              </Field>
-              <Field label="Related Payment ID">
-                <input
-                  value={ticketForm.relatedPaymentId}
-                  onChange={(event) => setTicketForm((current) => ({ ...current, relatedPaymentId: event.target.value }))}
-                  className="form-field"
-                  placeholder="Optional"
-                />
-              </Field>
-              <Field label="Description" className="md:col-span-2">
-                <textarea
-                  value={ticketForm.description}
-                  onChange={(event) => setTicketForm((current) => ({ ...current, description: event.target.value }))}
-                  className="form-field min-h-28 resize-y"
-                  placeholder="Include what happened, the approximate time, provider, network, amount, and any payment reference you have."
-                />
-              </Field>
-            </div>
-
-            <div className="mt-4 flex justify-end">
-              <button
-                type="button"
-                onClick={() => void submitTicket()}
-                disabled={submittingTicket}
-                className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50 sm:w-auto"
-              >
-                <Send size={16} />
-                {submittingTicket ? "Opening..." : "Open Ticket"}
-              </button>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-gray-950">Recent Tickets</h2>
-              <button
-                type="button"
-                onClick={() => void loadTickets()}
-                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
-              >
-                Refresh
-              </button>
-            </div>
-
-            {ticketsLoading && (
-              <div className="space-y-2">
-                <div className="h-16 animate-pulse rounded-xl bg-gray-100" />
-                <div className="h-16 animate-pulse rounded-xl bg-gray-100" />
+                  Refresh
+                </button>
               </div>
-            )}
-            {!ticketsLoading && ticketError && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
-                {ticketError}
-              </div>
-            )}
-            {!ticketsLoading && !ticketError && tickets.length === 0 && (
-              <p className="text-sm text-gray-600">No support tickets yet.</p>
-            )}
-            {!ticketsLoading && tickets.length > 0 && (
-              <div className="divide-y divide-gray-100">
-                {tickets.map((ticket) => (
-                  <div key={ticket.id} className="py-3 first:pt-0 last:pb-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <ProviderStatusPill label={ticket.status} tone="blue" />
-                      <span className="text-xs font-medium text-gray-500">{ticket.category}</span>
-                      <span className="text-xs font-medium text-gray-500">{ticket.priority}</span>
-                      <span className="text-xs text-gray-400">{formatDate(ticket.created_at)}</span>
+
+              {ticketsLoading && (
+                <div className="space-y-2">
+                  <div className="h-16 animate-pulse rounded-xl bg-gray-100" />
+                  <div className="h-16 animate-pulse rounded-xl bg-gray-100" />
+                </div>
+              )}
+              {!ticketsLoading && ticketError && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+                  {ticketError}
+                </div>
+              )}
+              {!ticketsLoading && !ticketError && tickets.length === 0 && (
+                <p className="text-sm text-gray-600">No support tickets yet.</p>
+              )}
+              {!ticketsLoading && tickets.length > 0 && (
+                <div className="divide-y divide-gray-100">
+                  {tickets.map((ticket) => (
+                    <div key={ticket.id} className="py-3 first:pt-0 last:pb-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <ProviderStatusPill label={ticket.status} tone="blue" />
+                        <span className="text-xs font-medium text-gray-500">{ticket.category}</span>
+                        <span className="text-xs font-medium text-gray-500">{ticket.priority}</span>
+                        <span className="text-xs text-gray-400">{formatDate(ticket.created_at)}</span>
+                      </div>
+                      <div className="mt-2 text-sm font-semibold text-gray-950">{ticket.subject}</div>
+                      <p className="mt-1 line-clamp-2 text-sm leading-5 text-gray-600">{ticket.description}</p>
                     </div>
-                    <div className="mt-2 text-sm font-semibold text-gray-950">{ticket.subject}</div>
-                    <p className="mt-1 line-clamp-2 text-sm leading-5 text-gray-600">{ticket.description}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </DashboardSection>
+                  ))}
+                </div>
+              )}
+            </div>
+          </DashboardSection>
 
-        <div className="space-y-4">
-          <DashboardSection title="Assistant" titleTone="blue">
-            <div className="rounded-2xl border border-blue-200/80 bg-[linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-5 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
+          <DashboardSection title="Feedback" titleTone="blue">
+            <div id="feedback" className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="h-5 w-5 shrink-0 text-[#0052FF]" />
+                <h2 className="text-base font-semibold text-gray-950">General Feedback</h2>
+              </div>
+              <p className="mt-1.5 text-sm leading-5 text-gray-500">
+                Share product, documentation, payment, or dashboard feedback.
+              </p>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <Field label="Type">
+                  <select
+                    value={feedbackForm.type}
+                    onChange={(event) => setFeedbackForm((current) => ({ ...current, type: event.target.value }))}
+                    className="form-field"
+                  >
+                    {feedbackTypes.map((type) => <option key={type}>{type}</option>)}
+                  </select>
+                </Field>
+                <Field label="Rating">
+                  <select
+                    value={feedbackForm.rating}
+                    onChange={(event) => setFeedbackForm((current) => ({ ...current, rating: event.target.value }))}
+                    className="form-field"
+                  >
+                    <option value="">Optional</option>
+                    <option value="5">5 - Excellent</option>
+                    <option value="4">4 - Good</option>
+                    <option value="3">3 - Neutral</option>
+                    <option value="2">2 - Needs work</option>
+                    <option value="1">1 - Poor</option>
+                  </select>
+                </Field>
+              </div>
+
+              <div className="mt-3">
+                <Field label="Message">
+                  <textarea
+                    value={feedbackForm.message}
+                    onChange={(event) => setFeedbackForm((current) => ({ ...current, message: event.target.value }))}
+                    className="form-field min-h-[80px] resize-y"
+                    placeholder="Tell us what would make PineTree clearer or easier to use."
+                  />
+                </Field>
+              </div>
+
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => void submitFeedback()}
+                  disabled={submittingFeedback}
+                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50 sm:w-auto"
+                >
+                  <CheckCircle2 size={16} />
+                  {submittingFeedback ? "Sending..." : "Send Feedback"}
+                </button>
+              </div>
+            </div>
+          </DashboardSection>
+        </div>
+
+        {/* Right column: Assistant — flex-col cascades height so the card fills the grid row */}
+        <div className="xl:flex xl:flex-col">
+          <DashboardSection title="Assistant" titleTone="blue" className="xl:flex xl:flex-col xl:flex-1">
+            <div className="xl:flex xl:flex-col xl:flex-1 rounded-2xl border border-blue-200/80 bg-[linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-5 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">
@@ -636,7 +701,7 @@ export default function HelpCenterPage() {
                 />
               </div>
 
-              <div className="mt-3 rounded-xl border border-blue-100 bg-white/75 p-3">
+              <div className="mt-3 xl:flex-1 rounded-xl border border-blue-100 bg-white/75 p-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.13em] text-[#0052FF]">
                   Local docs preview
                 </p>
@@ -662,68 +727,6 @@ export default function HelpCenterPage() {
           </DashboardSection>
         </div>
       </div>
-
-      <DashboardSection title="Feedback" titleTone="blue">
-        <div id="feedback" className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
-          <div className="grid gap-4 lg:grid-cols-[200px_190px_minmax(0,1fr)] lg:items-start lg:gap-5">
-            <div>
-              <div className="flex items-center gap-2">
-                <MessageSquare className="h-5 w-5 shrink-0 text-[#0052FF]" />
-                <h2 className="text-base font-semibold text-gray-950">General Feedback</h2>
-              </div>
-              <p className="mt-1.5 text-sm leading-5 text-gray-500">
-                Share product, documentation, payment, or dashboard feedback.
-              </p>
-            </div>
-
-            <div className="grid gap-3">
-              <Field label="Type">
-                <select
-                  value={feedbackForm.type}
-                  onChange={(event) => setFeedbackForm((current) => ({ ...current, type: event.target.value }))}
-                  className="form-field"
-                >
-                  {feedbackTypes.map((type) => <option key={type}>{type}</option>)}
-                </select>
-              </Field>
-              <Field label="Rating">
-                <select
-                  value={feedbackForm.rating}
-                  onChange={(event) => setFeedbackForm((current) => ({ ...current, rating: event.target.value }))}
-                  className="form-field"
-                >
-                  <option value="">Optional</option>
-                  <option value="5">5 - Excellent</option>
-                  <option value="4">4 - Good</option>
-                  <option value="3">3 - Neutral</option>
-                  <option value="2">2 - Needs work</option>
-                  <option value="1">1 - Poor</option>
-                </select>
-              </Field>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <Field label="Message">
-                <textarea
-                  value={feedbackForm.message}
-                  onChange={(event) => setFeedbackForm((current) => ({ ...current, message: event.target.value }))}
-                  className="form-field min-h-[88px] resize-y"
-                  placeholder="Tell us what would make PineTree clearer or easier to use."
-                />
-              </Field>
-              <button
-                type="button"
-                onClick={() => void submitFeedback()}
-                disabled={submittingFeedback}
-                className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50 lg:w-auto lg:self-end"
-              >
-                <CheckCircle2 size={16} />
-                {submittingFeedback ? "Sending..." : "Send Feedback"}
-              </button>
-            </div>
-          </div>
-        </div>
-      </DashboardSection>
 
       {selectedArticle && (
         <ArticleModal
