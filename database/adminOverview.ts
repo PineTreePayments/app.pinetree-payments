@@ -14,6 +14,12 @@ export type AdminOverviewMetrics = {
   connectedProviders: number
 }
 
+export type AdminGrowthMetrics = {
+  usersThisMonth: number
+  transactionsThisMonth: number
+  volumeThisMonth: number
+}
+
 export type AdminRecentTransaction = {
   id: string
   merchant_id: string
@@ -140,6 +146,41 @@ export async function getAdminProviderMetrics(): Promise<
   }
 
   return { connectedProviders: count ?? 0 }
+}
+
+export async function getAdminGrowthMetrics(): Promise<AdminGrowthMetrics> {
+  const now = new Date()
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+
+  const [{ count: usersThisMonth, error: userErr }, { data: txRows, error: txErr }] =
+    await Promise.all([
+      db
+        .from("merchants")
+        .select("id", { count: "exact", head: true })
+        .gte("created_at", monthStart),
+      db
+        .from("payments")
+        .select("gross_amount, status")
+        .gte("created_at", monthStart),
+    ])
+
+  if (userErr) throw new Error(`Failed to load monthly user growth: ${userErr.message}`)
+  if (txErr) throw new Error(`Failed to load monthly transaction growth: ${txErr.message}`)
+
+  const rows = (txRows || []) as Array<{
+    gross_amount: number | string | null
+    status: string | null
+  }>
+
+  const volumeThisMonth = rows
+    .filter((r) => r.status === "CONFIRMED")
+    .reduce((sum, r) => sum + Number(r.gross_amount ?? 0), 0)
+
+  return {
+    usersThisMonth: usersThisMonth ?? 0,
+    transactionsThisMonth: rows.length,
+    volumeThisMonth,
+  }
 }
 
 export async function getAdminRecentTransactions(limit = 10): Promise<AdminRecentTransaction[]> {

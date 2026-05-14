@@ -2,10 +2,12 @@ import {
   getAdminPaymentMetrics,
   getAdminMerchantMetrics,
   getAdminProviderMetrics,
+  getAdminGrowthMetrics,
   getAdminRecentTransactions,
   getAdminRecentTickets,
   getAdminRecentFeedback,
   type AdminOverviewMetrics,
+  type AdminGrowthMetrics,
   type AdminRecentTransaction,
   type AdminRecentTicket,
   type AdminRecentFeedback,
@@ -13,6 +15,7 @@ import {
 
 export type AdminOverviewResult = {
   metrics: AdminOverviewMetrics
+  growth: AdminGrowthMetrics
   recentTransactions: AdminRecentTransaction[]
   recentTickets: AdminRecentTicket[]
   recentFeedback: AdminRecentFeedback[]
@@ -20,15 +23,23 @@ export type AdminOverviewResult = {
 }
 
 export async function getAdminOverview(): Promise<AdminOverviewResult> {
-  const [paymentMetrics, merchantMetrics, providerMetrics, recentTransactions, recentTickets, recentFeedback] =
-    await Promise.all([
-      getAdminPaymentMetrics(),
-      getAdminMerchantMetrics(),
-      getAdminProviderMetrics(),
-      getAdminRecentTransactions(10),
-      getAdminRecentTickets(5),
-      getAdminRecentFeedback(5),
-    ])
+  const [
+    paymentMetrics,
+    merchantMetrics,
+    providerMetrics,
+    growth,
+    recentTransactions,
+    recentTickets,
+    recentFeedback,
+  ] = await Promise.all([
+    getAdminPaymentMetrics(),
+    getAdminMerchantMetrics(),
+    getAdminProviderMetrics(),
+    getAdminGrowthMetrics(),
+    getAdminRecentTransactions(10),
+    getAdminRecentTickets(5),
+    getAdminRecentFeedback(5),
+  ])
 
   return {
     metrics: {
@@ -36,6 +47,7 @@ export async function getAdminOverview(): Promise<AdminOverviewResult> {
       ...merchantMetrics,
       ...providerMetrics,
     },
+    growth,
     recentTransactions,
     recentTickets,
     recentFeedback,

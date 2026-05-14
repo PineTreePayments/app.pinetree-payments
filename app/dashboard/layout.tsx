@@ -121,12 +121,7 @@ export default function DashboardLayout({
     { name: "Providers", href: "/dashboard/providers" },
     { name: "Help Center", href: "/dashboard/help" },
     { name: "Settings", href: "/dashboard/settings" },
-    ...(isAdmin
-      ? [
-          { name: "Admin", href: "/dashboard/admin" },
-          { name: "Admin Support", href: "/dashboard/admin/support" },
-        ]
-      : []),
+    ...(isAdmin ? [{ name: "Admin", href: "/dashboard/admin" }] : []),
   ]
 
   return (
