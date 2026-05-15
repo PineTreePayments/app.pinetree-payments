@@ -22,6 +22,10 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/app/cash-app/id711923939",
     androidStoreUrl: "https://play.google.com/store/apps/details?id=com.squareup.cash",
     universalUrl: "https://cash.app/download",
+    // Cash App handles the standard lightning: URI scheme on iOS and Android.
+    // Using the universal scheme (not a cashapp:// proprietary deeplink) ensures
+    // this works even when multiple Lightning wallets are installed.
+    invoiceUrlBuilder: (invoiceBolt11) => `lightning:${invoiceBolt11}`,
   },
   {
     id: "strike",
@@ -30,6 +34,8 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/app/strike-btc-global-money/id1488724463",
     androidStoreUrl: "https://play.google.com/store/search?q=Strike%20Bitcoin&c=apps",
     universalUrl: "https://strike.me/download",
+    // Strike handles the standard lightning: URI scheme on iOS and Android.
+    invoiceUrlBuilder: (invoiceBolt11) => `lightning:${invoiceBolt11}`,
   },
   {
     id: "wallet-of-satoshi",
@@ -203,8 +209,30 @@ export default function LightningPayment({
     setWalletPickerOpen(false)
 
     if (wallet.invoiceUrlBuilder) {
-      window.location.href = wallet.invoiceUrlBuilder(getBolt11Invoice(invoiceUri))
-      window.setTimeout(() => setPendingWalletId(""), 1200)
+      const appUrl = wallet.invoiceUrlBuilder(getBolt11Invoice(invoiceUri))
+
+      // Attempt to bring the wallet app to the foreground.
+      // After 1.4 s, if the page is still visible (app didn't open / not installed),
+      // open the appropriate app store as a fallback.
+      // This is the safest pattern available since browsers cannot detect installed apps.
+      const fallbackTimer = window.setTimeout(() => {
+        if (document.visibilityState === "visible") {
+          const storeUrl = getStoreFallbackUrl(wallet)
+          if (storeUrl) window.open(storeUrl, "_blank", "noopener,noreferrer")
+        }
+        setPendingWalletId("")
+      }, 1400)
+
+      window.addEventListener(
+        "pagehide",
+        () => {
+          window.clearTimeout(fallbackTimer)
+          setPendingWalletId("")
+        },
+        { once: true },
+      )
+
+      window.location.href = appUrl
       return
     }
 
