@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect } from "react"
 import type { ReactNode } from "react"
 
 export type WalletPickerCard = {
@@ -35,7 +36,7 @@ type Props = {
 
 function WalletIcon({ wallet }: { wallet: WalletPickerCard }) {
   return (
-    <span className="flex h-14 w-14 items-center justify-center rounded-[18px] bg-[#0f172a] shadow-[0_12px_28px_rgba(0,0,0,0.28)] ring-1 ring-white/15 transition group-hover:scale-[1.03]">
+    <span className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-[18px] bg-[#0f172a] shadow-[0_12px_28px_rgba(0,0,0,0.28)] ring-1 ring-white/15 transition group-hover:scale-[1.03]">
       {wallet.iconPath ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={wallet.iconPath} alt="" className="h-full w-full rounded-[18px] object-contain p-1.5" />
@@ -54,14 +55,14 @@ function renderSection(section: WalletPickerSection) {
       <p className="px-1 text-[11px] font-semibold uppercase tracking-widest text-slate-500">
         {section.title}
       </p>
-      <div className="grid grid-cols-2 gap-3 min-[360px]:grid-cols-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 min-[360px]:grid-cols-3 sm:grid-cols-4 sm:gap-3">
         {section.wallets.map((wallet) => (
           <button
             key={wallet.id}
             type="button"
             disabled={wallet.disabled}
             onClick={wallet.onSelect}
-            className={`group flex min-h-[136px] flex-col items-center justify-between rounded-[22px] border px-2.5 py-3 text-center transition-all disabled:cursor-wait ${
+            className={`group flex min-h-[130px] w-full flex-col items-center justify-between overflow-hidden rounded-[22px] border px-2 py-3 text-center transition-all disabled:cursor-wait sm:min-h-[136px] sm:px-2.5 ${
               wallet.spanAll ? "col-span-2 min-[360px]:col-span-3 sm:col-span-4" : ""
             } ${
               wallet.active
@@ -71,11 +72,11 @@ function renderSection(section: WalletPickerSection) {
           >
             <span className="flex flex-col items-center gap-2">
               <WalletIcon wallet={wallet} />
-              <span className="line-clamp-2 min-h-[34px] text-sm font-semibold leading-tight text-white">
+              <span className="line-clamp-2 min-h-[34px] w-full text-xs font-semibold leading-tight text-white sm:text-sm">
                 {wallet.name}
               </span>
             </span>
-            <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+            <span className={`max-w-full truncate rounded-full px-2 py-1 text-[10px] font-semibold ${
               wallet.badgeTone === "green"
                 ? "bg-emerald-400/15 text-emerald-300 ring-1 ring-emerald-300/20"
                 : "bg-[#0052FF]/18 text-blue-200 ring-1 ring-blue-300/15"
@@ -94,24 +95,46 @@ export default function WalletPickerModal({
   title,
   eyebrow,
   searchValue,
-  searchPlaceholder = "Search wallet",
+  searchPlaceholder = "Search wallets",
   emptySearchMessage = "No wallets match your search.",
   notice,
   sections,
   onSearchChange,
   onClose,
 }: Props) {
+  // Lock body scroll (including horizontal) while modal is open.
+  // On iOS Safari this also prevents the page from shifting when the modal is
+  // in view, which fixes the "fixed modal appears off-screen" bug.
+  useEffect(() => {
+    if (!open) return
+    const prevOverflow = document.body.style.overflow
+    const prevOverflowX = document.body.style.overflowX
+    document.body.style.overflow = "hidden"
+    document.body.style.overflowX = "hidden"
+    return () => {
+      document.body.style.overflow = prevOverflow
+      document.body.style.overflowX = prevOverflowX
+    }
+  }, [open])
+
   if (!open) return null
 
   const hasResults = sections.some((section) => section.wallets.length > 0)
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 backdrop-blur-md sm:items-center sm:p-6"
+      // overflow-hidden: prevents any child overflow from expanding the scroll width.
+      // inset-0 + w-screen: double-pins the overlay to exactly the viewport width so it
+      // cannot be wider than the screen on any mobile browser / iOS Safari combination.
+      className="fixed inset-0 z-50 flex w-screen items-end justify-center overflow-hidden bg-black/70 backdrop-blur-md sm:items-center sm:p-6"
       onClick={onClose}
     >
       <div
-        className="flex max-h-[88svh] w-full flex-col overflow-hidden rounded-t-[30px] border border-white/10 bg-[#0b0f17] shadow-2xl shadow-black/60 sm:max-w-[520px] sm:rounded-[30px]"
+        // max-w-full ensures the panel never exceeds viewport width even if flex
+        // sizing behaves unexpectedly. max-h uses dvh (dynamic viewport height)
+        // which correctly accounts for the iOS Safari address bar both shown and
+        // hidden — unlike svh (small/static) whose fallback is unconstrained.
+        className="flex max-h-[90dvh] w-full max-w-full flex-col overflow-hidden rounded-t-[30px] border border-white/10 bg-[#0b0f17] shadow-2xl shadow-black/60 sm:max-w-[520px] sm:rounded-[30px]"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="border-b border-white/10 bg-[#0f1420] px-5 pb-4 pt-5 sm:px-6">
@@ -130,24 +153,28 @@ export default function WalletPickerModal({
               className="absolute right-0 top-0 flex h-9 w-9 items-center justify-center rounded-full bg-white/8 text-slate-300 ring-1 ring-white/10 transition hover:bg-white/12 hover:text-white"
               aria-label="Close wallet picker"
             >
-              x
+              ✕
             </button>
           </div>
           <div className="relative mt-5">
             <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm text-slate-500">
-              Search
+              ⌕
             </span>
             <input
               value={searchValue}
               onChange={(event) => onSearchChange(event.target.value)}
               placeholder={searchPlaceholder}
-              className="h-12 w-full rounded-2xl border border-white/10 bg-[#171d28] px-4 pl-[72px] text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-[#3b82f6]/70 focus:ring-4 focus:ring-[#0052FF]/20"
-              autoFocus
+              // No autoFocus: on iOS Safari, auto-focusing an input inside a fixed
+              // element immediately opens the soft keyboard and causes the browser to
+              // scroll/reposition the viewport, which pushes the fixed modal off-screen.
+              className="h-12 w-full rounded-2xl border border-white/10 bg-[#171d28] px-4 pl-10 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-[#3b82f6]/70 focus:ring-2 focus:ring-[#0052FF]/20"
             />
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 pb-[calc(env(safe-area-inset-bottom)+24px)] sm:px-6">
+        {/* overscroll-contain prevents momentum scroll from bleeding to the body,
+            which would shift the fixed overlay on some mobile browsers. */}
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-5 py-5 pb-[calc(env(safe-area-inset-bottom)+24px)] sm:px-6">
           {notice}
           {sections.map((section) => (
             <div key={section.title}>{renderSection(section)}</div>

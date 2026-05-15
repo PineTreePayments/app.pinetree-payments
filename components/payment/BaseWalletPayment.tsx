@@ -5,6 +5,7 @@ import type { Connector } from "wagmi"
 import { base } from "wagmi/chains"
 import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
+import { classifyWalletFamily, detectCapabilitiesFromProvider, orchestrateBasePayStrategy } from "@/lib/basePay/strategyOrchestrator"
 type BaseAsset = "ETH" | "USDC"
 type Props = {
   intentId?: string
@@ -109,14 +110,6 @@ type EvmTransactionRequest = {
   value: string
   data: string
   chainId: number
-}
-type WalletFamily = "coinbase" | "trust" | "metamask" | "rainbow" | "kraken" | "unknown"
-type WalletCapabilities = {
-  walletFamily: WalletFamily
-  supportsSendCalls: boolean
-  supportsTypedData: boolean
-  skipEip3009: boolean
-  skipDelegatedBatch: boolean
 }
 type WalletConnectProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>
@@ -429,6 +422,7 @@ function tryOpenWalletNativeUri(provider: WalletConnectProvider): void {
     }
     const uri = source.session?.peer?.metadata?.redirect?.native
     if (typeof uri === "string" && uri.length > 0 && !uri.startsWith("https://") && !uri.startsWith("http://")) {
+      console.info("[BASE TRACE] wallet_foreground_attempted", { uri: uri.split("?")[0] })
       window.location.href = uri
     }
   } catch {
@@ -716,46 +710,6 @@ async function signBaseUsdcV4AuthorizationWithTimeout(input: {
 }
 function isBaseUsdcV4Unavailable(result: { unavailable?: boolean; code?: string }): boolean {
   return result.unavailable === true || result.code === "BASE_USDC_TEMPORARILY_UNAVAILABLE"
-}
-function detectWalletCapabilities(
-  peerName: string | null,
-  provider: WalletConnectProvider
-): WalletCapabilities {
-  const name = (peerName || "").toLowerCase()
-  let walletFamily: WalletFamily = "unknown"
-  if (name.includes("coinbase")) walletFamily = "coinbase"
-  else if (name.includes("trust")) walletFamily = "trust"
-  else if (name.includes("metamask")) walletFamily = "metamask"
-  else if (name.includes("rainbow")) walletFamily = "rainbow"
-  else if (name.includes("kraken")) walletFamily = "kraken"
-
-  // WalletConnect session namespaces list methods the wallet explicitly supports.
-  // wallet_sendCalls absent from namespaces means the wallet opted out during session negotiation.
-  const sessionNamespaces = (provider as {
-    session?: { namespaces?: Record<string, { methods?: string[] }> }
-  }).session?.namespaces
-
-  let supportsSendCalls = true // optimistic default when no namespace data available
-  if (sessionNamespaces) {
-    supportsSendCalls = false
-    for (const ns of Object.values(sessionNamespaces)) {
-      if (Array.isArray(ns.methods) && ns.methods.includes("wallet_sendCalls")) {
-        supportsSendCalls = true
-        break
-      }
-    }
-  }
-
-  // Trust Wallet does not support eth_signTypedData_v4 for EIP-3009.
-  const supportsTypedData = walletFamily !== "trust"
-  const skipEip3009 = !supportsTypedData
-
-  // Skip delegated batch only when namespaces definitively show no support AND wallet
-  // is not Coinbase (Smart Wallet is the primary user of batch calls and should always be tried).
-  const skipDelegatedBatch =
-    Boolean(sessionNamespaces) && !supportsSendCalls && walletFamily !== "coinbase"
-
-  return { walletFamily, supportsSendCalls, supportsTypedData, skipEip3009, skipDelegatedBatch }
 }
 function resolveBaseUsdcStrategyFromResponse(result: {
   baseUsdcStrategy?: BaseUsdcStrategy
@@ -1188,7 +1142,7 @@ export default function BaseWalletPayment({
 
       if (kind === "usdc_approve") {
         pendingUsdcApproveTxRef.current = null
-        setBaseUsdcV4Status("Waiting for USDC authorization...")
+        setBaseUsdcV4Status("Waiting for authorization…")
         const maxWaitMs = 120_000
         const pollIntervalMs = 3_000
         const pollStartedAt = Date.now()
@@ -1438,7 +1392,7 @@ export default function BaseWalletPayment({
     console.info("[Base USDC V4] base-usdc-v4-prepare-start", {
       paymentId: input.paymentData.paymentId
     })
-    setBaseUsdcV4Status("Preparing USDC authorization...")
+    setBaseUsdcV4Status("Preparing payment…")
     const prepareRes = await fetch(
       `/api/payments/${encodeURIComponent(input.paymentData.paymentId)}/base-usdc-v4/prepare-authorization`,
       {
@@ -1466,7 +1420,7 @@ export default function BaseWalletPayment({
     })
     setExecStageRef.current("confirm_payment")
     console.log("[BASE UI] awaiting-wallet-confirmation", { paymentId: input.paymentData.paymentId, strategy: "v4_eip3009_relayer" })
-    setBaseUsdcV4Status("Sign USDC payment authorization...")
+    setBaseUsdcV4Status("Approve payment in your wallet")
     const peerName = getWalletConnectPeerName(input.provider)
     console.info("[PineTreeBaseTrace] Base USDC signing start", {
       step: "base-usdc-v4-sign-start",
@@ -1479,6 +1433,7 @@ export default function BaseWalletPayment({
       paymentId: input.paymentData.paymentId
     })
     beginWalletRequest({ kind: "usdc_signature", walletName: peerName })
+    window.setTimeout(() => { tryOpenWalletNativeUri(input.provider) }, 300)
     let signature = ""
     let signMethod: "A" | "B" = "A"
     try {
@@ -1530,7 +1485,7 @@ export default function BaseWalletPayment({
       paymentId: input.paymentData.paymentId,
       signaturePrefix: signature.slice(0, 10)
     })
-    setBaseUsdcV4Status("Relaying payment...")
+    setBaseUsdcV4Status("Processing payment…")
     void logBase("relay-start", { paymentId: input.paymentData.paymentId })
     console.info("[Base USDC V4] base-usdc-v4-relay-start", {
       paymentId: input.paymentData.paymentId
@@ -1589,28 +1544,36 @@ export default function BaseWalletPayment({
     }
     activeBaseUsdcV5PaymentRef.current = input.paymentData.paymentId
     const paymentId = input.paymentData.paymentId
-    const capabilities = detectWalletCapabilities(input.peerName, input.provider)
+    const capabilities = detectCapabilitiesFromProvider(input.peerName, input.provider)
     const isTrustWallet = capabilities.walletFamily === "trust"
+    const orchestration = orchestrateBasePayStrategy({
+      asset: "USDC",
+      walletCapabilities: capabilities,
+      delegatedEnabled: true,
+      relayerAvailable: true,
+      allowanceSufficient: false,
+    })
     try {
       let authTxHash: string | null = null
       let shouldUseAllowancePath = false
       console.log("[BASE USDC CHAIN] start", { paymentId, isTrustWallet, walletFamily: capabilities.walletFamily })
-      console.info("[BASE USDC STRATEGY]", {
+      console.info("[BASE TRACE] strategy_selected", {
+        paymentId,
+        primaryStrategy: orchestration.primaryStrategy,
+        fallbackStrategies: orchestration.fallbackStrategies,
         walletFamily: capabilities.walletFamily,
         peerName: input.peerName,
-        selectedAsset: "USDC",
-        delegatedEnabled: null,
-        willAttemptDelegated: !capabilities.skipDelegatedBatch,
-        willAttemptEip3009: !capabilities.skipEip3009,
-        allowanceFallbackAvailable: true,
+        expectedWalletPrompts: orchestration.expectedWalletPrompts,
+        debugSummary: orchestration.debugSummary,
       })
       void logBase("usdc-strategy-selected", {
         paymentId,
-        strategy: "delegated-eoa-first",
+        primaryStrategy: orchestration.primaryStrategy,
         walletFamily: capabilities.walletFamily,
         skipDelegated: capabilities.skipDelegatedBatch,
         eip3009Skipped: capabilities.skipEip3009,
         peerName: input.peerName,
+        debugSummary: orchestration.debugSummary,
       })
       // ── Strategy 1: Delegated EOA batch (wallet_sendCalls) ──────────────────
       // Attempts [USDC.approve + V5.payUsdcWithAllowance] as a single wallet approval.
@@ -1650,6 +1613,7 @@ export default function BaseWalletPayment({
           setBaseUsdcV4Status("Confirm payment in your wallet...")
           let sendCallsResult: unknown
           beginWalletRequest({ kind: "usdc_delegated", walletName: input.peerName })
+          window.setTimeout(() => { tryOpenWalletNativeUri(input.provider) }, 300)
           try {
             sendCallsResult = await input.provider.request({
               method: "wallet_sendCalls",
@@ -1781,6 +1745,7 @@ export default function BaseWalletPayment({
           let signature = ""
           void logBase("usdc-auth-start", { paymentId })
           beginWalletRequest({ kind: "usdc_signature", walletName: input.peerName })
+          window.setTimeout(() => { tryOpenWalletNativeUri(input.provider) }, 300)
           try {
             const rawSig = await Promise.race([
               input.provider.request({ method: "eth_signTypedData_v4", params: [input.fromAddress, serializedTypedData] }),
@@ -1823,7 +1788,7 @@ export default function BaseWalletPayment({
             }
           }
           if (!shouldUseAllowancePath && signature) {
-            setBaseUsdcV4Status("Relaying payment...")
+            setBaseUsdcV4Status("Processing payment…")
             console.info("[PineTreeBaseTrace] v5 relay start", { step: "v5-relay-start", paymentId })
             const relayRes = await fetch(
               `/api/payments/${encodeURIComponent(paymentId)}/base-usdc-v5/relay`,
@@ -1910,11 +1875,12 @@ export default function BaseWalletPayment({
         console.log("[BASE USDC CHAIN] approve-start", { paymentId })
         setExecStageRef.current("authorizing_usdc", { allowance: true })
         console.log("[BASE UI] usdc-authorization-start", { paymentId })
-        setBaseUsdcV4Status("One-time USDC authorization...")
+        setBaseUsdcV4Status("One-time USDC authorization required")
         void logBase("usdc-approve-requested", { paymentId, isTrustWallet })
         pendingUsdcApproveTxRef.current = approveTx
         queuePendingWalletAction({ kind: "usdc_approve", paymentId, ready: false })
         beginWalletRequest({ kind: "usdc_approve", walletName: input.peerName })
+        window.setTimeout(() => { tryOpenWalletNativeUri(input.provider) }, 300)
         const approveTxHash = await sendWalletConnectTransactionWithTimeout({
           provider: input.provider,
           fromAddress: input.fromAddress,
@@ -1926,7 +1892,7 @@ export default function BaseWalletPayment({
         clearPendingWalletAction({ clearTransactions: false })
         pendingUsdcApproveTxRef.current = null
         void logBase("usdc-approve-submitted", { paymentId, txHashPrefix: approveTxHash.slice(0, 10) })
-        setBaseUsdcV4Status("Waiting for USDC authorization...")
+        setBaseUsdcV4Status("Waiting for authorization…")
         const maxWaitMs = 120_000
         const pollIntervalMs = 3_000
         const pollStartedAt = Date.now()
@@ -1982,10 +1948,11 @@ export default function BaseWalletPayment({
       console.log("[BASE USDC CHAIN] payment-start", { paymentId })
       setExecStageRef.current("confirm_payment")
       console.log("[BASE UI] awaiting-wallet-confirmation", { paymentId, strategy: "allowance_two_step" })
-      setBaseUsdcV4Status("Step 2 of 2: Confirm payment...")
+      setBaseUsdcV4Status("Confirm payment in your wallet")
       void logBase("usdc-payment-requested", { paymentId, isTrustWallet })
       queuePendingWalletAction({ kind: "usdc_payment", paymentId, ready: false })
       beginWalletRequest({ kind: "usdc_payment", walletName: freshPeerName })
+      window.setTimeout(() => { tryOpenWalletNativeUri(freshProvider) }, 300)
       console.log("[BASE USDC CHAIN] payment-request-dispatch", { paymentId })
       void logBase("[BASE USDC CHAIN] payment-request-dispatch", { paymentId })
       void logBase("[BASE USDC CHAIN] payment-request-pending", { paymentId })
@@ -2120,7 +2087,7 @@ export default function BaseWalletPayment({
         createdBaseUsdcV5Payment = true
         activeBasePaymentAttemptRef.current = `${storedPaymentId}:USDC`
         setExecStageRef.current("confirm_payment")
-        setBaseUsdcV4Status("Step 2 of 2: Confirm payment...")
+        setBaseUsdcV4Status("Confirm payment in your wallet")
         console.log("[BASE USDC CHAIN] payment-request-build-ready", { paymentId: storedPaymentId, via: "resume" })
         void logBase("[BASE USDC CHAIN] payment-request-build-ready", { paymentId: storedPaymentId, via: "resume" })
         const resumeProvider = settledSession.provider
@@ -2454,9 +2421,9 @@ export default function BaseWalletPayment({
         setIsPreparingPayment(false)
         setIsOpeningWallet(false)
         if (walletKind === "usdc_approve") {
-          setBaseUsdcV4Status("One-time USDC authorization in your wallet...")
+          setBaseUsdcV4Status("One-time USDC authorization required")
         } else {
-          setBaseUsdcV4Status("Confirm payment in your wallet...")
+          setBaseUsdcV4Status("Confirm payment in your wallet")
         }
         // For USDC handoffs, clear attempt locks so resume handlers either
         // re-dispatch the stored transaction action or rebuild/re-dispatch the
@@ -3342,9 +3309,9 @@ export default function BaseWalletPayment({
           </div>
         )
       ) : null}
-      {selectedAsset === "USDC" && connectedPeerName?.toLowerCase().includes("trust") ? (
+      {selectedAsset === "USDC" && classifyWalletFamily(connectedPeerName ?? null) === "trust" ? (
         <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-          Trust Wallet may require a one-time USDC authorization before payment.
+          Trust Wallet requires a one-time USDC authorization before payment.
         </div>
       ) : null}
       {isConnecting ? (
