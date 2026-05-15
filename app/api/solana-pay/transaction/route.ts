@@ -79,6 +79,22 @@ export async function POST(req: NextRequest) {
     })
 
     console.log("TX SIZE", serialized.length)
+
+    // Solana hard limit: transactions must not exceed 1232 bytes.
+    // Reject early with a clear error rather than letting the wallet silently fail.
+    if (serialized.length > 1232) {
+      console.error("[SOLANA PAY][POST] transaction too large", {
+        paymentId,
+        senderAccount,
+        size: serialized.length,
+        limit: 1232,
+      })
+      return NextResponse.json(
+        { error: "Transaction too large for the Solana network. Please contact support." },
+        { status: 422, headers: CORS_HEADERS }
+      )
+    }
+
     console.log("SOLANA RESPONSE SENT")
 
     return NextResponse.json(

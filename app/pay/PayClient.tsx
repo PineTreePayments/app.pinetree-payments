@@ -262,6 +262,11 @@ export default function PayClient() {
     setSelectedAssetId("")
   }, [])
 
+  const handleSolanaCancelPayment = useCallback(() => {
+    setSolanaExecutionActive(false)
+    setSelectedAssetId("")
+  }, [])
+
   // ── Direct-payload mode state (non-intent, legacy QR) ─────────────────────
   const payload = useMemo(() => parsePayload(rawData), [rawData])
   const [selectedNetwork, setSelectedNetwork] = useState<string | null>(null)
@@ -334,7 +339,12 @@ export default function PayClient() {
         (activeStatus === "CREATED" || activeStatus === "PENDING" || activeStatus === "PROCESSING")
       ) {
         setSelectedAssetId(selectedAsset === "USDC" ? "sol-usdc" : "sol")
-        setSolanaExecutionActive(true)
+        // Only collapse the asset selector when a tx is actually in flight (PROCESSING).
+        // CREATED/PENDING means the user selected Solana but may not have submitted a tx yet;
+        // keeping the selector open lets them retry or switch rails without being trapped.
+        if (activeStatus === "PROCESSING") {
+          setSolanaExecutionActive(true)
+        }
       }
     } catch {
       setIntentLoadError("Unable to load payment. Please try again.")
@@ -1284,6 +1294,7 @@ export default function PayClient() {
                             paymentStatus={normalizedPaymentStatus}
                             initialError={getPhantomRetryMessage(phantomError) || getSolflareRetryMessage(solflareError)}
                             onExecutionStarted={() => setSolanaExecutionActive(true)}
+                            onCancel={handleSolanaCancelPayment}
                             onPaymentCreated={() => {
                               void loadIntentCallback()
                             }}

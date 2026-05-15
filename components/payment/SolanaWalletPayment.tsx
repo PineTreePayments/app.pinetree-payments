@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import WalletPickerModal, { type WalletPickerSection } from "@/components/payment/WalletPickerModal"
@@ -39,6 +39,7 @@ type Props = {
   onPaymentCreated?: (paymentId: string) => void
   onError?: (error: string) => void
   onExecutionStarted?: () => void
+  onCancel?: () => void
   initialError?: string
 }
 
@@ -57,6 +58,8 @@ type WalletCatalogItem = {
   name: string
   aliases?: string[]
   mobileDeepLink?: "phantom" | "solflare" | "trust" | "coinbase" | "okx"
+  /** Wallet's mobile in-app browser does not inject a Solana provider — hide mobile "Open app" flow */
+  mobileUnsupported?: true
   iconPath?: string
   installName?: string
   installUrl: string
@@ -76,7 +79,7 @@ const POPULAR_WALLETS: WalletCatalogItem[] = [
   { id: "backpack", name: "Backpack", iconPath: "/wallet-icons/backpack.png", installUrl: "https://backpack.app/download" },
   { id: "glow", name: "Glow", iconPath: "/wallet-icons/glow.png", installUrl: "https://glow.app" },
   { id: "trust-wallet", name: "Trust Wallet", aliases: ["trust"], mobileDeepLink: "trust", iconPath: "/wallet-icons/trust-wallet.svg", installUrl: "https://trustwallet.com/download" },
-  { id: "coinbase-wallet", name: "Coinbase Wallet", aliases: ["coinbase"], mobileDeepLink: "coinbase", iconPath: "/wallet-icons/coinbase-wallet.svg", installUrl: "https://www.coinbase.com/wallet/downloads" },
+  { id: "coinbase-wallet", name: "Coinbase Wallet", aliases: ["coinbase"], mobileDeepLink: "coinbase", mobileUnsupported: true, iconPath: "/wallet-icons/coinbase-wallet.svg", installUrl: "https://www.coinbase.com/wallet/downloads" },
   { id: "okx-wallet", name: "OKX Wallet", aliases: ["okx"], mobileDeepLink: "okx", iconPath: "/wallet-icons/okx-wallet.png", installUrl: "https://www.okx.com/web3" },
 ]
 
@@ -206,6 +209,7 @@ export default function SolanaWalletPayment({
   onPaymentCreated,
   onError,
   onExecutionStarted,
+  onCancel,
   initialError = "",
 }: Props) {
   const [wallets, setWallets] = useState<DetectedSolanaWallet[]>([])
@@ -216,6 +220,10 @@ export default function SolanaWalletPayment({
   const [pendingWalletId, setPendingWalletId] = useState("")
   const [execStage, setExecStage] = useState<SolanaExecutionStage>("idle")
   const [error, setError] = useState(initialError)
+  // Wallet bounce tracking — set on any launch attempt, detected on visibility return
+  const walletLaunchedRef = useRef(false)
+  const [walletLaunched, setWalletLaunched] = useState(false)
+  const [noTxAfterReturn, setNoTxAfterReturn] = useState(false)
   const [paymentData, setPaymentData] = useState<PaymentData | null>(() => {
     const paymentId = String(directPaymentId || parsePaymentIdFromUrl(directPaymentUrl)).trim()
     const paymentUrl = String(directPaymentUrl || "").trim()
@@ -239,6 +247,29 @@ export default function SolanaWalletPayment({
     window.addEventListener("focus", refreshWallets)
     return () => window.removeEventListener("focus", refreshWallets)
   }, [refreshWallets])
+
+  // When the customer returns to this page after being sent to a wallet app,
+  // detect the return and surface recovery actions if no tx was submitted.
+  useEffect(() => {
+    function handleReturn() {
+      if (!walletLaunchedRef.current) return
+      setNoTxAfterReturn(true)
+      // Unfreeze any "connecting" stage left over from the mobile redirect
+      setExecStage((current) => {
+        if (current === "connecting_wallet" || current === "creating_payment") return "idle"
+        return current
+      })
+    }
+    function handleVisibility() {
+      if (document.visibilityState === "visible") handleReturn()
+    }
+    document.addEventListener("visibilitychange", handleVisibility)
+    window.addEventListener("pageshow", handleReturn)
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility)
+      window.removeEventListener("pageshow", handleReturn)
+    }
+  }, [])
 
   useEffect(() => {
     setError(initialError)
@@ -284,7 +315,10 @@ export default function SolanaWalletPayment({
           ...item,
           detectedWallet,
           available: Boolean(detectedWallet),
-          mobileOpenable: Boolean(!detectedWallet && isMobile),
+          // mobileUnsupported wallets have no Solana provider in their mobile in-app browser.
+          // Keep them visible for desktop detection but suppress the "Open app" path on mobile
+          // so customers are not routed into an EVM/Base context by mistake.
+          mobileOpenable: Boolean(!detectedWallet && isMobile && !item.mobileUnsupported),
         }
       })
       .filter((item) => {
@@ -379,6 +413,9 @@ export default function SolanaWalletPayment({
     setActiveWalletName(wallet.name)
     setPendingWalletId(wallet.id)
     setWalletPickerOpen(false)
+    walletLaunchedRef.current = true
+    setWalletLaunched(true)
+    setNoTxAfterReturn(false)
     onExecutionStarted?.()
 
     try {
@@ -411,6 +448,9 @@ export default function SolanaWalletPayment({
     setActiveWalletName(wallet.name)
     setPendingWalletId(wallet.id)
     setWalletPickerOpen(false)
+    walletLaunchedRef.current = true
+    setWalletLaunched(true)
+    setNoTxAfterReturn(false)
     onExecutionStarted?.()
 
     try {
@@ -546,7 +586,13 @@ export default function SolanaWalletPayment({
           ? "open"
           : "install"
       const active = row.detectedWallet?.id === selectedWalletId || row.detectedWallet?.id === pendingWalletId
-      const statusLabel = action === "connect" ? "Detected" : action === "open" ? "Open app" : "Install"
+      const statusLabel = action === "connect"
+        ? "Detected"
+        : action === "open"
+          ? "Open app"
+          : (row.mobileUnsupported && isMobile)
+            ? "Desktop only"
+            : "Install"
 
       return {
         id: row.id,
@@ -612,6 +658,10 @@ export default function SolanaWalletPayment({
   }
 
   const isExecuting = execStage !== "idle" && execStage !== "retryable_error"
+  const isPaymentInFlight = String(paymentStatus || "").toUpperCase() === "PROCESSING"
+  // Show recovery actions after any wallet launch attempt, as long as no tx is in flight
+  const hasAttempted = walletLaunched && (execStage === "retryable_error" || noTxAfterReturn)
+  const showRecovery = hasAttempted && !isPaymentInFlight && !terminalStatus
   const walletStatus = getStepStatus(execStage, "wallet_connected", ["creating_payment", "connecting_wallet"])
   const confirmStatus = getStepStatus(execStage, "payment_submitted", ["wallet_connected", "confirm_payment"])
   const networkStatus = getStepStatus(execStage, "confirmed", ["payment_submitted", "detecting"])
@@ -619,11 +669,11 @@ export default function SolanaWalletPayment({
     execStage === "creating_payment"
       ? "Preparing payment..."
       : execStage === "connecting_wallet"
-        ? `Connecting ${activeWalletName || "wallet"}...`
+        ? `Wallet opened — approve the transaction to continue`
         : execStage === "wallet_connected" || execStage === "confirm_payment"
-          ? "Confirm payment in your wallet"
+          ? "Confirm in your wallet"
           : execStage === "payment_submitted" || execStage === "detecting"
-            ? "Waiting for network confirmation..."
+            ? "Waiting for payment..."
             : ""
 
   if (isExecuting) {
@@ -635,9 +685,9 @@ export default function SolanaWalletPayment({
         {amountDisplay}
         <div className="bg-white rounded-3xl mt-1 overflow-hidden shadow-sm ring-1 ring-gray-100">
           <div className="px-4 pt-4 pb-3 space-y-2.5">
-            {renderStep("Wallet connected", walletStatus, walletStatus === "active" ? "Choose and approve your Solana wallet" : undefined)}
-            {renderStep("Confirm payment", confirmStatus, confirmStatus === "active" ? "Approve the prepared transaction in your wallet" : undefined)}
-            {renderStep("Network confirmation", networkStatus)}
+            {renderStep("Wallet opened", walletStatus, walletStatus === "active" ? "Approve the transaction in your wallet to continue" : undefined)}
+            {renderStep("Confirm in wallet", confirmStatus, confirmStatus === "active" ? "Review and approve the prepared transaction" : undefined)}
+            {renderStep("Waiting for payment", networkStatus)}
           </div>
           {contextMessage ? (
             <div className="mx-4 mb-4 rounded-2xl px-4 py-3.5 bg-[#0052FF]/5 ring-1 ring-[#0052FF]/15">
@@ -646,7 +696,9 @@ export default function SolanaWalletPayment({
                 {contextMessage}
               </span>
               <p className="text-xs text-gray-600 mt-1.5 leading-relaxed">
-                Return here after approving if your wallet does not switch automatically.
+                {execStage === "payment_submitted" || execStage === "detecting"
+                  ? "Your transaction is being confirmed on the Solana network."
+                  : "Return here after approving if your wallet does not switch automatically."}
               </p>
             </div>
           ) : null}
@@ -662,22 +714,56 @@ export default function SolanaWalletPayment({
       </div>
       {amountDisplay}
 
-      {error ? (
-        <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
-          {error}
-        </div>
-      ) : null}
-
-      <Button
-        fullWidth
-        onClick={() => {
-          refreshWallets()
-          setWalletSearch("")
-          setWalletPickerOpen(true)
-        }}
-      >
-        Pay with {selectedAsset} on Solana
-      </Button>
+      {showRecovery ? (
+        <>
+          {error ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+              {error}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              No transaction detected. Your wallet returned without completing the payment.
+            </div>
+          )}
+          <Button
+            fullWidth
+            onClick={() => {
+              refreshWallets()
+              setWalletSearch("")
+              setWalletPickerOpen(true)
+            }}
+          >
+            {activeWalletName ? `Try again with ${activeWalletName}` : "Try again"}
+          </Button>
+          {onCancel ? (
+            <button
+              type="button"
+              onClick={() => {
+                setError("")
+                setExecStage("idle")
+                setWalletLaunched(false)
+                setNoTxAfterReturn(false)
+                walletLaunchedRef.current = false
+                onCancel()
+              }}
+              className="w-full text-center text-xs text-gray-500 underline underline-offset-2 py-1 hover:text-gray-700 transition-colors"
+            >
+              Switch payment method
+            </button>
+          ) : null}
+        </>
+      ) : (
+        <Button
+          fullWidth
+          onClick={() => {
+            refreshWallets()
+            setWalletSearch("")
+            setWalletPickerOpen(true)
+          }}
+        >
+          Pay with {selectedAsset} on Solana
+        </Button>
+      )}
 
       <WalletPickerModal
         open={walletPickerOpen}
