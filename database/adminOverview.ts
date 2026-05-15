@@ -5,12 +5,15 @@ const db = supabaseAdmin || supabase
 export type AdminOverviewMetrics = {
   totalTransactions: number
   confirmedTransactions: number
-  pendingTransactions: number
-  failedTransactions: number
+  processingTransactions: number   // PROCESSING only (in-flight on-chain)
+  pendingTransactions: number      // CREATED + PENDING (awaiting customer)
+  failedTransactions: number       // FAILED only (hard provider failure)
+  incompleteTransactions: number   // INCOMPLETE (customer abandoned)
+  expiredTransactions: number      // EXPIRED (timed out)
   totalConfirmedVolume: number
   totalFeesCollected: number
   activeMerchants: number
-  totalUsers: number
+  totalMerchants: number           // all merchant accounts (renamed from totalUsers)
   connectedProviders: number
 }
 
@@ -56,22 +59,28 @@ export const PAYMENT_METRICS_DEFAULT: Pick<
   AdminOverviewMetrics,
   | "totalTransactions"
   | "confirmedTransactions"
+  | "processingTransactions"
   | "pendingTransactions"
   | "failedTransactions"
+  | "incompleteTransactions"
+  | "expiredTransactions"
   | "totalConfirmedVolume"
   | "totalFeesCollected"
 > = {
   totalTransactions: 0,
   confirmedTransactions: 0,
+  processingTransactions: 0,
   pendingTransactions: 0,
   failedTransactions: 0,
+  incompleteTransactions: 0,
+  expiredTransactions: 0,
   totalConfirmedVolume: 0,
   totalFeesCollected: 0,
 }
 
-export const MERCHANT_METRICS_DEFAULT: Pick<AdminOverviewMetrics, "activeMerchants" | "totalUsers"> = {
+export const MERCHANT_METRICS_DEFAULT: Pick<AdminOverviewMetrics, "activeMerchants" | "totalMerchants"> = {
   activeMerchants: 0,
-  totalUsers: 0,
+  totalMerchants: 0,
 }
 
 export const PROVIDER_METRICS_DEFAULT: Pick<AdminOverviewMetrics, "connectedProviders"> = {
@@ -91,8 +100,11 @@ export async function getAdminPaymentMetrics(): Promise<
     AdminOverviewMetrics,
     | "totalTransactions"
     | "confirmedTransactions"
+    | "processingTransactions"
     | "pendingTransactions"
     | "failedTransactions"
+    | "incompleteTransactions"
+    | "expiredTransactions"
     | "totalConfirmedVolume"
     | "totalFeesCollected"
   >
@@ -114,8 +126,11 @@ export async function getAdminPaymentMetrics(): Promise<
     }>
 
     let confirmedTransactions = 0
+    let processingTransactions = 0
     let pendingTransactions = 0
     let failedTransactions = 0
+    let incompleteTransactions = 0
+    let expiredTransactions = 0
     let totalConfirmedVolume = 0
     let totalFeesCollected = 0
 
@@ -124,22 +139,39 @@ export async function getAdminPaymentMetrics(): Promise<
       const fee = Number(row.pinetree_fee ?? 0)
       const status = row.status ?? ""
 
-      if (status === "CONFIRMED") {
-        confirmedTransactions++
-        totalConfirmedVolume += gross
-        totalFeesCollected += fee
-      } else if (status === "FAILED" || status === "INCOMPLETE" || status === "EXPIRED") {
-        failedTransactions++
-      } else if (status === "CREATED" || status === "PENDING" || status === "PROCESSING") {
-        pendingTransactions++
+      switch (status) {
+        case "CONFIRMED":
+          confirmedTransactions++
+          totalConfirmedVolume += gross
+          totalFeesCollected += fee
+          break
+        case "PROCESSING":
+          processingTransactions++
+          break
+        case "CREATED":
+        case "PENDING":
+          pendingTransactions++
+          break
+        case "FAILED":
+          failedTransactions++
+          break
+        case "INCOMPLETE":
+          incompleteTransactions++
+          break
+        case "EXPIRED":
+          expiredTransactions++
+          break
       }
     }
 
     return {
       totalTransactions: rows.length,
       confirmedTransactions,
+      processingTransactions,
       pendingTransactions,
       failedTransactions,
+      incompleteTransactions,
+      expiredTransactions,
       totalConfirmedVolume,
       totalFeesCollected,
     }
@@ -150,7 +182,7 @@ export async function getAdminPaymentMetrics(): Promise<
 }
 
 export async function getAdminMerchantMetrics(): Promise<
-  Pick<AdminOverviewMetrics, "activeMerchants" | "totalUsers">
+  Pick<AdminOverviewMetrics, "activeMerchants" | "totalMerchants">
 > {
   try {
     const [
@@ -170,7 +202,7 @@ export async function getAdminMerchantMetrics(): Promise<
 
     return {
       activeMerchants: activeMerchants ?? 0,
-      totalUsers: totalUsers ?? 0,
+      totalMerchants: totalUsers ?? 0,
     }
   } catch (err) {
     console.error("[admin/overview] getAdminMerchantMetrics exception", err)

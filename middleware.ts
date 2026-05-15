@@ -12,6 +12,7 @@ function isProtectedPage(pathname: string): boolean {
 
 function isProtectedApi(pathname: string): boolean {
   return (
+    pathname.startsWith("/api/admin/") ||      // defense-in-depth; routes also self-protect via requireAdminFromRequest
     pathname.startsWith("/api/dashboard/") ||
     pathname === "/api/transactions" ||
     pathname.startsWith("/api/wallets/") ||

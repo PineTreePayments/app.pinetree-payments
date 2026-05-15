@@ -26,12 +26,15 @@ import {
 type Metrics = {
   totalTransactions: number
   confirmedTransactions: number
+  processingTransactions: number
   pendingTransactions: number
   failedTransactions: number
+  incompleteTransactions: number
+  expiredTransactions: number
   totalConfirmedVolume: number
   totalFeesCollected: number
   activeMerchants: number
-  totalUsers: number
+  totalMerchants: number
   connectedProviders: number
 }
 
@@ -681,16 +684,6 @@ export default function AdminPage() {
                     tone="green"
                   />
                   <CompactMetricTile
-                    label="Pending"
-                    value={m ? fmt(m.pendingTransactions) : "—"}
-                    tone="amber"
-                  />
-                  <CompactMetricTile
-                    label="Failed"
-                    value={m ? fmt(m.failedTransactions) : "—"}
-                    tone="red"
-                  />
-                  <CompactMetricTile
                     label="Confirmed Volume"
                     value={m ? fmtUSD(m.totalConfirmedVolume) : "—"}
                     tone="blue"
@@ -700,6 +693,34 @@ export default function AdminPage() {
                     value={m ? fmtUSD(m.totalFeesCollected) : "—"}
                     tone="blue"
                   />
+                  <CompactMetricTile
+                    label="Processing"
+                    value={m ? fmt(m.processingTransactions) : "—"}
+                    tone="amber"
+                    detail="In-flight on-chain"
+                  />
+                  <CompactMetricTile
+                    label="Awaiting Customer"
+                    value={m ? fmt(m.pendingTransactions) : "—"}
+                    detail="CREATED + PENDING"
+                  />
+                  <CompactMetricTile
+                    label="Failed"
+                    value={m ? fmt(m.failedTransactions) : "—"}
+                    tone="red"
+                    detail="Hard provider failure"
+                  />
+                  <CompactMetricTile
+                    label="Incomplete"
+                    value={m ? fmt(m.incompleteTransactions) : "—"}
+                    tone="amber"
+                    detail="Customer abandoned"
+                  />
+                  <CompactMetricTile
+                    label="Expired"
+                    value={m ? fmt(m.expiredTransactions) : "—"}
+                    detail="Timed out"
+                  />
                 </MetricGrid>
               </DashboardSection>
 
@@ -708,7 +729,7 @@ export default function AdminPage() {
                 <GroupedMetricSurface title="Platform Health" titleTone="blue">
                   <div className="divide-y divide-gray-100">
                     {[
-                      { label: "Total Users", value: m ? fmt(m.totalUsers) : "—", color: "text-[#0052FF]" },
+                      { label: "Merchant Accounts", value: m ? fmt(m.totalMerchants) : "—", color: "text-[#0052FF]" },
                       { label: "Active Merchants", value: m ? fmt(m.activeMerchants) : "—", color: "text-emerald-600" },
                       { label: "Connected Providers", value: m ? fmt(m.connectedProviders) : "—", color: "text-gray-950" },
                     ].map((row) => (
@@ -730,7 +751,7 @@ export default function AdminPage() {
                 <GroupedMetricSurface title={`Month Snapshot — ${monthLabel}`} titleTone="blue">
                   <div className="divide-y divide-gray-100">
                     {[
-                      { label: "New Users", value: g ? fmt(g.usersThisMonth) : "—", color: "text-[#0052FF]" },
+                      { label: "New Merchants", value: g ? fmt(g.usersThisMonth) : "—", color: "text-[#0052FF]" },
                       { label: "Transactions", value: g ? fmt(g.transactionsThisMonth) : "—", color: "text-gray-950" },
                       { label: "Confirmed Volume", value: g ? fmtUSD(g.volumeThisMonth) : "—", color: "text-emerald-600" },
                     ].map((row) => (
@@ -764,8 +785,8 @@ export default function AdminPage() {
                       desc: "Merchant ratings",
                       onClick: () => setActiveTab("feedback"),
                     },
-                    { label: "Transactions", href: "/dashboard/transactions", desc: "All payments" },
-                    { label: "Reports", href: "/dashboard/reports", desc: "Revenue reports" },
+                    { label: "Transaction Explorer", href: "/dashboard/admin/transactions", desc: "All platform payments" },
+                    { label: "Merchant Reports", href: "/dashboard/reports", desc: "Your account reports only" },
                   ].map((link) =>
                     "onClick" in link ? (
                       <button
@@ -816,7 +837,7 @@ export default function AdminPage() {
                 titleTone="blue"
                 action={
                   <Link
-                    href="/dashboard/transactions"
+                    href="/dashboard/admin/transactions"
                     className="text-xs font-medium text-[#0052FF] hover:underline"
                   >
                     View all

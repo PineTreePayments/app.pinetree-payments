@@ -1,0 +1,794 @@
+"use client"
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
+import Link from "next/link"
+import { supabase } from "@/lib/supabaseClient"
+import { toast } from "sonner"
+import { ArrowLeft, ChevronLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react"
+import {
+  CompactMetricTile,
+  DashboardSection,
+  InsightCard,
+  MetricGrid,
+} from "@/components/dashboard/DashboardPrimitives"
+
+// ─── Types ─────────────────────────────────────────────────────────────────────
+
+type TxRow = {
+  id: string
+  merchant_id: string
+  status: string
+  provider: string
+  network: string | null
+  gross_amount: number
+  merchant_amount: number
+  pinetree_fee: number
+  currency: string
+  provider_reference: string | null
+  created_at: string
+  updated_at: string
+}
+
+type TxSummary = {
+  totalCount: number
+  confirmedCount: number
+  processingCount: number
+  pendingCount: number
+  failedCount: number
+  incompleteCount: number
+  expiredCount: number
+  confirmedVolume: number
+  totalFees: number
+}
+
+type Distribution = {
+  providers: Record<string, number>
+  networks: Record<string, number>
+}
+
+type TxResult = {
+  rows: TxRow[]
+  totalCount: number
+  summary: TxSummary
+  distribution: Distribution
+  generatedAt: string
+}
+
+type AppliedFilters = {
+  search: string
+  status: string
+  network: string
+  provider: string
+  merchantId: string
+  datePreset: string
+}
+
+// ─── Constants ─────────────────────────────────────────────────────────────────
+
+const LIMIT = 50
+
+const STATUSES = [
+  { value: "", label: "All Statuses" },
+  { value: "CONFIRMED",  label: "Confirmed" },
+  { value: "PROCESSING", label: "Processing" },
+  { value: "PENDING",    label: "Pending" },
+  { value: "CREATED",    label: "Created" },
+  { value: "FAILED",     label: "Failed" },
+  { value: "INCOMPLETE", label: "Incomplete" },
+  { value: "EXPIRED",    label: "Expired" },
+]
+
+const NETWORKS = [
+  { value: "", label: "All Networks" },
+  { value: "solana",          label: "Solana" },
+  { value: "base",            label: "Base" },
+  { value: "ethereum",        label: "Ethereum" },
+  { value: "bitcoin_lightning", label: "Lightning" },
+]
+
+const PROVIDERS = [
+  { value: "", label: "All Providers" },
+  { value: "solana",   label: "Solana Pay" },
+  { value: "coinbase", label: "Coinbase" },
+  { value: "shift4",   label: "Shift4" },
+  { value: "base",     label: "Base Pay" },
+  { value: "lightning", label: "Lightning" },
+  { value: "cash",     label: "Cash" },
+]
+
+const DATE_PRESETS = [
+  { value: "",    label: "All Time" },
+  { value: "today", label: "Today" },
+  { value: "7d",  label: "Last 7 Days" },
+  { value: "30d", label: "Last 30 Days" },
+  { value: "90d", label: "Last 90 Days" },
+]
+
+const EMPTY_FILTERS: AppliedFilters = {
+  search: "", status: "", network: "", provider: "", merchantId: "", datePreset: "",
+}
+
+const STATUS_STYLE: Record<string, string> = {
+  CONFIRMED:  "bg-emerald-50 text-emerald-700 border-emerald-200",
+  PROCESSING: "bg-blue-50 text-blue-700 border-blue-200",
+  PENDING:    "bg-sky-50 text-sky-600 border-sky-200",
+  CREATED:    "bg-gray-100 text-gray-500 border-gray-200",
+  FAILED:     "bg-red-50 text-red-700 border-red-200",
+  INCOMPLETE: "bg-orange-50 text-orange-700 border-orange-200",
+  EXPIRED:    "bg-gray-100 text-gray-400 border-gray-200",
+  REFUNDED:   "bg-purple-50 text-purple-700 border-purple-200",
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+function fmt(n: number) {
+  return n.toLocaleString("en-US")
+}
+
+function fmtUSD(n: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n)
+}
+
+function fmtDateTime(iso: string) {
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  })
+}
+
+function pct(num: number, total: number): string {
+  if (!total) return "0%"
+  return ((num / total) * 100).toFixed(1) + "%"
+}
+
+function topKey(map: Record<string, number>): string | null {
+  const entries = Object.entries(map)
+  if (!entries.length) return null
+  return entries.reduce((best, cur) => (cur[1] > best[1] ? cur : best))[0]
+}
+
+function labelProvider(p: string | null): string {
+  if (!p) return "—"
+  const map: Record<string, string> = {
+    solana: "Solana Pay", coinbase: "Coinbase", shift4: "Shift4",
+    base: "Base Pay", lightning: "Lightning", cash: "Cash",
+  }
+  return map[p] ?? p
+}
+
+function labelNetwork(n: string | null): string {
+  if (!n) return "—"
+  const map: Record<string, string> = {
+    solana: "Solana", base: "Base", ethereum: "Ethereum",
+    bitcoin_lightning: "Lightning",
+  }
+  return map[n] ?? n
+}
+
+function dateRangeFromPreset(preset: string): { from?: string; to?: string } {
+  if (!preset) return {}
+  const now = new Date()
+  const to = now.toISOString()
+  switch (preset) {
+    case "today": {
+      const from = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+      return { from, to }
+    }
+    case "7d": {
+      const from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
+      return { from, to }
+    }
+    case "30d": {
+      const from = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
+      return { from, to }
+    }
+    case "90d": {
+      const from = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString()
+      return { from, to }
+    }
+    default:
+      return {}
+  }
+}
+
+function buildQueryString(filters: AppliedFilters, limit: number, offset: number): string {
+  const params = new URLSearchParams()
+  if (filters.status)     params.set("status",     filters.status)
+  if (filters.network)    params.set("network",    filters.network)
+  if (filters.provider)   params.set("provider",   filters.provider)
+  if (filters.merchantId) params.set("merchantId", filters.merchantId)
+  if (filters.search)     params.set("search",     filters.search)
+  const { from, to } = dateRangeFromPreset(filters.datePreset)
+  if (from) params.set("from", from)
+  if (to)   params.set("to",   to)
+  params.set("limit",  String(limit))
+  params.set("offset", String(offset))
+  return params.toString()
+}
+
+// ─── Sub-components ────────────────────────────────────────────────────────────
+
+function Spinner() {
+  return (
+    <div className="flex items-center justify-center py-16">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+    </div>
+  )
+}
+
+function StatusBadge({ status }: { status: string }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+        STATUS_STYLE[status] ?? "bg-gray-100 text-gray-600 border-gray-200"
+      }`}
+    >
+      {status}
+    </span>
+  )
+}
+
+function UnauthorizedScreen() {
+  return (
+    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
+      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M12 2C9.24 2 7 4.24 7 7v2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-2V7c0-2.76-2.24-5-5-5zm0 13a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm3-8H9V7a3 3 0 1 1 6 0v2z"
+            fill="#ef4444"
+          />
+        </svg>
+      </div>
+      <h1 className="text-lg font-semibold text-gray-900">Admin Access Required</h1>
+      <p className="max-w-xs text-sm text-gray-500">
+        Your account does not have admin privileges to view this page.
+      </p>
+      <Link
+        href="/dashboard"
+        className="mt-2 rounded-xl bg-[#0052FF] px-5 py-2 text-sm font-semibold text-white hover:bg-[#003FCC]"
+      >
+        Back to Dashboard
+      </Link>
+    </div>
+  )
+}
+
+// ─── Select style shared ───────────────────────────────────────────────────────
+
+const selectCls =
+  "h-9 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-700 shadow-sm focus:border-[#0052FF]/40 focus:outline-none focus:ring-2 focus:ring-[#0052FF]/10"
+
+// ─── Main page ─────────────────────────────────────────────────────────────────
+
+export default function AdminTransactionsPage() {
+  const router = useRouter()
+  const [token, setToken]           = useState("")
+  const [unauthorized, setUnauthorized] = useState(false)
+
+  // filter form state (what user is editing)
+  const [search,      setSearch]      = useState("")
+  const [status,      setStatus]      = useState("")
+  const [network,     setNetwork]     = useState("")
+  const [provider,    setProvider]    = useState("")
+  const [merchantId,  setMerchantId]  = useState("")
+  const [datePreset,  setDatePreset]  = useState("")
+
+  // applied filters (what was last fetched)
+  const [applied, setApplied] = useState<AppliedFilters>(EMPTY_FILTERS)
+  const [offset,  setOffset]  = useState(0)
+
+  // data
+  const [result,    setResult]    = useState<TxResult | null>(null)
+  const [loading,   setLoading]   = useState(true)
+
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  // ── Auth ────────────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) { router.replace("/login"); return }
+      setToken(session.access_token)
+    })
+  }, [router])
+
+  // ── Fetch ───────────────────────────────────────────────────────────────────
+
+  const fetchData = useCallback(async (tk: string, filters: AppliedFilters, off: number) => {
+    setLoading(true)
+    try {
+      const qs  = buildQueryString(filters, LIMIT, off)
+      const res = await fetch(`/api/admin/transactions?${qs}`, {
+        headers: { Authorization: `Bearer ${tk}` },
+      })
+      if (res.status === 403) { setUnauthorized(true); return }
+      if (!res.ok) { toast.error("Failed to load transactions"); return }
+      const data = (await res.json()) as TxResult
+      setResult(data)
+    } catch {
+      toast.error("Failed to load transactions")
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!token) return
+    void fetchData(token, applied, offset)
+  }, [token, applied, offset, fetchData])
+
+  // ── Filter actions ──────────────────────────────────────────────────────────
+
+  const applyFilters = useCallback(() => {
+    const next: AppliedFilters = { search, status, network, provider, merchantId, datePreset }
+    setApplied(next)
+    setOffset(0)
+  }, [search, status, network, provider, merchantId, datePreset])
+
+  const resetFilters = useCallback(() => {
+    setSearch(""); setStatus(""); setNetwork(""); setProvider("")
+    setMerchantId(""); setDatePreset("")
+    setApplied(EMPTY_FILTERS)
+    setOffset(0)
+  }, [])
+
+  // Auto-apply when dropdown fields change
+  const handleDropdownChange = useCallback(
+    (field: "status" | "network" | "provider" | "datePreset", value: string) => {
+      let nextStatus     = status
+      let nextNetwork    = network
+      let nextProvider   = provider
+      let nextDatePreset = datePreset
+      if (field === "status")     nextStatus     = value
+      if (field === "network")    nextNetwork    = value
+      if (field === "provider")   nextProvider   = value
+      if (field === "datePreset") nextDatePreset = value
+      if (field === "status")     setStatus(value)
+      if (field === "network")    setNetwork(value)
+      if (field === "provider")   setProvider(value)
+      if (field === "datePreset") setDatePreset(value)
+      const next: AppliedFilters = {
+        search, status: nextStatus, network: nextNetwork,
+        provider: nextProvider, merchantId, datePreset: nextDatePreset,
+      }
+      setApplied(next)
+      setOffset(0)
+    },
+    [search, status, network, provider, merchantId, datePreset]
+  )
+
+  // ── Pagination ──────────────────────────────────────────────────────────────
+
+  const totalCount = result?.totalCount ?? 0
+  const totalPages = Math.max(1, Math.ceil(totalCount / LIMIT))
+  const currentPage = Math.floor(offset / LIMIT) + 1
+  const rangeFrom = totalCount === 0 ? 0 : offset + 1
+  const rangeTo   = Math.min(offset + LIMIT, totalCount)
+
+  // ── Derived health insights ─────────────────────────────────────────────────
+
+  const insights = useMemo(() => {
+    if (!result?.summary) return []
+    const s = result.summary
+    const d = result.distribution
+    if (!s.totalCount) return ["No transactions match the current filters."]
+
+    const lines: string[] = []
+
+    const failRate = pct(s.failedCount, s.totalCount)
+    const incompleteRate = pct(s.incompleteCount, s.totalCount)
+    lines.push(`Failed rate: ${failRate} — Incomplete rate: ${incompleteRate}`)
+
+    const topProvider = topKey(d.providers)
+    const topNetwork  = topKey(d.networks)
+    if (topProvider || topNetwork) {
+      const parts: string[] = []
+      if (topProvider) parts.push(`Top provider: ${labelProvider(topProvider)}`)
+      if (topNetwork)  parts.push(`Top network: ${labelNetwork(topNetwork)}`)
+      lines.push(parts.join(" — "))
+    }
+
+    if (s.processingCount > 0) {
+      lines.push(
+        `${s.processingCount} payment${s.processingCount === 1 ? "" : "s"} currently PROCESSING (in-flight on-chain)`
+      )
+    }
+
+    if (s.expiredCount > 0) {
+      lines.push(`${s.expiredCount} expired payment${s.expiredCount === 1 ? "" : "s"} (timed out before customer paid)`)
+    }
+
+    return lines
+  }, [result])
+
+  const hasActiveFilter =
+    applied.status || applied.network || applied.provider ||
+    applied.merchantId || applied.search || applied.datePreset
+
+  // ── Guards ──────────────────────────────────────────────────────────────────
+
+  if (unauthorized) return <UnauthorizedScreen />
+
+  const s = result?.summary
+
+  // ── Render ──────────────────────────────────────────────────────────────────
+
+  return (
+    <div className="space-y-5 pb-10">
+
+      {/* ── Hero ─────────────────────────────────────────────────────────────── */}
+      <div className="relative overflow-hidden rounded-[1.35rem] border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.16),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] p-5 shadow-[0_18px_60px_rgba(37,99,235,0.13)] sm:p-6">
+        <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/80 to-transparent" />
+        <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <Link
+              href="/dashboard/admin"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-800"
+            >
+              <ArrowLeft size={12} /> Admin Dashboard
+            </Link>
+            <div className="mt-2 flex items-center gap-2.5">
+              <span className="inline-flex items-center rounded-full border border-blue-200/60 bg-blue-100/80 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.12em] text-blue-700">
+                PineTree Internal
+              </span>
+            </div>
+            <h1 className="mt-2.5 text-2xl font-semibold text-gray-950 sm:text-3xl">
+              Transaction Explorer
+            </h1>
+            <p className="mt-1.5 text-sm text-gray-600">
+              Platform-wide payment activity — all merchants, all rails
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end">
+            {result?.generatedAt && (
+              <div className="sm:text-right">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
+                  Last Updated
+                </p>
+                <p className="mt-0.5 text-sm text-gray-600">
+                  {fmtDateTime(result.generatedAt)}
+                </p>
+              </div>
+            )}
+            <button
+              onClick={() => token && void fetchData(token, applied, offset)}
+              disabled={loading}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+              title="Refresh"
+            >
+              <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Summary tiles ────────────────────────────────────────────────────── */}
+      <DashboardSection title="Summary" titleTone="blue">
+        <MetricGrid columns="three">
+          <CompactMetricTile
+            label="Total"
+            value={s ? fmt(s.totalCount) : "—"}
+          />
+          <CompactMetricTile
+            label="Confirmed"
+            value={s ? fmt(s.confirmedCount) : "—"}
+            tone="green"
+            detail={s && s.totalCount ? `${pct(s.confirmedCount, s.totalCount)} of total` : undefined}
+          />
+          <CompactMetricTile
+            label="Confirmed Volume"
+            value={s ? fmtUSD(s.confirmedVolume) : "—"}
+            tone="blue"
+          />
+          <CompactMetricTile
+            label="PineTree Fees"
+            value={s ? fmtUSD(s.totalFees) : "—"}
+            tone="blue"
+          />
+          <CompactMetricTile
+            label="Processing"
+            value={s ? fmt(s.processingCount) : "—"}
+            tone="amber"
+            detail="In-flight on-chain"
+          />
+          <CompactMetricTile
+            label="Awaiting Customer"
+            value={s ? fmt(s.pendingCount) : "—"}
+            detail="CREATED + PENDING"
+          />
+          <CompactMetricTile
+            label="Failed"
+            value={s ? fmt(s.failedCount) : "—"}
+            tone="red"
+            detail={s && s.totalCount ? `${pct(s.failedCount, s.totalCount)} rate` : undefined}
+          />
+          <CompactMetricTile
+            label="Incomplete"
+            value={s ? fmt(s.incompleteCount) : "—"}
+            tone="amber"
+            detail={s && s.totalCount ? `${pct(s.incompleteCount, s.totalCount)} rate` : undefined}
+          />
+          <CompactMetricTile
+            label="Expired"
+            value={s ? fmt(s.expiredCount) : "—"}
+            detail="Timed out"
+          />
+        </MetricGrid>
+      </DashboardSection>
+
+      {/* ── Health insights ──────────────────────────────────────────────────── */}
+      {insights.length > 0 && (
+        <InsightCard
+          title="Operational Insights"
+          insights={insights}
+          emptyText="No insights yet — data will appear as transactions accumulate."
+        />
+      )}
+
+      {/* ── Filter bar ───────────────────────────────────────────────────────── */}
+      <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+        <div className="flex flex-col gap-3">
+          {/* Row 1: search + merchant */}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="relative flex-1">
+              <Search
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              />
+              <input
+                ref={searchRef}
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && applyFilters()}
+                placeholder="Search payment ID or reference…"
+                className="h-9 w-full rounded-xl border border-gray-200 bg-white py-2 pl-9 pr-3 text-sm shadow-sm focus:border-[#0052FF]/40 focus:outline-none focus:ring-2 focus:ring-[#0052FF]/10"
+              />
+            </div>
+            <input
+              type="text"
+              value={merchantId}
+              onChange={(e) => setMerchantId(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && applyFilters()}
+              placeholder="Merchant ID (UUID)…"
+              className="h-9 flex-1 rounded-xl border border-gray-200 bg-white px-3 text-sm shadow-sm focus:border-[#0052FF]/40 focus:outline-none focus:ring-2 focus:ring-[#0052FF]/10 sm:max-w-[220px]"
+            />
+          </div>
+
+          {/* Row 2: dropdowns + buttons */}
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={status}
+              onChange={(e) => handleDropdownChange("status", e.target.value)}
+              className={selectCls}
+            >
+              {STATUSES.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+
+            <select
+              value={network}
+              onChange={(e) => handleDropdownChange("network", e.target.value)}
+              className={selectCls}
+            >
+              {NETWORKS.map((n) => (
+                <option key={n.value} value={n.value}>{n.label}</option>
+              ))}
+            </select>
+
+            <select
+              value={provider}
+              onChange={(e) => handleDropdownChange("provider", e.target.value)}
+              className={selectCls}
+            >
+              {PROVIDERS.map((p) => (
+                <option key={p.value} value={p.value}>{p.label}</option>
+              ))}
+            </select>
+
+            <select
+              value={datePreset}
+              onChange={(e) => handleDropdownChange("datePreset", e.target.value)}
+              className={selectCls}
+            >
+              {DATE_PRESETS.map((d) => (
+                <option key={d.value} value={d.value}>{d.label}</option>
+              ))}
+            </select>
+
+            <button
+              onClick={applyFilters}
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm hover:bg-[#003FCC]"
+            >
+              Apply
+            </button>
+
+            {hasActiveFilter && (
+              <button
+                onClick={resetFilters}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-600 hover:bg-gray-50"
+              >
+                <X size={13} /> Reset
+              </button>
+            )}
+          </div>
+
+          {/* Active filter chips */}
+          {hasActiveFilter && (
+            <div className="flex flex-wrap gap-1.5">
+              {applied.status && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                  Status: {applied.status}
+                </span>
+              )}
+              {applied.network && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                  Network: {labelNetwork(applied.network)}
+                </span>
+              )}
+              {applied.provider && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                  Provider: {labelProvider(applied.provider)}
+                </span>
+              )}
+              {applied.datePreset && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                  {DATE_PRESETS.find((d) => d.value === applied.datePreset)?.label}
+                </span>
+              )}
+              {applied.search && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                  Search: &ldquo;{applied.search}&rdquo;
+                </span>
+              )}
+              {applied.merchantId && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                  Merchant: {applied.merchantId.slice(0, 12)}…
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Table ────────────────────────────────────────────────────────────── */}
+      <DashboardSection
+        title="Payments"
+        titleTone="blue"
+        action={
+          !loading && (
+            <span className="text-xs text-gray-400">
+              {totalCount === 0
+                ? "No results"
+                : `${fmt(rangeFrom)}–${fmt(rangeTo)} of ${fmt(totalCount)}`}
+            </span>
+          )
+        }
+      >
+        <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          {loading ? (
+            <Spinner />
+          ) : !result?.rows.length ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <p className="font-medium text-gray-900">No payments found</p>
+              <p className="mt-1 text-sm text-gray-500">
+                {hasActiveFilter
+                  ? "Try adjusting or resetting your filters."
+                  : "No payment records exist yet."}
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Desktop header */}
+              <div className="hidden grid-cols-[140px_1fr_140px_110px_110px_100px_100px_110px] gap-3 bg-gray-50/60 px-5 py-2.5 sm:grid">
+                {["Time", "Payment ID / Merchant", "Provider", "Network", "Amount", "Fee", "Status"].map(
+                  (h, i) => (
+                    <div
+                      key={i}
+                      className="text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+                    >
+                      {h}
+                    </div>
+                  )
+                )}
+              </div>
+
+              <div className="divide-y divide-gray-100">
+                {result.rows.map((tx) => (
+                  <div
+                    key={tx.id}
+                    className="flex flex-col gap-1.5 px-5 py-3.5 sm:grid sm:grid-cols-[140px_1fr_140px_110px_110px_100px_100px_110px] sm:items-center sm:gap-3"
+                  >
+                    {/* Time */}
+                    <div className="text-xs text-gray-500">
+                      {fmtDateTime(tx.created_at)}
+                    </div>
+
+                    {/* Payment ID + Merchant */}
+                    <div className="min-w-0">
+                      <p className="truncate font-mono text-xs text-gray-800">
+                        {tx.id.slice(0, 20)}…
+                      </p>
+                      <p className="mt-0.5 truncate font-mono text-[11px] text-gray-400">
+                        {tx.merchant_id.slice(0, 16)}…
+                      </p>
+                    </div>
+
+                    {/* Provider */}
+                    <div className="hidden text-sm text-gray-700 sm:block">
+                      {labelProvider(tx.provider)}
+                    </div>
+
+                    {/* Network */}
+                    <div className="hidden text-sm text-gray-600 sm:block">
+                      {tx.network ? labelNetwork(tx.network) : <span className="text-gray-300">—</span>}
+                    </div>
+
+                    {/* Amount */}
+                    <div className="hidden text-sm font-medium text-gray-900 sm:block">
+                      {fmtUSD(Number(tx.gross_amount ?? 0))}
+                    </div>
+
+                    {/* Fee */}
+                    <div className="hidden text-sm text-gray-500 sm:block">
+                      {Number(tx.pinetree_fee) > 0
+                        ? fmtUSD(Number(tx.pinetree_fee))
+                        : <span className="text-gray-300">—</span>}
+                    </div>
+
+                    {/* Mobile amount row */}
+                    <div className="flex items-center justify-between sm:hidden">
+                      <span className="text-sm font-medium text-gray-900">
+                        {fmtUSD(Number(tx.gross_amount ?? 0))}
+                      </span>
+                      <StatusBadge status={tx.status} />
+                    </div>
+
+                    {/* Status (desktop) */}
+                    <div className="hidden sm:block">
+                      <StatusBadge status={tx.status} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Pagination */}
+        {!loading && totalCount > LIMIT && (
+          <div className="flex items-center justify-between pt-1">
+            <button
+              onClick={() => setOffset(Math.max(0, offset - LIMIT))}
+              disabled={currentPage === 1}
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-600 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ChevronLeft size={14} /> Previous
+            </button>
+
+            <span className="text-xs text-gray-500">
+              Page {fmt(currentPage)} of {fmt(totalPages)}
+            </span>
+
+            <button
+              onClick={() => setOffset(offset + LIMIT)}
+              disabled={currentPage >= totalPages}
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-600 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Next <ChevronRight size={14} />
+            </button>
+          </div>
+        )}
+      </DashboardSection>
+    </div>
+  )
+}
