@@ -15,12 +15,6 @@ const connectors = [
             description: "PineTree Payments Checkout",
             url: appUrl,
             icons: [],
-            redirect: {
-              // Tells mobile wallets where to send the user after session approval.
-              // Using the app URL so wallets can auto-return to the browser via
-              // universal link rather than requiring a manual tap.
-              universal: appUrl,
-            },
           },
         }),
       ]

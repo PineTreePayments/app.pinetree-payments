@@ -416,6 +416,25 @@ function getWalletConnectPeerName(provider: WalletConnectProvider): string | nul
   const name = source.session?.peer?.metadata?.name
   return typeof name === "string" && name.trim() ? name.trim() : null
 }
+function tryOpenWalletNativeUri(provider: WalletConnectProvider): void {
+  try {
+    const source = provider as {
+      session?: {
+        peer?: {
+          metadata?: {
+            redirect?: { native?: string }
+          }
+        }
+      }
+    }
+    const uri = source.session?.peer?.metadata?.redirect?.native
+    if (typeof uri === "string" && uri.length > 0 && !uri.startsWith("https://") && !uri.startsWith("http://")) {
+      window.location.href = uri
+    }
+  } catch {
+    // Best-effort; ignore errors.
+  }
+}
 function requireBaseUsdcV4TypedData(typedData: unknown, fromAddress: string): Eip712TypedData {
   if (!typedData || typeof typedData !== "object") {
     throw new Error("Invalid Base USDC typed data returned by server")
@@ -1142,7 +1161,7 @@ export default function BaseWalletPayment({
     beginWalletRequest({ kind, walletName: peerName })
     await logBase("pending-wallet-action-dispatch", { source, kind, paymentId, chainId: settledSession.chainId })
     try {
-      const txHash = await sendWalletConnectTransactionWithTimeout({
+      const txPromise = sendWalletConnectTransactionWithTimeout({
         provider,
         fromAddress,
         txRequest,
@@ -1153,6 +1172,8 @@ export default function BaseWalletPayment({
             ? "USDC authorization approval was not completed. Tap Continue in wallet to try again."
             : "Payment transaction was not completed. Tap Continue in wallet to try again.",
       })
+      window.setTimeout(() => { tryOpenWalletNativeUri(provider) }, 300)
+      const txHash = await txPromise
       resolveWalletRequest()
       pendingActionInFlightRef.current = false
       setPendingWalletActionInFlight(false)
@@ -3065,7 +3086,7 @@ export default function BaseWalletPayment({
     : activeWalletRequestKind === "usdc_approve"
       ? "One-time USDC authorization"
       : "Confirm payment in your wallet"
-  const walletRequestDetailCopy = "Return here after approving if your wallet does not switch automatically."
+  const walletRequestDetailCopy = "Return here after approving in your wallet."
   function renderStepIcon(status: "done" | "active" | "upcoming") {
     if (status === "done") {
       return (
@@ -3133,7 +3154,7 @@ export default function BaseWalletPayment({
             {showUsdcAuthStep ? renderStep(
               "One-time USDC authorization",
               usdcAuthStatus,
-              usdcAuthStatus === "active" ? "One-time USDC authorization in your wallet, then return here" : undefined
+              usdcAuthStatus === "active" ? "Approve in your wallet, then return here." : undefined
             ) : null}
             {renderStep(
               "Confirm payment",
@@ -3151,7 +3172,7 @@ export default function BaseWalletPayment({
                     {walletRequestIsPending ? walletRequestPrimaryCopy : contextMessage}
                   </span>
                   <p className="text-xs text-gray-600 leading-relaxed">
-                    {walletRequestIsPending ? walletRequestDetailCopy : "Return here after approving if your wallet does not switch automatically."}
+                    {walletRequestIsPending ? walletRequestDetailCopy : "Return here after approving in your wallet."}
                   </p>
                 </div>
               ) : (
@@ -3162,7 +3183,7 @@ export default function BaseWalletPayment({
               )}
               {showReturnHereHint ? (
                 <p className="mt-1.5 text-xs text-gray-500 leading-relaxed">
-                  Return here after approving if your wallet does not switch automatically.
+                  Return here after approving in your wallet.
                 </p>
               ) : null}
             </div>

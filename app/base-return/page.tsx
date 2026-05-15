@@ -1,3 +1,6 @@
+// LEGACY: This page is not used by the current WalletConnect/wagmi Base Pay flow.
+// It targets window.ethereum directly and is disconnected from BaseWalletPayment.tsx.
+// Do not add new functionality here. Safe to delete once confirmed unused in production.
 "use client"
 
 export const dynamic = "force-dynamic"
