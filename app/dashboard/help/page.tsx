@@ -240,6 +240,8 @@ export default function HelpCenterPage() {
       content: "Ask me to check your setup, explain a payment status, inspect connected wallets or rails, or help prepare a support ticket. I use your authenticated PineTree account context when available."
     }
   ])
+  const [mobileSection, setMobileSection] = useState<"ai" | "docs" | "support" | "tickets">("ai")
+  const [mobileFeedbackOpen, setMobileFeedbackOpen] = useState(false)
   const [ticketFilter, setTicketFilter] = useState<TicketFilter>("All")
   const [selectedTicket, setSelectedTicket] = useState<TicketRecord | null>(null)
   const [ticketDetailMessages, setTicketDetailMessages] = useState<TicketMessage[]>([])
@@ -583,7 +585,7 @@ export default function HelpCenterPage() {
   }
 
   return (
-    <div className="space-y-5 md:space-y-7">
+    <div className="space-y-4 pb-[calc(3.75rem+env(safe-area-inset-bottom,0px))] md:space-y-7 md:pb-0">
       <div>
         <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Help Center</h1>
         <p className="mt-1 text-[12px] font-semibold leading-5 tracking-[0.01em] text-[#0052FF] sm:text-sm">
@@ -604,12 +606,448 @@ export default function HelpCenterPage() {
               PineTree AI and the help library are grounded in PineTree POS, hosted checkout, providers, wallets, dashboard reports, and the official payment state model.
             </p>
           </div>
-          <div className="grid w-full grid-cols-2 gap-2 md:w-auto md:min-w-[300px]">
+          <div className="hidden w-full grid-cols-2 gap-2 md:grid md:w-auto md:min-w-[300px]">
             <QuickAction label="Open a Ticket" icon={<LifeBuoy size={18} />} href="#support-ticket" />
             <QuickAction label="Ask PineTree AI" icon={<Bot size={18} />} href="#pinetree-ai" />
           </div>
         </div>
       </div>
+
+      {/* ── MOBILE ONLY: tab content ─────────────────────────────────────── */}
+      <div className="md:hidden space-y-3">
+
+        {/* AI tab */}
+        {mobileSection === "ai" && (
+          <div className="rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-4 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Bot className="h-5 w-5 text-[#0052FF]" />
+                <h2 className="text-base font-semibold text-gray-950">Ask PineTree AI</h2>
+              </div>
+              <ProviderStatusPill label="Account-aware" tone="blue" />
+            </div>
+
+            <div className="flex gap-2 overflow-x-auto pb-2">
+              {suggestedQuestions.map((question) => (
+                <button
+                  key={question}
+                  type="button"
+                  onClick={() => void submitAssistantQuestion(question)}
+                  disabled={assistantLoading}
+                  className="shrink-0 rounded-full border border-blue-100 bg-white/85 px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:border-[#0052FF] hover:bg-blue-50 disabled:opacity-50"
+                >
+                  {question}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-3 max-h-[calc(100dvh-22rem)] min-h-[180px] space-y-3 overflow-y-auto rounded-xl border border-blue-100 bg-white/75 p-3">
+              {assistantMessages.map((message) => (
+                <AssistantMessageBubble
+                  key={message.id}
+                  message={message}
+                  onOpenArticle={(article) => {
+                    setSelectedCategory(article.category)
+                    setSelectedArticle(article)
+                    setQuery("")
+                  }}
+                />
+              ))}
+              {assistantLoading && (
+                <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-sm text-[#0052FF]">
+                  Checking your PineTree account context...
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
+              <Sparkles className="h-4 w-4 shrink-0 text-[#0052FF]" />
+              <input
+                value={assistantQuestion}
+                onChange={(event) => setAssistantQuestion(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault()
+                    void submitAssistantQuestion()
+                  }
+                }}
+                placeholder="Ask PineTree AI..."
+                className="min-h-9 flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+              />
+              <button
+                type="button"
+                onClick={() => void submitAssistantQuestion()}
+                disabled={assistantLoading || !assistantQuestion.trim()}
+                aria-label="Ask PineTree AI"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#0052FF] text-white transition hover:bg-blue-700 disabled:opacity-50"
+              >
+                <Send size={15} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Docs tab */}
+        {mobileSection === "docs" && (
+          <div className="space-y-3">
+            <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={query}
+                  onChange={(event) => {
+                    setQuery(event.target.value)
+                    setArticlesExpanded(false)
+                  }}
+                  placeholder="Search help articles..."
+                  className="min-h-11 w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-[#0052FF] focus:bg-white focus:ring-4 focus:ring-blue-100"
+                />
+              </div>
+              <div className="mt-2.5 flex gap-2 overflow-x-auto pb-0.5">
+                {["All", ...helpCategories].map((category) => {
+                  const active = category === selectedCategory
+                  return (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => {
+                        setSelectedCategory(category)
+                        setArticlesExpanded(false)
+                      }}
+                      className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                        active
+                          ? "border-[#0052FF] bg-[#0052FF] text-white shadow-sm"
+                          : "border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:bg-blue-50"
+                      }`}
+                    >
+                      {category}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-xl border border-gray-200/80 bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2.5">
+                <p className="text-xs font-semibold text-gray-700">
+                  {hasSearch ? `"${query.trim()}"` : selectedCategory === "All" ? "All docs" : selectedCategory}
+                  <span className="ml-1 font-normal text-gray-400">
+                    {filteredArticles.length} article{filteredArticles.length === 1 ? "" : "s"}
+                  </span>
+                </p>
+                {(selectedCategory !== "All" || hasSearch) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategory("All")
+                      setQuery("")
+                      setArticlesExpanded(false)
+                    }}
+                    className="text-xs font-semibold text-[#0052FF]"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+
+              <div className="divide-y divide-gray-100">
+                {visibleArticles.map((article) => (
+                  <button
+                    key={article.id}
+                    type="button"
+                    onClick={() => setSelectedArticle(article)}
+                    className="flex w-full items-start gap-3 px-3 py-3 text-left transition hover:bg-blue-50/40 active:bg-blue-50"
+                  >
+                    <BookOpen className="mt-0.5 h-4 w-4 shrink-0 text-[#0052FF]" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-gray-950">{article.title}</p>
+                      <p className="mt-0.5 line-clamp-1 text-xs text-gray-500">{article.description}</p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <span className="rounded-full border border-blue-100 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-[#0052FF]">
+                        {article.category.split(" ")[0]}
+                      </span>
+                      <ChevronRight className="h-3.5 w-3.5 text-gray-400" />
+                    </div>
+                  </button>
+                ))}
+                {filteredArticles.length === 0 && (
+                  <div className="px-3 py-6 text-center text-sm text-gray-500">
+                    No articles matched. Try another search term.
+                  </div>
+                )}
+              </div>
+
+              {hasMoreArticles && (
+                <div className="border-t border-gray-100 p-3">
+                  <button
+                    type="button"
+                    onClick={() => setArticlesExpanded(true)}
+                    className="w-full rounded-xl border border-blue-200 bg-blue-50 py-2 text-xs font-semibold text-[#0052FF] transition hover:bg-blue-100"
+                  >
+                    View {filteredArticles.length - visibleArticles.length} more articles
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Support tab */}
+        {mobileSection === "support" && (
+          <div className="space-y-3">
+            <div id="support-ticket-mobile" className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-base font-semibold text-gray-950">Open a Ticket</h2>
+                  <p className="mt-1 text-sm leading-5 text-gray-600">
+                    Send PineTree the details needed to investigate your issue.
+                  </p>
+                </div>
+                <LifeBuoy className="h-5 w-5 shrink-0 text-[#0052FF]" />
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <Field label="Category">
+                  <select
+                    value={ticketForm.category}
+                    onChange={(event) => setTicketForm((current) => ({ ...current, category: event.target.value }))}
+                    className="form-field"
+                  >
+                    {supportTicketCategories.map((category) => <option key={category}>{category}</option>)}
+                  </select>
+                </Field>
+                <Field label="Priority">
+                  <select
+                    value={ticketForm.priority}
+                    onChange={(event) => setTicketForm((current) => ({ ...current, priority: event.target.value }))}
+                    className="form-field"
+                  >
+                    {supportTicketPriorities.map((priority) => <option key={priority}>{priority}</option>)}
+                  </select>
+                </Field>
+                <Field label="Subject">
+                  <input
+                    value={ticketForm.subject}
+                    onChange={(event) => setTicketForm((current) => ({ ...current, subject: event.target.value }))}
+                    className="form-field"
+                    placeholder="Payment is still pending"
+                  />
+                </Field>
+                <Field label="Related Payment ID">
+                  <input
+                    value={ticketForm.relatedPaymentId}
+                    onChange={(event) => setTicketForm((current) => ({ ...current, relatedPaymentId: event.target.value }))}
+                    className="form-field"
+                    placeholder="Optional"
+                  />
+                </Field>
+                <Field label="Description" className="sm:col-span-2">
+                  <textarea
+                    value={ticketForm.description}
+                    onChange={(event) => setTicketForm((current) => ({ ...current, description: event.target.value }))}
+                    className="form-field min-h-24 resize-y"
+                    placeholder="Include what happened, payment ID, provider, wallet/network, approximate time, amount, and transaction hash if available."
+                  />
+                  <p className="mt-1.5 text-xs text-gray-400">
+                    For payment issues, include the payment ID, provider/network, wallet used, approximate time, amount, and transaction hash if available.
+                  </p>
+                </Field>
+              </div>
+
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={() => void submitTicket()}
+                  disabled={submittingTicket}
+                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
+                >
+                  <Send size={16} />
+                  {submittingTicket ? "Opening..." : "Open Ticket"}
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-sm">
+              <button
+                type="button"
+                onClick={() => setMobileFeedbackOpen((v) => !v)}
+                className="flex w-full items-center justify-between px-4 py-3.5"
+              >
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4 text-[#0052FF]" />
+                  <span className="text-sm font-semibold text-gray-950">General Feedback</span>
+                </div>
+                <ChevronRight className={`h-4 w-4 text-gray-400 transition ${mobileFeedbackOpen ? "rotate-90" : ""}`} />
+              </button>
+              {mobileFeedbackOpen && (
+                <div className="border-t border-gray-100 p-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Type">
+                      <select
+                        value={feedbackForm.type}
+                        onChange={(event) => setFeedbackForm((current) => ({ ...current, type: event.target.value }))}
+                        className="form-field"
+                      >
+                        {feedbackTypes.map((type) => <option key={type}>{type}</option>)}
+                      </select>
+                    </Field>
+                    <Field label="Rating">
+                      <select
+                        value={feedbackForm.rating}
+                        onChange={(event) => setFeedbackForm((current) => ({ ...current, rating: event.target.value }))}
+                        className="form-field"
+                      >
+                        <option value="">Optional</option>
+                        <option value="5">5 - Excellent</option>
+                        <option value="4">4 - Good</option>
+                        <option value="3">3 - Neutral</option>
+                        <option value="2">2 - Needs work</option>
+                        <option value="1">1 - Poor</option>
+                      </select>
+                    </Field>
+                  </div>
+                  <div className="mt-3">
+                    <Field label="Message">
+                      <textarea
+                        value={feedbackForm.message}
+                        onChange={(event) => setFeedbackForm((current) => ({ ...current, message: event.target.value }))}
+                        className="form-field min-h-[72px] resize-y"
+                        placeholder="Tell us what would make PineTree clearer or easier to use."
+                      />
+                    </Field>
+                  </div>
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={() => void submitFeedback()}
+                      disabled={submittingFeedback}
+                      className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      <CheckCircle2 size={16} />
+                      {submittingFeedback ? "Sending..." : "Send Feedback"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tickets tab */}
+        {mobileSection === "tickets" && (
+          <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-gray-950">My Tickets</h2>
+              <button
+                type="button"
+                onClick={() => void loadTickets()}
+                className="rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
+              >
+                Refresh
+              </button>
+            </div>
+
+            <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1">
+              {TICKET_FILTERS.map((filter) => {
+                const active = filter === ticketFilter
+                return (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setTicketFilter(filter)}
+                    className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                      active
+                        ? "border-[#0052FF] bg-[#0052FF] text-white shadow-sm"
+                        : "border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:bg-blue-50"
+                    }`}
+                  >
+                    {filter}
+                  </button>
+                )
+              })}
+            </div>
+
+            {ticketsLoading && (
+              <div className="space-y-2">
+                <div className="h-16 animate-pulse rounded-xl bg-gray-100" />
+                <div className="h-16 animate-pulse rounded-xl bg-gray-100" />
+              </div>
+            )}
+            {!ticketsLoading && ticketError && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+                {ticketError}
+              </div>
+            )}
+            {!ticketsLoading && !ticketError && filteredTickets.length === 0 && (
+              <div className="flex flex-col items-center gap-3 py-8 text-center">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full border border-blue-100 bg-blue-50">
+                  <LifeBuoy className="h-4 w-4 text-[#0052FF]" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-gray-950">
+                    {ticketFilter === "All" ? "No support tickets yet" : `No ${ticketFilter.toLowerCase()} tickets`}
+                  </p>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    {ticketFilter === "All" ? "Open a ticket in the Support tab." : "Change the filter to see other tickets."}
+                  </p>
+                </div>
+              </div>
+            )}
+            {!ticketsLoading && !ticketError && filteredTickets.length > 0 && (
+              <div className="space-y-1.5">
+                {filteredTickets.map((ticket) => (
+                  <button
+                    key={ticket.id}
+                    type="button"
+                    onClick={() => openTicketDetail(ticket)}
+                    className="w-full rounded-xl border border-gray-100 bg-white p-3 text-left transition hover:border-blue-200 hover:bg-blue-50/30"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <TicketStatusPill status={ticket.status} />
+                      <span className="text-[11px] text-gray-400">{formatDate(ticket.created_at)}</span>
+                    </div>
+                    <p className="mt-1.5 truncate text-sm font-semibold text-gray-950">{ticket.subject}</p>
+                    <p className="mt-0.5 text-xs text-gray-500">{ticket.category} · {ticket.priority}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── MOBILE ONLY: sticky tab bar ──────────────────────────────────── */}
+      <div
+        className="fixed bottom-0 left-0 right-0 z-40 border-t border-gray-200 bg-white/95 backdrop-blur-sm md:hidden"
+        style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+      >
+        <div className="flex">
+          {(
+            [
+              { id: "ai" as const, label: "Ask AI", icon: Bot },
+              { id: "docs" as const, label: "Docs", icon: BookOpen },
+              { id: "support" as const, label: "Support", icon: LifeBuoy },
+              { id: "tickets" as const, label: "Tickets", icon: FileText },
+            ]
+          ).map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setMobileSection(id)}
+              className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-2.5 text-[10px] font-semibold transition ${
+                mobileSection === id ? "text-[#0052FF]" : "text-gray-400 hover:text-gray-600"
+              }`}
+            >
+              <Icon className={`h-5 w-5 ${mobileSection === id ? "text-[#0052FF]" : "text-gray-400"}`} />
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── DESKTOP ONLY ─────────────────────────────────────────────────── */}
+      <div className="hidden md:block md:space-y-7">
 
       <DashboardSection title="Support Paths" titleTone="blue">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -1117,6 +1555,8 @@ export default function HelpCenterPage() {
           </DashboardSection>
         </div>
       </div>
+
+      </div>{/* end desktop-only block */}
 
       {/* Article modal */}
       {selectedArticle && (

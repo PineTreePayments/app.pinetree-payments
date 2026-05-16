@@ -100,9 +100,22 @@ export type AssistantRailSummary = {
   asset?: string
   connected: boolean
   enabled: boolean
+  availableForPos: boolean
+  availableForCheckout: boolean
+  sourceSignals: string[]
   status?: string
   readySignal?: string
   updatedAt?: string
+}
+
+export type AssistantSetupSourceSummary = {
+  providerRows: number
+  walletRows: number
+  connectedRails: number
+  enabledRails: number
+  posAvailableRails: number
+  checkoutAvailableRails: number
+  railNames: string[]
 }
 
 export type AssistantSetupSummary = {
@@ -144,6 +157,7 @@ export type PineTreeAssistantContext = {
   providers: AssistantProviderContext[]
   wallets: AssistantWalletContext[]
   railSummaries: AssistantRailSummary[]
+  setupSourceSummary: AssistantSetupSourceSummary
   recentPayments: AssistantPaymentContext[]
   recentTickets: AssistantSupportTicketContext[]
   checkoutLinks: {
@@ -182,7 +196,7 @@ function normalizeProviderRow(row: RawProviderRow): AssistantProviderContext {
     provider,
     label: providerLabel(provider),
     status: String(row.status || "unknown").trim(),
-    enabled: Boolean(row.enabled),
+    enabled: row.enabled !== false,
     dashboardStatus: row.dashboard_status ? String(row.dashboard_status) : null
   }
 }
@@ -227,11 +241,22 @@ function buildRailSummaries(
     const walletPresent = isWalletBased ? walletsByNetwork.has(key) : true
     const connected = providerStatusOk && walletPresent
 
+    const sourceSignals: string[] = ["provider-row"]
+    if (isWalletBased && walletPresent) sourceSignals.push("wallet-row")
+    if (providerStatusOk) sourceSignals.push("connected-status")
+    if (provider.enabled) sourceSignals.push("enabled-flag")
+
+    const availableForPos = connected && provider.enabled
+    const availableForCheckout = connected && provider.enabled
+
     const summary: AssistantRailSummary = {
       rail: provider.provider,
       provider: provider.label,
       connected,
       enabled: provider.enabled,
+      availableForPos,
+      availableForCheckout,
+      sourceSignals,
       status: provider.status,
       readySignal: connected && provider.enabled
         ? "connected-and-enabled"
@@ -261,6 +286,9 @@ function buildRailSummaries(
         asset: wallet.asset || undefined,
         connected: true,
         enabled: false,
+        availableForPos: false,
+        availableForCheckout: false,
+        sourceSignals: ["wallet-row"],
         status: wallet.status,
         readySignal: "wallet-without-provider",
         updatedAt: wallet.updatedAt || undefined
@@ -291,14 +319,12 @@ function buildSetupSummary(input: Omit<PineTreeAssistantContext, "setupSummary">
 
   const railSummaries = input.railSummaries
   const connectedRails = railSummaries.filter((r) => r.connected)
-  const enabledRailSet = new Set(railSummaries.filter((r) => r.connected && r.enabled).map((r) => r.rail.toLowerCase()))
+  const posAvailableRails = railSummaries.filter((r) => r.availableForPos)
+  const checkoutAvailableRails = railSummaries.filter((r) => r.availableForCheckout)
   const connectedRailSet = new Set(connectedRails.map((r) => r.rail.toLowerCase()))
 
   const connectedProviders = input.providers.filter((provider) =>
     connectedRailSet.has(provider.provider.toLowerCase()) || isConnectedStatus(provider.status)
-  )
-  const enabledProviders = input.providers.filter((provider) =>
-    enabledRailSet.has(provider.provider.toLowerCase()) || (isConnectedStatus(provider.status) && provider.enabled)
   )
   const hasActiveCheckoutLink = input.checkoutLinks.activeCount > 0
   const hasConfirmedPayment = input.recentPayments.some((payment) => payment.status === "CONFIRMED")
@@ -323,26 +349,26 @@ function buildSetupSummary(input: Omit<PineTreeAssistantContext, "setupSummary">
         : "I do not see a connected Solana or Base wallet yet."
     },
     paymentRails: {
-      status: enabledProviders.length > 0 ? "ready" : connectedProviders.length > 0 ? "incomplete" : "missing",
-      detail: enabledProviders.length > 0
-        ? `${enabledProviders.map((provider) => provider.label).join(", ")} enabled.`
+      status: posAvailableRails.length > 0 ? "ready" : connectedProviders.length > 0 ? "incomplete" : "missing",
+      detail: posAvailableRails.length > 0
+        ? `${posAvailableRails.map((r) => r.provider).join(", ")} connected and enabled.`
         : connectedProviders.length > 0
           ? `${connectedProviders.map((provider) => provider.label).join(", ")} connected, but I do not see an enabled rail.`
           : "I do not see a connected payment rail yet."
     },
     checkout: {
-      status: hasActiveCheckoutLink && enabledProviders.length > 0 ? "ready" : "not_ready",
+      status: hasActiveCheckoutLink && checkoutAvailableRails.length > 0 ? "ready" : "not_ready",
       detail: hasActiveCheckoutLink
-        ? enabledProviders.length > 0
-          ? "At least one active payment link and enabled rail are present."
+        ? checkoutAvailableRails.length > 0
+          ? `At least one active payment link found. Available for checkout: ${checkoutAvailableRails.map((r) => r.provider).join(", ")}.`
           : "A checkout link exists, but I do not see an enabled payment rail."
         : "I do not see an active checkout payment link yet."
     },
     pos: {
-      status: input.pos.terminalCount > 0 && enabledProviders.length > 0 ? "ready" : "not_ready",
+      status: input.pos.terminalCount > 0 && posAvailableRails.length > 0 ? "ready" : "not_ready",
       detail: input.pos.terminalCount > 0
-        ? enabledProviders.length > 0
-          ? `${input.pos.terminalCount} POS terminal${input.pos.terminalCount === 1 ? "" : "s"} found with an enabled rail.`
+        ? posAvailableRails.length > 0
+          ? `${input.pos.terminalCount} POS terminal${input.pos.terminalCount === 1 ? "" : "s"} found. Available for POS: ${posAvailableRails.map((r) => r.provider).join(", ")}.`
           : "POS terminal setup exists, but I do not see an enabled payment rail."
         : "I do not see a POS terminal yet."
     },
@@ -476,13 +502,19 @@ export async function getPineTreeAssistantContext(merchantId: string): Promise<P
 
   const railSummaries = buildRailSummaries(normalizedProviders, normalizedWallets)
 
-  console.info("[pinetree-ai-context] context loaded", {
-    walletCount: normalizedWallets.length,
-    providerCount: normalizedProviders.length,
+  const setupSourceSummary: AssistantSetupSourceSummary = {
+    providerRows: normalizedProviders.length,
+    walletRows: normalizedWallets.length,
     connectedRails: railSummaries.filter((r) => r.connected).length,
     enabledRails: railSummaries.filter((r) => r.enabled).length,
+    posAvailableRails: railSummaries.filter((r) => r.availableForPos).length,
+    checkoutAvailableRails: railSummaries.filter((r) => r.availableForCheckout).length,
     railNames: railSummaries.map((r) => r.rail)
-  })
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    console.info("[pinetree-ai-context] context loaded", setupSourceSummary)
+  }
 
   const safeContext: Omit<PineTreeAssistantContext, "setupSummary"> = {
     merchant: merchant
@@ -515,6 +547,7 @@ export async function getPineTreeAssistantContext(merchantId: string): Promise<P
     providers: normalizedProviders,
     wallets: normalizedWallets,
     railSummaries,
+    setupSourceSummary,
     recentPayments: payments.map((payment) => ({
       id: String(payment.id),
       status: payment.status,

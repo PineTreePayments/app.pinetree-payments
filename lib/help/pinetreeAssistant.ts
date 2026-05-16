@@ -129,6 +129,12 @@ export function classifyQuestionIntent(question: string): PineTreeAssistantInten
     return "payment_status"
   }
   if (
+    (normalized.includes("walk me through") || normalized.includes("show me how")) &&
+    (normalized.includes("pos") || normalized.includes("terminal") || normalized.includes("first payment"))
+  ) {
+    return "pos"
+  }
+  if (
     normalized.includes("set up") ||
     normalized.includes("setup") ||
     normalized.includes("finish") ||
@@ -300,11 +306,19 @@ function withContextAnswer(
       )
 
       if (connected && enabled) {
+        const availableForPos = baseRail?.availableForPos ?? false
+        const availableForCheckout = baseRail?.availableForCheckout ?? false
         return {
           title: "Base payment setup is connected and enabled",
-          body: "I can see Base payment setup exists on your account. The next thing to verify is whether Base USDC is enabled for checkout/POS and whether a recent Base USDC test payment completed.",
+          body: "I can see Base payment setup exists on your account. Here is what I can confirm about Base USDC availability.",
           bullets: [
             "Base is connected and enabled as a payment rail.",
+            availableForPos
+              ? "Base USDC is available for POS payments."
+              : "Base does not appear available for POS yet — verify it is enabled in Providers.",
+            availableForCheckout
+              ? "Base USDC is available for hosted checkout."
+              : "Base does not appear available for checkout yet — verify it is enabled in Providers.",
             basePayments.length > 0
               ? `I can see ${basePayments.length} recent Base-related payment${basePayments.length === 1 ? "" : "s"}.`
               : "I do not see a recent Base payment yet — run a small test to confirm the rail works end-to-end.",
@@ -316,7 +330,7 @@ function withContextAnswer(
       if (connected && !enabled) {
         return {
           title: "Base setup exists but is not enabled",
-          body: "I can see Base setup exists, but I do not see it enabled as an active payment rail yet.",
+          body: "I can see Base setup exists, but I do not see it enabled as an active payment rail. Base USDC is not yet available for POS or checkout.",
           bullets: [
             "Go to Providers and check whether Base payments is toggled on.",
             "Once enabled, run a small test payment to confirm the rail works end-to-end.",
@@ -370,6 +384,7 @@ function withContextAnswer(
   }
 
   if (intent === "checkout") {
+    const checkoutRails = context.railSummaries.filter((r) => r.availableForCheckout)
     return {
       title: "Checkout readiness",
       body: "Hosted checkout needs an active payment link or session path plus at least one enabled rail.",
@@ -377,7 +392,9 @@ function withContextAnswer(
         context.checkoutLinks.activeCount > 0
           ? `${context.checkoutLinks.activeCount} active checkout link${context.checkoutLinks.activeCount === 1 ? "" : "s"} found.`
           : "I do not see an active checkout payment link yet.",
-        context.setupSummary.paymentRails.detail,
+        checkoutRails.length > 0
+          ? `Available for checkout: ${checkoutRails.map((r) => r.provider).join(", ")}.`
+          : context.setupSummary.paymentRails.detail,
         context.checkoutLinks.mostRecentName
           ? `Most recent link: ${context.checkoutLinks.mostRecentName} (${context.checkoutLinks.mostRecentStatus || "unknown status"}).`
           : "Create a payment link from Online Checkout when you are ready to test."
@@ -386,6 +403,35 @@ function withContextAnswer(
   }
 
   if (intent === "pos") {
+    const isWalkthrough =
+      normalized.includes("walk me through") ||
+      normalized.includes("show me how") ||
+      normalized.includes("first pos") ||
+      normalized.includes("first payment") ||
+      normalized.includes("how do i")
+
+    if (isWalkthrough) {
+      const posRails = context.railSummaries.filter((r) => r.availableForPos)
+      const railStep = posRails.length > 0
+        ? `Available rails: ${posRails.map((r) => r.provider).join(", ")}. The customer selects one on their device.`
+        : "You need a connected and enabled payment rail first (Solana Pay, Base payments, Shift4, or Lightning). Go to Providers to connect one."
+      const terminalStep = context.pos.terminalCount > 0
+        ? `I can see ${context.pos.terminalCount} terminal${context.pos.terminalCount === 1 ? "" : "s"} in your account. Select or launch the one you want to use.`
+        : "I do not see a POS terminal yet. Create one from the POS section before your first payment."
+      return {
+        title: "How to run your first POS payment",
+        body: "Here are the steps to take your first POS payment end-to-end.",
+        bullets: [
+          `Step 1 — Check your terminal: ${terminalStep}`,
+          "Step 2 — Enter the sale amount: Type the customer's total. Review the PineTree fee and the amount you will receive, then proceed.",
+          `Step 3 — Choose a payment rail: ${railStep}`,
+          "Step 4 — Let the customer pay: The customer approves the wallet or provider step on their device. PineTree watches for the transaction.",
+          "Step 5 — Wait for CONFIRMED: Do not treat PENDING or PROCESSING as a completed payment. Only CONFIRMED means PineTree has finalized the payment.",
+          "Step 6 — Check Transactions: Open the Transactions page to verify the confirmed payment record shows the correct amount, provider, and rail."
+        ]
+      }
+    }
+
     return {
       title: "POS readiness",
       body: "PineTree POS needs a terminal and an enabled payment rail before you can run a meaningful customer payment test.",
@@ -393,7 +439,7 @@ function withContextAnswer(
         context.pos.terminalCount > 0
           ? `${context.pos.terminalCount} terminal${context.pos.terminalCount === 1 ? "" : "s"} found.`
           : "I do not see a POS terminal yet.",
-        context.setupSummary.paymentRails.detail,
+        context.setupSummary.pos.detail,
         "For the first test, open POS, enter a small amount, choose an available rail, and confirm the transaction reaches CONFIRMED."
       ]
     }
