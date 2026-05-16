@@ -159,13 +159,43 @@ function makeScenarios(serverDelegated: boolean, serverRelayer: boolean): SimSce
     { profileLabel: "metamask", asset: "USDC", delegatedEnabled: serverDelegated, relayerAvailable: serverRelayer, allowanceSufficient: false },
     { profileLabel: "trust_wallet", asset: "USDC", delegatedEnabled: serverDelegated, relayerAvailable: serverRelayer, allowanceSufficient: false },
     { profileLabel: "unknown_wallet", asset: "USDC", delegatedEnabled: serverDelegated, relayerAvailable: serverRelayer, allowanceSufficient: false },
-    // Special scenarios
+    // Special USDC scenarios
     { profileLabel: "relayer_unavailable", asset: "USDC", delegatedEnabled: false, relayerAvailable: false, allowanceSufficient: false },
     { profileLabel: "sufficient_allowance", asset: "USDC", delegatedEnabled: serverDelegated, relayerAvailable: serverRelayer, allowanceSufficient: true },
     { profileLabel: "insufficient_allowance", asset: "USDC", delegatedEnabled: serverDelegated, relayerAvailable: serverRelayer, allowanceSufficient: false },
-    // ETH
+    // Coinbase Smart Wallet with delegated batch disabled server-side — must fall to eip3009
+    { profileLabel: "coinbase_smart_wallet", asset: "USDC", delegatedEnabled: false, relayerAvailable: serverRelayer, allowanceSufficient: false },
+    // ETH — all relevant profiles (always base_eth_direct regardless of wallet family)
     { profileLabel: "metamask", asset: "ETH", delegatedEnabled: serverDelegated, relayerAvailable: serverRelayer, allowanceSufficient: false },
+    { profileLabel: "coinbase_smart_wallet", asset: "ETH", delegatedEnabled: serverDelegated, relayerAvailable: serverRelayer, allowanceSufficient: false },
+    { profileLabel: "trust_wallet", asset: "ETH", delegatedEnabled: serverDelegated, relayerAvailable: serverRelayer, allowanceSufficient: false },
+    { profileLabel: "coinbase_eoa", asset: "ETH", delegatedEnabled: serverDelegated, relayerAvailable: serverRelayer, allowanceSufficient: false },
   ]
+}
+
+function buildMissingCoverage(
+  results: Array<{ validation: { expected: BasePayStrategy; pass: boolean }; scenario: { asset: string } } | null>,
+  serverDelegated: boolean,
+  serverRelayer: boolean,
+): string[] {
+  const missing: string[] = []
+  const passing = new Set(
+    results
+      .filter((r): r is NonNullable<typeof r> => r !== null && r.validation.pass)
+      .map((r) => `${r.scenario.asset}:${r.validation.expected}`),
+  )
+
+  if (!passing.has("ETH:base_eth_direct")) missing.push("ETH → base_eth_direct (no passing ETH scenario)")
+  if (serverDelegated && !passing.has("USDC:usdc_delegated_batch_wallet_sendCalls")) {
+    missing.push("USDC → usdc_delegated_batch_wallet_sendCalls (delegated enabled but no passing scenario)")
+  }
+  if (serverRelayer && !passing.has("USDC:usdc_eip3009_relayer")) {
+    missing.push("USDC → usdc_eip3009_relayer (relayer enabled but no passing scenario)")
+  }
+  if (!passing.has("USDC:usdc_allowance_direct")) missing.push("USDC → usdc_allowance_direct (no passing scenario)")
+  if (!passing.has("USDC:usdc_allowance_two_step")) missing.push("USDC → usdc_allowance_two_step (no passing scenario)")
+
+  return missing
 }
 
 // ─── Route handler ────────────────────────────────────────────────────────────
@@ -228,6 +258,7 @@ export async function GET(req: NextRequest) {
 
     const passed = results.filter((r) => r && r.validation.pass).length
     const failed = results.filter((r) => r && !r.validation.pass).length
+    const missingCoverage = buildMissingCoverage(results, serverDelegated, serverRelayer)
 
     return NextResponse.json({
       ok: true,
@@ -235,7 +266,8 @@ export async function GET(req: NextRequest) {
         delegatedEnabled: serverDelegated,
         relayerAvailable: serverRelayer,
       },
-      summary: { total: results.length, passed, failed },
+      summary: { total: results.length, passed, failed, missingCoverage: missingCoverage.length },
+      missingCoverage,
       note: "Relayer unavailable mid-flow (after user signed EIP-3009) stops cleanly — BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE is re-thrown without falling to allowance path.",
       results,
     })

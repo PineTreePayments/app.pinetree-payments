@@ -267,6 +267,10 @@ export default function PayClient() {
     setSelectedAssetId("")
   }, [])
 
+  const handleLightningCancelPayment = useCallback(() => {
+    setSelectedAssetId("")
+  }, [])
+
   // ── Direct-payload mode state (non-intent, legacy QR) ─────────────────────
   const payload = useMemo(() => parsePayload(rawData), [rawData])
   const [selectedNetwork, setSelectedNetwork] = useState<string | null>(null)
@@ -1310,6 +1314,7 @@ export default function PayClient() {
                             onPaymentCreated={() => {
                               void loadIntentCallback()
                             }}
+                            onCancel={handleLightningCancelPayment}
                           />
                         ) : null}
 

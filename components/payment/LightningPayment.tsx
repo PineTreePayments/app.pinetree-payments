@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Button from "@/components/ui/Button"
+import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import WalletPickerModal, { type WalletPickerSection } from "@/components/payment/WalletPickerModal"
 
 type LightningWallet = {
@@ -44,6 +45,7 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/search?term=Wallet%20of%20Satoshi",
     androidStoreUrl: "https://play.google.com/store/apps/details?id=com.livingroomofsatoshi.wallet",
     universalUrl: "https://www.walletofsatoshi.com",
+    invoiceUrlBuilder: (invoiceBolt11) => `lightning:${invoiceBolt11}`,
   },
   {
     id: "muun",
@@ -52,6 +54,7 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
     iosStoreUrl: "https://apps.apple.com/us/search?term=Muun%20Bitcoin%20Lightning",
     androidStoreUrl: "https://play.google.com/store/search?q=Muun%20Bitcoin%20Lightning&c=apps",
     universalUrl: "https://muun.com",
+    invoiceUrlBuilder: (invoiceBolt11) => `lightning:${invoiceBolt11}`,
   },
   {
     id: "phoenix",
@@ -91,11 +94,21 @@ const LIGHTNING_WALLETS: LightningWallet[] = [
   },
 ]
 
+const TERMINAL_PAYMENT_STATUSES = new Set(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "CANCELED"])
+
+function normalizeTerminalStatus(status?: string): string {
+  const normalized = String(status || "").trim().toUpperCase()
+  if (normalized === "CANCELLED") return "CANCELED"
+  return TERMINAL_PAYMENT_STATUSES.has(normalized) ? normalized : ""
+}
+
 type Props = {
   intentId: string
   usdAmount: number
   paymentStatus?: string
   onPaymentCreated?: () => void
+  onExecutionStarted?: () => void
+  onCancel?: () => void
 }
 
 type LightningSelectionResult = {
@@ -136,11 +149,22 @@ function getStoreFallbackUrl(wallet: LightningWallet): string {
   return wallet.universalUrl || wallet.iosStoreUrl || wallet.androidStoreUrl || ""
 }
 
+async function logLightning(stage: string, payload: Record<string, unknown> = {}): Promise<void> {
+  console.log("[LIGHTNING DEBUG]", stage, payload)
+  await fetch("/api/debug/lightning", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ stage, payload }),
+  }).catch(() => null)
+}
+
 export default function LightningPayment({
   intentId,
   usdAmount,
   paymentStatus,
   onPaymentCreated,
+  onExecutionStarted,
+  onCancel,
 }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -150,12 +174,17 @@ export default function LightningPayment({
   const [walletPickerOpen, setWalletPickerOpen] = useState(false)
   const [walletSearch, setWalletSearch] = useState("")
   const [pendingWalletId, setPendingWalletId] = useState("")
+  const walletLaunchedRef = useRef(false)
+  const [walletLaunched, setWalletLaunched] = useState(false)
+  const [noPayAfterReturn, setNoPayAfterReturn] = useState(false)
+  const [launchedWalletName, setLaunchedWalletName] = useState("")
   const autoPrepareStartedRef = useRef(false)
 
   const invoice = String(payment?.paymentUrl || "")
   const invoiceUri = useMemo(() => normalizeLightningUri(invoice), [invoice])
   const hasInvoice = Boolean(invoiceUri)
-  const status = String(paymentStatus || "").toUpperCase()
+  const terminalStatus = normalizeTerminalStatus(paymentStatus)
+  const isPaymentProcessing = String(paymentStatus || "").toUpperCase() === "PROCESSING"
   const formattedUsdAmount = useMemo(() => new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
@@ -202,14 +231,48 @@ export default function LightningPayment({
     void prepareInvoice()
   }, [hasInvoice, prepareInvoice])
 
+  // When the customer returns to this page after being sent to a Lightning wallet,
+  // surface recovery actions if no payment was completed.
+  useEffect(() => {
+    function handleReturn() {
+      if (!walletLaunchedRef.current) return
+      setNoPayAfterReturn(true)
+      void logLightning("wallet_returned_without_payment", { walletName: launchedWalletName || null, rail: "lightning" })
+    }
+    function handleVisibility() {
+      if (document.visibilityState === "visible") handleReturn()
+    }
+    document.addEventListener("visibilitychange", handleVisibility)
+    window.addEventListener("pageshow", handleReturn)
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility)
+      window.removeEventListener("pageshow", handleReturn)
+    }
+  }, [])
+
   const openLightningWallet = useCallback((wallet: LightningWallet) => {
     if (!invoiceUri) return
 
     setPendingWalletId(wallet.id)
     setWalletPickerOpen(false)
+    walletLaunchedRef.current = true
+    setWalletLaunched(true)
+    setNoPayAfterReturn(false)
+    setLaunchedWalletName(wallet.name)
+    onExecutionStarted?.()
+
+    void logLightning("wallet_selected", { walletId: wallet.id, walletName: wallet.name, rail: "lightning" })
 
     if (wallet.invoiceUrlBuilder) {
-      const appUrl = wallet.invoiceUrlBuilder(getBolt11Invoice(invoiceUri))
+      const bolt11 = getBolt11Invoice(invoiceUri)
+      const appUrl = wallet.invoiceUrlBuilder(bolt11)
+
+      void logLightning("lightning_uri_generated", {
+        walletId: wallet.id,
+        rail: "lightning",
+        scheme: appUrl.split(":")[0],
+        invoicePrefix: bolt11.slice(0, 12),
+      })
 
       // Attempt to bring the wallet app to the foreground.
       // After 1.4 s, if the page is still visible (app didn't open / not installed),
@@ -217,6 +280,7 @@ export default function LightningPayment({
       // This is the safest pattern available since browsers cannot detect installed apps.
       const fallbackTimer = window.setTimeout(() => {
         if (document.visibilityState === "visible") {
+          void logLightning("app_store_fallback_triggered", { walletId: wallet.id, rail: "lightning", reason: "timeout_1400ms" })
           const storeUrl = getStoreFallbackUrl(wallet)
           if (storeUrl) window.open(storeUrl, "_blank", "noopener,noreferrer")
         }
@@ -232,6 +296,7 @@ export default function LightningPayment({
         { once: true },
       )
 
+      void logLightning("app_open_attempted", { walletId: wallet.id, rail: "lightning", scheme: appUrl.split(":")[0] })
       window.location.href = appUrl
       return
     }
@@ -242,6 +307,7 @@ export default function LightningPayment({
       return
     }
 
+    void logLightning("app_store_fallback_triggered", { walletId: wallet.id, rail: "lightning", reason: "no_invoice_url_builder" })
     window.open(installUrl, "_blank", "noopener,noreferrer")
     setPendingWalletId("")
   }, [invoiceUri])
@@ -275,6 +341,20 @@ export default function LightningPayment({
     window.setTimeout(() => setCopiedField(""), 1800)
   }
 
+  if (terminalStatus) {
+    if (terminalStatus === "CONFIRMED") {
+      void logLightning("payment_confirmed", { rail: "lightning", status: terminalStatus })
+    }
+    return (
+      <div className="space-y-3">
+        <div className="text-center text-xs font-semibold uppercase tracking-widest text-gray-500">
+          Bitcoin Lightning Payment
+        </div>
+        <PaymentStatusVisual status={terminalStatus} variant="card" />
+      </div>
+    )
+  }
+
   if (!hasInvoice) {
     return (
       <div className="space-y-3">
@@ -291,6 +371,8 @@ export default function LightningPayment({
       </div>
     )
   }
+
+  const showRecovery = walletLaunched && noPayAfterReturn && !isPaymentProcessing
 
   return (
     <div className="space-y-4">
@@ -310,19 +392,61 @@ export default function LightningPayment({
         </div>
       ) : null}
 
-      <Button
-        fullWidth
-        onClick={() => {
-          setWalletSearch("")
-          setWalletPickerOpen(true)
-        }}
-      >
-        Choose Lightning Wallet
-      </Button>
+      {showRecovery ? (
+        <>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            No payment detected. Your wallet returned without completing the payment.
+          </div>
+          <Button
+            fullWidth
+            onClick={() => {
+              void logLightning("retry_requested", { walletName: launchedWalletName || null, rail: "lightning" })
+              setWalletSearch("")
+              setWalletPickerOpen(true)
+            }}
+          >
+            {launchedWalletName ? `Try again with ${launchedWalletName}` : "Try again"}
+          </Button>
+          {onCancel ? (
+            <button
+              type="button"
+              onClick={() => {
+                void logLightning("switch_method", { walletName: launchedWalletName || null, rail: "lightning" })
+                setWalletLaunched(false)
+                setNoPayAfterReturn(false)
+                walletLaunchedRef.current = false
+                onCancel()
+              }}
+              className="w-full text-center text-xs text-gray-500 underline underline-offset-2 py-1 hover:text-gray-700 transition-colors"
+            >
+              Switch payment method
+            </button>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <Button
+            fullWidth
+            onClick={() => {
+              setWalletSearch("")
+              setWalletPickerOpen(true)
+            }}
+          >
+            Choose Lightning Wallet
+          </Button>
 
-      <Button fullWidth onClick={() => { window.location.href = invoiceUri }}>
-        Pay with installed Lightning wallet
-      </Button>
+          <Button fullWidth onClick={() => {
+            walletLaunchedRef.current = true
+            setWalletLaunched(true)
+            setNoPayAfterReturn(false)
+            setLaunchedWalletName("")
+            onExecutionStarted?.()
+            window.location.href = invoiceUri
+          }}>
+            Pay with installed Lightning wallet
+          </Button>
+        </>
+      )}
 
       <WalletPickerModal
         open={walletPickerOpen}
@@ -386,12 +510,6 @@ export default function LightningPayment({
           Open your Lightning wallet, paste the invoice, and confirm the exact amount.
         </p>
       </section>
-
-      {status ? (
-        <div className="text-center text-xs uppercase tracking-widest text-gray-500">
-          {status}
-        </div>
-      ) : null}
 
       <button
         onClick={() => setShowDetails((v) => !v)}

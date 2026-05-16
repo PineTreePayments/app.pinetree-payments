@@ -198,6 +198,15 @@ function buildInstallUrl(wallet: WalletCatalogItem): string {
   return wallet.installUrl
 }
 
+async function logSolana(stage: string, payload: Record<string, unknown> = {}): Promise<void> {
+  console.log("[SOLANA DEBUG]", stage, payload)
+  await fetch("/api/debug/solana", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ stage, payload }),
+  }).catch(() => null)
+}
+
 export default function SolanaWalletPayment({
   intentId,
   selectedAsset = "SOL",
@@ -254,6 +263,7 @@ export default function SolanaWalletPayment({
     function handleReturn() {
       if (!walletLaunchedRef.current) return
       setNoTxAfterReturn(true)
+      void logSolana("wallet_returned_without_signature", { rail: "solana" })
       // Unfreeze any "connecting" stage left over from the mobile redirect
       setExecStage((current) => {
         if (current === "connecting_wallet" || current === "creating_payment") return "idle"
@@ -383,6 +393,8 @@ export default function SolanaWalletPayment({
     }
 
     setExecStage("wallet_connected")
+    void logSolana("tx_requested", { paymentId, rail: "solana", hasPublicKey: true })
+
     const res = await fetch(`/api/solana-pay/transaction?paymentId=${encodeURIComponent(paymentId)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -404,6 +416,7 @@ export default function SolanaWalletPayment({
       throw new Error("Wallet did not return a transaction signature")
     }
 
+    void logSolana("signature_received", { paymentId, rail: "solana", signaturePrefix: signature.slice(0, 8) })
     return signature
   }
 
@@ -418,22 +431,29 @@ export default function SolanaWalletPayment({
     setNoTxAfterReturn(false)
     onExecutionStarted?.()
 
+    void logSolana("wallet_selected", { walletId: wallet.id, walletName: wallet.name, rail: "solana", openStrategy: "injected_provider" })
+
     try {
       const preparedPayment = await getPaymentData()
+      void logSolana("wallet_open_attempted", { walletId: wallet.id, paymentId: preparedPayment.paymentId, rail: "solana" })
       setExecStage("connecting_wallet")
       const signature = await sendWalletTransaction(wallet.provider, preparedPayment.paymentId)
 
       setExecStage("payment_submitted")
+      void logSolana("detect_called", { paymentId: preparedPayment.paymentId, rail: "solana", signaturePrefix: signature.slice(0, 8) })
       await fetch(`/api/payments/${encodeURIComponent(preparedPayment.paymentId)}/detect`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ txHash: signature }),
       }).catch(() => null)
+      void logSolana("detect_completed", { paymentId: preparedPayment.paymentId, rail: "solana" })
 
       setExecStage("detecting")
       onPaymentCreated?.(preparedPayment.paymentId)
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to send Solana transaction"
+      const isRejected = message.toLowerCase().includes("reject") || message.toLowerCase().includes("denied")
+      void logSolana(isRejected ? "user_rejected" : "retryable_error", { walletId: wallet.id, rail: "solana", error: message })
       setError(message)
       setExecStage("retryable_error")
       onError?.(message)
@@ -452,6 +472,8 @@ export default function SolanaWalletPayment({
     setWalletLaunched(true)
     setNoTxAfterReturn(false)
     onExecutionStarted?.()
+
+    void logSolana("wallet_selected", { walletId: wallet.id, walletName: wallet.name, rail: "solana", openStrategy: "mobile_deep_link" })
 
     try {
       const preparedPayment = await getPaymentData()
@@ -472,13 +494,16 @@ export default function SolanaWalletPayment({
         if (!res.ok || !data.connectUrl) {
           throw new Error(data.error || "Failed to open Solflare")
         }
+        void logSolana("deep_link_generated", { walletId: wallet.id, paymentId: preparedPayment.paymentId, rail: "solana", strategy: "solflare_universal" })
         const fallbackTimer = window.setTimeout(() => {
           if (document.visibilityState === "visible") {
+            void logSolana("timeout", { walletId: wallet.id, paymentId: preparedPayment.paymentId, rail: "solana", fallback: "install_page" })
             window.location.href = buildInstallUrl(wallet)
           }
         }, 1400)
 
         window.addEventListener("pagehide", () => window.clearTimeout(fallbackTimer), { once: true })
+        void logSolana("wallet_open_attempted", { walletId: wallet.id, paymentId: preparedPayment.paymentId, rail: "solana", strategy: "solflare_universal" })
         window.location.href = data.connectUrl
         return
       }
@@ -499,16 +524,21 @@ export default function SolanaWalletPayment({
           })
         : buildMobileWalletBrowserUrl(wallet, targetUrl)
 
+      void logSolana("deep_link_generated", { walletId: wallet.id, paymentId: preparedPayment.paymentId, rail: "solana", strategy: wallet.mobileDeepLink ?? "deep_link" })
+
       const fallbackTimer = window.setTimeout(() => {
         if (document.visibilityState === "visible") {
+          void logSolana("timeout", { walletId: wallet.id, paymentId: preparedPayment.paymentId, rail: "solana", fallback: "install_page" })
           window.location.href = buildInstallUrl(wallet)
         }
       }, 1400)
 
       window.addEventListener("pagehide", () => window.clearTimeout(fallbackTimer), { once: true })
+      void logSolana("wallet_open_attempted", { walletId: wallet.id, paymentId: preparedPayment.paymentId, rail: "solana", strategy: wallet.mobileDeepLink ?? "deep_link" })
       window.location.href = walletUrl
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to open Solana wallet"
+      void logSolana("retryable_error", { walletId: wallet.id, rail: "solana", error: message })
       setError(message)
       setExecStage("retryable_error")
       onError?.(message)
@@ -728,6 +758,7 @@ export default function SolanaWalletPayment({
           <Button
             fullWidth
             onClick={() => {
+              void logSolana("retry_requested", { walletName: activeWalletName || null, rail: "solana" })
               refreshWallets()
               setWalletSearch("")
               setWalletPickerOpen(true)
@@ -739,6 +770,7 @@ export default function SolanaWalletPayment({
             <button
               type="button"
               onClick={() => {
+                void logSolana("switch_method", { walletName: activeWalletName || null, rail: "solana" })
                 setError("")
                 setExecStage("idle")
                 setWalletLaunched(false)
