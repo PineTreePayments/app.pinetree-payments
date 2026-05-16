@@ -241,7 +241,7 @@ export async function createPaymentIntentEngine(input: {
 
   const availableNetworks = await getMerchantAvailableNetworks(merchantId)
   if (availableNetworks.length === 0) {
-    throw new Error("No supported wallets connected (requires Solana and/or Base)")
+    throw new Error("No crypto payment methods are enabled for this merchant.")
   }
 
   const intentId = crypto.randomUUID()

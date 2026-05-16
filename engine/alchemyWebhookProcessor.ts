@@ -39,6 +39,29 @@ export async function processAlchemyWebhook(input: {
         const payment = walletToPayment.get(toAddress)
         if (!payment) return
 
+        // contract_split payments require paymentRef verification before any status
+        // advancement. The Alchemy ADDRESS_ACTIVITY webhook matches by wallet address
+        // only — it carries no on-chain PaymentSplit log or paymentRef to verify
+        // against. Emitting an unverified event would advance stale active payments to
+        // PROCESSING whenever any other payment uses the same shared treasury address.
+        //
+        // The paymentWatcher / detect endpoint handles contract_split confirmation
+        // correctly by decoding the PaymentSplit log and checking paymentRef === paymentId.
+        // Let that path remain the authoritative confirmation source.
+        const split = ((payment.metadata ?? null) as StoredPaymentSplitMetadata | null)?.split
+        const feeCaptureMethod = String(split?.feeCaptureMethod || "").trim().toLowerCase()
+        if (feeCaptureMethod === "contract_split") {
+          console.info("[alchemyWebhook] base_webhook_skipped_unverified_payment_ref", {
+            paymentId: payment.id,
+            paymentStatus: payment.status,
+            toAddress,
+            txHash: activity.hash ?? null,
+            feeCaptureMethod,
+            reason: "contract_split requires paymentRef verification — address-only match rejected; watcher/detect is authoritative"
+          })
+          return
+        }
+
         await processPaymentEvent({
           type: "payment.confirmed",
           paymentId: payment.id,

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { hasProviderConnected } from "@/database/merchants"
+import { getMerchantAvailableNetworks } from "@/engine/paymentIntents"
 
 export async function GET(req: NextRequest) {
   try {
@@ -10,12 +11,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Missing merchantId" }, { status: 400 })
     }
 
-    const cardEnabled = await hasProviderConnected(merchantId, "shift4")
+    const [cardEnabled, availableNetworks] = await Promise.all([
+      hasProviderConnected(merchantId, "shift4"),
+      getMerchantAvailableNetworks(merchantId),
+    ])
+
+    // Crypto is available if the merchant has at least one non-card crypto rail ready.
+    // "shift4" is the hosted card network; every other network in availableNetworks is crypto.
+    const cryptoEnabled = availableNetworks.some((n) => n !== "shift4")
 
     return NextResponse.json({
       cash: true,
-      crypto: true,
-      card: cardEnabled
+      crypto: cryptoEnabled,
+      card: cardEnabled,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal server error"

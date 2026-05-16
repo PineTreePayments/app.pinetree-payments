@@ -123,6 +123,29 @@ type Feedback = {
   created_at: string
 }
 
+type AdminTxDetail = {
+  id: string
+  merchant_id: string
+  status: string
+  provider: string | null
+  network: string | null
+  gross_amount: number
+  merchant_amount: number
+  pinetree_fee: number
+  currency: string
+  provider_reference: string | null
+  metadata: unknown
+  created_at: string
+  updated_at: string
+}
+
+type TxEvent = {
+  id: string
+  event_type: string
+  provider_event: string | null
+  created_at: string
+}
+
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
 type AdminTab = "overview" | "support" | "feedback"
@@ -220,6 +243,31 @@ function fmtDateTime(iso: string) {
 
 function currentMonthLabel() {
   return new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })
+}
+
+const EVENT_LABELS: Record<string, string> = {
+  "payment.created":    "Created",
+  "payment.pending":    "Pending",
+  "payment.processing": "Processing",
+  "payment.confirmed":  "Confirmed",
+  "payment.failed":     "Failed",
+  "payment.cancelled":  "Cancelled",
+  "payment.incomplete": "Incomplete",
+  "payment.expired":    "Expired",
+  "payment.refunded":   "Refunded",
+}
+
+function paymentModeFromMetadata(metadata: unknown): "live" | "test" {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return "live"
+  const m = (metadata as Record<string, unknown>).payment_mode
+  return m === "test" ? "test" : "live"
+}
+
+const NETWORK_LABELS: Record<string, string> = {
+  solana:            "Solana",
+  base:              "Base",
+  bitcoin_lightning: "Lightning",
+  ethereum:          "Ethereum",
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
@@ -350,6 +398,11 @@ export default function AdminPage() {
   const [loadingFeedback, setLoadingFeedback] = useState(false)
   const [feedbackLoaded, setFeedbackLoaded] = useState(false)
 
+  // ── Transaction detail state ─────────────────────────────────────────────────
+  const [selectedTxId, setSelectedTxId] = useState<string | null>(null)
+  const [txDetail, setTxDetail] = useState<{ payment: AdminTxDetail; events: TxEvent[] } | null>(null)
+  const [loadingTxDetail, setLoadingTxDetail] = useState(false)
+
   // ── Auth ────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -450,6 +503,29 @@ export default function AdminPage() {
       fetchFeedback(token)
     }
   }, [token, activeTab, feedbackLoaded, fetchFeedback])
+
+  // ── Open transaction detail ──────────────────────────────────────────────────
+
+  const openTxDetail = useCallback(async (id: string, tk: string) => {
+    setSelectedTxId(id)
+    setTxDetail(null)
+    setLoadingTxDetail(true)
+    try {
+      const res = await fetch(`/api/admin/transactions/${encodeURIComponent(id)}`, {
+        headers: { Authorization: `Bearer ${tk}` },
+      })
+      if (!res.ok) {
+        toast.error("Failed to load transaction detail")
+        return
+      }
+      const data = await res.json()
+      setTxDetail({ payment: data.payment, events: data.events || [] })
+    } catch {
+      toast.error("Failed to load transaction detail")
+    } finally {
+      setLoadingTxDetail(false)
+    }
+  }, [])
 
   // ── Open ticket detail ──────────────────────────────────────────────────────
 
@@ -672,7 +748,7 @@ export default function AdminPage() {
             <div className="space-y-6 pb-8">
 
               {/* Payments — All Time */}
-              <DashboardSection title="Payments — All Time" titleTone="blue">
+              <DashboardSection title="Payments — All Time (All Modes)" titleTone="blue">
                 <MetricGrid columns="three">
                   <CompactMetricTile
                     label="Total"
@@ -786,7 +862,7 @@ export default function AdminPage() {
                       onClick: () => setActiveTab("feedback"),
                     },
                     { label: "Transaction Explorer", href: "/dashboard/admin/transactions", desc: "All platform payments" },
-                    { label: "Merchant Reports", href: "/dashboard/reports", desc: "Your account reports only" },
+                    { label: "Platform Reports", href: "/dashboard/admin/reports", desc: "Network reporting" },
                   ].map((link) =>
                     "onClick" in link ? (
                       <button
@@ -862,9 +938,10 @@ export default function AdminPage() {
                         ))}
                       </div>
                       {overview.recentTransactions.map((tx) => (
-                        <div
+                        <button
                           key={tx.id}
-                          className="flex items-center gap-3 px-5 py-3.5 sm:grid sm:grid-cols-[1fr_120px_110px_130px_100px] sm:gap-4"
+                          onClick={() => openTxDetail(tx.id, token)}
+                          className="w-full text-left flex items-center gap-3 px-5 py-3.5 sm:grid sm:grid-cols-[1fr_120px_110px_130px_100px] sm:gap-4 transition-colors hover:bg-[#0052FF]/[0.025] focus:outline-none"
                         >
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-mono text-xs text-gray-700">
@@ -886,7 +963,7 @@ export default function AdminPage() {
                           <div>
                             <StatusPill value={tx.status} styleMap={TX_STATUS_STYLE} />
                           </div>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   )}
@@ -1191,6 +1268,173 @@ export default function AdminPage() {
       {/* ════════════════════════════════════════════════════════════════════════
           TICKET DETAIL PANEL (shared, available from support tab)
       ════════════════════════════════════════════════════════════════════════ */}
+      {/* ════════════════════════════════════════════════════════════════════════
+          TRANSACTION DETAIL PANEL
+      ════════════════════════════════════════════════════════════════════════ */}
+      {selectedTxId && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px]"
+            onClick={() => {
+              setSelectedTxId(null)
+              setTxDetail(null)
+            }}
+          />
+          <div className="fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-white shadow-2xl sm:w-[560px] lg:w-[620px]">
+            {/* Panel header */}
+            <div className="flex-none border-b border-gray-100 px-6 py-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
+                    Platform Transaction Detail
+                  </p>
+                  <h2 className="mt-1 font-mono text-sm text-gray-800 break-all">
+                    {selectedTxId}
+                  </h2>
+                </div>
+                <button
+                  onClick={() => { setSelectedTxId(null); setTxDetail(null) }}
+                  className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {loadingTxDetail ? (
+              <div className="flex flex-1 items-center justify-center">
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+              </div>
+            ) : txDetail ? (
+              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+                {/* Status + amounts */}
+                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                  <div className="flex items-center justify-between gap-3 mb-4">
+                    <StatusPill value={txDetail.payment.status} styleMap={TX_STATUS_STYLE} />
+                    <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${paymentModeFromMetadata(txDetail.payment.metadata) === "test" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
+                      {paymentModeFromMetadata(txDetail.payment.metadata) === "test" ? "Test" : "Live"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">Total</p>
+                      <p className="mt-1 text-lg font-bold text-gray-900">
+                        {fmtUSD(Number(txDetail.payment.gross_amount ?? 0))}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">Merchant</p>
+                      <p className="mt-1 text-lg font-bold text-gray-900">
+                        {fmtUSD(Number(txDetail.payment.merchant_amount ?? 0))}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">Fee</p>
+                      <p className="mt-1 text-lg font-bold text-[#0052FF]">
+                        {fmtUSD(Number(txDetail.payment.pinetree_fee ?? 0))}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Details grid */}
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
+                  <div>
+                    <p className="text-gray-400">Merchant ID</p>
+                    <p className="mt-0.5 font-mono text-gray-700 break-all">{txDetail.payment.merchant_id}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400">Currency</p>
+                    <p className="mt-0.5 text-gray-700">{txDetail.payment.currency || "USD"}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400">Network</p>
+                    <p className="mt-0.5 text-gray-700">
+                      {txDetail.payment.network
+                        ? (NETWORK_LABELS[txDetail.payment.network] ?? txDetail.payment.network)
+                        : "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400">Provider</p>
+                    <p className="mt-0.5 text-gray-700">{txDetail.payment.provider || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400">Created</p>
+                    <p className="mt-0.5 text-gray-700">{fmtDateTime(txDetail.payment.created_at)}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400">Updated</p>
+                    <p className="mt-0.5 text-gray-700">{fmtDateTime(txDetail.payment.updated_at)}</p>
+                  </div>
+                  {txDetail.payment.provider_reference && (
+                    <div className="col-span-2">
+                      <p className="text-gray-400">Tx Hash / Reference</p>
+                      <p className="mt-0.5 font-mono text-gray-700 break-all text-[11px]">
+                        {txDetail.payment.provider_reference}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Event timeline */}
+                {txDetail.events.length > 0 && (
+                  <div>
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+                      Payment Timeline
+                    </p>
+                    <div className="space-y-1">
+                      {txDetail.events.map((ev) => (
+                        <div
+                          key={ev.id}
+                          className="flex items-start gap-3 rounded-xl bg-gray-50 px-3 py-2.5"
+                        >
+                          <div className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-blue-400" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-medium text-gray-800">
+                                {EVENT_LABELS[ev.event_type] ?? ev.event_type}
+                              </p>
+                              <p className="shrink-0 text-[11px] text-gray-400">
+                                {fmtDateTime(ev.created_at)}
+                              </p>
+                            </div>
+                            {ev.provider_event && (
+                              <p className="mt-0.5 text-[11px] text-gray-400">{ev.provider_event}</p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {txDetail.events.length === 0 && (
+                  <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+                    <p className="text-xs text-gray-400">No payment events recorded for this payment.</p>
+                  </div>
+                )}
+
+                {/* View in explorer */}
+                <div className="border-t border-gray-100 pt-4">
+                  <Link
+                    href={`/dashboard/admin/transactions?search=${encodeURIComponent(txDetail.payment.id)}`}
+                    className="text-xs font-medium text-[#0052FF] hover:underline"
+                    onClick={() => { setSelectedTxId(null); setTxDetail(null) }}
+                  >
+                    Open in Transaction Explorer →
+                  </Link>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-1 items-center justify-center">
+                <p className="text-sm text-gray-400">Failed to load transaction detail.</p>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
       {selectedTicketId && (
         <>
           <div

@@ -1144,11 +1144,11 @@ export default function BaseWalletPayment({
         pendingUsdcApproveTxRef.current = null
         setBaseUsdcV4Status("Waiting for authorization…")
         const maxWaitMs = 120_000
-        const pollIntervalMs = 3_000
+        const pollIntervalMs = 2_000
         const pollStartedAt = Date.now()
         let allowanceSufficient = false
+        void logBase("usdc-allowance-wait-started", { paymentId, via: "pending-wallet-action" })
         while (!allowanceSufficient && Date.now() - pollStartedAt < maxWaitMs) {
-          await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs))
           try {
             const checkRes = await fetch(
               `/api/payments/${encodeURIComponent(paymentId)}/base-usdc-v5/allowance-check`,
@@ -1163,6 +1163,8 @@ export default function BaseWalletPayment({
           } catch {
             // Continue polling on transient errors.
           }
+          if (allowanceSufficient) break
+          await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs))
         }
         if (!allowanceSufficient) {
           throw new Error("USDC allowance was not confirmed in time. Tap Continue in wallet to check again or Try Again to restart.")
@@ -1865,6 +1867,12 @@ export default function BaseWalletPayment({
         hasApproveTx: Boolean(buildData.approveTx),
         hasPaymentTx: Boolean(buildData.paymentTx)
       })
+      void logBase("usdc-amounts-debug", {
+        paymentId,
+        requiredAmount: buildData.requiredAmount,
+        currentAllowance: buildData.currentAllowance,
+        sufficient: buildData.sufficient,
+      })
       const { sufficient, approveTx, paymentTx } = buildData as Required<Pick<BaseUsdcV5AllowancePaymentResponse, "sufficient" | "approveTx" | "paymentTx">>
       // Store both two-step transactions before opening the wallet. If the mobile
       // native handoff is dismissed or WalletConnect transport times out, the UI can
@@ -1894,11 +1902,11 @@ export default function BaseWalletPayment({
         void logBase("usdc-approve-submitted", { paymentId, txHashPrefix: approveTxHash.slice(0, 10) })
         setBaseUsdcV4Status("Waiting for authorization…")
         const maxWaitMs = 120_000
-        const pollIntervalMs = 3_000
+        const pollIntervalMs = 2_000
         const pollStartedAt = Date.now()
         let allowanceSufficient = false
+        void logBase("usdc-allowance-wait-started", { paymentId })
         while (!allowanceSufficient && Date.now() - pollStartedAt < maxWaitMs) {
-          await new Promise<void>(resolve => setTimeout(resolve, pollIntervalMs))
           if (!isSendingBaseTxRef.current) break
           try {
             const checkRes = await fetch(
@@ -1916,6 +1924,8 @@ export default function BaseWalletPayment({
           } catch {
             // Continue polling on transient errors
           }
+          if (allowanceSufficient) break
+          await new Promise<void>(resolve => setTimeout(resolve, pollIntervalMs))
         }
         if (!allowanceSufficient) {
           throw new Error("USDC allowance was not confirmed in time. Please try again.")
@@ -1976,6 +1986,7 @@ export default function BaseWalletPayment({
       clearPendingWalletAction({ clearTransactions: false })
       input.finalPaymentTxRef.current = null
       input.finalPaymentIdRef.current = null
+      void logBase("usdc-payment-tx-hash-received", { paymentId, txHashPrefix: paymentTxHash.slice(0, 10) })
       console.log("[BASE USDC CHAIN] payment-submitted", { paymentId, txHashPrefix: paymentTxHash.slice(0, 10) })
       void logBase("[BASE USDC CHAIN] payment-submitted", { paymentId, txHashPrefix: paymentTxHash.slice(0, 10) })
       console.log("[BASE USDC CHAIN] final-tx", { paymentId, via: "allowance", txHashPrefix: paymentTxHash.slice(0, 10) })

@@ -209,6 +209,42 @@ export async function getAdminTransactionSummary(
   }
 }
 
+// ─── Single-payment detail ─────────────────────────────────────────────────────
+
+export type AdminTxDetailRow = {
+  id: string
+  merchant_id: string
+  status: string
+  provider: string | null
+  network: string | null
+  gross_amount: number
+  merchant_amount: number
+  pinetree_fee: number
+  currency: string
+  provider_reference: string | null
+  metadata: unknown
+  created_at: string
+  updated_at: string
+}
+
+export async function getAdminTransaction(id: string): Promise<AdminTxDetailRow | null> {
+  const safeId = String(id || "").replace(/[^a-zA-Z0-9\-]/g, "").slice(0, 36)
+  if (!safeId) return null
+  try {
+    const { data, error } = await db
+      .from("payments")
+      .select(
+        "id, merchant_id, status, provider, network, gross_amount, merchant_amount, pinetree_fee, currency, provider_reference, metadata, created_at, updated_at"
+      )
+      .eq("id", safeId)
+      .single()
+    if (error || !data) return null
+    return data as AdminTxDetailRow
+  } catch {
+    return null
+  }
+}
+
 /**
  * Provider and network distribution for the current filter context.
  * Used to compute "top provider" and "top network" health insights.

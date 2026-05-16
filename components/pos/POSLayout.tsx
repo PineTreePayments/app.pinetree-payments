@@ -86,7 +86,7 @@ export default function POSLayout({ terminalContext }: Props) {
   const [paymentError, setPaymentError] = useState("")
   const [breakdown, setBreakdown] = useState<Breakdown | null>(null)
   const [breakdownLoading, setBreakdownLoading] = useState(false)
-  const [availableMethods, setAvailableMethods] = useState<AvailableMethods>({ cash: true, crypto: true, card: false })
+  const [availableMethods, setAvailableMethods] = useState<AvailableMethods>({ cash: true, crypto: false, card: false })
   const [cashDigits, setCashDigits] = useState("")
   const [cashRecording, setCashRecording] = useState(false)
   const [canceling, setCanceling] = useState(false)
@@ -113,7 +113,7 @@ export default function POSLayout({ terminalContext }: Props) {
     setBreakdown(null)
     setCashDigits("")
     setCashRecording(false)
-    setAvailableMethods({ cash: true, crypto: true, card: false })
+    setAvailableMethods({ cash: true, crypto: false, card: false })
     resolvedPaymentIdRef.current = ""
   }
 
@@ -335,7 +335,7 @@ export default function POSLayout({ terminalContext }: Props) {
     if (methodsData) {
       setAvailableMethods({
         cash: methodsData.cash ?? true,
-        crypto: methodsData.crypto ?? true,
+        crypto: methodsData.crypto ?? false,
         card: methodsData.card ?? false
       })
     }
@@ -496,6 +496,7 @@ export default function POSLayout({ terminalContext }: Props) {
                   <Button
                     variant="secondary"
                     fullWidth
+                    disabled={!availableMethods.crypto}
                     onClick={startCrypto}
                   >
                     Crypto
