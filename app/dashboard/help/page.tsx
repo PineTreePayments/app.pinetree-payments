@@ -7,17 +7,22 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
+  CreditCard,
+  FileText,
   LifeBuoy,
   MessageSquare,
+  MonitorSmartphone,
   Search,
   Send,
+  ShieldAlert,
   Sparkles,
+  WalletCards,
   X
 } from "lucide-react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import { helpArticles, helpCategories, type HelpArticle } from "@/lib/help/helpContent"
-import { searchHelpArticles, type HelpSearchResult } from "@/lib/help/retrieval"
+import type { PineTreeAssistantAnswer } from "@/lib/help/pinetreeAssistant"
 import {
   feedbackTypes,
   supportTicketCategories,
@@ -72,13 +77,69 @@ type FeedbackForm = {
   rating: string
 }
 
+type AssistantMessage = {
+  id: string
+  role: "user" | "assistant"
+  content: string
+  answer?: PineTreeAssistantAnswer
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const suggestedQuestions = [
+  "Check my setup progress",
+  "What do I still need to finish?",
+  "Why isn't checkout ready?",
+  "Are my wallets connected?",
+  "Walk me through my first POS payment",
   "Why is my payment pending?",
-  "How do wallet connections work?",
-  "How do I troubleshoot a failed transaction?",
-  "What does Processing mean?"
+  "What information should I include in a support ticket?"
+]
+
+const supportHubSections = [
+  {
+    title: "Getting Started",
+    description: "Create your merchant account, complete the business profile, connect one rail, and run a test payment.",
+    icon: CheckCircle2,
+    articleIds: ["first-setup-checklist", "merchants-providers-wallets", "what-to-test-before-real-payments"]
+  },
+  {
+    title: "Accept Payments",
+    description: "Use PineTree POS, hosted checkout, payment links, and supported wallet or provider payment paths.",
+    icon: CreditCard,
+    articleIds: ["how-pos-works", "hosted-checkout-works", "online-checkout-links"]
+  },
+  {
+    title: "Transactions & Statuses",
+    description: "Understand CREATED, PENDING, PROCESSING, CONFIRMED, FAILED, and INCOMPLETE in merchant language.",
+    icon: FileText,
+    articleIds: ["status-pending", "status-processing", "status-incomplete"]
+  },
+  {
+    title: "Wallets & Providers",
+    description: "Connect Solana Pay, Base payments, Shift4, Lightning through Speed, and wallet rails when available.",
+    icon: WalletCards,
+    articleIds: ["providers-page-overview", "solana-provider-behavior", "base-wallet-payment-behavior"]
+  },
+  {
+    title: "Dashboard & Reports",
+    description: "Review overview metrics, transaction rows, wallet balances, exports, fees, and report windows.",
+    icon: MonitorSmartphone,
+    articleIds: ["dashboard-overview", "transactions-page", "reports-page"]
+  },
+  {
+    title: "Contact Support",
+    description: "Open tickets with payment ID, provider, network, timestamp, amount, and transaction hash when available.",
+    icon: LifeBuoy,
+    articleIds: ["open-support-ticket", "support-escalation-boundaries", "payment-stuck-processing"]
+  }
+]
+
+const escalationReasons = [
+  "Funds are missing, sent, or confirmed on-chain but not confirmed in PineTree.",
+  "A payment is stuck after customer funds were sent.",
+  "A provider connection fails repeatedly or needs approval/account review.",
+  "Refunds, disputes, compliance, underwriting, KYC/KYB, fraud, legal, tax, or admin database review is involved."
 ]
 
 const emptyTicketForm: TicketForm = {
@@ -179,6 +240,14 @@ export default function HelpCenterPage() {
   const [submittingTicket, setSubmittingTicket] = useState(false)
   const [submittingFeedback, setSubmittingFeedback] = useState(false)
   const [assistantQuestion, setAssistantQuestion] = useState("")
+  const [assistantLoading, setAssistantLoading] = useState(false)
+  const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([
+    {
+      id: "welcome",
+      role: "assistant",
+      content: "Ask me to check your setup, explain a payment status, inspect connected wallets or rails, or help prepare a support ticket. I use your authenticated PineTree account context when available."
+    }
+  ])
   const [ticketFilter, setTicketFilter] = useState<TicketFilter>("All")
   const [selectedTicket, setSelectedTicket] = useState<TicketRecord | null>(null)
   const [ticketDetailMessages, setTicketDetailMessages] = useState<TicketMessage[]>([])
@@ -202,14 +271,19 @@ export default function HelpCenterPage() {
     }))
   }, [])
 
+  const supportHubCards = useMemo(() => {
+    return supportHubSections.map((section) => ({
+      ...section,
+      articles: section.articleIds
+        .map((id) => helpArticles.find((article) => article.id === id))
+        .filter((article): article is HelpArticle => Boolean(article))
+    }))
+  }, [])
+
   const visibleLimit = articlesExpanded ? filteredArticles.length : DEFAULT_VISIBLE_ARTICLES
   const visibleArticles = filteredArticles.slice(0, visibleLimit)
   const hasMoreArticles = filteredArticles.length > visibleArticles.length
   const hasSearch = query.trim().length > 0
-
-  const assistantResults = useMemo<HelpSearchResult[]>(() => {
-    return searchHelpArticles(assistantQuestion, 3)
-  }, [assistantQuestion])
 
   const filteredTickets = useMemo(() => {
     return tickets.filter((ticket) => matchesTicketFilter(ticket, ticketFilter))
@@ -453,34 +527,137 @@ export default function HelpCenterPage() {
     }
   }
 
+  async function submitAssistantQuestion(questionOverride?: string) {
+    const message = (questionOverride ?? assistantQuestion).trim()
+    if (!message) return
+
+    const userMessage: AssistantMessage = {
+      id: `user-${Date.now()}`,
+      role: "user",
+      content: message
+    }
+
+    setAssistantMessages((current) => [...current, userMessage])
+    setAssistantQuestion("")
+
+    try {
+      setAssistantLoading(true)
+      const token = await getAccessToken()
+      if (!token) {
+        throw new Error("Sign in to use PineTree AI with account context.")
+      }
+
+      const res = await fetch("/api/help/assistant", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        credentials: "include",
+        body: JSON.stringify({ message })
+      })
+      const payload = (await res.json().catch(() => null)) as {
+        answer?: PineTreeAssistantAnswer
+        error?: string
+      } | null
+
+      if (!res.ok || !payload?.answer) {
+        throw new Error(payload?.error || "PineTree AI could not answer that yet.")
+      }
+
+      setAssistantMessages((current) => [
+        ...current,
+        {
+          id: `assistant-${Date.now()}`,
+          role: "assistant",
+          content: payload.answer?.body || "I checked your PineTree context.",
+          answer: payload.answer
+        }
+      ])
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : "PineTree AI is unavailable right now."
+      setAssistantMessages((current) => [
+        ...current,
+        {
+          id: `assistant-error-${Date.now()}`,
+          role: "assistant",
+          content: messageText
+        }
+      ])
+      toast.error(messageText)
+    } finally {
+      setAssistantLoading(false)
+    }
+  }
+
   return (
     <div className="space-y-5 md:space-y-7">
       <div>
         <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Help Center</h1>
         <p className="mt-1 text-[12px] font-semibold leading-5 tracking-[0.01em] text-[#0052FF] sm:text-sm">
-          PineTree Insight for payments, wallets, checkout, and merchant support.
+          PineTree merchant onboarding, setup, payment status, and support guidance.
         </p>
       </div>
 
-      <div className="rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.10),transparent_32%),linear-gradient(135deg,#ffffff_0%,#f8fbff_58%,#eef5ff_100%)] p-4 shadow-[0_12px_36px_rgba(0,82,255,0.10)] sm:p-5">
+      <div className="rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.12),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f8fbff_52%,#eef5ff_100%)] p-4 shadow-[0_12px_36px_rgba(0,82,255,0.10)] sm:p-5">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
-              Merchant Support
+              PineTree Support Center
             </p>
             <h2 className="mt-1.5 text-xl font-semibold leading-tight text-gray-950 sm:text-2xl">
-              Support workspace
+              Set up rails, understand payment states, and know when to escalate.
             </h2>
             <p className="mt-1 text-sm leading-5 text-gray-600">
-              Search docs, open tickets, and send feedback from one compact support panel.
+              PineTree AI and the help library are grounded in PineTree POS, hosted checkout, providers, wallets, dashboard reports, and the official payment state model.
             </p>
           </div>
           <div className="grid w-full grid-cols-2 gap-2 md:w-auto md:min-w-[300px]">
             <QuickAction label="Open a Ticket" icon={<LifeBuoy size={18} />} href="#support-ticket" />
-            <QuickAction label="General Feedback" icon={<MessageSquare size={18} />} href="#feedback" />
+            <QuickAction label="Ask PineTree AI" icon={<Bot size={18} />} href="#pinetree-ai" />
           </div>
         </div>
       </div>
+
+      <DashboardSection title="Support Paths" titleTone="blue">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {supportHubCards.map((section) => {
+            const Icon = section.icon
+            return (
+              <div
+                key={section.title}
+                className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-[#0052FF]">
+                    <Icon size={19} />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-semibold text-gray-950">{section.title}</h2>
+                    <p className="mt-1 text-xs leading-5 text-gray-600">{section.description}</p>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-1.5">
+                  {section.articles.map((article) => (
+                    <button
+                      key={article.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedCategory(article.category)
+                        setSelectedArticle(article)
+                      }}
+                      className="flex w-full items-center justify-between gap-2 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2 text-left text-xs font-semibold text-gray-700 transition hover:border-blue-200 hover:bg-blue-50/70"
+                    >
+                      <span className="min-w-0 truncate">{article.title}</span>
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[#0052FF]" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </DashboardSection>
 
       <GroupedMetricSurface className="p-3 sm:p-4">
         <div className="relative">
@@ -633,10 +810,26 @@ export default function HelpCenterPage() {
                 <div>
                   <h2 className="text-lg font-semibold text-gray-950">Open a Ticket</h2>
                   <p className="mt-1 text-sm leading-6 text-gray-600">
-                    Send PineTree the details needed to investigate payment, dashboard, settlement, or API issues.
+                    Send PineTree the details needed to investigate setup, provider, wallet, payment status, dashboard, or API issues.
                   </p>
                 </div>
                 <LifeBuoy className="h-6 w-6 shrink-0 text-[#0052FF]" />
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-3">
+                <div className="flex gap-2.5">
+                  <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-800">
+                      Escalate to PineTree support when
+                    </p>
+                    <div className="mt-2 grid gap-1.5 text-xs leading-5 text-amber-900 sm:grid-cols-2">
+                      {escalationReasons.map((reason) => (
+                        <p key={reason}>{reason}</p>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="mt-5 grid gap-3 md:grid-cols-2">
@@ -679,7 +872,7 @@ export default function HelpCenterPage() {
                     value={ticketForm.description}
                     onChange={(event) => setTicketForm((current) => ({ ...current, description: event.target.value }))}
                     className="form-field min-h-28 resize-y"
-                    placeholder="Include what happened, the approximate time, provider, network, amount, and any payment reference you have."
+                    placeholder="Include what happened, payment ID, provider, wallet/network, approximate time, amount, transaction hash if available, and what you expected."
                   />
                 </Field>
               </div>
@@ -869,65 +1062,77 @@ export default function HelpCenterPage() {
 
         {/* Right column: Assistant */}
         <div className="xl:flex xl:flex-col">
-          <DashboardSection title="Assistant" titleTone="blue" className="xl:flex xl:flex-col xl:flex-1">
-            <div className="xl:flex xl:flex-col xl:flex-1 rounded-2xl border border-blue-200/80 bg-[linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-5 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
+          <DashboardSection title="PineTree AI" titleTone="blue" className="xl:flex xl:flex-col xl:flex-1">
+            <div id="pinetree-ai" className="xl:flex xl:flex-col xl:flex-1 rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-5 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">
                     <Bot className="h-5 w-5 text-[#0052FF]" />
-                    <h2 className="text-lg font-semibold text-gray-950">Ask PineTree Assistant</h2>
+                    <h2 className="text-lg font-semibold text-gray-950">Ask PineTree AI</h2>
                   </div>
                   <p className="mt-2 text-sm leading-6 text-gray-600">
-                    Private beta placeholder. When enabled, answers will be grounded in PineTree help docs, transaction states, and merchant account context.
+                    PineTree AI can help you understand your account setup, connected wallets, payment rails, POS, checkout, dashboard, and recent payment status.
                   </p>
                 </div>
-                <ProviderStatusPill label="Coming Soon" tone="blue" />
+                <ProviderStatusPill label="Account-aware" tone="blue" />
               </div>
 
-              <div className="mt-4 space-y-2">
+              <div className="mt-4 grid gap-2">
                 {suggestedQuestions.map((question) => (
                   <button
                     key={question}
                     type="button"
-                    onClick={() => setAssistantQuestion(question)}
-                    className="w-full rounded-xl border border-blue-100 bg-white/80 px-3 py-2 text-left text-sm text-gray-700 transition hover:border-[#0052FF] hover:bg-blue-50"
+                    onClick={() => void submitAssistantQuestion(question)}
+                    disabled={assistantLoading}
+                    className="w-full rounded-xl border border-blue-100 bg-white/85 px-3 py-2 text-left text-sm font-medium text-gray-700 transition hover:border-[#0052FF] hover:bg-blue-50"
                   >
                     {question}
                   </button>
                 ))}
               </div>
 
-              <div className="mt-4 flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
+              <div className="mt-4 max-h-[560px] space-y-3 overflow-y-auto rounded-xl border border-blue-100 bg-white/75 p-3">
+                {assistantMessages.map((message) => (
+                  <AssistantMessageBubble
+                    key={message.id}
+                    message={message}
+                    onOpenArticle={(article) => {
+                      setSelectedCategory(article.category)
+                      setSelectedArticle(article)
+                      setQuery("")
+                    }}
+                  />
+                ))}
+                {assistantLoading && (
+                  <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-sm text-[#0052FF]">
+                    Checking your PineTree account context...
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-3 flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
                 <Sparkles className="h-4 w-4 text-[#0052FF]" />
                 <input
                   value={assistantQuestion}
                   onChange={(event) => setAssistantQuestion(event.target.value)}
-                  placeholder="Search PineTree help docs"
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault()
+                      void submitAssistantQuestion()
+                    }
+                  }}
+                  placeholder="Ask PineTree AI about your setup or a payment status"
                   className="min-h-9 flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
                 />
-              </div>
-
-              <div className="mt-3 xl:flex-1 rounded-xl border border-blue-100 bg-white/75 p-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.13em] text-[#0052FF]">
-                  Local docs preview
-                </p>
-                <div className="mt-2 space-y-2">
-                  {assistantResults.map((result) => (
-                    <button
-                      key={result.article.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedCategory(result.article.category)
-                        setSelectedArticle(result.article)
-                        setQuery("")
-                      }}
-                      className="block w-full rounded-lg px-2 py-1.5 text-left transition hover:bg-blue-50"
-                    >
-                      <span className="block text-sm font-semibold text-gray-950">{result.article.title}</span>
-                      <span className="mt-0.5 block text-xs leading-5 text-gray-600">{result.snippet}</span>
-                    </button>
-                  ))}
-                </div>
+                <button
+                  type="button"
+                  onClick={() => void submitAssistantQuestion()}
+                  disabled={assistantLoading || !assistantQuestion.trim()}
+                  aria-label="Ask PineTree AI"
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#0052FF] text-white transition hover:bg-blue-700 disabled:opacity-50"
+                >
+                  <Send size={15} />
+                </button>
               </div>
             </div>
           </DashboardSection>
@@ -954,6 +1159,111 @@ export default function HelpCenterPage() {
           onSendMessage={sendFollowUpMessage}
         />
       )}
+    </div>
+  )
+}
+
+function AssistantMessageBubble({
+  message,
+  onOpenArticle
+}: {
+  message: AssistantMessage
+  onOpenArticle: (article: HelpArticle) => void
+}) {
+  const isUser = message.role === "user"
+  const answer = message.answer
+
+  return (
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+      <div
+        className={`max-w-[92%] rounded-2xl border px-3 py-2.5 ${
+          isUser
+            ? "border-[#0052FF] bg-[#0052FF] text-white"
+            : "border-gray-200 bg-white text-gray-700 shadow-sm"
+        }`}
+      >
+        {answer ? (
+          <>
+            <p className="text-sm font-semibold text-gray-950">{answer.title}</p>
+            <p className="mt-1 text-sm leading-6 text-gray-600">{answer.body}</p>
+
+            {answer.checklist && answer.checklist.length > 0 && (
+              <div className="mt-3 space-y-1.5">
+                {answer.checklist.map((item) => (
+                  <div
+                    key={item.label}
+                    className="rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="text-xs font-semibold text-gray-700">{item.label}</span>
+                      <span
+                        className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                          item.tone === "good"
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : item.tone === "warning"
+                              ? "border-amber-200 bg-amber-50 text-amber-700"
+                              : "border-gray-200 bg-gray-100 text-gray-600"
+                        }`}
+                      >
+                        {item.tone === "good" ? "OK" : item.tone === "warning" ? "Review" : "Info"}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-gray-600">{item.value}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {answer.bullets.length > 0 && (
+              <div className="mt-3 space-y-1.5">
+                {answer.bullets.map((bullet) => (
+                  <div key={bullet} className="flex gap-2 text-xs leading-5 text-gray-700">
+                    <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#0052FF]" />
+                    <span>{bullet}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {answer.followUpQuestion && (
+              <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-5 text-[#0052FF]">
+                {answer.followUpQuestion}
+              </div>
+            )}
+
+            {answer.escalation && (
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+                {answer.escalation}
+              </div>
+            )}
+
+            {answer.matchedArticles.length > 0 && (
+              <div className="mt-3 border-t border-gray-100 pt-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-[#0052FF]">
+                  Related docs
+                </p>
+                <div className="mt-2 space-y-1">
+                  {answer.matchedArticles.map((result) => (
+                    <button
+                      key={result.article.id}
+                      type="button"
+                      onClick={() => onOpenArticle(result.article)}
+                      className="block w-full rounded-lg px-2 py-1.5 text-left transition hover:bg-blue-50"
+                    >
+                      <span className="block text-xs font-semibold text-gray-950">{result.article.title}</span>
+                      <span className="mt-0.5 block text-[11px] leading-4 text-gray-600">{result.snippet}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <p className={`text-sm leading-6 ${isUser ? "text-white" : "text-gray-600"}`}>
+            {message.content}
+          </p>
+        )}
+      </div>
     </div>
   )
 }

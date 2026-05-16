@@ -38,6 +38,7 @@ type PlatformReport = {
   expiredTransactions: number
   awaitingTransactions: number
   byNetwork: Record<string, ByNetworkEntry>
+  byProvider: Record<string, ByNetworkEntry>
   topMerchants: Array<{ merchantId: string; confirmedVolume: number; confirmedCount: number }>
   generatedAt: string
 }
@@ -106,6 +107,16 @@ const NETWORK_LABELS: Record<string, string> = {
   bitcoin_lightning: "Lightning",
   ethereum:         "Ethereum",
   unknown:          "Unknown",
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  solana:    "Solana Pay",
+  coinbase:  "Coinbase",
+  shift4:    "Shift4",
+  base:      "Base Pay",
+  lightning: "Lightning",
+  cash:      "Cash",
+  unknown:   "Unknown",
 }
 
 const AGE_LABELS: Record<string, string> = {
@@ -508,6 +519,40 @@ export default function AdminReportsPage() {
                       >
                         <div className="text-sm font-medium text-gray-900">
                           {NETWORK_LABELS[net] ?? net}
+                        </div>
+                        <div className="text-sm text-gray-600">{fmt(v.total)}</div>
+                        <div className="text-sm text-gray-600">{fmt(v.confirmed)}</div>
+                        <div className="text-sm font-medium text-gray-900">{fmtUSD(v.volume)}</div>
+                        <div className="text-sm text-gray-600">{fmtUSD(v.fees)}</div>
+                        <div className="text-sm text-gray-500">{pct(v.confirmed, v.total)}</div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </DashboardSection>
+          )}
+
+          {/* ── By provider ──────────────────────────────────────────────────── */}
+          {r && Object.keys(r.byProvider ?? {}).length > 0 && (
+            <DashboardSection title="Volume by Provider" titleTone="blue">
+              <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                <div className="hidden grid-cols-[1fr_90px_90px_110px_100px_80px] gap-4 bg-gray-50/60 px-5 py-2.5 sm:grid">
+                  {["Provider", "Total", "Confirmed", "Volume", "Fees", "Conv %"].map((h) => (
+                    <div key={h} className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+                      {h}
+                    </div>
+                  ))}
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {Object.entries(r.byProvider)
+                    .sort((a, b) => b[1].volume - a[1].volume)
+                    .map(([prov, v]) => (
+                      <div
+                        key={prov}
+                        className="grid grid-cols-[1fr_90px_90px_110px_100px_80px] gap-4 px-5 py-3"
+                      >
+                        <div className="text-sm font-medium text-gray-900">
+                          {PROVIDER_LABELS[prov] ?? prov}
                         </div>
                         <div className="text-sm text-gray-600">{fmt(v.total)}</div>
                         <div className="text-sm text-gray-600">{fmt(v.confirmed)}</div>

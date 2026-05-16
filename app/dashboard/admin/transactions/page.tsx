@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
-import { ArrowLeft, ChevronLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react"
+import { ArrowLeft, ChevronLeft, ChevronRight, Copy, RefreshCw, Search, X } from "lucide-react"
 import {
   CompactMetricTile,
   DashboardSection,
@@ -64,6 +64,44 @@ type AppliedFilters = {
   datePreset: string
 }
 
+// Detail drawer types
+
+type TxDetailPayment = {
+  id: string
+  merchant_id: string
+  status: string
+  provider: string | null
+  network: string | null
+  gross_amount: number
+  merchant_amount: number
+  pinetree_fee: number
+  currency: string
+  provider_reference: string | null
+  metadata: unknown
+  created_at: string
+  updated_at: string
+}
+
+type TxDetailEvent = {
+  id: string
+  event_type: string
+  provider_event: string | null
+  raw_payload: unknown
+  created_at: string
+}
+
+type TxDetailMerchant = {
+  id: string
+  email: string | null
+  business_name: string | null
+}
+
+type TxDetail = {
+  payment: TxDetailPayment
+  events: TxDetailEvent[]
+  merchant: TxDetailMerchant | null
+}
+
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
 const LIMIT = 50
@@ -72,12 +110,53 @@ const STATUSES = [
   { value: "", label: "All Statuses" },
   { value: "CONFIRMED",  label: "Confirmed" },
   { value: "PROCESSING", label: "Processing" },
-  { value: "PENDING",    label: "Pending" },
+  { value: "PENDING",    label: "Awaiting Customer" },
   { value: "CREATED",    label: "Created" },
   { value: "FAILED",     label: "Failed" },
   { value: "INCOMPLETE", label: "Incomplete" },
   { value: "EXPIRED",    label: "Expired" },
 ]
+
+const STATUS_LABELS: Record<string, string> = {
+  CREATED:    "Created",
+  PENDING:    "Awaiting Customer",
+  PROCESSING: "Processing",
+  CONFIRMED:  "Confirmed",
+  INCOMPLETE: "Incomplete",
+  FAILED:     "Failed",
+  EXPIRED:    "Expired",
+}
+
+const STATUS_DESCRIPTIONS: Record<string, string> = {
+  CREATED:    "Created, not yet shown to customer",
+  PENDING:    "Waiting for customer payment",
+  PROCESSING: "In-flight on-chain",
+  CONFIRMED:  "Payment complete",
+  INCOMPLETE: "Customer abandoned or did not finish",
+  FAILED:     "Payment failed or could not be completed",
+  EXPIRED:    "Timed out",
+}
+
+const TERMINAL_STATUSES = new Set(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED"])
+
+const EVENT_LABELS: Record<string, string> = {
+  "payment.created":    "Created",
+  "payment.pending":    "Pending",
+  "payment.processing": "Processing",
+  "payment.confirmed":  "Confirmed",
+  "payment.failed":     "Failed",
+  "payment.cancelled":  "Cancelled",
+  "payment.incomplete": "Incomplete",
+  "payment.expired":    "Expired",
+  "payment.refunded":   "Refunded",
+}
+
+const NETWORK_LABELS_DETAIL: Record<string, string> = {
+  solana:            "Solana",
+  base:              "Base",
+  bitcoin_lightning: "Lightning",
+  ethereum:          "Ethereum",
+}
 
 const NETWORKS = [
   { value: "", label: "All Networks" },
@@ -231,8 +310,71 @@ function StatusBadge({ status }: { status: string }) {
         STATUS_STYLE[status] ?? "bg-gray-100 text-gray-600 border-gray-200"
       }`}
     >
-      {status}
+      {STATUS_LABELS[status] ?? status}
     </span>
+  )
+}
+
+// ─── Detail drawer helpers ─────────────────────────────────────────────────────
+
+function extractMeta(metadata: unknown): {
+  paymentMode: "live" | "test"
+  merchantWallet: string | null
+  pinetreeWallet: string | null
+  splitContract: string | null
+  asset: string | null
+  strategy: string | null
+} {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return { paymentMode: "live", merchantWallet: null, pinetreeWallet: null, splitContract: null, asset: null, strategy: null }
+  }
+  const m = metadata as Record<string, unknown>
+  return {
+    paymentMode: m.payment_mode === "test" ? "test" : "live",
+    merchantWallet: (m.merchant_wallet ?? m.merchantWallet ?? m.wallet_address ?? null) as string | null,
+    pinetreeWallet: (m.pinetree_wallet ?? m.treasury_wallet ?? m.pinetreeWallet ?? m.treasuryWallet ?? null) as string | null,
+    splitContract: (m.split_contract ?? m.splitContract ?? m.splitContractAddress ?? null) as string | null,
+    asset: (m.asset ?? m.token ?? null) as string | null,
+    strategy: (m.strategy ?? null) as string | null,
+  }
+}
+
+function extractEventPayload(raw_payload: unknown): {
+  adminAction: string | null
+  failureReason: string | null
+  txHash: string | null
+} {
+  if (!raw_payload || typeof raw_payload !== "object" || Array.isArray(raw_payload)) {
+    return { adminAction: null, failureReason: null, txHash: null }
+  }
+  const p = raw_payload as Record<string, unknown>
+  return {
+    adminAction:   (p.adminAction   ?? p.admin_action   ?? null) as string | null,
+    failureReason: (p.failureReason ?? p.failure_reason ?? p.error ?? p.reason ?? null) as string | null,
+    txHash:        (p.txHash ?? p.tx_hash ?? p.signature ?? p.hash ?? null) as string | null,
+  }
+}
+
+function CopyButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false)
+  function doCopy() {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+  return (
+    <button
+      onClick={doCopy}
+      title="Copy"
+      className="ml-1.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-400 hover:text-gray-700 transition-colors"
+    >
+      {copied ? (
+        <span className="text-[10px] font-semibold text-emerald-600">✓</span>
+      ) : (
+        <Copy size={11} />
+      )}
+    </button>
   )
 }
 
@@ -289,6 +431,11 @@ export default function AdminTransactionsPage() {
   const [result,    setResult]    = useState<TxResult | null>(null)
   const [loading,   setLoading]   = useState(true)
 
+  // detail drawer
+  const [selectedTxId,    setSelectedTxId]    = useState<string | null>(null)
+  const [txDetail,        setTxDetail]        = useState<TxDetail | null>(null)
+  const [loadingTxDetail, setLoadingTxDetail] = useState(false)
+
   const searchRef = useRef<HTMLInputElement>(null)
 
   // ── Auth ────────────────────────────────────────────────────────────────────
@@ -338,6 +485,29 @@ export default function AdminTransactionsPage() {
     setMerchantId(""); setDatePreset("")
     setApplied(EMPTY_FILTERS)
     setOffset(0)
+  }, [])
+
+  const openTxDetail = useCallback(async (id: string) => {
+    setSelectedTxId(id)
+    setTxDetail(null)
+    setLoadingTxDetail(true)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) return
+      const res = await fetch(`/api/admin/transactions/${encodeURIComponent(id)}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+      if (!res.ok) {
+        toast.error("Failed to load transaction detail")
+        return
+      }
+      const data = await res.json() as TxDetail
+      setTxDetail(data)
+    } catch {
+      toast.error("Failed to load transaction detail")
+    } finally {
+      setLoadingTxDetail(false)
+    }
   }, [])
 
   // Auto-apply when dropdown fields change
@@ -704,9 +874,10 @@ export default function AdminTransactionsPage() {
 
               <div className="divide-y divide-gray-100">
                 {result.rows.map((tx) => (
-                  <div
+                  <button
                     key={tx.id}
-                    className="flex flex-col gap-1.5 px-5 py-3.5 sm:grid sm:grid-cols-[140px_1fr_140px_110px_110px_100px_100px_110px] sm:items-center sm:gap-3"
+                    onClick={() => openTxDetail(tx.id)}
+                    className="w-full text-left flex flex-col gap-1.5 px-5 py-3.5 transition-colors hover:bg-[#0052FF]/[0.025] focus:outline-none sm:grid sm:grid-cols-[140px_1fr_140px_110px_110px_100px_100px_110px] sm:items-center sm:gap-3"
                   >
                     {/* Time */}
                     <div className="text-xs text-gray-500">
@@ -757,7 +928,7 @@ export default function AdminTransactionsPage() {
                     <div className="hidden sm:block">
                       <StatusBadge status={tx.status} />
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </>
@@ -789,6 +960,308 @@ export default function AdminTransactionsPage() {
           </div>
         )}
       </DashboardSection>
+
+      {/* ════════════════════════════════════════════════════════════════════════
+          TRANSACTION DETAIL DRAWER
+      ════════════════════════════════════════════════════════════════════════ */}
+      {selectedTxId && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px]"
+            onClick={() => { setSelectedTxId(null); setTxDetail(null) }}
+          />
+          <div className="fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-white shadow-2xl sm:w-[580px] lg:w-[640px]">
+
+            {/* Panel header */}
+            <div className="flex-none border-b border-gray-100 px-6 py-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
+                    Platform Transaction Detail
+                  </p>
+                  <div className="mt-1 flex items-center gap-1">
+                    <h2 className="font-mono text-sm text-gray-800 break-all leading-snug">
+                      {selectedTxId}
+                    </h2>
+                    <CopyButton value={selectedTxId} />
+                  </div>
+                </div>
+                <button
+                  onClick={() => { setSelectedTxId(null); setTxDetail(null) }}
+                  className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {loadingTxDetail ? (
+              <div className="flex flex-1 items-center justify-center">
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+              </div>
+            ) : txDetail ? (
+              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+
+                {/* ── Status + amounts ─────────────────────────────────────── */}
+                {(() => {
+                  const meta = extractMeta(txDetail.payment.metadata)
+                  const isT = TERMINAL_STATUSES.has(txDetail.payment.status)
+                  return (
+                    <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4 space-y-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusBadge status={txDetail.payment.status} />
+                        <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${meta.paymentMode === "test" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
+                          {meta.paymentMode === "test" ? "Test" : "Live"}
+                        </span>
+                        <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${isT ? "bg-gray-100 text-gray-500 border-gray-200" : "bg-blue-50 text-blue-600 border-blue-200"}`}>
+                          {isT ? "Terminal" : "Non-terminal"}
+                        </span>
+                      </div>
+                      {STATUS_DESCRIPTIONS[txDetail.payment.status] && (
+                        <p className="text-xs text-gray-500">{STATUS_DESCRIPTIONS[txDetail.payment.status]}</p>
+                      )}
+                      <div className="grid grid-cols-3 gap-3 pt-1">
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">Gross Total</p>
+                          <p className="mt-1 text-lg font-bold text-gray-900">
+                            {fmtUSD(Number(txDetail.payment.gross_amount ?? 0))}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">Merchant</p>
+                          <p className="mt-1 text-lg font-bold text-gray-900">
+                            {fmtUSD(Number(txDetail.payment.merchant_amount ?? 0))}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">PineTree Fee</p>
+                          <p className="mt-1 text-lg font-bold text-[#0052FF]">
+                            {fmtUSD(Number(txDetail.payment.pinetree_fee ?? 0))}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                {/* ── Core details ─────────────────────────────────────────── */}
+                <div>
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Core Details</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
+                    <div>
+                      <p className="text-gray-400">Merchant ID</p>
+                      <div className="mt-0.5 flex items-start gap-1">
+                        <p className="font-mono text-gray-700 break-all">{txDetail.payment.merchant_id}</p>
+                        <CopyButton value={txDetail.payment.merchant_id} />
+                      </div>
+                    </div>
+                    {txDetail.merchant && (
+                      <div>
+                        <p className="text-gray-400">Business / Email</p>
+                        <p className="mt-0.5 text-gray-700">
+                          {txDetail.merchant.business_name || txDetail.merchant.email || "—"}
+                        </p>
+                        {txDetail.merchant.business_name && txDetail.merchant.email && (
+                          <p className="text-[11px] text-gray-400">{txDetail.merchant.email}</p>
+                        )}
+                      </div>
+                    )}
+                    <div>
+                      <p className="text-gray-400">Network / Rail</p>
+                      <p className="mt-0.5 text-gray-700">
+                        {txDetail.payment.network
+                          ? (NETWORK_LABELS_DETAIL[txDetail.payment.network] ?? txDetail.payment.network)
+                          : "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400">Provider</p>
+                      <p className="mt-0.5 text-gray-700">{txDetail.payment.provider || "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400">Currency</p>
+                      <p className="mt-0.5 text-gray-700">{txDetail.payment.currency || "USD"}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400">Payment Mode</p>
+                      <p className="mt-0.5 text-gray-700 capitalize">
+                        {extractMeta(txDetail.payment.metadata).paymentMode}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400">Created</p>
+                      <p className="mt-0.5 text-gray-700">{fmtDateTime(txDetail.payment.created_at)}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400">Updated</p>
+                      <p className="mt-0.5 text-gray-700">{fmtDateTime(txDetail.payment.updated_at)}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── References ───────────────────────────────────────────── */}
+                {txDetail.payment.provider_reference && (
+                  <div>
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Reference / Hash</p>
+                    <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5">
+                      <div className="flex items-start gap-1">
+                        <p className="font-mono text-[11px] text-gray-700 break-all leading-relaxed">
+                          {txDetail.payment.provider_reference}
+                        </p>
+                        <CopyButton value={txDetail.payment.provider_reference} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Wallet / split ───────────────────────────────────────── */}
+                {(() => {
+                  const meta = extractMeta(txDetail.payment.metadata)
+                  const hasWallet = meta.merchantWallet || meta.pinetreeWallet || meta.splitContract || meta.asset || meta.strategy
+                  if (!hasWallet) return null
+                  return (
+                    <div>
+                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Wallet & Routing</p>
+                      <div className="space-y-2 text-xs">
+                        {meta.merchantWallet && (
+                          <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
+                            <p className="text-gray-400">Merchant Wallet</p>
+                            <div className="mt-0.5 flex items-start gap-1">
+                              <p className="font-mono text-[11px] text-gray-700 break-all">{meta.merchantWallet}</p>
+                              <CopyButton value={meta.merchantWallet} />
+                            </div>
+                          </div>
+                        )}
+                        {meta.pinetreeWallet && (
+                          <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
+                            <p className="text-gray-400">PineTree Treasury Wallet</p>
+                            <div className="mt-0.5 flex items-start gap-1">
+                              <p className="font-mono text-[11px] text-gray-700 break-all">{meta.pinetreeWallet}</p>
+                              <CopyButton value={meta.pinetreeWallet} />
+                            </div>
+                          </div>
+                        )}
+                        {meta.splitContract && (
+                          <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
+                            <p className="text-gray-400">Split Contract</p>
+                            <div className="mt-0.5 flex items-start gap-1">
+                              <p className="font-mono text-[11px] text-gray-700 break-all">{meta.splitContract}</p>
+                              <CopyButton value={meta.splitContract} />
+                            </div>
+                          </div>
+                        )}
+                        {(meta.asset || meta.strategy) && (
+                          <div className="grid grid-cols-2 gap-2">
+                            {meta.asset && (
+                              <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
+                                <p className="text-gray-400">Asset</p>
+                                <p className="mt-0.5 text-gray-700">{meta.asset}</p>
+                              </div>
+                            )}
+                            {meta.strategy && (
+                              <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
+                                <p className="text-gray-400">Strategy</p>
+                                <p className="mt-0.5 text-gray-700">{meta.strategy}</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                {/* ── Payment timeline ─────────────────────────────────────── */}
+                <div>
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+                    Payment Timeline
+                  </p>
+                  {txDetail.events.length === 0 ? (
+                    <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+                      <p className="text-xs text-gray-400">No payment events recorded.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {txDetail.events.map((ev) => {
+                        const ep = extractEventPayload(ev.raw_payload)
+                        const isAdminAction = Boolean(ep.adminAction)
+                        return (
+                          <div
+                            key={ev.id}
+                            className={`rounded-xl px-3 py-2.5 ${isAdminAction ? "bg-amber-50 border border-amber-100" : "bg-gray-50"}`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <div className={`mt-1 h-2 w-2 shrink-0 rounded-full ${isAdminAction ? "bg-amber-400" : "bg-blue-400"}`} />
+                              <div className="min-w-0 flex-1 text-xs">
+                                <div className="flex items-center justify-between gap-2">
+                                  <p className="font-medium text-gray-800">
+                                    {EVENT_LABELS[ev.event_type] ?? ev.event_type}
+                                  </p>
+                                  <p className="shrink-0 text-[11px] text-gray-400">
+                                    {fmtDateTime(ev.created_at)}
+                                  </p>
+                                </div>
+                                {ev.provider_event && (
+                                  <p className="mt-0.5 text-[11px] text-gray-400">{ev.provider_event}</p>
+                                )}
+                                {ep.txHash && (
+                                  <div className="mt-1 flex items-center gap-1">
+                                    <p className="font-mono text-[11px] text-gray-500 truncate max-w-[240px]" title={ep.txHash}>
+                                      {ep.txHash.length > 24 ? ep.txHash.slice(0, 12) + "…" + ep.txHash.slice(-8) : ep.txHash}
+                                    </p>
+                                    <CopyButton value={ep.txHash} />
+                                  </div>
+                                )}
+                                {ep.failureReason && (
+                                  <p className="mt-1 text-[11px] text-red-600">↳ {ep.failureReason}</p>
+                                )}
+                                {isAdminAction && (
+                                  <p className="mt-1 text-[11px] font-medium text-amber-700">
+                                    Admin action: {ep.adminAction}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Audit ────────────────────────────────────────────────── */}
+                {(() => {
+                  const adminEvents = txDetail.events.filter((ev) => {
+                    const ep = extractEventPayload(ev.raw_payload)
+                    return Boolean(ep.adminAction)
+                  })
+                  if (!adminEvents.length) return null
+                  return (
+                    <div className="rounded-2xl border border-amber-200/60 bg-amber-50/50 px-4 py-3 text-xs space-y-1">
+                      <p className="font-semibold text-amber-800">Admin Cleanup Detected</p>
+                      {adminEvents.map((ev) => {
+                        const ep = extractEventPayload(ev.raw_payload)
+                        return (
+                          <p key={ev.id} className="text-amber-700">
+                            {EVENT_LABELS[ev.event_type] ?? ev.event_type} · {ep.adminAction}
+                            {ep.failureReason ? ` — ${ep.failureReason}` : ""}
+                            <span className="ml-1 text-amber-500">{fmtDateTime(ev.created_at)}</span>
+                          </p>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
+
+              </div>
+            ) : (
+              <div className="flex flex-1 items-center justify-center">
+                <p className="text-sm text-gray-400">Failed to load transaction detail.</p>
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   )
 }

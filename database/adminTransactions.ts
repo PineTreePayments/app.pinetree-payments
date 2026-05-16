@@ -245,6 +245,61 @@ export async function getAdminTransaction(id: string): Promise<AdminTxDetailRow 
   }
 }
 
+// ─── Single-payment events ─────────────────────────────────────────────────────
+
+export type AdminTxEventRow = {
+  id: string
+  event_type: string
+  provider_event: string | null
+  raw_payload: unknown
+  created_at: string
+}
+
+export async function getAdminTransactionEvents(paymentId: string): Promise<AdminTxEventRow[]> {
+  const safeId = String(paymentId || "").replace(/[^a-zA-Z0-9\-]/g, "").slice(0, 36)
+  if (!safeId) return []
+  try {
+    const { data, error } = await db
+      .from("payment_events")
+      .select("id, event_type, provider_event, raw_payload, created_at")
+      .eq("payment_id", safeId)
+      .order("created_at", { ascending: true })
+    if (error) {
+      console.error("[admin/tx] getAdminTransactionEvents error", error.message)
+      return []
+    }
+    return (data || []) as AdminTxEventRow[]
+  } catch {
+    return []
+  }
+}
+
+// ─── Merchant lookup for detail drawer ────────────────────────────────────────
+
+export type AdminTxMerchant = {
+  id: string
+  email: string | null
+  business_name: string | null
+}
+
+export async function getAdminTransactionMerchant(merchantId: string): Promise<AdminTxMerchant | null> {
+  const safeMid = String(merchantId || "").replace(/[^a-zA-Z0-9\-]/g, "").slice(0, 36)
+  if (!safeMid) return null
+  try {
+    const { data, error } = await db
+      .from("merchants")
+      .select("id, email, business_name")
+      .eq("id", safeMid)
+      .single()
+    if (error || !data) return null
+    return data as AdminTxMerchant
+  } catch {
+    return null
+  }
+}
+
+// ─── Distribution ──────────────────────────────────────────────────────────────
+
 /**
  * Provider and network distribution for the current filter context.
  * Used to compute "top provider" and "top network" health insights.

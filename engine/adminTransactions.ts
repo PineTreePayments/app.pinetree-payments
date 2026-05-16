@@ -2,13 +2,25 @@ import {
   getAdminTransactions,
   getAdminTransactionSummary,
   getAdminTransactionDistribution,
+  getAdminTransaction,
+  getAdminTransactionEvents,
+  getAdminTransactionMerchant,
   ADMIN_TX_SUMMARY_DEFAULT,
   type AdminTransactionFilters,
   type AdminTransactionRow,
   type AdminTransactionSummary,
+  type AdminTxDetailRow,
+  type AdminTxEventRow,
+  type AdminTxMerchant,
 } from "@/database/adminTransactions"
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
+
+export type AdminTransactionDetailResult = {
+  payment: AdminTxDetailRow
+  events: AdminTxEventRow[]
+  merchant: AdminTxMerchant | null
+}
 
 export type AdminTransactionsResult = {
   rows: AdminTransactionRow[]
@@ -60,4 +72,19 @@ export async function getAdminTransactionsEngine(
   )
 
   return { rows, totalCount, summary, distribution, generatedAt: new Date().toISOString() }
+}
+
+/**
+ * Full audit detail for a single platform payment — admin only, no merchant scope.
+ */
+export async function getAdminTransactionDetailEngine(
+  id: string
+): Promise<AdminTransactionDetailResult | null> {
+  const payment = await getAdminTransaction(id)
+  if (!payment) return null
+  const [events, merchant] = await Promise.all([
+    getAdminTransactionEvents(id),
+    getAdminTransactionMerchant(payment.merchant_id),
+  ])
+  return { payment, events, merchant }
 }

@@ -487,35 +487,44 @@ export const helpArticles: HelpArticle[] = [
     title: "When to open a support ticket",
     category: "Troubleshooting",
     description: "Open a ticket when the dashboard does not give enough detail to resolve a payment or setup issue.",
-    body: "Open a support ticket when a payment stays unclear after you check status, provider, network, amount, timestamp, and payment ID. Tickets are also useful for dashboard issues, settlement questions, wallet connection problems, provider setup questions, POS issues, API support, and feature requests.\n\nWhat this means: The fastest tickets include specific evidence instead of only a general description.\n\nWhat to check: Include payment ID, related payment ID field if available, provider, network, amount, customer action, timestamp, screenshots if useful, and what you expected to happen.",
+    body: "Open a support ticket when a payment stays unclear after you check status, provider, network, amount, timestamp, and payment ID. Tickets are also useful for dashboard issues, settlement questions, wallet connection problems, provider setup questions, POS issues, API support, and feature requests.\n\nWhat this means: The fastest tickets include specific evidence instead of only a general description. For payment issues, include the payment ID, provider, wallet/network, approximate time, amount, and transaction hash if available.\n\nWhat to check: Include payment ID, related payment ID field if available, provider, network, amount, customer action, timestamp, screenshots if useful, and what you expected to happen.",
     tags: ["support", "ticket", "troubleshooting"],
-    keywords: ["open ticket", "support", "help"]
+    keywords: ["open ticket", "support", "help", "transaction hash", "payment id"]
+  },
+  {
+    id: "support-escalation-boundaries",
+    title: "What PineTree support needs to review",
+    category: "Troubleshooting",
+    description: "Some payment, provider, compliance, and account-level questions require PineTree support or admin review.",
+    body: "PineTree AI can explain setup steps and basic troubleshooting, but it should escalate when funds are missing, a payment is stuck after funds were sent, a transaction is confirmed on-chain but not in PineTree, a provider connection fails repeatedly, or the issue involves account suspension, compliance, underwriting, KYC/KYB, fraud, refunds, disputes, legal questions, tax advice, or admin database review.\n\nWhat this means: PineTree AI should not guess about money movement, provider approval, account restrictions, or private account data. Those issues need a support ticket so PineTree can review authorized account and payment records.\n\nWhat to check: Open a support ticket and include payment ID, provider, wallet/network, approximate time, transaction hash if available, screenshots if helpful, and a short description of what the customer did.",
+    tags: ["support", "escalation", "funds", "admin review"],
+    keywords: ["missing funds", "refund", "dispute", "KYC", "KYB", "compliance", "legal", "tax", "confirmed on-chain"]
   },
   {
     id: "assistant-what-it-will-do",
-    title: "What PineTree Assistant will do",
+    title: "What PineTree AI can help with",
     category: "PineTree Assistant",
-    description: "The planned assistant will help answer PineTree questions from approved documentation and merchant context.",
-    body: "PineTree Assistant is planned as a guided support helper for PineTree documentation, transaction states, and merchant account context. It should help explain statuses, suggest what to check, and point merchants to relevant documentation.\n\nWhat this means: The assistant should be grounded in PineTree data instead of free-form guesses.\n\nWhat to check: For now, use the local docs preview and support ticket form for real support needs.",
-    tags: ["assistant", "private beta", "docs"],
-    keywords: ["AI assistant", "help assistant"]
+    description: "PineTree AI helps merchants understand PineTree setup, payment states, provider connections, POS, checkout, dashboards, and support boundaries.",
+    body: "PineTree AI is a guided support helper for PineTree merchant onboarding, account setup, payment rails, wallets, POS, hosted checkout, dashboard sections, transaction statuses, fees, and support escalation. It uses PineTree help content and should stay specific to PineTree workflows.\n\nWhat this means: PineTree AI is not a generic chatbot. It should explain PineTree concepts in plain English and avoid claiming unsupported provider behavior or live account approval.\n\nWhat to check: Ask about setup, pending payments, incomplete transactions, provider connections, wallet setup, POS checkout, hosted checkout links, or what to include in a support ticket.",
+    tags: ["assistant", "PineTree AI", "docs", "setup"],
+    keywords: ["AI assistant", "help assistant", "account setup", "payment statuses"]
   },
   {
     id: "assistant-local-docs-only",
-    title: "Current Assistant status",
+    title: "Current PineTree AI data access",
     category: "PineTree Assistant",
-    description: "The current Help Center assistant panel is local-docs-only and does not call an external AI provider.",
-    body: "The current assistant panel searches local PineTree help documentation and shows matching articles. It does not call OpenAI, Claude, or any external model provider.\n\nWhat this means: It can help you find documentation faster, but it is not generating support answers or reading live account data yet.\n\nWhat to check: Search terms, matching docs, and whether a support ticket is better for account-specific problems.",
-    tags: ["assistant", "local docs", "no external ai"],
-    keywords: ["private beta", "local search", "OpenAI", "Claude"]
+    description: "The Help Center PineTree AI panel uses PineTree help docs and does not inspect private merchant data from this page.",
+    body: "The current PineTree AI panel uses local PineTree help documentation and structured PineTree support guidance. It does not read private merchant account data in the Help Center UI and should not claim a provider account is approved or funds are received unless authorized PineTree data shows that status.\n\nWhat this means: PineTree AI can explain what to check, but account-specific payment confirmation or provider approval questions should move to a support ticket.\n\nWhat to check: Search terms, matching docs, and whether a support ticket is better for account-specific problems.",
+    tags: ["assistant", "local docs", "privacy"],
+    keywords: ["private data", "local search", "merchant context", "authorized data"]
   },
   {
     id: "assistant-boundaries",
-    title: "What PineTree Assistant can and cannot answer",
+    title: "What PineTree AI can and cannot answer",
     category: "PineTree Assistant",
-    description: "Future assistant answers should stay inside PineTree docs, transaction states, and merchant context.",
-    body: "When enabled, PineTree Assistant should answer questions about PineTree workflows, help docs, payment statuses, and merchant account context. It should not invent provider behavior, expose secrets, provide legal or tax advice, or claim a payment is complete unless PineTree status supports that.\n\nWhat this means: Assistant responses need clear boundaries and source grounding before a real AI provider is connected.\n\nWhat to check: Source docs, merchant scope, whether the question needs live account data, and whether a human support ticket is more appropriate.",
+    description: "PineTree AI answers setup and support questions, but escalates money movement, compliance, and account-review issues.",
+    body: "PineTree AI should answer questions about PineTree workflows, help docs, payment statuses, provider setup, wallet connections, POS, checkout, dashboard basics, and support ticket preparation. It should not invent provider behavior, expose secrets, provide legal or tax advice, or claim a payment is complete unless PineTree status supports that.\n\nWhat this means: If the question involves missing funds, stuck payments after funds were sent, confirmed on-chain activity not showing in PineTree, repeated provider setup failures, refunds, disputes, account suspension, compliance, underwriting, KYC/KYB, fraud, legal, tax, or admin database review, PineTree AI should send the merchant to support.\n\nWhat to check: Source docs, merchant scope, whether the question needs live account data, and whether a human support ticket is more appropriate.",
     tags: ["assistant", "boundaries", "safety"],
-    keywords: ["AI boundaries", "grounded answers", "merchant context"]
+    keywords: ["AI boundaries", "grounded answers", "merchant context", "escalate"]
   }
 ]

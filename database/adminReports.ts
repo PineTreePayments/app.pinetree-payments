@@ -22,6 +22,7 @@ export type PlatformReportMetrics = {
   expiredTransactions: number
   awaitingTransactions: number
   byNetwork: Record<string, { total: number; confirmed: number; volume: number; fees: number }>
+  byProvider: Record<string, { total: number; confirmed: number; volume: number; fees: number }>
   topMerchants: Array<{ merchantId: string; confirmedVolume: number; confirmedCount: number }>
   generatedAt: string
 }
@@ -40,6 +41,7 @@ export const PLATFORM_REPORT_DEFAULT: PlatformReportMetrics = {
   expiredTransactions: 0,
   awaitingTransactions: 0,
   byNetwork: {},
+  byProvider: {},
   topMerchants: [],
   generatedAt: "",
 }
@@ -150,7 +152,7 @@ export async function getPlatformReport(
 
     let q = db
       .from("payments")
-      .select("id, status, gross_amount, pinetree_fee, network, merchant_id, metadata")
+      .select("id, status, gross_amount, pinetree_fee, network, provider, merchant_id, metadata")
       .gte("created_at", periodStart)
 
     if (mode === "live") {
@@ -172,6 +174,7 @@ export async function getPlatformReport(
       gross_amount: number | string | null
       pinetree_fee: number | string | null
       network: string | null
+      provider: string | null
       merchant_id: string | null
       metadata: unknown
     }>
@@ -186,6 +189,7 @@ export async function getPlatformReport(
     let awaitingTransactions = 0
 
     const byNetwork: Record<string, { total: number; confirmed: number; volume: number; fees: number }> = {}
+    const byProvider: Record<string, { total: number; confirmed: number; volume: number; fees: number }> = {}
     const merchantVolume: Record<string, { volume: number; count: number }> = {}
 
     for (const row of rows) {
@@ -193,10 +197,14 @@ export async function getPlatformReport(
       const gross = Number(row.gross_amount ?? 0)
       const fee = Number(row.pinetree_fee ?? 0)
       const net = String(row.network ?? "unknown")
+      const prov = String(row.provider ?? "unknown")
       const mid = String(row.merchant_id ?? "")
 
       if (!byNetwork[net]) byNetwork[net] = { total: 0, confirmed: 0, volume: 0, fees: 0 }
       byNetwork[net].total++
+
+      if (!byProvider[prov]) byProvider[prov] = { total: 0, confirmed: 0, volume: 0, fees: 0 }
+      byProvider[prov].total++
 
       switch (status) {
         case "CONFIRMED":
@@ -206,6 +214,9 @@ export async function getPlatformReport(
           byNetwork[net].confirmed++
           byNetwork[net].volume += gross
           byNetwork[net].fees += fee
+          byProvider[prov].confirmed++
+          byProvider[prov].volume += gross
+          byProvider[prov].fees += fee
           if (mid) {
             if (!merchantVolume[mid]) merchantVolume[mid] = { volume: 0, count: 0 }
             merchantVolume[mid].volume += gross
@@ -250,6 +261,7 @@ export async function getPlatformReport(
       expiredTransactions,
       awaitingTransactions,
       byNetwork,
+      byProvider,
       topMerchants,
       generatedAt: new Date().toISOString(),
     }
