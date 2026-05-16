@@ -145,6 +145,8 @@ export function classifyQuestionIntent(question: string): PineTreeAssistantInten
     normalized.includes("rail") ||
     normalized.includes("solana") ||
     normalized.includes("base") ||
+    normalized.includes("usdc") ||
+    normalized.includes("walletconnect") ||
     normalized.includes("shift4") ||
     normalized.includes("lightning") ||
     normalized.includes("speed")
@@ -239,6 +241,7 @@ function withContextAnswer(
   question: string,
   context: PineTreeAssistantContext
 ): Omit<PineTreeAssistantAnswer, "matchedArticles"> {
+  const normalized = normalize(question)
   const intent = classifyQuestionIntent(question)
   const statusKey = statusKeyForQuestion(question)
   const merchantName = context.merchant?.businessName || "your account"
@@ -260,6 +263,99 @@ function withContextAnswer(
   }
 
   if (intent === "wallet_provider") {
+    const isBaseQuery =
+      normalized.includes("base") ||
+      normalized.includes("usdc") ||
+      normalized.includes("walletconnect") ||
+      normalized.includes("base pay") ||
+      normalized.includes("base payments")
+
+    if (isBaseQuery) {
+      const baseRail = context.railSummaries.find((r) => r.rail.toLowerCase() === "base")
+      const baseProvider = context.providers.find((p) => p.provider.toLowerCase() === "base")
+      const baseWallet = context.wallets.find((w) => w.network.toLowerCase() === "base")
+      const hasBase = Boolean(baseRail || baseProvider || baseWallet)
+
+      if (!hasBase) {
+        return {
+          title: "Base setup not found in account context",
+          body: "I do not see Base setup in the account context I'm allowed to read. If it appears connected elsewhere in your dashboard, this may mean PineTree AI is missing that setup source and support should review the account setup data.",
+          bullets: [
+            "Check the Providers page in your dashboard to confirm Base is connected.",
+            "Check the Wallets page to confirm a Base wallet address is saved.",
+            "If setup exists in the dashboard but not here, open a support ticket."
+          ]
+        }
+      }
+
+      const connected = baseRail?.connected ?? (
+        (baseProvider ? ["connected", "active", "enabled", "ready"].includes(baseProvider.status.toLowerCase()) : false) ||
+        Boolean(baseWallet)
+      )
+      const enabled = baseRail?.enabled ?? Boolean(baseProvider?.enabled)
+
+      const basePayments = context.recentPayments.filter((p) =>
+        (p.provider || "").toLowerCase().includes("base") ||
+        (p.network || "").toLowerCase().includes("base")
+      )
+
+      if (connected && enabled) {
+        return {
+          title: "Base payment setup is connected and enabled",
+          body: "I can see Base payment setup exists on your account. The next thing to verify is whether Base USDC is enabled for checkout/POS and whether a recent Base USDC test payment completed.",
+          bullets: [
+            "Base is connected and enabled as a payment rail.",
+            basePayments.length > 0
+              ? `I can see ${basePayments.length} recent Base-related payment${basePayments.length === 1 ? "" : "s"}.`
+              : "I do not see a recent Base payment yet — run a small test to confirm the rail works end-to-end.",
+            "For USDC on Base, the customer needs a wallet that supports the Base network (Coinbase Wallet or MetaMask configured for Base)."
+          ]
+        }
+      }
+
+      if (connected && !enabled) {
+        return {
+          title: "Base setup exists but is not enabled",
+          body: "I can see Base setup exists, but I do not see it enabled as an active payment rail yet.",
+          bullets: [
+            "Go to Providers and check whether Base payments is toggled on.",
+            "Once enabled, run a small test payment to confirm the rail works end-to-end.",
+            "If Base shows connected in Providers but appears disabled here, open a support ticket."
+          ]
+        }
+      }
+
+      return {
+        title: "Base setup detected but connection state is uncertain",
+        body: "I do not see enough account context to fully verify Base connection state. Check Providers and Wallets in your dashboard to confirm the current status.",
+        bullets: [
+          "Verify the Providers page shows Base as connected.",
+          "Verify the Wallets page shows a Base wallet address saved.",
+          basePayments.length > 0
+            ? `I can see ${basePayments.length} recent Base-related payment${basePayments.length === 1 ? "" : "s"}.`
+            : "I do not see a recent Base payment in your account context.",
+          "If something looks wrong, open a support ticket with your Base provider and wallet setup details."
+        ]
+      }
+    }
+
+    const hasWalletOrProviderSignal =
+      context.wallets.length > 0 ||
+      context.providers.some((p) => ["connected", "active", "enabled", "ready"].includes(p.status.toLowerCase()))
+
+    if (!hasWalletOrProviderSignal && context.providers.length === 0) {
+      return {
+        title: "Wallet and provider context unavailable",
+        body: "I do not see enough account context to verify wallet or payment rail connections yet. This can happen when setup has not started or if context loading was incomplete.",
+        bullets: [
+          "Go to Providers to connect your preferred payment rail (Solana Pay, Base payments, Shift4, or Lightning).",
+          "Go to Wallets to confirm wallet addresses are saved.",
+          "Run a small test payment after connecting to verify the rail works end-to-end."
+        ],
+        followUpQuestion: "Are you trying to connect your first payment rail or troubleshoot an existing one?"
+      }
+    }
+
     return {
       title: "Wallets and payment rails",
       body: "I checked your connected wallet and provider setup. Connected means PineTree has setup data; enabled means the rail can be offered for payments; ready means you should still validate it with a small test payment.",

@@ -14,7 +14,6 @@ import {
   MonitorSmartphone,
   Search,
   Send,
-  ShieldAlert,
   Sparkles,
   WalletCards,
   X
@@ -133,13 +132,6 @@ const supportHubSections = [
     icon: LifeBuoy,
     articleIds: ["open-support-ticket", "support-escalation-boundaries", "payment-stuck-processing"]
   }
-]
-
-const escalationReasons = [
-  "Funds are missing, sent, or confirmed on-chain but not confirmed in PineTree.",
-  "A payment is stuck after customer funds were sent.",
-  "A provider connection fails repeatedly or needs approval/account review.",
-  "Refunds, disputes, compliance, underwriting, KYC/KYB, fraud, legal, tax, or admin database review is involved."
 ]
 
 const emptyTicketForm: TicketForm = {
@@ -816,22 +808,6 @@ export default function HelpCenterPage() {
                 <LifeBuoy className="h-6 w-6 shrink-0 text-[#0052FF]" />
               </div>
 
-              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-3">
-                <div className="flex gap-2.5">
-                  <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-800">
-                      Escalate to PineTree support when
-                    </p>
-                    <div className="mt-2 grid gap-1.5 text-xs leading-5 text-amber-900 sm:grid-cols-2">
-                      {escalationReasons.map((reason) => (
-                        <p key={reason}>{reason}</p>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
               <div className="mt-5 grid gap-3 md:grid-cols-2">
                 <Field label="Category">
                   <select
@@ -874,6 +850,9 @@ export default function HelpCenterPage() {
                     className="form-field min-h-28 resize-y"
                     placeholder="Include what happened, payment ID, provider, wallet/network, approximate time, amount, transaction hash if available, and what you expected."
                   />
+                  <p className="mt-1.5 text-xs text-gray-400">
+                    For payment issues, include the payment ID, provider/network, wallet used, approximate time, amount, and transaction hash if available.
+                  </p>
                 </Field>
               </div>
 

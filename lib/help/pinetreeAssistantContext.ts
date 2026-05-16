@@ -17,7 +17,7 @@ type RawWalletRow = {
   network?: string | null
   asset?: string | null
   wallet_type?: string | null
-  provider?: string | null
+  wallet_address?: string | null
   status?: string | null
   created_at?: string | null
   updated_at?: string | null
@@ -93,6 +93,18 @@ export type AssistantSupportTicketContext = {
   lastResponseAt: string | null
 }
 
+export type AssistantRailSummary = {
+  rail: string
+  provider: string
+  network?: string
+  asset?: string
+  connected: boolean
+  enabled: boolean
+  status?: string
+  readySignal?: string
+  updatedAt?: string
+}
+
 export type AssistantSetupSummary = {
   accountProfile: { status: "complete" | "incomplete" | "unknown"; detail: string }
   wallets: { status: "ready" | "missing" | "unknown"; detail: string }
@@ -131,6 +143,7 @@ export type PineTreeAssistantContext = {
   } | null
   providers: AssistantProviderContext[]
   wallets: AssistantWalletContext[]
+  railSummaries: AssistantRailSummary[]
   recentPayments: AssistantPaymentContext[]
   recentTickets: AssistantSupportTicketContext[]
   checkoutLinks: {
@@ -147,12 +160,19 @@ export type PineTreeAssistantContext = {
 }
 
 function providerLabel(provider: string) {
-  const normalized = provider.toLowerCase()
+  const normalized = provider.toLowerCase().trim()
   if (normalized === "solana") return "Solana Pay"
-  if (normalized === "base") return "Base payments"
+  if (
+    normalized === "base" ||
+    normalized === "base_pay" ||
+    normalized === "basepay" ||
+    normalized === "base-pay" ||
+    normalized === "evm"
+  ) return "Base payments"
   if (normalized === "shift4") return "Shift4"
   if (normalized === "lightning") return "TrySpeed / Lightning"
   if (normalized === "coinbase") return "Coinbase"
+  if (normalized === "walletconnect") return "WalletConnect"
   return provider || "Unknown provider"
 }
 
@@ -168,8 +188,15 @@ function normalizeProviderRow(row: RawProviderRow): AssistantProviderContext {
 }
 
 function isConnectedStatus(status: string) {
-  const normalized = status.toLowerCase()
-  return normalized === "connected" || normalized === "active"
+  const normalized = status.toLowerCase().trim()
+  return (
+    normalized === "connected" ||
+    normalized === "active" ||
+    normalized === "enabled" ||
+    normalized === "ready" ||
+    normalized === "configured" ||
+    normalized === "on"
+  )
 }
 
 function isTerminalActive(status?: string | null) {
@@ -184,6 +211,64 @@ async function safeSingle<T>(label: string, query: PromiseLike<{ data: T | null;
     return null
   }
   return data
+}
+
+function buildRailSummaries(
+  normalizedProviders: AssistantProviderContext[],
+  normalizedWallets: AssistantWalletContext[]
+): AssistantRailSummary[] {
+  const walletsByNetwork = new Map(normalizedWallets.map((w) => [w.network.toLowerCase(), w]))
+  const summaries: AssistantRailSummary[] = []
+
+  for (const provider of normalizedProviders) {
+    const key = provider.provider.toLowerCase().trim()
+    const isWalletBased = key === "solana" || key === "base"
+    const providerStatusOk = isConnectedStatus(provider.status)
+    const walletPresent = isWalletBased ? walletsByNetwork.has(key) : true
+    const connected = providerStatusOk && walletPresent
+
+    const summary: AssistantRailSummary = {
+      rail: provider.provider,
+      provider: provider.label,
+      connected,
+      enabled: provider.enabled,
+      status: provider.status,
+      readySignal: connected && provider.enabled
+        ? "connected-and-enabled"
+        : connected
+          ? "connected-not-enabled"
+          : "not-connected"
+    }
+
+    if (key === "base") {
+      summary.network = "Base"
+      summary.asset = "USDC"
+    } else if (key === "solana") {
+      summary.network = "Solana"
+      summary.asset = "USDC"
+    }
+
+    summaries.push(summary)
+  }
+
+  for (const wallet of normalizedWallets) {
+    const key = wallet.network.toLowerCase()
+    if (!normalizedProviders.some((p) => p.provider.toLowerCase() === key)) {
+      summaries.push({
+        rail: wallet.network,
+        provider: providerLabel(wallet.network),
+        network: wallet.network,
+        asset: wallet.asset || undefined,
+        connected: true,
+        enabled: false,
+        status: wallet.status,
+        readySignal: "wallet-without-provider",
+        updatedAt: wallet.updatedAt || undefined
+      })
+    }
+  }
+
+  return summaries
 }
 
 async function safeList<T>(label: string, query: PromiseLike<{ data: T[] | null; error: { message: string } | null }>) {
@@ -203,8 +288,18 @@ function buildSetupSummary(input: Omit<PineTreeAssistantContext, "setupSummary">
       settingsFields?.country
   )
   const connectedWallets = input.wallets.filter((wallet) => wallet.network && wallet.status !== "missing")
-  const connectedProviders = input.providers.filter((provider) => isConnectedStatus(provider.status))
-  const enabledProviders = connectedProviders.filter((provider) => provider.enabled)
+
+  const railSummaries = input.railSummaries
+  const connectedRails = railSummaries.filter((r) => r.connected)
+  const enabledRailSet = new Set(railSummaries.filter((r) => r.connected && r.enabled).map((r) => r.rail.toLowerCase()))
+  const connectedRailSet = new Set(connectedRails.map((r) => r.rail.toLowerCase()))
+
+  const connectedProviders = input.providers.filter((provider) =>
+    connectedRailSet.has(provider.provider.toLowerCase()) || isConnectedStatus(provider.status)
+  )
+  const enabledProviders = input.providers.filter((provider) =>
+    enabledRailSet.has(provider.provider.toLowerCase()) || (isConnectedStatus(provider.status) && provider.enabled)
+  )
   const hasActiveCheckoutLink = input.checkoutLinks.activeCount > 0
   const hasConfirmedPayment = input.recentPayments.some((payment) => payment.status === "CONFIRMED")
   const openProblemPayments = input.recentPayments.filter((payment) =>
@@ -305,7 +400,7 @@ export async function getPineTreeAssistantContext(merchantId: string): Promise<P
       "wallets",
       db
         .from("merchant_wallets")
-        .select("id,network,asset,wallet_type,provider,status,created_at,updated_at")
+        .select("id,network,asset,wallet_type,wallet_address,status,created_at,updated_at")
         .eq("merchant_id", merchantId)
         .order("created_at", { ascending: false })
     ),
@@ -366,6 +461,29 @@ export async function getPineTreeAssistantContext(merchantId: string): Promise<P
     )
   ])
 
+  const normalizedProviders = providers.map(normalizeProviderRow)
+  const normalizedWallets = wallets
+    .filter((wallet) => Boolean(String(wallet.wallet_address || "").trim()))
+    .map((wallet) => ({
+      id: String(wallet.id || ""),
+      network: String(wallet.network || "unknown"),
+      asset: wallet.asset ? String(wallet.asset) : null,
+      walletType: wallet.wallet_type ? String(wallet.wallet_type) : null,
+      provider: null,
+      status: "connected",
+      updatedAt: wallet.updated_at ? String(wallet.updated_at) : wallet.created_at ? String(wallet.created_at) : null
+    }))
+
+  const railSummaries = buildRailSummaries(normalizedProviders, normalizedWallets)
+
+  console.info("[pinetree-ai-context] context loaded", {
+    walletCount: normalizedWallets.length,
+    providerCount: normalizedProviders.length,
+    connectedRails: railSummaries.filter((r) => r.connected).length,
+    enabledRails: railSummaries.filter((r) => r.enabled).length,
+    railNames: railSummaries.map((r) => r.rail)
+  })
+
   const safeContext: Omit<PineTreeAssistantContext, "setupSummary"> = {
     merchant: merchant
       ? {
@@ -394,16 +512,9 @@ export async function getPineTreeAssistantContext(merchantId: string): Promise<P
         businessType: settings?.business_type ? String(settings.business_type) : null
       }
     },
-    providers: providers.map(normalizeProviderRow),
-    wallets: wallets.map((wallet) => ({
-      id: String(wallet.id || ""),
-      network: String(wallet.network || "unknown"),
-      asset: wallet.asset ? String(wallet.asset) : null,
-      walletType: wallet.wallet_type ? String(wallet.wallet_type) : null,
-      provider: wallet.provider ? String(wallet.provider) : null,
-      status: wallet.status ? String(wallet.status) : "connected",
-      updatedAt: wallet.updated_at ? String(wallet.updated_at) : wallet.created_at ? String(wallet.created_at) : null
-    })),
+    providers: normalizedProviders,
+    wallets: normalizedWallets,
+    railSummaries,
     recentPayments: payments.map((payment) => ({
       id: String(payment.id),
       status: payment.status,
