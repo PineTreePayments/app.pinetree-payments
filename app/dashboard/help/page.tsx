@@ -29,7 +29,6 @@ import {
 } from "@/lib/help/supportOptions"
 import {
   DashboardSection,
-  GroupedMetricSurface,
   ProviderStatusPill
 } from "@/components/dashboard/DashboardPrimitives"
 
@@ -604,22 +603,22 @@ export default function HelpCenterPage() {
       </div>
 
       {/* Desktop hero card */}
-      <div className="hidden md:block rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.12),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f8fbff_52%,#eef5ff_100%)] p-4 shadow-[0_12px_36px_rgba(0,82,255,0.10)] sm:p-5">
+      <div className="hidden md:block rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.12),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f8fbff_52%,#eef5ff_100%)] p-3 shadow-[0_10px_30px_rgba(0,82,255,0.09)] sm:p-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
               PineTree Support Center
             </p>
-            <h2 className="mt-1.5 text-xl font-semibold leading-tight text-gray-950 sm:text-2xl">
+            <h2 className="mt-1 text-lg font-semibold leading-tight text-gray-950 sm:text-xl">
               Set up rails, understand payment states, and know when to escalate.
             </h2>
-            <p className="mt-1 text-sm leading-5 text-gray-600">
-              PineTree AI and the help library are grounded in PineTree POS, hosted checkout, providers, wallets, dashboard reports, and the official payment state model.
+            <p className="mt-1 max-w-xl text-sm leading-5 text-gray-500">
+              PineTree AI and the help library cover POS, checkout, providers, wallets, reports, and the payment state model.
             </p>
           </div>
-          <div className="grid w-full grid-cols-2 gap-2 md:w-auto md:min-w-[300px]">
-            <QuickAction label="Open a Ticket" icon={<LifeBuoy size={18} />} href="#support-ticket" />
-            <QuickAction label="Ask PineTree AI" icon={<Bot size={18} />} href="#pinetree-ai" />
+          <div className="grid w-full grid-cols-2 gap-2 md:w-auto md:min-w-[250px]">
+            <QuickAction label="Open a Ticket" icon={<LifeBuoy size={16} />} href="#support-ticket" />
+            <QuickAction label="Ask PineTree AI" icon={<Bot size={16} />} href="#pinetree-ai" />
           </div>
         </div>
       </div>
@@ -1060,21 +1059,21 @@ export default function HelpCenterPage() {
       <div className="hidden md:block md:space-y-7">
 
       <DashboardSection title="Support Paths" titleTone="blue">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [scrollbar-color:#e2e8f0_transparent] [scrollbar-width:thin]">
           {supportHubCards.map((section) => {
             const Icon = section.icon
             return (
               <div
                 key={section.title}
-                className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+                className="w-[320px] min-w-[320px] shrink-0 snap-start rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
               >
                 <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-[#0052FF]">
-                    <Icon size={19} />
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-[#0052FF]">
+                    <Icon size={17} />
                   </div>
                   <div className="min-w-0">
                     <h2 className="text-sm font-semibold text-gray-950">{section.title}</h2>
-                    <p className="mt-1 text-xs leading-5 text-gray-600">{section.description}</p>
+                    <p className="mt-0.5 text-xs leading-5 text-gray-500">{section.description}</p>
                   </div>
                 </div>
                 <div className="mt-3 space-y-1.5">
@@ -1099,45 +1098,8 @@ export default function HelpCenterPage() {
         </div>
       </DashboardSection>
 
-      <GroupedMetricSurface className="p-3 sm:p-4">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <input
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value)
-              setArticlesExpanded(false)
-            }}
-            placeholder="Search help articles, statuses, providers, or reports"
-            className="min-h-12 w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-[#0052FF] focus:bg-white focus:ring-4 focus:ring-blue-100"
-          />
-        </div>
 
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-          {["All", ...helpCategories].map((category) => {
-            const active = category === selectedCategory
-            return (
-              <button
-                key={category}
-                type="button"
-                onClick={() => {
-                  setSelectedCategory(category)
-                  setArticlesExpanded(false)
-                }}
-                className={`shrink-0 rounded-full border px-3 py-2 text-xs font-semibold transition ${
-                  active
-                    ? "border-[#0052FF] bg-[#0052FF] text-white shadow-sm"
-                    : "border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:bg-blue-50"
-                }`}
-              >
-                {category}
-              </button>
-            )
-          })}
-        </div>
-      </GroupedMetricSurface>
-
-      <DashboardSection title="Documentation" titleTone="blue">
+<DashboardSection title="Documentation" titleTone="blue">
         <div className="space-y-3">
           {!hasSearch && (
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -1240,7 +1202,7 @@ export default function HelpCenterPage() {
         </div>
       </DashboardSection>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         {/* Left column: Support tickets + Feedback */}
         <div className="space-y-4 md:space-y-5">
           <DashboardSection title="Support" titleTone="blue" className="min-w-0">
@@ -1488,37 +1450,37 @@ export default function HelpCenterPage() {
         </div>
 
         {/* Right column: Assistant */}
-        <div className="xl:flex xl:flex-col">
-          <DashboardSection title="PineTree AI" titleTone="blue" className="xl:flex xl:flex-col xl:flex-1">
-            <div id="pinetree-ai" className="xl:flex xl:flex-col xl:flex-1 rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-5 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
+        <div>
+          <DashboardSection title="PineTree AI" titleTone="blue">
+            <div id="pinetree-ai" className="rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-4 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">
                     <Bot className="h-5 w-5 text-[#0052FF]" />
                     <h2 className="text-lg font-semibold text-gray-950">Ask PineTree AI</h2>
                   </div>
-                  <p className="mt-2 text-sm leading-6 text-gray-600">
+                  <p className="mt-1.5 text-sm leading-5 text-gray-500">
                     PineTree AI can help you understand your account setup, connected wallets, payment rails, POS, checkout, dashboard, and recent payment status.
                   </p>
                 </div>
                 <ProviderStatusPill label="Account-aware" tone="blue" />
               </div>
 
-              <div className="mt-4 grid gap-2">
+              <div className="mt-3 grid gap-1.5">
                 {suggestedQuestions.map((question) => (
                   <button
                     key={question}
                     type="button"
                     onClick={() => void submitAssistantQuestion(question)}
                     disabled={assistantLoading}
-                    className="w-full rounded-xl border border-blue-100 bg-white/85 px-3 py-2 text-left text-sm font-medium text-gray-700 transition hover:border-[#0052FF] hover:bg-blue-50"
+                    className="w-full rounded-xl border border-blue-100 bg-white/85 px-3 py-1.5 text-left text-sm font-medium text-gray-700 transition hover:border-[#0052FF] hover:bg-blue-50"
                   >
                     {question}
                   </button>
                 ))}
               </div>
 
-              <div className="mt-4 max-h-[560px] space-y-3 overflow-y-auto rounded-xl border border-blue-100 bg-white/75 p-3">
+              <div className="mt-3 max-h-[260px] min-h-[100px] space-y-3 overflow-y-auto rounded-xl border border-blue-100 bg-white/75 p-3">
                 {assistantMessages.map((message) => (
                   <AssistantMessageBubble
                     key={message.id}
@@ -2115,7 +2077,7 @@ function QuickAction({ label, icon, href }: { label: string; icon: ReactNode; hr
   return (
     <a
       href={href}
-      className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-white px-3 text-sm font-semibold text-[#0052FF] shadow-sm transition hover:border-[#0052FF] hover:bg-blue-50"
+      className="inline-flex min-h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-blue-200 bg-white px-3 text-sm font-semibold text-[#0052FF] shadow-sm transition hover:border-[#0052FF] hover:bg-blue-50"
     >
       {icon}
       {label}
