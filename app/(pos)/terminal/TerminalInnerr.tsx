@@ -25,6 +25,7 @@ type TerminalContext = {
   merchantId: string
   terminalId: string
   provider: string
+  sessionToken: string
 }
 
 type DrawerSession = {
@@ -92,11 +93,12 @@ export default function TerminalInner() {
       setDrawerSession(drawer)
       setShiftStarted(Boolean(drawer?.active) || Number(terminalData.drawer_starting_amount ?? 0) === 0)
 
-      if (terminalData.merchant_id) {
+      if (terminalData.merchant_id && payload.sessionToken) {
         setTerminalContext({
           terminalId: terminalData.id,
           merchantId: terminalData.merchant_id,
-          provider: String(payload.provider || "solana")
+          provider: String(payload.provider || "solana"),
+          sessionToken: String(payload.sessionToken),
         })
       }
 
@@ -155,17 +157,18 @@ export default function TerminalInner() {
   }
 
   async function confirmShiftStart() {
-    if (!terminal?.id || !terminal.merchant_id) return
+    if (!terminal?.id || !terminalContext?.sessionToken) return
     setShiftStarting(true)
     try {
       const res = await fetch("/api/pos/drawer/open", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${terminalContext.sessionToken}`,
+        },
         body: JSON.stringify({
-          terminalId: terminal.id,
-          merchantId: terminal.merchant_id,
-          startingAmount: Number(terminal.drawer_starting_amount ?? 0)
-        })
+          startingAmount: Number(terminal.drawer_starting_amount ?? 0),
+        }),
       })
       const payload = await res.json().catch(() => null)
       if (!res.ok) {

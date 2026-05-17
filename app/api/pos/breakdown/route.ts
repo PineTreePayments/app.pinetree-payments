@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { previewPosBreakdownEngine } from "@/engine/posPayments"
+import { requireTerminalSession } from "@/lib/api/terminalAuth"
+import { getRouteErrorStatus } from "@/lib/api/merchantAuth"
 
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url)
-    const merchantId = String(searchParams.get("merchantId") || "").trim()
-    const amount = Number(searchParams.get("amount") || 0)
+    const { mid: merchantId } = requireTerminalSession(req)
 
-    if (!merchantId) {
-      return NextResponse.json({ error: "Missing merchantId" }, { status: 400 })
-    }
-
+    const amount = Number(req.nextUrl.searchParams.get("amount") || 0)
     if (!amount || amount <= 0) {
       return NextResponse.json({ error: "Invalid amount" }, { status: 400 })
     }
@@ -19,7 +16,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(breakdown)
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal server error"
-    const status = (err as Error & { status?: number }).status || 500
-    return NextResponse.json({ error: message }, { status })
+    return NextResponse.json({ error: message }, { status: getRouteErrorStatus(err) })
   }
 }

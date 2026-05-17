@@ -1,5 +1,6 @@
 import { supabaseAdmin, supabase } from "@/database"
 import { getDrawerState } from "./cashDrawer"
+import { signTerminalSession } from "@/lib/api/terminalAuth"
 
 const db = supabaseAdmin || supabase
 
@@ -20,6 +21,7 @@ export type TerminalSessionData = {
     lastEntryType: string | null
     lastEntryAt: string | null
   }
+  sessionToken: string
 }
 
 export async function getPosTerminalSessionEngine(terminalId: string): Promise<TerminalSessionData> {
@@ -58,6 +60,7 @@ export async function getPosTerminalSessionEngine(terminalId: string): Promise<T
       active: drawerState.active,
       lastEntryType: drawerState.lastEntry?.type || null,
       lastEntryAt: drawerState.lastEntry?.created_at || null
-    }
+    },
+    sessionToken: signTerminalSession(terminal.merchant_id, terminal.id),
   }
 }

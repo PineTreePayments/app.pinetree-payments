@@ -14,6 +14,7 @@ type Props = {
     merchantId: string
     terminalId?: string
     provider?: string
+    sessionToken?: string
   } | null
 }
 
@@ -74,6 +75,10 @@ function digitsToDisplay(d: string): string {
   if (!d) return "0.00"
   if (d.includes(".")) return d              // show raw during decimal entry
   return `${d}.00`                           // "12" → "12.00"
+}
+
+function posAuthHeaders(token?: string): Record<string, string> {
+  return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
 export default function POSLayout({ terminalContext }: Props) {
@@ -294,14 +299,14 @@ export default function POSLayout({ terminalContext }: Props) {
   ========================= */
 
   async function fetchBreakdown(amount: number): Promise<Breakdown | null> {
-    const merchantId = terminalContext?.merchantId
-    if (!merchantId) return null
+    const token = terminalContext?.sessionToken
+    if (!token) return null
     try {
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), 5000)
       const res = await fetch(
-        `/api/pos/breakdown?merchantId=${encodeURIComponent(merchantId)}&amount=${amount}`,
-        { signal: controller.signal }
+        `/api/pos/breakdown?amount=${amount}`,
+        { headers: posAuthHeaders(token), signal: controller.signal }
       )
       clearTimeout(timer)
       if (!res.ok) return null
@@ -321,11 +326,11 @@ export default function POSLayout({ terminalContext }: Props) {
     setBreakdown(null)
     setBreakdownLoading(true)
 
-    const merchantId = terminalContext?.merchantId
+    const token = terminalContext?.sessionToken
     const [breakdownData, methodsData] = await Promise.all([
       fetchBreakdown(subtotalNum),
-      merchantId
-        ? fetch(`/api/pos/methods?merchantId=${encodeURIComponent(merchantId)}`)
+      token
+        ? fetch("/api/pos/methods", { headers: posAuthHeaders(token) })
             .then(r => r.ok ? r.json() : null)
             .catch(() => null)
         : Promise.resolve(null)
@@ -373,12 +378,14 @@ export default function POSLayout({ terminalContext }: Props) {
 
       const res = await fetch("/api/pos/payment", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...posAuthHeaders(terminalContext?.sessionToken),
+        },
         body: JSON.stringify({
           amount: subtotalNum,
           currency: "USD",
-          terminal: terminalContext
-        })
+        }),
       })
 
       const data = await res.json()
@@ -599,24 +606,25 @@ export default function POSLayout({ terminalContext }: Props) {
               fullWidth
               disabled={cashRecording}
               onClick={async () => {
-                if (!terminalContext?.terminalId || !terminalContext?.merchantId) {
-                  setPaymentError("Missing terminal context for cash sale")
+                if (!terminalContext?.sessionToken) {
+                  setPaymentError("Missing terminal session for cash sale")
                   return
                 }
                 setCashRecording(true)
                 try {
                   const res = await fetch("/api/pos/drawer/sale", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: {
+                      "Content-Type": "application/json",
+                      ...posAuthHeaders(terminalContext.sessionToken),
+                    },
                     body: JSON.stringify({
-                      terminalId: terminalContext.terminalId,
-                      merchantId: terminalContext.merchantId,
                       saleTotal: totalDue,
                       cashTendered,
                       changeGiven: Math.max(0, changeDue),
                       subtotalAmount: breakdown?.subtotalAmount ?? totalDue,
-                      serviceFee: breakdown?.serviceFee ?? 0
-                    })
+                      serviceFee: breakdown?.serviceFee ?? 0,
+                    }),
                   })
                   const payload = await res.json().catch(() => null)
                   if (!res.ok) {

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { hasProviderConnected } from "@/database/merchants"
 import { getMerchantAvailableNetworks } from "@/engine/paymentIntents"
-import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
+import { getRouteErrorStatus } from "@/lib/api/merchantAuth"
+import { requireTerminalSession } from "@/lib/api/terminalAuth"
 
 export async function GET(req: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(req)
+    const { mid: merchantId } = requireTerminalSession(req)
 
     const [cardEnabled, availableNetworks] = await Promise.all([
       hasProviderConnected(merchantId, "shift4"),
