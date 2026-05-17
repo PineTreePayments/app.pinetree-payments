@@ -16,6 +16,7 @@ export default function SignupPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState("")
 
   /* =============================
   AUTO REDIRECT + AUTH LISTENER (FIX)
@@ -49,23 +50,29 @@ export default function SignupPage() {
 
   async function handleSignup() {
     setLoading(true)
+    setMessage("")
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password
     })
 
     if (error) {
       setLoading(false)
-      alert(error.message)
+      setMessage(error.message)
       return
     }
 
-    // 🔥 DO NOT RELY ON data.session
-    // Let auth listener handle redirect if session exists
-    alert("Account created. If email confirmation is enabled, check your email.")
+    if (data.session) {
+      // Email confirmation is disabled — session is live.
+      // The onAuthStateChange listener above will fire and call router.replace("/dashboard").
+      // Keep loading=true so the button stays disabled while navigation happens.
+      return
+    }
 
+    // Email confirmation is required — no session yet.
     setLoading(false)
+    setMessage("Account created. Check your email to confirm, then sign in.")
   }
 
   /* -----------------------------
@@ -140,6 +147,12 @@ export default function SignupPage() {
         >
           {loading ? "Creating..." : "Create Account"}
         </button>
+
+        {message && (
+          <p className="mt-4 text-sm text-center text-gray-700">
+            {message}
+          </p>
+        )}
 
       </div>
 

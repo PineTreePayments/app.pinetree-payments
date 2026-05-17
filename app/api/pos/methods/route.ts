@@ -1,15 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { hasProviderConnected } from "@/database/merchants"
 import { getMerchantAvailableNetworks } from "@/engine/paymentIntents"
+import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
 
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url)
-    const merchantId = String(searchParams.get("merchantId") || "").trim()
-
-    if (!merchantId) {
-      return NextResponse.json({ error: "Missing merchantId" }, { status: 400 })
-    }
+    const merchantId = await requireMerchantIdFromRequest(req)
 
     const [cardEnabled, availableNetworks] = await Promise.all([
       hasProviderConnected(merchantId, "shift4"),
@@ -27,6 +23,6 @@ export async function GET(req: NextRequest) {
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal server error"
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: message }, { status: getRouteErrorStatus(err) })
   }
 }
