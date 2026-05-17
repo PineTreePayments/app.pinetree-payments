@@ -215,7 +215,12 @@ function setupChecklist(context: PineTreeAssistantContext) {
 }
 
 function formatProviderList(context: PineTreeAssistantContext) {
-  if (context.providers.length === 0) return "I do not see any connected payment rails yet."
+  if (context.providers.length === 0) {
+    if (context.diagnostics?.sources.providers.ok === false) {
+      return "I could not verify payment rail data — the assistant context could not read the provider source. This needs internal support review."
+    }
+    return "I do not see any connected payment rails yet."
+  }
   return context.providers
     .map((provider) => {
       const enabled = provider.enabled ? "enabled" : "not enabled"
@@ -226,7 +231,22 @@ function formatProviderList(context: PineTreeAssistantContext) {
 }
 
 function formatWalletList(context: PineTreeAssistantContext) {
-  if (context.wallets.length === 0) return "I do not see a connected merchant wallet yet."
+  if (context.wallets.length === 0) {
+    if (context.diagnostics?.sources.wallets.ok === false) {
+      return "I could not verify wallet data — the assistant context could not read the wallet source. This needs internal support review."
+    }
+    // If providers exist but wallets are empty, give a more specific message
+    const connectedProviders = context.providers.filter((p) =>
+      ["connected", "active", "enabled", "ready"].includes(p.status.toLowerCase())
+    )
+    if (connectedProviders.length > 0) {
+      const names = connectedProviders.filter((p) => p.provider === "solana" || p.provider === "base").map((p) => p.label).join(", ")
+      if (names) {
+        return `I can see ${names} provider setup, but I do not see a connected wallet address record for ${names.includes(",") ? "those networks" : "that network"}.`
+      }
+    }
+    return "I do not see a connected merchant wallet yet."
+  }
   return context.wallets
     .map((wallet) => `${wallet.network}${wallet.walletType ? ` (${wallet.walletType})` : ""}: ${wallet.status}`)
     .join("; ")
@@ -339,12 +359,34 @@ function withContextAnswer(
         }
       }
 
+      const baseSourceError = context.diagnostics?.sources.providers.ok === false || context.diagnostics?.sources.wallets.ok === false
+      if (baseSourceError) {
+        return {
+          title: "Base context read error",
+          body: "I could not verify Base wallet or provider data because the assistant context could not read that setup source. This needs internal support review.",
+          bullets: [
+            "Your dashboard Providers and Wallets pages may still show the correct Base state.",
+            "Open a support ticket and include: 'PineTree AI context source error — Base'."
+          ]
+        }
+      }
+
+      const baseProviderPresent = Boolean(baseProvider)
+      const baseWalletPresent = Boolean(baseWallet)
       return {
         title: "Base setup detected but connection state is uncertain",
-        body: "I do not see enough account context to fully verify Base connection state. Check Providers and Wallets in your dashboard to confirm the current status.",
+        body: baseProviderPresent && !baseWalletPresent
+          ? "I can see the Base provider setup, but I do not see a connected Base wallet address record."
+          : !baseProviderPresent && baseWalletPresent
+            ? "I can see a Base wallet record, but Base does not appear set up as an active payment rail."
+            : "I do not see enough account context to fully verify Base connection state. Check Providers and Wallets in your dashboard to confirm the current status.",
         bullets: [
-          "Verify the Providers page shows Base as connected.",
-          "Verify the Wallets page shows a Base wallet address saved.",
+          baseProviderPresent
+            ? "Base provider row is present. Verify the status is 'connected' in the Providers page."
+            : "Verify the Providers page shows Base as connected.",
+          baseWalletPresent
+            ? "A Base wallet record is present. Verify the wallet address is saved in the Wallets page."
+            : "Verify the Wallets page shows a Base wallet address saved.",
           basePayments.length > 0
             ? `I can see ${basePayments.length} recent Base-related payment${basePayments.length === 1 ? "" : "s"}.`
             : "I do not see a recent Base payment in your account context.",
@@ -357,7 +399,22 @@ function withContextAnswer(
       context.wallets.length > 0 ||
       context.providers.some((p) => ["connected", "active", "enabled", "ready"].includes(p.status.toLowerCase()))
 
+    const hasSourceError =
+      context.diagnostics?.sources.providers.ok === false ||
+      context.diagnostics?.sources.wallets.ok === false
+
     if (!hasWalletOrProviderSignal && context.providers.length === 0) {
+      if (hasSourceError) {
+        return {
+          title: "Account context read error",
+          body: "I could not verify wallet or payment rail setup because the assistant context could not read that setup source. This needs internal support review.",
+          bullets: [
+            "Your dashboard Providers and Wallets pages may still show the correct state.",
+            "If setup exists in your dashboard but PineTree AI cannot read it, open a support ticket.",
+            "Include the message: 'PineTree AI context source error' when contacting support."
+          ]
+        }
+      }
       return {
         title: "Wallet and provider context unavailable",
         body: "I do not see enough account context to verify wallet or payment rail connections yet. This can happen when setup has not started or if context loading was incomplete.",

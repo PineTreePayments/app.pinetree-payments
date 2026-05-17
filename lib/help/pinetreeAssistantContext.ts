@@ -1,4 +1,7 @@
 import { supabase, supabaseAdmin } from "@/database"
+import { getMerchantWallets } from "@/database/merchantWallets"
+import { getMerchantAvailableNetworks } from "@/engine/paymentIntents"
+import { listCheckoutLinksEngine, type CheckoutLinkWithUrl } from "@/engine/checkoutLinks"
 import type { PaymentStatus } from "@/database/payments"
 
 const db = supabaseAdmin || supabase
@@ -8,17 +11,6 @@ type RawProviderRow = {
   status?: string | null
   enabled?: boolean | null
   dashboard_status?: string | null
-  created_at?: string | null
-  updated_at?: string | null
-}
-
-type RawWalletRow = {
-  id?: string | null
-  network?: string | null
-  asset?: string | null
-  wallet_type?: string | null
-  wallet_address?: string | null
-  status?: string | null
   created_at?: string | null
   updated_at?: string | null
 }
@@ -49,6 +41,34 @@ type RawSettingsRow = {
 type RawTaxSettingsRow = {
   tax_enabled?: boolean | null
   tax_rate?: number | string | null
+}
+
+type RawPaymentRow = {
+  id: string
+  status: PaymentStatus | string
+  provider?: string | null
+  network?: string | null
+  gross_amount?: number | string | null
+  merchant_amount?: number | string | null
+  pinetree_fee?: number | string | null
+  currency?: string | null
+  created_at: string
+  updated_at?: string | null
+}
+
+type RawTicketRow = {
+  id: string
+  category: string
+  subject: string
+  priority: string
+  status: string
+  related_payment_id?: string | null
+  created_at: string
+  last_response_at?: string | null
+}
+
+type RawTerminalRow = {
+  status?: string | null
 }
 
 export type AssistantProviderContext = {
@@ -128,6 +148,49 @@ export type AssistantSetupSummary = {
   supportAttention: { status: "yes" | "no"; detail: string }
 }
 
+export type AssistantSourceDiagnostic = {
+  source: string
+  ok: boolean
+  rawCount: number
+  errorMessage?: string
+}
+
+export type AssistantDiagnostics = {
+  merchantIdMasked: string
+  sources: {
+    merchantProfile: AssistantSourceDiagnostic & { found: boolean }
+    providers: AssistantSourceDiagnostic & {
+      connectedCount: number
+      enabledCount: number
+      providerKeys: string[]
+      statuses: string[]
+    }
+    wallets: AssistantSourceDiagnostic & {
+      addressPresentCount: number
+      networks: string[]
+      assets: string[]
+      walletTypes: string[]
+    }
+    availableNetworks: AssistantSourceDiagnostic & {
+      networks: string[]
+    }
+    checkout: AssistantSourceDiagnostic & {
+      activeCount: number
+    }
+    payments: AssistantSourceDiagnostic & {
+      confirmedCount: number
+      pendingCount: number
+      processingCount: number
+      failedCount: number
+      incompleteCount: number
+      recentProviders: string[]
+      recentNetworks: string[]
+    }
+    tickets: AssistantSourceDiagnostic
+    terminals: AssistantSourceDiagnostic
+  }
+}
+
 export type PineTreeAssistantContext = {
   merchant: {
     id: string
@@ -171,7 +234,10 @@ export type PineTreeAssistantContext = {
     activeTerminalCount: number
   }
   setupSummary: AssistantSetupSummary
+  diagnostics?: AssistantDiagnostics
 }
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function providerLabel(provider: string) {
   const normalized = provider.toLowerCase().trim()
@@ -201,7 +267,7 @@ function normalizeProviderRow(row: RawProviderRow): AssistantProviderContext {
   }
 }
 
-function isConnectedStatus(status: string) {
+export function isConnectedStatus(status: string) {
   const normalized = status.toLowerCase().trim()
   return (
     normalized === "connected" ||
@@ -218,18 +284,70 @@ function isTerminalActive(status?: string | null) {
   return !normalized || normalized === "active" || normalized === "open"
 }
 
-async function safeSingle<T>(label: string, query: PromiseLike<{ data: T | null; error: { message: string } | null }>) {
+function maskMerchantId(id: string): string {
+  if (id.length <= 8) return `${id.slice(0, 2)}...`
+  return `${id.slice(0, 4)}...${id.slice(-4)}`
+}
+
+// Maps getMerchantAvailableNetworks() WalletNetwork values to provider row keys
+function networkToProviderKey(network: string): string {
+  if (network === "bitcoin_lightning") return "lightning"
+  return network.toLowerCase()
+}
+
+// ── Tracked query helpers (capture errors for diagnostics) ───────────────────
+
+type TrackedListResult<T> = {
+  ok: boolean
+  data: T[]
+  rawCount: number
+  errorMessage?: string
+}
+
+type TrackedSingleResult<T> = {
+  ok: boolean
+  data: T | null
+  found: boolean
+  errorMessage?: string
+}
+
+async function trackedList<T>(
+  label: string,
+  query: PromiseLike<{ data: T[] | null; error: { message: string; code?: string } | null }>
+): Promise<TrackedListResult<T>> {
   const { data, error } = await query
   if (error) {
-    console.warn(`[pinetree-ai-context] ${label} unavailable`, { error: error.message })
-    return null
+    console.warn(`[pinetree-ai-context] ${label} query failed`, {
+      source: label,
+      errorMessage: error.message
+    })
+    return { ok: false, data: [], rawCount: 0, errorMessage: error.message }
   }
-  return data
+  const result = data || []
+  return { ok: true, data: result, rawCount: result.length }
 }
+
+async function trackedSingle<T>(
+  label: string,
+  query: PromiseLike<{ data: T | null; error: { message: string } | null }>
+): Promise<TrackedSingleResult<T>> {
+  const { data, error } = await query
+  if (error) {
+    console.warn(`[pinetree-ai-context] ${label} query failed`, {
+      source: label,
+      errorMessage: error.message
+    })
+    return { ok: false, data: null, found: false, errorMessage: error.message }
+  }
+  return { ok: true, data, found: data !== null }
+}
+
+// ── Rail summaries ────────────────────────────────────────────────────────────
 
 function buildRailSummaries(
   normalizedProviders: AssistantProviderContext[],
-  normalizedWallets: AssistantWalletContext[]
+  normalizedWallets: AssistantWalletContext[],
+  availableNetworkKeys: Set<string>
 ): AssistantRailSummary[] {
   const walletsByNetwork = new Map(normalizedWallets.map((w) => [w.network.toLowerCase(), w]))
   const summaries: AssistantRailSummary[] = []
@@ -241,13 +359,15 @@ function buildRailSummaries(
     const walletPresent = isWalletBased ? walletsByNetwork.has(key) : true
     const connected = providerStatusOk && walletPresent
 
+    // Use getMerchantAvailableNetworks() result as source of truth for availability
+    const availableForPos = availableNetworkKeys.has(key)
+    const availableForCheckout = availableNetworkKeys.has(key)
+
     const sourceSignals: string[] = ["provider-row"]
     if (isWalletBased && walletPresent) sourceSignals.push("wallet-row")
     if (providerStatusOk) sourceSignals.push("connected-status")
     if (provider.enabled) sourceSignals.push("enabled-flag")
-
-    const availableForPos = connected && provider.enabled
-    const availableForCheckout = connected && provider.enabled
+    if (availableForPos) sourceSignals.push("available-via-payment-engine")
 
     const summary: AssistantRailSummary = {
       rail: provider.provider,
@@ -258,11 +378,13 @@ function buildRailSummaries(
       availableForCheckout,
       sourceSignals,
       status: provider.status,
-      readySignal: connected && provider.enabled
-        ? "connected-and-enabled"
-        : connected
-          ? "connected-not-enabled"
-          : "not-connected"
+      readySignal: availableForPos
+        ? "available-for-payments"
+        : connected && provider.enabled
+          ? "connected-not-yet-available"
+          : connected
+            ? "connected-not-enabled"
+            : "not-connected"
     }
 
     if (key === "base") {
@@ -276,6 +398,7 @@ function buildRailSummaries(
     summaries.push(summary)
   }
 
+  // Wallet rows without a matching provider entry
   for (const wallet of normalizedWallets) {
     const key = wallet.network.toLowerCase()
     if (!normalizedProviders.some((p) => p.provider.toLowerCase() === key)) {
@@ -286,8 +409,8 @@ function buildRailSummaries(
         asset: wallet.asset || undefined,
         connected: true,
         enabled: false,
-        availableForPos: false,
-        availableForCheckout: false,
+        availableForPos: availableNetworkKeys.has(key),
+        availableForCheckout: availableNetworkKeys.has(key),
         sourceSignals: ["wallet-row"],
         status: wallet.status,
         readySignal: "wallet-without-provider",
@@ -299,16 +422,12 @@ function buildRailSummaries(
   return summaries
 }
 
-async function safeList<T>(label: string, query: PromiseLike<{ data: T[] | null; error: { message: string } | null }>) {
-  const { data, error } = await query
-  if (error) {
-    console.warn(`[pinetree-ai-context] ${label} unavailable`, { error: error.message })
-    return []
-  }
-  return data || []
-}
+// ── Setup summary ─────────────────────────────────────────────────────────────
 
-function buildSetupSummary(input: Omit<PineTreeAssistantContext, "setupSummary">): AssistantSetupSummary {
+function buildSetupSummary(
+  input: Omit<PineTreeAssistantContext, "setupSummary" | "diagnostics">,
+  diag?: AssistantDiagnostics
+): AssistantSetupSummary {
   const settingsFields = input.settings?.businessProfileFields
   const hasBusinessProfile = Boolean(
     settingsFields?.businessName &&
@@ -346,15 +465,19 @@ function buildSetupSummary(input: Omit<PineTreeAssistantContext, "setupSummary">
       status: connectedWallets.length > 0 ? "ready" : "missing",
       detail: connectedWallets.length > 0
         ? `${connectedWallets.map((wallet) => wallet.network).join(", ")} wallet setup found.`
-        : "I do not see a connected Solana or Base wallet yet."
+        : diag?.sources.wallets.ok === false
+          ? "I could not verify wallet setup — the wallet source returned an error."
+          : "I do not see a connected Solana or Base wallet yet."
     },
     paymentRails: {
       status: posAvailableRails.length > 0 ? "ready" : connectedProviders.length > 0 ? "incomplete" : "missing",
       detail: posAvailableRails.length > 0
         ? `${posAvailableRails.map((r) => r.provider).join(", ")} connected and enabled.`
         : connectedProviders.length > 0
-          ? `${connectedProviders.map((provider) => provider.label).join(", ")} connected, but I do not see an enabled rail.`
-          : "I do not see a connected payment rail yet."
+          ? `${connectedProviders.map((provider) => provider.label).join(", ")} connected, but I do not see an enabled rail available for payments yet.`
+          : diag?.sources.providers.ok === false
+            ? "I could not verify payment rail setup — the provider source returned an error."
+            : "I do not see a connected payment rail yet."
     },
     checkout: {
       status: hasActiveCheckoutLink && checkoutAvailableRails.length > 0 ? "ready" : "not_ready",
@@ -389,59 +512,64 @@ function buildSetupSummary(input: Omit<PineTreeAssistantContext, "setupSummary">
   }
 }
 
+// ── Main context loader ───────────────────────────────────────────────────────
+
 export async function getPineTreeAssistantContext(merchantId: string): Promise<PineTreeAssistantContext> {
   const [
-    merchant,
-    settings,
-    taxSettings,
-    providers,
-    wallets,
-    payments,
-    tickets,
-    checkoutLinks,
-    terminals
+    merchantResult,
+    settingsResult,
+    taxSettingsResult,
+    providersResult,
+    walletEngineResult,
+    availableNetworksResult,
+    paymentsResult,
+    ticketsResult,
+    checkoutLinksEngineResult,
+    terminalsResult
   ] = await Promise.all([
-    safeSingle<RawMerchantRow>("merchant", db.from("merchants").select("id,business_name,email,status").eq("id", merchantId).maybeSingle()),
-    safeSingle<RawSettingsRow>(
-      "merchant settings",
+    trackedSingle<RawMerchantRow>(
+      "merchant",
+      db.from("merchants").select("id,business_name,email,status").eq("id", merchantId).maybeSingle()
+    ),
+    trackedSingle<RawSettingsRow>(
+      "merchant_settings",
       db
         .from("merchant_settings")
         .select("business_name,address,city,state,zip,country,phone,business_type,default_provider,pinetree_fee_enabled,pinetree_fee_amount,smart_routing_enabled,auto_conversion_enabled")
         .eq("merchant_id", merchantId)
         .maybeSingle()
     ),
-    safeSingle<RawTaxSettingsRow>(
-      "tax settings",
+    trackedSingle<RawTaxSettingsRow>(
+      "merchant_tax_settings",
       db.from("merchant_tax_settings").select("tax_enabled,tax_rate").eq("merchant_id", merchantId).maybeSingle()
     ),
-    safeList<RawProviderRow>(
-      "providers",
+    trackedList<RawProviderRow>(
+      "merchant_providers",
       db
         .from("merchant_providers")
         .select("provider,status,enabled,dashboard_status,created_at,updated_at")
         .eq("merchant_id", merchantId)
         .order("provider", { ascending: true })
     ),
-    safeList<RawWalletRow>(
-      "wallets",
-      db
-        .from("merchant_wallets")
-        .select("id,network,asset,wallet_type,wallet_address,status,created_at,updated_at")
-        .eq("merchant_id", merchantId)
-        .order("created_at", { ascending: false })
-    ),
-    safeList<{
-      id: string
-      status: PaymentStatus | string
-      provider?: string | null
-      network?: string | null
-      gross_amount?: number | string | null
-      merchant_amount?: number | string | null
-      pinetree_fee?: number | string | null
-      currency?: string | null
-      created_at: string
-      updated_at?: string | null
-    }>(
+    // Use the same wallet helper as the payment engine (cross-references providers)
+    getMerchantWallets(merchantId)
+      .then((data) => ({ ok: true as const, data, rawCount: data.length, errorMessage: undefined }))
+      .catch((e: unknown) => ({
+        ok: false as const,
+        data: [] as Awaited<ReturnType<typeof getMerchantWallets>>,
+        rawCount: 0,
+        errorMessage: e instanceof Error ? e.message : String(e)
+      })),
+    // Use the same availability helper as POS methods
+    getMerchantAvailableNetworks(merchantId)
+      .then((networks) => ({ ok: true as const, networks, rawCount: networks.length, errorMessage: undefined }))
+      .catch((e: unknown) => ({
+        ok: false as const,
+        networks: [] as string[],
+        rawCount: 0,
+        errorMessage: e instanceof Error ? e.message : String(e)
+      })),
+    trackedList<RawPaymentRow>(
       "payments",
       db
         .from("payments")
@@ -450,17 +578,8 @@ export async function getPineTreeAssistantContext(merchantId: string): Promise<P
         .order("created_at", { ascending: false })
         .limit(12)
     ),
-    safeList<{
-      id: string
-      category: string
-      subject: string
-      priority: string
-      status: string
-      related_payment_id?: string | null
-      created_at: string
-      last_response_at?: string | null
-    }>(
-      "support tickets",
+    trackedList<RawTicketRow>(
+      "support_tickets",
       db
         .from("support_tickets")
         .select("id,category,subject,priority,status,related_payment_id,created_at,last_response_at")
@@ -468,39 +587,47 @@ export async function getPineTreeAssistantContext(merchantId: string): Promise<P
         .order("created_at", { ascending: false })
         .limit(5)
     ),
-    safeList<{
-      name?: string | null
-      status?: string | null
-      created_at?: string | null
-    }>(
-      "checkout links",
-      db
-        .from("checkout_links")
-        .select("name,status,created_at")
-        .eq("merchant_id", merchantId)
-        .order("created_at", { ascending: false })
-        .limit(10)
-    ),
-    safeList<{ status?: string | null }>(
+    // Use the same checkout link engine as /api/checkout-links (resolves expiry correctly)
+    listCheckoutLinksEngine(merchantId)
+      .then((data) => ({ ok: true as const, data, rawCount: data.length, errorMessage: undefined }))
+      .catch((e: unknown) => ({
+        ok: false as const,
+        data: [] as CheckoutLinkWithUrl[],
+        rawCount: 0,
+        errorMessage: e instanceof Error ? e.message : String(e)
+      })),
+    trackedList<RawTerminalRow>(
       "terminals",
       db.from("terminals").select("status").eq("merchant_id", merchantId)
     )
   ])
 
-  const normalizedProviders = providers.map(normalizeProviderRow)
-  const normalizedWallets = wallets
-    .filter((wallet) => Boolean(String(wallet.wallet_address || "").trim()))
-    .map((wallet) => ({
-      id: String(wallet.id || ""),
-      network: String(wallet.network || "unknown"),
-      asset: wallet.asset ? String(wallet.asset) : null,
-      walletType: wallet.wallet_type ? String(wallet.wallet_type) : null,
-      provider: null,
-      status: "connected",
-      updatedAt: wallet.updated_at ? String(wallet.updated_at) : wallet.created_at ? String(wallet.created_at) : null
-    }))
+  const merchant = merchantResult.data
+  const settings = settingsResult.data
+  const taxSettings = taxSettingsResult.data
+  const normalizedProviders = providersResult.data.map(normalizeProviderRow)
+  const merchantWallets = walletEngineResult.data
+  const availableNetworks = availableNetworksResult.networks
+  const payments = paymentsResult.data
+  const tickets = ticketsResult.data
+  const checkoutLinksData = checkoutLinksEngineResult.data
+  const terminals = terminalsResult.data
 
-  const railSummaries = buildRailSummaries(normalizedProviders, normalizedWallets)
+  // Map MerchantWallet rows to AssistantWalletContext (no address exposed)
+  const normalizedWallets: AssistantWalletContext[] = merchantWallets.map((wallet) => ({
+    id: wallet.id,
+    network: wallet.network,
+    asset: wallet.asset || null,
+    walletType: wallet.wallet_type || null,
+    provider: null,
+    status: "connected",
+    updatedAt: wallet.created_at || null
+  }))
+
+  // Build available provider key set from getMerchantAvailableNetworks()
+  const availableNetworkKeys = new Set(availableNetworks.map(networkToProviderKey))
+
+  const railSummaries = buildRailSummaries(normalizedProviders, normalizedWallets, availableNetworkKeys)
 
   const setupSourceSummary: AssistantSetupSourceSummary = {
     providerRows: normalizedProviders.length,
@@ -512,11 +639,91 @@ export async function getPineTreeAssistantContext(merchantId: string): Promise<P
     railNames: railSummaries.map((r) => r.rail)
   }
 
-  if (process.env.NODE_ENV !== "production") {
-    console.info("[pinetree-ai-context] context loaded", setupSourceSummary)
+  // Build diagnostics for debug/support use
+  const diagnostics: AssistantDiagnostics = {
+    merchantIdMasked: maskMerchantId(merchantId),
+    sources: {
+      merchantProfile: {
+        source: "merchants",
+        ok: merchantResult.ok,
+        rawCount: merchantResult.found ? 1 : 0,
+        found: merchantResult.found,
+        errorMessage: merchantResult.errorMessage
+      },
+      providers: {
+        source: "merchant_providers",
+        ok: providersResult.ok,
+        rawCount: providersResult.rawCount,
+        connectedCount: normalizedProviders.filter((p) => isConnectedStatus(p.status)).length,
+        enabledCount: normalizedProviders.filter((p) => p.enabled).length,
+        providerKeys: normalizedProviders.map((p) => p.provider),
+        statuses: [...new Set(normalizedProviders.map((p) => p.status))],
+        errorMessage: providersResult.errorMessage
+      },
+      wallets: {
+        source: "merchant_wallets via getMerchantWallets()",
+        ok: walletEngineResult.ok,
+        rawCount: walletEngineResult.rawCount,
+        addressPresentCount: normalizedWallets.length,
+        networks: [...new Set(normalizedWallets.map((w) => w.network))],
+        assets: [...new Set(normalizedWallets.map((w) => w.asset).filter(Boolean) as string[])],
+        walletTypes: [...new Set(normalizedWallets.map((w) => w.walletType).filter(Boolean) as string[])],
+        errorMessage: walletEngineResult.errorMessage
+      },
+      availableNetworks: {
+        source: "getMerchantAvailableNetworks()",
+        ok: availableNetworksResult.ok,
+        rawCount: availableNetworksResult.rawCount,
+        networks: availableNetworksResult.networks,
+        errorMessage: availableNetworksResult.errorMessage
+      },
+      checkout: {
+        source: "listCheckoutLinksEngine()",
+        ok: checkoutLinksEngineResult.ok,
+        rawCount: checkoutLinksEngineResult.rawCount,
+        activeCount: checkoutLinksData.filter((l) => l.resolvedStatus === "active").length,
+        errorMessage: checkoutLinksEngineResult.errorMessage
+      },
+      payments: {
+        source: "payments",
+        ok: paymentsResult.ok,
+        rawCount: paymentsResult.rawCount,
+        confirmedCount: payments.filter((p) => String(p.status) === "CONFIRMED").length,
+        pendingCount: payments.filter((p) => String(p.status) === "PENDING").length,
+        processingCount: payments.filter((p) => String(p.status) === "PROCESSING").length,
+        failedCount: payments.filter((p) => String(p.status) === "FAILED").length,
+        incompleteCount: payments.filter((p) => String(p.status) === "INCOMPLETE").length,
+        recentProviders: [...new Set(payments.map((p) => p.provider).filter(Boolean) as string[])],
+        recentNetworks: [...new Set(payments.map((p) => p.network).filter(Boolean) as string[])]
+      },
+      tickets: {
+        source: "support_tickets",
+        ok: ticketsResult.ok,
+        rawCount: ticketsResult.rawCount,
+        errorMessage: ticketsResult.errorMessage
+      },
+      terminals: {
+        source: "terminals",
+        ok: terminalsResult.ok,
+        rawCount: terminalsResult.rawCount,
+        errorMessage: terminalsResult.errorMessage
+      }
+    }
   }
 
-  const safeContext: Omit<PineTreeAssistantContext, "setupSummary"> = {
+  if (process.env.NODE_ENV !== "production") {
+    const sourceErrors = Object.entries(diagnostics.sources)
+      .filter(([, s]) => !s.ok)
+      .map(([key, s]) => ({ key, errorMessage: (s as AssistantSourceDiagnostic).errorMessage }))
+
+    console.info("[pinetree-ai-context] context loaded", {
+      merchantIdMasked: diagnostics.merchantIdMasked,
+      setupSourceSummary,
+      sourceErrors: sourceErrors.length > 0 ? sourceErrors : "none"
+    })
+  }
+
+  const safeContext: Omit<PineTreeAssistantContext, "setupSummary" | "diagnostics"> = {
     merchant: merchant
       ? {
           id: String(merchant.id),
@@ -570,20 +777,22 @@ export async function getPineTreeAssistantContext(merchantId: string): Promise<P
       createdAt: String(ticket.created_at),
       lastResponseAt: ticket.last_response_at ? String(ticket.last_response_at) : null
     })),
+    // Use resolvedStatus from listCheckoutLinksEngine (handles expiry correctly)
     checkoutLinks: {
-      activeCount: checkoutLinks.filter((link) => link.status === "active").length,
-      totalCount: checkoutLinks.length,
-      mostRecentName: checkoutLinks[0]?.name ? String(checkoutLinks[0].name) : null,
-      mostRecentStatus: checkoutLinks[0]?.status ? String(checkoutLinks[0].status) : null
+      activeCount: checkoutLinksData.filter((l) => l.resolvedStatus === "active").length,
+      totalCount: checkoutLinksData.length,
+      mostRecentName: checkoutLinksData[0]?.name || null,
+      mostRecentStatus: checkoutLinksData[0]?.resolvedStatus || null
     },
     pos: {
       terminalCount: terminals.length,
-      activeTerminalCount: terminals.filter((terminal) => isTerminalActive(terminal.status)).length
+      activeTerminalCount: terminals.filter((t) => isTerminalActive(t.status)).length
     }
   }
 
   return {
     ...safeContext,
-    setupSummary: buildSetupSummary(safeContext)
+    setupSummary: buildSetupSummary(safeContext, diagnostics),
+    diagnostics
   }
 }

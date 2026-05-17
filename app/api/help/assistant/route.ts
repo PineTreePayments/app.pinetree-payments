@@ -8,6 +8,7 @@ import {
 
 type AssistantRequestBody = {
   message?: string
+  debug?: boolean
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -19,8 +20,9 @@ export async function POST(req: NextRequest) {
     const merchantId = await requireMerchantIdFromRequest(req)
     const body = (await req.json().catch(() => ({}))) as AssistantRequestBody
     const message = String(body.message || "").trim()
+    const debugMode = body.debug === true && process.env.NODE_ENV !== "production"
 
-    if (!message) {
+    if (!message && !debugMode) {
       return NextResponse.json(
         { error: "message is required" },
         { status: 400 }
@@ -28,6 +30,71 @@ export async function POST(req: NextRequest) {
     }
 
     const context = await getPineTreeAssistantContext(merchantId)
+
+    if (debugMode) {
+      const diag = context.diagnostics
+      return NextResponse.json({
+        debug: true,
+        merchantScope: {
+          authenticated: true,
+          merchantResolved: true,
+          merchantIdMasked: diag?.merchantIdMasked ?? "unknown",
+          source: "supabase-user-or-api-key"
+        },
+        sources: {
+          merchantProfile: {
+            ok: diag?.sources.merchantProfile.ok,
+            found: diag?.sources.merchantProfile.found
+          },
+          providers: {
+            ok: diag?.sources.providers.ok,
+            rawCount: diag?.sources.providers.rawCount,
+            connectedCount: diag?.sources.providers.connectedCount,
+            enabledCount: diag?.sources.providers.enabledCount,
+            providerKeys: diag?.sources.providers.providerKeys,
+            statuses: diag?.sources.providers.statuses,
+            errorMessage: diag?.sources.providers.errorMessage
+          },
+          wallets: {
+            ok: diag?.sources.wallets.ok,
+            rawCount: diag?.sources.wallets.rawCount,
+            addressPresentCount: diag?.sources.wallets.addressPresentCount,
+            networks: diag?.sources.wallets.networks,
+            assets: diag?.sources.wallets.assets,
+            errorMessage: diag?.sources.wallets.errorMessage
+          },
+          availableNetworks: {
+            ok: diag?.sources.availableNetworks.ok,
+            networks: diag?.sources.availableNetworks.networks,
+            errorMessage: diag?.sources.availableNetworks.errorMessage
+          },
+          checkout: {
+            ok: diag?.sources.checkout.ok,
+            activeLinks: diag?.sources.checkout.activeCount,
+            totalLinks: diag?.sources.checkout.rawCount,
+            availableRails: context.railSummaries.filter((r) => r.availableForCheckout).map((r) => r.rail),
+            errorMessage: diag?.sources.checkout.errorMessage
+          },
+          payments: {
+            ok: diag?.sources.payments.ok,
+            recentCount: diag?.sources.payments.rawCount,
+            confirmedCount: diag?.sources.payments.confirmedCount,
+            pendingCount: diag?.sources.payments.pendingCount,
+            processingCount: diag?.sources.payments.processingCount,
+            failedCount: diag?.sources.payments.failedCount,
+            incompleteCount: diag?.sources.payments.incompleteCount
+          }
+        },
+        setupSummary: context.setupSummary,
+        sourceErrors: Object.entries(diag?.sources ?? {})
+          .filter(([, s]) => !(s as { ok: boolean }).ok)
+          .map(([key, s]) => ({
+            source: key,
+            errorMessage: (s as { errorMessage?: string }).errorMessage
+          }))
+      })
+    }
+
     const answer = answerPineTreeQuestion(message, context)
 
     return NextResponse.json({
