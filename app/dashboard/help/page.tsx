@@ -585,15 +585,26 @@ export default function HelpCenterPage() {
   }
 
   return (
-    <div className="space-y-4 pb-[calc(3.75rem+env(safe-area-inset-bottom,0px))] md:space-y-7 md:pb-0">
-      <div>
-        <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Help Center</h1>
+    <div className="space-y-3 md:space-y-7">
+
+      {/* Mobile header — compact */}
+      <div className="md:hidden">
+        <h1 className="text-xl font-semibold text-gray-950">Help Center</h1>
+        <p className="mt-0.5 text-[12px] text-gray-500">
+          Account setup, payment status, support, and PineTree AI.
+        </p>
+      </div>
+
+      {/* Desktop header */}
+      <div className="hidden md:block">
+        <h1 className="text-3xl font-semibold text-gray-950">Help Center</h1>
         <p className="mt-1 text-[12px] font-semibold leading-5 tracking-[0.01em] text-[#0052FF] sm:text-sm">
           PineTree merchant onboarding, setup, payment status, and support guidance.
         </p>
       </div>
 
-      <div className="rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.12),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f8fbff_52%,#eef5ff_100%)] p-4 shadow-[0_12px_36px_rgba(0,82,255,0.10)] sm:p-5">
+      {/* Desktop hero card */}
+      <div className="hidden md:block rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.12),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f8fbff_52%,#eef5ff_100%)] p-4 shadow-[0_12px_36px_rgba(0,82,255,0.10)] sm:p-5">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
@@ -606,10 +617,38 @@ export default function HelpCenterPage() {
               PineTree AI and the help library are grounded in PineTree POS, hosted checkout, providers, wallets, dashboard reports, and the official payment state model.
             </p>
           </div>
-          <div className="hidden w-full grid-cols-2 gap-2 md:grid md:w-auto md:min-w-[300px]">
+          <div className="grid w-full grid-cols-2 gap-2 md:w-auto md:min-w-[300px]">
             <QuickAction label="Open a Ticket" icon={<LifeBuoy size={18} />} href="#support-ticket" />
             <QuickAction label="Ask PineTree AI" icon={<Bot size={18} />} href="#pinetree-ai" />
           </div>
+        </div>
+      </div>
+
+      {/* Mobile tab row — top, sticky */}
+      <div className="sticky top-0 z-10 -mx-4 bg-white/95 px-4 pb-2 pt-1 backdrop-blur-sm md:hidden">
+        <div className="flex gap-2 overflow-x-auto">
+          {(
+            [
+              { id: "ai" as const, label: "Ask AI", icon: Bot },
+              { id: "docs" as const, label: "Docs", icon: BookOpen },
+              { id: "support" as const, label: "Support", icon: LifeBuoy },
+              { id: "tickets" as const, label: "Tickets", icon: FileText },
+            ]
+          ).map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setMobileSection(id)}
+              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                mobileSection === id
+                  ? "border-[#0052FF] bg-[#0052FF] text-white shadow-sm"
+                  : "border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:bg-blue-50"
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5 shrink-0" />
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -1015,35 +1054,6 @@ export default function HelpCenterPage() {
             )}
           </div>
         )}
-      </div>
-
-      {/* ── MOBILE ONLY: sticky tab bar ──────────────────────────────────── */}
-      <div
-        className="fixed bottom-0 left-0 right-0 z-40 border-t border-gray-200 bg-white/95 backdrop-blur-sm md:hidden"
-        style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
-      >
-        <div className="flex">
-          {(
-            [
-              { id: "ai" as const, label: "Ask AI", icon: Bot },
-              { id: "docs" as const, label: "Docs", icon: BookOpen },
-              { id: "support" as const, label: "Support", icon: LifeBuoy },
-              { id: "tickets" as const, label: "Tickets", icon: FileText },
-            ]
-          ).map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setMobileSection(id)}
-              className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-2.5 text-[10px] font-semibold transition ${
-                mobileSection === id ? "text-[#0052FF]" : "text-gray-400 hover:text-gray-600"
-              }`}
-            >
-              <Icon className={`h-5 w-5 ${mobileSection === id ? "text-[#0052FF]" : "text-gray-400"}`} />
-              {label}
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* ── DESKTOP ONLY ─────────────────────────────────────────────────── */}
