@@ -8,7 +8,6 @@ import {
   DashboardHeroCard,
   DashboardSection,
   GroupedMetricSurface,
-  MetricGrid,
   PineTreeInsightsCard
 } from "@/components/dashboard/DashboardPrimitives"
 import {
@@ -249,27 +248,12 @@ export default function ReportsPage() {
         }
       />
 
-      <MetricGrid columns="four">
-        <CompactMetricTile
-          label="Transactions"
-          value={summary ? String(summary.transactionCount) : "0"}
-        />
-        <CompactMetricTile
-          label="Avg Transaction"
-          value={summary ? fmt(summary.avgTransaction) : "$0.00"}
-          tone="blue"
-        />
-        <CompactMetricTile
-          label="Failed"
-          value={summary ? String(summary.failedPayments) : "0"}
-          tone={summary?.failedPayments ? "red" : "green"}
-        />
-        <CompactMetricTile
-          label="Success Rate"
-          value={`${successRate}%`}
-          tone="green"
-        />
-      </MetricGrid>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 md:gap-4">
+        <ReportStatTile label="Transactions"    value={summary ? String(summary.transactionCount) : "0"} />
+        <ReportStatTile label="Avg Transaction" value={summary ? fmt(summary.avgTransaction) : "$0.00"}  accent="blue" />
+        <ReportStatTile label="Failed"          value={summary ? String(summary.failedPayments) : "0"}   accent={summary?.failedPayments ? "red" : "green"} />
+        <ReportStatTile label="Success Rate"    value={`${successRate}%`}                                accent="green" />
+      </div>
 
       {summary && (
         <PineTreeInsightsCard
@@ -358,6 +342,42 @@ export default function ReportsPage() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+type StatAccent = "blue" | "green" | "red" | "neutral"
+
+function ReportStatTile({
+  label,
+  value,
+  accent = "neutral"
+}: {
+  label: string
+  value: string
+  accent?: StatAccent
+}) {
+  const surface: Record<StatAccent, string> = {
+    blue:    "bg-[#0c1a35] border border-blue-900/50 shadow-[0_8px_28px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(59,130,246,0.08)]",
+    green:   "bg-[#091c14] border border-emerald-900/45 shadow-[0_8px_28px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(16,185,129,0.07)]",
+    red:     "bg-[#1b0b0d] border border-red-900/40 shadow-[0_8px_28px_rgba(0,0,0,0.34)]",
+    neutral: "bg-[#0f1728] border border-[#1e2c47] shadow-[0_8px_28px_rgba(0,0,0,0.30)]",
+  }
+  const labelCls: Record<StatAccent, string> = {
+    blue:    "text-blue-400",
+    green:   "text-emerald-400",
+    red:     "text-red-400",
+    neutral: "text-slate-400",
+  }
+
+  return (
+    <div className={`min-w-0 rounded-2xl p-3.5 sm:p-4 ${surface[accent]}`}>
+      <p className={`truncate text-[10px] font-semibold uppercase tracking-[0.13em] ${labelCls[accent]}`}>
+        {label}
+      </p>
+      <div className="mt-1.5 min-w-0 text-xl font-semibold leading-tight text-white sm:text-2xl">
+        {value}
+      </div>
     </div>
   )
 }

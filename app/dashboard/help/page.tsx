@@ -656,7 +656,7 @@ export default function HelpCenterPage() {
 
         {/* AI tab */}
         {mobileSection === "ai" && (
-          <div className="rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-4 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
+          <div className="flex flex-col min-h-[calc(100dvh-8rem)] rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-4 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Bot className="h-5 w-5 text-[#0052FF]" />
@@ -679,7 +679,7 @@ export default function HelpCenterPage() {
               ))}
             </div>
 
-            <div className="mt-3 max-h-[calc(100dvh-22rem)] min-h-[180px] space-y-3 overflow-y-auto rounded-xl border border-blue-100 bg-white/75 p-3">
+            <div className="mt-3 flex-1 min-h-[200px] space-y-3 overflow-y-auto rounded-xl border border-blue-100 bg-white/75 p-3">
               {assistantMessages.map((message) => (
                 <AssistantMessageBubble
                   key={message.id}
@@ -885,11 +885,8 @@ export default function HelpCenterPage() {
                     value={ticketForm.description}
                     onChange={(event) => setTicketForm((current) => ({ ...current, description: event.target.value }))}
                     className="form-field min-h-24 resize-y"
-                    placeholder="Include what happened, payment ID, provider, wallet/network, approximate time, amount, and transaction hash if available."
+                    placeholder="Tell us what happened."
                   />
-                  <p className="mt-1.5 text-xs text-gray-400">
-                    For payment issues, include the payment ID, provider/network, wallet used, approximate time, amount, and transaction hash if available.
-                  </p>
                 </Field>
               </div>
 
@@ -1203,9 +1200,7 @@ export default function HelpCenterPage() {
       </DashboardSection>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-        {/* Left column: Support tickets + Feedback */}
-        <div className="space-y-4 md:space-y-5">
-          <DashboardSection title="Support" titleTone="blue" className="min-w-0">
+        <DashboardSection title="Support" titleTone="blue">
             {/* Open a Ticket form */}
             <div id="support-ticket" className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
               <div className="flex items-start justify-between gap-4">
@@ -1279,254 +1274,228 @@ export default function HelpCenterPage() {
               </div>
             </div>
 
-            {/* Recent Tickets window */}
-            <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold text-gray-950">Recent Tickets</h2>
-                <button
-                  type="button"
-                  onClick={() => void loadTickets()}
-                  className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
-                >
-                  Refresh
-                </button>
-              </div>
-
-              {/* Status filter chips */}
-              <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1">
-                {TICKET_FILTERS.map((filter) => {
-                  const active = filter === ticketFilter
-                  return (
-                    <button
-                      key={filter}
-                      type="button"
-                      onClick={() => setTicketFilter(filter)}
-                      className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                        active
-                          ? "border-[#0052FF] bg-[#0052FF] text-white shadow-sm"
-                          : "border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:bg-blue-50"
-                      }`}
-                    >
-                      {filter}
-                    </button>
-                  )
-                })}
-              </div>
-
-              {/* Loading skeletons */}
-              {ticketsLoading && (
-                <div className="space-y-2">
-                  <div className="h-[72px] animate-pulse rounded-xl bg-gray-100" />
-                  <div className="h-[72px] animate-pulse rounded-xl bg-gray-100" />
-                </div>
-              )}
-
-              {/* Error */}
-              {!ticketsLoading && ticketError && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
-                  {ticketError}
-                </div>
-              )}
-
-              {/* Empty state */}
-              {!ticketsLoading && !ticketError && filteredTickets.length === 0 && (
-                <div className="flex flex-col items-center gap-3 py-8 text-center">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-full border border-blue-100 bg-blue-50">
-                    <LifeBuoy className="h-5 w-5 text-[#0052FF]" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-gray-950">
-                      {ticketFilter === "All" ? "No support tickets yet" : `No ${ticketFilter.toLowerCase()} tickets`}
-                    </p>
-                    <p className="mt-1 text-xs text-gray-500">
-                      {ticketFilter === "All"
-                        ? "Open a ticket above to get help from PineTree."
-                        : "Change the filter to see other tickets."}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Ticket rows */}
-              {!ticketsLoading && !ticketError && filteredTickets.length > 0 && (
-                <div className="space-y-1.5">
-                  {filteredTickets.map((ticket) => (
-                    <button
-                      key={ticket.id}
-                      type="button"
-                      onClick={() => openTicketDetail(ticket)}
-                      className={`w-full rounded-xl border p-3 text-left outline-none transition hover:border-blue-200 hover:bg-blue-50/30 focus-visible:ring-4 focus-visible:ring-blue-100 ${
-                        ticket.status === "archived"
-                          ? "border-gray-100 bg-gray-50/60 opacity-80"
-                          : "border-gray-100 bg-white hover:shadow-[0_4px_14px_rgba(0,82,255,0.06)]"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <TicketStatusPill status={ticket.status} />
-                          <span className="text-xs text-gray-500">{ticket.category}</span>
-                          <span className="text-gray-300" aria-hidden>·</span>
-                          <span className="text-xs text-gray-500">{ticket.priority}</span>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1">
-                          <span className="text-[11px] text-gray-400">{formatDate(ticket.created_at)}</span>
-                          <ChevronRight className="h-3.5 w-3.5 text-gray-400" />
-                        </div>
-                      </div>
-                      <div className="mt-1.5 text-sm font-semibold text-gray-950">{ticket.subject}</div>
-                      {ticket.last_response_at && (
-                        <div className="mt-1 flex items-center gap-1 text-[11px] text-gray-500">
-                          <Clock className="h-3 w-3 shrink-0" />
-                          Last response {formatDate(ticket.last_response_at)}
-                        </div>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
           </DashboardSection>
 
-          <DashboardSection title="Feedback" titleTone="blue">
-            <div id="feedback" className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+        <DashboardSection title="PineTree AI" titleTone="blue">
+          <div id="pinetree-ai" className="rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-4 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
+            <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2">
-                <MessageSquare className="h-5 w-5 shrink-0 text-[#0052FF]" />
-                <h2 className="text-base font-semibold text-gray-950">General Feedback</h2>
+                <Bot className="h-5 w-5 text-[#0052FF]" />
+                <h2 className="text-lg font-semibold text-gray-950">Ask PineTree AI</h2>
               </div>
-              <p className="mt-1.5 text-sm leading-5 text-gray-500">
-                Share product, documentation, payment, or dashboard feedback.
-              </p>
-
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <Field label="Type">
-                  <select
-                    value={feedbackForm.type}
-                    onChange={(event) => setFeedbackForm((current) => ({ ...current, type: event.target.value }))}
-                    className="form-field"
-                  >
-                    {feedbackTypes.map((type) => <option key={type}>{type}</option>)}
-                  </select>
-                </Field>
-                <Field label="Rating">
-                  <select
-                    value={feedbackForm.rating}
-                    onChange={(event) => setFeedbackForm((current) => ({ ...current, rating: event.target.value }))}
-                    className="form-field"
-                  >
-                    <option value="">Optional</option>
-                    <option value="5">5 - Excellent</option>
-                    <option value="4">4 - Good</option>
-                    <option value="3">3 - Neutral</option>
-                    <option value="2">2 - Needs work</option>
-                    <option value="1">1 - Poor</option>
-                  </select>
-                </Field>
-              </div>
-
-              <div className="mt-3">
-                <Field label="Message">
-                  <textarea
-                    value={feedbackForm.message}
-                    onChange={(event) => setFeedbackForm((current) => ({ ...current, message: event.target.value }))}
-                    className="form-field min-h-[80px] resize-y"
-                    placeholder="Tell us what would make PineTree clearer or easier to use."
-                  />
-                </Field>
-              </div>
-
-              <div className="mt-3 flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => void submitFeedback()}
-                  disabled={submittingFeedback}
-                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50 sm:w-auto"
-                >
-                  <CheckCircle2 size={16} />
-                  {submittingFeedback ? "Sending..." : "Send Feedback"}
-                </button>
-              </div>
+              <ProviderStatusPill label="Account-aware" tone="blue" />
             </div>
-          </DashboardSection>
-        </div>
 
-        {/* Right column: Assistant */}
-        <div>
-          <DashboardSection title="PineTree AI" titleTone="blue">
-            <div id="pinetree-ai" className="rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-4 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Bot className="h-5 w-5 text-[#0052FF]" />
-                    <h2 className="text-lg font-semibold text-gray-950">Ask PineTree AI</h2>
-                  </div>
-                  <p className="mt-1.5 text-sm leading-5 text-gray-500">
-                    PineTree AI can help you understand your account setup, connected wallets, payment rails, POS, checkout, dashboard, and recent payment status.
-                  </p>
-                </div>
-                <ProviderStatusPill label="Account-aware" tone="blue" />
-              </div>
-
-              <div className="mt-3 grid gap-1.5">
-                {suggestedQuestions.map((question) => (
-                  <button
-                    key={question}
-                    type="button"
-                    onClick={() => void submitAssistantQuestion(question)}
-                    disabled={assistantLoading}
-                    className="w-full rounded-xl border border-blue-100 bg-white/85 px-3 py-1.5 text-left text-sm font-medium text-gray-700 transition hover:border-[#0052FF] hover:bg-blue-50"
-                  >
-                    {question}
-                  </button>
-                ))}
-              </div>
-
-              <div className="mt-3 max-h-[260px] min-h-[100px] space-y-3 overflow-y-auto rounded-xl border border-blue-100 bg-white/75 p-3">
-                {assistantMessages.map((message) => (
-                  <AssistantMessageBubble
-                    key={message.id}
-                    message={message}
-                    onOpenArticle={(article) => {
-                      setSelectedCategory(article.category)
-                      setSelectedArticle(article)
-                      setQuery("")
-                    }}
-                  />
-                ))}
-                {assistantLoading && (
-                  <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-sm text-[#0052FF]">
-                    Checking your PineTree account context...
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-3 flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
-                <Sparkles className="h-4 w-4 text-[#0052FF]" />
-                <input
-                  value={assistantQuestion}
-                  onChange={(event) => setAssistantQuestion(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault()
-                      void submitAssistantQuestion()
-                    }
+            <div className="mt-3 max-h-[360px] min-h-[120px] space-y-3 overflow-y-auto rounded-xl border border-blue-100 bg-white/75 p-3">
+              {assistantMessages.map((message) => (
+                <AssistantMessageBubble
+                  key={message.id}
+                  message={message}
+                  onOpenArticle={(article) => {
+                    setSelectedCategory(article.category)
+                    setSelectedArticle(article)
+                    setQuery("")
                   }}
-                  placeholder="Ask PineTree AI about your setup or a payment status"
-                  className="min-h-9 flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
                 />
+              ))}
+              {assistantLoading && (
+                <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-sm text-[#0052FF]">
+                  Checking your PineTree account context...
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
+              <Sparkles className="h-4 w-4 text-[#0052FF]" />
+              <input
+                value={assistantQuestion}
+                onChange={(event) => setAssistantQuestion(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault()
+                    void submitAssistantQuestion()
+                  }
+                }}
+                placeholder="Ask PineTree AI about your setup or a payment status"
+                className="min-h-9 flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+              />
+              <button
+                type="button"
+                onClick={() => void submitAssistantQuestion()}
+                disabled={assistantLoading || !assistantQuestion.trim()}
+                aria-label="Ask PineTree AI"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#0052FF] text-white transition hover:bg-blue-700 disabled:opacity-50"
+              >
+                <Send size={15} />
+              </button>
+            </div>
+          </div>
+        </DashboardSection>
+      </div>
+
+      <DashboardSection title="Recent Tickets" titleTone="blue">
+        <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-gray-950">Recent Tickets</h2>
+            <button
+              type="button"
+              onClick={() => void loadTickets()}
+              className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
+            >
+              Refresh
+            </button>
+          </div>
+
+          <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1">
+            {TICKET_FILTERS.map((filter) => {
+              const active = filter === ticketFilter
+              return (
                 <button
+                  key={filter}
                   type="button"
-                  onClick={() => void submitAssistantQuestion()}
-                  disabled={assistantLoading || !assistantQuestion.trim()}
-                  aria-label="Ask PineTree AI"
-                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#0052FF] text-white transition hover:bg-blue-700 disabled:opacity-50"
+                  onClick={() => setTicketFilter(filter)}
+                  className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                    active
+                      ? "border-[#0052FF] bg-[#0052FF] text-white shadow-sm"
+                      : "border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:bg-blue-50"
+                  }`}
                 >
-                  <Send size={15} />
+                  {filter}
                 </button>
+              )
+            })}
+          </div>
+
+          {ticketsLoading && (
+            <div className="space-y-2">
+              <div className="h-[72px] animate-pulse rounded-xl bg-gray-100" />
+              <div className="h-[72px] animate-pulse rounded-xl bg-gray-100" />
+            </div>
+          )}
+
+          {!ticketsLoading && ticketError && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+              {ticketError}
+            </div>
+          )}
+
+          {!ticketsLoading && !ticketError && filteredTickets.length === 0 && (
+            <div className="flex flex-col items-center gap-3 py-8 text-center">
+              <div className="flex h-11 w-11 items-center justify-center rounded-full border border-blue-100 bg-blue-50">
+                <LifeBuoy className="h-5 w-5 text-[#0052FF]" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-950">
+                  {ticketFilter === "All" ? "No support tickets yet" : `No ${ticketFilter.toLowerCase()} tickets`}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  {ticketFilter === "All"
+                    ? "Open a ticket above to get help from PineTree."
+                    : "Change the filter to see other tickets."}
+                </p>
               </div>
             </div>
-          </DashboardSection>
+          )}
+
+          {!ticketsLoading && !ticketError && filteredTickets.length > 0 && (
+            <div className="space-y-1.5">
+              {filteredTickets.map((ticket) => (
+                <button
+                  key={ticket.id}
+                  type="button"
+                  onClick={() => openTicketDetail(ticket)}
+                  className={`w-full rounded-xl border p-3 text-left outline-none transition hover:border-blue-200 hover:bg-blue-50/30 focus-visible:ring-4 focus-visible:ring-blue-100 ${
+                    ticket.status === "archived"
+                      ? "border-gray-100 bg-gray-50/60 opacity-80"
+                      : "border-gray-100 bg-white hover:shadow-[0_4px_14px_rgba(0,82,255,0.06)]"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <TicketStatusPill status={ticket.status} />
+                      <span className="text-xs text-gray-500">{ticket.category}</span>
+                      <span className="text-gray-300" aria-hidden>·</span>
+                      <span className="text-xs text-gray-500">{ticket.priority}</span>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <span className="text-[11px] text-gray-400">{formatDate(ticket.created_at)}</span>
+                      <ChevronRight className="h-3.5 w-3.5 text-gray-400" />
+                    </div>
+                  </div>
+                  <div className="mt-1.5 text-sm font-semibold text-gray-950">{ticket.subject}</div>
+                  {ticket.last_response_at && (
+                    <div className="mt-1 flex items-center gap-1 text-[11px] text-gray-500">
+                      <Clock className="h-3 w-3 shrink-0" />
+                      Last response {formatDate(ticket.last_response_at)}
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-      </div>
+      </DashboardSection>
+
+      <DashboardSection title="Feedback" titleTone="blue">
+        <div id="feedback" className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="h-5 w-5 shrink-0 text-[#0052FF]" />
+            <h2 className="text-base font-semibold text-gray-950">General Feedback</h2>
+          </div>
+          <p className="mt-1.5 text-sm leading-5 text-gray-500">
+            Share product, documentation, payment, or dashboard feedback.
+          </p>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <Field label="Type">
+              <select
+                value={feedbackForm.type}
+                onChange={(event) => setFeedbackForm((current) => ({ ...current, type: event.target.value }))}
+                className="form-field"
+              >
+                {feedbackTypes.map((type) => <option key={type}>{type}</option>)}
+              </select>
+            </Field>
+            <Field label="Rating">
+              <select
+                value={feedbackForm.rating}
+                onChange={(event) => setFeedbackForm((current) => ({ ...current, rating: event.target.value }))}
+                className="form-field"
+              >
+                <option value="">Optional</option>
+                <option value="5">5 - Excellent</option>
+                <option value="4">4 - Good</option>
+                <option value="3">3 - Neutral</option>
+                <option value="2">2 - Needs work</option>
+                <option value="1">1 - Poor</option>
+              </select>
+            </Field>
+          </div>
+
+          <div className="mt-3">
+            <Field label="Message">
+              <textarea
+                value={feedbackForm.message}
+                onChange={(event) => setFeedbackForm((current) => ({ ...current, message: event.target.value }))}
+                className="form-field min-h-[80px] resize-y"
+                placeholder="Tell us what would make PineTree clearer or easier to use."
+              />
+            </Field>
+          </div>
+
+          <div className="mt-3 flex justify-end">
+            <button
+              type="button"
+              onClick={() => void submitFeedback()}
+              disabled={submittingFeedback}
+              className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50 sm:w-auto"
+            >
+              <CheckCircle2 size={16} />
+              {submittingFeedback ? "Sending..." : "Send Feedback"}
+            </button>
+          </div>
+        </div>
+      </DashboardSection>
 
       </div>{/* end desktop-only block */}
 

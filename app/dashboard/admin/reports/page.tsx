@@ -7,9 +7,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import { ArrowLeft, RefreshCw } from "lucide-react"
 import {
-  CompactMetricTile,
   DashboardSection,
-  MetricGrid,
 } from "@/components/dashboard/DashboardPrimitives"
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -106,7 +104,7 @@ const NETWORK_LABELS: Record<string, string> = {
   base:             "Base",
   bitcoin_lightning: "Lightning",
   ethereum:         "Ethereum",
-  unknown:          "Unknown",
+  unknown:          "Cash",
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -398,12 +396,12 @@ export default function AdminReportsPage() {
 
       {/* ── Period tabs ──────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex gap-1 rounded-2xl border border-gray-200/80 bg-white/90 p-1 w-fit shadow-[0_2px_8px_rgba(15,23,42,0.06)]">
+        <div className="flex gap-1 overflow-x-auto rounded-2xl border border-gray-200/80 bg-white/90 p-1 shadow-[0_2px_8px_rgba(15,23,42,0.06)] sm:w-fit [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {PERIODS.map((p) => (
             <button
               key={p.value}
               onClick={() => setPeriod(p.value)}
-              className={`rounded-xl px-4 py-2 text-sm font-medium transition-all ${
+              className={`shrink-0 whitespace-nowrap rounded-xl px-2.5 py-1.5 text-xs font-medium transition-all sm:px-4 sm:py-2 sm:text-sm ${
                 period === p.value
                   ? "bg-[#0052FF] text-white shadow-sm"
                   : "text-gray-500 hover:text-gray-800"
@@ -441,53 +439,17 @@ export default function AdminReportsPage() {
             title={`Payment Volume — ${PERIODS.find((p) => p.value === period)?.label}`}
             titleTone="blue"
           >
-            <MetricGrid columns="three">
-              <CompactMetricTile
-                label="Total"
-                value={r ? fmt(r.totalTransactions) : "—"}
-              />
-              <CompactMetricTile
-                label="Confirmed"
-                value={r ? fmt(r.confirmedTransactions) : "—"}
-                tone="green"
-              />
-              <CompactMetricTile
-                label="Confirmed Volume"
-                value={r ? fmtUSD(r.confirmedVolume) : "—"}
-                tone="blue"
-              />
-              <CompactMetricTile
-                label="PineTree Fees"
-                value={r ? fmtUSD(r.pinetreeFees) : "—"}
-                tone="blue"
-              />
-              <CompactMetricTile
-                label="Processing"
-                value={r ? fmt(r.processingTransactions) : "—"}
-                tone="amber"
-                detail="In-flight on-chain"
-              />
-              <CompactMetricTile
-                label="Awaiting Customer"
-                value={r ? fmt(r.awaitingTransactions) : "—"}
-                detail="CREATED + PENDING"
-              />
-              <CompactMetricTile
-                label="Incomplete"
-                value={r ? fmt(r.incompleteTransactions) : "—"}
-                tone="amber"
-                detail="Customer abandoned"
-              />
-              <CompactMetricTile
-                label="Failed"
-                value={r ? fmt(r.failedTransactions) : "—"}
-                tone="red"
-              />
-              <CompactMetricTile
-                label="Expired"
-                value={r ? fmt(r.expiredTransactions) : "—"}
-              />
-            </MetricGrid>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:gap-4">
+              <AdminStatTile label="Total"            value={r ? fmt(r.totalTransactions) : "—"} />
+              <AdminStatTile label="Confirmed"        value={r ? fmt(r.confirmedTransactions) : "—"}  accent="green" />
+              <AdminStatTile label="Confirmed Volume" value={r ? fmtUSD(r.confirmedVolume) : "—"}     accent="blue" />
+              <AdminStatTile label="PineTree Fees"    value={r ? fmtUSD(r.pinetreeFees) : "—"}        accent="blue" />
+              <AdminStatTile label="Processing"       value={r ? fmt(r.processingTransactions) : "—"} detail="In-flight on-chain" />
+              <AdminStatTile label="Awaiting"         value={r ? fmt(r.awaitingTransactions) : "—"}   detail="CREATED + PENDING" />
+              <AdminStatTile label="Incomplete"       value={r ? fmt(r.incompleteTransactions) : "—"} detail="Customer abandoned" />
+              <AdminStatTile label="Failed"           value={r ? fmt(r.failedTransactions) : "—"}     accent="red" />
+              <AdminStatTile label="Expired"          value={r ? fmt(r.expiredTransactions) : "—"} />
+            </div>
           </DashboardSection>
 
           {/* ── Mode notice ──────────────────────────────────────────────────── */}
@@ -623,16 +585,16 @@ export default function AdminReportsPage() {
                   {/* Summary tiles */}
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                     {[
-                      { label: "Total Stale", value: fmt(stale.totalStale), tone: "amber" },
-                      { label: "CREATED", value: fmt(stale.byStatus.CREATED ?? 0), tone: "" },
-                      { label: "PENDING", value: fmt(stale.byStatus.PENDING ?? 0), tone: "" },
-                      { label: "PROCESSING", value: fmt(stale.byStatus.PROCESSING ?? 0), tone: "amber" },
+                      { label: "Total Stale", value: fmt(stale.totalStale),                     amber: true },
+                      { label: "CREATED",     value: fmt(stale.byStatus.CREATED ?? 0),          amber: false },
+                      { label: "PENDING",     value: fmt(stale.byStatus.PENDING ?? 0),          amber: false },
+                      { label: "PROCESSING",  value: fmt(stale.byStatus.PROCESSING ?? 0),       amber: true },
                     ].map((s) => (
-                      <div key={s.label} className="rounded-xl border border-gray-100 bg-gray-50 p-3">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+                      <div key={s.label} className="min-w-0 rounded-2xl bg-[#0f1728] border border-[#1e2c47] shadow-[0_8px_28px_rgba(0,0,0,0.30)] p-3.5">
+                        <p className="truncate text-[10px] font-semibold uppercase tracking-[0.13em] text-slate-400">
                           {s.label}
                         </p>
-                        <p className={`mt-1 text-xl font-bold ${s.tone === "amber" ? "text-amber-600" : "text-gray-900"}`}>
+                        <p className={`mt-1.5 text-xl font-semibold ${s.amber ? "text-amber-400" : "text-white"}`}>
                           {s.value}
                         </p>
                       </div>
@@ -641,23 +603,23 @@ export default function AdminReportsPage() {
 
                   {/* Eligibility summary */}
                   <div className="flex gap-3">
-                    <div className="flex-1 rounded-xl border border-green-100 bg-green-50 p-3">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-green-600">
+                    <div className="flex-1 min-w-0 rounded-2xl bg-[#091c14] border border-emerald-900/45 shadow-[0_8px_28px_rgba(0,0,0,0.34)] p-3.5">
+                      <p className="truncate text-[10px] font-semibold uppercase tracking-[0.13em] text-emerald-400">
                         Eligible for Incomplete
                       </p>
-                      <p className="mt-1 text-xl font-bold text-green-700">
+                      <p className="mt-1.5 text-xl font-semibold text-white">
                         {fmt(stale.eligibleCount ?? 0)}
                       </p>
-                      <p className="mt-0.5 text-[11px] text-green-600">PENDING &gt; 60 min</p>
+                      <p className="mt-1 text-[11px] text-emerald-600/80">PENDING &gt; 60 min</p>
                     </div>
-                    <div className="flex-1 rounded-xl border border-amber-100 bg-amber-50 p-3">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-amber-600">
+                    <div className="flex-1 min-w-0 rounded-2xl bg-[#1e1600] border border-amber-900/40 shadow-[0_8px_28px_rgba(0,0,0,0.34)] p-3.5">
+                      <p className="truncate text-[10px] font-semibold uppercase tracking-[0.13em] text-amber-400">
                         Review Required
                       </p>
-                      <p className="mt-1 text-xl font-bold text-amber-700">
+                      <p className="mt-1.5 text-xl font-semibold text-white">
                         {fmt(stale.reviewRequiredCount ?? 0)}
                       </p>
-                      <p className="mt-0.5 text-[11px] text-amber-600">CREATED &gt; 30 min · PROCESSING &gt; 24 h</p>
+                      <p className="mt-1 text-[11px] text-amber-600/80">CREATED &gt; 30 min · PROCESSING &gt; 24 h</p>
                     </div>
                   </div>
 
@@ -966,6 +928,41 @@ export default function AdminReportsPage() {
           </DashboardSection>
 
         </div>
+      )}
+    </div>
+  )
+}
+
+type AdminAccent = "blue" | "green" | "red" | "neutral"
+
+function AdminStatTile({ label, value, detail, accent = "neutral" }: {
+  label: string
+  value: string
+  detail?: string
+  accent?: AdminAccent
+}) {
+  const surface: Record<AdminAccent, string> = {
+    blue:    "bg-[#0c1a35] border border-blue-900/50 shadow-[0_8px_28px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(59,130,246,0.08)]",
+    green:   "bg-[#091c14] border border-emerald-900/45 shadow-[0_8px_28px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(16,185,129,0.07)]",
+    red:     "bg-[#1b0b0d] border border-red-900/40 shadow-[0_8px_28px_rgba(0,0,0,0.34)]",
+    neutral: "bg-[#0f1728] border border-[#1e2c47] shadow-[0_8px_28px_rgba(0,0,0,0.30)]",
+  }
+  const labelCls: Record<AdminAccent, string> = {
+    blue:    "text-blue-400",
+    green:   "text-emerald-400",
+    red:     "text-red-400",
+    neutral: "text-slate-400",
+  }
+  return (
+    <div className={`min-w-0 rounded-2xl p-3.5 sm:p-4 ${surface[accent]}`}>
+      <p className={`truncate text-[10px] font-semibold uppercase tracking-[0.13em] ${labelCls[accent]}`}>
+        {label}
+      </p>
+      <div className="mt-1.5 min-w-0 text-xl font-semibold leading-tight text-white sm:text-2xl">
+        {value}
+      </div>
+      {detail && (
+        <p className="mt-1 truncate text-[10px] text-slate-500">{detail}</p>
       )}
     </div>
   )
