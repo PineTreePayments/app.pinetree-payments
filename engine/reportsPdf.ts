@@ -1,4 +1,6 @@
 import { PDFDocument, PDFPage, StandardFonts, rgb, type PDFFont } from "pdf-lib"
+import { readFile } from "fs/promises"
+import { join } from "path"
 import { generateReportEngine, type ReportInput, type ReportSummary } from "./reports"
 import { PDF_RGB } from "@/lib/reporting/reportTheme"
 
@@ -217,8 +219,19 @@ export async function generateReportPdfFromSummary(report: ReportSummary) {
 
   // ── Branded header bar (page 1 only) ───────────────────────────────────────
   firstPage.drawRectangle({ x: 0, y: 714, width: 620, height: 86, color: BLUE })
-  firstPage.drawText("PineTree Payments", { x: 50, y: 772, size: 16, font: bold, color: WHITE })
-  firstPage.drawText("Financial Reporting", { x: 50, y: 751, size: 9, font, color: rgb(...PDF_RGB.headerSub) })
+
+  let textX = 50
+  try {
+    const logoPng = await readFile(join(process.cwd(), "public", "pinetree-web-logo.png"))
+    const logo = await pdfDoc.embedPng(logoPng)
+    firstPage.drawImage(logo, { x: 50, y: 742, width: 30, height: 30 })
+    textX = 90
+  } catch {
+    // Logo asset unavailable — header text rendered without logo
+  }
+
+  firstPage.drawText("PineTree Payments", { x: textX, y: 772, size: 16, font: bold, color: WHITE })
+  firstPage.drawText("Financial Reporting", { x: textX, y: 751, size: 9, font, color: rgb(...PDF_RGB.headerSub) })
   ctx.y = 700
 
   // ── Report title block ─────────────────────────────────────────────────────

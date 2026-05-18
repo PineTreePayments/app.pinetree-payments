@@ -9,6 +9,7 @@ import {
 import { generateReportPdfFromSummary } from "./reportsPdf"
 import { sendReportEmail } from "@/providers/email"
 import { REPORT_HEX } from "@/lib/reporting/reportTheme"
+import { BASE_URL } from "@/engine/config"
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -124,11 +125,7 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
               <table cellpadding="0" cellspacing="0" border="0">
                 <tr>
                   <td valign="middle" style="padding-right:14px;line-height:0;">
-                    <svg width="22" height="26" viewBox="0 0 22 26" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <polygon points="11,1 21,17 1,17" fill="rgba(255,255,255,0.92)"/>
-                      <polygon points="11,8 19.5,21 2.5,21" fill="rgba(255,255,255,0.92)"/>
-                      <rect x="9" y="21" width="4" height="4" fill="rgba(255,255,255,0.65)"/>
-                    </svg>
+                    <img src="${BASE_URL}/pinetree-web-logo.png" width="36" height="36" alt="PineTree" style="display:block;border:0;">
                   </td>
                   <td valign="middle">
                     <div style="color:#ffffff;font-size:21px;font-weight:800;letter-spacing:-0.3px;line-height:1.1;">PineTree Payments</div>
