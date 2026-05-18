@@ -1,7 +1,6 @@
 import { PDFDocument, PDFPage, StandardFonts, rgb, type PDFFont } from "pdf-lib"
-import { readFile } from "fs/promises"
-import { join } from "path"
 import { generateReportEngine, type ReportInput, type ReportSummary } from "./reports"
+import { buildNetworkAssetTotals } from "./reportDisplayNormalization"
 import { PDF_RGB } from "@/lib/reporting/reportTheme"
 
 type PdfContext = {
@@ -19,20 +18,20 @@ const MUTED = rgb(...PDF_RGB.muted)
 const LINE  = rgb(...PDF_RGB.line)
 const WHITE = rgb(...PDF_RGB.white)
 
-const TILE_BLUE_BG    = rgb(...PDF_RGB.tileBg.blue)
-const TILE_GREEN_BG   = rgb(...PDF_RGB.tileBg.green)
-const TILE_NEUTRAL_BG = rgb(...PDF_RGB.tileBg.neutral)
-const TILE_RED_BG     = rgb(...PDF_RGB.tileBg.red)
+const TILE_BLUE_BG    = rgb(...PDF_RGB.lightCard.bgBlue)
+const TILE_GREEN_BG   = rgb(...PDF_RGB.lightCard.bgGreen)
+const TILE_NEUTRAL_BG = rgb(...PDF_RGB.lightCard.bgNeutral)
+const TILE_RED_BG     = rgb(...PDF_RGB.lightCard.bgRed)
 
-const TILE_BLUE_BORDER    = rgb(...PDF_RGB.tileBorder.blue)
-const TILE_GREEN_BORDER   = rgb(...PDF_RGB.tileBorder.green)
-const TILE_NEUTRAL_BORDER = rgb(...PDF_RGB.tileBorder.neutral)
-const TILE_RED_BORDER     = rgb(...PDF_RGB.tileBorder.red)
+const TILE_BLUE_BORDER    = rgb(...PDF_RGB.lightCard.borderBlue)
+const TILE_GREEN_BORDER   = rgb(...PDF_RGB.lightCard.borderGreen)
+const TILE_NEUTRAL_BORDER = rgb(...PDF_RGB.lightCard.borderGray)
+const TILE_RED_BORDER     = rgb(...PDF_RGB.lightCard.borderRed)
 
-const TILE_BLUE_LABEL    = rgb(...PDF_RGB.tileLabel.blue)
-const TILE_GREEN_LABEL   = rgb(...PDF_RGB.tileLabel.green)
-const TILE_NEUTRAL_LABEL = rgb(...PDF_RGB.tileLabel.neutral)
-const TILE_RED_LABEL     = rgb(...PDF_RGB.tileLabel.red)
+const TILE_BLUE_LABEL    = rgb(...PDF_RGB.lightCard.labelBlue)
+const TILE_GREEN_LABEL   = rgb(...PDF_RGB.lightCard.labelGreen)
+const TILE_NEUTRAL_LABEL = rgb(...PDF_RGB.lightCard.labelGray)
+const TILE_RED_LABEL     = rgb(...PDF_RGB.lightCard.labelRed)
 
 type StatAccent = "blue" | "green" | "neutral" | "red"
 
@@ -122,7 +121,7 @@ function drawStatCard(ctx: PdfContext, x: number, width: number, label: string, 
   }[accent]
   ctx.page.drawRectangle({ x, y: cardY, width, height: H, color: bg, borderColor: border, borderWidth: 1 })
   ctx.page.drawText(label.toUpperCase(), { x: x + 12, y: cardY + H - 19, size: 7, font: ctx.bold, color: lbl })
-  ctx.page.drawText(value, { x: x + 12, y: cardY + 13, size: 16, font: ctx.bold, color: WHITE })
+  ctx.page.drawText(value, { x: x + 12, y: cardY + 13, size: 16, font: ctx.bold, color: TEXT })
 }
 
 // 2-column grid of dark stat tiles (left col x=50, right col x=320, each 250 wide)
@@ -220,18 +219,8 @@ export async function generateReportPdfFromSummary(report: ReportSummary) {
   // ── Branded header bar (page 1 only) ───────────────────────────────────────
   firstPage.drawRectangle({ x: 0, y: 714, width: 620, height: 86, color: BLUE })
 
-  let textX = 50
-  try {
-    const logoPng = await readFile(join(process.cwd(), "public", "pinetree-web-logo.png"))
-    const logo = await pdfDoc.embedPng(logoPng)
-    firstPage.drawImage(logo, { x: 50, y: 728, width: 48, height: 48 })
-    textX = 112
-  } catch {
-    // Logo asset unavailable — header text rendered without logo
-  }
-
-  firstPage.drawText("PineTree Payments", { x: textX, y: 765, size: 16, font: bold, color: WHITE })
-  firstPage.drawText("Financial Reporting", { x: textX, y: 748, size: 9, font, color: rgb(...PDF_RGB.headerSub) })
+  firstPage.drawText("PineTree Payments", { x: 50, y: 765, size: 16, font: bold, color: WHITE })
+  firstPage.drawText("Financial Reporting", { x: 50, y: 748, size: 9, font, color: rgb(...PDF_RGB.headerSub) })
   ctx.y = 700
 
   // ── Report title block ─────────────────────────────────────────────────────
@@ -280,10 +269,7 @@ export async function generateReportPdfFromSummary(report: ReportSummary) {
   }
 
   drawBreakdown(ctx, "Payment Provider Breakdown", report.providerTotals)
-  drawBreakdown(ctx, "Network / Asset Breakdown", {
-    ...report.networkTotals,
-    ...Object.fromEntries(Object.entries(report.assetTotals).map(([asset, value]) => [`Asset: ${asset}`, value]))
-  })
+  drawBreakdown(ctx, "Network / Asset Breakdown", buildNetworkAssetTotals(report.transactionsTable))
   drawBreakdown(ctx, "Channel Breakdown", report.channelTotals)
   drawLedger(ctx, report)
 

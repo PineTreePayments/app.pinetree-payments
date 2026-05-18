@@ -34,6 +34,24 @@ export function normalizeReportStatus(rawStatus: string, createdAt: string): str
  * Cash payments have no blockchain network; they are explicitly labelled "Cash"
  * using the provider field, mirroring TransactionActivityTable behaviour.
  */
+type AssetRow = { network: string; asset: string; gross: number; status: string }
+
+export function buildNetworkAssetLabel(network: string, asset: string): string {
+  if (!asset || asset === "USD") return network
+  if (!network || network === "Unknown") return asset
+  return `${network} ${asset}`
+}
+
+export function buildNetworkAssetTotals(rows: AssetRow[]): Record<string, number> {
+  const totals: Record<string, number> = {}
+  for (const row of rows) {
+    if (row.status !== "CONFIRMED") continue
+    const label = buildNetworkAssetLabel(row.network, row.asset)
+    totals[label] = (totals[label] || 0) + row.gross
+  }
+  return totals
+}
+
 export function normalizeReportNetwork(
   rawNetwork: string | null | undefined,
   rawProvider: string | null | undefined

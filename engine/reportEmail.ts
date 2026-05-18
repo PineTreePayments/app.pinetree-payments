@@ -9,7 +9,6 @@ import {
 import { generateReportPdfFromSummary } from "./reportsPdf"
 import { sendReportEmail } from "@/providers/email"
 import { REPORT_HEX } from "@/lib/reporting/reportTheme"
-import { BASE_URL } from "@/engine/config"
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -121,18 +120,9 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
 
           <!-- Header -->
           <tr>
-            <td style="background:${H.brand};padding:26px 36px 22px;">
-              <table cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td valign="middle" style="padding-right:16px;line-height:0;">
-                    <img src="${BASE_URL}/pinetree-web-logo.png" width="64" height="64" alt="PineTree" style="display:block;border:0;">
-                  </td>
-                  <td valign="middle">
-                    <div style="color:#ffffff;font-size:21px;font-weight:800;letter-spacing:-0.3px;line-height:1.1;">PineTree Payments</div>
-                    <div style="color:rgba(255,255,255,0.7);font-size:12px;margin-top:3px;font-weight:500;">Financial Reporting</div>
-                  </td>
-                </tr>
-              </table>
+            <td style="background:${H.brand};padding:28px 36px 24px;">
+              <div style="color:#ffffff;font-size:21px;font-weight:800;letter-spacing:-0.3px;line-height:1.1;">PineTree Payments</div>
+              <div style="color:rgba(255,255,255,0.7);font-size:12px;margin-top:4px;font-weight:500;">Financial Reporting</div>
             </td>
           </tr>
 

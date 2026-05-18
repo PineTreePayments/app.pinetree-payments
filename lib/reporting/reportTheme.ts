@@ -76,4 +76,18 @@ export const PDF_RGB = {
     neutral: [0.659, 0.690, 0.741] as RGB3,
     red:     [0.859, 0.459, 0.478] as RGB3,
   },
+  lightCard: {
+    bgBlue:      [0.941, 0.965, 1.0  ] as RGB3,
+    bgGreen:     [0.941, 0.980, 0.961] as RGB3,
+    bgNeutral:   [0.976, 0.980, 0.984] as RGB3,
+    bgRed:       [0.996, 0.949, 0.949] as RGB3,
+    borderBlue:  [0.749, 0.859, 0.996] as RGB3,
+    borderGreen: [0.655, 0.953, 0.816] as RGB3,
+    borderGray:  [0.898, 0.906, 0.922] as RGB3,
+    borderRed:   [0.996, 0.792, 0.792] as RGB3,
+    labelBlue:   [0.114, 0.306, 0.847] as RGB3,
+    labelGreen:  [0.016, 0.471, 0.341] as RGB3,
+    labelGray:   [0.420, 0.447, 0.502] as RGB3,
+    labelRed:    [0.725, 0.110, 0.110] as RGB3,
+  },
 }
