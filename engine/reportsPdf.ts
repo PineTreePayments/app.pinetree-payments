@@ -1,5 +1,6 @@
 import { PDFDocument, PDFPage, StandardFonts, rgb, type PDFFont } from "pdf-lib"
 import { generateReportEngine, type ReportInput, type ReportSummary } from "./reports"
+import { PDF_RGB } from "@/lib/reporting/reportTheme"
 
 type PdfContext = {
   pdfDoc: PDFDocument
@@ -9,30 +10,27 @@ type PdfContext = {
   y: number
 }
 
-// ── Base palette ──────────────────────────────────────────────────────────────
-const BLUE  = rgb(0, 0.321, 1)       // #0052FF
-const TEXT  = rgb(0.08, 0.1, 0.16)   // #141a28
-const MUTED = rgb(0.35, 0.39, 0.47)  // #5a6478
-const LINE  = rgb(0.86, 0.89, 0.94)  // #dbe4f0
-const WHITE = rgb(1, 1, 1)
+// ── Colors from shared report theme ───────────────────────────────────────────
+const BLUE  = rgb(...PDF_RGB.brand)
+const TEXT  = rgb(...PDF_RGB.text)
+const MUTED = rgb(...PDF_RGB.muted)
+const LINE  = rgb(...PDF_RGB.line)
+const WHITE = rgb(...PDF_RGB.white)
 
-// ── Dark stat tile backgrounds ────────────────────────────────────────────────
-const TILE_BLUE_BG    = rgb(0.047, 0.102, 0.208)  // #0c1a35
-const TILE_GREEN_BG   = rgb(0.035, 0.110, 0.078)  // #091c14
-const TILE_NEUTRAL_BG = rgb(0.059, 0.090, 0.157)  // #0f1728
-const TILE_RED_BG     = rgb(0.106, 0.043, 0.051)  // #1b0b0d
+const TILE_BLUE_BG    = rgb(...PDF_RGB.tileBg.blue)
+const TILE_GREEN_BG   = rgb(...PDF_RGB.tileBg.green)
+const TILE_NEUTRAL_BG = rgb(...PDF_RGB.tileBg.neutral)
+const TILE_RED_BG     = rgb(...PDF_RGB.tileBg.red)
 
-// ── Dark stat tile borders ────────────────────────────────────────────────────
-const TILE_BLUE_BORDER    = rgb(0.114, 0.306, 0.847)  // #1d4ed8
-const TILE_GREEN_BORDER   = rgb(0.016, 0.471, 0.341)  // #047857
-const TILE_NEUTRAL_BORDER = rgb(0.118, 0.173, 0.278)  // #1e2c47
-const TILE_RED_BORDER     = rgb(0.498, 0.114, 0.114)  // #7f1d1d
+const TILE_BLUE_BORDER    = rgb(...PDF_RGB.tileBorder.blue)
+const TILE_GREEN_BORDER   = rgb(...PDF_RGB.tileBorder.green)
+const TILE_NEUTRAL_BORDER = rgb(...PDF_RGB.tileBorder.neutral)
+const TILE_RED_BORDER     = rgb(...PDF_RGB.tileBorder.red)
 
-// ── Dark stat tile label colors ───────────────────────────────────────────────
-const TILE_BLUE_LABEL    = rgb(0.376, 0.647, 0.980)  // #60a5fa
-const TILE_GREEN_LABEL   = rgb(0.204, 0.827, 0.600)  // #34d399
-const TILE_NEUTRAL_LABEL = rgb(0.659, 0.690, 0.741)  // #a8b0bd
-const TILE_RED_LABEL     = rgb(0.859, 0.459, 0.478)  // #db757a
+const TILE_BLUE_LABEL    = rgb(...PDF_RGB.tileLabel.blue)
+const TILE_GREEN_LABEL   = rgb(...PDF_RGB.tileLabel.green)
+const TILE_NEUTRAL_LABEL = rgb(...PDF_RGB.tileLabel.neutral)
+const TILE_RED_LABEL     = rgb(...PDF_RGB.tileLabel.red)
 
 type StatAccent = "blue" | "green" | "neutral" | "red"
 
@@ -220,7 +218,7 @@ export async function generateReportPdfFromSummary(report: ReportSummary) {
   // ── Branded header bar (page 1 only) ───────────────────────────────────────
   firstPage.drawRectangle({ x: 0, y: 714, width: 620, height: 86, color: BLUE })
   firstPage.drawText("PineTree Payments", { x: 50, y: 772, size: 16, font: bold, color: WHITE })
-  firstPage.drawText("Financial Reporting", { x: 50, y: 751, size: 9, font, color: rgb(0.7, 0.85, 1.0) })
+  firstPage.drawText("Financial Reporting", { x: 50, y: 751, size: 9, font, color: rgb(...PDF_RGB.headerSub) })
   ctx.y = 700
 
   // ── Report title block ─────────────────────────────────────────────────────

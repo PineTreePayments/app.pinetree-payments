@@ -8,6 +8,7 @@ import {
 } from "./reports"
 import { generateReportPdfFromSummary } from "./reportsPdf"
 import { sendReportEmail } from "@/providers/email"
+import { REPORT_HEX } from "@/lib/reporting/reportTheme"
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -78,6 +79,7 @@ function buildInsightText(report: ReportSummary, isExport: boolean): string {
 
 function buildEmailHtml(report: ReportSummary, filename: string): string {
   const isExport = report.reportType === "transactions"
+  const H = REPORT_HEX
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -118,7 +120,7 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
 
           <!-- Header -->
           <tr>
-            <td style="background:#0052FF;padding:26px 36px 22px;">
+            <td style="background:${H.brand};padding:26px 36px 22px;">
               <table cellpadding="0" cellspacing="0" border="0">
                 <tr>
                   <td valign="middle" style="padding-right:14px;line-height:0;">
@@ -156,8 +158,8 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
                   <td class="pt-metric-col" valign="top" width="50%" style="width:50%;padding:0;vertical-align:top;">
                     <table width="100%" cellpadding="0" cellspacing="0">
                       <tr>
-                        <td class="pt-stat-tile" height="112" style="height:112px;padding:16px 16px;background:#101827;border-radius:14px;border:1px solid #1d4ed8;vertical-align:top;">
-                          <div style="font-size:10px;font-weight:800;color:#60a5fa;text-transform:uppercase;letter-spacing:0.7px;line-height:1.25;">Gross Volume</div>
+                        <td class="pt-stat-tile" height="112" style="height:112px;padding:16px 16px;background:${H.emailTileBg};border-radius:14px;border:1px solid ${H.tileBorder.blue};vertical-align:top;">
+                          <div style="font-size:10px;font-weight:800;color:${H.tileLabel.blue};text-transform:uppercase;letter-spacing:0.7px;line-height:1.25;">Gross Volume</div>
                           <div class="pt-stat-value" style="font-size:24px;font-weight:800;color:#ffffff;margin-top:12px;letter-spacing:-0.4px;line-height:1.12;">${currency(report.grossVolume)}</div>
                         </td>
                       </tr>
@@ -169,8 +171,8 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
                   <td class="pt-metric-col" valign="top" width="50%" style="width:50%;padding:0;vertical-align:top;">
                     <table width="100%" cellpadding="0" cellspacing="0">
                       <tr>
-                        <td class="pt-stat-tile" height="112" style="height:112px;padding:16px 16px;background:#101827;border-radius:14px;border:1px solid #047857;vertical-align:top;">
-                          <div style="font-size:10px;font-weight:800;color:#34d399;text-transform:uppercase;letter-spacing:0.7px;line-height:1.25;">Net Settlements</div>
+                        <td class="pt-stat-tile" height="112" style="height:112px;padding:16px 16px;background:${H.emailTileBg};border-radius:14px;border:1px solid ${H.tileBorder.green};vertical-align:top;">
+                          <div style="font-size:10px;font-weight:800;color:${H.tileLabel.green};text-transform:uppercase;letter-spacing:0.7px;line-height:1.25;">Net Settlements</div>
                           <div class="pt-stat-value" style="font-size:24px;font-weight:800;color:#ffffff;margin-top:12px;letter-spacing:-0.4px;line-height:1.12;">${currency(report.netSettlements)}</div>
                         </td>
                       </tr>
@@ -185,8 +187,8 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
                   <td class="pt-metric-col" valign="top" width="50%" style="width:50%;padding:0;vertical-align:top;">
                     <table width="100%" cellpadding="0" cellspacing="0">
                       <tr>
-                        <td class="pt-stat-tile" height="100" style="height:100px;padding:15px 16px;background:#101827;border:1px solid #263449;border-radius:14px;vertical-align:top;text-align:left;">
-                          <div style="font-size:10px;color:#a8b0bd;font-weight:800;text-transform:uppercase;letter-spacing:0.7px;line-height:1.25;">Transactions</div>
+                        <td class="pt-stat-tile" height="100" style="height:100px;padding:15px 16px;background:${H.emailTileBg};border:1px solid ${H.tileBorder.neutral};border-radius:14px;vertical-align:top;text-align:left;">
+                          <div style="font-size:10px;color:${H.tileLabel.neutral};font-weight:800;text-transform:uppercase;letter-spacing:0.7px;line-height:1.25;">Transactions</div>
                           <div class="pt-stat-value" style="font-size:22px;font-weight:800;color:#ffffff;margin-top:10px;line-height:1.12;">${report.transactionCount}</div>
                         </td>
                       </tr>
@@ -196,8 +198,8 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
                   <td class="pt-metric-col" valign="top" width="50%" style="width:50%;padding:0;vertical-align:top;">
                     <table width="100%" cellpadding="0" cellspacing="0">
                       <tr>
-                        <td class="pt-stat-tile" height="100" style="height:100px;padding:15px 16px;background:#101827;border:1px solid #263449;border-radius:14px;vertical-align:top;text-align:left;">
-                          <div style="font-size:10px;color:#a8b0bd;font-weight:800;text-transform:uppercase;letter-spacing:0.7px;line-height:1.25;">Success Rate</div>
+                        <td class="pt-stat-tile" height="100" style="height:100px;padding:15px 16px;background:${H.emailTileBg};border:1px solid ${H.tileBorder.neutral};border-radius:14px;vertical-align:top;text-align:left;">
+                          <div style="font-size:10px;color:${H.tileLabel.neutral};font-weight:800;text-transform:uppercase;letter-spacing:0.7px;line-height:1.25;">Success Rate</div>
                           <div class="pt-stat-value" style="font-size:22px;font-weight:800;color:#ffffff;margin-top:10px;line-height:1.12;">${report.successRate}%</div>
                         </td>
                       </tr>
@@ -217,8 +219,8 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
               <!-- PineTree Insights -->
               <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
                 <tr>
-                  <td style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:18px 20px;">
-                    <p style="margin:0 0 6px;font-size:10px;font-weight:700;color:#0052FF;text-transform:uppercase;letter-spacing:1px;">PineTree Insights</p>
+                  <td style="background:${H.insightBg};border:1px solid ${H.insightBorder};border-radius:10px;padding:18px 20px;">
+                    <p style="margin:0 0 6px;font-size:10px;font-weight:700;color:${H.brand};text-transform:uppercase;letter-spacing:1px;">PineTree Insights</p>
                     <p style="margin:0;font-size:13px;color:#374151;line-height:1.6;">${buildInsightText(report, isExport)}</p>
                   </td>
                 </tr>
