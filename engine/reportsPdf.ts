@@ -224,14 +224,14 @@ export async function generateReportPdfFromSummary(report: ReportSummary) {
   try {
     const logoPng = await readFile(join(process.cwd(), "public", "pinetree-web-logo.png"))
     const logo = await pdfDoc.embedPng(logoPng)
-    firstPage.drawImage(logo, { x: 50, y: 742, width: 30, height: 30 })
-    textX = 90
+    firstPage.drawImage(logo, { x: 50, y: 728, width: 48, height: 48 })
+    textX = 112
   } catch {
     // Logo asset unavailable — header text rendered without logo
   }
 
-  firstPage.drawText("PineTree Payments", { x: textX, y: 772, size: 16, font: bold, color: WHITE })
-  firstPage.drawText("Financial Reporting", { x: textX, y: 751, size: 9, font, color: rgb(...PDF_RGB.headerSub) })
+  firstPage.drawText("PineTree Payments", { x: textX, y: 765, size: 16, font: bold, color: WHITE })
+  firstPage.drawText("Financial Reporting", { x: textX, y: 748, size: 9, font, color: rgb(...PDF_RGB.headerSub) })
   ctx.y = 700
 
   // ── Report title block ─────────────────────────────────────────────────────
