@@ -4,7 +4,8 @@
       "Bash(xargs grep *)",
       "Bash(grep -n \"supabase.*from\\\\|supabase.*select\\\\|\\\\.from\\(\" /c/Users/andri/Desktop/app.pinetree-payments/app/dashboard/*.tsx)",
       "WebSearch",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(curl -s http://localhost:3000/api/off-ramp/support -o /dev/null -w \"%{http_code}\")"
     ]
   }
 }

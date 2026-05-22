@@ -96,6 +96,10 @@ Auth not yet established when these are called; engine enforces brute-force prot
 | `/api/transactions` | GET, POST | MERCHANT |
 | `/api/wallets/overview` | GET | MERCHANT |
 | `/api/wallets/refresh` | POST | MERCHANT |
+| `/api/off-ramp/support` | GET | MERCHANT |
+| `/api/off-ramp/sessions` | GET, POST | MERCHANT. POST creates draft audit records only; no provider session or fund movement. |
+| `/api/off-ramp/quote` | POST | MERCHANT. Quote only; no provider transaction, wallet signing, or fund movement. |
+| `/api/off-ramp/sessions/[id]/prepare` | POST | MERCHANT. Prepares quote/session state only; no crypto broadcast or fund movement. |
 | `/api/providers` | GET, POST | MERCHANT |
 | `/api/reports` | GET | MERCHANT |
 | `/api/reports/pdf` | GET | MERCHANT |

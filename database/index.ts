@@ -28,6 +28,9 @@ export * from "./merchantWallets"
 // Wallet Overview
 export * from "./walletOverview"
 
+// Off-ramp Sessions
+export * from "./offRampSessions"
+
 // Payment Intents
 export * from "./paymentIntents"
 

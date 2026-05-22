@@ -1,0 +1,798 @@
+import {
+  createOffRampSessionDraft,
+  getOffRampSessionForMerchant,
+  listOffRampSessionsForMerchant as listOffRampSessionRowsForMerchant,
+  recordOffRampEvent,
+  updateOffRampSessionQuote,
+  updateOffRampSessionStatus,
+  type OffRampSessionRecord
+} from "@/database/offRampSessions"
+import { moonPayOffRampAdapter } from "@/providers/offramp"
+import { OffRampProviderError, type OffRampProviderQuote } from "@/providers/offramp/types"
+
+export type OffRampProvider = "moonpay" | "ramp" | "banxa" | "transak"
+export type OffRampNetwork = "base" | "solana" | "lightning"
+export type OffRampAsset = "ETH" | "USDC" | "SOL" | "BTC"
+
+export type OffRampSessionStatus =
+  | "CREATED"
+  | "SETUP_REQUIRED"
+  | "QUOTE_READY"
+  | "AWAITING_APPROVAL"
+  | "AWAITING_CRYPTO"
+  | "SUBMITTED"
+  | "PROCESSING"
+  | "PAYOUT_INITIATED"
+  | "COMPLETED"
+  | "FAILED"
+  | "EXPIRED"
+  | "CANCELLED"
+
+export type OffRampQuoteRequest = {
+  provider: OffRampProvider
+  network: OffRampNetwork
+  asset: OffRampAsset
+  amount: number
+  fiatCurrency?: string
+  merchantState?: string | null
+}
+
+export type OffRampSessionDraftRequest = OffRampQuoteRequest & {
+  merchantId: string
+  sourceWalletAddress?: string | null
+  refundWalletAddress?: string | null
+  payoutMethod?: string | null
+  providerSetupActive?: boolean
+}
+
+export type OffRampSessionSummary = {
+  id: string
+  merchantId: string
+  provider: OffRampProvider
+  asset: OffRampAsset
+  network: OffRampNetwork
+  cryptoAmount: number | null
+  quoteFiatAmount: number | null
+  quoteFiatCurrency: string
+  status: OffRampSessionStatus
+  providerStatus: string | null
+  sourceWalletAddress: string | null
+  refundWalletAddress: string | null
+  payoutMethod: string | null
+  errorCode: string | null
+  errorMessage: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type OffRampQuoteSummary = Omit<OffRampProviderQuote, "rawProviderResponse">
+
+export type OffRampQuoteForMerchantRequest = OffRampQuoteRequest & {
+  merchantId: string
+  sourceWalletAddress?: string | null
+  refundWalletAddress?: string | null
+  payoutMethod?: string | null
+}
+
+export type PrepareOffRampSessionRequest = {
+  merchantId: string
+  sessionId: string
+  merchantState?: string | null
+  payoutMethod?: string | null
+}
+
+export type OffRampAssetSupportResult = {
+  supported: boolean
+  restricted?: boolean
+  reason?: string
+  moonPayCode?: string
+}
+
+export const SUPPORTED_MOONPAY_OFF_RAMP_ASSETS: Array<{
+  network: Extract<OffRampNetwork, "base" | "solana">
+  asset: Extract<OffRampAsset, "ETH" | "USDC" | "SOL">
+  moonPayCode: string
+}> = [
+  { network: "solana", asset: "USDC", moonPayCode: "usdc_sol" },
+  { network: "solana", asset: "SOL", moonPayCode: "sol" },
+  { network: "base", asset: "USDC", moonPayCode: "usdc_base" },
+  { network: "base", asset: "ETH", moonPayCode: "eth_base" }
+]
+
+export const MOONPAY_OFF_RAMP_DISCLAIMERS = [
+  "Cash-out availability varies by state, asset, network, and payout method.",
+  "Base network cash-out may not be available for New York residents through MoonPay."
+]
+
+const VALID_PROVIDERS: OffRampProvider[] = ["moonpay", "ramp", "banxa", "transak"]
+const VALID_NETWORKS: OffRampNetwork[] = ["base", "solana", "lightning"]
+const VALID_ASSETS: OffRampAsset[] = ["ETH", "USDC", "SOL", "BTC"]
+
+function normalizeProvider(value: unknown): OffRampProvider {
+  const normalized = String(value || "moonpay").trim().toLowerCase()
+  if (VALID_PROVIDERS.includes(normalized as OffRampProvider)) {
+    return normalized as OffRampProvider
+  }
+  throw new Error(`Unsupported off-ramp provider: ${normalized || "unknown"}`)
+}
+
+function normalizeNetwork(value: unknown): OffRampNetwork {
+  const normalized = String(value || "").trim().toLowerCase()
+  if (VALID_NETWORKS.includes(normalized as OffRampNetwork)) {
+    return normalized as OffRampNetwork
+  }
+  throw new Error(`Unsupported off-ramp network: ${normalized || "unknown"}`)
+}
+
+function normalizeAsset(value: unknown): OffRampAsset {
+  const normalized = String(value || "").trim().toUpperCase()
+  if (VALID_ASSETS.includes(normalized as OffRampAsset)) {
+    return normalized as OffRampAsset
+  }
+  throw new Error(`Unsupported off-ramp asset: ${normalized || "unknown"}`)
+}
+
+function normalizeMerchantState(value: unknown): string | null {
+  const normalized = String(value || "").trim().toUpperCase()
+  return normalized || null
+}
+
+function toSummary(row: OffRampSessionRecord): OffRampSessionSummary {
+  return {
+    id: row.id,
+    merchantId: row.merchant_id,
+    provider: row.provider as OffRampProvider,
+    asset: row.asset as OffRampAsset,
+    network: row.network as OffRampNetwork,
+    cryptoAmount: row.crypto_amount,
+    quoteFiatAmount: row.quote_fiat_amount,
+    quoteFiatCurrency: row.quote_fiat_currency,
+    status: row.status as OffRampSessionStatus,
+    providerStatus: row.provider_status,
+    sourceWalletAddress: row.source_wallet_address,
+    refundWalletAddress: row.refund_wallet_address,
+    payoutMethod: row.payout_method,
+    errorCode: row.error_code,
+    errorMessage: row.error_message,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  }
+}
+
+function toQuoteSummary(quote: OffRampProviderQuote): OffRampQuoteSummary {
+  return {
+    provider: quote.provider,
+    moonPayCode: quote.moonPayCode,
+    asset: quote.asset,
+    network: quote.network,
+    cryptoAmount: quote.cryptoAmount,
+    fiatCurrency: quote.fiatCurrency,
+    quoteFiatAmount: quote.quoteFiatAmount,
+    providerFeeAmount: quote.providerFeeAmount,
+    platformFeeAmount: quote.platformFeeAmount,
+    totalFeeAmount: quote.totalFeeAmount,
+    payoutMethod: quote.payoutMethod,
+    quoteExpiresAt: quote.quoteExpiresAt
+  }
+}
+
+function getProviderAdapter(provider: OffRampProvider) {
+  if (provider === "moonpay") return moonPayOffRampAdapter
+  throw new OffRampProviderError(
+    "Only MoonPay off-ramp support is planned for this phase.",
+    "OFF_RAMP_PROVIDER_UNSUPPORTED",
+    400
+  )
+}
+
+function getProviderErrorStatus(error: unknown) {
+  if (error instanceof OffRampProviderError) return error.status
+  return 400
+}
+
+function providerCallAttempted(error: unknown) {
+  if (!(error instanceof OffRampProviderError)) return true
+  return !error.message.toLowerCase().includes("not configured")
+}
+
+export function validateOffRampAssetSupport(input: {
+  provider: OffRampProvider
+  network: OffRampNetwork
+  asset: OffRampAsset
+  merchantState?: string | null
+}): OffRampAssetSupportResult {
+  if (input.provider !== "moonpay") {
+    return {
+      supported: false,
+      reason: "Only MoonPay off-ramp support is planned for this phase."
+    }
+  }
+
+  if (input.network === "lightning" || input.asset === "BTC") {
+    return {
+      supported: false,
+      reason: "MoonPay cash-out for Bitcoin Lightning is not enabled yet."
+    }
+  }
+
+  if (normalizeMerchantState(input.merchantState) === "NY" && input.network === "base") {
+    return {
+      supported: false,
+      restricted: true,
+      reason: "Base network cash-out may not be available for New York residents through MoonPay."
+    }
+  }
+
+  const supportedAsset = SUPPORTED_MOONPAY_OFF_RAMP_ASSETS.find(
+    (item) => item.network === input.network && item.asset === input.asset
+  )
+
+  if (!supportedAsset) {
+    return {
+      supported: false,
+      reason: "This asset and network are not supported for MoonPay cash-out yet."
+    }
+  }
+
+  return {
+    supported: true,
+    moonPayCode: supportedAsset.moonPayCode
+  }
+}
+
+export function getMoonPayOffRampSupportMatrix() {
+  return {
+    provider: "moonpay" as const,
+    supportedAssets: SUPPORTED_MOONPAY_OFF_RAMP_ASSETS,
+    restrictions: [
+      {
+        network: "base" as const,
+        merchantState: "NY",
+        message: "Base network cash-out may not be available for New York residents through MoonPay."
+      },
+      {
+        network: "lightning" as const,
+        asset: "BTC" as const,
+        message: "MoonPay cash-out for Bitcoin Lightning is not enabled yet."
+      }
+    ],
+    disclaimers: MOONPAY_OFF_RAMP_DISCLAIMERS,
+    providerCallsEnabled: false,
+    fundMovementEnabled: false
+  }
+}
+
+export async function createOffRampSessionDraftForMerchant(input: OffRampSessionDraftRequest): Promise<{
+  session: OffRampSessionSummary
+  support: OffRampAssetSupportResult
+  rejected: boolean
+}> {
+  const merchantId = String(input.merchantId || "").trim()
+  if (!merchantId) {
+    throw new Error("Missing merchant ID")
+  }
+
+  const provider = normalizeProvider(input.provider)
+  const network = normalizeNetwork(input.network)
+  const asset = normalizeAsset(input.asset)
+  const amount = Number(input.amount)
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Invalid off-ramp amount")
+  }
+
+  const merchantState = normalizeMerchantState(input.merchantState)
+  const support = validateOffRampAssetSupport({
+    provider,
+    network,
+    asset,
+    merchantState
+  })
+
+  const rejected = !support.supported
+  const status: OffRampSessionStatus = rejected
+    ? "FAILED"
+    : input.providerSetupActive
+      ? "CREATED"
+      : "SETUP_REQUIRED"
+
+  const session = await createOffRampSessionDraft({
+    merchantId,
+    provider,
+    asset,
+    network,
+    cryptoAmount: amount,
+    quoteFiatCurrency: input.fiatCurrency || "USD",
+    sourceWalletAddress: input.sourceWalletAddress || null,
+    refundWalletAddress: input.refundWalletAddress || input.sourceWalletAddress || null,
+    payoutMethod: input.payoutMethod || null,
+    status,
+    errorCode: rejected ? "OFF_RAMP_UNSUPPORTED" : null,
+    errorMessage: rejected ? support.reason || "Unsupported off-ramp request" : null,
+    metadata: {
+      merchantState,
+      moonPayCode: support.moonPayCode || null,
+      providerCallsEnabled: false,
+      fundMovementEnabled: false,
+      phase: "moonpay_off_ramp_phase_1"
+    }
+  })
+
+  await recordOffRampEvent({
+    sessionId: session.id,
+    merchantId,
+    eventType: rejected ? "off_ramp.session.rejected" : "off_ramp.session.created",
+    provider,
+    providerStatus: null,
+    rawPayload: {
+      provider,
+      network,
+      asset,
+      amount,
+      merchantState,
+      support,
+      providerCallsEnabled: false,
+      fundMovementEnabled: false
+    }
+  })
+
+  return {
+    session: toSummary(session),
+    support,
+    rejected
+  }
+}
+
+export async function getOffRampQuoteForMerchant(input: OffRampQuoteForMerchantRequest): Promise<{
+  session: OffRampSessionSummary
+  quote: OffRampQuoteSummary | null
+  support: OffRampAssetSupportResult
+  providerCallsEnabled: boolean
+}> {
+  const merchantId = String(input.merchantId || "").trim()
+  if (!merchantId) {
+    throw new Error("Missing merchant ID")
+  }
+
+  const provider = normalizeProvider(input.provider)
+  const network = normalizeNetwork(input.network)
+  const asset = normalizeAsset(input.asset)
+  const amount = Number(input.amount)
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Invalid off-ramp amount")
+  }
+
+  const merchantState = normalizeMerchantState(input.merchantState)
+  const support = validateOffRampAssetSupport({
+    provider,
+    network,
+    asset,
+    merchantState
+  })
+  const session = await createOffRampSessionDraft({
+    merchantId,
+    provider,
+    asset,
+    network,
+    cryptoAmount: amount,
+    quoteFiatCurrency: input.fiatCurrency || "USD",
+    sourceWalletAddress: input.sourceWalletAddress || null,
+    refundWalletAddress: input.refundWalletAddress || input.sourceWalletAddress || null,
+    payoutMethod: input.payoutMethod || "ach_bank_transfer",
+    status: support.supported ? "CREATED" : "FAILED",
+    errorCode: support.supported ? null : "OFF_RAMP_UNSUPPORTED",
+    errorMessage: support.supported ? null : support.reason || "Unsupported off-ramp request",
+    metadata: {
+      merchantState,
+      moonPayCode: support.moonPayCode || null,
+      providerCallsEnabled: false,
+      fundMovementEnabled: false,
+      phase: "moonpay_off_ramp_phase_2"
+    }
+  })
+
+  await recordOffRampEvent({
+    sessionId: session.id,
+    merchantId,
+    eventType: "off_ramp.quote.requested",
+    provider,
+    rawPayload: {
+      provider,
+      network,
+      asset,
+      amount,
+      merchantState,
+      support,
+      fundMovementEnabled: false
+    }
+  })
+
+  if (!support.supported) {
+    await recordOffRampEvent({
+      sessionId: session.id,
+      merchantId,
+      eventType: "off_ramp.quote.failed",
+      provider,
+      rawPayload: {
+        reason: support.reason,
+        restricted: support.restricted === true,
+        providerCallsEnabled: false,
+        fundMovementEnabled: false
+      }
+    })
+
+    return {
+      session: toSummary(session),
+      quote: null,
+      support,
+      providerCallsEnabled: false
+    }
+  }
+
+  try {
+    const adapter = getProviderAdapter(provider)
+    const quote = await adapter.getQuote({
+      provider,
+      network,
+      asset,
+      amount,
+      fiatCurrency: input.fiatCurrency || "USD",
+      payoutMethod: input.payoutMethod || "ach_bank_transfer",
+      extraFeePercentage: 0
+    })
+    const updated = await updateOffRampSessionQuote({
+      merchantId,
+      sessionId: session.id,
+      status: "QUOTE_READY",
+      cryptoAmount: quote.cryptoAmount,
+      quoteFiatAmount: quote.quoteFiatAmount,
+      quoteFiatCurrency: quote.fiatCurrency,
+      quoteFeeAmount: quote.providerFeeAmount,
+      platformFeeAmount: quote.platformFeeAmount,
+      quoteExpiresAt: quote.quoteExpiresAt,
+      payoutMethod: quote.payoutMethod,
+      providerStatus: "quote_ready",
+      errorCode: null,
+      errorMessage: null,
+      metadata: {
+        merchantState,
+        moonPayCode: quote.moonPayCode,
+        providerCallsEnabled: true,
+        fundMovementEnabled: false,
+        quoteFetchedAt: new Date().toISOString()
+      }
+    })
+
+    await recordOffRampEvent({
+      sessionId: session.id,
+      merchantId,
+      eventType: "off_ramp.quote.ready",
+      provider,
+      providerStatus: "quote_ready",
+      rawPayload: {
+        quote: toQuoteSummary(quote),
+        providerCallsEnabled: true,
+        fundMovementEnabled: false
+      }
+    })
+
+    return {
+      session: toSummary(updated),
+      quote: toQuoteSummary(quote),
+      support,
+      providerCallsEnabled: true
+    }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Off-ramp quote failed"
+    const code = error instanceof OffRampProviderError
+      ? error.code
+      : "OFF_RAMP_PROVIDER_REQUEST_FAILED"
+    const attemptedProviderCall = providerCallAttempted(error)
+    const updated = await updateOffRampSessionStatus({
+      merchantId,
+      sessionId: session.id,
+      status: "FAILED",
+      providerStatus: "quote_failed",
+      errorCode: code,
+      errorMessage: message,
+      metadata: {
+        merchantState,
+        moonPayCode: support.moonPayCode || null,
+        providerCallsEnabled: attemptedProviderCall,
+        fundMovementEnabled: false,
+        quoteFailedAt: new Date().toISOString()
+      }
+    })
+
+    await recordOffRampEvent({
+      sessionId: session.id,
+      merchantId,
+      eventType: "off_ramp.quote.failed",
+      provider,
+      providerStatus: "quote_failed",
+      rawPayload: {
+        errorCode: code,
+        errorMessage: message,
+        providerErrorStatus: getProviderErrorStatus(error),
+        providerCallsEnabled: attemptedProviderCall,
+        fundMovementEnabled: false
+      }
+    })
+
+    return {
+      session: toSummary(updated),
+      quote: null,
+      support,
+      providerCallsEnabled: attemptedProviderCall
+    }
+  }
+}
+
+export async function prepareOffRampSessionForMerchant(
+  input: PrepareOffRampSessionRequest
+): Promise<{
+  session: OffRampSessionSummary
+  quote: OffRampQuoteSummary | null
+  preparation: {
+    implemented: boolean
+    status: "NOT_IMPLEMENTED" | "PREPARED" | "QUOTE_READY" | "FAILED"
+    message: string
+  }
+  providerCallsEnabled: boolean
+}> {
+  const merchantId = String(input.merchantId || "").trim()
+  const sessionId = String(input.sessionId || "").trim()
+  if (!merchantId) throw new Error("Missing merchant ID")
+  if (!sessionId) throw new Error("Missing off-ramp session ID")
+
+  const existing = await getOffRampSessionForMerchant(merchantId, sessionId)
+  if (!existing) {
+    throw new Error("Off-ramp session not found")
+  }
+
+  const provider = normalizeProvider(existing.provider)
+  const network = normalizeNetwork(existing.network)
+  const asset = normalizeAsset(existing.asset)
+  const amount = Number(existing.crypto_amount)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Invalid off-ramp amount")
+  }
+
+  const merchantState = normalizeMerchantState(input.merchantState || existing.metadata.merchantState)
+  const support = validateOffRampAssetSupport({
+    provider,
+    network,
+    asset,
+    merchantState
+  })
+
+  if (!support.supported) {
+    const updated = await updateOffRampSessionStatus({
+      merchantId,
+      sessionId,
+      status: "FAILED",
+      providerStatus: "prepare_rejected",
+      errorCode: "OFF_RAMP_UNSUPPORTED",
+      errorMessage: support.reason || "Unsupported off-ramp request",
+      metadata: {
+        ...existing.metadata,
+        merchantState,
+        providerCallsEnabled: false,
+        fundMovementEnabled: false,
+        prepareRejectedAt: new Date().toISOString()
+      }
+    })
+
+    await recordOffRampEvent({
+      sessionId,
+      merchantId,
+      eventType: "off_ramp.quote.failed",
+      provider,
+      providerStatus: "prepare_rejected",
+      rawPayload: {
+        support,
+        providerCallsEnabled: false,
+        fundMovementEnabled: false
+      }
+    })
+
+    return {
+      session: toSummary(updated),
+      quote: null,
+      preparation: {
+        implemented: false,
+        status: "NOT_IMPLEMENTED",
+        message: support.reason || "Unsupported off-ramp request"
+      },
+      providerCallsEnabled: false
+    }
+  }
+
+  await recordOffRampEvent({
+    sessionId,
+    merchantId,
+    eventType: "off_ramp.quote.requested",
+    provider,
+    rawPayload: {
+      provider,
+      network,
+      asset,
+      amount,
+      providerCallsEnabled: true,
+      fundMovementEnabled: false
+    }
+  })
+
+  const adapter = getProviderAdapter(provider)
+  let quote: OffRampProviderQuote
+
+  try {
+    quote = await adapter.getQuote({
+      provider,
+      network,
+      asset,
+      amount,
+      fiatCurrency: existing.quote_fiat_currency || "USD",
+      payoutMethod: input.payoutMethod || existing.payout_method || "ach_bank_transfer",
+      extraFeePercentage: 0
+    })
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Off-ramp quote failed"
+    const code = error instanceof OffRampProviderError
+      ? error.code
+      : "OFF_RAMP_PROVIDER_REQUEST_FAILED"
+    const attemptedProviderCall = providerCallAttempted(error)
+    const failed = await updateOffRampSessionStatus({
+      merchantId,
+      sessionId,
+      status: "FAILED",
+      providerStatus: "quote_failed",
+      errorCode: code,
+      errorMessage: message,
+      metadata: {
+        ...existing.metadata,
+        merchantState,
+        moonPayCode: support.moonPayCode || null,
+        providerCallsEnabled: attemptedProviderCall,
+        fundMovementEnabled: false,
+        quoteFailedAt: new Date().toISOString()
+      }
+    })
+
+    await recordOffRampEvent({
+      sessionId,
+      merchantId,
+      eventType: "off_ramp.quote.failed",
+      provider,
+      providerStatus: "quote_failed",
+      rawPayload: {
+        errorCode: code,
+        errorMessage: message,
+        providerErrorStatus: getProviderErrorStatus(error),
+        providerCallsEnabled: attemptedProviderCall,
+        fundMovementEnabled: false
+      }
+    })
+
+    return {
+      session: toSummary(failed),
+      quote: null,
+      preparation: {
+        implemented: false,
+        status: "FAILED",
+        message
+      },
+      providerCallsEnabled: attemptedProviderCall
+    }
+  }
+
+  const updated = await updateOffRampSessionQuote({
+    merchantId,
+    sessionId,
+    status: "QUOTE_READY",
+    cryptoAmount: quote.cryptoAmount,
+    quoteFiatAmount: quote.quoteFiatAmount,
+    quoteFiatCurrency: quote.fiatCurrency,
+    quoteFeeAmount: quote.providerFeeAmount,
+    platformFeeAmount: quote.platformFeeAmount,
+    quoteExpiresAt: quote.quoteExpiresAt,
+    payoutMethod: quote.payoutMethod,
+    providerStatus: "quote_ready",
+    errorCode: null,
+    errorMessage: null,
+    metadata: {
+      ...existing.metadata,
+      merchantState,
+      moonPayCode: quote.moonPayCode,
+      providerCallsEnabled: true,
+      fundMovementEnabled: false,
+      quoteFetchedAt: new Date().toISOString()
+    }
+  })
+
+  await recordOffRampEvent({
+    sessionId,
+    merchantId,
+    eventType: "off_ramp.quote.ready",
+    provider,
+    providerStatus: "quote_ready",
+    rawPayload: {
+      quote: toQuoteSummary(quote),
+      providerCallsEnabled: true,
+      fundMovementEnabled: false
+    }
+  })
+
+  try {
+    const preparation = await adapter.createSession({
+      sessionId,
+      merchantId,
+      quote,
+      sourceWalletAddress: updated.source_wallet_address,
+      refundWalletAddress: updated.refund_wallet_address
+    })
+
+    await recordOffRampEvent({
+      sessionId,
+      merchantId,
+      eventType: "off_ramp.session.prepared",
+      provider,
+      rawPayload: {
+        preparation,
+        providerCallsEnabled: true,
+        fundMovementEnabled: false
+      }
+    })
+
+    return {
+      session: toSummary(updated),
+      quote: toQuoteSummary(quote),
+      preparation: {
+        implemented: preparation.implemented,
+        status: preparation.status,
+        message: preparation.message
+      },
+      providerCallsEnabled: true
+    }
+  } catch (error: unknown) {
+    if (error instanceof OffRampProviderError && error.code === "OFF_RAMP_PROVIDER_NOT_IMPLEMENTED") {
+      await recordOffRampEvent({
+        sessionId,
+        merchantId,
+        eventType: "off_ramp.session.prepare_not_implemented",
+        provider,
+        rawPayload: {
+          message: error.message,
+          providerCallsEnabled: false,
+          fundMovementEnabled: false
+        }
+      })
+
+      return {
+        session: toSummary(updated),
+        quote: toQuoteSummary(quote),
+        preparation: {
+          implemented: false,
+          status: "NOT_IMPLEMENTED",
+          message: error.message
+        },
+        providerCallsEnabled: true
+      }
+    }
+
+    throw error
+  }
+}
+
+export async function listOffRampSessionsForMerchant(
+  merchantId: string
+): Promise<OffRampSessionSummary[]> {
+  const normalizedMerchantId = String(merchantId || "").trim()
+  if (!normalizedMerchantId) {
+    throw new Error("Missing merchant ID")
+  }
+
+  const sessions = await listOffRampSessionRowsForMerchant(normalizedMerchantId)
+  return sessions.map(toSummary)
+}
