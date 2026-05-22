@@ -71,6 +71,7 @@ type IntentPayload = {
   paymentStatus?: string | null
   status?: string | null
   checkoutUrl?: string
+  checkoutToken?: string
 }
 
 type WalletOption = {
@@ -248,6 +249,12 @@ export default function PayClient() {
   const [paymentStatus, setPaymentStatus] = useState<string>("")
   const [intentPayload, setIntentPayload] = useState<IntentPayload | null>(null)
   const [intentLoadError, setIntentLoadError] = useState<string>("")
+  // Checkout session token — scoped to the current intent, used to authorise
+  // customer-initiated cancellation (/fail) without merchant credentials.
+  // Stored in a ref so useEffect closures (Phantom, Solflare) always see the
+  // latest value without requiring effect re-registration.
+  const [checkoutToken, setCheckoutToken] = useState<string>("")
+  const checkoutTokenRef = useRef<string>("")
 
   // ── Shift4 redirect state (inline — no dedicated component needed) ─────────
   const [shift4Loading, setShift4Loading] = useState(false)
@@ -327,6 +334,10 @@ export default function PayClient() {
       const intent = data as IntentPayload
       setIntentPayload(intent)
       setIntentLoadError("")
+      if (intent.checkoutToken) {
+        setCheckoutToken(intent.checkoutToken)
+        checkoutTokenRef.current = intent.checkoutToken
+      }
       // If the intent itself was expired (merchant cancel) and no payment was
       // ever created, synthesize CANCELED so the terminal-status screen fires.
       if (intent.status === "EXPIRED" && !intent.paymentId) {
@@ -371,6 +382,10 @@ export default function PayClient() {
   // Shift4: create payment + redirect to hosted checkout on button click
   const handleShift4Pay = useCallback(async () => {
     if (!intentId) return
+    if (!checkoutToken) {
+      setShift4Error("Checkout session unavailable. Please refresh and try again.")
+      return
+    }
     setShift4Loading(true)
     setShift4Error("")
     try {
@@ -378,7 +393,10 @@ export default function PayClient() {
         `/api/payment-intents/${encodeURIComponent(intentId)}/select-network`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${checkoutToken}`,
+          },
           body: JSON.stringify({ network: "shift4" }),
         }
       )
@@ -569,6 +587,9 @@ export default function PayClient() {
           try {
             await fetch(`/api/payments/${encodeURIComponent(paymentId)}/fail`, {
               method: "POST",
+              headers: checkoutTokenRef.current
+                ? { Authorization: `Bearer ${checkoutTokenRef.current}` }
+                : {},
             })
           } catch {}
 
@@ -630,6 +651,9 @@ export default function PayClient() {
     const fail = async (paymentId: string) => {
       await fetch(`/api/payments/${encodeURIComponent(paymentId)}/fail`, {
         method: "POST",
+        headers: checkoutTokenRef.current
+          ? { Authorization: `Bearer ${checkoutTokenRef.current}` }
+          : {},
       }).catch(() => null)
     }
 
@@ -1254,6 +1278,7 @@ export default function PayClient() {
                             selectedAsset={asset.symbol === "USDC" ? "USDC" : "ETH"}
                             usdAmount={displayAmount}
                             paymentStatus={normalizedPaymentStatus}
+                            checkoutToken={checkoutToken}
                             onExecutionStarted={() => setBaseExecutionActive(true)}
                             onCancel={handleBaseCancelPayment}
                             onPaymentCreated={() => {
@@ -1296,6 +1321,7 @@ export default function PayClient() {
                             selectedAsset={asset.symbol === "USDC" ? "USDC" : "SOL"}
                             usdAmount={displayAmount}
                             paymentStatus={normalizedPaymentStatus}
+                            checkoutToken={checkoutToken}
                             initialError={getPhantomRetryMessage(phantomError) || getSolflareRetryMessage(solflareError)}
                             onExecutionStarted={() => setSolanaExecutionActive(true)}
                             onCancel={handleSolanaCancelPayment}
@@ -1311,6 +1337,7 @@ export default function PayClient() {
                             intentId={intentId!}
                             usdAmount={displayAmount}
                             paymentStatus={normalizedPaymentStatus}
+                            checkoutToken={checkoutToken}
                             onPaymentCreated={() => {
                               void loadIntentCallback()
                             }}

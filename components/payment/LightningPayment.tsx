@@ -106,6 +106,7 @@ type Props = {
   intentId: string
   usdAmount: number
   paymentStatus?: string
+  checkoutToken?: string
   onPaymentCreated?: () => void
   onExecutionStarted?: () => void
   onCancel?: () => void
@@ -162,6 +163,7 @@ export default function LightningPayment({
   intentId,
   usdAmount,
   paymentStatus,
+  checkoutToken,
   onPaymentCreated,
   onExecutionStarted,
   onCancel,
@@ -205,7 +207,10 @@ export default function LightningPayment({
         `/api/payment-intents/${encodeURIComponent(intentId)}/select-network`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(checkoutToken ? { Authorization: `Bearer ${checkoutToken}` } : {}),
+          },
           body: JSON.stringify({ network: "bitcoin_lightning", asset: "BTC" }),
         }
       )

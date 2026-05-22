@@ -4,11 +4,10 @@ import { signTerminalSession } from "@/lib/api/terminalAuth"
 
 const db = supabaseAdmin || supabase
 
-export type TerminalSessionData = {
+export type TerminalDisplayData = {
   terminal: {
     id: string
     name: string
-    pin: string
     autolock: string
     merchant_id: string
     drawer_starting_amount: number
@@ -21,13 +20,17 @@ export type TerminalSessionData = {
     lastEntryType: string | null
     lastEntryAt: string | null
   }
-  sessionToken: string
 }
 
-export async function getPosTerminalSessionEngine(terminalId: string): Promise<TerminalSessionData> {
+/**
+ * Returns safe terminal display info for the lock screen.
+ * Never includes the PIN or a session token — those are only issued after
+ * successful server-side PIN verification via verifyPosTerminalPinEngine.
+ */
+export async function getPosTerminalDisplayEngine(terminalId: string): Promise<TerminalDisplayData> {
   const { data: terminal, error: terminalError } = await db
     .from("terminals")
-    .select("id,name,pin,autolock,merchant_id,drawer_starting_amount,created_at")
+    .select("id,name,autolock,merchant_id,drawer_starting_amount,created_at")
     .eq("id", terminalId)
     .single()
 
@@ -48,7 +51,6 @@ export async function getPosTerminalSessionEngine(terminalId: string): Promise<T
     terminal: {
       id: terminal.id,
       name: terminal.name,
-      pin: terminal.pin,
       autolock: terminal.autolock,
       merchant_id: terminal.merchant_id,
       drawer_starting_amount: Number(terminal.drawer_starting_amount ?? 0),
@@ -60,7 +62,31 @@ export async function getPosTerminalSessionEngine(terminalId: string): Promise<T
       active: drawerState.active,
       lastEntryType: drawerState.lastEntry?.type || null,
       lastEntryAt: drawerState.lastEntry?.created_at || null
-    },
-    sessionToken: signTerminalSession(terminal.merchant_id, terminal.id),
+    }
   }
+}
+
+/**
+ * Verifies a PIN server-side against the stored terminal PIN.
+ * Only issues a session token on success. Throws on bad PIN or unknown terminal.
+ */
+export async function verifyPosTerminalPinEngine(
+  terminalId: string,
+  pin: string
+): Promise<string> {
+  const { data: terminal, error } = await db
+    .from("terminals")
+    .select("id,pin,merchant_id")
+    .eq("id", terminalId)
+    .single()
+
+  if (error || !terminal) {
+    throw Object.assign(new Error("Terminal not found"), { status: 404 })
+  }
+
+  if (!pin || pin.length !== 4 || pin !== String(terminal.pin)) {
+    throw Object.assign(new Error("Incorrect PIN"), { status: 401 })
+  }
+
+  return signTerminalSession(terminal.merchant_id, terminal.id)
 }

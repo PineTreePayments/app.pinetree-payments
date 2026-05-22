@@ -18,7 +18,19 @@ export async function GET(
       return NextResponse.json({ error: "Payment not found" }, { status: 404 })
     }
 
-    return NextResponse.json({ payment })
+    // Return only public-safe fields. Internal fields (merchant_id, merchant_amount,
+    // pinetree_fee, provider_reference, metadata, payment_url, qr_code_url) are omitted.
+    const safePayment = {
+      id: payment.id,
+      status: payment.status,
+      gross_amount: payment.gross_amount,
+      currency: payment.currency,
+      network: payment.network ?? null,
+      provider: payment.provider,
+      created_at: payment.created_at,
+    }
+
+    return NextResponse.json({ payment: safePayment })
   } catch {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }

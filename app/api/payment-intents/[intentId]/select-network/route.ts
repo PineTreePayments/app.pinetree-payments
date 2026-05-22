@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { selectPaymentIntentNetworkEngine } from "@/engine/paymentIntents"
+import { verifyCheckoutSession } from "@/lib/api/checkoutAuth"
 
 type Params = { params: Promise<{ intentId: string }> }
 
@@ -35,6 +36,22 @@ export async function POST(req: NextRequest, { params }: Params) {
   let isBase = false
   try {
     const { intentId } = await params
+
+    const authHeader = req.headers.get("authorization") || ""
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : ""
+    if (!token) {
+      return NextResponse.json({ error: "Checkout session token required", code: "MISSING_CHECKOUT_TOKEN" }, { status: 401 })
+    }
+    let claims: ReturnType<typeof verifyCheckoutSession>
+    try {
+      claims = verifyCheckoutSession(token)
+    } catch {
+      return NextResponse.json({ error: "Invalid or expired checkout session", code: "INVALID_CHECKOUT_TOKEN" }, { status: 401 })
+    }
+    if (claims.iid !== intentId) {
+      return NextResponse.json({ error: "Checkout session does not match this payment intent", code: "CHECKOUT_TOKEN_MISMATCH" }, { status: 403 })
+    }
+
     const body = (await req.json()) as { network?: string; asset?: string }
     const network = String(body?.network || "").trim().toLowerCase()
     const asset = body?.asset ? String(body.asset).trim().toUpperCase() : undefined

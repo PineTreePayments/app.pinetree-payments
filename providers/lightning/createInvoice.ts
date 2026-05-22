@@ -285,42 +285,6 @@ export async function parseSpeedPaymentResponse(
   }
 }
 
-async function getMerchantSpeedSetup(
-  merchantId: string
-): Promise<{ speedAccountId: string; lightningAddress: string; paymentAddressId?: string; accountSource: "db_credentials" } | null> {
-  try {
-    const { supabaseAdmin, supabase } = await import("@/database/supabase")
-    const db = supabaseAdmin || supabase
-
-    const { data } = await db
-      .from("merchant_providers")
-      .select("credentials")
-      .eq("merchant_id", merchantId)
-      .eq("provider", "lightning")
-      .in("status", ["connected", "active"])
-      .maybeSingle()
-
-    if (!data?.credentials) return null
-
-    const creds = data.credentials as Record<string, unknown>
-    const speedAccountId = String(creds.speed_account_id || "").trim()
-    const lightningAddress = String(creds.lightning_address || "").trim()
-    const paymentAddressId = String(creds.payment_address_id || "").trim()
-    const providerModel = String(creds.provider_model || "").trim()
-
-    if (providerModel !== "speed_merchant_account") return null
-    if (!speedAccountId || !lightningAddress) return null
-    return {
-      speedAccountId,
-      lightningAddress,
-      paymentAddressId: paymentAddressId || undefined,
-      accountSource: "db_credentials"
-    }
-  } catch {
-    return null
-  }
-}
-
 function resolveInvoiceAccount(args: {
   merchantSetup: { speedAccountId: string; accountSource: "db_credentials" }
   balance: SpeedBalanceDiagnostics
@@ -368,38 +332,26 @@ export async function createLightningInvoice(
     )
   }
 
-  const merchantSetup = await getMerchantSpeedSetup(input.merchantId)
-  const dbSpeedAccountId = merchantSetup?.speedAccountId || ""
-  const merchantLightningAddress =
-    input.merchantLightningAddress ||
-    merchantSetup?.lightningAddress ||
-    ""
-  const paymentAddressId = merchantSetup?.paymentAddressId || ""
+  // Merchant Speed setup is resolved by the engine (database layer) and passed in.
+  // The provider adapter does not query the database directly.
+  const speedAccountId = String(input.speedAccountId || "").trim()
+  const merchantLightningAddress = String(input.merchantLightningAddress || "").trim()
+  const paymentAddressId = String(input.lightningPaymentAddressId || "").trim()
 
-  if (!dbSpeedAccountId) {
-    throw new Error(
-      "Merchant Speed Account ID is not configured. " +
-      "The merchant must save a Speed Account ID before accepting Bitcoin Lightning payments."
-    )
+  if (!speedAccountId || !merchantLightningAddress) {
+    throw new Error("Lightning provider setup is incomplete for this merchant.")
   }
 
-  if (!merchantLightningAddress) {
-    throw new Error(
-      "Merchant Lightning Address is not configured. " +
-      "The merchant must save a verified Lightning Address before accepting Bitcoin Lightning payments."
-    )
-  }
-
-  const balance = await getSpeedAccountBalanceDiagnostics(dbSpeedAccountId)
+  const balance = await getSpeedAccountBalanceDiagnostics(speedAccountId)
   const invoiceAccount = resolveInvoiceAccount({
-    merchantSetup: merchantSetup!,
+    merchantSetup: { speedAccountId, accountSource: "db_credentials" },
     balance
   })
 
   console.info("[lightning/speed] invoice account selection", {
     paymentId: input.paymentId,
     merchantId: input.merchantId,
-    dbSpeedAccountIdMasked: maskSpeedAccountId(dbSpeedAccountId),
+    speedAccountIdMasked: maskSpeedAccountId(speedAccountId),
     invoiceAccountIdMasked: invoiceAccount.settlementAccountId
       ? maskSpeedAccountId(invoiceAccount.settlementAccountId)
       : "",

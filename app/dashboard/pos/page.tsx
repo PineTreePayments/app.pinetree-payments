@@ -117,11 +117,15 @@ export default function POSPage() {
   }, [callPosTerminalsApi])
 
   async function loadDrawerBalances(terminalList: Terminal[]) {
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+    if (!token) return
+
     const results = await Promise.allSettled(
       terminalList.map(async (t) => {
         const res = await fetch(`/api/pos/drawer/balance?terminalId=${encodeURIComponent(t.id)}`, {
           cache: "no-store",
-          credentials: "include"
+          headers: { Authorization: `Bearer ${token}` },
         })
         if (!res.ok) return null
         const data = await res.json() as DrawerBalance

@@ -296,9 +296,15 @@ export default function ProvidersPage() {
       lastPollAt = now
 
       try {
+        const { data: { session: authSession } } = await supabase.auth.getSession()
+        const authToken = authSession?.access_token
+
         const res = await fetch(
           `/api/wallet-connect-session?session_id=${encodeURIComponent(walletSessionId)}`,
-          { cache: "no-store" }
+          {
+            cache: "no-store",
+            ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
+          }
         )
 
         if (!res.ok) {
@@ -775,10 +781,13 @@ export default function ProvidersPage() {
       applyProvidersPayload(payload)
 
       if (walletSessionId) {
+        const { data: { session: wcsSession } } = await supabase.auth.getSession()
+        const wcsToken = wcsSession?.access_token
         await fetch("/api/wallet-connect-session", {
           method: "DELETE",
           headers: {
             "Content-Type": "application/json",
+            ...(wcsToken ? { Authorization: `Bearer ${wcsToken}` } : {}),
           },
           body: JSON.stringify({ session_id: walletSessionId }),
         })

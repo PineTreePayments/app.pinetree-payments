@@ -15,7 +15,6 @@ type Toast = {
 type Terminal = {
   id: string
   name: string
-  pin: string
   autolock: string
   merchant_id?: string
   drawer_starting_amount?: number
@@ -55,6 +54,7 @@ export default function TerminalInner() {
   const [shiftStarted, setShiftStarted] = useState(false)
   const [shiftStarting, setShiftStarting] = useState(false)
   const [drawerSession, setDrawerSession] = useState<DrawerSession | null>(null)
+  const [pendingProvider, setPendingProvider] = useState<string>("solana")
 
   function showToast(message:string,type:"success"|"error"){
 
@@ -92,15 +92,9 @@ export default function TerminalInner() {
       const drawer = (payload.drawer || null) as DrawerSession | null
       setDrawerSession(drawer)
       setShiftStarted(Boolean(drawer?.active) || Number(terminalData.drawer_starting_amount ?? 0) === 0)
-
-      if (terminalData.merchant_id && payload.sessionToken) {
-        setTerminalContext({
-          terminalId: terminalData.id,
-          merchantId: terminalData.merchant_id,
-          provider: String(payload.provider || "solana"),
-          sessionToken: String(payload.sessionToken),
-        })
-      }
+      // Store the provider for later use when setting terminalContext after PIN verification.
+      // terminalContext (including session token) is set only after successful PIN verification.
+      setPendingProvider(String(payload.provider || "solana"))
 
     }
 
@@ -120,7 +114,7 @@ export default function TerminalInner() {
     return () => window.removeEventListener("popstate", handlePopState)
   }, [unlockMode])
 
-  function handleDigitsChange(next: string | ((prev: string) => string)) {
+  async function handleDigitsChange(next: string | ((prev: string) => string)) {
     const resolved = typeof next === "function" ? next(digits) : next
 
     if (!terminal || resolved.length !== 4 || isRedirecting) {
@@ -128,18 +122,44 @@ export default function TerminalInner() {
       return
     }
 
-    if (resolved === terminal.pin) {
+    // 4 digits entered — verify server-side; never compare PIN in the browser
+    setDigits(resolved)
+    setIsRedirecting(true)
+
+    try {
+      const res = await fetch("/api/pos/terminal-auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ terminalId: terminal.id, pin: resolved })
+      })
+
+      const data = await res.json().catch(() => null) as { sessionToken?: string } | null
+
+      if (!res.ok) {
+        setIsRedirecting(false)
+        showToast("Incorrect PIN", "error")
+        setDigits("")
+        return
+      }
+
+      if (data?.sessionToken && terminal.merchant_id) {
+        setTerminalContext({
+          terminalId: terminal.id,
+          merchantId: terminal.merchant_id,
+          provider: pendingProvider,
+          sessionToken: String(data.sessionToken)
+        })
+      }
+
       showToast("Terminal unlocked", "success")
-      setIsRedirecting(true)
       setTimeout(() => {
         router.push("/dashboard/pos")
       }, 700)
-      setDigits(resolved)
-      return
+    } catch {
+      setIsRedirecting(false)
+      showToast("Incorrect PIN", "error")
+      setDigits("")
     }
-
-    showToast("Incorrect PIN", "error")
-    setDigits("")
   }
 
   function requestUnlock(){
@@ -221,7 +241,6 @@ export default function TerminalInner() {
         return
       }
 
-      setTerminal((prev) => (prev ? { ...prev, pin: recoveryPin } : prev))
       setRecoveryPin("")
       setRecoveryPhrase("")
       setShowRecovery(false)

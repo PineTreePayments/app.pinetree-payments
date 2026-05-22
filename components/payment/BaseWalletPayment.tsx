@@ -16,6 +16,7 @@ type Props = {
   paymentStatus?: string
   selectedAsset?: BaseAsset
   baseUsdcStrategy?: BaseUsdcStrategy
+  checkoutToken?: string
   onPaymentCreated?: (paymentId: string) => void
   onSuccess?: (txHash: string, paymentId: string) => void | Promise<void>
   onError?: (error: string) => void
@@ -836,6 +837,7 @@ export default function BaseWalletPayment({
   paymentStatus = "",
   selectedAsset = "ETH",
   baseUsdcStrategy: directBaseUsdcStrategy,
+  checkoutToken,
   onPaymentCreated,
   onSuccess,
   onError,
@@ -1228,7 +1230,10 @@ export default function BaseWalletPayment({
         setLocalError(friendly)
         onError?.(friendly)
         if (kind === "eth_payment") {
-          await fetch(`/api/payments/${encodeURIComponent(paymentId)}/fail`, { method: "POST" }).catch(() => null)
+          await fetch(`/api/payments/${encodeURIComponent(paymentId)}/fail`, {
+            method: "POST",
+            headers: checkoutToken ? { Authorization: `Bearer ${checkoutToken}` } : {},
+          }).catch(() => null)
           if (intentId) window.location.href = `/pay?intent=${encodeURIComponent(intentId)}&status=cancelled`
         }
         return false
@@ -1332,7 +1337,10 @@ export default function BaseWalletPayment({
         `/api/payment-intents/${encodeURIComponent(intentId)}/select-network`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(checkoutToken ? { Authorization: `Bearer ${checkoutToken}` } : {}),
+          },
           body: JSON.stringify({ network: "base", asset: selectedAsset }),
         }
       )
@@ -2401,6 +2409,7 @@ export default function BaseWalletPayment({
         })
         await fetch(`/api/payments/${encodeURIComponent(createdPaymentId)}/fail`, {
           method: "POST",
+          headers: checkoutToken ? { Authorization: `Bearer ${checkoutToken}` } : {},
         }).catch(() => null)
         if (intentId) {
           window.location.href = `/pay?intent=${encodeURIComponent(intentId)}&status=cancelled`

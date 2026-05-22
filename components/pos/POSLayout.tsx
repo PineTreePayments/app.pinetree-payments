@@ -127,7 +127,8 @@ export default function POSLayout({ terminalContext }: Props) {
       setCanceling(true)
       try {
         await fetch(`/api/payment-intents/${encodeURIComponent(intentId)}/cancel`, {
-          method: "POST"
+          method: "POST",
+          headers: posAuthHeaders(terminalContext?.sessionToken),
         })
       } catch {
         // best-effort — always reset local state even if the API call fails

@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getPaymentById, getPaymentEvents } from "@/database"
 import { getTransactionByPaymentId } from "@/database/transactions"
+import { requireAdminFromRequest, getRouteErrorStatus } from "@/lib/api/adminAuth"
 import type { StoredPaymentSplitMetadata } from "@/types/payment"
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ paymentId: string }> }
 ) {
   try {
+    await requireAdminFromRequest(req)
+
     const { paymentId } = await context.params
 
     if (!String(paymentId || "").trim()) {
@@ -70,6 +73,6 @@ export async function GET(
   } catch (err) {
     const message = err instanceof Error ? err.message : "Debug read failed"
     console.error("[PineTreeBaseTrace] debug endpoint error", { error: message })
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: message }, { status: getRouteErrorStatus(err) })
   }
 }

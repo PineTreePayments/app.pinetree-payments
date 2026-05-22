@@ -35,6 +35,7 @@ type Props = {
   usdAmount: number
   paymentId?: string
   paymentStatus?: string
+  checkoutToken?: string
   walletOptions?: Array<{ id: string; label: string; url?: string; href?: string }>
   onPaymentCreated?: (paymentId: string) => void
   onError?: (error: string) => void
@@ -215,6 +216,7 @@ export default function SolanaWalletPayment({
   nativeAmount,
   paymentId: directPaymentId,
   paymentStatus,
+  checkoutToken,
   onPaymentCreated,
   onError,
   onExecutionStarted,
@@ -364,7 +366,10 @@ export default function SolanaWalletPayment({
       `/api/payment-intents/${encodeURIComponent(intentId)}/select-network`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(checkoutToken ? { Authorization: `Bearer ${checkoutToken}` } : {}),
+        },
         body: JSON.stringify({ network: "solana", asset: selectedAsset }),
       }
     )

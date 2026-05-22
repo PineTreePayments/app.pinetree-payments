@@ -32,6 +32,7 @@ import {
   validateConfigOnce
 } from "./config"
 import { getMerchantCredential } from "@/database/merchants"
+import { getMerchantLightningSetup } from "@/database/merchantProviders"
 
 type PaymentMetadata = {
   merchantAmount?: number
@@ -388,6 +389,22 @@ export async function createPayment(
   // ✅ ENGINE NOW PASSES FULL SPLIT DATA TO PROVIDER
   // No more single amount, provider receives exact split values
   const providerApiKey = await getProviderApiKey(providerName, input.merchantId)
+
+  // Resolve merchant Lightning provider setup from database before calling the provider.
+  // The provider adapter must not query the database — all DB reads happen here in the engine.
+  let merchantSpeedAccountId: string | undefined
+  let merchantLightningAddressResolved: string | undefined
+  let lightningPaymentAddressId: string | undefined
+  if (network === "bitcoin_lightning") {
+    const lightningSetup = await getMerchantLightningSetup(input.merchantId)
+    if (!lightningSetup) {
+      throw new Error("Lightning provider setup is incomplete for this merchant.")
+    }
+    merchantSpeedAccountId = lightningSetup.speedAccountId
+    merchantLightningAddressResolved = lightningSetup.lightningAddress
+    lightningPaymentAddressId = lightningSetup.paymentAddressId
+  }
+
   const providerPayment = network === "bitcoin_lightning" && provider.createLightningInvoice
     ? await provider.createLightningInvoice({
         paymentId,
@@ -399,6 +416,9 @@ export async function createPayment(
         pinetreeWallet,
         merchantId: input.merchantId,
         providerApiKey,
+        speedAccountId: merchantSpeedAccountId,
+        merchantLightningAddress: merchantLightningAddressResolved,
+        lightningPaymentAddressId,
         metadata: input.metadata
       })
     : await provider.createPayment!({

@@ -1,8 +1,2 @@
 {
-  "crons": [
-    {
-      "path": "/api/cron/check-payments",
-      "schedule": "0 0 * * *"
-    }
-  ]
 }

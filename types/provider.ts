@@ -46,6 +46,8 @@ export type LightningInvoiceRequest = {
   pinetreeWallet?: string
   providerApiKey?: string
   merchantLightningAddress?: string
+  speedAccountId?: string
+  lightningPaymentAddressId?: string
   metadata?: Record<string, unknown>
 }
 
