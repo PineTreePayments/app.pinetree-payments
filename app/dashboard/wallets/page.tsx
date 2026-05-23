@@ -159,7 +159,13 @@ const pineTreePrimaryButton =
   "inline-flex min-h-10 items-center justify-center rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm shadow-[#0052FF]/20 transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-55"
 
 const pineTreeDisabledButton =
-  "w-full cursor-not-allowed rounded-xl border border-[#0052FF]/20 bg-[#0052FF]/10 px-4 py-3 text-sm font-semibold text-[#0052FF]/55 shadow-sm shadow-[#0052FF]/5"
+  "w-full cursor-not-allowed rounded-xl border border-[#0052FF]/20 bg-[#0052FF]/10 px-3.5 py-2.5 text-sm font-medium text-[#0052FF]/55 shadow-sm shadow-[#0052FF]/5"
+
+const pineTreeNeutralDisabledButton =
+  "w-full cursor-not-allowed rounded-xl border border-gray-200 bg-gray-100 px-3.5 py-2.5 text-sm font-medium text-gray-400"
+
+const pineTreeDangerDisabledButton =
+  "cursor-not-allowed rounded-xl border border-red-100 bg-white/70 px-3.5 py-2 text-sm font-medium text-red-300"
 
 const walletDetailPanelClass = "min-h-[430px] space-y-4"
 
@@ -1026,18 +1032,18 @@ export default function WalletsPage() {
               </button>
             </div>
 
-            <div className="shrink-0 overflow-x-auto border-b border-gray-100 bg-gray-50/70 px-3 py-2 sm:px-5">
-              <div className="flex min-w-max items-center gap-1.5">
+            <div className="shrink-0 overflow-x-auto border-b border-gray-100 bg-gray-50/70 px-2 py-2 [-ms-overflow-style:none] [scrollbar-width:none] sm:px-5 [&::-webkit-scrollbar]:hidden">
+              <div className="mx-auto flex w-max min-w-max items-center gap-2 px-2">
                 {detailTabs.map((tab) => (
                   <button
                     key={tab.id}
                     type="button"
                     onClick={() => setActiveTab(tab.id)}
                     className={cx(
-                      "rounded-xl px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus:ring-4 focus:ring-blue-100",
+                      "whitespace-nowrap rounded-xl px-3 py-1.5 text-[11px] font-semibold leading-5 transition focus:outline-none focus:ring-4 focus:ring-blue-100 sm:px-3.5 sm:text-xs",
                       activeTab === tab.id
-                        ? "bg-[#0052FF] text-white shadow-[0_8px_18px_rgba(0,82,255,0.22)]"
-                        : "bg-white text-gray-600 shadow-sm ring-1 ring-gray-200/80 hover:bg-gray-50 hover:text-gray-800"
+                        ? "bg-[#0052FF] text-white shadow-[0_5px_14px_rgba(0,82,255,0.18)]"
+                        : "bg-white/90 text-gray-600 shadow-sm ring-1 ring-gray-200/80 hover:bg-white hover:text-gray-800"
                     )}
                   >
                     {tab.label}
@@ -1127,7 +1133,7 @@ export default function WalletsPage() {
                   <button
                     type="button"
                     disabled
-                    className="w-full cursor-not-allowed rounded-xl border border-gray-200 bg-gray-100 px-4 py-3 text-sm font-semibold text-gray-400"
+                    className={pineTreeNeutralDisabledButton}
                   >
                     Prepare Send - Coming Soon
                   </button>
@@ -1173,7 +1179,7 @@ export default function WalletsPage() {
                   <button
                     type="button"
                     disabled
-                    className="w-full cursor-not-allowed rounded-xl border border-gray-200 bg-gray-100 px-4 py-3 text-sm font-semibold text-gray-400"
+                    className={pineTreeNeutralDisabledButton}
                   >
                     Prepare Speed Withdrawal - Coming Soon
                   </button>
@@ -1207,7 +1213,7 @@ export default function WalletsPage() {
                       <button
                         type="button"
                         disabled
-                        className="w-full cursor-not-allowed rounded-xl border border-gray-200 bg-gray-100 px-4 py-3 text-sm font-semibold text-gray-400"
+                        className={pineTreeNeutralDisabledButton}
                       >
                         Speed Cash Out - Coming Soon
                       </button>
@@ -1456,7 +1462,7 @@ export default function WalletsPage() {
                         <button
                           type="button"
                           disabled
-                          className="mt-4 w-full cursor-not-allowed rounded-xl border border-gray-200 bg-gray-100 px-4 py-3 text-sm font-semibold text-gray-400"
+                          className={cx(pineTreeNeutralDisabledButton, "mt-4")}
                         >
                           Prepare Wallet Approval - Coming Soon
                         </button>
@@ -1498,7 +1504,7 @@ export default function WalletsPage() {
                     <button
                       type="button"
                       disabled
-                      className="mt-3 cursor-not-allowed rounded-xl border border-red-100 bg-white/70 px-4 py-2 text-sm font-semibold text-red-300"
+                      className={cx(pineTreeDangerDisabledButton, "mt-3")}
                     >
                       Disconnect - Coming Soon
                     </button>
