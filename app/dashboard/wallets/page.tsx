@@ -118,6 +118,33 @@ type OffRampWidgetUrlResponse = {
   error?: string
 }
 
+type OffRampDepositInstructionPreviewResponse = {
+  success?: boolean
+  instructionReady?: boolean
+  depositAddress?: string | null
+  memo?: string | null
+  destinationTag?: string | null
+  approvalReady?: boolean
+  message?: string
+  fundMovementEnabled?: boolean
+  nextStep?: string
+  error?: string
+}
+
+type OffRampWalletApprovalPreviewResponse = {
+  success?: boolean
+  approvalReady?: boolean
+  fromWalletAddress?: string | null
+  destinationAddress?: string | null
+  estimatedNetworkFee?: null
+  message?: string
+  instructionReady?: boolean
+  fundMovementEnabled?: boolean
+  signablePayload?: null
+  nextStep?: string
+  error?: string
+}
+
 const moonPaySupportedAssets = [
   "USDC on Solana",
   "SOL on Solana",
@@ -299,6 +326,11 @@ export default function WalletsPage() {
   const [cashOutInfo, setCashOutInfo] = useState<string | null>(null)
   const [cashOutLoading, setCashOutLoading] = useState(false)
   const [cashOutWidgetLoading, setCashOutWidgetLoading] = useState(false)
+  const [cashOutDepositPreview, setCashOutDepositPreview] =
+    useState<OffRampDepositInstructionPreviewResponse | null>(null)
+  const [cashOutApprovalPreview, setCashOutApprovalPreview] =
+    useState<OffRampWalletApprovalPreviewResponse | null>(null)
+  const [cashOutPreviewLoading, setCashOutPreviewLoading] = useState(false)
 
   useEffect(() => {
     loadOverview(false)
@@ -315,6 +347,9 @@ export default function WalletsPage() {
     setCashOutInfo(null)
     setCashOutLoading(false)
     setCashOutWidgetLoading(false)
+    setCashOutDepositPreview(null)
+    setCashOutApprovalPreview(null)
+    setCashOutPreviewLoading(false)
   }, [selectedWallet])
 
   async function loadOverview(refresh: boolean) {
@@ -396,6 +431,8 @@ export default function WalletsPage() {
     setCashOutInfo(null)
     setCashOutQuote(null)
     setCashOutSession(null)
+    setCashOutDepositPreview(null)
+    setCashOutApprovalPreview(null)
 
     try {
       const token = await getMerchantToken()
@@ -445,6 +482,8 @@ export default function WalletsPage() {
     setCashOutWidgetLoading(true)
     setCashOutError(null)
     setCashOutInfo(null)
+    setCashOutDepositPreview(null)
+    setCashOutApprovalPreview(null)
 
     try {
       const token = await getMerchantToken()
@@ -478,6 +517,66 @@ export default function WalletsPage() {
       setCashOutError(err instanceof Error ? err.message : "MoonPay widget launch failed")
     } finally {
       setCashOutWidgetLoading(false)
+    }
+  }
+
+  async function checkDepositInstructions() {
+    if (!cashOutSession) return
+
+    setCashOutPreviewLoading(true)
+    setCashOutError(null)
+    setCashOutDepositPreview(null)
+    setCashOutApprovalPreview(null)
+
+    try {
+      const token = await getMerchantToken()
+      const depositRes = await fetch(
+        `/api/off-ramp/sessions/${cashOutSession.id}/deposit-instructions/preview`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          credentials: "include",
+          cache: "no-store",
+          body: JSON.stringify({})
+        }
+      )
+      const depositPayload = (await depositRes.json().catch(() => null)) as
+        OffRampDepositInstructionPreviewResponse | null
+
+      if (!depositRes.ok || !depositPayload?.success) {
+        throw new Error(depositPayload?.error || "Deposit instructions are not available yet.")
+      }
+
+      setCashOutDepositPreview(depositPayload)
+
+      const approvalRes = await fetch(
+        `/api/off-ramp/sessions/${cashOutSession.id}/wallet-approval/preview`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          credentials: "include",
+          cache: "no-store",
+          body: JSON.stringify({})
+        }
+      )
+      const approvalPayload = (await approvalRes.json().catch(() => null)) as
+        OffRampWalletApprovalPreviewResponse | null
+
+      if (!approvalRes.ok || !approvalPayload?.success) {
+        throw new Error(approvalPayload?.error || "Wallet approval preview is not available yet.")
+      }
+
+      setCashOutApprovalPreview(approvalPayload)
+    } catch (err) {
+      setCashOutError(err instanceof Error ? err.message : "Deposit instruction preview failed")
+    } finally {
+      setCashOutPreviewLoading(false)
     }
   }
 
@@ -1162,6 +1261,8 @@ export default function WalletsPage() {
                                   setCashOutSession(null)
                                   setCashOutError(null)
                                   setCashOutInfo(null)
+                                  setCashOutDepositPreview(null)
+                                  setCashOutApprovalPreview(null)
                                 }}
                                 className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
                               >
@@ -1188,6 +1289,8 @@ export default function WalletsPage() {
                                   setCashOutSession(null)
                                   setCashOutError(null)
                                   setCashOutInfo(null)
+                                  setCashOutDepositPreview(null)
+                                  setCashOutApprovalPreview(null)
                                 }}
                                 placeholder="0.00"
                                 className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
@@ -1209,6 +1312,8 @@ export default function WalletsPage() {
                                   setCashOutSession(null)
                                   setCashOutError(null)
                                   setCashOutInfo(null)
+                                  setCashOutDepositPreview(null)
+                                  setCashOutApprovalPreview(null)
                                 }}
                                 placeholder="Optional"
                                 className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-semibold text-gray-700 outline-none"
@@ -1274,12 +1379,80 @@ export default function WalletsPage() {
                     </div>
                   )}
 
+                  {!selectedWallet.isLightning && cashOutSession?.status === "AWAITING_APPROVAL" && (
+                    <>
+                      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-gray-950">
+                              MoonPay Deposit Instructions
+                            </p>
+                            <p className="mt-1 text-sm leading-6 text-gray-600">
+                              After the MoonPay flow provides deposit instructions, PineTree will prepare the wallet approval step here.
+                            </p>
+                          </div>
+                          <NetworkStatusPill
+                            label={cashOutDepositPreview?.instructionReady ? "Ready" : "Waiting"}
+                            tone={cashOutDepositPreview?.instructionReady ? "blue" : "amber"}
+                          />
+                        </div>
+
+                        {cashOutDepositPreview && (
+                          <p className="mt-3 rounded-xl border border-gray-100 bg-gray-50/80 p-3 text-sm leading-6 text-gray-600">
+                            {cashOutDepositPreview.instructionReady
+                              ? "Deposit instructions are available for preview."
+                              : "Waiting for MoonPay deposit instructions."}
+                          </p>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={checkDepositInstructions}
+                          disabled={cashOutPreviewLoading}
+                          className={cx(pineTreePrimaryButton, "mt-4 w-full disabled:cursor-not-allowed disabled:opacity-55")}
+                        >
+                          {cashOutPreviewLoading ? "Checking..." : "Check Deposit Instructions"}
+                        </button>
+                      </div>
+
+                      <div className="rounded-2xl border border-gray-200 bg-gray-50/80 p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-gray-950">Wallet Approval</p>
+                            <p className="mt-1 text-sm leading-6 text-gray-600">
+                              Wallet approval is not enabled yet. PineTree will not move funds without explicit merchant approval.
+                            </p>
+                          </div>
+                          <NetworkStatusPill
+                            label={cashOutApprovalPreview?.approvalReady ? "Preview ready" : "Disabled"}
+                            tone={cashOutApprovalPreview?.approvalReady ? "blue" : "slate"}
+                          />
+                        </div>
+
+                        {cashOutApprovalPreview && (
+                          <p className="mt-3 rounded-xl border border-gray-100 bg-white/80 p-3 text-sm leading-6 text-gray-600">
+                            {cashOutApprovalPreview.message ||
+                              "Wallet approval will be enabled after MoonPay provides deposit instructions."}
+                          </p>
+                        )}
+
+                        <button
+                          type="button"
+                          disabled
+                          className="mt-4 w-full cursor-not-allowed rounded-xl border border-gray-200 bg-gray-100 px-4 py-3 text-sm font-semibold text-gray-400"
+                        >
+                          Prepare Wallet Approval - Coming Soon
+                        </button>
+                      </div>
+                    </>
+                  )}
+
                   <button
                     type="button"
                     disabled
                     className={pineTreeDisabledButton}
                   >
-                    Send Crypto / Wallet Approval - Disabled for Phase 4
+                    Send Crypto / Wallet Approval - Disabled for Phase 5
                   </button>
                 </div>
               )}

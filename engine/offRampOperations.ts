@@ -10,6 +10,7 @@ import {
 import { moonPayOffRampAdapter } from "@/providers/offramp"
 import {
   OffRampProviderError,
+  type OffRampDepositInstruction,
   type OffRampProviderQuote,
   type OffRampProviderWidgetUrl
 } from "@/providers/offramp/types"
@@ -92,6 +93,45 @@ export type CreateOffRampWidgetLaunchRequest = {
   refundWalletAddress?: string | null
   redirectPath?: string | null
   merchantState?: string | null
+}
+
+export type OffRampSessionScopedRequest = {
+  merchantId: string
+  sessionId: string
+}
+
+export type OffRampDepositInstructionPreview = {
+  session: OffRampSessionSummary
+  provider: OffRampProvider
+  instructionReady: boolean
+  network: OffRampNetwork
+  asset: OffRampAsset
+  amount: number
+  depositAddress: string | null
+  memo: string | null
+  destinationTag: string | null
+  expiresAt: string | null
+  rawStatus: string | null
+  approvalReady: boolean
+  message: string
+  fundMovementEnabled: false
+  nextStep: "WAIT_FOR_MOONPAY_DEPOSIT_INSTRUCTIONS"
+}
+
+export type OffRampWalletApprovalPreview = {
+  session: OffRampSessionSummary
+  approvalReady: boolean
+  fromWalletAddress: string | null
+  destinationAddress: string | null
+  asset: OffRampAsset
+  amount: number
+  network: OffRampNetwork
+  estimatedNetworkFee: null
+  message: string
+  instructionReady: boolean
+  fundMovementEnabled: false
+  signablePayload: null
+  nextStep: "WAIT_FOR_MOONPAY_DEPOSIT_INSTRUCTIONS" | "MERCHANT_APPROVES_WALLET_TRANSFER"
 }
 
 export type OffRampAssetSupportResult = {
@@ -232,6 +272,24 @@ function createOffRampRedirectUrl(sessionId: string, redirectPath?: string | nul
   url.searchParams.set("offRampSessionId", sessionId)
   url.searchParams.set("provider", "moonpay")
   return url.toString()
+}
+
+function validateDepositPreviewStatus(status: OffRampSessionStatus) {
+  return status === "QUOTE_READY" ||
+    status === "AWAITING_APPROVAL" ||
+    status === "AWAITING_CRYPTO"
+}
+
+function getDepositPreviewMessage(status: OffRampSessionStatus, instruction: OffRampDepositInstruction) {
+  if (instruction.instructionReady) {
+    return "MoonPay deposit instructions are available for wallet approval preview."
+  }
+
+  if (status === "QUOTE_READY") {
+    return "MoonPay flow has not been completed yet. Open MoonPay before checking deposit instructions."
+  }
+
+  return instruction.message || "Waiting for MoonPay deposit instructions."
 }
 
 export function validateOffRampAssetSupport(input: {
@@ -934,6 +992,165 @@ export async function createOffRampWidgetLaunchForMerchant(
     providerCallsEnabled: true,
     fundMovementEnabled: false,
     nextStep: "MERCHANT_COMPLETES_MOONPAY_FLOW"
+  }
+}
+
+export async function getOffRampDepositInstructionPreviewForMerchant(
+  input: OffRampSessionScopedRequest,
+  recordPreviewEvent = true
+): Promise<OffRampDepositInstructionPreview> {
+  const merchantId = String(input.merchantId || "").trim()
+  const sessionId = String(input.sessionId || "").trim()
+  if (!merchantId) throw new Error("Missing merchant ID")
+  if (!sessionId) throw new Error("Missing off-ramp session ID")
+
+  const existing = await getOffRampSessionForMerchant(merchantId, sessionId)
+  if (!existing) {
+    throw new Error("Off-ramp session not found")
+  }
+
+  const provider = normalizeProvider(existing.provider)
+  const network = normalizeNetwork(existing.network)
+  const asset = normalizeAsset(existing.asset)
+  const status = existing.status as OffRampSessionStatus
+  const amount = Number(existing.crypto_amount)
+
+  if (provider !== "moonpay") {
+    throw new Error("Unsupported off-ramp provider for deposit instruction preview.")
+  }
+
+  if (!validateDepositPreviewStatus(status)) {
+    throw new Error("Off-ramp session is not ready for deposit instruction preview.")
+  }
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Invalid off-ramp amount")
+  }
+
+  const support = validateOffRampAssetSupport({
+    provider,
+    network,
+    asset,
+    merchantState: existing.metadata.merchantState as string | null | undefined
+  })
+  if (!support.supported) {
+    throw new Error(support.reason || "Unsupported off-ramp request")
+  }
+
+  const adapter = getProviderAdapter(provider)
+  const instruction = await adapter.getDepositInstructions({
+    sessionId,
+    merchantId,
+    providerSessionId: existing.provider_session_id,
+    externalTransactionId: existing.external_transaction_id,
+    network,
+    asset,
+    amount
+  })
+  const approvalReady = Boolean(instruction.instructionReady && instruction.depositAddress)
+  const message = getDepositPreviewMessage(status, instruction)
+
+  await updateOffRampSessionStatus({
+    merchantId,
+    sessionId,
+    status,
+    providerStatus: existing.provider_status,
+    metadata: {
+      ...existing.metadata,
+      depositInstructionPreviewedAt: new Date().toISOString(),
+      depositInstructionReady: instruction.instructionReady,
+      approvalReady,
+      fundMovementEnabled: false
+    }
+  })
+
+  if (recordPreviewEvent) {
+    await recordOffRampEvent({
+      sessionId,
+      merchantId,
+      eventType: "off_ramp.deposit_instruction.previewed",
+      provider,
+      providerStatus: existing.provider_status,
+      rawPayload: {
+        provider,
+        network,
+        asset,
+        amount,
+        instructionReady: instruction.instructionReady,
+        depositAddressPresent: Boolean(instruction.depositAddress),
+        memoPresent: Boolean(instruction.memo),
+        destinationTagPresent: Boolean(instruction.destinationTag),
+        approvalReady,
+        message,
+        providerCallsEnabled: false,
+        fundMovementEnabled: false
+      }
+    })
+  }
+
+  return {
+    session: toSummary(existing),
+    provider,
+    instructionReady: instruction.instructionReady,
+    network,
+    asset,
+    amount,
+    depositAddress: instruction.depositAddress,
+    memo: instruction.memo,
+    destinationTag: instruction.destinationTag,
+    expiresAt: instruction.expiresAt,
+    rawStatus: instruction.rawStatus,
+    approvalReady,
+    message,
+    fundMovementEnabled: false,
+    nextStep: "WAIT_FOR_MOONPAY_DEPOSIT_INSTRUCTIONS"
+  }
+}
+
+export async function prepareOffRampWalletApprovalPreviewForMerchant(
+  input: OffRampSessionScopedRequest
+): Promise<OffRampWalletApprovalPreview> {
+  const preview = await getOffRampDepositInstructionPreviewForMerchant(input, false)
+  const approvalReady = Boolean(preview.depositAddress)
+  const message = approvalReady
+    ? "Wallet approval preview is ready. PineTree will still require explicit merchant approval before any future transfer."
+    : "Wallet approval will be enabled after MoonPay provides deposit instructions."
+
+  await recordOffRampEvent({
+    sessionId: input.sessionId,
+    merchantId: input.merchantId,
+    eventType: "off_ramp.wallet_approval.previewed",
+    provider: preview.provider,
+    rawPayload: {
+      provider: preview.provider,
+      network: preview.network,
+      asset: preview.asset,
+      amount: preview.amount,
+      instructionReady: preview.instructionReady,
+      approvalReady,
+      depositAddressPresent: Boolean(preview.depositAddress),
+      signablePayloadCreated: false,
+      providerCallsEnabled: false,
+      fundMovementEnabled: false
+    }
+  })
+
+  return {
+    session: preview.session,
+    approvalReady,
+    fromWalletAddress: preview.session.sourceWalletAddress,
+    destinationAddress: preview.depositAddress,
+    asset: preview.asset,
+    amount: preview.amount,
+    network: preview.network,
+    estimatedNetworkFee: null,
+    message,
+    instructionReady: preview.instructionReady,
+    fundMovementEnabled: false,
+    signablePayload: null,
+    nextStep: approvalReady
+      ? "MERCHANT_APPROVES_WALLET_TRANSFER"
+      : "WAIT_FOR_MOONPAY_DEPOSIT_INSTRUCTIONS"
   }
 }
 

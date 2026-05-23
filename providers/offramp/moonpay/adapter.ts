@@ -10,6 +10,8 @@ import {
 import {
   OffRampProviderError,
   type OffRampProviderAdapter,
+  type OffRampDepositInstruction,
+  type OffRampDepositInstructionInput,
   type OffRampProviderQuote,
   type OffRampProviderQuoteInput,
   type OffRampProviderSessionInput,
@@ -225,6 +227,28 @@ export const moonPayOffRampAdapter: OffRampProviderAdapter = {
       widgetUrl: url.toString(),
       signed,
       expiresAt: null,
+      fundMovementEnabled: false
+    }
+  },
+
+  async getDepositInstructions(
+    input: OffRampDepositInstructionInput
+  ): Promise<OffRampDepositInstruction> {
+    return {
+      provider: "moonpay",
+      providerSessionId: input.providerSessionId || null,
+      externalTransactionId: input.externalTransactionId || null,
+      network: input.network,
+      asset: input.asset,
+      amount: input.amount,
+      depositAddress: null,
+      memo: null,
+      destinationTag: null,
+      expiresAt: null,
+      rawStatus: null,
+      instructionReady: false,
+      message:
+        "MoonPay deposit instructions are not available until the MoonPay transaction status/webhook integration is implemented.",
       fundMovementEnabled: false
     }
   },

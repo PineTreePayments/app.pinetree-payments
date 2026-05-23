@@ -91,6 +91,33 @@ export type OffRampProviderWidgetUrl = {
   fundMovementEnabled: false
 }
 
+export type OffRampDepositInstructionInput = {
+  sessionId: string
+  merchantId: string
+  providerSessionId?: string | null
+  externalTransactionId?: string | null
+  network: OffRampNetwork
+  asset: OffRampAsset
+  amount: number
+}
+
+export type OffRampDepositInstruction = {
+  provider: OffRampProvider
+  providerSessionId?: string | null
+  externalTransactionId?: string | null
+  network: OffRampNetwork
+  asset: OffRampAsset
+  amount: number
+  depositAddress: string | null
+  memo: string | null
+  destinationTag: string | null
+  expiresAt: string | null
+  rawStatus: string | null
+  instructionReady: boolean
+  message: string
+  fundMovementEnabled: false
+}
+
 export type OffRampSessionStatusInput = {
   providerSessionId?: string | null
   externalTransactionId?: string | null
@@ -114,6 +141,7 @@ export type OffRampProviderAdapter = {
   getQuote(input: OffRampProviderQuoteInput): Promise<OffRampProviderQuote>
   createSession(input: OffRampProviderSessionInput): Promise<OffRampProviderSessionPreparation>
   createWidgetUrl(input: OffRampProviderWidgetUrlInput): Promise<OffRampProviderWidgetUrl>
+  getDepositInstructions(input: OffRampDepositInstructionInput): Promise<OffRampDepositInstruction>
   getSessionStatus(input: OffRampSessionStatusInput): Promise<OffRampProviderSessionPreparation>
   verifyWebhook(input: OffRampWebhookVerifyInput): Promise<boolean>
   parseWebhookEvent(input: unknown): Promise<OffRampWebhookEvent>
