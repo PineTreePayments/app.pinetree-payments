@@ -48,8 +48,10 @@ SPEED_API_BASE_URL=https://api.tryspeed.com
 SPEED_WEBHOOK_SECRET=
 SPEED_ENVIRONMENT=production
 SPEED_PLATFORM_ACCOUNT_ID=
+SPEED_DASHBOARD_URL=
 PINETREE_LIGHTNING_SUPPORTS_FEE_AT_PAYMENT_TIME=true
 PINETREE_LIGHTNING_SUPPORTS_SPLIT_SETTLEMENT=true
 ```
 
 `SPEED_API_KEY` and `SPEED_WEBHOOK_SECRET` are server-only secrets. Do not prefix secret keys with `NEXT_PUBLIC_`. `SPEED_PUBLISHABLE_KEY` may be stored for future client-side Speed features, but it is not required by the current checkout flow.
+`SPEED_DASHBOARD_URL` is optional and must be an HTTPS URL. When configured, authenticated merchants with a connected Speed provider can open it from the Wallets Speed Setup tab.

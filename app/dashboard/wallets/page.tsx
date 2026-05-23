@@ -34,18 +34,46 @@ type PaymentRailItem = {
   assetSymbol: "BTC"
   nativeBalance: number
   usdValue: number
+  speedSetupStatus?: SpeedSetupStatus
+}
+
+type SpeedSetupStatus = {
+  connected: boolean
+  speedAccountId: string | null
+  balanceAvailable: boolean
+  cryptoPayoutsEnabled: false
+  bankPayoutsEnabled: false
+  dashboardUrlConfigured: boolean
+  dashboardUrl: string | null
+  providerSubmissionEnabled: false
+  notes: string[]
+}
+
+type WalletOperationSummary = {
+  id: string
+  provider: "speed"
+  operationType: string
+  asset: string
+  network: string
+  amount: number
+  destinationType: string
+  status: string
+  errorCode: string | null
+  errorMessage: string | null
+  createdAt: string
 }
 
 type WalletOverviewResponse = {
   success?: boolean
   wallets?: WalletItem[]
   paymentRails?: PaymentRailItem[]
+  recentSpeedOperations?: WalletOperationSummary[]
   totalUsd?: number
   lastRun?: string | null
   error?: string
 }
 
-type DetailTab = "overview" | "send" | "provider_actions" | "cash_out" | "activity" | "settings"
+type DetailTab = "overview" | "send" | "cash_out" | "speed_setup" | "activity" | "settings"
 
 type SelectedWallet = {
   id: string
@@ -61,6 +89,7 @@ type SelectedWallet = {
   usdValue: number
   decimals: number
   isLightning: boolean
+  speedSetupStatus?: SpeedSetupStatus
 }
 
 type CashOutAssetOption = {
@@ -315,6 +344,13 @@ function formatCashOutAmount(value: number | null | undefined, currency = "USD")
   return `${currency} ${Number(value).toFixed(2)}`
 }
 
+function formatSpeedDestinationType(value: string) {
+  if (value === "lightning_invoice") return "Lightning invoice"
+  if (value === "bitcoin_address") return "Bitcoin address"
+  if (value === "provider_bank_payout") return "Bank payout"
+  return value.replace(/_/g, " ")
+}
+
 function getExplorerUrl(rail: SelectedWallet["rail"], referenceTitle: string): string | null {
   if (!referenceTitle) return null
   if (rail === "solana") return `https://solscan.io/account/${referenceTitle}`
@@ -369,6 +405,25 @@ function DisabledField({
   )
 }
 
+function CompactStatusRow({
+  label,
+  value
+}: {
+  label: string
+  value: string
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-3.5 py-3">
+      <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-400">
+        {label}
+      </span>
+      <span className="min-w-0 truncate text-right text-sm font-semibold text-gray-800">
+        {value}
+      </span>
+    </div>
+  )
+}
+
 function WalletOperationEmptyState({ compact = false }: { compact?: boolean }) {
   return (
     <div className={cx(
@@ -378,9 +433,9 @@ function WalletOperationEmptyState({ compact = false }: { compact?: boolean }) {
       <div className="flex items-start gap-3">
         <span className="mt-1 h-2.5 w-2.5 rounded-full bg-blue-600 shadow-[0_0_18px_rgba(37,99,235,0.55)]" />
         <div>
-          <p className="text-sm font-semibold text-gray-950">No wallet operations yet</p>
+          <p className="text-sm font-semibold text-gray-950">No cash-out activity yet</p>
           <p className="mt-1 text-sm leading-6 text-gray-500">
-            Send and cash-out history will appear here once wallet operations are enabled.
+            Cash-out previews, submitted withdrawals, and provider status updates will appear here.
           </p>
         </div>
       </div>
@@ -391,6 +446,7 @@ function WalletOperationEmptyState({ compact = false }: { compact?: boolean }) {
 export default function WalletsPage() {
   const [wallets, setWallets] = useState<WalletItem[]>([])
   const [paymentRails, setPaymentRails] = useState<PaymentRailItem[]>([])
+  const [recentSpeedOperations, setRecentSpeedOperations] = useState<WalletOperationSummary[]>([])
   const [totalBalance, setTotalBalance] = useState(0)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [refreshError, setRefreshError] = useState<string | null>(null)
@@ -490,6 +546,7 @@ export default function WalletsPage() {
 
       setWallets(payload?.wallets || [])
       setPaymentRails(payload?.paymentRails || [])
+      setRecentSpeedOperations(payload?.recentSpeedOperations || [])
       setTotalBalance(Number(payload?.totalUsd ?? 0) || 0)
       setLastRefreshAt(payload?.lastRun || null)
     } catch (err) {
@@ -782,12 +839,38 @@ export default function WalletsPage() {
 
       setSpeedWithdrawalDraft(payload.operation)
       setSpeedWithdrawalMessage(
-        payload.message || "Withdrawal draft created. Provider submission remains disabled."
+        payload.message || "Cash-out preview created. Provider submission remains disabled."
       )
+      await loadOverview(false)
     } catch (err) {
-      setSpeedWithdrawalError(err instanceof Error ? err.message : "Withdrawal draft failed")
+      setSpeedWithdrawalError(err instanceof Error ? err.message : "Cash-out preview failed")
     } finally {
       setSpeedWithdrawalLoading(false)
+    }
+  }
+
+  async function openSpeedDashboard() {
+    if (!selectedWallet?.speedSetupStatus?.dashboardUrl) return
+
+    try {
+      const token = await getMerchantToken()
+      const res = await fetch("/api/wallets/speed/dashboard", {
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        credentials: "include",
+        cache: "no-store",
+        redirect: "manual"
+      })
+
+      if (!res.ok && res.type !== "opaqueredirect") {
+        const payload = (await res.json().catch(() => null)) as { error?: string } | null
+        throw new Error(payload?.error || "Speed dashboard is not available.")
+      }
+
+      window.open(selectedWallet.speedSetupStatus.dashboardUrl, "_blank", "noopener,noreferrer")
+    } catch (err) {
+      setRefreshError(err instanceof Error ? err.message : "Speed dashboard is not available.")
     }
   }
 
@@ -805,7 +888,8 @@ export default function WalletsPage() {
       nativeBalance: rail.nativeBalance,
       usdValue: rail.usdValue,
       decimals: 8,
-      isLightning: true
+      isLightning: true,
+      speedSetupStatus: rail.speedSetupStatus
     }
   }
 
@@ -874,12 +958,14 @@ export default function WalletsPage() {
     : null
   const cashOutAssetOptions = getCashOutAssetOptions(selectedWallet)
   const cashOutUnavailable = selectedWallet?.isLightning || cashOutAssetOptions.length === 0
+  const speedSetupStatus = selectedWallet?.speedSetupStatus || null
+  const speedActivity = recentSpeedOperations.filter((operation) => operation.provider === "speed")
 
   const detailTabs: Array<{ id: DetailTab; label: string }> = selectedWallet?.isLightning
     ? [
       { id: "overview", label: "Overview" },
-      { id: "provider_actions", label: "Provider Actions" },
       { id: "cash_out", label: "Cash Out" },
+      { id: "speed_setup", label: "Speed Setup" },
       { id: "activity", label: "Activity" },
       { id: "settings", label: "Settings" }
     ]
@@ -1348,136 +1434,6 @@ export default function WalletsPage() {
                 </div>
               )}
 
-              {activeTab === "provider_actions" && selectedWallet.isLightning && (
-                <div className={walletDetailPanelClass}>
-                  <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
-                    <p className="text-sm font-semibold text-blue-950">Speed Provider Actions</p>
-                    <p className="mt-1 text-sm leading-6 text-blue-900/75">
-                      Create a draft before any Speed withdrawal flow is enabled. Provider submission stays disabled.
-                    </p>
-                  </div>
-
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <label className="block rounded-xl border border-gray-100 bg-gray-50/70 p-3.5">
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
-                        Amount
-                      </span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.00000001"
-                        value={speedWithdrawalAmount}
-                        onChange={(event) => {
-                          setSpeedWithdrawalAmount(event.target.value)
-                          setSpeedWithdrawalDraft(null)
-                          setSpeedWithdrawalError(null)
-                          setSpeedWithdrawalMessage(null)
-                        }}
-                        placeholder="0.00000000"
-                        className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-semibold text-gray-800 outline-none placeholder:text-gray-400"
-                      />
-                    </label>
-                    <label className="block rounded-xl border border-gray-100 bg-gray-50/70 p-3.5">
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
-                        Destination Type
-                      </span>
-                      <select
-                        value={speedWithdrawalDestinationType}
-                        onChange={(event) => {
-                          setSpeedWithdrawalDestinationType(event.target.value as SpeedWithdrawalDestinationType)
-                          setSpeedWithdrawalDraft(null)
-                          setSpeedWithdrawalError(null)
-                          setSpeedWithdrawalMessage(null)
-                        }}
-                        className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-semibold text-gray-800 outline-none"
-                      >
-                        <option value="lightning_invoice">Lightning invoice</option>
-                        <option value="bitcoin_address">Bitcoin address</option>
-                        <option value="provider_bank_payout">Bank payout through provider</option>
-                      </select>
-                    </label>
-                  </div>
-
-                  <div className="grid gap-3">
-                    <label className="block rounded-xl border border-gray-100 bg-gray-50/70 p-3.5">
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
-                        Destination / Invoice
-                      </span>
-                      <input
-                        value={speedWithdrawalDestinationValue}
-                        onChange={(event) => {
-                          setSpeedWithdrawalDestinationValue(event.target.value)
-                          setSpeedWithdrawalDraft(null)
-                          setSpeedWithdrawalError(null)
-                          setSpeedWithdrawalMessage(null)
-                        }}
-                        placeholder="Lightning invoice or Bitcoin address"
-                        className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-semibold text-gray-800 outline-none placeholder:text-gray-400"
-                      />
-                    </label>
-                    <label className="block rounded-xl border border-gray-100 bg-gray-50/70 p-3.5">
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
-                        Memo / Reference Optional
-                      </span>
-                      <input
-                        value={speedWithdrawalMemo}
-                        onChange={(event) => {
-                          setSpeedWithdrawalMemo(event.target.value)
-                          setSpeedWithdrawalDraft(null)
-                          setSpeedWithdrawalError(null)
-                          setSpeedWithdrawalMessage(null)
-                        }}
-                        placeholder="Optional internal note"
-                        className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-semibold text-gray-800 outline-none placeholder:text-gray-400"
-                      />
-                    </label>
-                  </div>
-
-                  {speedWithdrawalError && (
-                    <p className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-sm leading-6 text-red-700">
-                      {speedWithdrawalError}
-                    </p>
-                  )}
-
-                  {speedWithdrawalDraft && (
-                    <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm font-semibold text-gray-950">Withdrawal Draft</p>
-                        <NetworkStatusPill label={speedWithdrawalDraft.status} tone="blue" />
-                      </div>
-                      <div className="mt-3 grid gap-2 text-sm text-gray-600 sm:grid-cols-2">
-                        <p>Amount: {speedWithdrawalDraft.amount} BTC</p>
-                        <p>Destination: {speedWithdrawalDraft.destinationType.replace(/_/g, " ")}</p>
-                      </div>
-                      <p className="mt-3 text-xs leading-5 text-gray-500">
-                        {speedWithdrawalMessage || "Provider submission disabled until Speed withdrawal endpoint is confirmed."}
-                      </p>
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={createSpeedWithdrawalDraft}
-                    disabled={speedWithdrawalLoading}
-                    className={pineTreePrimaryButton}
-                  >
-                    {speedWithdrawalLoading ? "Creating Draft..." : "Create Withdrawal Draft"}
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled
-                    className={pineTreeNeutralDisabledButton}
-                  >
-                    Submit Withdrawal - Coming Soon
-                  </button>
-
-                  <p className="text-center text-[11px] text-gray-500">
-                    PineTree will not move provider-managed funds without merchant confirmation.
-                  </p>
-                </div>
-              )}
-
               {activeTab === "cash_out" && (
                 <div className={walletDetailPanelClass}>
                   {selectedWallet.isLightning ? (
@@ -1485,25 +1441,132 @@ export default function WalletsPage() {
                       <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4 shadow-[0_8px_24px_rgba(0,82,255,0.07)]">
                         <p className="text-base font-semibold text-blue-950">Bitcoin Lightning Cash Out</p>
                         <p className="mt-1 text-sm font-semibold text-[#0052FF]">
-                          Provider-managed through Speed
+                          Powered by Speed
                         </p>
                         <p className="mt-2 text-sm leading-6 text-blue-900/75">
-                          Speed-supported withdrawals and payouts will appear here once enabled.
+                          Prepare a cash-out request from your Speed Lightning balance. PineTree will not submit it to Speed until provider submission is enabled.
                         </p>
                       </div>
 
-                      <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
-                        <p className="text-sm leading-6 text-gray-600">
-                          Speed bank payout support is not enabled yet. Bitcoin Lightning cash-out is separate from Base/Solana off-ramp providers.
-                        </p>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <label className="block rounded-xl border border-gray-100 bg-gray-50/70 p-3.5">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+                            Amount in BTC
+                          </span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.00000001"
+                            value={speedWithdrawalAmount}
+                            onChange={(event) => {
+                              setSpeedWithdrawalAmount(event.target.value)
+                              setSpeedWithdrawalDraft(null)
+                              setSpeedWithdrawalError(null)
+                              setSpeedWithdrawalMessage(null)
+                            }}
+                            placeholder="0.00000000"
+                            className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-semibold text-gray-800 outline-none placeholder:text-gray-400"
+                          />
+                        </label>
+                        <label className="block rounded-xl border border-gray-100 bg-gray-50/70 p-3.5">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+                            Destination Type
+                          </span>
+                          <select
+                            value={speedWithdrawalDestinationType}
+                            onChange={(event) => {
+                              setSpeedWithdrawalDestinationType(event.target.value as SpeedWithdrawalDestinationType)
+                              setSpeedWithdrawalDraft(null)
+                              setSpeedWithdrawalError(null)
+                              setSpeedWithdrawalMessage(null)
+                            }}
+                            className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-semibold text-gray-800 outline-none"
+                          >
+                            <option value="lightning_invoice">Lightning invoice</option>
+                            <option value="bitcoin_address">Bitcoin address</option>
+                            <option value="provider_bank_payout" disabled>Bank payout, disabled</option>
+                          </select>
+                        </label>
                       </div>
+
+                      <div className="grid gap-3">
+                        <label className="block rounded-xl border border-gray-100 bg-gray-50/70 p-3.5">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+                            Destination / Invoice
+                          </span>
+                          <input
+                            value={speedWithdrawalDestinationValue}
+                            onChange={(event) => {
+                              setSpeedWithdrawalDestinationValue(event.target.value)
+                              setSpeedWithdrawalDraft(null)
+                              setSpeedWithdrawalError(null)
+                              setSpeedWithdrawalMessage(null)
+                            }}
+                            placeholder="Lightning invoice or Bitcoin address"
+                            className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-semibold text-gray-800 outline-none placeholder:text-gray-400"
+                          />
+                        </label>
+                        <label className="block rounded-xl border border-gray-100 bg-gray-50/70 p-3.5">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+                            Memo / Reference Optional
+                          </span>
+                          <input
+                            value={speedWithdrawalMemo}
+                            onChange={(event) => {
+                              setSpeedWithdrawalMemo(event.target.value)
+                              setSpeedWithdrawalDraft(null)
+                              setSpeedWithdrawalError(null)
+                              setSpeedWithdrawalMessage(null)
+                            }}
+                            placeholder="Optional internal note"
+                            className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-semibold text-gray-800 outline-none placeholder:text-gray-400"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="rounded-xl border border-[#0052FF]/10 bg-[#0052FF]/5 p-3 text-sm leading-6 text-gray-700">
+                        Bank payout through Speed is not enabled in PineTree yet. Use Speed Dashboard for provider-managed payout settings if available.
+                      </div>
+
+                      {speedWithdrawalError && (
+                        <p className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-sm leading-6 text-red-700">
+                          {speedWithdrawalError}
+                        </p>
+                      )}
+
+                      {speedWithdrawalDraft && (
+                        <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-sm font-semibold text-gray-950">Cash Out Preview Created</p>
+                            <NetworkStatusPill label={speedWithdrawalDraft.status} tone="blue" />
+                          </div>
+                          <div className="mt-3 grid gap-2 text-sm text-gray-600 sm:grid-cols-2">
+                            <p>Amount: {speedWithdrawalDraft.amount} BTC</p>
+                            <p>Destination type: {formatSpeedDestinationType(speedWithdrawalDraft.destinationType)}</p>
+                            <p>Status: Draft</p>
+                            <p>Next step: Submit to Speed is disabled until provider submission is enabled.</p>
+                          </div>
+                          <p className="mt-3 text-xs leading-5 text-gray-500">
+                            {speedWithdrawalMessage || "Provider submission disabled until Speed withdrawal endpoint is confirmed."}
+                          </p>
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={createSpeedWithdrawalDraft}
+                        disabled={speedWithdrawalLoading}
+                        className={pineTreePrimaryButton}
+                      >
+                        {speedWithdrawalLoading ? "Preparing..." : "Prepare Cash Out"}
+                      </button>
 
                       <button
                         type="button"
                         disabled
                         className={pineTreeNeutralDisabledButton}
                       >
-                        Speed Cash Out - Coming Soon
+                        Submit Cash Out - Coming Soon
                       </button>
 
                       <p className="text-center text-[11px] text-gray-500">
@@ -1801,9 +1864,127 @@ export default function WalletsPage() {
                 </div>
               )}
 
+              {activeTab === "speed_setup" && selectedWallet.isLightning && (
+                <div className={walletDetailPanelClass}>
+                  <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-base font-semibold text-gray-950">Speed Setup</p>
+                        <p className="mt-1 text-sm leading-6 text-gray-700">
+                          {speedSetupStatus?.connected
+                            ? "Bitcoin Lightning is connected through your Speed account."
+                            : "Bitcoin Lightning is not connected through Speed yet."}
+                        </p>
+                      </div>
+                      <NetworkStatusPill
+                        label={speedSetupStatus?.connected ? "Connected" : "Not connected"}
+                        tone={speedSetupStatus?.connected ? "blue" : "slate"}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <CompactStatusRow
+                      label="Speed Account ID"
+                      value={speedSetupStatus?.speedAccountId || "Not connected"}
+                    />
+                    <CompactStatusRow
+                      label="Balance Sync"
+                      value={speedSetupStatus?.balanceAvailable ? "Available" : "Not available"}
+                    />
+                    <CompactStatusRow label="Crypto Payout Submission" value="Disabled in PineTree" />
+                    <CompactStatusRow
+                      label="Bank Payout Setup"
+                      value={speedSetupStatus?.bankPayoutsEnabled ? "Enabled" : "Not enabled"}
+                    />
+                    <CompactStatusRow label="Provider Submission" value="Disabled" />
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {speedSetupStatus?.dashboardUrlConfigured && speedSetupStatus.dashboardUrl ? (
+                      <button
+                        type="button"
+                        onClick={openSpeedDashboard}
+                        className={pineTreePrimaryButton}
+                      >
+                        Open Speed Dashboard
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled
+                        className={pineTreeDisabledButton}
+                      >
+                        Open Speed Dashboard - Not Configured
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => loadOverview(true)}
+                      disabled={isRefreshing}
+                      className={pineTreeSecondaryActionButton}
+                    >
+                      {isRefreshing ? "Refreshing..." : "Refresh Speed Status"}
+                    </button>
+                  </div>
+
+                  <div className="rounded-xl border border-gray-100 bg-gray-50/70 p-3 text-sm leading-6 text-gray-600">
+                    Use Speed to manage provider requirements and payout settings. PineTree will show setup status here as provider capabilities are enabled.
+                  </div>
+
+                  {speedSetupStatus?.notes?.length ? (
+                    <div className="space-y-1 rounded-xl border border-gray-100 bg-white p-3">
+                      {speedSetupStatus.notes.map((note) => (
+                        <p key={note} className="text-xs leading-5 text-gray-500">
+                          {note}
+                        </p>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
               {activeTab === "activity" && (
                 <div className={walletDetailPanelClass}>
-                  <WalletOperationEmptyState compact />
+                  {selectedWallet.isLightning && speedActivity.length > 0 ? (
+                    <div className="space-y-2">
+                      {speedActivity.map((operation) => (
+                        <div
+                          key={operation.id}
+                          className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-gray-950">
+                                {operation.operationType === "WITHDRAWAL_DRAFT"
+                                  ? "Cash-out preview"
+                                  : operation.operationType.replace(/_/g, " ")}
+                              </p>
+                              <p className="mt-1 text-xs text-gray-500">
+                                {formatChicagoDateTime(operation.createdAt)}
+                              </p>
+                            </div>
+                            <NetworkStatusPill
+                              label={operation.status}
+                              tone={operation.status === "VALIDATION_FAILED" ? "amber" : "blue"}
+                            />
+                          </div>
+                          <div className="mt-3 grid gap-2 text-sm text-gray-600 sm:grid-cols-2">
+                            <p>{operation.amount} {operation.asset}</p>
+                            <p>{formatSpeedDestinationType(operation.destinationType)}</p>
+                          </div>
+                          {operation.errorMessage && (
+                            <p className="mt-3 rounded-xl border border-amber-100 bg-amber-50/80 p-3 text-xs leading-5 text-amber-800">
+                              {operation.errorMessage}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <WalletOperationEmptyState compact />
+                  )}
                 </div>
               )}
 

@@ -133,3 +133,27 @@ export async function recordWalletOperationEvent(
 
   return data as WalletOperationEventRecord
 }
+
+export async function listRecentWalletOperationsForMerchant(
+  merchantId: string,
+  options?: { provider?: "speed"; limit?: number }
+): Promise<WalletOperationRecord[]> {
+  let query = db
+    .from("wallet_operations")
+    .select("*")
+    .eq("merchant_id", merchantId)
+    .order("created_at", { ascending: false })
+    .limit(Math.max(1, Math.min(Number(options?.limit || 8), 25)))
+
+  if (options?.provider) {
+    query = query.eq("provider", options.provider)
+  }
+
+  const { data, error } = await query
+
+  if (error) {
+    throw new Error(`Failed to load wallet operations: ${error.message}`)
+  }
+
+  return ((data || []) as WalletOperationRecord[]).map(normalizeWalletOperation)
+}

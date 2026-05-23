@@ -14,6 +14,12 @@ import {
   maskSpeedAccountId,
   type SpeedBalanceDiagnostics
 } from "@/providers/lightning/getBalance"
+import { getConfiguredSpeedDashboardUrl } from "@/providers/lightning/dashboard"
+import { getMerchantSpeedProviderSetup } from "@/database/merchantProviders"
+import {
+  listRecentWalletOperationsForMerchant,
+  type WalletOperationRecord
+} from "@/database/walletOperations"
 
 const db = supabaseAdmin || supabase
 
@@ -45,11 +51,39 @@ export type WalletOverviewPaymentRail = {
   nativeBalance: number
   usdValue: number
   balanceSource?: SpeedBalanceDiagnostics["balanceSource"]
+  speedSetupStatus: SpeedSetupStatus
+}
+
+export type WalletOverviewOperation = {
+  id: string
+  provider: "speed"
+  operationType: string
+  asset: string
+  network: string
+  amount: number
+  destinationType: string
+  status: string
+  errorCode: string | null
+  errorMessage: string | null
+  createdAt: string
+}
+
+export type SpeedSetupStatus = {
+  connected: boolean
+  speedAccountId: string | null
+  balanceAvailable: boolean
+  cryptoPayoutsEnabled: false
+  bankPayoutsEnabled: false
+  dashboardUrlConfigured: boolean
+  dashboardUrl: string | null
+  providerSubmissionEnabled: false
+  notes: string[]
 }
 
 export type WalletOverviewResult = {
   wallets: WalletOverviewItem[]
   paymentRails: WalletOverviewPaymentRail[]
+  recentSpeedOperations: WalletOverviewOperation[]
   totalUsd: number
   totalsByAsset: { SOL: number; ETH: number; BTC: number }
   prices: { SOL: number; ETH: number; BTC: number }
@@ -66,6 +100,63 @@ function normalizeNetwork(network: string): WalletNetwork | null {
 
 function networkAsset(network: WalletNetwork): "SOL" | "ETH" {
   return network === "solana" ? "SOL" : "ETH"
+}
+
+function buildSpeedSetupStatus(input: {
+  speedAccountId: string | null
+  balanceAvailable?: boolean
+}): SpeedSetupStatus {
+  const dashboardUrl = getConfiguredSpeedDashboardUrl()
+  const connected = Boolean(input.speedAccountId)
+  const notes = connected
+    ? [
+      "Speed account ID is stored in merchant provider credentials.",
+      "PineTree provider submission is disabled until Speed withdrawal and payout endpoints are confirmed."
+    ]
+    : ["Connect a Speed account in Providers before using Bitcoin Lightning setup tools."]
+
+  if (!dashboardUrl) {
+    notes.push("Speed dashboard URL is not configured.")
+  }
+
+  return {
+    connected,
+    speedAccountId: input.speedAccountId,
+    balanceAvailable: Boolean(input.balanceAvailable),
+    cryptoPayoutsEnabled: false,
+    bankPayoutsEnabled: false,
+    dashboardUrlConfigured: Boolean(dashboardUrl),
+    dashboardUrl,
+    providerSubmissionEnabled: false,
+    notes
+  }
+}
+
+function summarizeWalletOperation(row: WalletOperationRecord): WalletOverviewOperation {
+  return {
+    id: row.id,
+    provider: "speed",
+    operationType: row.operation_type,
+    asset: row.asset,
+    network: row.network,
+    amount: Number(row.amount),
+    destinationType: row.destination_type,
+    status: row.status,
+    errorCode: row.error_code,
+    errorMessage: row.error_message,
+    createdAt: row.created_at
+  }
+}
+
+export async function getSpeedSetupStatusForMerchant(
+  merchantId: string
+): Promise<SpeedSetupStatus> {
+  const setup = await getMerchantSpeedProviderSetup(merchantId)
+  const speedAccountId = setup?.speedAccountId || null
+  return buildSpeedSetupStatus({
+    speedAccountId,
+    balanceAvailable: false
+  })
 }
 
 async function getLightningPaymentRails(
@@ -105,7 +196,11 @@ async function getLightningPaymentRails(
         speedAccountId,
         assetSymbol: "BTC",
         nativeBalance: 0,
-        usdValue: 0
+        usdValue: 0,
+        speedSetupStatus: buildSpeedSetupStatus({
+          speedAccountId,
+          balanceAvailable: false
+        })
       } satisfies WalletOverviewPaymentRail
     })
     .filter(Boolean) as WalletOverviewPaymentRail[]
@@ -118,7 +213,11 @@ async function getLightningPaymentRails(
         ...rail,
         nativeBalance,
         usdValue: nativeBalance * prices.BTC,
-        balanceSource: balance.balanceSource
+        balanceSource: balance.balanceSource,
+        speedSetupStatus: buildSpeedSetupStatus({
+          speedAccountId: rail.speedAccountId,
+          balanceAvailable: balance.balanceSource !== "none"
+        })
       }
     })
   )
@@ -331,6 +430,9 @@ export async function getWalletOverviewEngine(
     getMerchantWalletRows(merchantId),
     getLightningPaymentRails(merchantId, prices)
   ])
+  const recentSpeedOperations = (
+    await listRecentWalletOperationsForMerchant(merchantId, { provider: "speed", limit: 8 })
+  ).map(summarizeWalletOperation)
   let activePaymentRails = paymentRails
 
   const walletBalancesById: Record<string, number> = {}
@@ -419,6 +521,7 @@ export async function getWalletOverviewEngine(
   return {
     wallets,
     paymentRails: activePaymentRails,
+    recentSpeedOperations,
     totalUsd,
     totalsByAsset,
     prices,
