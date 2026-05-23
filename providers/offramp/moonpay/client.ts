@@ -5,6 +5,7 @@ export type MoonPayClientConfig = {
   secretKey: string
   webhookSecret?: string | null
   baseUrl: string
+  widgetBaseUrl: string
   appUrl: string
 }
 
@@ -13,6 +14,12 @@ export function getMoonPayClientConfig(): MoonPayClientConfig {
   const secretKey = String(process.env.MOONPAY_SECRET_KEY || "").trim()
   const webhookSecret = String(process.env.MOONPAY_WEBHOOK_SECRET || "").trim() || null
   const baseUrl = String(process.env.MOONPAY_BASE_URL || "https://api.moonpay.com")
+    .trim()
+    .replace(/\/+$/, "")
+  const widgetBaseUrl = String(
+    process.env.MOONPAY_WIDGET_BASE_URL ||
+      (apiKey.includes("_test_") ? "https://sell-sandbox.moonpay.com" : "https://sell.moonpay.com")
+  )
     .trim()
     .replace(/\/+$/, "")
   const appUrl = String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "")
@@ -24,6 +31,7 @@ export function getMoonPayClientConfig(): MoonPayClientConfig {
     secretKey,
     webhookSecret,
     baseUrl,
+    widgetBaseUrl,
     appUrl
   }
 }
@@ -52,6 +60,18 @@ export function assertMoonPaySessionConfigured(config = getMoonPayClientConfig()
   if (!config.appUrl || !config.appUrl.startsWith("https://")) {
     throw new OffRampProviderError(
       "MoonPay off-ramp session preparation requires NEXT_PUBLIC_APP_URL to be a full HTTPS URL.",
+      "OFF_RAMP_PROVIDER_DISABLED",
+      503
+    )
+  }
+}
+
+export function assertMoonPayWidgetConfigured(config = getMoonPayClientConfig()) {
+  assertMoonPayQuoteConfigured(config)
+
+  if (!config.widgetBaseUrl || !config.widgetBaseUrl.startsWith("https://")) {
+    throw new OffRampProviderError(
+      "MoonPay widget launch requires a full HTTPS widget URL.",
       "OFF_RAMP_PROVIDER_DISABLED",
       503
     )

@@ -100,6 +100,7 @@ Auth not yet established when these are called; engine enforces brute-force prot
 | `/api/off-ramp/sessions` | GET, POST | MERCHANT. POST creates draft audit records only; no provider session or fund movement. |
 | `/api/off-ramp/quote` | POST | MERCHANT. Quote only; no provider transaction, wallet signing, or fund movement. |
 | `/api/off-ramp/sessions/[id]/prepare` | POST | MERCHANT. Prepares quote/session state only; no crypto broadcast or fund movement. |
+| `/api/off-ramp/sessions/[id]/widget-url` | POST | MERCHANT. Prepares MoonPay widget URL only; no provider transaction settlement, wallet signing, crypto broadcast, or fund movement. |
 | `/api/providers` | GET, POST | MERCHANT |
 | `/api/reports` | GET | MERCHANT |
 | `/api/reports/pdf` | GET | MERCHANT |

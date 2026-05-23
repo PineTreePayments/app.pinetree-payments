@@ -68,6 +68,29 @@ export type OffRampProviderSessionPreparation = {
   rawProviderResponse?: Record<string, unknown>
 }
 
+export type OffRampProviderWidgetUrlInput = {
+  sessionId: string
+  merchantId: string
+  network: OffRampNetwork
+  asset: OffRampAsset
+  moonPayCode: string
+  cryptoAmount: number
+  fiatCurrency?: string
+  payoutMethod?: string | null
+  sourceWalletAddress?: string | null
+  refundWalletAddress?: string | null
+  merchantEmail?: string | null
+  redirectUrl: string
+}
+
+export type OffRampProviderWidgetUrl = {
+  provider: OffRampProvider
+  widgetUrl: string
+  signed: boolean
+  expiresAt?: string | null
+  fundMovementEnabled: false
+}
+
 export type OffRampSessionStatusInput = {
   providerSessionId?: string | null
   externalTransactionId?: string | null
@@ -90,6 +113,7 @@ export type OffRampProviderAdapter = {
   provider: OffRampProvider
   getQuote(input: OffRampProviderQuoteInput): Promise<OffRampProviderQuote>
   createSession(input: OffRampProviderSessionInput): Promise<OffRampProviderSessionPreparation>
+  createWidgetUrl(input: OffRampProviderWidgetUrlInput): Promise<OffRampProviderWidgetUrl>
   getSessionStatus(input: OffRampSessionStatusInput): Promise<OffRampProviderSessionPreparation>
   verifyWebhook(input: OffRampWebhookVerifyInput): Promise<boolean>
   parseWebhookEvent(input: unknown): Promise<OffRampWebhookEvent>

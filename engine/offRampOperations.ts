@@ -8,7 +8,11 @@ import {
   type OffRampSessionRecord
 } from "@/database/offRampSessions"
 import { moonPayOffRampAdapter } from "@/providers/offramp"
-import { OffRampProviderError, type OffRampProviderQuote } from "@/providers/offramp/types"
+import {
+  OffRampProviderError,
+  type OffRampProviderQuote,
+  type OffRampProviderWidgetUrl
+} from "@/providers/offramp/types"
 
 export type OffRampProvider = "moonpay" | "ramp" | "banxa" | "transak"
 export type OffRampNetwork = "base" | "solana" | "lightning"
@@ -79,6 +83,15 @@ export type PrepareOffRampSessionRequest = {
   sessionId: string
   merchantState?: string | null
   payoutMethod?: string | null
+}
+
+export type CreateOffRampWidgetLaunchRequest = {
+  merchantId: string
+  sessionId: string
+  sourceWalletAddress?: string | null
+  refundWalletAddress?: string | null
+  redirectPath?: string | null
+  merchantState?: string | null
 }
 
 export type OffRampAssetSupportResult = {
@@ -193,6 +206,32 @@ function getProviderErrorStatus(error: unknown) {
 function providerCallAttempted(error: unknown) {
   if (!(error instanceof OffRampProviderError)) return true
   return !error.message.toLowerCase().includes("not configured")
+}
+
+function getAppBaseUrl() {
+  return String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "")
+    .trim()
+    .replace(/\/+$/, "")
+}
+
+function createOffRampRedirectUrl(sessionId: string, redirectPath?: string | null) {
+  const appBaseUrl = getAppBaseUrl()
+  if (!appBaseUrl || !appBaseUrl.startsWith("https://")) {
+    throw new OffRampProviderError(
+      "MoonPay widget launch requires NEXT_PUBLIC_APP_URL or APP_URL to be a full HTTPS URL.",
+      "OFF_RAMP_PROVIDER_DISABLED",
+      503
+    )
+  }
+
+  const normalizedPath = String(redirectPath || "/dashboard/wallets").trim()
+  const safePath = normalizedPath.startsWith("/") && !normalizedPath.startsWith("//")
+    ? normalizedPath
+    : "/dashboard/wallets"
+  const url = new URL(safePath, appBaseUrl)
+  url.searchParams.set("offRampSessionId", sessionId)
+  url.searchParams.set("provider", "moonpay")
+  return url.toString()
 }
 
 export function validateOffRampAssetSupport(input: {
@@ -782,6 +821,119 @@ export async function prepareOffRampSessionForMerchant(
     }
 
     throw error
+  }
+}
+
+export async function createOffRampWidgetLaunchForMerchant(
+  input: CreateOffRampWidgetLaunchRequest
+): Promise<{
+  session: OffRampSessionSummary
+  widgetUrl: string
+  provider: OffRampProvider
+  signed: boolean
+  expiresAt?: string | null
+  providerCallsEnabled: boolean
+  fundMovementEnabled: false
+  nextStep: "MERCHANT_COMPLETES_MOONPAY_FLOW"
+}> {
+  const merchantId = String(input.merchantId || "").trim()
+  const sessionId = String(input.sessionId || "").trim()
+  if (!merchantId) throw new Error("Missing merchant ID")
+  if (!sessionId) throw new Error("Missing off-ramp session ID")
+
+  const existing = await getOffRampSessionForMerchant(merchantId, sessionId)
+  if (!existing) {
+    throw new Error("Off-ramp session not found")
+  }
+
+  const provider = normalizeProvider(existing.provider)
+  const network = normalizeNetwork(existing.network)
+  const asset = normalizeAsset(existing.asset)
+  const amount = Number(existing.crypto_amount)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Invalid off-ramp amount")
+  }
+
+  if (existing.status !== "QUOTE_READY" && existing.status !== "AWAITING_APPROVAL") {
+    throw new Error("Off-ramp session must have a ready quote before launching MoonPay.")
+  }
+
+  const merchantState = normalizeMerchantState(input.merchantState || existing.metadata.merchantState)
+  const support = validateOffRampAssetSupport({
+    provider,
+    network,
+    asset,
+    merchantState
+  })
+
+  if (!support.supported || !support.moonPayCode) {
+    throw new Error(support.reason || "Unsupported off-ramp request")
+  }
+
+  const adapter = getProviderAdapter(provider)
+  const redirectUrl = createOffRampRedirectUrl(sessionId, input.redirectPath)
+  const widget: OffRampProviderWidgetUrl = await adapter.createWidgetUrl({
+    sessionId,
+    merchantId,
+    network,
+    asset,
+    moonPayCode: support.moonPayCode,
+    cryptoAmount: amount,
+    fiatCurrency: existing.quote_fiat_currency || "USD",
+    payoutMethod: existing.payout_method || "ach_bank_transfer",
+    sourceWalletAddress: input.sourceWalletAddress || existing.source_wallet_address,
+    refundWalletAddress: input.refundWalletAddress || existing.refund_wallet_address,
+    redirectUrl
+  })
+
+  const updated = await updateOffRampSessionStatus({
+    merchantId,
+    sessionId,
+    status: "AWAITING_APPROVAL",
+    providerStatus: "widget_prepared",
+    errorCode: null,
+    errorMessage: null,
+    metadata: {
+      ...existing.metadata,
+      merchantState,
+      widgetLaunchPrepared: true,
+      providerCallsEnabled: true,
+      fundMovementEnabled: false,
+      moonPayCode: support.moonPayCode,
+      redirectUrl,
+      signed: widget.signed,
+      widgetPreparedAt: new Date().toISOString()
+    }
+  })
+
+  await recordOffRampEvent({
+    sessionId,
+    merchantId,
+    eventType: "off_ramp.widget.prepared",
+    provider,
+    providerStatus: "widget_prepared",
+    rawPayload: {
+      provider,
+      network,
+      asset,
+      moonPayCode: support.moonPayCode,
+      signed: widget.signed,
+      redirectUrl,
+      providerCallsEnabled: true,
+      fundMovementEnabled: false,
+      nextStep: "MERCHANT_COMPLETES_MOONPAY_FLOW"
+    }
+  })
+
+  return {
+    session: toSummary(updated),
+    widgetUrl: widget.widgetUrl,
+    provider,
+    signed: widget.signed,
+    expiresAt: widget.expiresAt,
+    providerCallsEnabled: true,
+    fundMovementEnabled: false,
+    nextStep: "MERCHANT_COMPLETES_MOONPAY_FLOW"
   }
 }
 

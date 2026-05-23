@@ -1,6 +1,8 @@
+import crypto from "crypto"
 import type { OffRampAsset, OffRampNetwork } from "@/engine/offRampOperations"
 import {
   assertMoonPayQuoteConfigured,
+  assertMoonPayWidgetConfigured,
   extractMoonPayErrorMessage,
   getMoonPayClientConfig,
   readMoonPayResponse
@@ -12,6 +14,8 @@ import {
   type OffRampProviderQuoteInput,
   type OffRampProviderSessionInput,
   type OffRampProviderSessionPreparation,
+  type OffRampProviderWidgetUrl,
+  type OffRampProviderWidgetUrlInput,
   type OffRampSessionStatusInput,
   type OffRampWebhookEvent,
   type OffRampWebhookVerifyInput
@@ -43,6 +47,20 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {}
+}
+
+function appendIfPresent(url: URL, key: string, value: string | number | null | undefined) {
+  const normalized = String(value ?? "").trim()
+  if (normalized) {
+    url.searchParams.set(key, normalized)
+  }
+}
+
+function signWidgetUrl(url: URL, secretKey: string): string {
+  return crypto
+    .createHmac("sha256", secretKey)
+    .update(url.search)
+    .digest("base64")
 }
 
 export const moonPayOffRampAdapter: OffRampProviderAdapter = {
@@ -149,6 +167,66 @@ export const moonPayOffRampAdapter: OffRampProviderAdapter = {
       "OFF_RAMP_PROVIDER_NOT_IMPLEMENTED",
       501
     )
+  },
+
+  async createWidgetUrl(input: OffRampProviderWidgetUrlInput): Promise<OffRampProviderWidgetUrl> {
+    const config = getMoonPayClientConfig()
+    assertMoonPayWidgetConfigured(config)
+
+    const amount = Number(input.cryptoAmount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new OffRampProviderError(
+        "Invalid MoonPay widget amount.",
+        "OFF_RAMP_PROVIDER_REQUEST_FAILED",
+        400
+      )
+    }
+
+    const redirectUrl = String(input.redirectUrl || "").trim()
+    if (!redirectUrl || !redirectUrl.startsWith("https://")) {
+      throw new OffRampProviderError(
+        "MoonPay widget launch requires a full HTTPS redirect URL.",
+        "OFF_RAMP_PROVIDER_DISABLED",
+        503
+      )
+    }
+
+    const url = new URL("/", config.widgetBaseUrl)
+    url.searchParams.set("apiKey", config.apiKey)
+    url.searchParams.set("baseCurrencyCode", input.moonPayCode)
+    url.searchParams.set("baseCurrencyAmount", String(amount))
+    url.searchParams.set("quoteCurrencyCode", String(input.fiatCurrency || "USD").trim().toUpperCase())
+    url.searchParams.set("lockAmount", "true")
+    url.searchParams.set("externalTransactionId", input.sessionId)
+    url.searchParams.set("redirectURL", redirectUrl)
+    appendIfPresent(url, "paymentMethod", input.payoutMethod)
+    appendIfPresent(url, "email", input.merchantEmail)
+
+    const refundWalletAddress = String(input.refundWalletAddress || "").trim()
+    if (refundWalletAddress) {
+      url.searchParams.set("refundWalletAddress", refundWalletAddress)
+    }
+
+    const signed = Boolean(config.secretKey && (refundWalletAddress || input.merchantEmail))
+    if ((refundWalletAddress || input.merchantEmail) && !config.secretKey) {
+      throw new OffRampProviderError(
+        "MoonPay widget launch with prefilled sensitive fields requires MOONPAY_SECRET_KEY.",
+        "OFF_RAMP_PROVIDER_DISABLED",
+        503
+      )
+    }
+
+    if (signed) {
+      url.searchParams.set("signature", signWidgetUrl(url, config.secretKey))
+    }
+
+    return {
+      provider: "moonpay",
+      widgetUrl: url.toString(),
+      signed,
+      expiresAt: null,
+      fundMovementEnabled: false
+    }
   },
 
   async getSessionStatus(input: OffRampSessionStatusInput): Promise<OffRampProviderSessionPreparation> {

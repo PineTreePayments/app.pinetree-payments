@@ -62,6 +62,62 @@ type SelectedWallet = {
   isLightning: boolean
 }
 
+type CashOutAssetOption = {
+  label: string
+  asset: "SOL" | "USDC" | "ETH"
+  network: "solana" | "base"
+}
+
+type OffRampSessionSummary = {
+  id: string
+  status: string
+  asset: string
+  network: string
+  cryptoAmount: number | null
+  quoteFiatAmount: number | null
+  quoteFiatCurrency: string
+  payoutMethod: string | null
+}
+
+type OffRampQuoteSummary = {
+  provider: string
+  moonPayCode: string
+  asset: string
+  network: string
+  cryptoAmount: number
+  fiatCurrency: string
+  quoteFiatAmount: number | null
+  providerFeeAmount: number | null
+  platformFeeAmount: number | null
+  totalFeeAmount: number | null
+  payoutMethod: string | null
+  quoteExpiresAt: string | null
+}
+
+type OffRampQuoteResponse = {
+  success?: boolean
+  session?: OffRampSessionSummary
+  quote?: OffRampQuoteSummary | null
+  providerCallsEnabled?: boolean
+  fundMovementEnabled?: boolean
+  error?: string
+  support?: {
+    supported?: boolean
+    reason?: string
+  }
+}
+
+type OffRampWidgetUrlResponse = {
+  success?: boolean
+  session?: OffRampSessionSummary
+  widgetUrl?: string
+  signed?: boolean
+  providerCallsEnabled?: boolean
+  fundMovementEnabled?: boolean
+  nextStep?: string
+  error?: string
+}
+
 const moonPaySupportedAssets = [
   "USDC on Solana",
   "SOL on Solana",
@@ -77,6 +133,8 @@ const pineTreePrimaryButton =
 
 const pineTreeDisabledButton =
   "w-full cursor-not-allowed rounded-xl border border-[#0052FF]/20 bg-[#0052FF]/10 px-4 py-3 text-sm font-semibold text-[#0052FF]/55 shadow-sm shadow-[#0052FF]/5"
+
+const walletDetailPanelClass = "min-h-[430px] space-y-4"
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ")
@@ -127,6 +185,32 @@ function normalizeWalletNetwork(network: string): SelectedWallet["rail"] {
   if (n === "base") return "base"
   if (n === "ethereum") return "ethereum"
   return "base"
+}
+
+function getCashOutAssetOptions(wallet: SelectedWallet | null): CashOutAssetOption[] {
+  if (!wallet || wallet.isLightning) return []
+  if (wallet.rail === "solana") {
+    return [
+      { label: "SOL on Solana", asset: "SOL", network: "solana" },
+      { label: "USDC on Solana", asset: "USDC", network: "solana" }
+    ]
+  }
+  if (wallet.rail === "base") {
+    return [
+      { label: "ETH on Base", asset: "ETH", network: "base" },
+      { label: "USDC on Base", asset: "USDC", network: "base" }
+    ]
+  }
+  return []
+}
+
+function getDefaultCashOutAsset(wallet: SelectedWallet | null) {
+  return getCashOutAssetOptions(wallet)[0] || null
+}
+
+function formatCashOutAmount(value: number | null | undefined, currency = "USD") {
+  if (value == null || !Number.isFinite(Number(value))) return "-"
+  return `${currency} ${Number(value).toFixed(2)}`
 }
 
 function getExplorerUrl(rail: SelectedWallet["rail"], referenceTitle: string): string | null {
@@ -206,10 +290,32 @@ export default function WalletsPage() {
   const [activeTab, setActiveTab] = useState<DetailTab>("overview")
   const [cashOutSetupOpen, setCashOutSetupOpen] = useState(false)
   const [copiedRef, setCopiedRef] = useState(false)
+  const [cashOutAsset, setCashOutAsset] = useState<CashOutAssetOption | null>(null)
+  const [cashOutAmount, setCashOutAmount] = useState("")
+  const [cashOutState, setCashOutState] = useState("")
+  const [cashOutQuote, setCashOutQuote] = useState<OffRampQuoteSummary | null>(null)
+  const [cashOutSession, setCashOutSession] = useState<OffRampSessionSummary | null>(null)
+  const [cashOutError, setCashOutError] = useState<string | null>(null)
+  const [cashOutInfo, setCashOutInfo] = useState<string | null>(null)
+  const [cashOutLoading, setCashOutLoading] = useState(false)
+  const [cashOutWidgetLoading, setCashOutWidgetLoading] = useState(false)
 
   useEffect(() => {
     loadOverview(false)
   }, [])
+
+  useEffect(() => {
+    const defaultAsset = getDefaultCashOutAsset(selectedWallet)
+    setCashOutAsset(defaultAsset)
+    setCashOutAmount("")
+    setCashOutState("")
+    setCashOutQuote(null)
+    setCashOutSession(null)
+    setCashOutError(null)
+    setCashOutInfo(null)
+    setCashOutLoading(false)
+    setCashOutWidgetLoading(false)
+  }, [selectedWallet])
 
   async function loadOverview(refresh: boolean) {
     setIsRefreshing(true)
@@ -266,6 +372,113 @@ export default function WalletsPage() {
     setCopiedRef(false)
     setActiveTab(tab)
     setSelectedWallet(wallet)
+  }
+
+  async function getMerchantToken() {
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+    if (!token) {
+      throw new Error("No active auth session")
+    }
+    return token
+  }
+
+  async function requestCashOutQuote() {
+    if (!selectedWallet || !cashOutAsset) return
+    const amount = Number(cashOutAmount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setCashOutError("Enter a cash-out amount greater than zero.")
+      return
+    }
+
+    setCashOutLoading(true)
+    setCashOutError(null)
+    setCashOutInfo(null)
+    setCashOutQuote(null)
+    setCashOutSession(null)
+
+    try {
+      const token = await getMerchantToken()
+      const res = await fetch("/api/off-ramp/quote", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({
+          provider: "moonpay",
+          network: cashOutAsset.network,
+          asset: cashOutAsset.asset,
+          amount,
+          fiatCurrency: "USD",
+          payoutMethod: "ach_bank_transfer",
+          sourceWalletAddress: selectedWallet.referenceTitle,
+          refundWalletAddress: selectedWallet.referenceTitle,
+          merchantState: cashOutState || null
+        })
+      })
+      const payload = (await res.json().catch(() => null)) as OffRampQuoteResponse | null
+
+      if (!res.ok || !payload?.success || !payload.quote || !payload.session) {
+        const message = payload?.error || payload?.support?.reason || "MoonPay quote unavailable"
+        throw new Error(
+          message.includes("Currency not supported in test mode")
+            ? "MoonPay returned: Currency not supported in test mode. This may change after production approval."
+            : message
+        )
+      }
+
+      setCashOutQuote(payload.quote)
+      setCashOutSession(payload.session)
+    } catch (err) {
+      setCashOutError(err instanceof Error ? err.message : "Cash-out quote failed")
+    } finally {
+      setCashOutLoading(false)
+    }
+  }
+
+  async function continueWithMoonPay() {
+    if (!selectedWallet || !cashOutSession) return
+
+    setCashOutWidgetLoading(true)
+    setCashOutError(null)
+    setCashOutInfo(null)
+
+    try {
+      const token = await getMerchantToken()
+      const res = await fetch(`/api/off-ramp/sessions/${cashOutSession.id}/widget-url`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({
+          sourceWalletAddress: selectedWallet.referenceTitle,
+          refundWalletAddress: selectedWallet.referenceTitle,
+          redirectPath: "/dashboard/wallets",
+          merchantState: cashOutState || null
+        })
+      })
+      const payload = (await res.json().catch(() => null)) as OffRampWidgetUrlResponse | null
+
+      if (!res.ok || !payload?.success || !payload.widgetUrl) {
+        throw new Error(payload?.error || "MoonPay widget URL unavailable")
+      }
+
+      window.open(payload.widgetUrl, "_blank", "noopener,noreferrer")
+      setCashOutSession(payload.session || cashOutSession)
+      setCashOutInfo(
+        "Complete MoonPay verification and sale confirmation. PineTree will not move funds without wallet approval."
+      )
+    } catch (err) {
+      setCashOutError(err instanceof Error ? err.message : "MoonPay widget launch failed")
+    } finally {
+      setCashOutWidgetLoading(false)
+    }
   }
 
   function buildLightningWallet(rail: PaymentRailItem): SelectedWallet {
@@ -347,6 +560,8 @@ export default function WalletsPage() {
   const explorerUrl = selectedWallet
     ? getExplorerUrl(selectedWallet.rail, selectedWallet.referenceTitle)
     : null
+  const cashOutAssetOptions = getCashOutAssetOptions(selectedWallet)
+  const cashOutUnavailable = selectedWallet?.isLightning || cashOutAssetOptions.length === 0
 
   const detailTabs: Array<{ id: DetailTab; label: string }> = selectedWallet?.isLightning
     ? [
@@ -679,17 +894,17 @@ export default function WalletsPage() {
 
       {selectedWallet && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-3"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4"
           onMouseDown={() => setSelectedWallet(null)}
         >
           <div
             role="dialog"
             aria-modal="true"
             aria-label={`${selectedWallet.displayName} wallet details`}
-            className="max-h-[94vh] w-full max-w-3xl overflow-hidden rounded-t-3xl border border-white/70 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.22)] sm:rounded-2xl"
+            className="flex h-[calc(100dvh-2rem)] max-h-[760px] min-h-[620px] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-white/70 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.22)] max-sm:h-[calc(100dvh-1.5rem)] max-sm:min-h-0 sm:rounded-2xl"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-4 border-b border-gray-100 p-5">
+            <div className="shrink-0 flex items-start justify-between gap-4 border-b border-gray-100 p-5">
               <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
                   Wallet Details
@@ -712,7 +927,7 @@ export default function WalletsPage() {
               </button>
             </div>
 
-            <div className="overflow-x-auto border-b border-gray-100 bg-gray-50/70 px-3 py-2 sm:px-5">
+            <div className="shrink-0 overflow-x-auto border-b border-gray-100 bg-gray-50/70 px-3 py-2 sm:px-5">
               <div className="flex min-w-max items-center gap-1.5">
                 {detailTabs.map((tab) => (
                   <button
@@ -732,9 +947,9 @@ export default function WalletsPage() {
               </div>
             </div>
 
-            <div className="max-h-[68vh] overflow-y-auto p-5">
+            <div className="min-h-0 flex-1 overflow-y-auto p-5">
               {activeTab === "overview" && (
-                <div className="space-y-4">
+                <div className={walletDetailPanelClass}>
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
@@ -794,7 +1009,7 @@ export default function WalletsPage() {
               )}
 
               {activeTab === "send" && !selectedWallet.isLightning && (
-                <div className="space-y-4">
+                <div className={walletDetailPanelClass}>
                   <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
                     <p className="text-sm font-semibold text-blue-900">
                       Send crypto to any valid wallet or exchange address.
@@ -825,86 +1040,258 @@ export default function WalletsPage() {
               )}
 
               {activeTab === "provider_actions" && selectedWallet.isLightning && (
-                <div className="space-y-4">
-                  <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
-                    <p className="text-sm font-semibold text-gray-950">Provider Actions</p>
-                    <p className="mt-1 text-sm leading-6 text-gray-600">
-                      Speed and Lightning-specific actions will stay behind provider controls until a safe PineTree operation flow is enabled.
+                <div className={walletDetailPanelClass}>
+                  <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+                    <p className="text-sm font-semibold text-blue-950">Speed Provider Actions</p>
+                    <p className="mt-1 text-sm leading-6 text-blue-900/75">
+                      Manage Lightning-specific actions for balances connected through Speed. Withdrawals, payout setup, and provider transfers will appear here once enabled.
                     </p>
                   </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <DisabledField label="Amount" value="Coming soon" />
+                    <label className="block rounded-xl border border-gray-100 bg-gray-50/70 p-3.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+                        Destination Type
+                      </span>
+                      <select
+                        disabled
+                        value="Lightning invoice"
+                        className="mt-2 w-full cursor-not-allowed border-0 bg-transparent p-0 text-sm font-semibold text-gray-500 outline-none"
+                      >
+                        <option>Lightning invoice</option>
+                        <option>Bitcoin address</option>
+                        <option>Bank payout through provider</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="grid gap-3">
+                    <DisabledField label="Destination / Invoice" value="Coming soon" />
+                    <DisabledField label="Memo / Reference Optional" value="Coming soon" />
+                  </div>
+
                   <button
                     type="button"
                     disabled
                     className="w-full cursor-not-allowed rounded-xl border border-gray-200 bg-gray-100 px-4 py-3 text-sm font-semibold text-gray-400"
                   >
-                    Provider Actions - Coming Soon
+                    Prepare Speed Withdrawal - Coming Soon
                   </button>
+
+                  <p className="text-center text-[11px] text-gray-500">
+                    PineTree will not move provider-managed funds without merchant confirmation.
+                  </p>
                 </div>
               )}
 
               {activeTab === "cash_out" && (
-                <div className="space-y-4">
-                  <div className="rounded-2xl border border-[#0052FF]/20 bg-[#0052FF]/5 p-4 shadow-[0_8px_24px_rgba(0,82,255,0.07)]">
-                    <p className="text-base font-semibold text-gray-950">Cash Out with PineTree</p>
-                    <p className="mt-1 text-sm font-semibold text-[#0052FF]">
-                      Payouts processed through MoonPay.
-                    </p>
-                    <p className="mt-2 text-sm leading-6 text-gray-700">
-                      Cash Out converts supported crypto to fiat through MoonPay's regulated flow.
-                    </p>
-                    <p className="mt-3 border-t border-[#0052FF]/10 pt-3 text-xs leading-5 text-gray-600">
-                      Cash-out availability varies by state, asset, network, and payout method. Base network cash-out may not be available for New York residents through MoonPay.
-                    </p>
-                  </div>
-
+                <div className={walletDetailPanelClass}>
                   {selectedWallet.isLightning ? (
-                    <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
-                      <p className="text-sm leading-6 text-gray-600">
-                        MoonPay currently targets Base and Solana assets for PineTree Cash Out. Speed and Lightning off-ramp support is not enabled yet.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
-                        Supported MoonPay Assets
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {moonPaySupportedAssets.map((asset) => (
-                          <NetworkStatusPill key={asset} label={asset} tone="slate" />
-                        ))}
+                    <>
+                      <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4 shadow-[0_8px_24px_rgba(0,82,255,0.07)]">
+                        <p className="text-base font-semibold text-blue-950">Bitcoin Lightning Cash Out</p>
+                        <p className="mt-1 text-sm font-semibold text-[#0052FF]">
+                          Provider-managed through Speed
+                        </p>
+                        <p className="mt-2 text-sm leading-6 text-blue-900/75">
+                          Speed cash-out and withdrawal support will let merchants move Bitcoin Lightning balance through supported provider payout or transfer workflows once enabled.
+                        </p>
                       </div>
+
+                      <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
+                        <p className="text-sm leading-6 text-gray-600">
+                          Bitcoin Lightning cash-out is separate from MoonPay. PineTree will use Speed-supported withdrawal or payout tools for Lightning balances when this provider flow is enabled.
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled
+                        className="w-full cursor-not-allowed rounded-xl border border-gray-200 bg-gray-100 px-4 py-3 text-sm font-semibold text-gray-400"
+                      >
+                        Speed Cash Out - Coming Soon
+                      </button>
+
+                      <p className="text-center text-[11px] text-gray-500">
+                        PineTree will not move provider-managed funds without merchant confirmation.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="rounded-2xl border border-[#0052FF]/20 bg-[#0052FF]/5 p-4 shadow-[0_8px_24px_rgba(0,82,255,0.07)]">
+                        <p className="text-base font-semibold text-gray-950">Cash Out with PineTree</p>
+                        <p className="mt-1 text-sm font-semibold text-[#0052FF]">
+                          Payouts processed through MoonPay.
+                        </p>
+                        <p className="mt-2 text-sm leading-6 text-gray-700">
+                          Cash Out converts supported {selectedWallet.rail === "base" ? "Base" : "Solana"} assets to fiat through MoonPay's regulated flow.
+                        </p>
+                        {selectedWallet.rail === "base" ? (
+                          <p className="mt-3 border-t border-[#0052FF]/10 pt-3 text-xs leading-5 text-gray-600">
+                            Cash-out availability varies by state, asset, network, and payout method. Base network cash-out may not be available for New York residents through MoonPay.
+                          </p>
+                        ) : (
+                          <p className="mt-3 border-t border-[#0052FF]/10 pt-3 text-xs leading-5 text-gray-600">
+                            Cash-out availability varies by asset, network, payout method, and MoonPay account approval.
+                          </p>
+                        )}
+                      </div>
+
+                      {cashOutUnavailable && (
+                        <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
+                          <p className="text-sm leading-6 text-gray-600">
+                            MoonPay cash-out is not available for this wallet network yet.
+                          </p>
+                        </div>
+                      )}
+
+                      {!cashOutUnavailable && (
+                        <>
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <label className="block rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
+                              <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+                                Asset
+                              </span>
+                              <select
+                                value={cashOutAsset?.label || ""}
+                                onChange={(event) => {
+                                  const next = cashOutAssetOptions.find((option) => option.label === event.target.value) || null
+                                  setCashOutAsset(next)
+                                  setCashOutQuote(null)
+                                  setCashOutSession(null)
+                                  setCashOutError(null)
+                                  setCashOutInfo(null)
+                                }}
+                                className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                              >
+                                {cashOutAssetOptions.map((option) => (
+                                  <option key={option.label} value={option.label}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label className="block rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
+                              <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+                                Amount
+                              </span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                value={cashOutAmount}
+                                onChange={(event) => {
+                                  setCashOutAmount(event.target.value)
+                                  setCashOutQuote(null)
+                                  setCashOutSession(null)
+                                  setCashOutError(null)
+                                  setCashOutInfo(null)
+                                }}
+                                placeholder="0.00"
+                                className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                              />
+                            </label>
+                          </div>
+
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <DisabledField label="Payout Method" value="Bank transfer through MoonPay" />
+                            <label className="block rounded-xl border border-gray-100 bg-gray-50/70 p-3.5">
+                              <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+                                Merchant State
+                              </span>
+                              <input
+                                value={cashOutState}
+                                onChange={(event) => {
+                                  setCashOutState(event.target.value.toUpperCase().slice(0, 2))
+                                  setCashOutQuote(null)
+                                  setCashOutSession(null)
+                                  setCashOutError(null)
+                                  setCashOutInfo(null)
+                                }}
+                                placeholder="Optional"
+                                className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-semibold text-gray-700 outline-none"
+                              />
+                            </label>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={requestCashOutQuote}
+                            disabled={cashOutLoading || !cashOutAsset}
+                            className={cx(pineTreePrimaryButton, "w-full disabled:cursor-not-allowed disabled:opacity-55")}
+                          >
+                            {cashOutLoading ? "Getting Quote..." : "Get Cash Out Quote"}
+                          </button>
+
+                          {cashOutQuote && (
+                            <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                  <p className="text-sm font-semibold text-gray-950">MoonPay Quote</p>
+                                  <p className="mt-1 text-xs text-gray-500">
+                                    {cashOutQuote.cryptoAmount} {cashOutQuote.asset} to {cashOutQuote.fiatCurrency}
+                                  </p>
+                                </div>
+                                <NetworkStatusPill label={cashOutSession?.status || "QUOTE_READY"} tone="blue" />
+                              </div>
+                              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                                <DisabledField
+                                  label="Payout"
+                                  value={formatCashOutAmount(cashOutQuote.quoteFiatAmount, cashOutQuote.fiatCurrency)}
+                                />
+                                <DisabledField
+                                  label="Fees"
+                                  value={formatCashOutAmount(cashOutQuote.totalFeeAmount, cashOutQuote.fiatCurrency)}
+                                />
+                                <DisabledField label="Provider" value="MoonPay" />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={continueWithMoonPay}
+                                disabled={cashOutWidgetLoading || !cashOutSession}
+                                className={cx(pineTreePrimaryButton, "mt-4 w-full disabled:cursor-not-allowed disabled:opacity-55")}
+                              >
+                                {cashOutWidgetLoading ? "Preparing MoonPay..." : "Continue with MoonPay"}
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </>
+                  )}
+
+                  {cashOutError && (
+                    <div className="rounded-2xl border border-red-100 bg-red-50/70 p-4 text-sm leading-6 text-red-800">
+                      {cashOutError}
                     </div>
                   )}
 
-                  <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
-                    <p className="text-sm font-semibold text-gray-950">
-                      Cash Out requires MoonPay setup before this wallet can use bank withdrawal.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => setCashOutSetupOpen(true)}
-                      className={cx(pineTreePrimaryButton, "mt-3")}
-                    >
-                      Set Up Cash Out
-                    </button>
-                  </div>
+                  {cashOutInfo && (
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50/80 p-4 text-sm leading-6 text-blue-900">
+                      {cashOutInfo}
+                    </div>
+                  )}
 
                   <button
                     type="button"
                     disabled
                     className={pineTreeDisabledButton}
                   >
-                    MoonPay Cash Out &mdash; Setup Required
+                    Send Crypto / Wallet Approval - Disabled for Phase 4
                   </button>
                 </div>
               )}
 
               {activeTab === "activity" && (
-                <WalletOperationEmptyState compact />
+                <div className={walletDetailPanelClass}>
+                  <WalletOperationEmptyState compact />
+                </div>
               )}
 
               {activeTab === "settings" && (
-                <div className="space-y-3">
+                <div className={walletDetailPanelClass}>
                   <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Wallet Label</p>
                     <p className="mt-2 text-sm font-semibold text-gray-950">{selectedWallet.displayName}</p>
