@@ -196,13 +196,16 @@ const pineTreePrimaryButton =
   "inline-flex min-h-10 items-center justify-center rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm shadow-[#0052FF]/20 transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-55"
 
 const pineTreeDisabledButton =
-  "w-full cursor-not-allowed rounded-xl border border-[#0052FF]/20 bg-[#0052FF]/10 px-3.5 py-2.5 text-sm font-medium text-[#0052FF]/55 shadow-sm shadow-[#0052FF]/5"
+  "inline-flex w-fit cursor-not-allowed items-center justify-center rounded-xl border border-[#0052FF]/20 bg-[#0052FF]/10 px-4 py-2 text-sm font-semibold text-[#0052FF]/55 shadow-sm shadow-[#0052FF]/5"
 
 const pineTreeNeutralDisabledButton =
-  "w-full cursor-not-allowed rounded-xl border border-gray-200 bg-gray-100 px-3.5 py-2.5 text-sm font-medium text-gray-400"
+  "inline-flex w-fit cursor-not-allowed items-center justify-center rounded-xl border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-400"
 
-const pineTreeDangerDisabledButton =
-  "cursor-not-allowed rounded-xl border border-red-100 bg-white/70 px-3.5 py-2 text-sm font-medium text-red-300"
+const pineTreeDangerActionButton =
+  "inline-flex w-fit items-center justify-center rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 shadow-sm transition hover:border-red-300 hover:bg-red-50 focus:outline-none focus:ring-4 focus:ring-red-100 disabled:cursor-not-allowed disabled:opacity-55"
+
+const pineTreeSecondaryActionButton =
+  "inline-flex w-fit items-center justify-center rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-4 focus:ring-gray-100 disabled:cursor-not-allowed disabled:opacity-55"
 
 const walletDetailPanelClass = "min-h-[430px] space-y-4"
 
@@ -290,6 +293,14 @@ function getExplorerUrl(rail: SelectedWallet["rail"], referenceTitle: string): s
   return null
 }
 
+function getDisconnectProvider(wallet: SelectedWallet | null): "solana" | "base" | "lightning" | null {
+  if (!wallet) return null
+  if (wallet.rail === "solana") return "solana"
+  if (wallet.rail === "base") return "base"
+  if (wallet.rail === "bitcoin_lightning") return "lightning"
+  return null
+}
+
 function formatChicagoDateTime(value: string | null) {
   if (!value) return "-"
   const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(value)
@@ -374,6 +385,9 @@ export default function WalletsPage() {
   const [cashOutApprovalPreview, setCashOutApprovalPreview] =
     useState<OffRampWalletApprovalPreviewResponse | null>(null)
   const [cashOutPreviewLoading, setCashOutPreviewLoading] = useState(false)
+  const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false)
+  const [disconnecting, setDisconnecting] = useState(false)
+  const [disconnectError, setDisconnectError] = useState<string | null>(null)
 
   useEffect(() => {
     loadOverview(false)
@@ -393,6 +407,9 @@ export default function WalletsPage() {
     setCashOutDepositPreview(null)
     setCashOutApprovalPreview(null)
     setCashOutPreviewLoading(false)
+    setDisconnectConfirmOpen(false)
+    setDisconnecting(false)
+    setDisconnectError(null)
   }, [selectedWallet])
 
   async function loadOverview(refresh: boolean) {
@@ -450,6 +467,48 @@ export default function WalletsPage() {
     setCopiedRef(false)
     setActiveTab(tab)
     setSelectedWallet(wallet)
+  }
+
+  async function disconnectSelectedWallet() {
+    if (!selectedWallet) return
+    const provider = getDisconnectProvider(selectedWallet)
+    if (!provider) {
+      setDisconnectError("This wallet connection cannot be disconnected from Wallets yet.")
+      return
+    }
+
+    setDisconnecting(true)
+    setDisconnectError(null)
+
+    try {
+      const token = await getMerchantToken()
+      const res = await fetch("/api/providers", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({
+          action: "disconnectProvider",
+          provider
+        })
+      })
+      const payload = (await res.json().catch(() => null)) as WalletOverviewResponse | null
+
+      if (!res.ok || !payload?.success) {
+        throw new Error(payload?.error || "Disconnect failed")
+      }
+
+      setSelectedWallet(null)
+      setDisconnectConfirmOpen(false)
+      await loadOverview(true)
+    } catch (err) {
+      setDisconnectError(err instanceof Error ? err.message : "Disconnect failed")
+    } finally {
+      setDisconnecting(false)
+    }
   }
 
   async function getMerchantToken() {
@@ -1554,7 +1613,7 @@ export default function WalletsPage() {
                     disabled
                     className={pineTreeDisabledButton}
                   >
-                    Send Crypto / Wallet Approval - Disabled
+                    Wallet Approval Disabled
                   </button>
                 </div>
               )}
@@ -1576,17 +1635,62 @@ export default function WalletsPage() {
                     <p className="mt-2 text-sm text-gray-600">Managed by PineTree payment routing settings.</p>
                   </div>
                   <div className="rounded-2xl border border-red-100 bg-red-50/50 p-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-red-500">Disconnect Wallet</p>
-                    <p className="mt-2 text-sm leading-6 text-red-900/75">
-                      Disconnect controls will appear here once a safe merchant confirmation flow is enabled.
-                    </p>
-                    <button
-                      type="button"
-                      disabled
-                      className={cx(pineTreeDangerDisabledButton, "mt-3")}
-                    >
-                      Disconnect - Coming Soon
-                    </button>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-red-500">
+                          Connection Management
+                        </p>
+                        <p className="mt-2 text-sm leading-6 text-red-900/75">
+                          Disconnecting removes this wallet from PineTree balance and setup views. Historical transactions and reports remain available.
+                        </p>
+                      </div>
+                      <NetworkStatusPill label="No fund movement" tone="slate" />
+                    </div>
+
+                    {disconnectError && (
+                      <p className="mt-3 rounded-xl border border-red-100 bg-white/80 p-3 text-sm leading-6 text-red-700">
+                        {disconnectError}
+                      </p>
+                    )}
+
+                    {!disconnectConfirmOpen ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDisconnectConfirmOpen(true)
+                          setDisconnectError(null)
+                        }}
+                        disabled={!getDisconnectProvider(selectedWallet)}
+                        className={cx(pineTreeDangerActionButton, "mt-3")}
+                      >
+                        Disconnect Wallet
+                      </button>
+                    ) : (
+                      <div className="mt-3 rounded-xl border border-red-100 bg-white/80 p-3">
+                        <p className="text-sm font-semibold text-red-900">Disconnect this wallet?</p>
+                        <p className="mt-1 text-sm leading-6 text-red-900/70">
+                          This removes the connection from PineTree views only. It does not move funds or revoke anything on-chain.
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setDisconnectConfirmOpen(false)}
+                            disabled={disconnecting}
+                            className={pineTreeSecondaryActionButton}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={disconnectSelectedWallet}
+                            disabled={disconnecting}
+                            className={pineTreeDangerActionButton}
+                          >
+                            {disconnecting ? "Disconnecting..." : "Disconnect Wallet"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
