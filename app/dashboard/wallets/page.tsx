@@ -145,15 +145,52 @@ type OffRampWalletApprovalPreviewResponse = {
   error?: string
 }
 
-const moonPaySupportedAssets = [
+type OffRampProviderAvailability = "unavailable" | "pending_approval" | "sandbox" | "production" | "disabled"
+
+type OffRampProviderOption = {
+  id: "moonpay" | "alchemy_pay" | "banxa"
+  displayName: string
+  status: OffRampProviderAvailability
+  apiProvider: "moonpay" | null
+}
+
+const supportedOffRampProviders: OffRampProviderOption[] = [
+  {
+    id: "alchemy_pay",
+    displayName: "Alchemy Pay",
+    status: "pending_approval",
+    apiProvider: null
+  },
+  {
+    id: "banxa",
+    displayName: "Banxa",
+    status: "disabled",
+    apiProvider: null
+  },
+  {
+    id: "moonpay",
+    displayName: "MoonPay",
+    status: "unavailable",
+    apiProvider: "moonpay"
+  }
+]
+
+const currentOffRampProvider = supportedOffRampProviders.find((provider) =>
+  provider.status === "production" || provider.status === "sandbox"
+) || supportedOffRampProviders.find((provider) => provider.status === "pending_approval") || null
+
+const isOffRampProviderActive =
+  currentOffRampProvider?.status === "production" || currentOffRampProvider?.status === "sandbox"
+
+const offRampSupportedAssets = [
   "USDC on Solana",
   "SOL on Solana",
   "USDC on Base",
   "ETH on Base"
 ]
 
-const moonPayDisclaimer =
-  "Availability varies by state, asset, network, and payout method. Base network cash-out may not be available for New York residents."
+const offRampAvailabilityCopy =
+  "Availability will vary by provider approval, state, asset, network, and payout method. Base network cash-out may not be available for some jurisdictions."
 
 const pineTreePrimaryButton =
   "inline-flex min-h-10 items-center justify-center rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm shadow-[#0052FF]/20 transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-55"
@@ -426,6 +463,11 @@ export default function WalletsPage() {
 
   async function requestCashOutQuote() {
     if (!selectedWallet || !cashOutAsset) return
+    if (!isOffRampProviderActive || !currentOffRampProvider?.apiProvider) {
+      setCashOutError("Off-ramp provider is not currently available.")
+      return
+    }
+
     const amount = Number(cashOutAmount)
     if (!Number.isFinite(amount) || amount <= 0) {
       setCashOutError("Enter a cash-out amount greater than zero.")
@@ -451,7 +493,7 @@ export default function WalletsPage() {
         credentials: "include",
         cache: "no-store",
         body: JSON.stringify({
-          provider: "moonpay",
+          provider: currentOffRampProvider.apiProvider,
           network: cashOutAsset.network,
           asset: cashOutAsset.asset,
           amount,
@@ -465,10 +507,10 @@ export default function WalletsPage() {
       const payload = (await res.json().catch(() => null)) as OffRampQuoteResponse | null
 
       if (!res.ok || !payload?.success || !payload.quote || !payload.session) {
-        const message = payload?.error || payload?.support?.reason || "MoonPay quote unavailable"
+        const message = payload?.error || payload?.support?.reason || "Provider quote unavailable"
         throw new Error(
           message.includes("Currency not supported in test mode")
-            ? "MoonPay returned: Currency not supported in test mode. This may change after production approval."
+            ? "Provider returned: Currency not supported in test mode. This may change after production approval."
             : message
         )
       }
@@ -482,8 +524,12 @@ export default function WalletsPage() {
     }
   }
 
-  async function continueWithMoonPay() {
+  async function continueWithProvider() {
     if (!selectedWallet || !cashOutSession) return
+    if (!isOffRampProviderActive) {
+      setCashOutError("Off-ramp provider is not currently available.")
+      return
+    }
 
     setCashOutWidgetLoading(true)
     setCashOutError(null)
@@ -511,16 +557,16 @@ export default function WalletsPage() {
       const payload = (await res.json().catch(() => null)) as OffRampWidgetUrlResponse | null
 
       if (!res.ok || !payload?.success || !payload.widgetUrl) {
-        throw new Error(payload?.error || "MoonPay widget URL unavailable")
+        throw new Error(payload?.error || "Provider launch URL unavailable")
       }
 
       window.open(payload.widgetUrl, "_blank", "noopener,noreferrer")
       setCashOutSession(payload.session || cashOutSession)
       setCashOutInfo(
-        "Complete MoonPay verification and sale confirmation. PineTree will not move funds without wallet approval."
+        "Complete provider verification and sale confirmation. PineTree will not move funds without wallet approval."
       )
     } catch (err) {
-      setCashOutError(err instanceof Error ? err.message : "MoonPay widget launch failed")
+      setCashOutError(err instanceof Error ? err.message : "Provider launch failed")
     } finally {
       setCashOutWidgetLoading(false)
     }
@@ -739,20 +785,20 @@ export default function WalletsPage() {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="text-base font-semibold text-gray-950">Cash Out Setup</p>
-                <NetworkStatusPill label="MoonPay" tone="slate" className="min-h-6 px-2 text-[10px]" />
-                <NetworkStatusPill label="Setup required" tone="amber" className="min-h-6 px-2 text-[10px]" />
+                <NetworkStatusPill label="Off-ramp Provider" tone="slate" className="min-h-6 px-2 text-[10px]" />
+                <NetworkStatusPill label="Provider pending" tone="amber" className="min-h-6 px-2 text-[10px]" />
               </div>
               <p className="mt-2 text-sm leading-6 text-gray-600">
-                Activate MoonPay once to enable PineTree Cash Out for supported wallets and assets.
+                PineTree Cash Out is being configured for approved off-ramp providers. Once enabled, merchants will be able to use supported providers to convert eligible crypto balances to fiat payouts.
               </p>
-              <p className="mt-2 text-xs leading-5 text-gray-500">{moonPayDisclaimer}</p>
+              <p className="mt-2 text-xs leading-5 text-gray-500">{offRampAvailabilityCopy}</p>
             </div>
             <button
               type="button"
-              onClick={() => setCashOutSetupOpen(true)}
-              className={cx(pineTreePrimaryButton, "shrink-0")}
+              disabled
+              className={cx(pineTreeDisabledButton, "shrink-0 lg:w-auto")}
             >
-              Set Up Cash Out
+              Provider Setup Pending
             </button>
           </div>
         </div>
@@ -950,7 +996,7 @@ export default function WalletsPage() {
           <div
             role="dialog"
             aria-modal="true"
-            aria-label="MoonPay Cash Out setup"
+            aria-label="Cash Out setup"
             className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-t-3xl border border-white/70 bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,0.22)] sm:rounded-2xl"
             onMouseDown={(event) => event.stopPropagation()}
           >
@@ -959,7 +1005,7 @@ export default function WalletsPage() {
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
                   Cash Out Setup
                 </p>
-                <h2 className="mt-1 text-lg font-semibold text-gray-950">Set Up Cash Out</h2>
+                <h2 className="mt-1 text-lg font-semibold text-gray-950">Off-Ramp Provider Setup</h2>
               </div>
               <button
                 type="button"
@@ -973,24 +1019,24 @@ export default function WalletsPage() {
             <div className="mt-5 space-y-3">
               <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4 shadow-[0_8px_24px_rgba(0,82,255,0.06)]">
                 <p className="text-sm leading-6 text-gray-700">
-                  MoonPay will process fiat payout and compliance checks.
+                  PineTree Cash Out is being configured for approved off-ramp providers.
                 </p>
                 <p className="mt-2 text-sm leading-6 text-gray-700">
-                  PineTree will keep the merchant experience unified and track supported cash-out sessions once enabled.
+                  Once enabled, merchants will be able to use supported providers to convert eligible crypto balances to fiat payouts.
                 </p>
                 <p className="mt-2 text-sm font-semibold text-gray-950">
-                  No MoonPay connection is live yet.
+                  Provider access is currently pending approval.
                 </p>
               </div>
 
-              <p className="text-xs leading-5 text-gray-500">{moonPayDisclaimer}</p>
+              <p className="text-xs leading-5 text-gray-500">{offRampAvailabilityCopy}</p>
 
               <button
                 type="button"
                 disabled
                 className={pineTreeDisabledButton}
               >
-                MoonPay Setup &mdash; Coming Soon
+                Provider Setup Pending
               </button>
             </div>
           </div>
@@ -1206,7 +1252,7 @@ export default function WalletsPage() {
 
                       <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
                         <p className="text-sm leading-6 text-gray-600">
-                          Bitcoin Lightning cash-out is separate from MoonPay. PineTree will use Speed-supported withdrawal or payout tools for Lightning balances when this provider flow is enabled.
+                          Bitcoin Lightning cash-out is separate from Base/Solana off-ramp providers. PineTree will use Speed-supported withdrawal or payout tools for Lightning balances when this provider flow is enabled.
                         </p>
                       </div>
 
@@ -1225,20 +1271,22 @@ export default function WalletsPage() {
                   ) : (
                     <>
                       <div className="rounded-2xl border border-[#0052FF]/20 bg-[#0052FF]/5 p-4 shadow-[0_8px_24px_rgba(0,82,255,0.07)]">
-                        <p className="text-base font-semibold text-gray-950">Cash Out with PineTree</p>
+                        <p className="text-base font-semibold text-gray-950">PineTree Cash Out</p>
                         <p className="mt-1 text-sm font-semibold text-[#0052FF]">
-                          Payouts processed through MoonPay.
+                          {isOffRampProviderActive
+                            ? "Payouts are processed through the configured off-ramp provider."
+                            : "Off-ramp provider setup pending"}
                         </p>
                         <p className="mt-2 text-sm leading-6 text-gray-700">
-                          Cash Out converts supported {selectedWallet.rail === "base" ? "Base" : "Solana"} assets to fiat through MoonPay's regulated flow.
+                          PineTree Cash Out will allow merchants to move supported crypto balances to a bank account through an approved off-ramp provider. Provider access is currently being configured.
                         </p>
                         {selectedWallet.rail === "base" ? (
                           <p className="mt-3 border-t border-[#0052FF]/10 pt-3 text-xs leading-5 text-gray-600">
-                            Cash-out availability varies by state, asset, network, and payout method. Base network cash-out may not be available for New York residents through MoonPay.
+                            Cash-out availability varies by state, asset, network, and payout method. Base network cash-out may not be available in every jurisdiction.
                           </p>
                         ) : (
                           <p className="mt-3 border-t border-[#0052FF]/10 pt-3 text-xs leading-5 text-gray-600">
-                            Cash-out availability varies by asset, network, payout method, and MoonPay account approval.
+                            Cash-out availability varies by provider approval, asset, network, and payout method.
                           </p>
                         )}
                       </div>
@@ -1246,12 +1294,43 @@ export default function WalletsPage() {
                       {cashOutUnavailable && (
                         <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
                           <p className="text-sm leading-6 text-gray-600">
-                            MoonPay cash-out is not available for this wallet network yet.
+                            PineTree Cash Out is not available for this wallet network yet.
                           </p>
                         </div>
                       )}
 
-                      {!cashOutUnavailable && (
+                      {!cashOutUnavailable && !isOffRampProviderActive && (
+                        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-gray-950">Provider Setup Pending</p>
+                              <p className="mt-1 text-sm leading-6 text-gray-600">
+                                Activate a supported off-ramp provider to enable PineTree Cash Out for supported wallets and assets.
+                              </p>
+                            </div>
+                            <NetworkStatusPill label="Pending" tone="amber" />
+                          </div>
+                          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                            {offRampSupportedAssets.map((asset) => (
+                              <div
+                                key={asset}
+                                className="rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2 text-xs font-semibold text-gray-500"
+                              >
+                                {asset}
+                              </div>
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            disabled
+                            className={cx(pineTreeDisabledButton, "mt-4")}
+                          >
+                            Provider Setup Pending
+                          </button>
+                        </div>
+                      )}
+
+                      {!cashOutUnavailable && isOffRampProviderActive && (
                         <>
                           <div className="grid gap-3 md:grid-cols-2">
                             <label className="block rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
@@ -1305,7 +1384,7 @@ export default function WalletsPage() {
                           </div>
 
                           <div className="grid gap-3 md:grid-cols-2">
-                            <DisabledField label="Payout Method" value="Bank transfer through MoonPay" />
+                            <DisabledField label="Payout Method" value="Bank transfer through configured provider" />
                             <label className="block rounded-xl border border-gray-100 bg-gray-50/70 p-3.5">
                               <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
                                 Merchant State
@@ -1340,7 +1419,7 @@ export default function WalletsPage() {
                             <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
                               <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div>
-                                  <p className="text-sm font-semibold text-gray-950">MoonPay Quote</p>
+                                  <p className="text-sm font-semibold text-gray-950">Provider Quote</p>
                                   <p className="mt-1 text-xs text-gray-500">
                                     {cashOutQuote.cryptoAmount} {cashOutQuote.asset} to {cashOutQuote.fiatCurrency}
                                   </p>
@@ -1356,15 +1435,15 @@ export default function WalletsPage() {
                                   label="Fees"
                                   value={formatCashOutAmount(cashOutQuote.totalFeeAmount, cashOutQuote.fiatCurrency)}
                                 />
-                                <DisabledField label="Provider" value="MoonPay" />
+                                <DisabledField label="Provider" value="Configured provider" />
                               </div>
                               <button
                                 type="button"
-                                onClick={continueWithMoonPay}
+                                onClick={continueWithProvider}
                                 disabled={cashOutWidgetLoading || !cashOutSession}
                                 className={cx(pineTreePrimaryButton, "mt-4 w-full disabled:cursor-not-allowed disabled:opacity-55")}
                               >
-                                {cashOutWidgetLoading ? "Preparing MoonPay..." : "Continue with MoonPay"}
+                                {cashOutWidgetLoading ? "Preparing provider..." : "Continue with Provider"}
                               </button>
                             </div>
                           )}
@@ -1391,10 +1470,10 @@ export default function WalletsPage() {
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
                             <p className="text-sm font-semibold text-gray-950">
-                              MoonPay Deposit Instructions
+                              Provider Deposit Instructions
                             </p>
                             <p className="mt-1 text-sm leading-6 text-gray-600">
-                              After the MoonPay flow provides deposit instructions, PineTree will prepare the wallet approval step here.
+                              After the provider flow supplies deposit instructions, PineTree will prepare the wallet approval step here.
                             </p>
                           </div>
                           <NetworkStatusPill
@@ -1408,7 +1487,7 @@ export default function WalletsPage() {
                             <p>
                               {cashOutDepositPreview.instructionReady
                                 ? "Deposit instructions are available for preview."
-                                : "Waiting for MoonPay deposit instructions."}
+                                : "Waiting for provider deposit instructions."}
                             </p>
                             {cashOutDepositPreview.depositAddress && (
                               <div className="mt-3 space-y-2 rounded-lg border border-gray-200 bg-white/80 p-3 font-mono text-xs text-gray-700">
@@ -1455,7 +1534,7 @@ export default function WalletsPage() {
                         {cashOutApprovalPreview && (
                           <p className="mt-3 rounded-xl border border-gray-100 bg-white/80 p-3 text-sm leading-6 text-gray-600">
                             {cashOutApprovalPreview.message ||
-                              "Wallet approval will be enabled after MoonPay provides deposit instructions."}
+                              "Wallet approval will be enabled after the provider supplies deposit instructions."}
                           </p>
                         )}
 
