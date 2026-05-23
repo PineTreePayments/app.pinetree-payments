@@ -76,7 +76,10 @@ export type SpeedSetupStatus = {
   speedAccountId: string | null
   balanceAvailable: boolean
   cryptoPayoutsEnabled: false
-  bankPayoutsEnabled: false
+  bankPayoutsEnabled: boolean
+  bankPayoutCapabilityVerified: boolean
+  bankPayoutDestinationConfigured: boolean
+  bankPayoutSetupRequiredReason: string
   dashboardUrlConfigured: boolean
   dashboardUrl: string | null
   bankSetupUrlConfigured: boolean
@@ -131,6 +134,10 @@ function buildSpeedSetupStatus(input: {
     balanceAvailable: Boolean(input.balanceAvailable),
     cryptoPayoutsEnabled: false,
     bankPayoutsEnabled: false,
+    bankPayoutCapabilityVerified: false,
+    bankPayoutDestinationConfigured: false,
+    bankPayoutSetupRequiredReason:
+      "PineTree does not have a confirmed Speed bank payout API capability or bank destination identifier for this account yet.",
     dashboardUrlConfigured: Boolean(dashboardUrl),
     dashboardUrl,
     bankSetupUrlConfigured: Boolean(bankSetupUrl),

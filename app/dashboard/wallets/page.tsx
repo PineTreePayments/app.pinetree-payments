@@ -42,7 +42,10 @@ type SpeedSetupStatus = {
   speedAccountId: string | null
   balanceAvailable: boolean
   cryptoPayoutsEnabled: false
-  bankPayoutsEnabled: false
+  bankPayoutsEnabled: boolean
+  bankPayoutCapabilityVerified: boolean
+  bankPayoutDestinationConfigured: boolean
+  bankPayoutSetupRequiredReason: string
   dashboardUrlConfigured: boolean
   dashboardUrl: string | null
   bankSetupUrlConfigured: boolean
@@ -77,6 +80,19 @@ type WalletOverviewResponse = {
 
 type DetailTab = "overview" | "send" | "cash_out" | "speed_setup" | "activity" | "settings"
 type ActivityFilter = "all" | "completed" | "failed" | "drafts"
+type BankSettlementState =
+  | "ready"
+  | "awaiting_verification"
+  | "merchant_confirmed"
+  | "direct_setup"
+  | "dashboard_setup"
+  | "not_configured"
+type BankSettlementDisplay = {
+  title: "Bank Settlement"
+  status: "Ready" | "Awaiting Verification" | "Merchant Confirmed" | "Needs Setup" | "Not Configured"
+  helper: string
+  action: "Cash Out Funds" | "Refresh Status" | "Set Up Bank Settlement" | "Open Speed Dashboard" | "Contact Support"
+}
 
 type SelectedWallet = {
   id: string
@@ -367,34 +383,124 @@ function formatOperationStatusForMerchant(status: string) {
   return status
 }
 
+function getBankSettlementKey(status?: SpeedSetupStatus | null) {
+  return status?.speedAccountId ? `speed:${status.speedAccountId}` : null
+}
+
+function getBankSettlementState(
+  status?: SpeedSetupStatus | null,
+  merchantConfirmed = false
+): BankSettlementState {
+  if (status?.bankPayoutsEnabled || (status?.bankPayoutCapabilityVerified && status?.bankPayoutDestinationConfigured)) {
+    return "ready"
+  }
+  if (status?.bankPayoutDestinationConfigured || status?.bankPayoutCapabilityVerified) return "awaiting_verification"
+  if (merchantConfirmed) return "merchant_confirmed"
+  if (status?.bankSetupUrlConfigured && status.bankSetupUrl) return "direct_setup"
+  if (status?.dashboardUrlConfigured && status.dashboardUrl) return "dashboard_setup"
+  return "not_configured"
+}
+
+function getBankSettlementDisplay(state: BankSettlementState): BankSettlementDisplay {
+  if (state === "ready") {
+    return {
+      title: "Bank Settlement",
+      status: "Ready",
+      helper: "Bank account withdrawals are available.",
+      action: "Cash Out Funds"
+    }
+  }
+  if (state === "awaiting_verification") {
+    return {
+      title: "Bank Settlement",
+      status: "Awaiting Verification",
+      helper: "We are waiting to verify that bank settlement is available.",
+      action: "Refresh Status"
+    }
+  }
+  if (state === "merchant_confirmed") {
+    return {
+      title: "Bank Settlement",
+      status: "Merchant Confirmed",
+      helper: "Setup completed in Speed. PineTree is still waiting for provider verification before bank withdrawals can be marked ready.",
+      action: "Refresh Status"
+    }
+  }
+  if (state === "direct_setup") {
+    return {
+      title: "Bank Settlement",
+      status: "Needs Setup",
+      helper: "To enable bank withdrawals, open Speed Bank Setup, add a bank account, complete provider verification, return to PineTree, and refresh status.",
+      action: "Set Up Bank Settlement"
+    }
+  }
+  if (state === "dashboard_setup") {
+    return {
+      title: "Bank Settlement",
+      status: "Needs Setup",
+      helper: "To enable bank withdrawals, open Speed Dashboard, navigate to Banking or Payout Settings, add a bank account, complete provider verification, return to PineTree, and refresh status.",
+      action: "Open Speed Dashboard"
+    }
+  }
+  return {
+    title: "Bank Settlement",
+    status: "Not Configured",
+    helper: "PineTree does not currently have a configured provider setup path.",
+    action: "Contact Support"
+  }
+}
+
+function getBankSettlementSetupHeading(state: BankSettlementState) {
+  if (state === "not_configured") return "Setup Path Not Configured"
+  return getBankSettlementDisplay(state).status
+}
+
+function getBankSettlementHelper(state: BankSettlementState) {
+  return getBankSettlementDisplay(state).helper
+}
+
 function getLightningNextAction(input: {
-  dashboardAvailable?: boolean
-  bankSetupAvailable?: boolean
+  bankSettlementState: BankSettlementState
   hasBalance?: boolean
   hasActivity?: boolean
-  bankPayoutsEnabled?: boolean
 }) {
-  if (!input.bankPayoutsEnabled && input.bankSetupAvailable) {
+  if (input.bankSettlementState === "direct_setup") {
     return {
       title: "Set Up Bank Settlement",
-      description: "Finish provider-managed bank payout setup so bank account withdrawals can be enabled later.",
+      description: "Connect payout settings to enable bank withdrawals.",
       action: "Set Up Bank Settlement" as const
     }
   }
 
-  if (input.hasBalance) {
+  if (input.bankSettlementState === "dashboard_setup") {
+    return {
+      title: "Open Speed Dashboard",
+      description: "Go to payout or bank settings inside Speed to finish setup.",
+      action: "Open Speed Dashboard" as const
+    }
+  }
+
+  if (input.bankSettlementState === "awaiting_verification" || input.bankSettlementState === "merchant_confirmed") {
+    return {
+      title: "Refresh Status",
+      description: "PineTree will check whether bank settlement is available from the provider state it can read.",
+      action: "Refresh Status" as const
+    }
+  }
+
+  if (input.bankSettlementState === "not_configured") {
+    return {
+      title: "Contact Support",
+      description: "PineTree does not currently have a configured provider setup path for bank settlement.",
+      action: "Contact Support" as const
+    }
+  }
+
+  if (input.bankSettlementState === "ready" || input.hasBalance) {
     return {
       title: "Cash Out Funds",
       description: "Move available Bitcoin Lightning funds to a Lightning invoice or Bitcoin address.",
       action: "Cash Out Funds" as const
-    }
-  }
-
-  if (!input.bankPayoutsEnabled && input.dashboardAvailable) {
-    return {
-      title: "Enable Bank Settlement",
-      description: "Open the provider dashboard and go to payout or bank settings to finish setup.",
-      action: "Enable Bank Payouts" as const
     }
   }
 
@@ -512,6 +618,154 @@ function CapabilityCard({
   )
 }
 
+function StatTile({
+  label,
+  value,
+  helper,
+  tone = "slate"
+}: {
+  label: string
+  value: string
+  helper: string
+  tone?: "blue" | "slate" | "amber"
+}) {
+  const toneClass = tone === "blue"
+    ? "border-[#0052FF]/15 bg-[#0052FF]/5"
+    : tone === "amber"
+      ? "border-amber-200 bg-amber-50/70"
+      : "border-gray-100 bg-gray-50/70"
+
+  return (
+    <div className={cx("rounded-2xl border p-3 shadow-[0_6px_18px_rgba(15,23,42,0.035)] sm:p-4", toneClass)}>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400 sm:text-[11px]">
+        {label}
+      </p>
+      <p className="mt-1 truncate text-sm font-semibold text-gray-950 sm:text-base" title={value}>
+        {value}
+      </p>
+      <p className="mt-1 line-clamp-2 text-xs leading-5 text-gray-600 sm:text-sm sm:leading-6">
+        {helper}
+      </p>
+    </div>
+  )
+}
+
+function CapabilityBadge({
+  label,
+  value,
+  tone = "blue"
+}: {
+  label: string
+  value: string
+  tone?: "blue" | "slate" | "amber"
+}) {
+  const toneClass = tone === "blue"
+    ? "border-[#0052FF]/15 bg-[#0052FF]/5 text-[#0052FF]"
+    : tone === "amber"
+      ? "border-amber-200 bg-amber-50 text-amber-700"
+      : "border-gray-200 bg-white text-gray-600"
+
+  return (
+    <div className={cx("rounded-xl border px-3 py-2", toneClass)}>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] opacity-70">{label}</p>
+      <p className="mt-1 text-xs font-semibold sm:text-sm">{value}</p>
+    </div>
+  )
+}
+
+function BankSettlementChecklist({
+  state,
+  providerSetupAvailable,
+  merchantConfirmed,
+  providerVerified
+}: {
+  state: BankSettlementState
+  providerSetupAvailable: boolean
+  merchantConfirmed: boolean
+  providerVerified: boolean
+}) {
+  const verificationLabel = providerVerified ? "Provider Verified" : "Setup Completed In Speed"
+  const items = [
+    {
+      label: "Open Provider Setup",
+      done: providerSetupAvailable || merchantConfirmed || providerVerified || state === "ready"
+    },
+    {
+      label: "Add Bank Account",
+      done: merchantConfirmed || providerVerified || state === "ready"
+    },
+    {
+      label: verificationLabel,
+      done: merchantConfirmed || providerVerified || state === "ready"
+    },
+    {
+      label: "Refresh Status",
+      done: providerVerified || state === "ready"
+    }
+  ]
+
+  return (
+    <div className="rounded-xl border border-gray-100 bg-white p-3 shadow-[0_6px_18px_rgba(15,23,42,0.035)]">
+      <div className="grid gap-2 sm:grid-cols-2">
+        {items.map((item) => (
+          <div key={item.label} className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+            <span
+              className={cx(
+                "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs",
+                item.done ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "bg-gray-50 text-gray-400 ring-1 ring-gray-200"
+              )}
+              aria-hidden="true"
+            >
+              {item.done ? "✓" : "○"}
+            </span>
+            <span>{item.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function BankSettlementStepList({ state }: { state: BankSettlementState }) {
+  if (state === "direct_setup") {
+    return (
+      <ol className="mt-3 list-decimal space-y-1 pl-4 text-sm leading-6 text-gray-700">
+        <li>Open Speed Bank Setup</li>
+        <li>Add bank account</li>
+        <li>Complete provider verification</li>
+        <li>Return to PineTree</li>
+        <li>Refresh Status</li>
+      </ol>
+    )
+  }
+
+  if (state === "dashboard_setup") {
+    return (
+      <ol className="mt-3 list-decimal space-y-1 pl-4 text-sm leading-6 text-gray-700">
+        <li>Open Speed Dashboard</li>
+        <li>Navigate to Banking or Payout Settings</li>
+        <li>Add bank account</li>
+        <li>Complete provider verification</li>
+        <li>Return to PineTree</li>
+        <li>Refresh Status</li>
+      </ol>
+    )
+  }
+
+  if (state === "merchant_confirmed") {
+    return (
+      <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
+        ✓ Setup Completed In Speed
+        <p className="mt-1 text-sm font-medium leading-6 text-emerald-900/75">
+          PineTree is still waiting for provider verification. Merchant confirmation does not enable bank withdrawals.
+        </p>
+      </div>
+    )
+  }
+
+  return null
+}
+
 function CapabilityRow({
   enabled,
   label,
@@ -599,8 +853,25 @@ export default function WalletsPage() {
   const [speedWithdrawalError, setSpeedWithdrawalError] = useState<string | null>(null)
   const [speedWithdrawalLoading, setSpeedWithdrawalLoading] = useState(false)
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all")
+  const [merchantOpenedBankSettlementSetup, setMerchantOpenedBankSettlementSetup] = useState<Record<string, boolean>>({})
+  const [merchantConfirmedBankSettlement, setMerchantConfirmedBankSettlement] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
+    try {
+      const opened = window.localStorage.getItem("pinetree.speed.bankSettlementOpened")
+      if (opened) {
+        const parsed = JSON.parse(opened) as Record<string, boolean>
+        setMerchantOpenedBankSettlementSetup(parsed && typeof parsed === "object" ? parsed : {})
+      }
+      const stored = window.localStorage.getItem("pinetree.speed.bankSettlementConfirmed")
+      if (stored) {
+        const parsed = JSON.parse(stored) as Record<string, boolean>
+        setMerchantConfirmedBankSettlement(parsed && typeof parsed === "object" ? parsed : {})
+      }
+    } catch {
+      setMerchantOpenedBankSettlementSetup({})
+      setMerchantConfirmedBankSettlement({})
+    }
     loadOverview(false)
   }, [])
 
@@ -667,6 +938,11 @@ export default function WalletsPage() {
       setRecentSpeedOperations(payload?.recentSpeedOperations || [])
       setTotalBalance(Number(payload?.totalUsd ?? 0) || 0)
       setLastRefreshAt(payload?.lastRun || null)
+      setSelectedWallet((current) => {
+        if (!current?.isLightning) return current
+        const nextRail = (payload?.paymentRails || []).find((rail) => rail.id === current.id)
+        return nextRail ? buildLightningWallet(nextRail) : current
+      })
     } catch (err) {
       setRefreshError(err instanceof Error ? err.message : "Wallet refresh failed")
     } finally {
@@ -986,6 +1262,7 @@ export default function WalletsPage() {
         throw new Error(payload?.error || "Speed dashboard is not available.")
       }
 
+      markSpeedBankSetupOpened()
       window.open(selectedWallet.speedSetupStatus.dashboardUrl, "_blank", "noopener,noreferrer")
     } catch (err) {
       setRefreshError(err instanceof Error ? err.message : "Speed dashboard is not available.")
@@ -995,8 +1272,44 @@ export default function WalletsPage() {
   function openSpeedBankSetup() {
     const bankSetupUrl = selectedWallet?.speedSetupStatus?.bankSetupUrl
     if (bankSetupUrl) {
+      markSpeedBankSetupOpened()
       window.open(bankSetupUrl, "_blank", "noopener,noreferrer")
     }
+  }
+
+  function markSpeedBankSetupOpened() {
+    const key = getBankSettlementKey(selectedWallet?.speedSetupStatus)
+    if (!key) return
+
+    setMerchantOpenedBankSettlementSetup((current) => {
+      const next = { ...current, [key]: true }
+      try {
+        window.localStorage.setItem("pinetree.speed.bankSettlementOpened", JSON.stringify(next))
+      } catch {
+        // Local storage can be unavailable in private or restricted browser contexts.
+      }
+      return next
+    })
+  }
+
+  function markSpeedBankSetupCompleted() {
+    const key = getBankSettlementKey(selectedWallet?.speedSetupStatus)
+    if (!key) return
+
+    markSpeedBankSetupOpened()
+    setMerchantConfirmedBankSettlement((current) => {
+      const next = { ...current, [key]: true }
+      try {
+        window.localStorage.setItem("pinetree.speed.bankSettlementConfirmed", JSON.stringify(next))
+      } catch {
+        // Local storage can be unavailable in private or restricted browser contexts.
+      }
+      return next
+    })
+  }
+
+  function openSupportTicket() {
+    window.location.href = "/dashboard/help#support-ticket"
   }
 
   function buildLightningWallet(rail: PaymentRailItem): SelectedWallet {
@@ -1086,12 +1399,22 @@ export default function WalletsPage() {
   const speedSetupStatus = selectedWallet?.speedSetupStatus || null
   const speedActivity = recentSpeedOperations.filter((operation) => operation.provider === "speed")
   const latestSpeedActivity = speedActivity[0] || null
+  const bankSettlementKey = getBankSettlementKey(speedSetupStatus)
+  const bankSettlementSetupOpened = Boolean(bankSettlementKey && merchantOpenedBankSettlementSetup[bankSettlementKey])
+  const bankSettlementMerchantConfirmed = Boolean(bankSettlementKey && merchantConfirmedBankSettlement[bankSettlementKey])
+  const bankSettlementProviderVerified = Boolean(
+    speedSetupStatus?.bankPayoutsEnabled ||
+    (speedSetupStatus?.bankPayoutCapabilityVerified && speedSetupStatus?.bankPayoutDestinationConfigured)
+  )
+  const bankSettlementState = getBankSettlementState(speedSetupStatus, bankSettlementMerchantConfirmed)
+  const bankSettlementDisplay = {
+    ...getBankSettlementDisplay(bankSettlementState),
+    helper: getBankSettlementHelper(bankSettlementState)
+  }
   const lightningNextAction = getLightningNextAction({
-    dashboardAvailable: Boolean(speedSetupStatus?.dashboardUrlConfigured && speedSetupStatus.dashboardUrl),
-    bankSetupAvailable: Boolean(speedSetupStatus?.bankSetupUrlConfigured && speedSetupStatus.bankSetupUrl),
+    bankSettlementState,
     hasBalance: Number(selectedWallet?.nativeBalance || 0) > 0,
-    hasActivity: Boolean(latestSpeedActivity),
-    bankPayoutsEnabled: Boolean(speedSetupStatus?.bankPayoutsEnabled)
+    hasActivity: Boolean(latestSpeedActivity)
   })
   const filteredSpeedActivity = speedActivity.filter((operation) => {
     if (activityFilter === "completed") return operation.status === "COMPLETED"
@@ -1469,15 +1792,15 @@ export default function WalletsPage() {
               </button>
             </div>
 
-            <div className="shrink-0 overflow-x-auto border-b border-gray-100 bg-gray-50/70 px-3 py-3 [-ms-overflow-style:none] [scrollbar-width:none] sm:px-5 [&::-webkit-scrollbar]:hidden">
-              <div className="mx-auto flex w-max min-w-max items-center gap-3 px-1 sm:px-2">
+            <div className="shrink-0 overflow-x-auto border-b border-gray-100 bg-gray-50/70 px-2 py-2 [-ms-overflow-style:none] [scrollbar-width:none] sm:px-5 sm:py-3 [&::-webkit-scrollbar]:hidden">
+              <div className="mx-auto flex w-max min-w-max items-center gap-2 px-1 sm:gap-3 sm:px-2">
                 {detailTabs.map((tab) => (
                   <button
                     key={tab.id}
                     type="button"
                     onClick={() => setActiveTab(tab.id)}
                     className={cx(
-                      "min-h-10 whitespace-nowrap rounded-xl px-4 py-2 text-xs font-semibold leading-5 transition focus:outline-none focus:ring-4 focus:ring-blue-100 sm:min-h-11 sm:px-5 sm:text-sm",
+                      "min-h-9 whitespace-nowrap rounded-xl px-3 py-1.5 text-[11px] font-semibold leading-5 transition focus:outline-none focus:ring-4 focus:ring-blue-100 sm:min-h-11 sm:px-5 sm:py-2 sm:text-sm",
                       activeTab === tab.id
                         ? "bg-[#0052FF] text-white shadow-[0_5px_14px_rgba(0,82,255,0.18)]"
                         : "bg-white/90 text-gray-600 shadow-sm ring-1 ring-gray-200/80 hover:bg-white hover:text-gray-800"
@@ -1489,72 +1812,69 @@ export default function WalletsPage() {
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto p-5">
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
               {activeTab === "overview" && (
                 <div className={walletDetailPanelClass}>
                   {selectedWallet.isLightning ? (
                     <>
-                      <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-5 shadow-[0_8px_24px_rgba(0,82,255,0.06)]">
+                      <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4 shadow-[0_8px_24px_rgba(0,82,255,0.06)] sm:p-5">
                         <div className="flex flex-wrap items-start justify-between gap-4">
                           <div className="min-w-0">
                             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Bitcoin Lightning</p>
                             <div className="mt-2 flex flex-wrap items-center gap-2">
-                              <p className="text-xl font-semibold text-gray-950">Connected</p>
+                              <p className="text-lg font-semibold text-gray-950 sm:text-xl">Connected</p>
                               <NetworkStatusPill label="Ready" tone="blue" />
                             </div>
-                            <p className="mt-2 text-sm leading-6 text-gray-700">
+                            <p className="mt-1 text-sm leading-6 text-gray-700 sm:mt-2">
                               PineTree is tracking this Lightning balance and the cash-out paths available today.
                             </p>
                           </div>
                         </div>
                       </div>
 
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <CapabilityCard
-                          title="Available Balance"
-                          status={`${Number(selectedWallet.nativeBalance ?? 0).toFixed(selectedWallet.decimals)} ${selectedWallet.assetSymbol}`}
-                          description={`Estimated value: $${Number(selectedWallet.usdValue ?? 0).toFixed(2)} USD.`}
+                      <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                        <StatTile
+                          label="Balance"
+                          value={`${Number(selectedWallet.nativeBalance ?? 0).toFixed(selectedWallet.decimals)} ${selectedWallet.assetSymbol}`}
+                          helper={`$${Number(selectedWallet.usdValue ?? 0).toFixed(2)} USD`}
                           tone="blue"
                         />
-                        <CapabilityCard
-                          title="Cash Out"
-                          status="Available"
-                          description="Withdraw to a Lightning invoice or Bitcoin address."
+                        <StatTile
+                          label="Cash Out"
+                          value="Available"
+                          helper="Invoice or Bitcoin address"
                           tone="blue"
                         />
-                        <CapabilityCard
-                          title="Bank Payouts"
-                          status="Not enabled"
-                          description="Bank settlement is not configured yet."
-                          tone="slate"
+                        <StatTile
+                          label="Bank Settlement"
+                          value={bankSettlementDisplay.status}
+                          helper={bankSettlementDisplay.helper}
+                          tone={bankSettlementState === "ready" ? "blue" : bankSettlementState === "not_configured" ? "amber" : "slate"}
                         />
-                        <CapabilityCard
-                          title="Last Sync"
-                          status={lastRefreshAt ? formatChicagoDateTime(lastRefreshAt) : "Not available"}
-                          description={speedSetupStatus?.balanceAvailable ? "Balance sync is active for this account." : "Refresh balance to check the latest sync state."}
+                        <StatTile
+                          label="Last Sync"
+                          value={lastRefreshAt ? formatChicagoDateTime(lastRefreshAt) : "Not available"}
+                          helper={speedSetupStatus?.balanceAvailable ? "Sync active" : "Refresh to check"}
                           tone={speedSetupStatus?.balanceAvailable ? "blue" : "amber"}
                         />
-                      </div>
-
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <CapabilityCard
-                          title="Last Activity"
-                          status={latestSpeedActivity ? formatOperationStatusForMerchant(latestSpeedActivity.status) : "None"}
-                          description={latestSpeedActivity ? formatChicagoDateTime(latestSpeedActivity.createdAt) : "No cash-out activity yet."}
+                        <StatTile
+                          label="Last Activity"
+                          value={latestSpeedActivity ? formatOperationStatusForMerchant(latestSpeedActivity.status) : "None"}
+                          helper={latestSpeedActivity ? formatChicagoDateTime(latestSpeedActivity.createdAt) : "No activity yet"}
                           tone="slate"
                         />
                       </div>
 
-                      <div className="rounded-2xl border border-[#0052FF]/15 bg-white p-5 shadow-[0_10px_30px_rgba(0,82,255,0.08)]">
+                      <div className="rounded-2xl border border-[#0052FF]/15 bg-white p-4 shadow-[0_10px_30px_rgba(0,82,255,0.08)] sm:p-5">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
                             <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-[#0052FF]">Next Action</p>
                             <p className="mt-1 text-base font-semibold text-gray-950">{lightningNextAction.title}</p>
-                            <p className="mt-1 text-sm leading-6 text-gray-600">{lightningNextAction.description}</p>
+                            <p className="mt-1 text-sm leading-5 text-gray-600 sm:leading-6">{lightningNextAction.description}</p>
                           </div>
                           <NetworkStatusPill
-                            label={speedSetupStatus?.bankPayoutsEnabled ? "Ready" : "Needs setup"}
-                            tone={speedSetupStatus?.bankPayoutsEnabled ? "blue" : "slate"}
+                            label={bankSettlementDisplay.status}
+                            tone={bankSettlementState === "ready" ? "blue" : bankSettlementState === "not_configured" ? "amber" : "slate"}
                           />
                         </div>
                       </div>
@@ -1568,30 +1888,36 @@ export default function WalletsPage() {
                           >
                             Set Up Bank Settlement
                           </button>
-                        ) : lightningNextAction.action === "Enable Bank Payouts" ? (
+                        ) : lightningNextAction.action === "Open Speed Dashboard" ? (
                           <button
                             type="button"
-                            onClick={() => setActiveTab("speed_setup")}
+                            onClick={openSpeedDashboard}
                             className={cx(pineTreePrimaryButton, "w-full sm:w-fit")}
                           >
-                            View Bank Settlement Setup
+                            Open Speed Dashboard
                           </button>
                         ) : (
                           <button
                             type="button"
                             onClick={() => {
-                              if (lightningNextAction.action === "Refresh Balance") {
+                              if (lightningNextAction.action === "Refresh Balance" || lightningNextAction.action === "Refresh Status") {
                                 void loadOverview(true)
+                                return
+                              }
+                              if (lightningNextAction.action === "Contact Support") {
+                                openSupportTicket()
                                 return
                               }
                               setActiveTab("cash_out")
                             }}
-                            disabled={isRefreshing && lightningNextAction.action === "Refresh Balance"}
+                            disabled={isRefreshing && (lightningNextAction.action === "Refresh Balance" || lightningNextAction.action === "Refresh Status")}
                             className={cx(pineTreePrimaryButton, "w-full sm:w-fit")}
                           >
-                            {lightningNextAction.action === "Refresh Balance"
-                              ? (isRefreshing ? "Refreshing..." : "Refresh Balance")
-                              : "Cash Out Funds"}
+                            {lightningNextAction.action === "Refresh Balance" || lightningNextAction.action === "Refresh Status"
+                              ? (isRefreshing ? "Refreshing..." : lightningNextAction.action)
+                              : lightningNextAction.action === "Contact Support"
+                                ? "Contact Support"
+                                : "Cash Out Funds"}
                           </button>
                         )}
                         <button
@@ -1797,22 +2123,24 @@ export default function WalletsPage() {
                         />
                         <CapabilityCard
                           title="Bank Account Withdrawals"
-                          status="Needs Setup"
-                          description="Connect bank settlement settings before using bank withdrawals."
-                          tone="slate"
+                          status={bankSettlementDisplay.status}
+                          description={bankSettlementDisplay.helper}
+                          tone={bankSettlementState === "ready" ? "blue" : bankSettlementState === "not_configured" ? "amber" : "slate"}
                         />
                       </div>
 
-                      <div className="rounded-xl border border-[#0052FF]/10 bg-[#0052FF]/5 p-3 text-sm leading-6 text-gray-700">
-                        Bank account withdrawals need bank settlement setup first.
-                        <button
-                          type="button"
-                          onClick={() => setActiveTab("speed_setup")}
-                          className="ml-1 font-semibold text-[#0052FF] underline-offset-2 hover:underline"
-                        >
-                          Review setup
-                        </button>
-                      </div>
+                      {bankSettlementState !== "ready" && (
+                        <div className="rounded-xl border border-[#0052FF]/10 bg-[#0052FF]/5 p-3 text-sm leading-6 text-gray-700">
+                          {bankSettlementDisplay.status}: {bankSettlementDisplay.helper}
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab("speed_setup")}
+                            className="ml-1 font-semibold text-[#0052FF] underline-offset-2 hover:underline"
+                          >
+                            Review setup
+                          </button>
+                        </div>
+                      )}
 
                       <div className="grid gap-3">
                         <label className="block rounded-xl border border-gray-100 bg-gray-50/70 p-3.5">
@@ -2218,7 +2546,7 @@ export default function WalletsPage() {
 
               {activeTab === "speed_setup" && selectedWallet.isLightning && (
                 <div className={walletDetailPanelClass}>
-                  <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-5">
+                  <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4 shadow-[0_8px_24px_rgba(0,82,255,0.06)] sm:p-5">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-[#0052FF]">Provider Health</p>
@@ -2234,100 +2562,97 @@ export default function WalletsPage() {
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Capabilities</p>
-                    <div className="mt-3 grid gap-3">
-                      <CapabilityRow
-                        enabled
-                        label="Lightning Payments"
-                        detail="Accept Bitcoin Lightning payments through PineTree."
-                      />
-                      <CapabilityRow
-                        enabled={Boolean(speedSetupStatus?.balanceAvailable)}
-                        label="Wallet Balance Sync"
-                        detail="Refresh the Lightning balance from PineTree."
-                      />
-                      <CapabilityRow
-                        enabled
-                        label="Lightning Withdrawals"
-                        detail="Create cash-out requests for Lightning invoices."
-                      />
-                      <CapabilityRow
-                        enabled
-                        label="Bitcoin Address Withdrawals"
-                        detail="Create cash-out requests for Bitcoin addresses."
+                  <div className={cx(
+                    "rounded-2xl border p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5",
+                    bankSettlementState === "ready"
+                      ? "border-emerald-200 bg-emerald-50/70"
+                      : bankSettlementState === "not_configured"
+                        ? "border-amber-200 bg-amber-50/70"
+                        : "border-[#0052FF]/15 bg-white"
+                  )}>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-500">
+                          {bankSettlementDisplay.title}
+                        </p>
+                        <p className="mt-2 text-lg font-semibold text-gray-950">
+                          {getBankSettlementSetupHeading(bankSettlementState)}
+                        </p>
+                        <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-700">{bankSettlementDisplay.helper}</p>
+                        <BankSettlementStepList state={bankSettlementState} />
+                      </div>
+                      <NetworkStatusPill
+                        label={bankSettlementDisplay.status}
+                        tone={bankSettlementState === "ready" ? "blue" : bankSettlementState === "not_configured" ? "amber" : "slate"}
                       />
                     </div>
-                  </div>
 
-                  <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Next Step</p>
-                    <p className="mt-2 text-sm font-semibold text-gray-950">
-                      {speedSetupStatus?.bankPayoutsEnabled
-                        ? "Continue managing provider setup"
-                        : "Enable Bank Settlement"}
-                    </p>
-                    <div className="mt-2 grid gap-2 text-sm leading-6 text-gray-600">
-                      <p>
-                        {speedSetupStatus?.bankPayoutsEnabled
-                          ? "Keep provider requirements current as PineTree adds more treasury capabilities."
-                          : speedSetupStatus?.bankSetupUrlConfigured
-                            ? "Connect bank payout settings through the provider to enable bank account withdrawals."
-                            : "Bank settlement is not ready in PineTree yet. Go to payout or bank settings inside Speed to finish setup when available."}
-                      </p>
-                      <p>Auto Convert will fit here later for BTC to USD, USDC, SOL, and ETH treasury workflows.</p>
+                    <div className="mt-4">
+                      <BankSettlementChecklist
+                        state={bankSettlementState}
+                        providerSetupAvailable={bankSettlementSetupOpened}
+                        merchantConfirmed={bankSettlementMerchantConfirmed}
+                        providerVerified={bankSettlementProviderVerified}
+                      />
                     </div>
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    {speedSetupStatus?.bankSetupUrlConfigured && speedSetupStatus.bankSetupUrl ? (
-                      <button
-                        type="button"
-                        onClick={openSpeedBankSetup}
-                        className={pineTreePrimaryButton}
-                      >
+                    {bankSettlementDisplay.action === "Set Up Bank Settlement" && (
+                      <button type="button" onClick={openSpeedBankSetup} className={pineTreePrimaryButton}>
                         Set Up Bank Settlement
                       </button>
-                    ) : speedSetupStatus?.dashboardUrlConfigured && speedSetupStatus.dashboardUrl ? (
-                      <button
-                        type="button"
-                        onClick={openSpeedDashboard}
-                        className={pineTreePrimaryButton}
-                      >
+                    )}
+                    {bankSettlementDisplay.action === "Open Speed Dashboard" && (
+                      <button type="button" onClick={openSpeedDashboard} className={pineTreePrimaryButton}>
                         Open Speed Dashboard
                       </button>
-                    ) : (
+                    )}
+                    {bankSettlementDisplay.action === "Refresh Status" && (
                       <button
                         type="button"
-                        disabled
-                        className={pineTreeDisabledButton}
+                        onClick={() => loadOverview(true)}
+                        disabled={isRefreshing}
+                        className={pineTreePrimaryButton}
                       >
-                        Bank Settlement Setup Not Ready
+                        {isRefreshing ? "Refreshing..." : "Refresh Status"}
+                      </button>
+                    )}
+                    {bankSettlementDisplay.action === "Cash Out Funds" && (
+                      <button type="button" onClick={() => setActiveTab("cash_out")} className={pineTreePrimaryButton}>
+                        Cash Out Funds
+                      </button>
+                    )}
+                    {bankSettlementDisplay.action === "Contact Support" && (
+                      <button type="button" onClick={openSupportTicket} className={pineTreePrimaryButton}>
+                        Contact Support
                       </button>
                     )}
 
-                    {!speedSetupStatus?.bankSetupUrlConfigured && speedSetupStatus?.dashboardUrlConfigured && speedSetupStatus.dashboardUrl && (
+                    {(bankSettlementState === "direct_setup" || bankSettlementState === "dashboard_setup") && (
                       <button
                         type="button"
-                        onClick={openSpeedDashboard}
+                        onClick={markSpeedBankSetupCompleted}
                         className={pineTreeSecondaryActionButton}
                       >
-                        Go to payout or bank settings inside Speed
+                        I completed provider setup
                       </button>
                     )}
 
-                    <button
-                      type="button"
-                      onClick={() => loadOverview(true)}
-                      disabled={isRefreshing}
-                      className={pineTreeSecondaryActionButton}
-                    >
-                      {isRefreshing ? "Refreshing..." : "Refresh Health"}
-                    </button>
+                    {bankSettlementDisplay.action !== "Refresh Status" && (
+                      <button
+                        type="button"
+                        onClick={() => loadOverview(true)}
+                        disabled={isRefreshing}
+                        className={pineTreeSecondaryActionButton}
+                      >
+                        {isRefreshing ? "Refreshing..." : "Refresh Status"}
+                      </button>
+                    )}
                   </div>
 
                   <div className="rounded-xl border border-gray-100 bg-gray-50/70 p-3 text-sm leading-6 text-gray-600">
-                    PineTree keeps the wallet experience here. Use the provider dashboard only for account requirements that PineTree cannot manage yet.
+                    Speed does not currently expose a PineTree-verified bank payout capability here. Merchant confirmation only records that setup was completed in Speed; it does not enable withdrawals.
                   </div>
                 </div>
               )}

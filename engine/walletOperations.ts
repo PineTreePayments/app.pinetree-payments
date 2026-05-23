@@ -4,6 +4,7 @@ import {
   type WalletOperationRecord
 } from "@/database/walletOperations"
 import { getMerchantLightningSetup } from "@/database/merchantProviders"
+import { getSpeedAccountBalanceDiagnostics } from "@/providers/lightning/getBalance"
 
 // Wallet operation foundation types and validation.
 // No real transaction logic is implemented here.
@@ -153,6 +154,17 @@ function summarizeOperation(row: WalletOperationRecord): SpeedWithdrawalDraftRes
   }
 }
 
+function buildBalanceValidationMetadata(input: Awaited<ReturnType<typeof getSpeedAccountBalanceDiagnostics>>) {
+  return {
+    balanceValidation: input.balanceSource === "none" ? "unavailable" : "checked",
+    balanceSource: input.balanceSource,
+    availableBalanceBtc: input.btcAmount,
+    availableBalanceSats: input.satsAmount,
+    balanceLookupStatus: input.httpStatus,
+    balanceLookupError: input.error || null
+  }
+}
+
 async function createSpeedWithdrawalValidationFailure(
   input: CreateSpeedWithdrawalDraftInput,
   errorCode: string,
@@ -258,6 +270,21 @@ export async function createSpeedWithdrawalDraftForMerchant(
     )
   }
 
+  const balance = await getSpeedAccountBalanceDiagnostics(lightningSetup.speedAccountId)
+  const balanceMetadata = buildBalanceValidationMetadata(balance)
+
+  if (balance.balanceSource !== "none" && amount > balance.btcAmount) {
+    return createSpeedWithdrawalValidationFailure(
+      input,
+      "INSUFFICIENT_AVAILABLE_BALANCE",
+      "Withdrawal amount is greater than the available Bitcoin Lightning balance.",
+      {
+        validation: "availableBalance",
+        ...balanceMetadata
+      }
+    )
+  }
+
   const operation = await createWalletOperation({
     merchantId: input.merchantId,
     provider: "speed",
@@ -274,7 +301,7 @@ export async function createSpeedWithdrawalDraftForMerchant(
       speedAccountConfigured: Boolean(lightningSetup.speedAccountId),
       lightningAddressConfigured: Boolean(lightningSetup.lightningAddress),
       accountSource: lightningSetup.accountSource,
-      balanceValidation: "not_performed_no_trusted_cached_balance",
+      ...balanceMetadata,
       providerCallsEnabled: false,
       fundMovementEnabled: false,
       providerSubmissionEnabled: false
