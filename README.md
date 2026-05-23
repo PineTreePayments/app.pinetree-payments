@@ -49,9 +49,11 @@ SPEED_WEBHOOK_SECRET=
 SPEED_ENVIRONMENT=production
 SPEED_PLATFORM_ACCOUNT_ID=
 SPEED_DASHBOARD_URL=
+SPEED_BANK_SETUP_URL=
 PINETREE_LIGHTNING_SUPPORTS_FEE_AT_PAYMENT_TIME=true
 PINETREE_LIGHTNING_SUPPORTS_SPLIT_SETTLEMENT=true
 ```
 
 `SPEED_API_KEY` and `SPEED_WEBHOOK_SECRET` are server-only secrets. Do not prefix secret keys with `NEXT_PUBLIC_`. `SPEED_PUBLISHABLE_KEY` may be stored for future client-side Speed features, but it is not required by the current checkout flow.
 `SPEED_DASHBOARD_URL` is optional and must be an HTTPS URL. When configured, authenticated merchants with a connected Speed provider can open it from the Wallets Speed Setup tab.
+`SPEED_BANK_SETUP_URL` is optional and must be an HTTPS URL. Use it only for a safe provider-hosted bank settlement or payout setup page; PineTree must not store merchant provider usernames or passwords.

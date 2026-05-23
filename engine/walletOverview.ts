@@ -14,7 +14,10 @@ import {
   maskSpeedAccountId,
   type SpeedBalanceDiagnostics
 } from "@/providers/lightning/getBalance"
-import { getConfiguredSpeedDashboardUrl } from "@/providers/lightning/dashboard"
+import {
+  getConfiguredSpeedBankSetupUrl,
+  getConfiguredSpeedDashboardUrl
+} from "@/providers/lightning/dashboard"
 import { getMerchantSpeedProviderSetup } from "@/database/merchantProviders"
 import {
   listRecentWalletOperationsForMerchant,
@@ -76,6 +79,8 @@ export type SpeedSetupStatus = {
   bankPayoutsEnabled: false
   dashboardUrlConfigured: boolean
   dashboardUrl: string | null
+  bankSetupUrlConfigured: boolean
+  bankSetupUrl: string | null
   providerSubmissionEnabled: false
   notes: string[]
 }
@@ -107,6 +112,7 @@ function buildSpeedSetupStatus(input: {
   balanceAvailable?: boolean
 }): SpeedSetupStatus {
   const dashboardUrl = getConfiguredSpeedDashboardUrl()
+  const bankSetupUrl = getConfiguredSpeedBankSetupUrl()
   const connected = Boolean(input.speedAccountId)
   const notes = connected
     ? [
@@ -127,6 +133,8 @@ function buildSpeedSetupStatus(input: {
     bankPayoutsEnabled: false,
     dashboardUrlConfigured: Boolean(dashboardUrl),
     dashboardUrl,
+    bankSetupUrlConfigured: Boolean(bankSetupUrl),
+    bankSetupUrl,
     providerSubmissionEnabled: false,
     notes
   }

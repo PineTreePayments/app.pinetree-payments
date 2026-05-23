@@ -1,5 +1,5 @@
-export function getConfiguredSpeedDashboardUrl(): string | null {
-  const raw = String(process.env.SPEED_DASHBOARD_URL || "").trim()
+function readSafeHttpsUrl(value: string): string | null {
+  const raw = String(value || "").trim()
   if (!raw) return null
 
   try {
@@ -9,4 +9,12 @@ export function getConfiguredSpeedDashboardUrl(): string | null {
   } catch {
     return null
   }
+}
+
+export function getConfiguredSpeedDashboardUrl(): string | null {
+  return readSafeHttpsUrl(process.env.SPEED_DASHBOARD_URL || "")
+}
+
+export function getConfiguredSpeedBankSetupUrl(): string | null {
+  return readSafeHttpsUrl(process.env.SPEED_BANK_SETUP_URL || "")
 }

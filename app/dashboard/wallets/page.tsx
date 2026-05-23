@@ -45,6 +45,8 @@ type SpeedSetupStatus = {
   bankPayoutsEnabled: false
   dashboardUrlConfigured: boolean
   dashboardUrl: string | null
+  bankSetupUrlConfigured: boolean
+  bankSetupUrl: string | null
   providerSubmissionEnabled: false
   notes: string[]
 }
@@ -367,10 +369,19 @@ function formatOperationStatusForMerchant(status: string) {
 
 function getLightningNextAction(input: {
   dashboardAvailable?: boolean
+  bankSetupAvailable?: boolean
   hasBalance?: boolean
   hasActivity?: boolean
   bankPayoutsEnabled?: boolean
 }) {
+  if (!input.bankPayoutsEnabled && input.bankSetupAvailable) {
+    return {
+      title: "Set Up Bank Settlement",
+      description: "Finish provider-managed bank payout setup so bank account withdrawals can be enabled later.",
+      action: "Set Up Bank Settlement" as const
+    }
+  }
+
   if (input.hasBalance) {
     return {
       title: "Cash Out Funds",
@@ -382,7 +393,7 @@ function getLightningNextAction(input: {
   if (!input.bankPayoutsEnabled && input.dashboardAvailable) {
     return {
       title: "Enable Bank Settlement",
-      description: "Continue payout setup so future bank settlement can be enabled when available.",
+      description: "Open the provider dashboard and go to payout or bank settings to finish setup.",
       action: "Enable Bank Payouts" as const
     }
   }
@@ -981,6 +992,13 @@ export default function WalletsPage() {
     }
   }
 
+  function openSpeedBankSetup() {
+    const bankSetupUrl = selectedWallet?.speedSetupStatus?.bankSetupUrl
+    if (bankSetupUrl) {
+      window.open(bankSetupUrl, "_blank", "noopener,noreferrer")
+    }
+  }
+
   function buildLightningWallet(rail: PaymentRailItem): SelectedWallet {
     return {
       id: rail.id,
@@ -1070,6 +1088,7 @@ export default function WalletsPage() {
   const latestSpeedActivity = speedActivity[0] || null
   const lightningNextAction = getLightningNextAction({
     dashboardAvailable: Boolean(speedSetupStatus?.dashboardUrlConfigured && speedSetupStatus.dashboardUrl),
+    bankSetupAvailable: Boolean(speedSetupStatus?.bankSetupUrlConfigured && speedSetupStatus.bankSetupUrl),
     hasBalance: Number(selectedWallet?.nativeBalance || 0) > 0,
     hasActivity: Boolean(latestSpeedActivity),
     bankPayoutsEnabled: Boolean(speedSetupStatus?.bankPayoutsEnabled)
@@ -1506,7 +1525,7 @@ export default function WalletsPage() {
                         <CapabilityCard
                           title="Bank Payouts"
                           status="Not enabled"
-                          description="Bank account withdrawals are being expanded for this wallet."
+                          description="Bank settlement is not configured yet."
                           tone="slate"
                         />
                         <CapabilityCard
@@ -1541,7 +1560,15 @@ export default function WalletsPage() {
                       </div>
 
                       <div className="flex flex-col gap-2 sm:flex-row">
-                        {lightningNextAction.action === "Enable Bank Payouts" ? (
+                        {lightningNextAction.action === "Set Up Bank Settlement" ? (
+                          <button
+                            type="button"
+                            onClick={openSpeedBankSetup}
+                            className={cx(pineTreePrimaryButton, "w-full sm:w-fit")}
+                          >
+                            Set Up Bank Settlement
+                          </button>
+                        ) : lightningNextAction.action === "Enable Bank Payouts" ? (
                           <button
                             type="button"
                             onClick={() => setActiveTab("speed_setup")}
@@ -1770,14 +1797,21 @@ export default function WalletsPage() {
                         />
                         <CapabilityCard
                           title="Bank Account Withdrawals"
-                          status="Unavailable"
-                          description="Bank payout support is not available in PineTree yet."
+                          status="Needs Setup"
+                          description="Connect bank settlement settings before using bank withdrawals."
                           tone="slate"
                         />
                       </div>
 
                       <div className="rounded-xl border border-[#0052FF]/10 bg-[#0052FF]/5 p-3 text-sm leading-6 text-gray-700">
-                        Additional payout options are currently being expanded.
+                        Bank account withdrawals need bank settlement setup first.
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab("speed_setup")}
+                          className="ml-1 font-semibold text-[#0052FF] underline-offset-2 hover:underline"
+                        >
+                          Review setup
+                        </button>
                       </div>
 
                       <div className="grid gap-3">
@@ -2237,20 +2271,30 @@ export default function WalletsPage() {
                       <p>
                         {speedSetupStatus?.bankPayoutsEnabled
                           ? "Keep provider requirements current as PineTree adds more treasury capabilities."
-                          : "Bank settlement is not ready in PineTree yet. Continue setup here as account requirements become available."}
+                          : speedSetupStatus?.bankSetupUrlConfigured
+                            ? "Connect bank payout settings through the provider to enable bank account withdrawals."
+                            : "Bank settlement is not ready in PineTree yet. Go to payout or bank settings inside Speed to finish setup when available."}
                       </p>
                       <p>Auto Convert will fit here later for BTC to USD, USDC, SOL, and ETH treasury workflows.</p>
                     </div>
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    {speedSetupStatus?.dashboardUrlConfigured && speedSetupStatus.dashboardUrl ? (
+                    {speedSetupStatus?.bankSetupUrlConfigured && speedSetupStatus.bankSetupUrl ? (
+                      <button
+                        type="button"
+                        onClick={openSpeedBankSetup}
+                        className={pineTreePrimaryButton}
+                      >
+                        Set Up Bank Settlement
+                      </button>
+                    ) : speedSetupStatus?.dashboardUrlConfigured && speedSetupStatus.dashboardUrl ? (
                       <button
                         type="button"
                         onClick={openSpeedDashboard}
                         className={pineTreePrimaryButton}
                       >
-                        Open Provider Dashboard
+                        Open Speed Dashboard
                       </button>
                     ) : (
                       <button
@@ -2258,7 +2302,17 @@ export default function WalletsPage() {
                         disabled
                         className={pineTreeDisabledButton}
                       >
-                        Provider Dashboard Not Ready
+                        Bank Settlement Setup Not Ready
+                      </button>
+                    )}
+
+                    {!speedSetupStatus?.bankSetupUrlConfigured && speedSetupStatus?.dashboardUrlConfigured && speedSetupStatus.dashboardUrl && (
+                      <button
+                        type="button"
+                        onClick={openSpeedDashboard}
+                        className={pineTreeSecondaryActionButton}
+                      >
+                        Go to payout or bank settings inside Speed
                       </button>
                     )}
 
