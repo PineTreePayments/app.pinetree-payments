@@ -183,14 +183,14 @@ const isOffRampProviderActive =
   currentOffRampProvider?.status === "production" || currentOffRampProvider?.status === "sandbox"
 
 const offRampSupportedAssets = [
+  "SOL",
   "USDC on Solana",
-  "SOL on Solana",
-  "USDC on Base",
-  "ETH on Base"
+  "ETH on Base",
+  "USDC on Base"
 ]
 
 const offRampAvailabilityCopy =
-  "Availability will vary by provider approval, state, asset, network, and payout method. Base network cash-out may not be available for some jurisdictions."
+  "Availability depends on provider approval, region, asset, network, and payout method."
 
 const pineTreePrimaryButton =
   "inline-flex min-h-10 items-center justify-center rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm shadow-[#0052FF]/20 transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-55"
@@ -199,7 +199,7 @@ const pineTreeDisabledButton =
   "inline-flex w-fit cursor-not-allowed items-center justify-center rounded-xl border border-[#0052FF]/20 bg-[#0052FF]/10 px-4 py-2 text-sm font-semibold text-[#0052FF]/55 shadow-sm shadow-[#0052FF]/5"
 
 const pineTreeNeutralDisabledButton =
-  "inline-flex w-fit cursor-not-allowed items-center justify-center rounded-xl border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-400"
+  "inline-flex w-fit cursor-not-allowed items-center justify-center rounded-xl border border-[#0052FF]/20 bg-[#0052FF]/10 px-4 py-2 text-sm font-semibold text-[#0052FF]/55 shadow-sm shadow-[#0052FF]/5"
 
 const pineTreeDangerActionButton =
   "inline-flex w-fit items-center justify-center rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 shadow-sm transition hover:border-red-300 hover:bg-red-50 focus:outline-none focus:ring-4 focus:ring-red-100 disabled:cursor-not-allowed disabled:opacity-55"
@@ -848,7 +848,7 @@ export default function WalletsPage() {
                 <NetworkStatusPill label="Provider pending" tone="amber" className="min-h-6 px-2 text-[10px]" />
               </div>
               <p className="mt-2 text-sm leading-6 text-gray-600">
-                PineTree Cash Out is being configured for approved off-ramp providers. Once enabled, merchants will be able to use supported providers to convert eligible crypto balances to fiat payouts.
+                PineTree Cash Out is being configured for approved off-ramp providers.
               </p>
               <p className="mt-2 text-xs leading-5 text-gray-500">{offRampAvailabilityCopy}</p>
             </div>
@@ -1078,10 +1078,7 @@ export default function WalletsPage() {
             <div className="mt-5 space-y-3">
               <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4 shadow-[0_8px_24px_rgba(0,82,255,0.06)]">
                 <p className="text-sm leading-6 text-gray-700">
-                  PineTree Cash Out is being configured for approved off-ramp providers.
-                </p>
-                <p className="mt-2 text-sm leading-6 text-gray-700">
-                  Once enabled, merchants will be able to use supported providers to convert eligible crypto balances to fiat payouts.
+                  Cash-out will let merchants move supported crypto balances to a bank account through an approved provider.
                 </p>
                 <p className="mt-2 text-sm font-semibold text-gray-950">
                   Provider access is currently pending approval.
@@ -1305,13 +1302,13 @@ export default function WalletsPage() {
                           Provider-managed through Speed
                         </p>
                         <p className="mt-2 text-sm leading-6 text-blue-900/75">
-                          Speed cash-out and withdrawal support will let merchants move Bitcoin Lightning balance through supported provider payout or transfer workflows once enabled.
+                          Speed-supported withdrawals and payouts will appear here once enabled.
                         </p>
                       </div>
 
                       <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
                         <p className="text-sm leading-6 text-gray-600">
-                          Bitcoin Lightning cash-out is separate from Base/Solana off-ramp providers. PineTree will use Speed-supported withdrawal or payout tools for Lightning balances when this provider flow is enabled.
+                          Bitcoin Lightning cash-out is separate from Base/Solana off-ramp providers.
                         </p>
                       </div>
 
@@ -1337,15 +1334,15 @@ export default function WalletsPage() {
                             : "Off-ramp provider setup pending"}
                         </p>
                         <p className="mt-2 text-sm leading-6 text-gray-700">
-                          PineTree Cash Out will allow merchants to move supported crypto balances to a bank account through an approved off-ramp provider. Provider access is currently being configured.
+                          Cash-out will let merchants move supported crypto balances to a bank account through an approved provider.
                         </p>
                         {selectedWallet.rail === "base" ? (
                           <p className="mt-3 border-t border-[#0052FF]/10 pt-3 text-xs leading-5 text-gray-600">
-                            Cash-out availability varies by state, asset, network, and payout method. Base network cash-out may not be available in every jurisdiction.
+                            Availability depends on provider approval, region, asset, network, and payout method.
                           </p>
                         ) : (
                           <p className="mt-3 border-t border-[#0052FF]/10 pt-3 text-xs leading-5 text-gray-600">
-                            Cash-out availability varies by provider approval, asset, network, and payout method.
+                            Availability depends on provider approval, region, asset, network, and payout method.
                           </p>
                         )}
                       </div>
@@ -1364,16 +1361,16 @@ export default function WalletsPage() {
                             <div>
                               <p className="text-sm font-semibold text-gray-950">Provider Setup Pending</p>
                               <p className="mt-1 text-sm leading-6 text-gray-600">
-                                Activate a supported off-ramp provider to enable PineTree Cash Out for supported wallets and assets.
+                                Base and Solana cash-out will activate after PineTree connects an approved off-ramp provider.
                               </p>
                             </div>
                             <NetworkStatusPill label="Pending" tone="amber" />
                           </div>
-                          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                          <div className="mt-4 flex flex-wrap gap-1.5">
                             {offRampSupportedAssets.map((asset) => (
                               <div
                                 key={asset}
-                                className="rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2 text-xs font-semibold text-gray-500"
+                                className="rounded-full border border-[#0052FF]/10 bg-[#0052FF]/5 px-2.5 py-1 text-[11px] font-semibold text-[#0052FF]/60"
                               >
                                 {asset}
                               </div>
@@ -1634,14 +1631,14 @@ export default function WalletsPage() {
                     <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Default Payment Wallet</p>
                     <p className="mt-2 text-sm text-gray-600">Managed by PineTree payment routing settings.</p>
                   </div>
-                  <div className="rounded-2xl border border-red-100 bg-red-50/50 p-4">
+                  <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-red-500">
+                        <p className="text-sm font-semibold text-gray-950">
                           Connection Management
                         </p>
-                        <p className="mt-2 text-sm leading-6 text-red-900/75">
-                          Disconnecting removes this wallet from PineTree balance and setup views. Historical transactions and reports remain available.
+                        <p className="mt-1 text-sm leading-6 text-gray-600">
+                          Disconnect this wallet from PineTree. Historical transactions stay saved.
                         </p>
                       </div>
                       <NetworkStatusPill label="No fund movement" tone="slate" />
@@ -1666,10 +1663,10 @@ export default function WalletsPage() {
                         Disconnect Wallet
                       </button>
                     ) : (
-                      <div className="mt-3 rounded-xl border border-red-100 bg-white/80 p-3">
-                        <p className="text-sm font-semibold text-red-900">Disconnect this wallet?</p>
-                        <p className="mt-1 text-sm leading-6 text-red-900/70">
-                          This removes the connection from PineTree views only. It does not move funds or revoke anything on-chain.
+                      <div className="mt-3 rounded-xl border border-gray-100 bg-white/80 p-3">
+                        <p className="text-sm font-semibold text-gray-950">Disconnect this wallet?</p>
+                        <p className="mt-1 text-sm leading-6 text-gray-600">
+                          This removes it from Wallets and Providers setup. Funds and history are not affected.
                         </p>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button
