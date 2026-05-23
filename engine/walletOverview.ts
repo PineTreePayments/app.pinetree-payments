@@ -15,7 +15,10 @@ import {
   type SpeedBalanceDiagnostics
 } from "@/providers/lightning/getBalance"
 import {
+  getConfiguredSpeedAutoConvertUrl,
+  getConfiguredSpeedBankWithdrawUrl,
   getConfiguredSpeedBankSetupUrl,
+  getConfiguredSpeedBtcWithdrawUrl,
   getConfiguredSpeedDashboardUrl
 } from "@/providers/lightning/dashboard"
 import { getMerchantSpeedProviderSetup } from "@/database/merchantProviders"
@@ -82,8 +85,14 @@ export type SpeedSetupStatus = {
   bankPayoutSetupRequiredReason: string
   dashboardUrlConfigured: boolean
   dashboardUrl: string | null
+  btcWithdrawUrlConfigured: boolean
+  btcWithdrawUrl: string | null
+  bankWithdrawUrlConfigured: boolean
+  bankWithdrawUrl: string | null
   bankSetupUrlConfigured: boolean
   bankSetupUrl: string | null
+  autoConvertUrlConfigured: boolean
+  autoConvertUrl: string | null
   providerSubmissionEnabled: false
   notes: string[]
 }
@@ -115,7 +124,10 @@ function buildSpeedSetupStatus(input: {
   balanceAvailable?: boolean
 }): SpeedSetupStatus {
   const dashboardUrl = getConfiguredSpeedDashboardUrl()
+  const btcWithdrawUrl = getConfiguredSpeedBtcWithdrawUrl()
+  const bankWithdrawUrl = getConfiguredSpeedBankWithdrawUrl()
   const bankSetupUrl = getConfiguredSpeedBankSetupUrl()
+  const autoConvertUrl = getConfiguredSpeedAutoConvertUrl()
   const connected = Boolean(input.speedAccountId)
   const notes = connected
     ? [
@@ -140,8 +152,14 @@ function buildSpeedSetupStatus(input: {
       "PineTree does not have a confirmed Speed bank payout API capability or bank destination identifier for this account yet.",
     dashboardUrlConfigured: Boolean(dashboardUrl),
     dashboardUrl,
+    btcWithdrawUrlConfigured: Boolean(btcWithdrawUrl),
+    btcWithdrawUrl,
+    bankWithdrawUrlConfigured: Boolean(bankWithdrawUrl),
+    bankWithdrawUrl,
     bankSetupUrlConfigured: Boolean(bankSetupUrl),
     bankSetupUrl,
+    autoConvertUrlConfigured: Boolean(autoConvertUrl),
+    autoConvertUrl,
     providerSubmissionEnabled: false,
     notes
   }
