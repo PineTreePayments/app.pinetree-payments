@@ -1,3 +1,10 @@
+import {
+  createWalletOperation,
+  recordWalletOperationEvent,
+  type WalletOperationRecord
+} from "@/database/walletOperations"
+import { getMerchantLightningSetup } from "@/database/merchantProviders"
+
 // Wallet operation foundation types and validation.
 // No real transaction logic is implemented here.
 // Real fund movement requires merchant approval plus wallet/provider execution
@@ -15,12 +22,15 @@ export type WalletOperationType =
   | "PROVIDER_ACTION"
 
 // Operation lifecycle for a future audit trail.
-// CREATED -> SETUP_REQUIRED / AWAITING_APPROVAL -> SUBMITTED -> PROCESSING -> COMPLETED
-// Any operation can move to FAILED or CANCELLED before completion.
+// DRAFT -> AWAITING_CONFIRMATION -> READY_TO_SUBMIT -> SUBMITTED -> PROCESSING -> COMPLETED.
+// This phase only creates DRAFT or VALIDATION_FAILED records.
 export type WalletOperationStatus =
   | "CREATED"
-  | "SETUP_REQUIRED"
+  | "DRAFT"
+  | "VALIDATION_FAILED"
+  | "AWAITING_CONFIRMATION"
   | "AWAITING_APPROVAL"
+  | "READY_TO_SUBMIT"
   | "SUBMITTED"
   | "PROCESSING"
   | "COMPLETED"
@@ -37,6 +47,45 @@ export type WalletOperationRequest = {
 export type WalletOperationValidationResult =
   | { valid: true }
   | { valid: false; reason: string }
+
+export type SpeedWithdrawalDestinationType =
+  | "lightning_invoice"
+  | "bitcoin_address"
+  | "provider_bank_payout"
+
+export type CreateSpeedWithdrawalDraftInput = {
+  merchantId: string
+  walletId?: string | null
+  amount: number
+  destinationType: SpeedWithdrawalDestinationType
+  destinationValue?: string | null
+  memo?: string | null
+}
+
+export type SpeedWithdrawalDraftResult = {
+  success: boolean
+  operation: {
+    id: string
+    provider: "speed"
+    operationType: "WITHDRAWAL_DRAFT"
+    asset: "BTC"
+    network: "bitcoin_lightning"
+    amount: number
+    destinationType: SpeedWithdrawalDestinationType
+    destinationValue: string | null
+    status: WalletOperationStatus
+    errorCode: string | null
+    errorMessage: string | null
+    providerOperationId: null
+    providerStatus: null
+    createdAt: string
+  }
+  eventType: string
+  providerCallsEnabled: false
+  fundMovementEnabled: false
+  nextStep: "MERCHANT_REVIEWS_WITHDRAWAL_DRAFT" | "FIX_VALIDATION_ERRORS"
+  message: string
+}
 
 const VALID_RAILS: WalletOperationRail[] = [
   "bitcoin_lightning",
@@ -67,4 +116,192 @@ export function validateWalletOperationRequest(
     return { valid: false, reason: `Unsupported operation type: ${req.type}` }
   }
   return { valid: true }
+}
+
+function createStatusError(message: string, status: number) {
+  const error = new Error(message) as Error & { status?: number }
+  error.status = status
+  return error
+}
+
+function isLikelyBolt11Invoice(value: string): boolean {
+  const normalized = value.trim().toLowerCase()
+  return /^ln(bc|tb|bcrt)[a-z0-9]{20,}$/i.test(normalized)
+}
+
+function isLikelyBitcoinAddress(value: string): boolean {
+  const normalized = value.trim()
+  return /^(bc1|tb1|[13mn2])[a-zA-HJ-NP-Z0-9]{20,90}$/.test(normalized)
+}
+
+function summarizeOperation(row: WalletOperationRecord): SpeedWithdrawalDraftResult["operation"] {
+  return {
+    id: row.id,
+    provider: "speed",
+    operationType: "WITHDRAWAL_DRAFT",
+    asset: "BTC",
+    network: "bitcoin_lightning",
+    amount: Number(row.amount),
+    destinationType: row.destination_type as SpeedWithdrawalDestinationType,
+    destinationValue: row.destination_value,
+    status: row.status,
+    errorCode: row.error_code,
+    errorMessage: row.error_message,
+    providerOperationId: null,
+    providerStatus: null,
+    createdAt: row.created_at
+  }
+}
+
+async function createSpeedWithdrawalValidationFailure(
+  input: CreateSpeedWithdrawalDraftInput,
+  errorCode: string,
+  errorMessage: string,
+  metadata: Record<string, unknown>
+): Promise<SpeedWithdrawalDraftResult> {
+  const operation = await createWalletOperation({
+    merchantId: input.merchantId,
+    provider: "speed",
+    operationType: "WITHDRAWAL_DRAFT",
+    asset: "BTC",
+    network: "bitcoin_lightning",
+    amount: Number.isFinite(input.amount) ? Math.max(0, input.amount) : 0,
+    destinationType: input.destinationType,
+    destinationValue: input.destinationValue || null,
+    status: "VALIDATION_FAILED",
+    errorCode,
+    errorMessage,
+    metadata: {
+      ...metadata,
+      walletId: input.walletId || null,
+      memo: input.memo || null,
+      providerCallsEnabled: false,
+      fundMovementEnabled: false
+    }
+  })
+
+  await recordWalletOperationEvent({
+    walletOperationId: operation.id,
+    merchantId: input.merchantId,
+    eventType: "wallet.speed_withdrawal.validation_failed",
+    provider: "speed",
+    rawPayload: {
+      errorCode,
+      errorMessage,
+      destinationType: input.destinationType,
+      providerCallsEnabled: false,
+      fundMovementEnabled: false
+    }
+  })
+
+  return {
+    success: false,
+    operation: summarizeOperation(operation),
+    eventType: "wallet.speed_withdrawal.validation_failed",
+    providerCallsEnabled: false,
+    fundMovementEnabled: false,
+    nextStep: "FIX_VALIDATION_ERRORS",
+    message: errorMessage
+  }
+}
+
+export async function createSpeedWithdrawalDraftForMerchant(
+  input: CreateSpeedWithdrawalDraftInput
+): Promise<SpeedWithdrawalDraftResult> {
+  if (!input.merchantId?.trim()) {
+    throw createStatusError("Missing merchant ID", 400)
+  }
+
+  const lightningSetup = await getMerchantLightningSetup(input.merchantId)
+  if (!lightningSetup) {
+    throw createStatusError("Speed provider is not configured for this merchant.", 503)
+  }
+
+  const amount = Number(input.amount)
+  const destinationType = input.destinationType
+  const destinationValue = String(input.destinationValue || "").trim()
+  const memo = String(input.memo || "").trim()
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return createSpeedWithdrawalValidationFailure(
+      { ...input, amount: Number.isFinite(amount) ? amount : 0 },
+      "INVALID_AMOUNT",
+      "Withdrawal amount must be greater than zero.",
+      { validation: "amount" }
+    )
+  }
+
+  if (destinationType === "provider_bank_payout") {
+    return createSpeedWithdrawalValidationFailure(
+      input,
+      "BANK_PAYOUT_NOT_ENABLED",
+      "Speed bank payout support is not enabled yet.",
+      { validation: "destinationType" }
+    )
+  }
+
+  if (destinationType === "lightning_invoice" && !isLikelyBolt11Invoice(destinationValue)) {
+    return createSpeedWithdrawalValidationFailure(
+      input,
+      "INVALID_LIGHTNING_INVOICE",
+      "Destination must look like a BOLT11 Lightning invoice.",
+      { validation: "destinationValue" }
+    )
+  }
+
+  if (destinationType === "bitcoin_address" && !isLikelyBitcoinAddress(destinationValue)) {
+    return createSpeedWithdrawalValidationFailure(
+      input,
+      "INVALID_BITCOIN_ADDRESS",
+      "Destination must look like a Bitcoin address.",
+      { validation: "destinationValue" }
+    )
+  }
+
+  const operation = await createWalletOperation({
+    merchantId: input.merchantId,
+    provider: "speed",
+    operationType: "WITHDRAWAL_DRAFT",
+    asset: "BTC",
+    network: "bitcoin_lightning",
+    amount,
+    destinationType,
+    destinationValue,
+    status: "DRAFT",
+    metadata: {
+      walletId: input.walletId || null,
+      memo: memo || null,
+      speedAccountConfigured: Boolean(lightningSetup.speedAccountId),
+      lightningAddressConfigured: Boolean(lightningSetup.lightningAddress),
+      accountSource: lightningSetup.accountSource,
+      balanceValidation: "not_performed_no_trusted_cached_balance",
+      providerCallsEnabled: false,
+      fundMovementEnabled: false,
+      providerSubmissionEnabled: false
+    }
+  })
+
+  await recordWalletOperationEvent({
+    walletOperationId: operation.id,
+    merchantId: input.merchantId,
+    eventType: "wallet.speed_withdrawal.draft_created",
+    provider: "speed",
+    rawPayload: {
+      destinationType,
+      amount,
+      providerCallsEnabled: false,
+      fundMovementEnabled: false,
+      providerSubmissionEnabled: false
+    }
+  })
+
+  return {
+    success: true,
+    operation: summarizeOperation(operation),
+    eventType: "wallet.speed_withdrawal.draft_created",
+    providerCallsEnabled: false,
+    fundMovementEnabled: false,
+    nextStep: "MERCHANT_REVIEWS_WITHDRAWAL_DRAFT",
+    message: "Withdrawal draft created. Provider submission is disabled until Speed withdrawal endpoints are confirmed."
+  }
 }

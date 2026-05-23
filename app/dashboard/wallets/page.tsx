@@ -48,6 +48,7 @@ type WalletOverviewResponse = {
 type DetailTab = "overview" | "send" | "provider_actions" | "cash_out" | "activity" | "settings"
 
 type SelectedWallet = {
+  id: string
   displayName: string
   rail: "bitcoin_lightning" | "solana" | "base" | "ethereum"
   provider: string
@@ -141,6 +142,34 @@ type OffRampWalletApprovalPreviewResponse = {
   instructionReady?: boolean
   fundMovementEnabled?: boolean
   signablePayload?: null
+  nextStep?: string
+  error?: string
+}
+
+type SpeedWithdrawalDestinationType = "lightning_invoice" | "bitcoin_address" | "provider_bank_payout"
+
+type SpeedWithdrawalDraftResponse = {
+  success?: boolean
+  operation?: {
+    id: string
+    provider: "speed"
+    operationType: "WITHDRAWAL_DRAFT"
+    asset: "BTC"
+    network: "bitcoin_lightning"
+    amount: number
+    destinationType: SpeedWithdrawalDestinationType
+    destinationValue: string | null
+    status: string
+    errorCode: string | null
+    errorMessage: string | null
+    providerOperationId: null
+    providerStatus: null
+    createdAt: string
+  }
+  eventType?: string
+  message?: string
+  providerCallsEnabled?: boolean
+  fundMovementEnabled?: boolean
   nextStep?: string
   error?: string
 }
@@ -388,6 +417,15 @@ export default function WalletsPage() {
   const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
   const [disconnectError, setDisconnectError] = useState<string | null>(null)
+  const [speedWithdrawalAmount, setSpeedWithdrawalAmount] = useState("")
+  const [speedWithdrawalDestinationType, setSpeedWithdrawalDestinationType] =
+    useState<SpeedWithdrawalDestinationType>("lightning_invoice")
+  const [speedWithdrawalDestinationValue, setSpeedWithdrawalDestinationValue] = useState("")
+  const [speedWithdrawalMemo, setSpeedWithdrawalMemo] = useState("")
+  const [speedWithdrawalDraft, setSpeedWithdrawalDraft] = useState<SpeedWithdrawalDraftResponse["operation"] | null>(null)
+  const [speedWithdrawalMessage, setSpeedWithdrawalMessage] = useState<string | null>(null)
+  const [speedWithdrawalError, setSpeedWithdrawalError] = useState<string | null>(null)
+  const [speedWithdrawalLoading, setSpeedWithdrawalLoading] = useState(false)
 
   useEffect(() => {
     loadOverview(false)
@@ -410,6 +448,14 @@ export default function WalletsPage() {
     setDisconnectConfirmOpen(false)
     setDisconnecting(false)
     setDisconnectError(null)
+    setSpeedWithdrawalAmount("")
+    setSpeedWithdrawalDestinationType("lightning_invoice")
+    setSpeedWithdrawalDestinationValue("")
+    setSpeedWithdrawalMemo("")
+    setSpeedWithdrawalDraft(null)
+    setSpeedWithdrawalMessage(null)
+    setSpeedWithdrawalError(null)
+    setSpeedWithdrawalLoading(false)
   }, [selectedWallet])
 
   async function loadOverview(refresh: boolean) {
@@ -691,8 +737,63 @@ export default function WalletsPage() {
     }
   }
 
+  async function createSpeedWithdrawalDraft() {
+    if (!selectedWallet?.isLightning) return
+
+    const amount = Number(speedWithdrawalAmount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setSpeedWithdrawalError("Enter a withdrawal amount greater than zero.")
+      return
+    }
+
+    if (!speedWithdrawalDestinationValue.trim()) {
+      setSpeedWithdrawalError("Enter a destination or invoice.")
+      return
+    }
+
+    setSpeedWithdrawalLoading(true)
+    setSpeedWithdrawalError(null)
+    setSpeedWithdrawalMessage(null)
+    setSpeedWithdrawalDraft(null)
+
+    try {
+      const token = await getMerchantToken()
+      const res = await fetch("/api/wallets/speed/withdrawals/draft", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({
+          walletId: selectedWallet.id,
+          amount,
+          destinationType: speedWithdrawalDestinationType,
+          destinationValue: speedWithdrawalDestinationValue.trim(),
+          memo: speedWithdrawalMemo.trim() || null
+        })
+      })
+      const payload = (await res.json().catch(() => null)) as SpeedWithdrawalDraftResponse | null
+
+      if (!res.ok || !payload?.success || !payload.operation) {
+        throw new Error(payload?.error || payload?.message || "Withdrawal draft could not be created.")
+      }
+
+      setSpeedWithdrawalDraft(payload.operation)
+      setSpeedWithdrawalMessage(
+        payload.message || "Withdrawal draft created. Provider submission remains disabled."
+      )
+    } catch (err) {
+      setSpeedWithdrawalError(err instanceof Error ? err.message : "Withdrawal draft failed")
+    } finally {
+      setSpeedWithdrawalLoading(false)
+    }
+  }
+
   function buildLightningWallet(rail: PaymentRailItem): SelectedWallet {
     return {
+      id: rail.id,
       displayName: "Bitcoin Lightning",
       rail: "bitcoin_lightning",
       provider: "Speed",
@@ -712,6 +813,7 @@ export default function WalletsPage() {
     const rail = normalizeWalletNetwork(w.network)
 
     return {
+      id: w.id,
       displayName: formatProvider(w.provider, w.network),
       rail,
       provider: formatProvider(w.provider, w.network),
@@ -1251,39 +1353,123 @@ export default function WalletsPage() {
                   <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
                     <p className="text-sm font-semibold text-blue-950">Speed Provider Actions</p>
                     <p className="mt-1 text-sm leading-6 text-blue-900/75">
-                      Manage Lightning-specific actions for balances connected through Speed. Withdrawals, payout setup, and provider transfers will appear here once enabled.
+                      Create a draft before any Speed withdrawal flow is enabled. Provider submission stays disabled.
                     </p>
                   </div>
 
                   <div className="grid gap-3 md:grid-cols-2">
-                    <DisabledField label="Amount" value="Coming soon" />
+                    <label className="block rounded-xl border border-gray-100 bg-gray-50/70 p-3.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+                        Amount
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.00000001"
+                        value={speedWithdrawalAmount}
+                        onChange={(event) => {
+                          setSpeedWithdrawalAmount(event.target.value)
+                          setSpeedWithdrawalDraft(null)
+                          setSpeedWithdrawalError(null)
+                          setSpeedWithdrawalMessage(null)
+                        }}
+                        placeholder="0.00000000"
+                        className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-semibold text-gray-800 outline-none placeholder:text-gray-400"
+                      />
+                    </label>
                     <label className="block rounded-xl border border-gray-100 bg-gray-50/70 p-3.5">
                       <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
                         Destination Type
                       </span>
                       <select
-                        disabled
-                        value="Lightning invoice"
-                        className="mt-2 w-full cursor-not-allowed border-0 bg-transparent p-0 text-sm font-semibold text-gray-500 outline-none"
+                        value={speedWithdrawalDestinationType}
+                        onChange={(event) => {
+                          setSpeedWithdrawalDestinationType(event.target.value as SpeedWithdrawalDestinationType)
+                          setSpeedWithdrawalDraft(null)
+                          setSpeedWithdrawalError(null)
+                          setSpeedWithdrawalMessage(null)
+                        }}
+                        className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-semibold text-gray-800 outline-none"
                       >
-                        <option>Lightning invoice</option>
-                        <option>Bitcoin address</option>
-                        <option>Bank payout through provider</option>
+                        <option value="lightning_invoice">Lightning invoice</option>
+                        <option value="bitcoin_address">Bitcoin address</option>
+                        <option value="provider_bank_payout">Bank payout through provider</option>
                       </select>
                     </label>
                   </div>
 
                   <div className="grid gap-3">
-                    <DisabledField label="Destination / Invoice" value="Coming soon" />
-                    <DisabledField label="Memo / Reference Optional" value="Coming soon" />
+                    <label className="block rounded-xl border border-gray-100 bg-gray-50/70 p-3.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+                        Destination / Invoice
+                      </span>
+                      <input
+                        value={speedWithdrawalDestinationValue}
+                        onChange={(event) => {
+                          setSpeedWithdrawalDestinationValue(event.target.value)
+                          setSpeedWithdrawalDraft(null)
+                          setSpeedWithdrawalError(null)
+                          setSpeedWithdrawalMessage(null)
+                        }}
+                        placeholder="Lightning invoice or Bitcoin address"
+                        className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-semibold text-gray-800 outline-none placeholder:text-gray-400"
+                      />
+                    </label>
+                    <label className="block rounded-xl border border-gray-100 bg-gray-50/70 p-3.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+                        Memo / Reference Optional
+                      </span>
+                      <input
+                        value={speedWithdrawalMemo}
+                        onChange={(event) => {
+                          setSpeedWithdrawalMemo(event.target.value)
+                          setSpeedWithdrawalDraft(null)
+                          setSpeedWithdrawalError(null)
+                          setSpeedWithdrawalMessage(null)
+                        }}
+                        placeholder="Optional internal note"
+                        className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-semibold text-gray-800 outline-none placeholder:text-gray-400"
+                      />
+                    </label>
                   </div>
+
+                  {speedWithdrawalError && (
+                    <p className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-sm leading-6 text-red-700">
+                      {speedWithdrawalError}
+                    </p>
+                  )}
+
+                  {speedWithdrawalDraft && (
+                    <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-gray-950">Withdrawal Draft</p>
+                        <NetworkStatusPill label={speedWithdrawalDraft.status} tone="blue" />
+                      </div>
+                      <div className="mt-3 grid gap-2 text-sm text-gray-600 sm:grid-cols-2">
+                        <p>Amount: {speedWithdrawalDraft.amount} BTC</p>
+                        <p>Destination: {speedWithdrawalDraft.destinationType.replace(/_/g, " ")}</p>
+                      </div>
+                      <p className="mt-3 text-xs leading-5 text-gray-500">
+                        {speedWithdrawalMessage || "Provider submission disabled until Speed withdrawal endpoint is confirmed."}
+                      </p>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={createSpeedWithdrawalDraft}
+                    disabled={speedWithdrawalLoading}
+                    className={pineTreePrimaryButton}
+                  >
+                    {speedWithdrawalLoading ? "Creating Draft..." : "Create Withdrawal Draft"}
+                  </button>
 
                   <button
                     type="button"
                     disabled
                     className={pineTreeNeutralDisabledButton}
                   >
-                    Prepare Speed Withdrawal - Coming Soon
+                    Submit Withdrawal - Coming Soon
                   </button>
 
                   <p className="text-center text-[11px] text-gray-500">
@@ -1308,7 +1494,7 @@ export default function WalletsPage() {
 
                       <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
                         <p className="text-sm leading-6 text-gray-600">
-                          Bitcoin Lightning cash-out is separate from Base/Solana off-ramp providers.
+                          Speed bank payout support is not enabled yet. Bitcoin Lightning cash-out is separate from Base/Solana off-ramp providers.
                         </p>
                       </div>
 

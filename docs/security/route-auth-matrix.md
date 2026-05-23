@@ -97,6 +97,7 @@ Auth not yet established when these are called; engine enforces brute-force prot
 | `/api/transactions` | GET, POST | MERCHANT |
 | `/api/wallets/overview` | GET | MERCHANT |
 | `/api/wallets/refresh` | POST | MERCHANT |
+| `/api/wallets/speed/withdrawals/draft` | POST | MERCHANT. Creates Speed withdrawal draft audit records only; no Speed withdrawal API call, Lightning payment, Bitcoin on-chain payment, bank payout, provider operation ID, or fund movement. |
 | `/api/off-ramp/support` | GET | MERCHANT |
 | `/api/off-ramp/sessions` | GET, POST | MERCHANT. POST creates draft audit records only; no provider session or fund movement. |
 | `/api/off-ramp/quote` | POST | MERCHANT. Quote only; no provider transaction, wallet signing, or fund movement. |
