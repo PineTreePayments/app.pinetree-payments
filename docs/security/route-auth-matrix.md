@@ -13,6 +13,7 @@ Audited 2026-05-19. Updated 2026-05-19 (Phase 3D). All routes under `app/api/**/
 | ADMIN | Admin JWT via `requireAdminFromRequest` |
 | CRON | `Authorization: Bearer ${CRON_SECRET}` header |
 | WEBHOOK | Provider HMAC signature (Alchemy / Speed) |
+| PUBLIC_PROVIDER_WEBHOOK | Public provider callback with required provider signature verification |
 | PIN | POS PIN + brute-force protection (issues `pts_` token) |
 | GAP | No auth — needs follow-up |
 
@@ -174,6 +175,7 @@ Auth not yet established when these are called; engine enforces brute-force prot
 | `/api/webhooks/base` | POST | WEBHOOK (Alchemy HMAC `x-alchemy-signature`) | Do not change per Phase 3C constraints |
 | `/api/webhooks/solana` | POST | WEBHOOK (Alchemy HMAC `x-alchemy-signature`) | Do not change per Phase 3C constraints |
 | `/api/webhooks/lightning` | POST | WEBHOOK (Speed HMAC via adapter `verifyWebhook`) | Do not change per Phase 3C constraints |
+| `/api/webhooks/moonpay/off-ramp` | POST | PUBLIC_PROVIDER_WEBHOOK (MoonPay `Moonpay-Signature-V2`) | Off-ramp status intake only; no wallet signing, crypto broadcast, or fund movement. |
 | `/api/webhooks/provider` | POST | WEBHOOK (delegates to `processWebhook` → adapter `verifyWebhook`) | No explicit route-level sig check; security depends on engine |
 | `/api/cron/check-payments` | GET | CRON (`CRON_SECRET` bearer) | Scheduled cron **removed from vercel.json** (Phase 3C). Route kept for manual use. Rejects if `CRON_SECRET` not set. |
 | `/api/cron/update-balances` | GET | CRON (`CRON_SECRET` bearer) | Not scheduled; dev backdoor when no secret set |

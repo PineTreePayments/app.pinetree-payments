@@ -1398,11 +1398,28 @@ export default function WalletsPage() {
                         </div>
 
                         {cashOutDepositPreview && (
-                          <p className="mt-3 rounded-xl border border-gray-100 bg-gray-50/80 p-3 text-sm leading-6 text-gray-600">
-                            {cashOutDepositPreview.instructionReady
-                              ? "Deposit instructions are available for preview."
-                              : "Waiting for MoonPay deposit instructions."}
-                          </p>
+                          <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50/80 p-3 text-sm leading-6 text-gray-600">
+                            <p>
+                              {cashOutDepositPreview.instructionReady
+                                ? "Deposit instructions are available for preview."
+                                : "Waiting for MoonPay deposit instructions."}
+                            </p>
+                            {cashOutDepositPreview.depositAddress && (
+                              <div className="mt-3 space-y-2 rounded-lg border border-gray-200 bg-white/80 p-3 font-mono text-xs text-gray-700">
+                                <p className="break-all">
+                                  Deposit address: {cashOutDepositPreview.depositAddress}
+                                </p>
+                                {cashOutDepositPreview.memo && (
+                                  <p className="break-all">Memo: {cashOutDepositPreview.memo}</p>
+                                )}
+                                {cashOutDepositPreview.destinationTag && (
+                                  <p className="break-all">
+                                    Destination tag: {cashOutDepositPreview.destinationTag}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         )}
 
                         <button
@@ -1452,7 +1469,7 @@ export default function WalletsPage() {
                     disabled
                     className={pineTreeDisabledButton}
                   >
-                    Send Crypto / Wallet Approval - Disabled for Phase 5
+                    Send Crypto / Wallet Approval - Disabled
                   </button>
                 </div>
               )}

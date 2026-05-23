@@ -1,8 +1,11 @@
 import {
   createOffRampSessionDraft,
+  getOffRampSessionByExternalTransactionId,
+  getOffRampSessionByProviderSessionId,
   getOffRampSessionForMerchant,
   listOffRampSessionsForMerchant as listOffRampSessionRowsForMerchant,
   recordOffRampEvent,
+  updateOffRampSessionFromProviderStatus,
   updateOffRampSessionQuote,
   updateOffRampSessionStatus,
   type OffRampSessionRecord
@@ -11,6 +14,7 @@ import { moonPayOffRampAdapter } from "@/providers/offramp"
 import {
   OffRampProviderError,
   type OffRampDepositInstruction,
+  type OffRampProviderWebhookEvent,
   type OffRampProviderQuote,
   type OffRampProviderWidgetUrl
 } from "@/providers/offramp/types"
@@ -132,6 +136,21 @@ export type OffRampWalletApprovalPreview = {
   fundMovementEnabled: false
   signablePayload: null
   nextStep: "WAIT_FOR_MOONPAY_DEPOSIT_INSTRUCTIONS" | "MERCHANT_APPROVES_WALLET_TRANSFER"
+}
+
+export type ProcessOffRampProviderWebhookInput = {
+  provider: OffRampProvider
+  rawBody: string
+  signature?: string | null
+}
+
+export type ProcessOffRampProviderWebhookResult = {
+  processed: boolean
+  matchedSession: boolean
+  sessionId?: string
+  statusUpdate?: OffRampSessionStatus | null
+  providerStatus?: string | null
+  fundMovementEnabled: false
 }
 
 export type OffRampAssetSupportResult = {
@@ -290,6 +309,66 @@ function getDepositPreviewMessage(status: OffRampSessionStatus, instruction: Off
   }
 
   return instruction.message || "Waiting for MoonPay deposit instructions."
+}
+
+function getStringMetadata(metadata: Record<string, unknown>, key: string): string | null {
+  const value = metadata[key]
+  const normalized = String(value ?? "").trim()
+  return normalized || null
+}
+
+function getStoredDepositInstruction(row: OffRampSessionRecord): OffRampDepositInstruction | null {
+  const depositAddress = getStringMetadata(row.metadata, "depositAddress")
+  const instructionReady = row.metadata.depositInstructionReady === true && Boolean(depositAddress)
+  if (!instructionReady) return null
+
+  return {
+    provider: row.provider as OffRampProvider,
+    providerSessionId: row.provider_session_id,
+    externalTransactionId: row.external_transaction_id,
+    network: row.network as OffRampNetwork,
+    asset: row.asset as OffRampAsset,
+    amount: Number(row.crypto_amount || 0),
+    depositAddress,
+    memo: getStringMetadata(row.metadata, "depositMemo"),
+    destinationTag: getStringMetadata(row.metadata, "depositDestinationTag"),
+    expiresAt: getStringMetadata(row.metadata, "depositInstructionExpiresAt"),
+    rawStatus: row.provider_status,
+    instructionReady: true,
+    message: "MoonPay deposit instructions are available for wallet approval preview.",
+    fundMovementEnabled: false
+  }
+}
+
+function providerStatusIndicatesFailure(status: string | null | undefined) {
+  const normalized = String(status || "").toLowerCase()
+  return ["failed", "cancelled", "canceled", "expired", "rejected"].some((needle) =>
+    normalized.includes(needle)
+  )
+}
+
+function providerStatusIndicatesWaitingForCrypto(status: string | null | undefined) {
+  const normalized = String(status || "").toLowerCase()
+  return ["waiting", "deposit", "pending_crypto", "awaiting"].some((needle) =>
+    normalized.includes(needle)
+  )
+}
+
+function providerStatusIndicatesCompleted(status: string | null | undefined) {
+  const normalized = String(status || "").toLowerCase()
+  return ["complete", "completed", "succeeded", "settled"].some((needle) =>
+    normalized.includes(needle)
+  )
+}
+
+function getWebhookStatusUpdate(event: OffRampProviderWebhookEvent): OffRampSessionStatus | null {
+  if (providerStatusIndicatesFailure(event.providerStatus)) return "FAILED"
+  if (event.depositAddress || providerStatusIndicatesWaitingForCrypto(event.providerStatus)) {
+    return "AWAITING_CRYPTO"
+  }
+  if (providerStatusIndicatesCompleted(event.providerStatus)) return "PROCESSING"
+  if (event.providerStatus) return "PROCESSING"
+  return null
 }
 
 export function validateOffRampAssetSupport(input: {
@@ -1038,7 +1117,8 @@ export async function getOffRampDepositInstructionPreviewForMerchant(
   }
 
   const adapter = getProviderAdapter(provider)
-  const instruction = await adapter.getDepositInstructions({
+  const storedInstruction = getStoredDepositInstruction(existing)
+  const instruction = storedInstruction || await adapter.getDepositInstructions({
     sessionId,
     merchantId,
     providerSessionId: existing.provider_session_id,
@@ -1151,6 +1231,168 @@ export async function prepareOffRampWalletApprovalPreviewForMerchant(
     nextStep: approvalReady
       ? "MERCHANT_APPROVES_WALLET_TRANSFER"
       : "WAIT_FOR_MOONPAY_DEPOSIT_INSTRUCTIONS"
+  }
+}
+
+async function findSessionForProviderWebhook(event: OffRampProviderWebhookEvent) {
+  if (event.externalTransactionId) {
+    const byExternalTransactionId = await getOffRampSessionByExternalTransactionId(
+      event.provider,
+      event.externalTransactionId
+    )
+    if (byExternalTransactionId) return byExternalTransactionId
+  }
+
+  if (event.providerSessionId) {
+    const byProviderSessionId = await getOffRampSessionByProviderSessionId(
+      event.provider,
+      event.providerSessionId
+    )
+    if (byProviderSessionId) return byProviderSessionId
+  }
+
+  return null
+}
+
+export async function processOffRampProviderWebhook(
+  input: ProcessOffRampProviderWebhookInput
+): Promise<ProcessOffRampProviderWebhookResult> {
+  const provider = normalizeProvider(input.provider)
+  if (provider !== "moonpay") {
+    throw new Error("Unsupported off-ramp webhook provider.")
+  }
+
+  const adapter = getProviderAdapter(provider)
+  const verified = await adapter.verifyWebhookSignature({
+    payload: input.rawBody,
+    signature: input.signature
+  })
+
+  if (!verified) {
+    throw new Error("Invalid MoonPay webhook signature.")
+  }
+
+  const event = await adapter.normalizeTransactionStatus(input.rawBody)
+  const session = await findSessionForProviderWebhook(event)
+  if (!session) {
+    return {
+      processed: true,
+      matchedSession: false,
+      providerStatus: event.providerStatus || null,
+      fundMovementEnabled: false
+    }
+  }
+
+  const statusUpdate = getWebhookStatusUpdate(event)
+  const depositInstructionReady = Boolean(event.depositAddress)
+  const metadata: Record<string, unknown> = {
+    ...session.metadata,
+    lastWebhookAt: new Date().toISOString(),
+    lastProviderEventType: event.eventType,
+    providerCallsEnabled: true,
+    fundMovementEnabled: false
+  }
+
+  if (event.externalTransactionId && event.externalTransactionId !== session.id) {
+    metadata.externalTransactionId = event.externalTransactionId
+  }
+  if (depositInstructionReady) {
+    metadata.depositInstructionReady = true
+    metadata.depositAddress = event.depositAddress
+    metadata.depositMemo = event.memo || null
+    metadata.depositDestinationTag = event.destinationTag || null
+    metadata.depositInstructionSource = "moonpay_webhook"
+  }
+  if (event.cryptoTxHash) {
+    metadata.providerCryptoTxHashSeen = true
+  }
+  if (event.payoutStatus) {
+    metadata.providerPayoutStatus = event.payoutStatus
+  }
+
+  const updated = await updateOffRampSessionFromProviderStatus({
+    provider,
+    sessionId: session.id,
+    status: statusUpdate || session.status,
+    providerStatus: event.providerStatus || session.provider_status,
+    providerSessionId: event.providerSessionId || undefined,
+    externalTransactionId:
+      event.externalTransactionId && event.externalTransactionId !== session.id
+        ? event.externalTransactionId
+        : undefined,
+    errorCode: providerStatusIndicatesFailure(event.providerStatus) ? "OFF_RAMP_PROVIDER_FAILED" : null,
+    errorMessage: providerStatusIndicatesFailure(event.providerStatus)
+      ? "MoonPay reported the off-ramp transaction failed."
+      : null,
+    metadata
+  })
+
+  await recordOffRampEvent({
+    sessionId: session.id,
+    merchantId: session.merchant_id,
+    eventType: "off_ramp.moonpay.webhook.received",
+    provider,
+    providerEventId: event.providerEventId || null,
+    providerStatus: event.providerStatus || null,
+    rawPayload: {
+      eventType: event.eventType,
+      providerSessionId: event.providerSessionId || null,
+      externalTransactionIdPresent: Boolean(event.externalTransactionId),
+      providerStatus: event.providerStatus || null,
+      depositAddressPresent: Boolean(event.depositAddress),
+      cryptoTxHashPresent: Boolean(event.cryptoTxHash),
+      payoutStatus: event.payoutStatus || null,
+      rawPayloadSafe: event.rawPayloadSafe,
+      providerCallsEnabled: true,
+      fundMovementEnabled: false
+    }
+  })
+
+  await recordOffRampEvent({
+    sessionId: session.id,
+    merchantId: session.merchant_id,
+    eventType: "off_ramp.moonpay.status.updated",
+    provider,
+    providerEventId: event.providerEventId || null,
+    providerStatus: event.providerStatus || null,
+    rawPayload: {
+      previousStatus: session.status,
+      status: updated.status,
+      providerStatus: event.providerStatus || null,
+      completedStatusSuppressed: providerStatusIndicatesCompleted(event.providerStatus),
+      cryptoTxHashColumnUpdated: false,
+      fiatSettledAtUpdated: false,
+      providerCallsEnabled: true,
+      fundMovementEnabled: false
+    }
+  })
+
+  if (depositInstructionReady) {
+    await recordOffRampEvent({
+      sessionId: session.id,
+      merchantId: session.merchant_id,
+      eventType: "off_ramp.deposit_instruction.ready",
+      provider,
+      providerEventId: event.providerEventId || null,
+      providerStatus: event.providerStatus || null,
+      rawPayload: {
+        depositAddressPresent: true,
+        memoPresent: Boolean(event.memo),
+        destinationTagPresent: Boolean(event.destinationTag),
+        signablePayloadCreated: false,
+        providerCallsEnabled: true,
+        fundMovementEnabled: false
+      }
+    })
+  }
+
+  return {
+    processed: true,
+    matchedSession: true,
+    sessionId: session.id,
+    statusUpdate: updated.status,
+    providerStatus: event.providerStatus || null,
+    fundMovementEnabled: false
   }
 }
 

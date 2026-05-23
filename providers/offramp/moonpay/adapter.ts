@@ -16,6 +16,7 @@ import {
   type OffRampProviderQuoteInput,
   type OffRampProviderSessionInput,
   type OffRampProviderSessionPreparation,
+  type OffRampProviderWebhookEvent,
   type OffRampProviderWidgetUrl,
   type OffRampProviderWidgetUrlInput,
   type OffRampSessionStatusInput,
@@ -26,6 +27,11 @@ import {
 function readNumber(value: unknown): number | null {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : null
+}
+
+function readString(value: unknown): string | null {
+  const normalized = String(value ?? "").trim()
+  return normalized || null
 }
 
 function readPath(input: unknown, path: string[]): unknown {
@@ -49,6 +55,85 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {}
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : []
+}
+
+const SECRET_KEY_PATTERN = /(secret|token|authorization|api[-_]?key|signature|password|bearer|webhook)/i
+
+function sanitizePayload(value: unknown, depth = 0): unknown {
+  if (depth > 6) return "[truncated]"
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 50).map((item) => sanitizePayload(item, depth + 1))
+  }
+
+  if (value && typeof value === "object") {
+    const clean: Record<string, unknown> = {}
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      clean[key] = SECRET_KEY_PATTERN.test(key)
+        ? "[redacted]"
+        : sanitizePayload(item, depth + 1)
+    }
+    return clean
+  }
+
+  return value
+}
+
+function safeRecordPayload(value: unknown): Record<string, unknown> {
+  return asRecord(sanitizePayload(value))
+}
+
+function parseMoonPaySignatureHeader(signature: string | null | undefined): {
+  timestamp: string | null
+  signatures: string[]
+} {
+  const header = String(signature || "").trim()
+  if (!header) return { timestamp: null, signatures: [] }
+
+  const values: Record<string, string[]> = {}
+  for (const part of header.split(",")) {
+    const [rawKey, ...rawValue] = part.trim().split("=")
+    const key = rawKey.trim().toLowerCase()
+    const value = rawValue.join("=").trim()
+    if (!key || !value) continue
+    values[key] = [...(values[key] || []), value]
+  }
+
+  const timestamp = values.t?.[0] || values.timestamp?.[0] || null
+  const signatures = [
+    ...(values.s || []),
+    ...(values.v1 || []),
+    ...(values.signature || [])
+  ]
+
+  if (!timestamp && signatures.length === 0 && header) {
+    return { timestamp: null, signatures: [header] }
+  }
+
+  return { timestamp, signatures }
+}
+
+function timingSafeEqualString(left: string, right: string) {
+  const leftBuffer = Buffer.from(left)
+  const rightBuffer = Buffer.from(right)
+  if (leftBuffer.length !== rightBuffer.length) return false
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer)
+}
+
+function normalizeMoonPayCode(code: string | null): {
+  network: OffRampNetwork | null
+  asset: OffRampAsset | null
+} {
+  const normalized = String(code || "").trim().toLowerCase()
+  if (normalized === "sol") return { network: "solana", asset: "SOL" }
+  if (normalized === "usdc_sol") return { network: "solana", asset: "USDC" }
+  if (normalized === "eth_base") return { network: "base", asset: "ETH" }
+  if (normalized === "usdc_base") return { network: "base", asset: "USDC" }
+  return { network: null, asset: null }
 }
 
 function appendIfPresent(url: URL, key: string, value: string | number | null | undefined) {
@@ -262,16 +347,116 @@ export const moonPayOffRampAdapter: OffRampProviderAdapter = {
     )
   },
 
+  async verifyWebhookSignature(input: OffRampWebhookVerifyInput): Promise<boolean> {
+    const config = getMoonPayClientConfig()
+    const webhookSecret = String(config.webhookSecret || "").trim()
+    if (!webhookSecret) {
+      throw new OffRampProviderError(
+        "MoonPay webhook verification requires MOONPAY_WEBHOOK_SECRET.",
+        "OFF_RAMP_PROVIDER_DISABLED",
+        503
+      )
+    }
+
+    const { timestamp, signatures } = parseMoonPaySignatureHeader(input.signature)
+    if (!timestamp || signatures.length === 0) return false
+
+    const signedPayload = `${timestamp}.${input.payload}`
+    const hexDigest = crypto.createHmac("sha256", webhookSecret).update(signedPayload).digest("hex")
+    const base64Digest = crypto.createHmac("sha256", webhookSecret).update(signedPayload).digest("base64")
+
+    return signatures.some((candidate) => {
+      const normalized = String(candidate || "").trim()
+      if (!normalized) return false
+      return timingSafeEqualString(hexDigest, normalized) ||
+        timingSafeEqualString(base64Digest, normalized)
+    })
+  },
+
+  async normalizeTransactionStatus(input: unknown): Promise<OffRampProviderWebhookEvent> {
+    const payload = typeof input === "string"
+      ? JSON.parse(input) as Record<string, unknown>
+      : asRecord(input)
+    const data = asRecord(readPath(payload, ["data"]))
+    const baseCurrency = asRecord(readPath(data, ["baseCurrency"]))
+    const quoteCurrency = asRecord(readPath(data, ["quoteCurrency"]))
+    const depositWallet = asRecord(readPath(data, ["depositWallet"]))
+    const integratedSellDepositInfo = asRecord(readPath(data, ["integratedSellDepositInfo"]))
+    const currencyCode =
+      readString(readPath(baseCurrency, ["code"])) ||
+      readString(readPath(data, ["baseCurrencyCode"]))
+    const normalizedCurrency = normalizeMoonPayCode(currencyCode)
+    const eventType =
+      readString(readPath(payload, ["type"])) ||
+      readString(readPath(payload, ["eventType"])) ||
+      readString(readPath(payload, ["event"])) ||
+      "moonpay.webhook.unknown"
+    const providerEventId =
+      readString(readPath(payload, ["id"])) ||
+      readString(readPath(payload, ["eventId"]))
+    const depositAddress =
+      readString(readPath(depositWallet, ["address"])) ||
+      readString(readPath(depositWallet, ["walletAddress"])) ||
+      readString(readPath(integratedSellDepositInfo, ["depositWalletAddress"])) ||
+      readString(readPath(data, ["depositWalletAddress"]))
+    const memo =
+      readString(readPath(depositWallet, ["memo"])) ||
+      readString(readPath(integratedSellDepositInfo, ["memo"]))
+    const destinationTag =
+      readString(readPath(depositWallet, ["destinationTag"])) ||
+      readString(readPath(depositWallet, ["tag"])) ||
+      readString(readPath(integratedSellDepositInfo, ["destinationTag"]))
+    const payoutStatus =
+      readString(readPath(data, ["payoutStatus"])) ||
+      readString(readPath(data, ["payout", "status"]))
+    const paymentMethods = asArray(readPath(data, ["paymentMethods"]))
+    const paymentMethodStatus = paymentMethods
+      .map((item) => readString(readPath(item, ["status"])))
+      .find(Boolean) || null
+
+    return {
+      provider: "moonpay",
+      eventType,
+      providerEventId,
+      providerSessionId:
+        readString(readPath(data, ["id"])) ||
+        readString(readPath(data, ["transactionId"])),
+      externalTransactionId: readString(readPath(data, ["externalTransactionId"])),
+      providerStatus: readString(readPath(data, ["status"])) || paymentMethodStatus,
+      sessionId: null,
+      network: normalizedCurrency.network,
+      asset: normalizedCurrency.asset,
+      cryptoAmount: readNumber(readPath(data, ["baseCurrencyAmount"])),
+      fiatAmount:
+        readNumber(readPath(data, ["quoteCurrencyAmount"])) ||
+        readNumber(readPath(data, ["fiatAmount"])),
+      cryptoTxHash:
+        readString(readPath(data, ["depositHash"])) ||
+        readString(readPath(data, ["cryptoTxHash"])),
+      depositAddress,
+      memo,
+      destinationTag,
+      payoutStatus,
+      rawPayloadSafe: {
+        ...safeRecordPayload(payload),
+        normalizedQuoteCurrency: readString(readPath(quoteCurrency, ["code"]))
+      },
+      verified: true
+    }
+  },
+
   async verifyWebhook(input: OffRampWebhookVerifyInput): Promise<boolean> {
-    void input
-    return false
+    return this.verifyWebhookSignature(input)
   },
 
   async parseWebhookEvent(input: unknown): Promise<OffRampWebhookEvent> {
+    const normalized = await this.normalizeTransactionStatus(input)
     return {
       provider: "moonpay",
-      eventType: "off_ramp.webhook.unimplemented",
-      rawPayload: asRecord(input)
+      providerEventId: normalized.providerEventId,
+      providerStatus: normalized.providerStatus,
+      eventType: normalized.eventType,
+      rawPayload: normalized.rawPayloadSafe
     }
   }
 }

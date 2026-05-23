@@ -128,6 +128,27 @@ export type OffRampWebhookVerifyInput = {
   signature?: string | null
 }
 
+export type OffRampProviderWebhookEvent = {
+  provider: OffRampProvider
+  eventType: string
+  providerEventId?: string | null
+  providerSessionId?: string | null
+  externalTransactionId?: string | null
+  providerStatus?: string | null
+  sessionId?: string | null
+  network?: OffRampNetwork | null
+  asset?: OffRampAsset | null
+  cryptoAmount?: number | null
+  fiatAmount?: number | null
+  cryptoTxHash?: string | null
+  depositAddress?: string | null
+  memo?: string | null
+  destinationTag?: string | null
+  payoutStatus?: string | null
+  rawPayloadSafe: Record<string, unknown>
+  verified: boolean
+}
+
 export type OffRampWebhookEvent = {
   provider: OffRampProvider
   providerEventId?: string | null
@@ -143,6 +164,8 @@ export type OffRampProviderAdapter = {
   createWidgetUrl(input: OffRampProviderWidgetUrlInput): Promise<OffRampProviderWidgetUrl>
   getDepositInstructions(input: OffRampDepositInstructionInput): Promise<OffRampDepositInstruction>
   getSessionStatus(input: OffRampSessionStatusInput): Promise<OffRampProviderSessionPreparation>
+  verifyWebhookSignature(input: OffRampWebhookVerifyInput): Promise<boolean>
+  normalizeTransactionStatus(input: unknown): Promise<OffRampProviderWebhookEvent>
   verifyWebhook(input: OffRampWebhookVerifyInput): Promise<boolean>
   parseWebhookEvent(input: unknown): Promise<OffRampWebhookEvent>
   supportsAsset(input: { network: OffRampNetwork; asset: OffRampAsset }): boolean

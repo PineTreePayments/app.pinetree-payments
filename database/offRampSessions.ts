@@ -120,6 +120,18 @@ export type RecordOffRampEventInput = {
   rawPayload?: Record<string, unknown>
 }
 
+export type UpdateOffRampSessionFromProviderStatusInput = {
+  provider: string
+  sessionId: string
+  status?: OffRampSessionStatus
+  providerStatus?: string | null
+  providerSessionId?: string | null
+  externalTransactionId?: string | null
+  errorCode?: string | null
+  errorMessage?: string | null
+  metadata?: Record<string, unknown>
+}
+
 function requireValue(value: string, label: string) {
   const normalized = String(value || "").trim()
   if (!normalized) {
@@ -237,6 +249,61 @@ export async function getOffRampSessionForMerchant(
   return data ? normalizeRecord(data as Record<string, unknown>) : null
 }
 
+export async function getOffRampSessionByExternalTransactionId(
+  provider: string,
+  externalTransactionId: string
+): Promise<OffRampSessionRecord | null> {
+  const normalizedProvider = requireValue(provider, "provider")
+  const normalizedExternalTransactionId = requireValue(externalTransactionId, "externalTransactionId")
+
+  const { data, error } = await db
+    .from("off_ramp_sessions")
+    .select("*")
+    .eq("provider", normalizedProvider)
+    .eq("external_transaction_id", normalizedExternalTransactionId)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(`Failed to fetch off-ramp session by external transaction ID: ${error.message}`)
+  }
+
+  if (data) return normalizeRecord(data as Record<string, unknown>)
+
+  const { data: sessionData, error: sessionError } = await db
+    .from("off_ramp_sessions")
+    .select("*")
+    .eq("provider", normalizedProvider)
+    .eq("id", normalizedExternalTransactionId)
+    .maybeSingle()
+
+  if (sessionError) {
+    throw new Error(`Failed to fetch off-ramp session by mapped session ID: ${sessionError.message}`)
+  }
+
+  return sessionData ? normalizeRecord(sessionData as Record<string, unknown>) : null
+}
+
+export async function getOffRampSessionByProviderSessionId(
+  provider: string,
+  providerSessionId: string
+): Promise<OffRampSessionRecord | null> {
+  const normalizedProvider = requireValue(provider, "provider")
+  const normalizedProviderSessionId = requireValue(providerSessionId, "providerSessionId")
+
+  const { data, error } = await db
+    .from("off_ramp_sessions")
+    .select("*")
+    .eq("provider", normalizedProvider)
+    .eq("provider_session_id", normalizedProviderSessionId)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(`Failed to fetch off-ramp session by provider session ID: ${error.message}`)
+  }
+
+  return data ? normalizeRecord(data as Record<string, unknown>) : null
+}
+
 export async function listOffRampSessionsForMerchant(
   merchantId: string,
   options: ListOffRampSessionsOptions = {}
@@ -295,6 +362,61 @@ export async function updateOffRampSessionStatus(
 
   if (error) {
     throw new Error(`Failed to update off-ramp session status: ${error.message}`)
+  }
+
+  return normalizeRecord(data as Record<string, unknown>)
+}
+
+export async function updateOffRampSessionFromProviderStatus(
+  input: UpdateOffRampSessionFromProviderStatusInput
+): Promise<OffRampSessionRecord> {
+  const provider = requireValue(input.provider, "provider")
+  const sessionId = requireValue(input.sessionId, "sessionId")
+
+  const { data: existingData, error: existingError } = await db
+    .from("off_ramp_sessions")
+    .select("*")
+    .eq("provider", provider)
+    .eq("id", sessionId)
+    .maybeSingle()
+
+  if (existingError) {
+    throw new Error(`Failed to fetch off-ramp session for provider status update: ${existingError.message}`)
+  }
+
+  if (!existingData) {
+    throw new Error("Off-ramp session not found for provider status update")
+  }
+
+  const existing = normalizeRecord(existingData as Record<string, unknown>)
+
+  const update: Record<string, unknown> = {
+    updated_at: new Date().toISOString()
+  }
+
+  if (input.status !== undefined) update.status = input.status
+  if (input.providerStatus !== undefined) update.provider_status = input.providerStatus
+  if (input.providerSessionId !== undefined) update.provider_session_id = input.providerSessionId
+  if (input.externalTransactionId !== undefined) update.external_transaction_id = input.externalTransactionId
+  if (input.errorCode !== undefined) update.error_code = input.errorCode
+  if (input.errorMessage !== undefined) update.error_message = input.errorMessage
+  if (input.metadata !== undefined) {
+    update.metadata = {
+      ...existing.metadata,
+      ...input.metadata
+    }
+  }
+
+  const { data, error } = await db
+    .from("off_ramp_sessions")
+    .update(update)
+    .eq("provider", provider)
+    .eq("id", sessionId)
+    .select("*")
+    .single()
+
+  if (error) {
+    throw new Error(`Failed to update off-ramp session from provider status: ${error.message}`)
   }
 
   return normalizeRecord(data as Record<string, unknown>)
