@@ -116,6 +116,10 @@ type WalletConnectProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>
   on?: (event: string, handler: (...args: unknown[]) => void) => void
   removeListener?: (event: string, handler: (...args: unknown[]) => void) => void
+  modal?: {
+    close?: () => unknown
+    closeModal?: () => unknown
+  }
 }
 type SettledWalletConnectSession = {
   provider: WalletConnectProvider
@@ -409,6 +413,30 @@ function getWalletConnectPeerName(provider: WalletConnectProvider): string | nul
   }
   const name = source.session?.peer?.metadata?.name
   return typeof name === "string" && name.trim() ? name.trim() : null
+}
+function closeWalletConnectSelectionModal(provider?: WalletConnectProvider | null): void {
+  try {
+    const modal = provider?.modal
+    if (typeof modal?.close === "function") {
+      modal.close()
+      return
+    }
+    if (typeof modal?.closeModal === "function") {
+      modal.closeModal()
+      return
+    }
+  } catch {
+    // Best-effort only; the payment state machine remains authoritative.
+  }
+
+  try {
+    const modalElement = document.querySelector("w3m-modal, appkit-modal") as unknown as {
+      close?: () => unknown
+    } | null
+    modalElement?.close?.()
+  } catch {
+    // Best-effort only.
+  }
 }
 function tryOpenWalletNativeUri(provider: WalletConnectProvider): void {
   try {
@@ -938,42 +966,51 @@ export default function BaseWalletPayment({
     while (Date.now() - startedAt <= BASE_WC_SETTLE_TIMEOUT_MS) {
       if (paymentSubmittedRef.current) return null
       const activeRequest = activeWalletRequestRef.current
-      if (activeRequest?.pending && activeRequest.kind === "connect") {
-        lastReason = "connection-request-pending"
-      } else {
+      try {
+        const provider = await getWalletConnectProvider(walletConnectConnector)
+        const accounts = await provider.request({ method: "eth_accounts", params: [] })
+        const resolvedAddress = extractAddressFromConnectResult(accounts)
+        let providerChainId: number | null = null
         try {
-          const provider = await getWalletConnectProvider(walletConnectConnector)
-          const accounts = await provider.request({ method: "eth_accounts", params: [] })
-          const resolvedAddress = extractAddressFromConnectResult(accounts)
-          let providerChainId: number | null = null
-          try {
-            const chainIdResult = await provider.request({ method: "eth_chainId", params: [] })
-            providerChainId = Number(BigInt(String(chainIdResult || "0x0")))
-          } catch {
-            providerChainId = null
-          }
-
-          if (/^0x[a-fA-F0-9]{40}$/.test(resolvedAddress) && (!providerChainId || providerChainId === base.id)) {
-            await new Promise<void>((resolve) => setTimeout(resolve, BASE_WC_POST_ACCOUNT_SETTLE_MS))
-            addressRef.current = resolvedAddress
-            if (providerChainId) connectedChainIdRef.current = providerChainId
-            await logBase("walletconnect-connection-settled", {
-              source,
-              hasAddress: true,
-              chainId: providerChainId,
-            })
-            return {
-              provider,
-              address: resolvedAddress,
-              chainId: providerChainId,
-              peerName: getWalletConnectPeerName(provider),
-            }
-          }
-
-          lastReason = resolvedAddress ? "chain-not-ready" : "no-provider-account"
-        } catch (error) {
-          lastReason = extractErrorMessage(error) || "provider-unavailable"
+          const chainIdResult = await provider.request({ method: "eth_chainId", params: [] })
+          providerChainId = Number(BigInt(String(chainIdResult || "0x0")))
+        } catch {
+          providerChainId = null
         }
+
+        if (/^0x[a-fA-F0-9]{40}$/.test(resolvedAddress) && (!providerChainId || providerChainId === base.id)) {
+          await new Promise<void>((resolve) => setTimeout(resolve, BASE_WC_POST_ACCOUNT_SETTLE_MS))
+          addressRef.current = resolvedAddress
+          if (providerChainId) connectedChainIdRef.current = providerChainId
+          if (activeRequest?.pending && activeRequest.kind === "connect") {
+            closeWalletConnectSelectionModal(provider)
+            activeWalletRequestRef.current = null
+            setWalletRequestUiState("request_resolved")
+            setPendingWalletRequestKind(null)
+            setWalletHandoffPending(false)
+            setIsOpeningWallet(false)
+          }
+          await logBase("walletconnect-connection-settled", {
+            source,
+            hasAddress: true,
+            chainId: providerChainId,
+            clearedConnectRequest: activeRequest?.kind === "connect",
+          })
+          return {
+            provider,
+            address: resolvedAddress,
+            chainId: providerChainId,
+            peerName: getWalletConnectPeerName(provider),
+          }
+        }
+
+        lastReason = resolvedAddress
+          ? "chain-not-ready"
+          : activeRequest?.pending && activeRequest.kind === "connect"
+            ? "connection-request-pending"
+            : "no-provider-account"
+      } catch (error) {
+        lastReason = extractErrorMessage(error) || "provider-unavailable"
       }
 
       await logBase("walletconnect-connection-pending", { source, reason: lastReason })
@@ -2547,6 +2584,11 @@ export default function BaseWalletPayment({
           let connectResult: Awaited<ReturnType<typeof connectAsync>>
           try {
             connectResult = await connectPromise
+            try {
+              closeWalletConnectSelectionModal(await getWalletConnectProvider(walletConnectConnector))
+            } catch {
+              closeWalletConnectSelectionModal()
+            }
             resolveWalletRequest()
           } catch (connectErr) {
             const connectMsg = connectErr instanceof Error ? connectErr.message : String(connectErr)
@@ -2559,6 +2601,19 @@ export default function BaseWalletPayment({
               clearPendingBaseWalletConnectPayment()
               setHasPendingBaseWcPayment(false)
               throw connectErr
+            }
+            const settledSession = await waitForWalletConnectSettlement("connect-error-settle")
+            if (settledSession) {
+              setExecStageRef.current("wallet_connected")
+              setConnectedPeerName(settledSession.peerName)
+              console.log("[BASE UI] wallet-connected", { intentId: intentId || null, selectedAsset, source: "connect-error-settle" })
+              void logBase("wc-connect-success-after-error", {
+                hasAddress: true,
+                chainId: settledSession.chainId,
+                selectedAsset,
+              })
+              await continueBasePayment(settledSession.address)
+              return
             }
             activeWalletRequestRef.current = null
             preservePendingWalletRequestUi("connect")
@@ -2646,7 +2701,7 @@ export default function BaseWalletPayment({
         onError?.(friendly)
       }
     })()
-  }, [address, connectAsync, continueBasePayment, enforceActivePaymentBeforeWalletConnect, intentId, isConnected, onError, onExecutionStarted, resetBasePaymentAttemptForRetry, resolvePaymentData, selectedAsset, walletConnectConnector])
+  }, [address, connectAsync, continueBasePayment, enforceActivePaymentBeforeWalletConnect, intentId, isConnected, onError, onExecutionStarted, resetBasePaymentAttemptForRetry, resolvePaymentData, selectedAsset, waitForWalletConnectSettlement, walletConnectConnector])
   const stopAutoResumeRetry = useCallback(() => {
     if (autoResumeRetryRef.current) {
       clearInterval(autoResumeRetryRef.current)
@@ -2674,7 +2729,7 @@ export default function BaseWalletPayment({
   }, [address, intentId, selectedAsset])
   const resumeFromWalletConnectProvider = useCallback(async (source: string) => {
     if (selectedAsset !== "ETH" && selectedAsset !== "USDC") return false
-    if (activeWalletRequestRef.current?.pending) {
+    if (activeWalletRequestRef.current?.pending && activeWalletRequestRef.current.kind !== "connect") {
       await logBase("auto-resume-provider-check-skipped", {
         source,
         reason: "wallet-request-pending",
@@ -2821,7 +2876,7 @@ export default function BaseWalletPayment({
     if (activeBasePaymentAttemptRef.current !== null) return
     if (activeBaseUsdcV4PaymentRef.current !== null) return
     if (activeBaseUsdcV5PaymentRef.current !== null) return
-    if (activeWalletRequestRef.current?.pending) {
+    if (activeWalletRequestRef.current?.pending && activeWalletRequestRef.current.kind !== "connect") {
       void logBase("auto-resume-skipped", {
         source,
         reason: "wallet-request-pending",
@@ -2931,7 +2986,7 @@ export default function BaseWalletPayment({
     if (activeBasePaymentAttemptRef.current !== null) return
     if (activeBaseUsdcV4PaymentRef.current !== null) return
     if (activeBaseUsdcV5PaymentRef.current !== null) return
-    if (activeWalletRequestRef.current?.pending) return
+    if (activeWalletRequestRef.current?.pending && activeWalletRequestRef.current.kind !== "connect") return
     if (sessionSettleTriggerFiredRef.current) return
     sessionSettleTriggerFiredRef.current = true
     // Snapshot the chain ID at session-settle time so continueBasePayment can skip
