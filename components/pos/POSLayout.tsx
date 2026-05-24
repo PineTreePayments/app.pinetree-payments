@@ -341,7 +341,7 @@ export default function POSLayout({ terminalContext }: Props) {
     if (methodsData) {
       setAvailableMethods({
         cash: methodsData.cash ?? true,
-        crypto: methodsData.crypto ?? false,
+        crypto: methodsData.cryptoAvailable === true,
         card: methodsData.card ?? false
       })
     }

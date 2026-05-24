@@ -14,6 +14,7 @@ export type TerminalDisplayData = {
     created_at?: string
   }
   provider: string
+  sessionToken: string
   drawer: {
     balance: number
     active: boolean
@@ -23,9 +24,9 @@ export type TerminalDisplayData = {
 }
 
 /**
- * Returns safe terminal display info for the lock screen.
- * Never includes the PIN or a session token — those are only issued after
- * successful server-side PIN verification via verifyPosTerminalPinEngine.
+ * Returns safe terminal display info for the POS screen.
+ * Never includes the PIN. A scoped terminal session token is returned so the
+ * terminal can call POS APIs without exposing merchant credentials.
  */
 export async function getPosTerminalDisplayEngine(terminalId: string): Promise<TerminalDisplayData> {
   const { data: terminal, error: terminalError } = await db
@@ -46,6 +47,7 @@ export async function getPosTerminalDisplayEngine(terminalId: string): Promise<T
     .maybeSingle()
 
   const drawerState = await getDrawerState(terminal.id)
+  const sessionToken = await signTerminalSession(terminal.merchant_id, terminal.id)
 
   return {
     terminal: {
@@ -57,6 +59,7 @@ export async function getPosTerminalDisplayEngine(terminalId: string): Promise<T
       created_at: terminal.created_at
     },
     provider: wallet?.network || "solana",
+    sessionToken,
     drawer: {
       balance: drawerState.balance,
       active: drawerState.active,

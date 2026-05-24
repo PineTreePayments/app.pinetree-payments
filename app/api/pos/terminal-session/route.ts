@@ -7,9 +7,8 @@ function getErrorMessage(error: unknown, fallback: string) {
 }
 
 /**
- * GET — returns safe terminal display info (name, drawer state, provider).
- * Never returns the terminal PIN or a session token. PIN verification and
- * session-token issuance happen via POST /api/pos/terminal-auth.
+ * GET - returns safe terminal display info (name, drawer state, provider) and
+ * a scoped terminal session token. Never returns the terminal PIN.
  */
 export async function GET(req: NextRequest) {
   try {
@@ -30,7 +29,7 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * POST — PIN recovery: reset the terminal PIN using the recovery phrase.
+ * POST - PIN recovery: reset the terminal PIN using the recovery phrase.
  * Does NOT verify a login PIN or issue a session token.
  */
 export async function POST(req: NextRequest) {

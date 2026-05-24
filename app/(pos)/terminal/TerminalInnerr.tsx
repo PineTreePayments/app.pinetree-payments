@@ -92,9 +92,17 @@ export default function TerminalInner() {
       const drawer = (payload.drawer || null) as DrawerSession | null
       setDrawerSession(drawer)
       setShiftStarted(Boolean(drawer?.active) || Number(terminalData.drawer_starting_amount ?? 0) === 0)
-      // Store the provider for later use when setting terminalContext after PIN verification.
-      // terminalContext (including session token) is set only after successful PIN verification.
-      setPendingProvider(String(payload.provider || "solana"))
+      const provider = String(payload.provider || "solana")
+      setPendingProvider(provider)
+
+      if (payload.sessionToken && terminalData.merchant_id) {
+        setTerminalContext({
+          terminalId: terminalData.id,
+          merchantId: terminalData.merchant_id,
+          provider,
+          sessionToken: String(payload.sessionToken)
+        })
+      }
 
     }
 
