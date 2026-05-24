@@ -19,6 +19,11 @@ function providerToNetworks(provider: string): string[] {
   return getSupportedNetworksForAdapter(provider)
 }
 
+// Providers that store payment addresses in merchant_wallets.
+// Non-wallet providers (e.g. lightning_nwc) must not influence which wallet rows
+// are returned — they have no entry in merchant_wallets.
+const WALLET_BASED_PROVIDERS = new Set(["solana", "base", "coinbase"])
+
 async function getConnectedProviderNetworks(merchantId: string): Promise<Set<string> | null> {
   const { data, error } = await supabase
     .from("merchant_providers")
@@ -27,12 +32,20 @@ async function getConnectedProviderNetworks(merchantId: string): Promise<Set<str
     .in("status", ["connected", "active"])
 
   if (error || !data || data.length === 0) {
-    // No provider records — caller will use merchant_wallets directly
+    return null
+  }
+
+  const walletProviders = (data as Array<{ provider?: string | null }>).filter(
+    (row) => WALLET_BASED_PROVIDERS.has(String(row.provider || "").toLowerCase().trim())
+  )
+
+  if (walletProviders.length === 0) {
+    // No wallet-based providers configured — do not filter merchant_wallets
     return null
   }
 
   const networks = new Set<string>()
-  for (const row of data as Array<{ provider?: string | null }>) {
+  for (const row of walletProviders) {
     for (const n of providerToNetworks(String(row.provider || ""))) {
       networks.add(n)
     }
@@ -131,13 +144,18 @@ export async function getConnectedHostedCheckoutNetworks(merchantId: string): Pr
 
   if (error || !data || data.length === 0) return []
 
-  const hostedCheckoutProviders = new Set(["shift4", "lightning"])
+  // Maps provider key → the WalletNetwork it serves in hosted checkout.
+  const hostedCheckoutProviders: Record<string, string> = {
+    "shift4": "shift4",
+    "lightning_nwc": "bitcoin_lightning"
+  }
   const networks: string[] = []
 
   for (const row of data as Array<{ provider?: string | null }>) {
     const provider = String(row.provider || "").toLowerCase().trim()
-    if (hostedCheckoutProviders.has(provider)) {
-      networks.push(provider)
+    const networkKey = hostedCheckoutProviders[provider]
+    if (networkKey && !networks.includes(networkKey)) {
+      networks.push(networkKey)
     }
   }
 

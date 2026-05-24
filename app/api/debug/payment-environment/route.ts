@@ -142,44 +142,16 @@ export async function GET(req: NextRequest) {
         : baseProbe.reachable ? undefined : "Base payment watcher will fail",
     })
 
-    // ── Speed webhook secret ──────────────────────────────────────────────────
-    const webhookSecret = checkEnv(["SPEED_WEBHOOK_SECRET", "PINETREE_LIGHTNING_WEBHOOK_SECRET"])
+    // ── NWC Lightning treasury ────────────────────────────────────────────────
+    const nwcTreasury = checkEnv(["PINETREE_TREASURY_NWC_URI"])
     checks.push({
-      name: "Lightning Webhook Secret (Speed)",
-      status: webhookSecret.present ? "healthy" : "missing",
+      name: "Lightning Treasury (NWC URI)",
+      status: nwcTreasury.present ? "healthy" : "warning",
       rails: ["lightning"],
-      detail: webhookSecret.present
-        ? `Configured via ${webhookSecret.source}`
-        : "SPEED_WEBHOOK_SECRET not set — all incoming Lightning webhooks will be rejected (401)",
-      fallback: webhookSecret.present ? undefined : "No Lightning payments will ever confirm — webhook is the only confirmation path",
-    })
-
-    // ── Speed provider credentials ────────────────────────────────────────────
-    const speedApiKey = checkEnv(["SPEED_API_KEY", "PINETREE_LIGHTNING_PROVIDER_KEY"])
-    const speedAccountId = checkEnv(["SPEED_PLATFORM_ACCOUNT_ID"])
-    checks.push({
-      name: "Lightning Provider Credentials (Speed API)",
-      status: speedApiKey.present ? "healthy" : "missing",
-      rails: ["lightning"],
-      detail: speedApiKey.present
-        ? `API key configured via ${speedApiKey.source}${speedAccountId.present ? "; platform account ID present" : "; SPEED_PLATFORM_ACCOUNT_ID not set"}`
-        : "SPEED_API_KEY not set — Lightning invoice creation will fail",
-      fallback: speedApiKey.present ? undefined : "Lightning payment creation will fail",
-    })
-
-    // ── Lightning fee capture flags ───────────────────────────────────────────
-    const feeAtPaymentTime = String(process.env.PINETREE_LIGHTNING_SUPPORTS_FEE_AT_PAYMENT_TIME || "").toLowerCase() === "true"
-    const splitSettlement = String(process.env.PINETREE_LIGHTNING_SUPPORTS_SPLIT_SETTLEMENT || "").toLowerCase() === "true"
-    checks.push({
-      name: "Lightning Fee Capture (invoice_split)",
-      status: feeAtPaymentTime && splitSettlement ? "healthy" : "warning",
-      rails: ["lightning"],
-      detail: feeAtPaymentTime && splitSettlement
-        ? "PINETREE_LIGHTNING_SUPPORTS_FEE_AT_PAYMENT_TIME=true + PINETREE_LIGHTNING_SUPPORTS_SPLIT_SETTLEMENT=true"
-        : `Fee capture flags incomplete: FEE_AT_PAYMENT_TIME=${feeAtPaymentTime} SPLIT_SETTLEMENT=${splitSettlement}`,
-      fallback: feeAtPaymentTime && splitSettlement
-        ? undefined
-        : "Lightning adapter will be marked as not supporting invoice_split — Lightning payments disabled",
+      detail: nwcTreasury.present
+        ? `Configured via ${nwcTreasury.source}`
+        : "PINETREE_TREASURY_NWC_URI not set — PineTree fee collection after Lightning payments will be skipped",
+      fallback: nwcTreasury.present ? undefined : "Lightning payments will process but PineTree cannot collect fees",
     })
 
     // ── Supabase ──────────────────────────────────────────────────────────────

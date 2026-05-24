@@ -52,7 +52,9 @@ export async function updatePaymentStatus(
     const feeCaptureMethod = String(split?.feeCaptureMethod || "").trim().toLowerCase()
     const providerSettledFeeCapture =
       feeCaptureMethod === "invoice_split" ||
-      feeCaptureMethod === "collection_then_settle"
+      feeCaptureMethod === "collection_then_settle" ||
+      // NWC collects PineTree fees post-payment via pay_invoice — no split wallet at confirmation time.
+      feeCaptureMethod === "post_payment_nwc"
     const hasRequiredSplitMetadata = providerSettledFeeCapture
       ? Boolean(String(split?.merchantWallet || "").trim())
       : Boolean(

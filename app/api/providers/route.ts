@@ -51,8 +51,7 @@ export async function POST(req: NextRequest) {
         provider: String(body.provider || ""),
         walletAddress: body.walletAddress,
         walletType: body.walletType,
-        apiKey: body.apiKey,
-        lightningAddress: body.lightningAddress
+        apiKey: body.apiKey
       })
     } else {
       return NextResponse.json({ error: "Unknown action" }, { status: 400 })

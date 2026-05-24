@@ -16,11 +16,13 @@ export type FeeCaptureMethod =
   | "direct"
   | "invoice_split"
   | "collection_then_settle"
+  | "post_payment_nwc"
 
 export type ProviderCustodyModel =
   | "provider"
   | "merchant"
   | "noncustodial"
+  | "self_custody"
   | "unknown"
 
 export type ProviderCapabilities = {
@@ -45,10 +47,9 @@ export type LightningInvoiceRequest = {
   merchantWallet?: string
   pinetreeWallet?: string
   providerApiKey?: string
-  merchantLightningAddress?: string
-  speedAccountId?: string
-  lightningPaymentAddressId?: string
   metadata?: Record<string, unknown>
+  nwcUri?: string
+  btcPriceUsd?: number
 }
 
 export type LightningInvoice = {
@@ -58,7 +59,7 @@ export type LightningInvoice = {
   paymentUrl?: string
   qrCodeUrl?: string
   expiresAt?: string
-  feeCaptureMethod: "invoice_split" | "collection_then_settle"
+  feeCaptureMethod: "invoice_split" | "collection_then_settle" | "post_payment_nwc"
   metadata?: Record<string, unknown>
 }
 

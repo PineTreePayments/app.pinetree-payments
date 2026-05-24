@@ -15,10 +15,7 @@ type ProviderCredentials = {
   api_key?: string
   wallet?: string
   wallet_type?: string | null
-  speed_account_id?: string
-  lightning_address?: string
-  payment_address_id?: string
-  lightning_address_verified?: boolean
+  wallet_label?: string
   provider_model?: string
   [key: string]: unknown
 }
@@ -83,14 +80,6 @@ type ProvidersApiResponse = {
   }
   error?: string
 }
-
-const SPEED_LINKS = {
-  signup: "https://app.tryspeed.com/signup",
-  dashboard: "https://app.tryspeed.com",
-  apiKeys: "https://app.tryspeed.com/developer/api-keys",
-  associatedAccounts: "https://app.tryspeed.com/settings/associated-accounts",
-  paymentAddresses: "https://app.tryspeed.com/payment-addresses"
-} as const
 
 function getInjectedSolanaProvider() {
   return window.solana as SolanaProviderLike | undefined
@@ -170,10 +159,17 @@ export default function ProvidersPage() {
   const [wallets, setWallets] = useState<WalletRecord[]>([])
   const [activeProvider, setActiveProvider] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState("")
-  const [lightningSpeedAccountId, setLightningSpeedAccountId] = useState("")
-  const [lightningAddress, setLightningAddress] = useState("")
-  const [lightningPaymentAddressId, setLightningPaymentAddressId] = useState("")
-  const [lightningSetupStep, setLightningSetupStep] = useState<1 | 2 | 3>(1)
+  const [nwcUri, setNwcUri] = useState("")
+  const [nwcWalletLabel, setNwcWalletLabel] = useState("")
+  const [nwcTestResult, setNwcTestResult] = useState<{
+    success: boolean
+    canMakeInvoice?: boolean
+    canPayInvoice?: boolean
+    canLookupInvoice?: boolean
+    walletAlias?: string
+    error?: string
+  } | null>(null)
+  const [nwcTesting, setNwcTesting] = useState(false)
   const [loading, setLoading] = useState(false)
 
   const [smartRouting, setSmartRouting] = useState(false)
@@ -193,10 +189,10 @@ export default function ProvidersPage() {
   const closeProviderModal = useCallback(() => {
     setActiveProvider(null)
     setInputValue("")
-    setLightningSpeedAccountId("")
-    setLightningAddress("")
-    setLightningPaymentAddressId("")
-    setLightningSetupStep(1)
+    setNwcUri("")
+    setNwcWalletLabel("")
+    setNwcTestResult(null)
+    setNwcTesting(false)
     setShowMobileConnect(false)
     setSelectedWalletType(null)
     setWalletSessionId(null)
@@ -647,30 +643,17 @@ export default function ProvidersPage() {
 
     if (provider === "lightning") {
       setInputValue("")
-      setLightningSpeedAccountId(String(p?.credentials?.speed_account_id || ""))
-      setLightningAddress(String(p?.credentials?.lightning_address || ""))
-      setLightningPaymentAddressId(String(p?.credentials?.payment_address_id || ""))
-      setLightningSetupStep(1)
+      setNwcUri("")
+      setNwcWalletLabel("")
+      setNwcTestResult(null)
     } else if (p?.credentials?.api_key) {
       setInputValue(p.credentials.api_key)
-      setLightningSpeedAccountId("")
-      setLightningAddress("")
-      setLightningPaymentAddressId("")
     } else if (p?.credentials?.wallet) {
       setInputValue(p.credentials.wallet)
-      setLightningSpeedAccountId("")
-      setLightningAddress("")
-      setLightningPaymentAddressId("")
     } else if (existingWallet?.wallet_address) {
       setInputValue(existingWallet.wallet_address)
-      setLightningSpeedAccountId("")
-      setLightningAddress("")
-      setLightningPaymentAddressId("")
     } else {
       setInputValue("")
-      setLightningSpeedAccountId("")
-      setLightningAddress("")
-      setLightningPaymentAddressId("")
     }
 
     setShowMobileConnect(false)
@@ -686,6 +669,52 @@ export default function ProvidersPage() {
     }
 
     setActiveProvider(provider)
+  }
+
+  async function testNwcConnection() {
+    const uri = nwcUri.trim()
+    if (!uri) {
+      toast.error("Paste your NWC connection string first")
+      return
+    }
+
+    setNwcTesting(true)
+    setNwcTestResult(null)
+
+    try {
+      const { data: { session: authSession } } = await supabase.auth.getSession()
+      const authToken = authSession?.access_token
+      if (!authToken) {
+        toast.error("Please sign in again")
+        return
+      }
+
+      const res = await fetch("/api/wallets/lightning/test", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ nwcUri: uri })
+      })
+
+      const data = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        setNwcTestResult({ success: false, error: data?.error || "Connection test failed" })
+        return
+      }
+
+      setNwcTestResult({
+        success: true,
+        canMakeInvoice: Boolean(data?.canMakeInvoice),
+        walletAlias: data?.walletAlias || ""
+      })
+    } catch (err) {
+      setNwcTestResult({ success: false, error: err instanceof Error ? err.message : "Test failed" })
+    } finally {
+      setNwcTesting(false)
+    }
   }
 
   async function saveProvider(provider: string) {
@@ -746,36 +775,46 @@ export default function ProvidersPage() {
           return
         }
       } else if (provider === "lightning") {
-        walletAddress = lightningSpeedAccountId.trim()
-        if (!walletAddress) {
-          toast.error("Speed Account ID is required")
+        const uri = nwcUri.trim()
+        if (!uri) {
+          toast.error("NWC connection string is required")
           return
         }
 
-        if (!lightningAddress.trim()) {
-          toast.error("BTC Lightning Address is required (e.g. username@tryspeed.com)")
+        const { data: { session: authSession } } = await supabase.auth.getSession()
+        const authToken = authSession?.access_token
+        if (!authToken) {
+          toast.error("Please sign in again")
           return
         }
 
-        if (!lightningPaymentAddressId.trim()) {
-          toast.error("Payment Address ID is required (e.g. pa_...)")
+        const res = await fetch("/api/wallets/lightning/connect", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ nwcUri: uri, walletLabel: nwcWalletLabel.trim() || "Lightning Wallet" })
+        })
+
+        const data = await res.json().catch(() => null)
+        if (!res.ok) {
+          toast.error(data?.error || "Failed to connect Lightning wallet")
           return
         }
+
+        toast.success("Lightning wallet connected")
+        closeProviderModal()
+        await loadAll()
+        return
       }
 
       const payload = await callProvidersApi("POST", {
         action: "saveProvider",
         provider,
         walletAddress: provider === "solana" || provider === "base" ? walletAddress : undefined,
-        walletType:
-          provider === "solana" || provider === "base"
-            ? walletType
-            : provider === "lightning"
-              ? lightningPaymentAddressId.trim()
-              : undefined,
-        apiKey: provider === "coinbase" || provider === "shift4" ? walletAddress : undefined,
-        lightningAddress: provider === "lightning" ? lightningAddress.trim() : undefined,
-        ...(provider === "lightning" ? { walletAddress } : {})
+        walletType: provider === "solana" || provider === "base" ? walletType : undefined,
+        apiKey: provider === "coinbase" || provider === "shift4" ? walletAddress : undefined
       })
 
       applyProvidersPayload(payload)
@@ -795,10 +834,10 @@ export default function ProvidersPage() {
 
       setActiveProvider(null)
       setInputValue("")
-      setLightningSpeedAccountId("")
-      setLightningAddress("")
-      setLightningPaymentAddressId("")
-      setLightningSetupStep(1)
+      setNwcUri("")
+      setNwcWalletLabel("")
+      setNwcTestResult(null)
+      setNwcTesting(false)
       setShowMobileConnect(false)
       setSelectedWalletType(null)
       setWalletSessionId(null)
@@ -849,7 +888,7 @@ export default function ProvidersPage() {
     }
 
     if (value && provider === "lightning" && getStatus(provider) !== "Connected") {
-      toast.error("Connect Speed before enabling Bitcoin Lightning.")
+      toast.error("Connect a Lightning wallet first.")
       return
     }
 
@@ -923,24 +962,24 @@ export default function ProvidersPage() {
     const p = getProvider(provider)
     const wallet = getWallet(provider)
     const walletValue = p?.credentials?.wallet || wallet?.wallet_address
-    const lightningAccountId = String(p?.credentials?.speed_account_id || "")
+    const lightningWalletLabel = String(p?.credentials?.wallet_label || "")
     const walletType = p?.credentials?.wallet_type || wallet?.wallet_type || wallet?.asset
     const walletLabel = formatWalletLabel(provider, walletType, wallet?.asset || null)
     const connectedCredentialLine = walletValue
       ? provider === "solana" || provider === "base"
         ? `${walletLabel} • ${formatCredentialPart(walletValue, 6, 4)}`
         : `${name} • ${formatCredentialPart(walletValue, 6, 4)}`
-      : provider === "lightning" && lightningAccountId
-        ? `Speed • ${formatCredentialPart(lightningAccountId)}`
+      : provider === "lightning" && lightningWalletLabel
+        ? `Lightning • ${lightningWalletLabel}`
         : ""
     const primaryActionLabel = connected
       ? "Disconnect"
       : provider === "lightning"
-        ? "Set Up"
+        ? "Connect"
         : "Connect"
     const lightningCredentialLine =
-      provider === "lightning" && lightningAccountId
-        ? `Speed • ${formatCredentialPart(lightningAccountId)}`
+      provider === "lightning" && lightningWalletLabel
+        ? `Lightning • ${lightningWalletLabel}`
         : ""
 
     return (
@@ -992,7 +1031,7 @@ export default function ProvidersPage() {
               </span>
               <span
                 className="mt-1 block min-w-0 truncate text-sm font-medium leading-snug text-gray-950"
-                title={`Speed • ${lightningAccountId}`}
+                title={`Lightning • ${lightningWalletLabel}`}
               >
                 {lightningCredentialLine}
               </span>
@@ -1128,7 +1167,7 @@ export default function ProvidersPage() {
           name="Bitcoin Lightning"
           provider="lightning"
           networks="Bitcoin Lightning"
-          settlement="Lightning account"
+          settlement="NWC wallet"
           description="Accept Lightning wallet payments."
         />
       </div>
@@ -1153,7 +1192,7 @@ export default function ProvidersPage() {
                   : activeProvider === "base"
                     ? "Connect Wallet to Base Pay"
                     : activeProvider === "lightning"
-                      ? "Set Up Bitcoin Lightning"
+                      ? "Connect Lightning Wallet"
                     : `Connect ${activeProvider}`}
               </h2>
 
@@ -1168,175 +1207,73 @@ export default function ProvidersPage() {
             </div>
 
             {activeProvider === "lightning" && (
-              <div className="mb-2">
-                <div className="mb-5 grid grid-cols-3 gap-2">
-                  {[1, 2, 3].map((step) => (
-                    <div
-                      key={step}
-                      className={`h-1.5 rounded-full ${
-                        lightningSetupStep >= step ? "bg-blue-600" : "bg-gray-200"
-                      }`}
-                    />
-                  ))}
-                </div>
+              <div className="space-y-4">
+                <p className="text-sm text-gray-600">
+                  Connect any NWC-compatible Lightning wallet (Zeus, Alby, Mutiny, and others).
+                </p>
 
-                <div className="rounded-2xl border border-gray-200 bg-gray-50/80 p-4 shadow-inner sm:p-5">
-                  {lightningSetupStep === 1 && (
-                    <div className="space-y-5">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
-                          Step 1 of 3
-                        </p>
-                        <h3 className="mt-2 text-xl font-semibold leading-tight text-gray-950">
-                          Open Speed
-                        </h3>
-                        <p className="mt-2 text-sm leading-6 text-gray-600">
-                          Create or open your Speed account. Speed handles your Lightning account and verification.
-                        </p>
-                      </div>
+                <label className="block">
+                  <span className="text-sm font-semibold text-gray-900">NWC Connection String</span>
+                  <input
+                    type="password"
+                    value={nwcUri}
+                    onChange={(e) => { setNwcUri(e.target.value); setNwcTestResult(null) }}
+                    placeholder="nostr+walletconnect://..."
+                    className={lightningInputClass()}
+                    autoComplete="off"
+                  />
+                  <span className="mt-1 block text-xs text-gray-500">
+                    Found in your wallet under Nostr Wallet Connect or NWC. Stored securely — never exposed after saving.
+                  </span>
+                </label>
 
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                        <a href={SPEED_LINKS.signup} target="_blank" rel="noopener noreferrer" className={actionButtonClass()}>
-                          Create Speed Account
-                        </a>
-                        <a href={SPEED_LINKS.dashboard} target="_blank" rel="noopener noreferrer" className={actionButtonClass()}>
-                          Open Speed Dashboard
-                        </a>
-                      </div>
+                <label className="block">
+                  <span className="text-sm font-semibold text-gray-900">
+                    Wallet Label <span className="font-normal text-gray-500">(optional)</span>
+                  </span>
+                  <input
+                    value={nwcWalletLabel}
+                    onChange={(e) => setNwcWalletLabel(e.target.value)}
+                    placeholder="e.g. Zeus Wallet"
+                    className={lightningInputClass()}
+                  />
+                </label>
 
-                      <button
-                        onClick={() => setLightningSetupStep(2)}
-                        className={`${primaryButtonClass()} w-full`}
-                      >
-                        I have a Speed account
-                      </button>
+                {nwcTestResult && (
+                  <div className={`rounded-xl border px-4 py-3 text-sm ${nwcTestResult.success ? "border-green-200 bg-green-50 text-green-800" : "border-red-200 bg-red-50 text-red-700"}`}>
+                    {nwcTestResult.success
+                      ? `Connected${nwcTestResult.walletAlias ? ` · ${nwcTestResult.walletAlias}` : ""}${nwcTestResult.canMakeInvoice ? " · Can receive payments" : ""}`
+                      : nwcTestResult.error || "Connection failed"}
+                  </div>
+                )}
 
-                      <button
-                        type="button"
-                        onClick={closeProviderModal}
-                        className={`${secondaryButtonClass()} w-full`}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  )}
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+                  <button
+                    type="button"
+                    onClick={closeProviderModal}
+                    className={`${secondaryButtonClass()} w-full sm:w-auto`}
+                  >
+                    Cancel
+                  </button>
 
-                  {lightningSetupStep === 2 && (
-                    <div className="space-y-5">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
-                          Step 2 of 3
-                        </p>
-                        <h3 className="mt-2 text-xl font-semibold leading-tight text-gray-950">
-                          Copy Account ID
-                        </h3>
-                        <p className="mt-2 text-sm leading-6 text-gray-600">
-                          Open Associated Accounts and copy your Account ID.
-                        </p>
-                      </div>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={testNwcConnection}
+                      disabled={nwcTesting || !nwcUri.trim()}
+                      className={`${secondaryButtonClass()} w-full sm:w-auto`}
+                    >
+                      {nwcTesting ? "Testing..." : "Test Connection"}
+                    </button>
 
-                      <label className="block">
-                        <span className="text-sm font-semibold text-gray-900">Speed Account ID</span>
-                        <input
-                          value={lightningSpeedAccountId}
-                          onChange={(e) => setLightningSpeedAccountId(e.target.value)}
-                          placeholder="Speed Account ID"
-                          className={lightningInputClass()}
-                        />
-                      </label>
-
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <p className="text-xs text-gray-500">Copy the Account ID from your Associated Accounts page.</p>
-                        <a href={SPEED_LINKS.associatedAccounts} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
-                          Open Associated Accounts
-                        </a>
-                      </div>
-
-                      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
-                        <button
-                          onClick={() => setLightningSetupStep(1)}
-                          className={`${secondaryButtonClass()} w-full sm:w-auto`}
-                        >
-                          Back
-                        </button>
-                        <button
-                          onClick={() => setLightningSetupStep(3)}
-                          className={`${primaryButtonClass()} w-full sm:w-auto`}
-                        >
-                          Continue
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {lightningSetupStep === 3 && (
-                    <div className="space-y-5">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
-                          Step 3 of 3
-                        </p>
-                        <h3 className="mt-2 text-xl font-semibold leading-tight text-gray-950">
-                          Create BTC Payment Address
-                        </h3>
-                        <p className="mt-2 text-sm leading-6 text-gray-600">
-                          Create a BTC Payment Address in Speed, then paste the username@tryspeed.com address and Payment Address ID here.
-                        </p>
-                      </div>
-
-                      <div className="space-y-4">
-                        <label className="block">
-                          <span className="text-sm font-semibold text-gray-900">BTC Payment Address</span>
-                          <input
-                            value={lightningAddress}
-                            onChange={(e) => setLightningAddress(e.target.value)}
-                            placeholder="username@tryspeed.com"
-                            className={lightningInputClass()}
-                          />
-                        </label>
-
-                        <label className="block">
-                          <span className="text-sm font-semibold text-gray-900">Payment Address ID</span>
-                          <input
-                            value={lightningPaymentAddressId}
-                            onChange={(e) => setLightningPaymentAddressId(e.target.value)}
-                            placeholder="pa_..."
-                            className={lightningInputClass()}
-                          />
-                        </label>
-                      </div>
-
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <p className="text-xs text-gray-500">Choose BTC, keep tryspeed.com as the domain, enter a username, then create the address. Speed shows both on the Payment Address details page.</p>
-                        <a href={SPEED_LINKS.paymentAddresses} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
-                          Open Payment Addresses
-                        </a>
-                      </div>
-
-                      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
-                        <div className="flex flex-col-reverse gap-2 sm:flex-row">
-                          <button
-                            onClick={closeProviderModal}
-                            className={`${secondaryButtonClass()} w-full sm:w-auto`}
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            onClick={() => setLightningSetupStep(2)}
-                            className={`${secondaryButtonClass()} w-full sm:w-auto`}
-                          >
-                            Back
-                          </button>
-                        </div>
-                        <button
-                          onClick={() => saveProvider("lightning")}
-                          disabled={loading}
-                          className={`${primaryButtonClass()} w-full sm:w-auto`}
-                        >
-                          {loading ? "Verifying..." : "Verify and Enable Bitcoin Lightning"}
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                    <button
+                      onClick={() => saveProvider("lightning")}
+                      disabled={loading || !nwcUri.trim()}
+                      className={`${primaryButtonClass()} w-full sm:w-auto`}
+                    >
+                      {loading ? "Connecting..." : "Connect Wallet"}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

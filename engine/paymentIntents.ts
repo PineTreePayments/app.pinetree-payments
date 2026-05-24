@@ -42,29 +42,9 @@ function uniqueNetworks(networks: WalletNetwork[]) {
   return [...new Set(networks)]
 }
 
-function readPath(input: unknown, path: string[]): unknown {
-  let cursor: unknown = input
-
-  for (const key of path) {
-    if (!cursor || typeof cursor !== "object") return undefined
-    cursor = (cursor as Record<string, unknown>)[key]
-  }
-
-  return cursor
-}
-
-function getLightningEstimatedSats(metadata: unknown): number | undefined {
-  const rawProviderPayment = readPath(metadata, ["lightningProviderMetadata", "speedPayment"])
-  const targetCurrency = String(readPath(rawProviderPayment, ["target_currency"]) || "")
-    .trim()
-    .toUpperCase()
-  const targetAmount = Number(readPath(rawProviderPayment, ["target_amount"]))
-
-  if (targetCurrency !== "SATS" || !Number.isFinite(targetAmount) || targetAmount <= 0) {
-    return undefined
-  }
-
-  return targetAmount
+function getLightningEstimatedSats(_metadata: unknown): number | undefined {
+  // NWC invoices encode the sats amount in the invoice itself — no provider metadata needed.
+  return undefined
 }
 
 type WalletOption = {
@@ -124,6 +104,9 @@ function isProviderAvailableForCheckout(
   network: WalletNetwork,
   enabledProviders: Set<string>
 ): boolean {
+  if (network === "bitcoin_lightning") {
+    return enabledProviders.has("lightning") || enabledProviders.has("lightning_nwc")
+  }
   const providerKey = walletNetworkToProviderKey(network)
   if (!providerKey) return false
   return enabledProviders.has(providerKey)
@@ -192,11 +175,22 @@ export async function getMerchantAvailableNetworks(merchantId: string): Promise<
       .map((p) => String(p.provider || "").toLowerCase().trim())
   )
 
+  // All connected/active provider keys regardless of enabled state — used to
+  // distinguish "row exists but disabled" from "no row at all" in walletNetworks.
+  const allProviderKeys = new Set(
+    providers.map((p) => String(p.provider || "").toLowerCase().trim())
+  )
+
   const walletNetworks = wallets
     .map((w) => normalizeWalletNetwork(w.network))
     .filter((n): n is WalletNetwork => {
       if (!n || !SUPPORTED_NETWORKS.includes(n)) return false
-      return isProviderAvailableForCheckout(n, enabledProviders)
+      const providerKey = walletNetworkToProviderKey(n)
+      if (!providerKey) return false
+      if (enabledProviders.has(providerKey)) return true
+      if (allProviderKeys.has(providerKey)) return false
+      // No provider row for this network — include the wallet for backward compat
+      return true
     })
 
   const hostedCheckoutNetworks = hostedNetworks
@@ -211,13 +205,14 @@ export async function getMerchantAvailableNetworks(merchantId: string): Promise<
     return providers.some((provider) => {
       const providerId = String(provider.provider || "").toLowerCase().trim()
       const metadata = getProviderMetadata(providerId)
+      if (!metadata?.supportedNetworks.includes("bitcoin_lightning")) return false
+      if (!metadata.capabilities?.supportsLightningInvoice) return false
+      if (!isProviderHealthy(providerId)) return false
+      // NWC uses polling and post-payment fee — does not require webhook or atomic fee capture
+      if (providerId === "lightning_nwc") return true
       return Boolean(
-        metadata &&
-        metadata.supportedNetworks.includes("bitcoin_lightning") &&
-        metadata.capabilities?.supportsLightningInvoice &&
         metadata.capabilities?.supportsWebhookConfirmation &&
-        providerSupportsFeeAtPaymentTime(providerId) &&
-        isProviderHealthy(providerId)
+        providerSupportsFeeAtPaymentTime(providerId)
       )
     })
   })

@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@noble/curves": "^2.2.0",
     "@solana-mobile/wallet-adapter-mobile": "^2.2.8",
     "@solana/spl-token": "^0.4.14",
     "@solana/wallet-adapter-base": "^0.9.27",
@@ -35,7 +36,8 @@
     "sonner": "^2.0.7",
     "uuid": "^13.0.0",
     "viem": "^2.48.4",
-    "wagmi": "^3.6.4"
+    "wagmi": "^3.6.4",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -43,6 +45,7 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/ws": "^8.18.1",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "ethers": "^6.16.0",

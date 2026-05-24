@@ -155,7 +155,7 @@ export function classifyQuestionIntent(question: string): PineTreeAssistantInten
     normalized.includes("walletconnect") ||
     normalized.includes("shift4") ||
     normalized.includes("lightning") ||
-    normalized.includes("speed")
+    normalized.includes("nwc")
   ) {
     return "wallet_provider"
   }
@@ -599,7 +599,7 @@ function setupAnswer(): Omit<PineTreeAssistantAnswer, "matchedArticles"> {
     title: "Set up PineTree in four steps",
     body: "Start by creating your merchant account, completing your business profile, connecting at least one supported payment rail, then running a small POS or hosted checkout test before taking real customer payments.",
     bullets: [
-      "Go to Providers and connect the rail you plan to use: Solana Pay, Base payments, Shift4, or Lightning through Speed when available for your account.",
+      "Go to Providers and connect the rail you plan to use: Solana Pay, Base payments, Shift4, or Bitcoin Lightning via NWC.",
       "For wallet rails, save the merchant wallet address PineTree should use for that network.",
       "Create a small POS sale or checkout link and confirm the payment reaches CONFIRMED before going live."
     ]
@@ -609,7 +609,7 @@ function setupAnswer(): Omit<PineTreeAssistantAnswer, "matchedArticles"> {
 function railAnswer(): Omit<PineTreeAssistantAnswer, "matchedArticles"> {
   return {
     title: "Connect a payment rail from Providers",
-    body: "PineTree routes payments through configured rails. Solana Pay and Base use merchant wallet setup, Shift4 uses provider credentials, and Lightning uses Speed account and payment address details when platform support is enabled.",
+    body: "PineTree routes payments through configured rails. Solana Pay and Base use merchant wallet setup, Shift4 uses provider credentials, and Lightning uses an NWC-connected wallet.",
     bullets: [
       "Connected means PineTree has enough configuration to attempt that rail; it does not guarantee every customer payment will succeed.",
       "Run a small test payment after saving provider or wallet details.",

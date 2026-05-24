@@ -133,8 +133,7 @@ function titleForReport(type: ReportType) {
 
 function displayProviderName(provider: string) {
   const normalized = String(provider || "").toLowerCase().trim()
-  if (normalized === "lightning") return "Bitcoin Lightning"
-  if (normalized === "speed") return "Speed"
+  if (normalized === "lightning" || normalized === "lightning_nwc") return "Bitcoin Lightning"
   if (normalized === "solana") return "Solana Pay"
   if (normalized === "base") return "Base Pay"
   if (normalized === "coinbase") return "Coinbase Business"

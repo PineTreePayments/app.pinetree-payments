@@ -19,6 +19,9 @@ const NETWORK_DEFAULT_ADAPTER: Partial<Record<string, PaymentAdapterId>> = {
 
 function adapterMeetsNetworkRequirements(adapterId: PaymentAdapterId, network: string): boolean {
   if (network === "bitcoin_lightning") {
+    // NWC collects PineTree fees post-payment via merchant-authorized pay_invoice.
+    // It deliberately does not capture fees at payment time — that is correct by design.
+    if (adapterId === "lightning_nwc") return true
     return providerSupportsFeeAtPaymentTime(adapterId)
   }
 
@@ -72,7 +75,7 @@ export async function chooseBestAdapter(input: {
       throw new Error(`Requested payment adapter does not support ${network}`)
     }
     if (!adapterMeetsNetworkRequirements(requestedAdapterId, network)) {
-      throw new Error(`Requested payment adapter cannot collect PineTree fees at payment time on ${network}`)
+      throw new Error(`Requested payment adapter does not meet network requirements for ${network}`)
     }
     if (!isProviderHealthy(requestedAdapterId)) {
       throw new Error(`Requested payment adapter is unhealthy: ${requestedAdapterId}`)

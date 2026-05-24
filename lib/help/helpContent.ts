@@ -55,7 +55,7 @@ export const helpArticles: HelpArticle[] = [
     title: "First setup checklist",
     category: "Getting Started",
     description: "A practical checklist before sending a customer through PineTree.",
-    body: "Start by connecting at least one supported provider or wallet. For Solana or Base wallet rails, save the merchant wallet in Providers. For Bitcoin Lightning, complete the Speed account setup fields. For Shift4, add the provider credentials required by your account. Then create a small checkout link or POS test sale and confirm that the payment status updates as expected.\n\nWhat this means: PineTree needs a configured route before it can create a live customer payment.\n\nWhat to check: Confirm provider status, wallet address, supported asset, test amount, payment status, transaction row, and report visibility. Do not rely on a payment method until a small end-to-end test succeeds.",
+    body: "Start by connecting at least one supported provider or wallet. For Solana or Base wallet rails, save the merchant wallet in Providers. For Bitcoin Lightning, connect a compatible NWC Lightning wallet in Providers. For Shift4, add the provider credentials required by your account. Then create a small checkout link or POS test sale and confirm that the payment status updates as expected.\n\nWhat this means: PineTree needs a configured route before it can create a live customer payment.\n\nWhat to check: Confirm provider status, wallet address, supported asset, test amount, payment status, transaction row, and report visibility. Do not rely on a payment method until a small end-to-end test succeeds.",
     tags: ["setup", "test", "providers", "wallets"],
     keywords: ["first setup", "checklist", "test payment"]
   },
@@ -64,7 +64,7 @@ export const helpArticles: HelpArticle[] = [
     title: "Understanding merchants, providers, and wallets",
     category: "Getting Started",
     description: "How the main PineTree account concepts fit together.",
-    body: "A merchant is the account using PineTree. A provider is a supported payment service or rail, such as Solana Pay, Base Pay, Shift4, or Bitcoin Lightning through Speed. A wallet is a merchant-controlled address used by wallet rails like Solana and Base.\n\nWhat this means: Provider setup and wallet setup are related, but they are not the same thing. Some rails use a wallet address. Other rails use provider credentials or provider-hosted payment sessions.\n\nWhat to check: In Providers, review connection state. In Wallets, review visible wallet or payment-account balances. In Transactions, review which provider and network handled a payment.",
+    body: "A merchant is the account using PineTree. A provider is a supported payment service or rail, such as Solana Pay, Base Pay, Shift4, or Bitcoin Lightning via NWC. A wallet is a merchant-controlled address used by wallet rails like Solana and Base.\n\nWhat this means: Provider setup and wallet setup are related, but they are not the same thing. Some rails use a wallet address. Other rails use provider credentials or provider-hosted payment sessions.\n\nWhat to check: In Providers, review connection state. In Wallets, review visible wallet or payment-account balances. In Transactions, review which provider and network handled a payment.",
     tags: ["merchant", "providers", "wallets", "accounts"],
     keywords: ["merchant id", "provider", "wallet address"]
   },
@@ -144,8 +144,8 @@ export const helpArticles: HelpArticle[] = [
     id: "wallet-page-overview",
     title: "Wallet page overview",
     category: "Wallet Connections",
-    description: "The Wallets page summarizes connected wallets and Speed Lightning account balances visible to PineTree.",
-    body: "The Wallets page shows total connected wallet and payment-account value, last sync time, connection count, and individual rows for wallets or payment rails. It includes Solana/Base wallet addresses and Bitcoin Lightning account rows when present.\n\nWhat this means: Wallets is a balance and connection overview. It does not by itself create payments or move funds.\n\nWhat to check: Connected status, shortened address or Speed account ID, native balance, USD value, and last refresh time.",
+    description: "The Wallets page summarizes connected wallets and Lightning wallet connections visible to PineTree.",
+    body: "The Wallets page shows total connected wallet and payment-account value, last sync time, connection count, and individual rows for wallets or payment rails. It includes Solana/Base wallet addresses and Bitcoin Lightning NWC wallet rows when present.\n\nWhat this means: Wallets is a balance and connection overview. It does not by itself create payments or move funds.\n\nWhat to check: Connected status, shortened address or wallet label, native balance, USD value, and last refresh time.",
     tags: ["wallets", "balances", "overview"],
     keywords: ["wallet overview", "refresh balances", "connections"]
   },
@@ -213,13 +213,13 @@ export const helpArticles: HelpArticle[] = [
     keywords: ["card", "fiat", "api key", "redirect"]
   },
   {
-    id: "lightning-speed-provider-status",
-    title: "Bitcoin Lightning and Speed provider status",
+    id: "lightning-nwc-provider-status",
+    title: "Bitcoin Lightning provider status",
     category: "Provider Connections",
-    description: "Lightning setup uses Speed account details and a BTC payment address verification step.",
-    body: "Bitcoin Lightning setup walks through Speed account creation, Speed Account ID entry, BTC Payment Address entry, and Payment Address ID entry. PineTree verifies the Lightning Address format before marking it connected. The Lightning adapter relies on Speed platform configuration and webhook confirmation.\n\nWhat this means: Merchants do not paste a Speed API key into the dashboard. They provide account and payment address details while platform credentials are configured server-side.\n\nWhat to check: Speed Account ID, BTC Payment Address, Payment Address ID, provider status, and whether Lightning support is enabled by platform configuration.",
-    tags: ["lightning", "speed", "bitcoin", "btc"],
-    keywords: ["TrySpeed", "Speed", "Lightning Address", "payment address id"]
+    description: "Lightning setup connects a compatible NWC wallet using a nostr+walletconnect:// connection string.",
+    body: "Bitcoin Lightning setup in PineTree uses NWC (Nostr Wallet Connect). Paste the nostr+walletconnect:// connection string from a compatible wallet app such as Mutiny, Alby, or any NWC-compatible wallet. PineTree tests the connection and saves the wallet label. The connection string is stored server-side only and is never returned to the browser after saving.\n\nWhat this means: Merchants provide a connection string from their own Lightning wallet. PineTree then creates invoices on the merchant wallet and collects the platform fee after payment confirmation.\n\nWhat to check: NWC connection string, wallet label, test result, provider status, and whether invoice creation succeeds in a small test payment.",
+    tags: ["lightning", "nwc", "bitcoin", "btc"],
+    keywords: ["NWC", "nostr walletconnect", "Lightning wallet", "connection string"]
   },
   {
     id: "base-provider-behavior",
@@ -253,9 +253,9 @@ export const helpArticles: HelpArticle[] = [
     title: "What credentials and IDs mean",
     category: "Provider Connections",
     description: "Some provider fields identify accounts or payment addresses; others are secrets and should be treated carefully.",
-    body: "The dashboard may ask for provider-specific values such as a Shift4 API key, Speed Account ID, BTC Payment Address, Payment Address ID, or wallet address. API keys are sensitive. Wallet addresses and account IDs identify where or how PineTree should route payments.\n\nWhat this means: Enter values exactly as shown by the provider. Do not share API keys in support tickets unless PineTree specifically provides a secure process.\n\nWhat to check: Field label, provider dashboard source, copied value, and whether the provider status updates after saving.",
+    body: "The dashboard may ask for provider-specific values such as a Shift4 API key, an NWC connection string, or a wallet address. API keys and connection strings are sensitive. Wallet addresses identify where PineTree should route payments.\n\nWhat this means: Enter values exactly as shown by the provider. Do not share API keys or connection strings in support tickets unless PineTree specifically provides a secure process.\n\nWhat to check: Field label, provider dashboard source, copied value, and whether the provider status updates after saving.",
     tags: ["credentials", "api key", "ids", "security"],
-    keywords: ["Speed Account ID", "Shift4 API key", "wallet address"]
+    keywords: ["NWC connection string", "Shift4 API key", "wallet address"]
   },
   {
     id: "status-created",
@@ -460,7 +460,7 @@ export const helpArticles: HelpArticle[] = [
     title: "Provider not connected",
     category: "Troubleshooting",
     description: "A missing provider connection can prevent a payment method from appearing or being prepared.",
-    body: "If a provider is not connected, PineTree may not show that payment option or may fail to create the payment. Solana and Base need saved wallets. Shift4 needs credentials. Lightning needs Speed setup and platform support.\n\nWhat this means: The checkout experience is driven by configured rails.\n\nWhat to check: Providers page status, enabled toggle, wallet address, credentials, Lightning setup fields, and a small test payment after saving.",
+    body: "If a provider is not connected, PineTree may not show that payment option or may fail to create the payment. Solana and Base need saved wallets. Shift4 needs credentials. Lightning needs an NWC wallet connected.\n\nWhat this means: The checkout experience is driven by configured rails.\n\nWhat to check: Providers page status, enabled toggle, wallet address, credentials, Lightning connection, and a small test payment after saving.",
     tags: ["provider", "not connected", "setup"],
     keywords: ["missing payment method", "provider unavailable"]
   },

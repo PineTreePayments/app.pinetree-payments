@@ -48,12 +48,12 @@ export type WalletOperationEventRecord = {
 
 export type CreateWalletOperationInput = {
   merchantId: string
-  provider: "speed"
-  operationType: "WITHDRAWAL_DRAFT"
-  asset: "BTC"
-  network: "bitcoin_lightning"
+  provider: string
+  operationType: string
+  asset: string
+  network: string
   amount: number
-  destinationType: "lightning_invoice" | "bitcoin_address" | "provider_bank_payout"
+  destinationType: string
   destinationValue?: string | null
   status: WalletOperationStatus
   errorCode?: string | null
@@ -65,7 +65,7 @@ export type RecordWalletOperationEventInput = {
   walletOperationId: string
   merchantId: string
   eventType: string
-  provider?: "speed"
+  provider?: string
   providerEventId?: string | null
   providerStatus?: string | null
   rawPayload?: Record<string, unknown>
@@ -119,7 +119,7 @@ export async function recordWalletOperationEvent(
       wallet_operation_id: input.walletOperationId,
       merchant_id: input.merchantId,
       event_type: input.eventType,
-      provider: input.provider || "speed",
+      provider: input.provider || "unknown",
       provider_event_id: input.providerEventId || null,
       provider_status: input.providerStatus || null,
       raw_payload: input.rawPayload || {}
@@ -136,7 +136,7 @@ export async function recordWalletOperationEvent(
 
 export async function listRecentWalletOperationsForMerchant(
   merchantId: string,
-  options?: { provider?: "speed"; limit?: number }
+  options?: { provider?: string; limit?: number }
 ): Promise<WalletOperationRecord[]> {
   let query = db
     .from("wallet_operations")

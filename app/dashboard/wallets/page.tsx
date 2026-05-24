@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import {
   CompactMetricTile,
@@ -25,44 +25,32 @@ type WalletItem = {
   usdValue: number
 }
 
+type NwcConnectionStatus = {
+  connected: boolean
+  walletLabel: string | null
+  canMakeInvoice: boolean
+  canLookupInvoice: boolean
+  canPayInvoice: boolean
+  canCollectFee: boolean
+  lastTestedAt: string | null
+  connectionError: string | null
+}
+
 type PaymentRailItem = {
   id: string
   type: "bitcoin_lightning"
-  provider: "Speed"
-  status: "Connected"
-  speedAccountId: string
+  provider: "Direct Lightning Wallet"
+  status: "Connected" | "Not Connected" | "Error"
+  walletLabel: string
   assetSymbol: "BTC"
   nativeBalance: number
   usdValue: number
-  speedSetupStatus?: SpeedSetupStatus
-}
-
-type SpeedSetupStatus = {
-  connected: boolean
-  speedAccountId: string | null
-  balanceAvailable: boolean
-  cryptoPayoutsEnabled: false
-  bankPayoutsEnabled: boolean
-  bankPayoutCapabilityVerified: boolean
-  bankPayoutDestinationConfigured: boolean
-  bankPayoutSetupRequiredReason: string
-  dashboardUrlConfigured: boolean
-  dashboardUrl: string | null
-  btcWithdrawUrlConfigured: boolean
-  btcWithdrawUrl: string | null
-  bankWithdrawUrlConfigured: boolean
-  bankWithdrawUrl: string | null
-  bankSetupUrlConfigured: boolean
-  bankSetupUrl: string | null
-  autoConvertUrlConfigured: boolean
-  autoConvertUrl: string | null
-  providerSubmissionEnabled: false
-  notes: string[]
+  nwcConnectionStatus: NwcConnectionStatus | null
 }
 
 type WalletOperationSummary = {
   id: string
-  provider: "speed"
+  provider: string
   operationType: string
   asset: string
   network: string
@@ -78,28 +66,24 @@ type WalletOverviewResponse = {
   success?: boolean
   wallets?: WalletItem[]
   paymentRails?: PaymentRailItem[]
-  recentSpeedOperations?: WalletOperationSummary[]
+  recentOperations?: WalletOperationSummary[]
   totalUsd?: number
   lastRun?: string | null
   error?: string
 }
 
-type DetailTab = "overview" | "send" | "cash_out" | "speed_setup" | "activity" | "settings"
+type DetailTab = "overview" | "send" | "cash_out" | "lightning_wallet" | "activity" | "settings"
 type ActivityFilter = "all" | "completed" | "failed" | "drafts"
-type BankSettlementState =
-  | "ready"
-  | "awaiting_verification"
-  | "merchant_confirmed"
-  | "direct_setup"
-  | "dashboard_setup"
-  | "not_configured"
-type BankSettlementDisplay = {
-  title: "Bank Settlement"
-  status: "Ready" | "Awaiting Verification" | "Merchant Confirmed" | "Needs Setup" | "Not Configured"
-  helper: string
-  action: "Cash Out Funds" | "Refresh Status" | "Set Up Bank Settlement" | "Open Speed Dashboard" | "Contact Support"
+
+type NwcTestResult = {
+  success: boolean
+  connected: boolean
+  canMakeInvoice: boolean
+  canPayInvoice: boolean
+  canCollectFee: boolean
+  walletAlias?: string
+  error?: string
 }
-type SpeedActionId = "btc_withdraw" | "bank_withdraw" | "bank_setup" | "auto_convert"
 
 type SelectedWallet = {
   id: string
@@ -115,7 +99,7 @@ type SelectedWallet = {
   usdValue: number
   decimals: number
   isLightning: boolean
-  speedSetupStatus?: SpeedSetupStatus
+  nwcConnectionStatus?: NwcConnectionStatus | null
 }
 
 type CashOutAssetOption = {
@@ -201,34 +185,6 @@ type OffRampWalletApprovalPreviewResponse = {
   error?: string
 }
 
-type SpeedWithdrawalDestinationType = "lightning_invoice" | "bitcoin_address" | "provider_bank_payout"
-
-type SpeedWithdrawalDraftResponse = {
-  success?: boolean
-  operation?: {
-    id: string
-    provider: "speed"
-    operationType: "WITHDRAWAL_DRAFT"
-    asset: "BTC"
-    network: "bitcoin_lightning"
-    amount: number
-    destinationType: SpeedWithdrawalDestinationType
-    destinationValue: string | null
-    status: string
-    errorCode: string | null
-    errorMessage: string | null
-    providerOperationId: null
-    providerStatus: null
-    createdAt: string
-  }
-  eventType?: string
-  message?: string
-  providerCallsEnabled?: boolean
-  fundMovementEnabled?: boolean
-  nextStep?: string
-  error?: string
-}
-
 type OffRampProviderAvailability = "unavailable" | "pending_approval" | "sandbox" | "production" | "disabled"
 
 type OffRampProviderOption = {
@@ -293,6 +249,9 @@ const pineTreeSecondaryActionButton =
 
 const walletDetailPanelClass = "min-h-[430px] space-y-4"
 
+const albySetupUrl = process.env.NEXT_PUBLIC_ALBY_SETUP_URL || "https://getalby.com"
+const zeusSetupUrl = process.env.NEXT_PUBLIC_ZEUS_SETUP_URL || "https://zeusln.com"
+
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ")
 }
@@ -330,12 +289,6 @@ function formatWalletAddress(address: string) {
   return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`
 }
 
-function formatSpeedAccountId(accountId: string) {
-  const trimmed = accountId.trim()
-  if (trimmed.length <= 16) return trimmed
-  return `${trimmed.slice(0, 8)}...${trimmed.slice(-4)}`
-}
-
 function normalizeWalletNetwork(network: string): SelectedWallet["rail"] {
   const n = String(network || "").toLowerCase().trim()
   if (n === "solana") return "solana"
@@ -370,13 +323,6 @@ function formatCashOutAmount(value: number | null | undefined, currency = "USD")
   return `${currency} ${Number(value).toFixed(2)}`
 }
 
-function formatSpeedDestinationType(value: string) {
-  if (value === "lightning_invoice") return "Lightning invoice"
-  if (value === "bitcoin_address") return "Bitcoin address"
-  if (value === "provider_bank_payout") return "Bank payout"
-  return value.replace(/_/g, " ")
-}
-
 function getOperationGroupLabel(operation: WalletOperationSummary) {
   if (operation.status === "DRAFT") return "Drafts"
   if (operation.status === "VALIDATION_FAILED" || operation.status === "FAILED") return "Needs attention"
@@ -388,152 +334,6 @@ function formatOperationStatusForMerchant(status: string) {
   if (status === "DRAFT") return "Saved"
   if (status === "VALIDATION_FAILED") return "Failed"
   return status
-}
-
-function getBankSettlementKey(status?: SpeedSetupStatus | null) {
-  return status?.speedAccountId ? `speed:${status.speedAccountId}` : null
-}
-
-function getBankSettlementState(
-  status?: SpeedSetupStatus | null,
-  merchantConfirmed = false
-): BankSettlementState {
-  if (status?.bankPayoutsEnabled || (status?.bankPayoutCapabilityVerified && status?.bankPayoutDestinationConfigured)) {
-    return "ready"
-  }
-  if (status?.bankPayoutDestinationConfigured || status?.bankPayoutCapabilityVerified) return "awaiting_verification"
-  if (merchantConfirmed) return "merchant_confirmed"
-  if (status?.bankSetupUrlConfigured && status.bankSetupUrl) return "direct_setup"
-  if (status?.dashboardUrlConfigured && status.dashboardUrl) return "dashboard_setup"
-  return "not_configured"
-}
-
-function getBankSettlementDisplay(state: BankSettlementState): BankSettlementDisplay {
-  if (state === "ready") {
-    return {
-      title: "Bank Settlement",
-      status: "Ready",
-      helper: "Bank payouts are ready.",
-      action: "Cash Out Funds"
-    }
-  }
-  if (state === "awaiting_verification") {
-    return {
-      title: "Bank Settlement",
-      status: "Awaiting Verification",
-      helper: "Provider verification is pending.",
-      action: "Refresh Status"
-    }
-  }
-  if (state === "merchant_confirmed") {
-    return {
-      title: "Bank Settlement",
-      status: "Merchant Confirmed",
-      helper: "Setup completed in Speed; verification is pending.",
-      action: "Refresh Status"
-    }
-  }
-  if (state === "direct_setup") {
-    return {
-      title: "Bank Settlement",
-      status: "Needs Setup",
-      helper: "Open Speed to add or verify a bank account.",
-      action: "Set Up Bank Settlement"
-    }
-  }
-  if (state === "dashboard_setup") {
-    return {
-      title: "Bank Settlement",
-      status: "Needs Setup",
-      helper: "Open Speed to manage payout settings.",
-      action: "Open Speed Dashboard"
-    }
-  }
-  return {
-    title: "Bank Settlement",
-    status: "Not Configured",
-    helper: "No Speed shortcut is configured.",
-    action: "Contact Support"
-  }
-}
-
-function getBankSettlementSetupHeading(state: BankSettlementState) {
-  if (state === "not_configured") return "Setup Path Not Configured"
-  return getBankSettlementDisplay(state).status
-}
-
-function getBankSettlementHelper(state: BankSettlementState) {
-  return getBankSettlementDisplay(state).helper
-}
-
-function getLightningNextAction(input: {
-  bankSettlementState: BankSettlementState
-  hasBalance?: boolean
-  hasActivity?: boolean
-}) {
-  if (input.bankSettlementState === "direct_setup") {
-    return {
-      title: "Set Up Bank Settlement",
-      description: "Connect payout settings to enable bank withdrawals.",
-      action: "Set Up Bank Settlement" as const
-    }
-  }
-
-  if (input.bankSettlementState === "dashboard_setup") {
-    return {
-      title: "Open Speed Dashboard",
-      description: "Go to payout or bank settings inside Speed to finish setup.",
-      action: "Open Speed Dashboard" as const
-    }
-  }
-
-  if (input.bankSettlementState === "awaiting_verification" || input.bankSettlementState === "merchant_confirmed") {
-    return {
-      title: "Refresh Status",
-      description: "PineTree will check whether bank settlement is available from the provider state it can read.",
-      action: "Refresh Status" as const
-    }
-  }
-
-  if (input.bankSettlementState === "not_configured") {
-    return {
-      title: "Contact Support",
-      description: "PineTree does not currently have a configured provider setup path for bank settlement.",
-      action: "Contact Support" as const
-    }
-  }
-
-  if (input.bankSettlementState === "ready" || input.hasBalance) {
-    return {
-      title: "Cash Out Funds",
-      description: "Move available Bitcoin Lightning funds to a Lightning invoice or Bitcoin address.",
-      action: "Cash Out Funds" as const
-    }
-  }
-
-  return {
-    title: input.hasActivity ? "Refresh Balance" : "Configure Auto Convert Later",
-    description: input.hasActivity
-      ? "Refresh the wallet to make sure PineTree is showing the latest Lightning balance."
-      : "Auto Convert is a future treasury workflow. This wallet is ready for Lightning activity today.",
-    action: "Refresh Balance" as const
-  }
-}
-
-function getSpeedActionUrl(status: SpeedSetupStatus | null, action: SpeedActionId) {
-  if (!status) return null
-  if (action === "btc_withdraw") return status.btcWithdrawUrl || status.dashboardUrl
-  if (action === "bank_withdraw") return status.bankWithdrawUrl || status.dashboardUrl
-  if (action === "bank_setup") return status.bankSetupUrl || status.dashboardUrl
-  return status.autoConvertUrl || status.dashboardUrl
-}
-
-function speedActionUsesFallback(status: SpeedSetupStatus | null, action: SpeedActionId) {
-  if (!status?.dashboardUrl) return false
-  if (action === "btc_withdraw") return !status.btcWithdrawUrl
-  if (action === "bank_withdraw") return !status.bankWithdrawUrl
-  if (action === "bank_setup") return !status.bankSetupUrl
-  return !status.autoConvertUrl
 }
 
 function getExplorerUrl(rail: SelectedWallet["rail"], referenceTitle: string): string | null {
@@ -746,7 +546,7 @@ function WalletOperationEmptyState({ compact = false }: { compact?: boolean }) {
 export default function WalletsPage() {
   const [wallets, setWallets] = useState<WalletItem[]>([])
   const [paymentRails, setPaymentRails] = useState<PaymentRailItem[]>([])
-  const [recentSpeedOperations, setRecentSpeedOperations] = useState<WalletOperationSummary[]>([])
+  const [recentOperations, setRecentOperations] = useState<WalletOperationSummary[]>([])
   const [totalBalance, setTotalBalance] = useState(0)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [refreshError, setRefreshError] = useState<string | null>(null)
@@ -773,35 +573,18 @@ export default function WalletsPage() {
   const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
   const [disconnectError, setDisconnectError] = useState<string | null>(null)
-  const [speedWithdrawalAmount, setSpeedWithdrawalAmount] = useState("")
-  const [speedWithdrawalDestinationType, setSpeedWithdrawalDestinationType] =
-    useState<SpeedWithdrawalDestinationType>("lightning_invoice")
-  const [speedWithdrawalDestinationValue, setSpeedWithdrawalDestinationValue] = useState("")
-  const [speedWithdrawalMemo, setSpeedWithdrawalMemo] = useState("")
-  const [speedWithdrawalDraft, setSpeedWithdrawalDraft] = useState<SpeedWithdrawalDraftResponse["operation"] | null>(null)
-  const [speedWithdrawalMessage, setSpeedWithdrawalMessage] = useState<string | null>(null)
-  const [speedWithdrawalError, setSpeedWithdrawalError] = useState<string | null>(null)
-  const [speedWithdrawalLoading, setSpeedWithdrawalLoading] = useState(false)
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all")
-  const [merchantOpenedBankSettlementSetup, setMerchantOpenedBankSettlementSetup] = useState<Record<string, boolean>>({})
-  const [merchantConfirmedBankSettlement, setMerchantConfirmedBankSettlement] = useState<Record<string, boolean>>({})
+  // NWC Lightning wallet connection state
+  const [nwcUri, setNwcUri] = useState("")
+  const [nwcWalletLabel, setNwcWalletLabel] = useState("")
+  const [nwcTestResult, setNwcTestResult] = useState<NwcTestResult | null>(null)
+  const [nwcTestLoading, setNwcTestLoading] = useState(false)
+  const [nwcConnectLoading, setNwcConnectLoading] = useState(false)
+  const [nwcConnectError, setNwcConnectError] = useState<string | null>(null)
+  const [nwcConnectSuccess, setNwcConnectSuccess] = useState<string | null>(null)
+  const nwcInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    try {
-      const opened = window.localStorage.getItem("pinetree.speed.bankSettlementOpened")
-      if (opened) {
-        const parsed = JSON.parse(opened) as Record<string, boolean>
-        setMerchantOpenedBankSettlementSetup(parsed && typeof parsed === "object" ? parsed : {})
-      }
-      const stored = window.localStorage.getItem("pinetree.speed.bankSettlementConfirmed")
-      if (stored) {
-        const parsed = JSON.parse(stored) as Record<string, boolean>
-        setMerchantConfirmedBankSettlement(parsed && typeof parsed === "object" ? parsed : {})
-      }
-    } catch {
-      setMerchantOpenedBankSettlementSetup({})
-      setMerchantConfirmedBankSettlement({})
-    }
     loadOverview(false)
   }, [])
 
@@ -822,15 +605,12 @@ export default function WalletsPage() {
     setDisconnectConfirmOpen(false)
     setDisconnecting(false)
     setDisconnectError(null)
-    setSpeedWithdrawalAmount("")
-    setSpeedWithdrawalDestinationType("lightning_invoice")
-    setSpeedWithdrawalDestinationValue("")
-    setSpeedWithdrawalMemo("")
-    setSpeedWithdrawalDraft(null)
-    setSpeedWithdrawalMessage(null)
-    setSpeedWithdrawalError(null)
-    setSpeedWithdrawalLoading(false)
     setActivityFilter("all")
+    setNwcUri("")
+    setNwcWalletLabel("")
+    setNwcTestResult(null)
+    setNwcConnectError(null)
+    setNwcConnectSuccess(null)
   }, [selectedWallet])
 
   async function loadOverview(refresh: boolean) {
@@ -865,12 +645,16 @@ export default function WalletsPage() {
 
       setWallets(payload?.wallets || [])
       setPaymentRails(payload?.paymentRails || [])
-      setRecentSpeedOperations(payload?.recentSpeedOperations || [])
+      setRecentOperations(payload?.recentOperations || [])
       setTotalBalance(Number(payload?.totalUsd ?? 0) || 0)
       setLastRefreshAt(payload?.lastRun || null)
       setSelectedWallet((current) => {
         if (!current?.isLightning) return current
-        const nextRail = (payload?.paymentRails || []).find((rail) => rail.id === current.id)
+        // Prefer the same rail by ID; fall back to any lightning rail to handle
+        // the placeholder → real-ID transition after a new connection is saved.
+        const nextRail =
+          (payload?.paymentRails || []).find((rail) => rail.id === current.id) ??
+          (payload?.paymentRails || []).find((rail) => rail.type === "bitcoin_lightning")
         return nextRail ? buildLightningWallet(nextRail) : current
       })
     } catch (err) {
@@ -1118,161 +902,112 @@ export default function WalletsPage() {
     }
   }
 
-  async function createSpeedWithdrawalDraft() {
-    if (!selectedWallet?.isLightning) return
-
-    const amount = Number(speedWithdrawalAmount)
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setSpeedWithdrawalError("Enter a withdrawal amount greater than zero.")
+  async function testNwcUri() {
+    const uri = nwcUri.trim()
+    if (!uri) {
+      setNwcConnectError("Paste an NWC connection string first.")
       return
     }
-
-    if (!speedWithdrawalDestinationValue.trim()) {
-      setSpeedWithdrawalError("Enter a destination or invoice.")
-      return
-    }
-
-    setSpeedWithdrawalLoading(true)
-    setSpeedWithdrawalError(null)
-    setSpeedWithdrawalMessage(null)
-    setSpeedWithdrawalDraft(null)
-
+    setNwcTestLoading(true)
+    setNwcTestResult(null)
+    setNwcConnectError(null)
+    setNwcConnectSuccess(null)
     try {
       const token = await getMerchantToken()
-      const res = await fetch("/api/wallets/speed/withdrawals/draft", {
+      const res = await fetch("/api/wallets/lightning/test", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({ nwcUri: uri })
+      })
+      const payload = await res.json().catch(() => null) as NwcTestResult | null
+      if (!res.ok && !payload) throw new Error("Test request failed")
+      setNwcTestResult(payload as NwcTestResult)
+      if (payload?.error) setNwcConnectError(payload.error)
+    } catch (err) {
+      setNwcConnectError(err instanceof Error ? err.message : "Connection test failed")
+    } finally {
+      setNwcTestLoading(false)
+    }
+  }
+
+  async function connectNwcWallet() {
+    const uri = nwcUri.trim()
+    if (!uri) {
+      setNwcConnectError("Paste an NWC connection string first.")
+      return
+    }
+    setNwcConnectLoading(true)
+    setNwcConnectError(null)
+    setNwcConnectSuccess(null)
+    try {
+      const token = await getMerchantToken()
+      const res = await fetch("/api/wallets/lightning/connect", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         credentials: "include",
         cache: "no-store",
         body: JSON.stringify({
-          walletId: selectedWallet.id,
-          amount,
-          destinationType: speedWithdrawalDestinationType,
-          destinationValue: speedWithdrawalDestinationValue.trim(),
-          memo: speedWithdrawalMemo.trim() || null
+          action: "connect",
+          nwcUri: uri,
+          walletLabel: nwcWalletLabel.trim() || "Lightning Wallet"
         })
       })
-      const payload = (await res.json().catch(() => null)) as SpeedWithdrawalDraftResponse | null
-
-      if (!res.ok || !payload?.success || !payload.operation) {
-        throw new Error(payload?.error || "Cash-out request could not be saved.")
-      }
-
-      setSpeedWithdrawalDraft(payload.operation)
-      setSpeedWithdrawalMessage(
-        "Your cash-out request has been saved for review."
-      )
+      const payload = await res.json().catch(() => null) as { success?: boolean; error?: string; message?: string } | null
+      if (!res.ok || !payload?.success) throw new Error(payload?.error || "Connection failed")
+      setNwcConnectSuccess(payload?.message || "Lightning wallet connected.")
+      setNwcUri("")
+      setNwcTestResult(null)
       await loadOverview(false)
     } catch (err) {
-      setSpeedWithdrawalError(err instanceof Error ? err.message : "Cash-out preview failed")
+      setNwcConnectError(err instanceof Error ? err.message : "Connection failed")
     } finally {
-      setSpeedWithdrawalLoading(false)
+      setNwcConnectLoading(false)
     }
   }
 
-  async function openSpeedDashboard() {
-    if (!selectedWallet?.speedSetupStatus?.dashboardUrl) return
-
+  async function disconnectNwcWallet() {
+    setDisconnecting(true)
+    setDisconnectError(null)
     try {
       const token = await getMerchantToken()
-      const res = await fetch("/api/wallets/speed/dashboard", {
-        headers: {
-          Authorization: `Bearer ${token}`
-        },
+      const res = await fetch("/api/wallets/lightning/connect", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         credentials: "include",
         cache: "no-store",
-        redirect: "manual"
+        body: JSON.stringify({ action: "disconnect" })
       })
-
-      if (!res.ok && res.type !== "opaqueredirect") {
-        const payload = (await res.json().catch(() => null)) as { error?: string } | null
-        throw new Error(payload?.error || "Speed dashboard is not available.")
-      }
-
-      markSpeedBankSetupOpened()
-      window.open(selectedWallet.speedSetupStatus.dashboardUrl, "_blank", "noopener,noreferrer")
+      const payload = await res.json().catch(() => null) as { success?: boolean; error?: string } | null
+      if (!res.ok || !payload?.success) throw new Error(payload?.error || "Disconnect failed")
+      setSelectedWallet(null)
+      setDisconnectConfirmOpen(false)
+      await loadOverview(true)
     } catch (err) {
-      setRefreshError(err instanceof Error ? err.message : "Speed dashboard is not available.")
+      setDisconnectError(err instanceof Error ? err.message : "Disconnect failed")
+    } finally {
+      setDisconnecting(false)
     }
-  }
-
-  function openSpeedBankSetup() {
-    const bankSetupUrl = selectedWallet?.speedSetupStatus?.bankSetupUrl
-    if (bankSetupUrl) {
-      markSpeedBankSetupOpened()
-      window.open(bankSetupUrl, "_blank", "noopener,noreferrer")
-    }
-  }
-
-  function markSpeedBankSetupOpened() {
-    const key = getBankSettlementKey(selectedWallet?.speedSetupStatus)
-    if (!key) return
-
-    setMerchantOpenedBankSettlementSetup((current) => {
-      const next = { ...current, [key]: true }
-      try {
-        window.localStorage.setItem("pinetree.speed.bankSettlementOpened", JSON.stringify(next))
-      } catch {
-        // Local storage can be unavailable in private or restricted browser contexts.
-      }
-      return next
-    })
-  }
-
-  function markSpeedBankSetupCompleted() {
-    const key = getBankSettlementKey(selectedWallet?.speedSetupStatus)
-    if (!key) return
-
-    markSpeedBankSetupOpened()
-    setMerchantConfirmedBankSettlement((current) => {
-      const next = { ...current, [key]: true }
-      try {
-        window.localStorage.setItem("pinetree.speed.bankSettlementConfirmed", JSON.stringify(next))
-      } catch {
-        // Local storage can be unavailable in private or restricted browser contexts.
-      }
-      return next
-    })
-  }
-
-  function openSupportTicket() {
-    window.location.href = "/dashboard/help#support-ticket"
-  }
-
-  function openSpeedAction(action: SpeedActionId) {
-    const status = selectedWallet?.speedSetupStatus || null
-    const url = getSpeedActionUrl(status, action)
-    if (!url) {
-      setRefreshError("Speed dashboard URL is not configured.")
-      return
-    }
-
-    if (action === "bank_setup" || action === "bank_withdraw") {
-      markSpeedBankSetupOpened()
-    }
-
-    window.open(url, "_blank", "noopener,noreferrer")
   }
 
   function buildLightningWallet(rail: PaymentRailItem): SelectedWallet {
+    const label = rail.walletLabel || "Lightning Wallet"
     return {
       id: rail.id,
-      displayName: "Bitcoin Lightning",
+      displayName: label,
       rail: "bitcoin_lightning",
-      provider: "Speed",
+      provider: rail.provider,
       networkLabel: "Bitcoin Lightning",
-      reference: formatSpeedAccountId(rail.speedAccountId),
-      referenceTitle: rail.speedAccountId,
-      referenceLabel: "Account Reference",
+      reference: label,
+      referenceTitle: label,
+      referenceLabel: "Wallet",
       assetSymbol: "BTC",
       nativeBalance: rail.nativeBalance,
       usdValue: rail.usdValue,
       decimals: 8,
       isLightning: true,
-      speedSetupStatus: rail.speedSetupStatus
+      nwcConnectionStatus: rail.nwcConnectionStatus
     }
   }
 
@@ -1298,10 +1033,10 @@ export default function WalletsPage() {
 
   const balancedRails = paymentRails.filter(
     (rail) =>
-      Boolean(rail.speedAccountId) &&
+      Boolean(rail.nwcConnectionStatus?.connected) &&
       (Number(rail.nativeBalance ?? 0) > 0 || Number(rail.usdValue ?? 0) > 0)
   )
-  const totalConnections = wallets.length + balancedRails.length
+  const totalConnections = wallets.length + paymentRails.length
   const walletInsights = [
     totalConnections > 0
       ? `${totalConnections} connected ${totalConnections === 1 ? "wallet or payment account is" : "wallets and payment accounts are"} included in this balance view.`
@@ -1314,12 +1049,12 @@ export default function WalletsPage() {
   const connectionRows = useMemo(() => [
     ...paymentRails.map((rail) => ({
       id: rail.id,
-      name: "Bitcoin Lightning",
+      name: rail.walletLabel || "Bitcoin Lightning",
       provider: formatDashboardProvider(rail.provider),
       network: "Bitcoin Lightning",
-      reference: formatSpeedAccountId(rail.speedAccountId),
-      referenceTitle: rail.speedAccountId,
-      status: rail.speedAccountId ? "Connected" : "Not Connected",
+      reference: rail.walletLabel || "—",
+      referenceTitle: rail.walletLabel || "",
+      status: rail.nwcConnectionStatus?.connected ? "Connected" : "Not Connected",
       balance: `${Number(rail.nativeBalance ?? 0).toFixed(8)} ${rail.assetSymbol}`,
       usdValue: `$${Number(rail.usdValue ?? 0).toFixed(2)} USD`
     })),
@@ -1341,33 +1076,15 @@ export default function WalletsPage() {
     : null
   const cashOutAssetOptions = getCashOutAssetOptions(selectedWallet)
   const cashOutUnavailable = selectedWallet?.isLightning || cashOutAssetOptions.length === 0
-  const speedSetupStatus = selectedWallet?.speedSetupStatus || null
-  const speedActivity = recentSpeedOperations.filter((operation) => operation.provider === "speed")
-  const latestSpeedActivity = speedActivity[0] || null
-  const bankSettlementKey = getBankSettlementKey(speedSetupStatus)
-  const bankSettlementSetupOpened = Boolean(bankSettlementKey && merchantOpenedBankSettlementSetup[bankSettlementKey])
-  const bankSettlementMerchantConfirmed = Boolean(bankSettlementKey && merchantConfirmedBankSettlement[bankSettlementKey])
-  const bankSettlementProviderVerified = Boolean(
-    speedSetupStatus?.bankPayoutsEnabled ||
-    (speedSetupStatus?.bankPayoutCapabilityVerified && speedSetupStatus?.bankPayoutDestinationConfigured)
-  )
-  const bankSettlementState = getBankSettlementState(speedSetupStatus, bankSettlementMerchantConfirmed)
-  const bankSettlementDisplay = {
-    ...getBankSettlementDisplay(bankSettlementState),
-    helper: getBankSettlementHelper(bankSettlementState)
-  }
-  const lightningNextAction = getLightningNextAction({
-    bankSettlementState,
-    hasBalance: Number(selectedWallet?.nativeBalance || 0) > 0,
-    hasActivity: Boolean(latestSpeedActivity)
-  })
-  const filteredSpeedActivity = speedActivity.filter((operation) => {
+  const nwcStatus = selectedWallet?.nwcConnectionStatus || null
+  const lightningActivity = recentOperations
+  const filteredLightningActivity = lightningActivity.filter((operation) => {
     if (activityFilter === "completed") return operation.status === "COMPLETED"
     if (activityFilter === "failed") return operation.status === "FAILED" || operation.status === "VALIDATION_FAILED"
     if (activityFilter === "drafts") return operation.status === "DRAFT"
     return true
   })
-  const activityGroups = filteredSpeedActivity.reduce(
+  const activityGroups = filteredLightningActivity.reduce(
     (groups, operation) => {
       const label = getOperationGroupLabel(operation)
       groups[label] = [...(groups[label] || []), operation]
@@ -1380,8 +1097,7 @@ export default function WalletsPage() {
   const detailTabs: Array<{ id: DetailTab; label: string }> = selectedWallet?.isLightning
     ? [
       { id: "overview", label: "Overview" },
-      { id: "cash_out", label: "Cash Out" },
-      { id: "speed_setup", label: "Provider Setup" },
+      { id: "lightning_wallet", label: "Manage Wallet" },
       { id: "activity", label: "Activity" }
     ]
     : [
@@ -1476,33 +1192,48 @@ export default function WalletsPage() {
 
           {paymentRails.map((rail) => {
             const wallet = buildLightningWallet(rail)
+            const nwcConnected = Boolean(rail.nwcConnectionStatus?.connected)
 
             return (
               <button
                 key={rail.id}
                 type="button"
-                onClick={() => openWalletDetail(wallet)}
+                onClick={() => openWalletDetail(wallet, "lightning_wallet")}
                 className="group flex min-h-[156px] flex-col justify-between rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_18px_50px_rgba(15,23,42,0.10)] focus:outline-none focus:ring-4 focus:ring-blue-100 sm:p-5"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-base font-semibold text-gray-950">Bitcoin Lightning</p>
+                    <p className="text-base font-semibold text-gray-950">
+                      {rail.walletLabel || "Bitcoin Lightning"}
+                    </p>
                     <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
-                      <NetworkStatusPill label="Speed" tone="slate" className="min-h-6 px-2 text-[10px]" />
+                      <NetworkStatusPill label="Direct Lightning" tone="slate" className="min-h-6 px-2 text-[10px]" />
                       <NetworkStatusPill label="Bitcoin Lightning" tone="slate" className="min-h-6 px-2 text-[10px]" />
                     </div>
                   </div>
                   <NetworkStatusPill
-                    label={rail.speedAccountId ? "Connected" : "Not Connected"}
-                    tone={rail.speedAccountId ? "blue" : "slate"}
+                    label={nwcConnected ? "Connected" : "Not Connected"}
+                    tone={nwcConnected ? "blue" : "slate"}
                     className="shrink-0"
                   />
                 </div>
 
                 <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-                  <p className="min-w-0 truncate font-mono text-xs text-gray-500" title={rail.speedAccountId}>
-                    {formatSpeedAccountId(rail.speedAccountId)}
-                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {nwcConnected && rail.nwcConnectionStatus?.canMakeInvoice && (
+                      <span className="rounded-full border border-[#0052FF]/15 bg-[#0052FF]/5 px-2 py-0.5 text-[10px] font-semibold text-[#0052FF]">
+                        Receive
+                      </span>
+                    )}
+                    {nwcConnected && rail.nwcConnectionStatus?.canCollectFee && (
+                      <span className="rounded-full border border-[#0052FF]/15 bg-[#0052FF]/5 px-2 py-0.5 text-[10px] font-semibold text-[#0052FF]">
+                        Auto-fee
+                      </span>
+                    )}
+                    {!nwcConnected && (
+                      <span className="text-xs text-gray-400">Tap to connect a wallet</span>
+                    )}
+                  </div>
                   <div className="text-left sm:text-right">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-500">Balance</p>
                     <p className="mt-1 text-lg font-semibold text-gray-950">
@@ -1515,7 +1246,7 @@ export default function WalletsPage() {
                 </div>
 
                 <span className="mt-4 text-xs font-semibold text-blue-700 opacity-80 transition group-hover:opacity-100">
-                  Manage
+                  {nwcConnected ? "Manage" : "Connect Wallet"}
                 </span>
               </button>
             )
@@ -1764,28 +1495,28 @@ export default function WalletsPage() {
                     <>
                       <div className="grid grid-cols-2 gap-2 sm:gap-3">
                         <StatTile
-                          label="Balance"
-                          value={`${Number(selectedWallet.nativeBalance ?? 0).toFixed(selectedWallet.decimals)} ${selectedWallet.assetSymbol}`}
-                          helper={`$${Number(selectedWallet.usdValue ?? 0).toFixed(2)} USD`}
-                          tone="blue"
+                          label="Wallet"
+                          value={nwcStatus?.walletLabel || "Not Connected"}
+                          helper={nwcStatus?.connected ? "NWC wallet connected" : "Connect a wallet to accept Lightning payments"}
+                          tone={nwcStatus?.connected ? "blue" : "slate"}
                         />
                         <StatTile
-                          label="Cash Out"
-                          value="Available"
-                          helper="Open Speed"
-                          tone="blue"
+                          label="Invoice Creation"
+                          value={nwcStatus?.canMakeInvoice ? "Supported" : nwcStatus?.connected ? "Not Supported" : "—"}
+                          helper="Required to accept Lightning payments from customers"
+                          tone={nwcStatus?.canMakeInvoice ? "blue" : "slate"}
                         />
                         <StatTile
-                          label="Bank Setup Status"
-                          value={bankSettlementDisplay.status}
-                          helper={bankSettlementDisplay.helper}
-                          tone={bankSettlementState === "ready" ? "blue" : bankSettlementState === "not_configured" ? "amber" : "slate"}
+                          label="Fee Collection"
+                          value={nwcStatus?.canCollectFee ? "Automatic" : nwcStatus?.connected ? "Manual" : "—"}
+                          helper={nwcStatus?.canCollectFee ? "$0.15 fee auto-collected post-payment" : "Wallet needs pay_invoice for auto-fee"}
+                          tone={nwcStatus?.canCollectFee ? "blue" : "amber"}
                         />
                         <StatTile
                           label="Last Sync"
                           value={lastRefreshAt ? formatChicagoDateTime(lastRefreshAt) : "Not available"}
-                          helper={speedSetupStatus?.balanceAvailable ? "Sync active" : "Refresh to check"}
-                          tone={speedSetupStatus?.balanceAvailable ? "blue" : "amber"}
+                          helper="Refresh to update wallet status"
+                          tone="slate"
                         />
                       </div>
                     </>
@@ -1885,37 +1616,12 @@ export default function WalletsPage() {
               {activeTab === "cash_out" && (
                 <div className={walletDetailPanelClass}>
                   {selectedWallet.isLightning ? (
-                    <>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <button
-                          type="button"
-                          onClick={() => openSpeedAction("btc_withdraw")}
-                          className={cx(pineTreePrimaryButton, "min-h-12 w-full")}
-                        >
-                          Withdraw BTC
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openSpeedAction("bank_withdraw")}
-                          className={cx(pineTreePrimaryButton, "min-h-12 w-full")}
-                        >
-                          Withdraw Cash
-                        </button>
-                      </div>
-
-                      {bankSettlementState !== "ready" && (
-                        <div className="rounded-xl border border-gray-100 bg-gray-50/70 p-3 text-sm leading-6 text-gray-700">
-                          Bank setup: <span className="font-semibold text-gray-900">{bankSettlementDisplay.status}</span>
-                          <button
-                            type="button"
-                            onClick={() => setActiveTab("speed_setup")}
-                            className="ml-1 font-semibold text-[#0052FF] underline-offset-2 hover:underline"
-                          >
-                            Review setup
-                          </button>
-                        </div>
-                      )}
-                    </>
+                    <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
+                      <p className="text-sm font-semibold text-gray-950">Lightning Wallet</p>
+                      <p className="mt-1 text-sm leading-6 text-gray-600">
+                        Direct Lightning wallets receive Bitcoin instantly. Cash-out to your bank is managed separately outside PineTree.
+                      </p>
+                    </div>
                   ) : (
                     <>
                       <div className="rounded-2xl border border-[#0052FF]/20 bg-[#0052FF]/5 p-4 shadow-[0_8px_24px_rgba(0,82,255,0.07)]">
@@ -2209,53 +1915,269 @@ export default function WalletsPage() {
                 </div>
               )}
 
-              {activeTab === "speed_setup" && selectedWallet.isLightning && (
+              {activeTab === "lightning_wallet" && selectedWallet.isLightning && (
                 <div className={walletDetailPanelClass}>
-                  <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:p-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-base font-semibold text-gray-950">Speed Actions</p>
+                  {nwcStatus?.connected ? (
+                    <>
+                      <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-gray-950">{nwcStatus.walletLabel || "Lightning Wallet"}</p>
+                            <p className="mt-1 text-sm leading-6 text-gray-600">NWC wallet connected and ready to receive payments.</p>
+                          </div>
+                          <NetworkStatusPill label="Connected" tone="blue" />
+                        </div>
+                        <div className="mt-4 grid grid-cols-3 gap-2">
+                          <CapabilityBadge label="Receive" value={nwcStatus.canMakeInvoice ? "Yes" : "No"} tone={nwcStatus.canMakeInvoice ? "blue" : "slate"} />
+                          <CapabilityBadge label="Lookup" value={nwcStatus.canLookupInvoice ? "Yes" : "No"} tone={nwcStatus.canLookupInvoice ? "blue" : "slate"} />
+                          <CapabilityBadge label="Auto-fee" value={nwcStatus.canCollectFee ? "Yes" : "No"} tone={nwcStatus.canCollectFee ? "blue" : "amber"} />
+                        </div>
+                      </div>
+
+                      {!nwcStatus.canCollectFee && (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+                          <p className="text-sm font-semibold text-gray-950">Automatic Fee Collection Unavailable</p>
+                          <p className="mt-1 text-sm leading-6 text-gray-700">
+                            Your wallet does not support pay_invoice. PineTree cannot automatically collect its $0.15 fee. Consider connecting a wallet with full NWC permissions.
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
+                        <p className="text-sm font-semibold text-gray-950">Connect a Different Wallet</p>
                         <p className="mt-1 text-sm leading-6 text-gray-600">
-                          Some actions may open Speed to complete provider-managed setup.
+                          Paste a new NWC URI to replace the current connection. The wallet must support invoice creation, payment lookup, and fee handling.
+                        </p>
+                        <div className="mt-3 space-y-2">
+                          <input
+                            ref={nwcInputRef}
+                            type="text"
+                            value={nwcUri}
+                            onChange={(e) => { setNwcUri(e.target.value); setNwcTestResult(null); setNwcConnectError(null); setNwcConnectSuccess(null) }}
+                            placeholder="nostr+walletconnect://..."
+                            className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 font-mono text-xs text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                          />
+                          <input
+                            type="text"
+                            value={nwcWalletLabel}
+                            onChange={(e) => setNwcWalletLabel(e.target.value)}
+                            placeholder="Wallet label (optional)"
+                            className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                          />
+                          {nwcTestResult && (
+                            <div className={cx(
+                              "rounded-2xl border p-4",
+                              nwcTestResult.success ? "border-[#0052FF]/15 bg-[#0052FF]/5" : "border-amber-200 bg-amber-50/70"
+                            )}>
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="text-sm font-semibold text-gray-950">
+                                  {nwcTestResult.success ? "Connection successful" : "Connection issue"}
+                                </p>
+                                <NetworkStatusPill label={nwcTestResult.connected ? "Reachable" : "Unreachable"} tone={nwcTestResult.connected ? "blue" : "slate"} />
+                              </div>
+                              {nwcTestResult.walletAlias && (
+                                <p className="mt-1 text-xs text-gray-500">Wallet: {nwcTestResult.walletAlias}</p>
+                              )}
+                              <div className="mt-3 grid grid-cols-3 gap-2">
+                                <CapabilityBadge label="Receive" value={nwcTestResult.canMakeInvoice ? "Yes" : "No"} tone={nwcTestResult.canMakeInvoice ? "blue" : "slate"} />
+                                <CapabilityBadge label="Pay" value={nwcTestResult.canPayInvoice ? "Yes" : "No"} tone={nwcTestResult.canPayInvoice ? "blue" : "slate"} />
+                                <CapabilityBadge label="Auto-fee" value={nwcTestResult.canCollectFee ? "Yes" : "No"} tone={nwcTestResult.canCollectFee ? "blue" : "amber"} />
+                              </div>
+                              {nwcTestResult.error && (
+                                <p className="mt-2 text-sm text-red-700">{nwcTestResult.error}</p>
+                              )}
+                            </div>
+                          )}
+                          {nwcTestResult && !nwcTestResult.canPayInvoice && (
+                            <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+                              <p className="text-sm leading-6 text-amber-800">
+                                This wallet cannot support PineTree fee handling. Try Alby Hub or another NWC wallet.
+                              </p>
+                            </div>
+                          )}
+                          <div className="flex gap-2">
+                            <button type="button" onClick={testNwcUri} disabled={nwcTestLoading || !nwcUri.trim()} className={cx(pineTreeSecondaryActionButton, "flex-1 justify-center disabled:cursor-not-allowed disabled:opacity-55")}>
+                              {nwcTestLoading ? "Testing..." : "Test"}
+                            </button>
+                            <button type="button" onClick={connectNwcWallet} disabled={nwcConnectLoading || !nwcUri.trim() || !nwcTestResult?.success || nwcTestResult?.canPayInvoice === false} className={cx(pineTreePrimaryButton, "flex-1 disabled:cursor-not-allowed disabled:opacity-55")}>
+                              {nwcConnectLoading ? "Saving..." : "Save New Wallet"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {disconnectConfirmOpen ? (
+                        <div className="rounded-2xl border border-red-100 bg-white p-4">
+                          <p className="text-sm font-semibold text-gray-950">Disconnect Lightning wallet?</p>
+                          <p className="mt-1 text-sm leading-6 text-gray-600">
+                            Removes the NWC connection. New Lightning invoices cannot be created until you reconnect.
+                          </p>
+                          {disconnectError && <p className="mt-2 text-sm text-red-600">{disconnectError}</p>}
+                          <div className="mt-3 flex gap-2">
+                            <button type="button" onClick={() => setDisconnectConfirmOpen(false)} disabled={disconnecting} className={pineTreeSecondaryActionButton}>Cancel</button>
+                            <button type="button" onClick={disconnectNwcWallet} disabled={disconnecting} className={pineTreeDangerActionButton}>
+                              {disconnecting ? "Disconnecting..." : "Disconnect"}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button type="button" onClick={() => setDisconnectConfirmOpen(true)} className={cx(pineTreeDangerActionButton, "self-start")}>
+                          Disconnect Wallet
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <p className="text-sm leading-6 text-gray-700">
+                          Connect a PineTree-compatible Lightning wallet to accept Bitcoin payments directly to your wallet.
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-gray-500">
+                          Customers can pay with any Lightning wallet. NWC is only required for the merchant wallet.
                         </p>
                       </div>
-                      <NetworkStatusPill
-                        label={speedSetupStatus?.connected ? "Connected" : "Not Connected"}
-                        tone={speedSetupStatus?.connected ? "blue" : "slate"}
-                      />
-                    </div>
 
-                    <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                      {([
-                        ["btc_withdraw", "Withdraw BTC"],
-                        ["bank_withdraw", "Withdraw Cash / Bank Payout"],
-                        ["bank_setup", "Set Up Bank Account"],
-                        ["auto_convert", "Auto Convert Settings"]
-                      ] as Array<[SpeedActionId, string]>).map(([action, label]) => (
-                        <button
-                          key={action}
-                          type="button"
-                          onClick={() => openSpeedAction(action)}
-                          disabled={!getSpeedActionUrl(speedSetupStatus, action)}
-                          className={cx(
-                            pineTreeSecondaryActionButton,
-                            "min-h-11 w-full justify-between px-4 disabled:cursor-not-allowed disabled:opacity-55"
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-semibold text-gray-950">Alby Go / Alby Hub</p>
+                            <span className="shrink-0 rounded-full bg-[#0052FF] px-2 py-0.5 text-[10px] font-semibold text-white">Recommended</span>
+                          </div>
+                          <p className="mt-2 text-xs leading-5 text-gray-600">
+                            Use Alby Hub to create an NWC connection for PineTree, then paste the connection URI below.
+                          </p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <a
+                              href={albySetupUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={pineTreeSecondaryActionButton}
+                            >
+                              Open Alby
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => nwcInputRef.current?.focus()}
+                              className={pineTreeSecondaryActionButton}
+                            >
+                              Paste NWC URI
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-semibold text-gray-950">Zeus Wallet</p>
+                            <span className="shrink-0 rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-semibold text-gray-600">Advanced</span>
+                          </div>
+                          <p className="mt-2 text-xs leading-5 text-gray-600">
+                            Use Zeus if your wallet provides an NWC connection URI with invoice and payment permissions.
+                          </p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <a
+                              href={zeusSetupUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={pineTreeSecondaryActionButton}
+                            >
+                              Open Zeus
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => nwcInputRef.current?.focus()}
+                              className={pineTreeSecondaryActionButton}
+                            >
+                              Paste NWC URI
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <p className="text-xs leading-5 text-gray-500">
+                        Your wallet must allow PineTree to request invoices, verify payments, and handle PineTree platform fees.
+                      </p>
+
+                      <div className="space-y-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-400">Paste NWC Connection URI</p>
+                        <input
+                          ref={nwcInputRef}
+                          type="text"
+                          value={nwcUri}
+                          onChange={(e) => { setNwcUri(e.target.value); setNwcTestResult(null); setNwcConnectError(null); setNwcConnectSuccess(null) }}
+                          placeholder="nostr+walletconnect://..."
+                          className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 font-mono text-xs text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                        />
+                        <input
+                          type="text"
+                          value={nwcWalletLabel}
+                          onChange={(e) => setNwcWalletLabel(e.target.value)}
+                          placeholder="Wallet label (optional, e.g. Alby Hub)"
+                          className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                        />
+                      </div>
+
+                      {nwcTestResult && (
+                        <div className={cx(
+                          "rounded-2xl border p-4",
+                          nwcTestResult.success ? "border-[#0052FF]/15 bg-[#0052FF]/5" : "border-amber-200 bg-amber-50/70"
+                        )}>
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm font-semibold text-gray-950">
+                              {nwcTestResult.success ? "Connection successful" : "Connection issue"}
+                            </p>
+                            <NetworkStatusPill label={nwcTestResult.connected ? "Reachable" : "Unreachable"} tone={nwcTestResult.connected ? "blue" : "slate"} />
+                          </div>
+                          {nwcTestResult.walletAlias && (
+                            <p className="mt-1 text-xs text-gray-500">Wallet: {nwcTestResult.walletAlias}</p>
                           )}
-                        >
-                          <span>{label}</span>
-                          {speedActionUsesFallback(speedSetupStatus, action) && (
-                            <span className="text-[11px] font-semibold text-gray-400">Dashboard</span>
+                          <div className="mt-3 grid grid-cols-3 gap-2">
+                            <CapabilityBadge label="Receive" value={nwcTestResult.canMakeInvoice ? "Yes" : "No"} tone={nwcTestResult.canMakeInvoice ? "blue" : "slate"} />
+                            <CapabilityBadge label="Pay" value={nwcTestResult.canPayInvoice ? "Yes" : "No"} tone={nwcTestResult.canPayInvoice ? "blue" : "slate"} />
+                            <CapabilityBadge label="Auto-fee" value={nwcTestResult.canCollectFee ? "Yes" : "No"} tone={nwcTestResult.canCollectFee ? "blue" : "amber"} />
+                          </div>
+                          {nwcTestResult.error && (
+                            <p className="mt-2 text-sm text-red-700">{nwcTestResult.error}</p>
                           )}
+                        </div>
+                      )}
+
+                      {nwcTestResult && !nwcTestResult.canPayInvoice && (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+                          <p className="text-sm font-semibold text-gray-950">Wallet Not Compatible</p>
+                          <p className="mt-1 text-sm leading-6 text-amber-800">
+                            This wallet cannot support PineTree fee handling. Try Alby Hub or another NWC wallet.
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="flex gap-2">
+                        <button type="button" onClick={testNwcUri} disabled={nwcTestLoading || !nwcUri.trim()} className={cx(pineTreeSecondaryActionButton, "flex-1 justify-center disabled:cursor-not-allowed disabled:opacity-55")}>
+                          {nwcTestLoading ? "Testing..." : "Test Connection"}
                         </button>
-                      ))}
+                        <button type="button" onClick={connectNwcWallet} disabled={nwcConnectLoading || !nwcUri.trim() || !nwcTestResult?.success || nwcTestResult?.canPayInvoice === false} className={cx(pineTreePrimaryButton, "flex-1 disabled:cursor-not-allowed disabled:opacity-55")}>
+                          {nwcConnectLoading ? "Saving..." : "Save Wallet"}
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {nwcConnectError && (
+                    <div className="rounded-2xl border border-red-100 bg-red-50/70 p-3 text-sm leading-6 text-red-800">
+                      {nwcConnectError}
                     </div>
-                  </div>
+                  )}
+
+                  {nwcConnectSuccess && (
+                    <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-3 text-sm leading-6 text-[#0052FF]">
+                      {nwcConnectSuccess}
+                    </div>
+                  )}
                 </div>
               )}
 
               {activeTab === "activity" && (
                 <div className={walletDetailPanelClass}>
-                  {selectedWallet.isLightning && speedActivity.length > 0 ? (
+                  {selectedWallet.isLightning && lightningActivity.length > 0 ? (
                     <>
                       <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                         {([
@@ -2280,7 +2202,7 @@ export default function WalletsPage() {
                         ))}
                       </div>
 
-                      {filteredSpeedActivity.length === 0 ? (
+                      {filteredLightningActivity.length === 0 ? (
                         <WalletOperationEmptyState compact />
                       ) : (
                         <div className="space-y-4">
@@ -2307,7 +2229,7 @@ export default function WalletsPage() {
                                       <div>
                                         <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Type</p>
                                         <p className="mt-1 text-sm font-semibold text-gray-950">
-                                          {operation.operationType === "WITHDRAWAL_DRAFT" ? "Cash out" : operation.operationType.replace(/_/g, " ")}
+                                          {operation.operationType.replace(/_/g, " ")}
                                         </p>
                                       </div>
                                       <div>
@@ -2327,9 +2249,6 @@ export default function WalletsPage() {
                                         <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Date</p>
                                         <p className="mt-1 text-sm text-gray-600">{formatChicagoDateTime(operation.createdAt)}</p>
                                       </div>
-                                    </div>
-                                    <div className="mt-3 rounded-xl border border-white/80 bg-white/70 px-3 py-2 text-xs text-gray-500">
-                                      Destination: {formatSpeedDestinationType(operation.destinationType)}
                                     </div>
                                     {operation.errorMessage && (
                                       <p className="mt-3 rounded-xl border border-amber-100 bg-amber-50/80 p-3 text-xs leading-5 text-amber-800">

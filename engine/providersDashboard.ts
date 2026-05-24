@@ -2,7 +2,6 @@ import { supabaseAdmin, supabase } from "@/database"
 import { refreshWalletBalancesEngine } from "./walletOverview"
 import { loadProviders } from "./loadProviders"
 import { getProviderMetadata } from "./providerRegistry"
-import { verifyLightningAddress } from "@/providers/lightning/verifyLightningAddress"
 
 const db = supabaseAdmin || supabase
 
@@ -49,26 +48,14 @@ export type ProvidersDashboardData = {
   }
 }
 
-// Lightning Address format: user@domain.tld (same RFC as email user@host)
-function isValidLightningAddress(address: string): boolean {
-  return /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(address.trim())
-}
-
-function hasSpeedAccountId(row?: ProviderRow | null): boolean {
-  const accountId = String(row?.credentials?.speed_account_id || "").trim()
-  return Boolean(accountId)
-}
-
-function hasSpeedConnection(row?: ProviderRow | null): boolean {
+function hasNwcConnection(row?: ProviderRow | null): boolean {
   if (!row) return false
-  if (hasSpeedAccountId(row)) return true
-
   const status = String(row.status || "").toLowerCase().trim()
   return status === "connected" || status === "active"
 }
 
 function getLightningCapabilities() {
-  const metadata = getProviderMetadata("lightning")
+  const metadata = getProviderMetadata("lightning_nwc")
   const capabilities = metadata?.capabilities
 
   return {
@@ -80,28 +67,39 @@ function getLightningCapabilities() {
 }
 
 function getLightningDashboardStatus(row?: ProviderRow | null): LightningDashboardStatus {
-  if (!hasSpeedConnection(row)) return "not_configured"
+  if (!hasNwcConnection(row)) return "not_configured"
   return "connected"
 }
 
 function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
   const providersByKey = new Map(rows.map((row) => [row.provider, row]))
-  const lightning = providersByKey.get("lightning")
+  const nwcRow = providersByKey.get("lightning_nwc")
   const lightningCapabilities = getLightningCapabilities()
-  const lightningStatus = getLightningDashboardStatus(lightning)
+  const lightningStatus = getLightningDashboardStatus(nwcRow)
 
-  const decoratedRows = rows.map((row) => {
-    if (row.provider !== "lightning") return row
+  // Exclude raw lightning/lightning_nwc rows — a sanitized "lightning" row is synthesized below.
+  // This prevents nwc_uri (a private key) from ever reaching the UI via the providers response.
+  const decoratedRows: ProviderRow[] = rows.filter(
+    (row) => row.provider !== "lightning" && row.provider !== "lightning_nwc"
+  )
 
-    return {
-      ...row,
-      enabled: lightningStatus === "connected" ? Boolean(row.enabled) : false,
+  if (nwcRow) {
+    // Expose only safe credential fields — never nwc_uri
+    const safeCredentials: JsonObject = {
+      wallet_label: String(nwcRow.credentials?.wallet_label || "Lightning Wallet"),
+      last_tested_at: (nwcRow.credentials?.last_tested_at as string | null) ?? null,
+      provider_model: "nwc_merchant_wallet"
+    }
+
+    decoratedRows.push({
+      provider: "lightning",
+      status: nwcRow.status,
+      enabled: lightningStatus === "connected" ? Boolean(nwcRow.enabled) : false,
+      credentials: safeCredentials,
       dashboard_status: lightningStatus,
       capabilities: lightningCapabilities
-    }
-  })
-
-  if (!providersByKey.has("lightning")) {
+    })
+  } else {
     decoratedRows.push({
       provider: "lightning",
       status: "disconnected",
@@ -229,26 +227,29 @@ export async function toggleProviderEngine(
   if (provider === "lightning" && enabled) {
     const { data, error: lookupError } = await db
       .from("merchant_providers")
-      .select("provider,status,enabled,credentials")
+      .select("id")
       .eq("merchant_id", merchantId)
-      .eq("provider", provider)
+      .eq("provider", "lightning_nwc")
+      .in("status", ["connected", "active"])
       .maybeSingle()
 
     if (lookupError) {
-      throw new Error(`Failed checking provider: ${lookupError.message}`)
+      throw new Error(`Failed checking Lightning provider: ${lookupError.message}`)
     }
 
-    const row = data as ProviderRow | null
-    if (!hasSpeedConnection(row)) {
-      throw new Error("A Speed Account ID is required before enabling Bitcoin Lightning.")
+    if (!data) {
+      throw new Error("Connect a Lightning wallet first to enable Bitcoin Lightning payments.")
     }
   }
+
+  // Map UI provider key "lightning" to the actual DB row key "lightning_nwc"
+  const targetProvider = provider === "lightning" ? "lightning_nwc" : provider
 
   const { error } = await db
     .from("merchant_providers")
     .update({ enabled })
     .eq("merchant_id", merchantId)
-    .eq("provider", provider)
+    .eq("provider", targetProvider)
 
   if (error) {
     throw new Error(`Failed to toggle provider: ${error.message}`)
@@ -276,6 +277,9 @@ export async function disconnectProviderEngine(merchantId: string, provider: str
     }
   }
 
+  // Map UI provider key "lightning" to the actual DB row key "lightning_nwc"
+  const targetProvider = provider === "lightning" ? "lightning_nwc" : provider
+
   const { error: providerError } = await db
     .from("merchant_providers")
     .update({
@@ -284,7 +288,7 @@ export async function disconnectProviderEngine(merchantId: string, provider: str
       credentials: {}
     })
     .eq("merchant_id", merchantId)
-    .eq("provider", provider)
+    .eq("provider", targetProvider)
 
   if (providerError) {
     throw new Error(`Failed disconnecting provider: ${providerError.message}`)
@@ -297,10 +301,9 @@ export async function saveProviderEngine(args: {
   walletAddress?: string
   walletType?: string | null
   apiKey?: string
-  lightningAddress?: string
 }) {
   await loadProviders()
-  const { merchantId, provider, walletAddress, walletType, apiKey, lightningAddress } = args
+  const { merchantId, provider, walletAddress, walletType, apiKey } = args
 
   let credentials: JsonObject = {}
 
@@ -359,51 +362,8 @@ export async function saveProviderEngine(args: {
       wallet_type: walletType || null
     }
   } else if (provider === "lightning") {
-    const speedAccountId = String(walletAddress || "").trim()
-    const address = String(lightningAddress || "").trim()
-    // app/api/providers forwards this existing field; for Lightning setup it
-    // carries Speed's Payment Address ID, not a wallet type.
-    const paymentAddressId = String(walletType || "").trim()
-
-    if (!speedAccountId) {
-      throw new Error("Speed Account ID is required.")
-    }
-
-    if (!address) {
-      throw new Error("BTC Payment Address is required (e.g. username@tryspeed.com)")
-    }
-
-    if (!isValidLightningAddress(address)) {
-      throw new Error(
-        "Invalid BTC Payment Address format. Use username@tryspeed.com."
-      )
-    }
-
-    if (!paymentAddressId) {
-      throw new Error("Payment Address ID is required (e.g. pa_...).")
-    }
-
-    // LNURL-pay verification (LUD-16): fetch /.well-known/lnurlp/<user> and
-    // confirm the response is a valid payRequest descriptor before marking verified.
-    const verification = await verifyLightningAddress(address)
-
-    if (!verification.verified) {
-      throw new Error(
-        "That BTC Payment Address could not be verified as a Lightning Address. Please check the address in Speed and try again."
-      )
-    }
-
-    credentials = {
-      speed_account_id: speedAccountId,
-      lightning_address: address,
-      payment_address_id: paymentAddressId,
-      lightning_address_verified: true,
-      verified_at: new Date().toISOString(),
-      provider_model: "speed_merchant_account",
-      lnurl_domain: verification.domain,
-      lnurl_callback: verification.callbackUrl,
-      verification_method: "lnurl-pay"
-    }
+    // NWC Lightning is connected via /api/wallets/lightning/connect — not this path.
+    throw new Error("Use the Lightning wallet connection flow to connect a Bitcoin Lightning wallet.")
   } else {
     if (!apiKey) {
       throw new Error("API key required")

@@ -44,6 +44,16 @@ export async function runPaymentWatcher(paymentId: string, options?: { txHash?: 
     return false
   }
 
+  // NWC Lightning: invoice status is checked via the NWC protocol, not by blockchain scanning.
+  // Short-circuit here so watchPaymentOnce (which only knows Solana/EVM) is never called.
+  if (
+    String(payment.network || "").toLowerCase() === "bitcoin_lightning" &&
+    String(payment.provider || "").toLowerCase() === "lightning_nwc"
+  ) {
+    const { checkNwcPaymentOnce } = await import("./checkNwcPayment")
+    return checkNwcPaymentOnce(payment.id)
+  }
+
   const split = ((payment.metadata ?? null) as StoredPaymentSplitMetadata | null)?.split
   const isBase = String(payment.network || "").toLowerCase() === "base"
 

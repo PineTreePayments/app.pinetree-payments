@@ -250,7 +250,7 @@ function providerLabel(provider: string) {
     normalized === "evm"
   ) return "Base payments"
   if (normalized === "shift4") return "Shift4"
-  if (normalized === "lightning") return "TrySpeed / Lightning"
+  if (normalized === "lightning" || normalized === "lightning_nwc") return "Bitcoin Lightning"
   if (normalized === "coinbase") return "Coinbase"
   if (normalized === "walletconnect") return "WalletConnect"
   return provider || "Unknown provider"
