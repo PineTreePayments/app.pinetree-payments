@@ -172,9 +172,9 @@ const BASE_WC_SETTLE_TIMEOUT_MS = 8_000
 const BASE_WC_SETTLE_POLL_MS = 250
 const BASE_WC_POST_ACCOUNT_SETTLE_MS = 250
 const BASE_ETH_TX_REQUEST_TIMEOUT_MS = 90_000
-const BASE_ETH_TX_TIMEOUT_MESSAGE = "Transaction approval was not completed. Tap Pay to try again."
+const BASE_ETH_TX_TIMEOUT_MESSAGE = "Transaction approval was not completed. Retry payment approval to try again."
 const BASE_USDC_TX_REQUEST_TIMEOUT_MS = 90_000
-const BASE_USDC_SIGN_TIMEOUT_MESSAGE = "USDC authorization signature was not completed. Tap Pay to try again."
+const BASE_USDC_SIGN_TIMEOUT_MESSAGE = "USDC authorization signature was not completed. Retry USDC authorization to try again."
 const BASE_USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 const BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE =
   "Base USDC is temporarily unavailable because current network costs are above PineTree’s limit. Please try again shortly or choose another payment method."
@@ -205,6 +205,9 @@ async function logBase(stage: string, payload: Record<string, unknown> = {}): Pr
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ stage, payload }),
   }).catch(() => null)
+}
+function logBasePay(event: string, payload: Record<string, unknown> = {}): void {
+  console.info(`[BasePay] ${event}`, payload)
 }
 function extractErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -419,10 +422,12 @@ function closeWalletConnectSelectionModal(provider?: WalletConnectProvider | nul
     const modal = provider?.modal
     if (typeof modal?.close === "function") {
       modal.close()
+      logBasePay("walletconnect_modal_close_attempted", { method: "provider.modal.close" })
       return
     }
     if (typeof modal?.closeModal === "function") {
       modal.closeModal()
+      logBasePay("walletconnect_modal_close_attempted", { method: "provider.modal.closeModal" })
       return
     }
   } catch {
@@ -434,6 +439,7 @@ function closeWalletConnectSelectionModal(provider?: WalletConnectProvider | nul
       close?: () => unknown
     } | null
     modalElement?.close?.()
+    logBasePay("walletconnect_modal_close_attempted", { method: "dom-modal-close", found: Boolean(modalElement) })
   } catch {
     // Best-effort only.
   }
@@ -590,20 +596,42 @@ async function sendWalletConnectTransaction(input: {
   provider: WalletConnectProvider
   fromAddress: string
   txRequest: EvmTransactionRequest
+  actionKind?: WalletRequestKind
 }): Promise<string> {
-  const txHash = await input.provider.request({
-    method: "eth_sendTransaction",
-    params: [
-      {
-        from: input.fromAddress,
-        to: input.txRequest.to,
-        value: input.txRequest.value,
-        data: input.txRequest.data,
-        chainId: decimalOrHexToHex(String(input.txRequest.chainId)),
-      },
-    ],
-  })
-  return normalizeHexTransactionHash(txHash)
+  const actionKind = input.actionKind || "eth_payment"
+  const params = [
+    {
+      from: input.fromAddress,
+      to: input.txRequest.to,
+      value: input.txRequest.value,
+      data: input.txRequest.data,
+      chainId: decimalOrHexToHex(String(input.txRequest.chainId)),
+    },
+  ]
+  logBasePay("provider_request_start", { method: "eth_sendTransaction", actionKind, hasParams: true })
+  let rawTxHash: unknown
+  try {
+    rawTxHash = await input.provider.request({
+      method: "eth_sendTransaction",
+      params,
+    })
+  } catch (error) {
+    const details = extractErrorDetails(error)
+    logBasePay("provider_request_rejected", {
+      actionKind,
+      code: details.code ?? null,
+      message: details.message ?? "",
+    })
+    throw error
+  }
+  const txHash = maybeHexTransactionHash(rawTxHash)
+  logBasePay("provider_request_resolved", { actionKind, hasTxHash: Boolean(txHash) })
+  if (!txHash) {
+    logBasePay("provider_request_timeout_or_no_result", { actionKind })
+    throw new Error("Wallet did not return a transaction hash.")
+  }
+  logBasePay("tx_hash_captured", { actionKind, hasTxHash: true })
+  return txHash
 }
 async function sendWalletConnectTransactionWithTimeout(input: {
   provider: WalletConnectProvider
@@ -611,6 +639,7 @@ async function sendWalletConnectTransactionWithTimeout(input: {
   txRequest: EvmTransactionRequest
   timeoutMs: number
   timeoutMessage: string
+  actionKind?: WalletRequestKind
 }): Promise<string> {
   let txTimeoutHandle: ReturnType<typeof setTimeout> | null = null
   try {
@@ -619,6 +648,7 @@ async function sendWalletConnectTransactionWithTimeout(input: {
         provider: input.provider,
         fromAddress: input.fromAddress,
         txRequest: input.txRequest,
+        actionKind: input.actionKind,
       }),
       new Promise<never>((_, reject) => {
         txTimeoutHandle = setTimeout(
@@ -627,6 +657,11 @@ async function sendWalletConnectTransactionWithTimeout(input: {
         )
       }),
     ])
+  } catch (error) {
+    if (extractErrorMessage(error) === input.timeoutMessage) {
+      logBasePay("provider_request_timeout_or_no_result", { actionKind: input.actionKind || "eth_payment" })
+    }
+    throw error
   } finally {
     if (txTimeoutHandle !== null) clearTimeout(txTimeoutHandle)
   }
@@ -914,6 +949,7 @@ export default function BaseWalletPayment({
   const pendingActionInFlightRef = useRef(false)
   const dispatchPendingWalletActionRef = useRef<((source?: string) => Promise<boolean>) | null>(null)
   const autoWalletActionAttemptedKeyRef = useRef<Set<string>>(new Set())
+  const autoWalletActionDispatchingKeyRef = useRef<Set<string>>(new Set())
   // Tracks a live wallet request (connect / sign / send) so we know whether
   // the user is currently in-wallet. While pending=true we never show rejection UI.
   const activeWalletRequestRef = useRef<ActiveWalletRequest | null>(null)
@@ -1015,11 +1051,15 @@ export default function BaseWalletPayment({
           if (activeRequest?.pending && activeRequest.kind === "connect") {
             closeWalletConnectSelectionModal(provider)
             activeWalletRequestRef.current = null
+            logBasePay("stale_lock_cleared", { lockName: "activeWalletRequestRef:connect" })
             setWalletRequestUiState("request_resolved")
             setPendingWalletRequestKind(null)
             setWalletHandoffPending(false)
             setIsOpeningWallet(false)
           }
+          logBasePay("connection_settled", { source })
+          logBasePay("accounts_detected", { hasAccount: true })
+          logBasePay("chain_detected", { chainId: providerChainId })
           await logBase("walletconnect-connection-settled", {
             source,
             hasAddress: true,
@@ -1158,6 +1198,7 @@ export default function BaseWalletPayment({
       setLocalError("Wallet disconnected. Reconnect to continue.")
       setPendingWalletActionReady(true)
       setBaseMobileStepRef.current("fallback_required")
+      logBasePay("fallback_required", { actionKind: kind, reason: "connection-not-settled" })
       return false
     }
     const provider = settledSession.provider
@@ -1171,6 +1212,7 @@ export default function BaseWalletPayment({
       setLocalError("Payment confirmation details are no longer available. Tap Try Again to restart.")
       setExecStageRef.current("retryable_error")
       setBaseMobileStepRef.current("failed")
+      logBasePay("fallback_required", { actionKind: kind, reason: "missing-transaction-request" })
       clearPendingWalletAction()
       return false
     }
@@ -1183,18 +1225,33 @@ export default function BaseWalletPayment({
     setBaseMobileStepRef.current(kind === "usdc_approve" ? "usdc_authorization_dispatching" : "payment_dispatching")
     const stage = kind === "usdc_approve" ? "authorizing_usdc" : "confirm_payment"
     setExecStageRef.current(stage, kind === "usdc_approve" ? { allowance: true } : undefined)
-    setBaseMobileStepRef.current(kind === "usdc_approve" ? "usdc_authorization_in_wallet" : "payment_in_wallet")
     setBaseUsdcV4Status(
       kind === "usdc_approve"
         ? "One-time USDC authorization..."
         : kind === "usdc_payment"
-          ? "Confirm payment..."
-          : "Confirm payment in your wallet..."
+          ? "Opening payment approval..."
+          : "Approve in your wallet..."
     )
 
     const peerName = settledSession.peerName
 
     beginWalletRequest({ kind, walletName: peerName })
+    const attemptKey = `${paymentId}:${kind}`
+    if (source.startsWith("auto-")) {
+      if (autoWalletActionAttemptedKeyRef.current.has(attemptKey)) {
+        activeWalletRequestRef.current = null
+        pendingActionInFlightRef.current = false
+        setPendingWalletActionInFlight(false)
+        setPendingWalletActionReady(true)
+        setIsOpeningWallet(false)
+        setBaseMobileStepRef.current("fallback_required")
+        logBasePay("fallback_required", { actionKind: kind, reason: "auto-dispatch-already-attempted" })
+        return false
+      }
+      autoWalletActionAttemptedKeyRef.current.add(attemptKey)
+    }
+    autoWalletActionDispatchingKeyRef.current.delete(attemptKey)
+    logBasePay("auto_dispatch_start", { actionKind: kind, attemptKey })
     await logBase("pending-wallet-action-dispatch", { source, kind, paymentId, chainId: settledSession.chainId })
     try {
       closeWalletConnectSelectionModal(provider)
@@ -1206,9 +1263,11 @@ export default function BaseWalletPayment({
         timeoutMessage: kind === "eth_payment"
           ? BASE_ETH_TX_TIMEOUT_MESSAGE
           : kind === "usdc_approve"
-            ? "USDC authorization approval was not completed. Tap Continue in wallet to try again."
-            : "Payment transaction was not completed. Tap Continue in wallet to try again.",
+            ? "USDC authorization approval was not completed. Retry USDC authorization to try again."
+            : "Payment transaction was not completed. Retry payment approval to try again.",
+        actionKind: kind,
       })
+      setBaseMobileStepRef.current(kind === "usdc_approve" ? "usdc_authorization_in_wallet" : "payment_in_wallet")
       window.setTimeout(() => { tryOpenWalletNativeUri(provider) }, 300)
       const txHash = await txPromise
       resolveWalletRequest()
@@ -1251,7 +1310,7 @@ export default function BaseWalletPayment({
           await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs))
         }
         if (!allowanceSufficient) {
-          throw new Error("USDC allowance was not confirmed in time. Tap Continue in wallet to check again or Try Again to restart.")
+          throw new Error("USDC allowance was not confirmed in time. Retry USDC authorization or tap Try Again to restart.")
         }
         await logBase("usdc-allowance-confirmed", { paymentId, via: "pending-wallet-action" })
         setExecStageRef.current("usdc_authorized")
@@ -1324,11 +1383,12 @@ export default function BaseWalletPayment({
       setPendingWalletActionReady(true)
       setPendingWalletActionKind(kind)
       setBaseMobileStepRef.current("fallback_required")
+      logBasePay("fallback_required", { actionKind: kind, reason: rejected ? "rejected" : "request-failed-or-blocked" })
       setExecStageRef.current(kind === "usdc_approve" ? "authorizing_usdc" : "confirm_payment", kind === "usdc_approve" ? { allowance: true } : undefined)
       setBaseUsdcV4Status(
         kind === "usdc_approve"
-          ? "Wallet was interrupted. Tap Continue in wallet to complete USDC authorization."
-          : "Wallet was interrupted. Tap Continue in wallet to confirm payment."
+          ? "Wallet was interrupted. Retry USDC authorization."
+          : "Wallet was interrupted. Retry payment approval."
       )
       setLocalError("")
       return false
@@ -1650,7 +1710,8 @@ export default function BaseWalletPayment({
     })
     try {
       let authTxHash: string | null = null
-      let shouldUseAllowancePath = false
+      const forceWalletConnectAllowancePath = true
+      let shouldUseAllowancePath = forceWalletConnectAllowancePath
       console.log("[BASE USDC CHAIN] start", { paymentId, isTrustWallet, walletFamily: capabilities.walletFamily })
       console.info("[BASE TRACE] strategy_selected", {
         paymentId,
@@ -1676,7 +1737,14 @@ export default function BaseWalletPayment({
       // does not support wallet_sendCalls, or the prepare call fails non-fatally.
       // User rejection and unresolvable confirmation are propagated as errors.
       let delegatedFallthrough = false
-      if (capabilities.skipDelegatedBatch) {
+      if (forceWalletConnectAllowancePath) {
+        console.info("[BASE DELEGATED] batch-skipped", {
+          paymentId,
+          reason: "walletconnect-mobile-allowance-flow",
+          walletFamily: capabilities.walletFamily,
+        })
+        delegatedFallthrough = true
+      } else if (capabilities.skipDelegatedBatch) {
         console.info("[BASE DELEGATED] batch-skipped", {
           paymentId,
           reason: "wallet-capability-no-sendcalls",
@@ -1684,7 +1752,7 @@ export default function BaseWalletPayment({
         })
         delegatedFallthrough = true
       }
-      if (!capabilities.skipDelegatedBatch) try {
+      if (!forceWalletConnectAllowancePath && !capabilities.skipDelegatedBatch) try {
         setBaseUsdcV4Status("Preparing payment...")
         const delegatedPrepareRes = await fetch(
           `/api/payments/${encodeURIComponent(paymentId)}/base-usdc-v5/delegated/prepare`,
@@ -1705,7 +1773,7 @@ export default function BaseWalletPayment({
           console.info("[BASE DELEGATED] batch-start", { paymentId })
           setExecStageRef.current("confirm_payment")
           console.log("[BASE UI] awaiting-wallet-confirmation", { paymentId, strategy: "delegated_eoa_batch" })
-          setBaseUsdcV4Status("Confirm payment in your wallet...")
+          setBaseUsdcV4Status("Opening payment approval...")
           let sendCallsResult: unknown
           beginWalletRequest({ kind: "usdc_delegated", walletName: input.peerName })
           window.setTimeout(() => { tryOpenWalletNativeUri(input.provider) }, 300)
@@ -1805,7 +1873,7 @@ export default function BaseWalletPayment({
           console.info("[BASE USDC CHAIN] eip3009-skipped", { paymentId, reason: "typed-data-unsupported", walletFamily: capabilities.walletFamily, nextStrategy: "allowance-path" })
         }
       }
-      if (!capabilities.skipEip3009) {
+      if (!forceWalletConnectAllowancePath && !capabilities.skipEip3009) {
         try {
           setBaseUsdcV4Status("Preparing payment...")
           console.log("[BASE USDC CHAIN] eip3009-start", { paymentId })
@@ -1995,7 +2063,7 @@ export default function BaseWalletPayment({
       console.log("[BASE USDC CHAIN] payment-start", { paymentId })
       setExecStageRef.current("confirm_payment")
       console.log("[BASE UI] awaiting-wallet-confirmation", { paymentId, strategy: "allowance_two_step" })
-      setBaseUsdcV4Status("Confirm payment in your wallet")
+      setBaseUsdcV4Status("Opening payment approval")
       void logBase("usdc-payment-requested", { paymentId, isTrustWallet })
       queuePendingWalletAction({ kind: "usdc_payment", paymentId, ready: true })
       activeBasePaymentAttemptRef.current = null
@@ -2083,12 +2151,15 @@ export default function BaseWalletPayment({
       connectedChainIdRef.current = null
       if (!alreadyOnBase) {
         try {
+          logBasePay("switch_chain_start", { chainId: base.id })
           await switchChainAsync({ chainId: base.id })
+          logBasePay("switch_chain_done", { chainId: base.id })
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
           if (!message.toLowerCase().includes("already") && !message.includes(String(base.id))) {
             throw error
           }
+          logBasePay("switch_chain_done", { chainId: base.id })
         }
       }
       // ── Final USDC payment resume path ────────────────────────────────────────
@@ -2108,7 +2179,7 @@ export default function BaseWalletPayment({
         createdBaseUsdcV5Payment = true
         activeBasePaymentAttemptRef.current = `${storedPaymentId}:USDC`
         setExecStageRef.current("confirm_payment")
-        setBaseUsdcV4Status("Confirm payment in your wallet")
+        setBaseUsdcV4Status("Opening payment approval")
         console.log("[BASE USDC CHAIN] payment-request-build-ready", { paymentId: storedPaymentId, via: "resume" })
         void logBase("[BASE USDC CHAIN] payment-request-build-ready", { paymentId: storedPaymentId, via: "resume" })
         const resumeProvider = settledSession.provider
@@ -2124,7 +2195,8 @@ export default function BaseWalletPayment({
             fromAddress,
             txRequest: storedPaymentTx,
             timeoutMs: BASE_USDC_TX_REQUEST_TIMEOUT_MS,
-            timeoutMessage: "Payment transaction was not completed. Tap Pay to try again.",
+            timeoutMessage: "Payment transaction was not completed. Retry payment approval to try again.",
+            actionKind: "usdc_payment",
           })
         } catch (resumeErr) {
           void logBase("[BASE USDC CHAIN] payment-request-error", {
@@ -2353,7 +2425,7 @@ export default function BaseWalletPayment({
             ? "Wallet connection declined. Tap Try Again to retry."
             : "Payment declined. Tap Try Again to retry.")
         : isHandoff
-          ? "Confirm payment in your wallet, or tap Try Again to restart."
+          ? "Waiting for wallet response, or tap Try Again to restart."
           : message
       const failReason = getFailReason({
         selectedAsset,
@@ -2450,7 +2522,7 @@ export default function BaseWalletPayment({
         if (walletKind === "usdc_approve") {
           setBaseUsdcV4Status("One-time USDC authorization required")
         } else {
-          setBaseUsdcV4Status("Confirm payment in your wallet")
+          setBaseUsdcV4Status("Opening payment approval")
         }
         // For USDC handoffs, clear attempt locks so resume handlers either
         // re-dispatch the stored transaction action or rebuild/re-dispatch the
@@ -2493,6 +2565,7 @@ export default function BaseWalletPayment({
     prefetchedTxRequestRef.current = null
     autoResumeAttemptedKeyRef.current = null
     autoWalletActionAttemptedKeyRef.current.clear()
+    autoWalletActionDispatchingKeyRef.current.clear()
     setBaseUsdcV4Status("")
     setIsResolvingAccount(false)
     clearPendingBaseWalletConnectPayment()
@@ -2727,6 +2800,7 @@ export default function BaseWalletPayment({
       const provider = await getWalletConnectProvider(walletConnectConnector)
       const accounts = await provider.request({ method: "eth_accounts", params: [] })
       const providerAddress = extractAddressFromConnectResult(accounts) || String(address || "").trim()
+      logBasePay("accounts_detected", { hasAccount: Boolean(providerAddress) })
       let providerChainId: number | null = null
       try {
         const chainIdResult = await provider.request({ method: "eth_chainId", params: [] })
@@ -2734,6 +2808,7 @@ export default function BaseWalletPayment({
       } catch {
         providerChainId = null
       }
+      logBasePay("chain_detected", { chainId: providerChainId || chain?.id || connectedChainIdRef.current || null })
       await logBase("auto-resume-provider-check", {
         source,
         hasProviderAddress: Boolean(providerAddress),
@@ -2912,6 +2987,8 @@ export default function BaseWalletPayment({
     prefetchedProviderRef.current = null
     prefetchedTxRequestRef.current = null
     autoResumeAttemptedKeyRef.current = null
+    autoWalletActionAttemptedKeyRef.current.clear()
+    autoWalletActionDispatchingKeyRef.current.clear()
     setBaseUsdcV4Status("")
     activeBasePaymentAttemptRef.current = null
     activeBaseUsdcV4PaymentRef.current = null
@@ -2952,9 +3029,13 @@ export default function BaseWalletPayment({
     const attemptKey = `${paymentId}:${kind}`
     if (autoWalletActionAttemptedKeyRef.current.has(attemptKey)) {
       setBaseMobileStepRef.current("fallback_required")
+      logBasePay("fallback_required", { actionKind: kind, reason: "auto-dispatch-already-attempted" })
       return
     }
-    autoWalletActionAttemptedKeyRef.current.add(attemptKey)
+    if (autoWalletActionDispatchingKeyRef.current.has(attemptKey)) {
+      return
+    }
+    autoWalletActionDispatchingKeyRef.current.add(attemptKey)
     setWalletHandoffPending(false)
     setBaseMobileStepRef.current(kind === "usdc_approve" ? "usdc_authorization_dispatching" : "payment_dispatching")
     void logBase("pending-wallet-action-auto-dispatch", {
@@ -2964,10 +3045,12 @@ export default function BaseWalletPayment({
       step: kind === "usdc_approve" ? "usdc_authorization_dispatching" : "payment_dispatching",
     })
     void dispatchPendingWalletActionRef.current?.(`auto-${kind}`).then((ok) => {
+      autoWalletActionDispatchingKeyRef.current.delete(attemptKey)
       if (ok) return
       if (paymentSubmittedRef.current) return
       if (pendingActionKindRef.current !== kind || pendingActionPaymentIdRef.current !== paymentId) return
       setBaseMobileStepRef.current("fallback_required")
+      logBasePay("fallback_required", { actionKind: kind, reason: "auto-dispatch-failed" })
     })
   }, [pendingWalletActionInFlight, pendingWalletActionReady, selectedAsset])
   useEffect(() => {
@@ -3140,9 +3223,9 @@ export default function BaseWalletPayment({
   } else if (execStage === "usdc_authorized") {
     contextMessage = "Authorization confirmed. Preparing payment…"
   } else if (execStage === "confirm_payment") {
-    contextMessage = "Confirm payment in your wallet"
+    contextMessage = "Approve in your wallet"
   } else if (execStage === "submitting_payment") {
-    contextMessage = "Confirming your payment…"
+    contextMessage = "Submitting payment..."
   } else if (execStage === "payment_submitted" || execStage === "detecting") {
     contextMessage = "Waiting for network confirmation…"
   }
@@ -3163,7 +3246,7 @@ export default function BaseWalletPayment({
   } else if (baseMobileStep === "payment_dispatching") {
     contextMessage = "Opening payment confirmation in your wallet..."
   } else if (baseMobileStep === "payment_in_wallet") {
-    contextMessage = "Confirm payment in your wallet"
+    contextMessage = "Approve in your wallet"
   } else if (baseMobileStep === "payment_submitted") {
     contextMessage = "Payment submitted"
   } else if (baseMobileStep === "network_confirmation") {
@@ -3188,13 +3271,13 @@ export default function BaseWalletPayment({
     ? "Approve wallet connection"
     : activeWalletRequestKind === "usdc_approve"
       ? "One-time USDC authorization"
-      : "Confirm payment in your wallet"
+      : "Payment approval"
   const walletRequestDetailCopy = "Return here after approving in your wallet."
   const fallbackButtonCopy = pendingWalletActionKind === "usdc_approve"
-    ? "Approve USDC in wallet"
+    ? "Retry USDC authorization"
     : pendingWalletActionKind === "eth_payment" || pendingWalletActionKind === "usdc_payment"
-      ? "Confirm payment in wallet"
-      : "Continue in wallet"
+      ? "Retry payment approval"
+      : "Retry wallet approval"
   function renderStepIcon(status: "done" | "active" | "upcoming") {
     if (status === "done") {
       return (
@@ -3265,9 +3348,9 @@ export default function BaseWalletPayment({
               usdcAuthStatus === "active" ? "Approve in your wallet, then return here." : undefined
             ) : null}
             {renderStep(
-              "Confirm payment",
+              "Payment approval",
               confirmPayStatus,
-              confirmPayStatus === "active" ? "Confirm payment in your wallet" : undefined
+              confirmPayStatus === "active" ? "Approve in your wallet" : undefined
             )}
             {renderStep("Network confirmation", networkConfStatus)}
           </div>
@@ -3302,17 +3385,17 @@ export default function BaseWalletPayment({
             <Button
               fullWidth
               onClick={() => {
-                void logBase("continue-in-wallet-click", {
+                void logBase("retry-wallet-approval-click", {
                   intentId: intentId || null,
                   selectedAsset,
                   walletRequestKind: pendingActionKindRef.current || pendingWalletRequestKind,
                   pendingWalletActionReady,
                 })
                 if (pendingActionKindRef.current) {
-                  void dispatchPendingWalletActionRef.current?.("continue-in-wallet-click")
+                  void dispatchPendingWalletActionRef.current?.("retry-wallet-approval-click")
                   return
                 }
-                triggerBaseAutoResumeRef.current?.("continue-in-wallet-click")
+                triggerBaseAutoResumeRef.current?.("retry-wallet-approval-click")
               }}
             >
               {fallbackButtonCopy}
@@ -3468,7 +3551,7 @@ export default function BaseWalletPayment({
       ) : isOpeningWallet ? (
         <Button fullWidth disabled>
           <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
-          {baseUsdcV4Status || "Confirming transaction…"}
+          {baseUsdcV4Status || "Waiting for wallet response..."}
         </Button>
       ) : (
         <div className="space-y-2">
