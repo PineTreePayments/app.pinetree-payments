@@ -1,8 +1,6 @@
-import type { BaseUsdcStrategy } from "@/types/payment"
-
 /**
  * PineTree Engine Configuration
- * 
+ *
  * Centralized configuration for the PineTree payment engine.
  * All system constants and platform settings are defined here.
  */
@@ -30,8 +28,6 @@ const BASE_NATIVE_USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 const DEFAULT_BASE_USDC_AUTH_VALIDITY_SECONDS = 600
 const MIN_BASE_USDC_AUTH_VALIDITY_SECONDS = 300
 const MAX_BASE_USDC_AUTH_VALIDITY_SECONDS = 900
-// LEGACY — only used by getBaseUsdcStrategy() which is not called when PINETREE_BASE_SPLIT_VERSION=v5
-const DEFAULT_BASE_USDC_STRATEGY: BaseUsdcStrategy = "v4_eip3009_relayer"
 
 /**
  * Network-specific PineTree treasury wallets
@@ -174,12 +170,7 @@ export function assertSplitRailConfig(network: string): void {
   }
 
   if (normalized === "base") {
-    // Route to V5 or V4 config check depending on the active split version.
-    if (isBaseSplitV5()) {
-      assertBaseV5Config()
-    } else {
-      assertBaseUsdcV4Config()
-    }
+    assertBaseV6Config()
     return
   }
 
@@ -200,74 +191,61 @@ export function assertSplitRailConfig(network: string): void {
   // Direct mode (PINETREE_EVM_SPLIT_MODE not set or "direct"): no contract required
 }
 
-/**
- * Base USDC V4 relayer configuration
- *
- * These helpers are server-side engine configuration only. In particular,
- * PINETREE_BASE_USDC_RELAYER_PRIVATE_KEY must never be exposed to browser code
- * or any NEXT_PUBLIC_* environment variable.
- */
-export function getBaseUsdcV4Contract(): string {
+// ─── Base V6 config ───────────────────────────────────────────────────────────
+
+export function getBaseV6Contract(): string {
   return requireEvmAddress(
-    "PINETREE_BASE_USDC_V4_CONTRACT",
-    process.env.PINETREE_BASE_USDC_V4_CONTRACT || ""
+    "PINETREE_BASE_V6_CONTRACT",
+    process.env.PINETREE_BASE_V6_CONTRACT || ""
   )
 }
 
-export function getBaseUsdcTokenAddress(): string {
+export function getBaseV6UsdcToken(): string {
   const tokenAddress = requireEvmAddress(
-    "PINETREE_BASE_USDC_TOKEN_ADDRESS",
-    process.env.PINETREE_BASE_USDC_TOKEN_ADDRESS || BASE_NATIVE_USDC_ADDRESS
+    "PINETREE_BASE_V6_USDC_TOKEN",
+    process.env.PINETREE_BASE_V6_USDC_TOKEN || BASE_NATIVE_USDC_ADDRESS
   )
-
   if (tokenAddress.toLowerCase() !== BASE_NATIVE_USDC_ADDRESS.toLowerCase()) {
     throw new Error(
-      "Invalid PINETREE_BASE_USDC_TOKEN_ADDRESS. Base USDC V4 requires native Base USDC " +
+      "Invalid PINETREE_BASE_V6_USDC_TOKEN. Base V6 requires native Base USDC " +
         `${BASE_NATIVE_USDC_ADDRESS}.`
     )
   }
-
   return tokenAddress
 }
 
-export function getBaseUsdcRelayer(): { address: string; privateKey: string } {
+export function getBaseV6Relayer(): { address: string; privateKey: string } {
   const address = requireEvmAddress(
-    "PINETREE_BASE_USDC_RELAYER_ADDRESS",
-    process.env.PINETREE_BASE_USDC_RELAYER_ADDRESS || ""
+    "PINETREE_BASE_V6_RELAYER_ADDRESS",
+    process.env.PINETREE_BASE_V6_RELAYER_ADDRESS || ""
   )
-  const privateKey = String(process.env.PINETREE_BASE_USDC_RELAYER_PRIVATE_KEY || "").trim()
+  const privateKey = String(process.env.PINETREE_BASE_V6_RELAYER_PRIVATE_KEY || "").trim()
 
   if (!privateKey) {
-    throw new Error("Missing required environment variable: PINETREE_BASE_USDC_RELAYER_PRIVATE_KEY")
+    throw new Error("Missing required environment variable: PINETREE_BASE_V6_RELAYER_PRIVATE_KEY")
   }
-
   if (!isPrivateKey(privateKey)) {
     throw new Error(
-      "Invalid PINETREE_BASE_USDC_RELAYER_PRIVATE_KEY. Expected a 0x-prefixed 32-byte private key."
+      "Invalid PINETREE_BASE_V6_RELAYER_PRIVATE_KEY. Expected a 0x-prefixed 32-byte private key."
     )
   }
-
   return { address, privateKey }
 }
 
-export function getBaseUsdcGasCap(): { maxGasUsd: number } {
-  const raw = String(process.env.PINETREE_BASE_USDC_MAX_GAS_USD || "").trim()
-
+export function getBaseV6GasCap(): { maxGasUsd: number } {
+  const raw = String(process.env.PINETREE_BASE_V6_MAX_GAS_USD || "").trim()
   if (!raw) {
-    throw new Error("Missing required environment variable: PINETREE_BASE_USDC_MAX_GAS_USD")
+    throw new Error("Missing required environment variable: PINETREE_BASE_V6_MAX_GAS_USD")
   }
-
   const maxGasUsd = Number(raw)
-
   if (!Number.isFinite(maxGasUsd) || maxGasUsd <= 0) {
-    throw new Error("Invalid PINETREE_BASE_USDC_MAX_GAS_USD. Expected a finite number greater than 0.")
+    throw new Error("Invalid PINETREE_BASE_V6_MAX_GAS_USD. Expected a finite number greater than 0.")
   }
-
   return { maxGasUsd }
 }
 
-export function getBaseUsdcAuthValiditySeconds(): number {
-  const raw = String(process.env.PINETREE_BASE_USDC_AUTH_VALIDITY_SECONDS || "").trim()
+export function getBaseV6AuthValiditySeconds(): number {
+  const raw = String(process.env.PINETREE_BASE_V6_AUTH_VALIDITY_SECONDS || "").trim()
   const seconds = raw ? Number(raw) : DEFAULT_BASE_USDC_AUTH_VALIDITY_SECONDS
 
   if (
@@ -276,94 +254,45 @@ export function getBaseUsdcAuthValiditySeconds(): number {
     seconds > MAX_BASE_USDC_AUTH_VALIDITY_SECONDS
   ) {
     throw new Error(
-      "Invalid PINETREE_BASE_USDC_AUTH_VALIDITY_SECONDS. Expected a finite number between " +
+      "Invalid PINETREE_BASE_V6_AUTH_VALIDITY_SECONDS. Expected a finite number between " +
         `${MIN_BASE_USDC_AUTH_VALIDITY_SECONDS} and ${MAX_BASE_USDC_AUTH_VALIDITY_SECONDS}.`
     )
   }
-
   return Math.floor(seconds)
 }
 
-export function assertBaseUsdcV4Config(): void {
-  getBaseUsdcV4Contract()
-  getBaseUsdcTokenAddress()
-  getBaseUsdcRelayer()
-  getBaseUsdcGasCap()
-  getBaseUsdcAuthValiditySeconds()
-
-  requireEvmAddress(
-    "PINETREE_TREASURY_WALLET_BASE",
-    process.env.PINETREE_TREASURY_WALLET_BASE || ""
-  )
-}
-
-export function isBaseUsdcV4Configured(): boolean {
-  try {
-    assertBaseUsdcV4Config()
-    return true
-  } catch {
-    return false
-  }
-}
-
-// ─── Base V5 config ───────────────────────────────────────────────────────────
-
-export function getBaseSplitVersion(): string {
-  return String(process.env.PINETREE_BASE_SPLIT_VERSION || "").toLowerCase().trim() || "v4"
-}
-
-export function isBaseSplitV5(): boolean {
-  return getBaseSplitVersion() === "v5"
-}
-
-export function getBaseV5SplitContract(): string {
-  return requireEvmAddress(
-    "PINETREE_BASE_SPLIT_V5_CONTRACT",
-    process.env.PINETREE_BASE_SPLIT_V5_CONTRACT || ""
-  )
-}
-
-export function assertBaseV5Config(): void {
-  getBaseV5SplitContract()
-  getBaseUsdcTokenAddress()
-  getBaseUsdcRelayer()
-  getBaseUsdcGasCap()
-  getBaseUsdcAuthValiditySeconds()
-
-  requireEvmAddress(
-    "PINETREE_TREASURY_WALLET_BASE",
-    process.env.PINETREE_TREASURY_WALLET_BASE || ""
-  )
-}
-
-export function isBaseV5Configured(): boolean {
-  try {
-    assertBaseV5Config()
-    return true
-  } catch {
-    return false
-  }
-}
-
-export function isBaseDelegatedEoaEnabled(): boolean {
-  return String(process.env.PINETREE_BASE_DELEGATED_EOA_ENABLED || "")
+export function isBaseV6DelegatedEnabled(): boolean {
+  return String(process.env.PINETREE_BASE_V6_DELEGATED_ENABLED || "")
     .toLowerCase()
     .trim() === "true"
 }
 
-// LEGACY — not called when PINETREE_BASE_SPLIT_VERSION=v5. Preserved for V4 rollback only.
-export function getBaseUsdcStrategy(): BaseUsdcStrategy {
-  const strategy = String(
-    process.env.PINETREE_BASE_USDC_STRATEGY || DEFAULT_BASE_USDC_STRATEGY
-  ).trim()
+export function isBaseV6Eip3009Enabled(): boolean {
+  const raw = String(process.env.PINETREE_BASE_V6_EIP3009_ENABLED || "").toLowerCase().trim()
+  // Default true — opt-out by setting to "false"
+  return raw !== "false"
+}
 
-  if (strategy === "v1_approve_splitToken" || strategy === "v4_eip3009_relayer") {
-    return strategy
-  }
+export function assertBaseV6Config(): void {
+  getBaseV6Contract()
+  getBaseV6UsdcToken()
+  getBaseV6Relayer()
+  getBaseV6GasCap()
+  getBaseV6AuthValiditySeconds()
 
-  throw new Error(
-    "Invalid PINETREE_BASE_USDC_STRATEGY. Expected v1_approve_splitToken or v4_eip3009_relayer."
+  requireEvmAddress(
+    "PINETREE_TREASURY_WALLET_BASE",
+    process.env.PINETREE_TREASURY_WALLET_BASE || ""
   )
+}
+
+export function isBaseV6Configured(): boolean {
+  try {
+    assertBaseV6Config()
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**

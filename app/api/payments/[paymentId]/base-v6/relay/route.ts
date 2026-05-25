@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { relayBaseUsdcV5Payment } from "@/engine/baseUsdcV5Relayer"
+import { relayBaseV6Payment } from "@/engine/baseV6Relayer"
 
 export async function POST(
   req: NextRequest,
@@ -20,17 +20,14 @@ export async function POST(
     }
     const payerAddress = String(body.payerAddress || "").trim()
 
-    console.info("[PineTreeBaseTrace] v5 relay called", {
-      step: "v5-route-relay-entry",
+    console.info("[BASE V6] relay route entry", {
       paymentId,
       payerAddress,
-      asset: "USDC",
-      network: "base",
       hasAuthorization: Boolean(body.authorization),
       hasSignature: Boolean(body.signature)
     })
 
-    const result = await relayBaseUsdcV5Payment({
+    const result = await relayBaseV6Payment({
       paymentId,
       payerAddress,
       authorization: {
@@ -42,17 +39,13 @@ export async function POST(
     })
 
     if (result.ok) {
-      console.info("[PineTreeBaseTrace] v5 relay success", {
-        step: "v5-route-relay-response",
+      console.info("[BASE V6] relay route success", {
         paymentId,
-        asset: "USDC",
-        network: "base",
         txHash: (result as { txHash?: string }).txHash || null,
         status: (result as { status?: string }).status || null
       })
     } else {
-      console.warn("[PineTreeBaseTrace] v5 relay unavailable", {
-        step: "v5-route-relay-unavailable",
+      console.warn("[BASE V6] relay route unavailable", {
         paymentId,
         code: (result as Record<string, unknown>).code || null
       })
@@ -60,14 +53,8 @@ export async function POST(
 
     return NextResponse.json(result)
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to relay Base USDC V5 payment"
-    console.error("[PineTreeBaseTrace] v5 relay error", {
-      step: "v5-route-relay-error",
-      paymentId,
-      asset: "USDC",
-      network: "base",
-      error: message
-    })
+    const message = error instanceof Error ? error.message : "Failed to relay Base V6 payment"
+    console.error("[BASE V6] relay route error", { paymentId, error: message })
     return NextResponse.json({ ok: false, error: message }, { status: 400 })
   }
 }

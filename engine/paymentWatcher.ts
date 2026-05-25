@@ -23,7 +23,7 @@
  *             engine/checkPaymentOnce.ts
  */
 
-import { getBaseUsdcTokenAddress, getRpcUrl } from "./config"
+import { getBaseV6UsdcToken, getRpcUrl } from "./config"
 import { processPaymentEvent } from "./eventProcessor"
 import { id as ethersId, AbiCoder } from "ethers"
 
@@ -864,7 +864,7 @@ function isValidBaseUsdcToken(
   if (!isBaseUsdc) return true
 
   try {
-    return token.toLowerCase() === getBaseUsdcTokenAddress().toLowerCase()
+    return token.toLowerCase() === getBaseV6UsdcToken().toLowerCase()
   } catch {
     return false
   }

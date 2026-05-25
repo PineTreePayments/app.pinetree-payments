@@ -17,11 +17,11 @@ import {
 } from "@/database/transactions"
 import type { StoredPaymentSplitMetadata } from "@/types/payment"
 import {
-  getBaseUsdcAuthValiditySeconds,
-  getBaseUsdcGasCap,
-  getBaseUsdcRelayer,
-  getBaseUsdcTokenAddress,
-  getBaseV5SplitContract,
+  getBaseV6AuthValiditySeconds,
+  getBaseV6Contract,
+  getBaseV6GasCap,
+  getBaseV6Relayer,
+  getBaseV6UsdcToken,
   getPineTreeTreasuryWallet,
   getRpcUrl
 } from "./config"
@@ -39,7 +39,7 @@ const TERMINAL_PAYMENT_STATUSES = new Set([
   "REFUNDED"
 ])
 
-const V5_ABI = [
+const V6_ABI = [
   "function payUsdcWithAuthorization((address payer,address merchant,address treasury,uint256 merchantAmount,uint256 feeAmount,string paymentRef) payment,(uint256 validAfter,uint256 validBefore,bytes32 nonce) authorization,(uint8 v,bytes32 r,bytes32 s) signature)",
   "function payUsdcWithAllowance(address merchant,address treasury,uint256 merchantAmount,uint256 feeAmount,string paymentRef)",
   "function relayers(address relayer) view returns (bool)",
@@ -56,19 +56,19 @@ const usdcIface = new Interface([
   "function approve(address spender, uint256 amount) returns (bool)"
 ])
 
-const v5Iface = new Interface([
+const v6Iface = new Interface([
   "function payUsdcWithAllowance(address merchant,address treasury,uint256 merchantAmount,uint256 feeAmount,string paymentRef)"
 ])
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type BaseUsdcV5Authorization = {
+type BaseV6Authorization = {
   validAfter: string
   validBefore: string
   nonce: string
 }
 
-type BaseUsdcV5TypedDataInput = {
+type BaseV6TypedDataInput = {
   payerAddress: string
   value: string | bigint
   validAfter: string | number | bigint
@@ -76,7 +76,7 @@ type BaseUsdcV5TypedDataInput = {
   nonce: string
 }
 
-type BaseUsdcV5PaymentContext = {
+type BaseV6PaymentContext = {
   paymentId: string
   payerAddress: string
   merchantWallet: string
@@ -87,22 +87,22 @@ type BaseUsdcV5PaymentContext = {
   splitContract: string
 }
 
-export type BaseUsdcV5UnavailableResponse = {
+export type BaseV6UnavailableResponse = {
   ok: false
   unavailable: true
   code: "BASE_USDC_TEMPORARILY_UNAVAILABLE"
   message: string
 }
 
-export type BaseUsdcV5RelayResponse =
+export type BaseV6RelayResponse =
   | { ok: true; status: "submitted"; txHash: string }
-  | BaseUsdcV5UnavailableResponse
+  | BaseV6UnavailableResponse
 
-export type BaseUsdcV5AllowanceCheckResult =
+export type BaseV6AllowanceCheckResult =
   | { ok: true; allowance: string; required: string; sufficient: boolean }
-  | BaseUsdcV5UnavailableResponse
+  | BaseV6UnavailableResponse
 
-export type BaseUsdcV5AllowancePaymentResult =
+export type BaseV6AllowancePaymentResult =
   | {
       ok: true
       paymentId: string
@@ -112,11 +112,11 @@ export type BaseUsdcV5AllowancePaymentResult =
       approveTx: { to: string; data: string; value: string; chainId: number } | null
       paymentTx: { to: string; data: string; value: string; chainId: number }
     }
-  | BaseUsdcV5UnavailableResponse
+  | BaseV6UnavailableResponse
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function unavailable(): BaseUsdcV5UnavailableResponse {
+function unavailable(): BaseV6UnavailableResponse {
   return {
     ok: false,
     unavailable: true,
@@ -145,18 +145,17 @@ function requireAtomicAmount(label: string, value: unknown): bigint {
   return amount
 }
 
-function normalizeAuthorization(input: BaseUsdcV5Authorization): BaseUsdcV5Authorization {
+function normalizeAuthorization(input: BaseV6Authorization): BaseV6Authorization {
   const validAfter = String(input.validAfter ?? "").trim()
   const validBefore = String(input.validBefore ?? "").trim()
   const nonce = String(input.nonce || "").trim()
 
   if (!/^\d+$/.test(validAfter) || !/^\d+$/.test(validBefore)) {
-    throw new Error("Invalid Base USDC V5 authorization validity window")
+    throw new Error("Invalid Base V6 authorization validity window")
   }
   if (!/^0x[a-fA-F0-9]{64}$/.test(nonce)) {
-    throw new Error("Invalid Base USDC V5 authorization nonce")
+    throw new Error("Invalid Base V6 authorization nonce")
   }
-
   return { validAfter, validBefore, nonce }
 }
 
@@ -166,11 +165,11 @@ function isSameAddress(left: string, right: string): boolean {
 
 // ─── Payment context loader ───────────────────────────────────────────────────
 
-async function loadValidatedPaymentContext(input: {
+async function loadV6PaymentContext(input: {
   paymentId: string
   payerAddress: string
   allowTerminal: boolean
-}): Promise<BaseUsdcV5PaymentContext> {
+}): Promise<BaseV6PaymentContext> {
   const paymentId = String(input.paymentId || "").trim()
   if (!paymentId) throw new Error("Missing paymentId")
 
@@ -179,7 +178,7 @@ async function loadValidatedPaymentContext(input: {
   if (!payment) throw new Error("Payment not found")
 
   const status = String(payment.status || "").toUpperCase()
-  if (input.allowTerminal ? false : TERMINAL_PAYMENT_STATUSES.has(status)) {
+  if (!input.allowTerminal && TERMINAL_PAYMENT_STATUSES.has(status)) {
     throw new Error("Payment is already terminal")
   }
   if (!["CREATED", "PENDING", "PROCESSING"].includes(status)) {
@@ -187,7 +186,7 @@ async function loadValidatedPaymentContext(input: {
   }
 
   if (String(payment.network || "").toLowerCase().trim() !== "base") {
-    throw new Error("Base USDC V5 is only available for Base payments")
+    throw new Error("Base V6 is only available for Base payments")
   }
 
   const split = ((payment.metadata ?? null) as StoredPaymentSplitMetadata | null)?.split
@@ -197,24 +196,26 @@ async function loadValidatedPaymentContext(input: {
     throw new Error("Payment is not a Base USDC payment")
   }
 
-  if (split.baseUsdcStrategy !== "v5_eip3009_relayer") {
-    throw new Error("Payment is not configured for Base USDC V5 relayer")
-  }
-
-  const v5Contract = getBaseV5SplitContract()
-  if (!isSameAddress(String(split.splitContract || ""), v5Contract)) {
-    throw new Error("Payment split contract does not match Base V5 contract")
+  const v6Contract = getBaseV6Contract()
+  if (split.splitContract && !isSameAddress(String(split.splitContract), v6Contract)) {
+    throw new Error("Payment split contract does not match Base V6 contract")
   }
 
   const merchantWallet = requireEvmAddress("merchantWallet", String(split.merchantWallet || ""))
-  const treasuryWallet = requireEvmAddress("PINETREE_TREASURY_WALLET_BASE", getPineTreeTreasuryWallet("base"))
+  const treasuryWallet = requireEvmAddress(
+    "PINETREE_TREASURY_WALLET_BASE",
+    getPineTreeTreasuryWallet("base")
+  )
   const splitTreasuryWallet = requireEvmAddress("pinetreeWallet", String(split.pinetreeWallet || ""))
 
   if (treasuryWallet !== splitTreasuryWallet) {
     throw new Error("Payment treasury does not match PINETREE_TREASURY_WALLET_BASE")
   }
 
-  const merchantAmount = requireAtomicAmount("merchantNativeAmountAtomic", split.merchantNativeAmountAtomic)
+  const merchantAmount = requireAtomicAmount(
+    "merchantNativeAmountAtomic",
+    split.merchantNativeAmountAtomic
+  )
   const feeAmount = requireAtomicAmount("feeNativeAmountAtomic", split.feeNativeAmountAtomic)
 
   return {
@@ -225,64 +226,13 @@ async function loadValidatedPaymentContext(input: {
     merchantAmount,
     feeAmount,
     totalAmount: merchantAmount + feeAmount,
-    splitContract: requireEvmAddress("PINETREE_BASE_SPLIT_V5_CONTRACT", v5Contract)
-  }
-}
-
-// Lighter context loader for allowance path — does not require v5_eip3009_relayer strategy.
-// The allowance path is valid for any active V5 USDC payment.
-async function loadAllowancePaymentContext(input: {
-  paymentId: string
-  payerAddress: string
-}): Promise<BaseUsdcV5PaymentContext> {
-  const paymentId = String(input.paymentId || "").trim()
-  if (!paymentId) throw new Error("Missing paymentId")
-
-  const payerAddress = requireEvmAddress("payerAddress", input.payerAddress)
-  const payment = await getPaymentById(paymentId)
-  if (!payment) throw new Error("Payment not found")
-
-  const status = String(payment.status || "").toUpperCase()
-  if (TERMINAL_PAYMENT_STATUSES.has(status)) {
-    throw new Error("Payment is already terminal")
-  }
-  if (!["CREATED", "PENDING", "PROCESSING"].includes(status)) {
-    throw new Error("Payment is not active")
-  }
-
-  if (String(payment.network || "").toLowerCase().trim() !== "base") {
-    throw new Error("Base USDC V5 is only available for Base payments")
-  }
-
-  const split = ((payment.metadata ?? null) as StoredPaymentSplitMetadata | null)?.split
-  if (!split) throw new Error("Payment split metadata is missing")
-
-  if (String(split.asset || "").toUpperCase() !== "USDC") {
-    throw new Error("Payment is not a Base USDC payment")
-  }
-
-  const v5Contract = getBaseV5SplitContract()
-
-  const merchantWallet = requireEvmAddress("merchantWallet", String(split.merchantWallet || ""))
-  const treasuryWallet = requireEvmAddress("PINETREE_TREASURY_WALLET_BASE", getPineTreeTreasuryWallet("base"))
-  const merchantAmount = requireAtomicAmount("merchantNativeAmountAtomic", split.merchantNativeAmountAtomic)
-  const feeAmount = requireAtomicAmount("feeNativeAmountAtomic", split.feeNativeAmountAtomic)
-
-  return {
-    paymentId: payment.id,
-    payerAddress,
-    merchantWallet,
-    treasuryWallet,
-    merchantAmount,
-    feeAmount,
-    totalAmount: merchantAmount + feeAmount,
-    splitContract: requireEvmAddress("PINETREE_BASE_SPLIT_V5_CONTRACT", v5Contract)
+    splitContract: requireEvmAddress("PINETREE_BASE_V6_CONTRACT", v6Contract)
   }
 }
 
 // ─── Typed data builder ───────────────────────────────────────────────────────
 
-export function buildBaseUsdcV5TypedData(input: BaseUsdcV5TypedDataInput) {
+export function buildBaseV6TypedData(input: BaseV6TypedDataInput) {
   const authorization = normalizeAuthorization({
     validAfter: String(input.validAfter),
     validBefore: String(input.validBefore),
@@ -290,7 +240,7 @@ export function buildBaseUsdcV5TypedData(input: BaseUsdcV5TypedDataInput) {
   })
   const value = String(input.value)
   if (!/^\d+$/.test(value) || BigInt(value) <= BigInt(0)) {
-    throw new Error("Invalid Base USDC V5 authorization value")
+    throw new Error("Invalid Base V6 authorization value")
   }
 
   return {
@@ -298,7 +248,7 @@ export function buildBaseUsdcV5TypedData(input: BaseUsdcV5TypedDataInput) {
       name: "USD Coin",
       version: "2",
       chainId: BASE_CHAIN_ID,
-      verifyingContract: getBaseUsdcTokenAddress()
+      verifyingContract: getBaseV6UsdcToken()
     },
     types: {
       ReceiveWithAuthorization: [
@@ -313,7 +263,7 @@ export function buildBaseUsdcV5TypedData(input: BaseUsdcV5TypedDataInput) {
     primaryType: "ReceiveWithAuthorization",
     message: {
       from: requireEvmAddress("payerAddress", input.payerAddress),
-      to: getBaseV5SplitContract(),
+      to: getBaseV6Contract(),
       value,
       validAfter: authorization.validAfter,
       validBefore: authorization.validBefore,
@@ -324,13 +274,13 @@ export function buildBaseUsdcV5TypedData(input: BaseUsdcV5TypedDataInput) {
 
 // ─── Availability check ───────────────────────────────────────────────────────
 
-export async function getBaseUsdcV5Availability(): Promise<BaseUsdcV5UnavailableResponse | { ok: true }> {
+export async function getBaseV6Availability(): Promise<BaseV6UnavailableResponse | { ok: true }> {
   try {
-    getBaseV5SplitContract()
-    getBaseUsdcTokenAddress()
-    getBaseUsdcRelayer()
-    getBaseUsdcGasCap()
-    getBaseUsdcAuthValiditySeconds()
+    getBaseV6Contract()
+    getBaseV6UsdcToken()
+    getBaseV6Relayer()
+    getBaseV6GasCap()
+    getBaseV6AuthValiditySeconds()
     getPineTreeTreasuryWallet("base")
     getRpcUrl("base")
     return { ok: true }
@@ -341,53 +291,49 @@ export async function getBaseUsdcV5Availability(): Promise<BaseUsdcV5Unavailable
 
 // ─── Prepare authorization ────────────────────────────────────────────────────
 
-export async function prepareBaseUsdcV5Authorization(input: {
+export async function prepareBaseV6Authorization(input: {
   paymentId: string
   payerAddress: string
 }) {
-  console.info("[PineTreeBaseTrace] v5 prepare-authorization engine called", {
-    step: "v5-prepare-entry",
+  console.info("[BASE V6] prepare-authorization entry", {
     paymentId: input.paymentId,
     payerAddress: input.payerAddress
   })
 
-  const availability = await getBaseUsdcV5Availability()
+  const availability = await getBaseV6Availability()
   if (!availability.ok) {
-    console.warn("[PineTreeBaseTrace] v5 prepare-authorization config unavailable", {
-      step: "v5-prepare-unavailable",
+    console.warn("[BASE V6] prepare-authorization config unavailable", {
       paymentId: input.paymentId,
       code: availability.code
     })
     return availability
   }
 
-  let context: BaseUsdcV5PaymentContext
+  let context: BaseV6PaymentContext
   try {
-    context = await loadValidatedPaymentContext({
+    context = await loadV6PaymentContext({
       paymentId: input.paymentId,
       payerAddress: input.payerAddress,
       allowTerminal: false
     })
   } catch (ctxErr) {
     const ctxMsg = ctxErr instanceof Error ? ctxErr.message : String(ctxErr)
-    console.error("[PineTreeBaseTrace] v5 prepare-authorization context load failed", {
-      step: "v5-prepare-context-error",
+    console.error("[BASE V6] prepare-authorization context load failed", {
       paymentId: input.paymentId,
       error: ctxMsg
     })
     throw ctxErr
   }
 
-  const v5Contract = getBaseV5SplitContract()
-  const usdcTokenAddress = getBaseUsdcTokenAddress()
-
+  const v6Contract = getBaseV6Contract()
+  const usdcTokenAddress = getBaseV6UsdcToken()
   const now = Math.floor(Date.now() / 1000)
-  const authorization: BaseUsdcV5Authorization = {
+  const authorization: BaseV6Authorization = {
     validAfter: "0",
-    validBefore: String(now + getBaseUsdcAuthValiditySeconds()),
+    validBefore: String(now + getBaseV6AuthValiditySeconds()),
     nonce: hexlify(randomBytes(32))
   }
-  const typedData = buildBaseUsdcV5TypedData({
+  const typedData = buildBaseV6TypedData({
     payerAddress: context.payerAddress,
     value: context.totalAmount,
     validAfter: authorization.validAfter,
@@ -395,11 +341,9 @@ export async function prepareBaseUsdcV5Authorization(input: {
     nonce: authorization.nonce
   })
 
-  console.info("[PineTreeBaseTrace] v5 prepare-authorization typed-data prepared", {
-    step: "v5-prepare-success",
+  console.info("[BASE V6] prepare-authorization success", {
     paymentId: context.paymentId,
-    baseUsdcStrategy: "v5_eip3009_relayer",
-    splitContract: v5Contract,
+    splitContract: v6Contract,
     usdcTokenAddress,
     validBefore: authorization.validBefore
   })
@@ -413,24 +357,22 @@ export async function prepareBaseUsdcV5Authorization(input: {
   }
 }
 
-// ─── Relay payment (authorization path) ──────────────────────────────────────
+// ─── Relay payment (EIP-3009 path) ───────────────────────────────────────────
 
-export async function relayBaseUsdcV5Payment(input: {
+export async function relayBaseV6Payment(input: {
   paymentId: string
   payerAddress: string
-  authorization: BaseUsdcV5Authorization
+  authorization: BaseV6Authorization
   signature: string
-}): Promise<BaseUsdcV5RelayResponse> {
-  console.info("[PineTreeBaseTrace] v5 relayer called", {
-    step: "v5-relay-entry",
+}): Promise<BaseV6RelayResponse> {
+  console.info("[BASE V6] relay entry", {
     paymentId: input.paymentId,
     payerAddress: input.payerAddress
   })
 
-  const availability = await getBaseUsdcV5Availability()
+  const availability = await getBaseV6Availability()
   if (!availability.ok) {
-    console.warn("[PineTreeBaseTrace] v5 relayer config unavailable", {
-      step: "v5-relay-config-unavailable",
+    console.warn("[BASE V6] relay config unavailable", {
       paymentId: input.paymentId,
       code: availability.code
     })
@@ -440,51 +382,46 @@ export async function relayBaseUsdcV5Payment(input: {
   const existingTransaction = await getTransactionByPaymentId(input.paymentId)
   const existingTxHash = String(existingTransaction?.provider_transaction_id || "").trim()
   if (/^0x[a-fA-F0-9]{64}$/.test(existingTxHash)) {
-    console.info("[PineTreeBaseTrace] v5 relayer idempotent — txHash already exists", {
-      step: "v5-relay-idempotent",
+    console.info("[BASE V6] relay idempotent — txHash already exists", {
       paymentId: input.paymentId,
       txHash: existingTxHash
     })
     return { ok: true, status: "submitted", txHash: existingTxHash }
   }
 
-  const context = await loadValidatedPaymentContext({
+  const context = await loadV6PaymentContext({
     paymentId: input.paymentId,
     payerAddress: input.payerAddress,
     allowTerminal: false
   })
   const authorization = normalizeAuthorization(input.authorization)
-  const typedData = buildBaseUsdcV5TypedData({
+  const typedData = buildBaseV6TypedData({
     payerAddress: context.payerAddress,
     value: context.totalAmount,
     validAfter: authorization.validAfter,
     validBefore: authorization.validBefore,
     nonce: authorization.nonce
   })
-  const recovered = getAddress(verifyTypedData(
-    typedData.domain,
-    typedData.types,
-    typedData.message,
-    input.signature
-  ))
+  const recovered = getAddress(
+    verifyTypedData(typedData.domain, typedData.types, typedData.message, input.signature)
+  )
 
   if (recovered !== context.payerAddress) {
-    console.error("[PineTreeBaseTrace] v5 relayer signature mismatch", {
-      step: "v5-relay-sig-mismatch",
+    console.error("[BASE V6] relay signature mismatch", {
       paymentId: input.paymentId,
       recovered,
       expected: context.payerAddress
     })
-    throw new Error("Base USDC V5 authorization signature does not match payer")
+    throw new Error("Base V6 authorization signature does not match payer")
   }
 
   const signature = Signature.from(input.signature)
   const provider = new JsonRpcProvider(getRpcUrl("base"), BASE_CHAIN_ID)
-  const { address: configuredRelayerAddress, privateKey } = getBaseUsdcRelayer()
+  const { address: configuredRelayerAddress, privateKey } = getBaseV6Relayer()
   const relayer = new Wallet(privateKey, provider)
+
   if (getAddress(relayer.address) !== getAddress(configuredRelayerAddress)) {
-    console.error("[PineTreeBaseTrace] v5 relayer address mismatch — returning unavailable", {
-      step: "v5-relay-address-mismatch",
+    console.error("[BASE V6] relay address mismatch", {
       paymentId: input.paymentId,
       configuredRelayerAddress,
       derivedRelayerAddress: relayer.address
@@ -492,7 +429,7 @@ export async function relayBaseUsdcV5Payment(input: {
     return unavailable()
   }
 
-  const contract = new Contract(context.splitContract, V5_ABI, relayer)
+  const contract = new Contract(context.splitContract, V6_ABI, relayer)
 
   const [isRelayerAllowed, isPaymentRefUsed, contractTreasury] = await Promise.all([
     contract.relayers(relayer.address) as Promise<boolean>,
@@ -500,19 +437,18 @@ export async function relayBaseUsdcV5Payment(input: {
     contract.pineTreeTreasury() as Promise<string>
   ])
 
-  console.info("[PineTreeBaseTrace] v5 relayer contract checks", {
-    step: "v5-relay-contract-checks",
+  console.info("[BASE V6] relay contract checks", {
     paymentId: input.paymentId,
     splitContract: context.splitContract,
     relayerAddress: relayer.address,
     isRelayerAllowed,
     isPaymentRefUsed,
-    contractTreasuryMatchesConfig: getAddress(contractTreasury) === getAddress(context.treasuryWallet)
+    contractTreasuryMatchesConfig:
+      getAddress(contractTreasury) === getAddress(context.treasuryWallet)
   })
 
   if (!isRelayerAllowed) {
-    console.error("[PineTreeBaseTrace] v5 relayer not allowlisted — returning unavailable", {
-      step: "v5-relay-not-allowlisted",
+    console.error("[BASE V6] relay not allowlisted", {
       paymentId: input.paymentId,
       relayerAddress: relayer.address,
       splitContract: context.splitContract
@@ -521,12 +457,11 @@ export async function relayBaseUsdcV5Payment(input: {
   }
 
   if (isPaymentRefUsed) {
-    throw new Error("Base USDC V5 payment reference has already been used on-chain")
+    throw new Error("Base V6 payment reference has already been used on-chain")
   }
 
   if (getAddress(contractTreasury) !== getAddress(context.treasuryWallet)) {
-    console.error("[PineTreeBaseTrace] v5 relayer treasury mismatch — returning unavailable", {
-      step: "v5-relay-treasury-mismatch",
+    console.error("[BASE V6] relay treasury mismatch", {
       paymentId: input.paymentId,
       contractTreasury: getAddress(contractTreasury),
       configuredTreasury: context.treasuryWallet
@@ -547,11 +482,7 @@ export async function relayBaseUsdcV5Payment(input: {
     validBefore: BigInt(authorization.validBefore),
     nonce: authorization.nonce
   }
-  const signatureArgs = {
-    v: signature.v,
-    r: signature.r,
-    s: signature.s
-  }
+  const signatureArgs = { v: signature.v, r: signature.r, s: signature.s }
 
   const estimatedGas = await contract.payUsdcWithAuthorization.estimateGas(
     paymentArgs,
@@ -561,36 +492,26 @@ export async function relayBaseUsdcV5Payment(input: {
   const feeData = await provider.getFeeData()
   const gasPrice = feeData.maxFeePerGas || feeData.gasPrice
   if (!gasPrice) {
-    console.warn("[PineTreeBaseTrace] v5 relayer no gas price available — returning unavailable", {
-      step: "v5-relay-no-gas-price",
-      paymentId: input.paymentId
-    })
+    console.warn("[BASE V6] relay no gas price available", { paymentId: input.paymentId })
     return unavailable()
   }
 
   const gasCostWei = estimatedGas * gasPrice
   const prices = await getMarketPricesUSD()
   const gasCostUsd = Number(formatEther(gasCostWei)) * prices.ETH
-  const { maxGasUsd } = getBaseUsdcGasCap()
-
+  const { maxGasUsd } = getBaseV6GasCap()
   const relayerBalance = await provider.getBalance(relayer.address)
 
-  console.info("[PineTreeBaseTrace] v5 relayer gas check", {
-    step: "v5-relay-gas-check",
+  console.info("[BASE V6] relay gas check", {
     paymentId: input.paymentId,
-    relayerAddress: relayer.address,
     estimatedGas: estimatedGas.toString(),
-    gasCostWei: gasCostWei.toString(),
     gasCostUsd: Number.isFinite(gasCostUsd) ? gasCostUsd.toFixed(6) : "NaN",
     maxGasUsd,
-    relayerBalanceWei: relayerBalance.toString(),
-    gasCostWithinCap: Number.isFinite(gasCostUsd) && gasCostUsd <= maxGasUsd,
-    relayerHasSufficientBalance: relayerBalance >= gasCostWei
+    withinCap: Number.isFinite(gasCostUsd) && gasCostUsd <= maxGasUsd
   })
 
   if (!Number.isFinite(gasCostUsd) || gasCostUsd > maxGasUsd) {
-    console.warn("[PineTreeBaseTrace] v5 relayer gas cap exceeded — returning unavailable", {
-      step: "v5-relay-gas-cap-exceeded",
+    console.warn("[BASE V6] relay gas cap exceeded", {
       paymentId: input.paymentId,
       gasCostUsd,
       maxGasUsd
@@ -599,23 +520,18 @@ export async function relayBaseUsdcV5Payment(input: {
   }
 
   if (relayerBalance < gasCostWei) {
-    console.warn("[PineTreeBaseTrace] v5 relayer insufficient ETH balance — returning unavailable", {
-      step: "v5-relay-balance-insufficient",
+    console.warn("[BASE V6] relay insufficient ETH balance", {
       paymentId: input.paymentId,
-      relayerAddress: relayer.address,
       gasCostWei: gasCostWei.toString(),
       relayerBalanceWei: relayerBalance.toString()
     })
     return unavailable()
   }
 
-  console.info("[PineTreeBaseTrace] v5 relayer submitting payUsdcWithAuthorization", {
-    step: "v5-relay-submit",
+  console.info("[BASE V6] relay submitting payUsdcWithAuthorization", {
     paymentId: input.paymentId,
     splitContract: context.splitContract,
-    relayerAddress: relayer.address,
-    merchantAmount: context.merchantAmount.toString(),
-    feeAmount: context.feeAmount.toString()
+    relayerAddress: relayer.address
   })
 
   const tx = await contract.payUsdcWithAuthorization(
@@ -625,14 +541,10 @@ export async function relayBaseUsdcV5Payment(input: {
   )
   const txHash = String(tx.hash || "")
   if (!/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
-    throw new Error("Base USDC V5 relayer did not return a transaction hash")
+    throw new Error("Base V6 relayer did not return a transaction hash")
   }
 
-  console.info("[PineTreeBaseTrace] v5 relayer txHash returned", {
-    step: "v5-relay-tx-submitted",
-    paymentId: input.paymentId,
-    txHash
-  })
+  console.info("[BASE V6] relay tx submitted", { paymentId: input.paymentId, txHash })
 
   if (existingTransaction?.id) {
     await updateTransactionProviderReference(existingTransaction.id, txHash)
@@ -641,34 +553,24 @@ export async function relayBaseUsdcV5Payment(input: {
   try {
     const receipt = await provider.waitForTransaction(txHash, 1, 90_000)
     if (receipt) {
-      console.info("[PineTreeBaseTrace] v5 relayer receipt mined", {
-        step: "v5-relay-receipt",
+      console.info("[BASE V6] relay receipt mined", {
         paymentId: input.paymentId,
         txHash,
         receiptStatus: receipt.status !== undefined ? String(receipt.status) : "unknown"
       })
       const { runPaymentWatcher } = await import("./checkPaymentOnce")
-      let watcherDetected = false
       try {
-        watcherDetected = await runPaymentWatcher(input.paymentId, { txHash })
+        await runPaymentWatcher(input.paymentId, { txHash })
       } catch (watcherErr) {
-        console.error("[PineTreeBaseTrace] v5 relayer watcher error", {
-          step: "v5-relay-watcher-error",
+        console.error("[BASE V6] relay watcher error", {
           paymentId: input.paymentId,
           txHash,
           error: watcherErr instanceof Error ? watcherErr.message : String(watcherErr)
         })
       }
-      console.info("[PineTreeBaseTrace] v5 relayer watcher result", {
-        step: "v5-relay-watcher-done",
-        paymentId: input.paymentId,
-        txHash,
-        detected: watcherDetected
-      })
     }
   } catch (waitErr) {
-    console.warn("[PineTreeBaseTrace] v5 relayer wait-for-receipt timeout — cron will detect", {
-      step: "v5-relay-wait-timeout",
+    console.warn("[BASE V6] relay wait-for-receipt timeout — cron will detect", {
       paymentId: input.paymentId,
       txHash,
       error: waitErr instanceof Error ? waitErr.message : String(waitErr)
@@ -680,42 +582,37 @@ export async function relayBaseUsdcV5Payment(input: {
 
 // ─── Allowance check ──────────────────────────────────────────────────────────
 
-export async function checkBaseUsdcV5Allowance(input: {
+export async function checkBaseV6Allowance(input: {
   paymentId: string
   payerAddress: string
-}): Promise<BaseUsdcV5AllowanceCheckResult> {
+}): Promise<BaseV6AllowanceCheckResult> {
   try {
-    const context = await loadAllowancePaymentContext({
+    const context = await loadV6PaymentContext({
       paymentId: input.paymentId,
-      payerAddress: input.payerAddress
+      payerAddress: input.payerAddress,
+      allowTerminal: false
     })
-
     const provider = new JsonRpcProvider(getRpcUrl("base"), BASE_CHAIN_ID)
-    const usdcContract = new Contract(getBaseUsdcTokenAddress(), USDC_ABI, provider)
-    const rawAllowance = await usdcContract.allowance(
+    const usdcContract = new Contract(getBaseV6UsdcToken(), USDC_ABI, provider)
+    const rawAllowance = (await usdcContract.allowance(
       context.payerAddress,
       context.splitContract
-    ) as bigint
+    )) as bigint
 
     const allowance = rawAllowance.toString()
     const required = context.totalAmount.toString()
     const sufficient = rawAllowance >= context.totalAmount
 
-    console.info("[PineTreeBaseTrace] v5 allowance check", {
-      step: "v5-allowance-check",
+    console.info("[BASE V6] allowance check", {
       paymentId: context.paymentId,
-      payerAddress: context.payerAddress,
-      splitContract: context.splitContract,
       allowance,
       required,
       sufficient
     })
-
     return { ok: true, allowance, required, sufficient }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error("[PineTreeBaseTrace] v5 allowance check failed", {
-      step: "v5-allowance-check-error",
+    console.error("[BASE V6] allowance check failed", {
       paymentId: input.paymentId,
       error: message
     })
@@ -725,20 +622,20 @@ export async function checkBaseUsdcV5Allowance(input: {
 
 // ─── Build allowance-path transactions ───────────────────────────────────────
 
-export async function buildBaseUsdcV5AllowancePayment(input: {
+export async function buildBaseV6AllowancePayment(input: {
   paymentId: string
   payerAddress: string
-}): Promise<BaseUsdcV5AllowancePaymentResult> {
-  let context: BaseUsdcV5PaymentContext
+}): Promise<BaseV6AllowancePaymentResult> {
+  let context: BaseV6PaymentContext
   try {
-    context = await loadAllowancePaymentContext({
+    context = await loadV6PaymentContext({
       paymentId: input.paymentId,
-      payerAddress: input.payerAddress
+      payerAddress: input.payerAddress,
+      allowTerminal: false
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error("[PineTreeBaseTrace] v5 build-allowance-payment context error", {
-      step: "v5-build-allowance-context-error",
+    console.error("[BASE V6] build-allowance-payment context error", {
       paymentId: input.paymentId,
       error: message
     })
@@ -747,18 +644,18 @@ export async function buildBaseUsdcV5AllowancePayment(input: {
 
   try {
     const provider = new JsonRpcProvider(getRpcUrl("base"), BASE_CHAIN_ID)
-    const usdcContract = new Contract(getBaseUsdcTokenAddress(), USDC_ABI, provider)
-    const rawAllowance = await usdcContract.allowance(
+    const usdcContract = new Contract(getBaseV6UsdcToken(), USDC_ABI, provider)
+    const rawAllowance = (await usdcContract.allowance(
       context.payerAddress,
       context.splitContract
-    ) as bigint
+    )) as bigint
 
     const sufficient = rawAllowance >= context.totalAmount
 
     const approveTx = sufficient
       ? null
       : {
-          to: getBaseUsdcTokenAddress(),
+          to: getBaseV6UsdcToken(),
           data: usdcIface.encodeFunctionData("approve", [
             context.splitContract,
             context.totalAmount
@@ -769,7 +666,7 @@ export async function buildBaseUsdcV5AllowancePayment(input: {
 
     const paymentTx = {
       to: context.splitContract,
-      data: v5Iface.encodeFunctionData("payUsdcWithAllowance", [
+      data: v6Iface.encodeFunctionData("payUsdcWithAllowance", [
         context.merchantWallet,
         context.treasuryWallet,
         context.merchantAmount,
@@ -780,14 +677,11 @@ export async function buildBaseUsdcV5AllowancePayment(input: {
       chainId: BASE_CHAIN_ID
     }
 
-    console.info("[PineTreeBaseTrace] v5 build-allowance-payment ready", {
-      step: "v5-build-allowance-ready",
+    console.info("[BASE V6] build-allowance-payment ready", {
       paymentId: context.paymentId,
-      payerAddress: context.payerAddress,
       sufficient,
       currentAllowance: rawAllowance.toString(),
-      required: context.totalAmount.toString(),
-      hasApproveTx: !sufficient
+      required: context.totalAmount.toString()
     })
 
     return {
@@ -801,8 +695,7 @@ export async function buildBaseUsdcV5AllowancePayment(input: {
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error("[PineTreeBaseTrace] v5 build-allowance-payment failed", {
-      step: "v5-build-allowance-error",
+    console.error("[BASE V6] build-allowance-payment failed", {
       paymentId: input.paymentId,
       error: message
     })

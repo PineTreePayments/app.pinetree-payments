@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAdminFromRequest, getRouteErrorStatus } from "@/lib/api/adminAuth"
 import {
-  isBaseV5Configured,
-  isBaseDelegatedEoaEnabled,
+  isBaseV6Configured,
+  isBaseV6DelegatedEnabled,
   RPC_URLS,
 } from "@/engine/config"
 
@@ -24,7 +24,7 @@ function checkEnv(names: string[]): { present: boolean; source: string } {
   return { present: false, source: "" }
 }
 
-async function probeRpc(url: string, label: string): Promise<{ reachable: boolean; latencyMs?: number }> {
+async function probeRpc(url: string): Promise<{ reachable: boolean; latencyMs?: number }> {
   const start = Date.now()
   try {
     const controller = new AbortController()
@@ -60,52 +60,47 @@ export async function GET(req: NextRequest) {
       fallback: wc.present ? undefined : "Base ETH and Base USDC payments will fail on connect",
     })
 
-    // ── Base relayer (V5 / EIP-3009) ─────────────────────────────────────────
-    const relayerReady = isBaseV5Configured()
-    const relayerAddr = checkEnv(["PINETREE_BASE_USDC_RELAYER_ADDRESS"])
-    const relayerKey = checkEnv(["PINETREE_BASE_USDC_RELAYER_PRIVATE_KEY"])
-    const gasCap = checkEnv(["PINETREE_BASE_USDC_MAX_GAS_USD"])
+    // ── Base V6 contract + relayer ────────────────────────────────────────────
+    const v6Ready = isBaseV6Configured()
+    const v6Contract = checkEnv(["PINETREE_BASE_V6_CONTRACT"])
+    const v6RelayerAddr = checkEnv(["PINETREE_BASE_V6_RELAYER_ADDRESS"])
+    const v6RelayerKey = checkEnv(["PINETREE_BASE_V6_RELAYER_PRIVATE_KEY"])
+    const v6GasCap = checkEnv(["PINETREE_BASE_V6_MAX_GAS_USD"])
     checks.push({
-      name: "Base USDC Relayer (EIP-3009)",
-      status: relayerReady ? "healthy" : relayerAddr.present ? "warning" : "missing",
+      name: "Base V6 Contract",
+      status: v6Contract.present ? "healthy" : "missing",
       rails: ["base"],
-      detail: relayerReady
-        ? "V5 relayer fully configured"
-        : !relayerAddr.present
-          ? "PINETREE_BASE_USDC_RELAYER_ADDRESS not set"
-          : !relayerKey.present
-            ? "PINETREE_BASE_USDC_RELAYER_PRIVATE_KEY not set"
-            : !gasCap.present
-              ? "PINETREE_BASE_USDC_MAX_GAS_USD not set"
-              : "V5 relayer configuration incomplete — check contract address and treasury wallet",
-      fallback: relayerReady ? undefined : "USDC payments will fall through to allowance_two_step path",
+      detail: v6Contract.present
+        ? `PINETREE_BASE_V6_CONTRACT set`
+        : "PINETREE_BASE_V6_CONTRACT not set — Base payments will fail",
+      fallback: v6Contract.present ? undefined : "All Base payments will fail at payment creation",
+    })
+    checks.push({
+      name: "Base V6 Relayer (EIP-3009)",
+      status: v6Ready ? "healthy" : v6RelayerAddr.present ? "warning" : "missing",
+      rails: ["base"],
+      detail: v6Ready
+        ? "V6 relayer fully configured"
+        : !v6RelayerAddr.present
+          ? "PINETREE_BASE_V6_RELAYER_ADDRESS not set"
+          : !v6RelayerKey.present
+            ? "PINETREE_BASE_V6_RELAYER_PRIVATE_KEY not set"
+            : !v6GasCap.present
+              ? "PINETREE_BASE_V6_MAX_GAS_USD not set"
+              : "V6 relayer configuration incomplete",
+      fallback: v6Ready ? undefined : "USDC EIP-3009 path unavailable; allowance_two_step will be used",
     })
 
-    // ── Base Delegated EOA ────────────────────────────────────────────────────
-    const delegatedEnabled = isBaseDelegatedEoaEnabled()
+    // ── Base V6 Delegated (wallet_sendCalls) ──────────────────────────────────
+    const v6DelegatedEnabled = isBaseV6DelegatedEnabled()
     checks.push({
-      name: "Base Delegated EOA (wallet_sendCalls)",
-      status: delegatedEnabled ? "healthy" : "warning",
+      name: "Base V6 Delegated (wallet_sendCalls)",
+      status: v6DelegatedEnabled ? "healthy" : "warning",
       rails: ["base"],
-      detail: delegatedEnabled
-        ? "PINETREE_BASE_DELEGATED_EOA_ENABLED=true — Coinbase Smart Wallet batch path active"
-        : "PINETREE_BASE_DELEGATED_EOA_ENABLED not set or false — batch path disabled",
-      fallback: delegatedEnabled ? undefined : "Coinbase Smart Wallet falls to EIP-3009 or allowance path",
-    })
-
-    // ── Base V5 split contract ────────────────────────────────────────────────
-    const v5Contract = checkEnv(["PINETREE_BASE_SPLIT_V5_CONTRACT"])
-    const splitVersion = String(process.env.PINETREE_BASE_SPLIT_VERSION || "v4")
-    checks.push({
-      name: "Base V5 Split Contract",
-      status: v5Contract.present ? "healthy" : splitVersion === "v5" ? "missing" : "warning",
-      rails: ["base"],
-      detail: v5Contract.present
-        ? `PINETREE_BASE_SPLIT_V5_CONTRACT set (version: ${splitVersion})`
-        : splitVersion === "v5"
-          ? "PINETREE_BASE_SPLIT_V5_CONTRACT not set but PINETREE_BASE_SPLIT_VERSION=v5 — Base payments will fail"
-          : `PINETREE_BASE_SPLIT_V5_CONTRACT not set (active version: ${splitVersion})`,
-      fallback: v5Contract.present || splitVersion !== "v5" ? undefined : "All Base USDC payments will fail at payment creation",
+      detail: v6DelegatedEnabled
+        ? "PINETREE_BASE_V6_DELEGATED_ENABLED=true — Coinbase Smart Wallet batch path active"
+        : "PINETREE_BASE_V6_DELEGATED_ENABLED not set or false — batch path disabled",
+      fallback: v6DelegatedEnabled ? undefined : "Coinbase Smart Wallet falls to EIP-3009 or allowance path",
     })
 
     // ── Solana RPC ────────────────────────────────────────────────────────────
@@ -113,7 +108,7 @@ export async function GET(req: NextRequest) {
       process.env.RPC_URL_SOLANA || process.env.SOLANA_RPC_URL || RPC_URLS.solana || ""
     )
     const solanaRpcCustom = Boolean(process.env.RPC_URL_SOLANA || process.env.SOLANA_RPC_URL)
-    const solanaProbe = await probeRpc(solanaRpcUrl, "solana")
+    const solanaProbe = await probeRpc(solanaRpcUrl)
     checks.push({
       name: "Solana RPC",
       status: solanaProbe.reachable ? (solanaRpcCustom ? "healthy" : "warning") : "missing",
@@ -129,7 +124,7 @@ export async function GET(req: NextRequest) {
     // ── Base RPC ──────────────────────────────────────────────────────────────
     const baseRpcUrl = String(process.env.BASE_RPC_URL || RPC_URLS.base || "")
     const baseRpcCustom = Boolean(process.env.BASE_RPC_URL)
-    const baseProbe = await probeRpc(baseRpcUrl, "base")
+    const baseProbe = await probeRpc(baseRpcUrl)
     checks.push({
       name: "Base RPC",
       status: baseProbe.reachable ? (baseRpcCustom ? "healthy" : "warning") : "missing",

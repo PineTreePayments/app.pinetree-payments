@@ -97,7 +97,7 @@ export type PaymentStatus =
   | "EXPIRED"
   | "REFUNDED"
 
-export type BaseUsdcStrategy = "v1_approve_splitToken" | "v4_eip3009_relayer" | "v5_eip3009_relayer"
+export type BaseUsdcStrategy = "v6_eip3009_relayer"
 
 export type PaymentSplitMetadata = {
   merchantWallet?: string
@@ -113,6 +113,12 @@ export type PaymentSplitMetadata = {
   splitContract?: string
   asset?: string
   baseUsdcStrategy?: BaseUsdcStrategy
+  /** V6+: contract version tag written at payment creation time. */
+  baseVersion?: "v6"
+  /** V6+: actual runtime strategy the server resolved at payment creation. */
+  baseStrategy?: string
+  /** V6+: wallet family detected at checkout time (set post-execution). */
+  baseWalletFamily?: string
 }
 
 export type StoredPaymentSplitMetadata = {

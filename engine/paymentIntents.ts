@@ -351,13 +351,9 @@ export async function selectPaymentIntentNetworkEngine(input: {
 
       if (isActiveStatus && isSameNetwork && isSameAsset) {
         const existingSplit = existingMeta?.split
-        const reuseStrategy = existingSplit?.baseUsdcStrategy === "v5_eip3009_relayer"
-          ? "v5_eip3009_relayer" as const
-          : existingSplit?.baseUsdcStrategy === "v4_eip3009_relayer"
-            ? "v4_eip3009_relayer" as const
-            : existingSplit?.baseUsdcStrategy === "v1_approve_splitToken"
-              ? "v1_approve_splitToken" as const
-              : undefined
+        const reuseStrategy = existingSplit?.baseUsdcStrategy === "v6_eip3009_relayer"
+          ? "v6_eip3009_relayer" as const
+          : undefined
         const reuseSplitContract = String(existingSplit?.splitContract || "").trim() || undefined
         const reusePaymentUrl = String(existingPayment.payment_url || "").trim()
         const reuseWalletUrl = reusePaymentUrl
@@ -472,13 +468,9 @@ export async function selectPaymentIntentNetworkEngine(input: {
       ? String(payment.paymentUrl || "")
       : String(payment.universalUrl || payment.paymentUrl || "")
     const persistedSplit = (persistedPayment.metadata as { split?: Record<string, unknown> } | null)?.split
-    const persistedBaseUsdcStrategy = persistedSplit?.baseUsdcStrategy === "v5_eip3009_relayer"
-      ? "v5_eip3009_relayer"
-      : persistedSplit?.baseUsdcStrategy === "v4_eip3009_relayer"
-        ? "v4_eip3009_relayer"
-        : persistedSplit?.baseUsdcStrategy === "v1_approve_splitToken"
-          ? "v1_approve_splitToken"
-          : payment.baseUsdcStrategy
+    const persistedBaseUsdcStrategy = persistedSplit?.baseUsdcStrategy === "v6_eip3009_relayer"
+      ? "v6_eip3009_relayer"
+      : payment.baseUsdcStrategy
     const persistedSplitContract = String(persistedSplit?.splitContract || payment.address || "").trim() || undefined
     const estimatedSats = normalizedNetwork === "bitcoin_lightning"
       ? getLightningEstimatedSats(persistedPayment.metadata)

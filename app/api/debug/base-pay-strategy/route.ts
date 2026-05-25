@@ -7,7 +7,7 @@ import {
   type BasePayWalletCapabilities,
   type BasePayOrchestrationInput,
 } from "@/lib/basePay/strategyOrchestrator"
-import { isBaseV5Configured, isBaseDelegatedEoaEnabled } from "@/engine/config"
+import { isBaseV6Configured, isBaseV6DelegatedEnabled } from "@/engine/config"
 
 /**
  * Independently derive the expected primary strategy from raw inputs.
@@ -204,8 +204,8 @@ export async function GET(req: NextRequest) {
   try {
     await requireAdminFromRequest(req)
 
-    const serverDelegated = isBaseDelegatedEoaEnabled()
-    const serverRelayer = isBaseV5Configured()
+    const serverDelegated = isBaseV6DelegatedEnabled()
+    const serverRelayer = isBaseV6Configured()
 
     const profiles = makeProfiles()
     const profileMap = new Map(profiles.map((p) => [p.label, p]))
@@ -299,8 +299,8 @@ export async function POST(req: NextRequest) {
     const input: BasePayOrchestrationInput = {
       asset,
       walletCapabilities: caps,
-      delegatedEnabled: body.delegatedEnabled ?? isBaseDelegatedEoaEnabled(),
-      relayerAvailable: body.relayerAvailable ?? isBaseV5Configured(),
+      delegatedEnabled: body.delegatedEnabled ?? isBaseV6DelegatedEnabled(),
+      relayerAvailable: body.relayerAvailable ?? isBaseV6Configured(),
       allowanceSufficient: body.allowanceSufficient ?? false,
     }
 
