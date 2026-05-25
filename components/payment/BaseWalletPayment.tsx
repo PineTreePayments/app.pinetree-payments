@@ -125,10 +125,16 @@ type BaseV6StrategyResponse = {
   ok?: boolean
   paymentId?: string
   strategy?: "base_eth_direct" | "usdc_delegated_batch" | "usdc_eip3009_relayer" | "usdc_allowance_direct" | "usdc_allowance_two_step"
+  fallbackStrategy?: "usdc_eip3009_relayer" | "usdc_allowance_direct" | "usdc_allowance_two_step" | null
   asset?: "ETH" | "USDC"
   allowanceSufficient?: boolean
   relayerAvailable?: boolean
   delegatedAvailable?: boolean
+  requiredUsdcAmount?: string
+  currentAllowance?: string
+  walletFamily?: string
+  supportsTypedData?: boolean
+  supportsSendCalls?: boolean
   expectedWalletPrompts?: number
   customerFacingNotice?: string
   debugSummary?: string
@@ -223,6 +229,30 @@ async function logBase(stage: string, payload: Record<string, unknown> = {}): Pr
 }
 function logBasePay(event: string, payload: Record<string, unknown> = {}): void {
   console.info(`[BasePay] ${event}`, payload)
+}
+function logBaseV6(event: string, payload: Record<string, unknown> = {}): void {
+  const allowed = new Set([
+    "paymentId",
+    "actionKind",
+    "strategy",
+    "hasAccount",
+    "chainId",
+    "hasTxHash",
+    "requestStarted",
+    "method",
+    "reason",
+    "elapsedMs",
+    "fallbackStrategy",
+    "relayerAvailable",
+    "allowanceSufficient",
+    "requiredUsdcAmount",
+    "currentAllowance",
+    "walletFamily",
+    "supportsTypedData",
+    "supportsSendCalls",
+  ])
+  const safePayload = Object.fromEntries(Object.entries(payload).filter(([key]) => allowed.has(key)))
+  console.info(`[BaseV6] ${event}`, safePayload)
 }
 function extractErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -615,9 +645,11 @@ async function sendWalletConnectTransaction(input: {
   provider: WalletConnectProvider
   fromAddress: string
   txRequest: EvmTransactionRequest
+  paymentId?: string
   actionKind?: WalletRequestKind
 }): Promise<string> {
   const actionKind = input.actionKind || "eth_payment"
+  const startedAt = Date.now()
   const params = [
     {
       from: input.fromAddress,
@@ -628,6 +660,13 @@ async function sendWalletConnectTransaction(input: {
     },
   ]
   logBasePay("provider_request_start", { method: "eth_sendTransaction", actionKind, hasParams: true })
+  logBaseV6(actionKind === "eth_payment" ? "eth_provider_request_start" : actionKind === "usdc_approve" ? "usdc_approve_tx_start" : "usdc_final_payment_tx_start", {
+    paymentId: input.paymentId || "",
+    actionKind,
+    method: "eth_sendTransaction",
+    requestStarted: true,
+    chainId: input.txRequest.chainId,
+  })
   let rawTxHash: unknown
   try {
     rawTxHash = await input.provider.request({
@@ -641,21 +680,52 @@ async function sendWalletConnectTransaction(input: {
       code: details.code ?? null,
       message: details.message ?? "",
     })
+    logBaseV6("error", {
+      paymentId: input.paymentId || "",
+      actionKind,
+      method: "eth_sendTransaction",
+      requestStarted: true,
+      reason: String(details.message || details.code || "provider_request_failed"),
+      elapsedMs: Date.now() - startedAt,
+    })
     throw error
   }
   const txHash = maybeHexTransactionHash(rawTxHash)
   logBasePay("provider_request_resolved", { actionKind, hasTxHash: Boolean(txHash) })
+  logBaseV6(actionKind === "eth_payment" ? "eth_provider_request_resolved" : actionKind === "usdc_approve" ? "usdc_approve_tx_resolved" : "usdc_final_payment_tx_resolved", {
+    paymentId: input.paymentId || "",
+    actionKind,
+    method: "eth_sendTransaction",
+    hasTxHash: Boolean(txHash),
+    elapsedMs: Date.now() - startedAt,
+  })
   if (!txHash) {
     logBasePay("provider_request_no_response", { actionKind, reason: "no-tx-hash-returned" })
+    logBaseV6("error", {
+      paymentId: input.paymentId || "",
+      actionKind,
+      method: "eth_sendTransaction",
+      hasTxHash: false,
+      reason: "no-tx-hash-returned",
+      elapsedMs: Date.now() - startedAt,
+    })
     throw new Error("Wallet did not return a transaction hash.")
   }
   logBasePay("tx_hash_captured", { actionKind, hasTxHash: true })
+  logBaseV6(actionKind === "eth_payment" ? "eth_tx_hash_captured" : "tx_hash_captured", {
+    paymentId: input.paymentId || "",
+    actionKind,
+    method: "eth_sendTransaction",
+    hasTxHash: true,
+    elapsedMs: Date.now() - startedAt,
+  })
   return txHash
 }
 async function sendWalletConnectTransactionWithTimeout(input: {
   provider: WalletConnectProvider
   fromAddress: string
   txRequest: EvmTransactionRequest
+  paymentId?: string
   timeoutMs: number
   timeoutMessage: string
   actionKind?: WalletRequestKind
@@ -667,6 +737,7 @@ async function sendWalletConnectTransactionWithTimeout(input: {
         provider: input.provider,
         fromAddress: input.fromAddress,
         txRequest: input.txRequest,
+        paymentId: input.paymentId,
         actionKind: input.actionKind,
       }),
       new Promise<never>((_, reject) => {
@@ -1156,9 +1227,9 @@ export default function BaseWalletPayment({
         setIsOpeningWallet(false)
         setBaseMobileStepRef.current("fallback_required")
         logBasePay("fallback_required", { actionKind: kind, reason: "auto-dispatch-already-attempted" })
+        logBaseV6("fallback_required", { paymentId, actionKind: kind, reason: "auto-dispatch-already-attempted" })
         return false
       }
-      autoWalletActionAttemptedKeyRef.current.add(attemptKey)
     }
     autoWalletActionDispatchingKeyRef.current.delete(attemptKey)
     logBasePay("auto_dispatch_start", { actionKind: kind, attemptKey })
@@ -1169,6 +1240,7 @@ export default function BaseWalletPayment({
         provider,
         fromAddress,
         txRequest,
+        paymentId,
         timeoutMs: kind === "eth_payment" ? BASE_ETH_TX_REQUEST_TIMEOUT_MS : BASE_USDC_TX_REQUEST_TIMEOUT_MS,
         timeoutMessage: kind === "eth_payment"
           ? BASE_ETH_TX_TIMEOUT_MESSAGE
@@ -1177,6 +1249,9 @@ export default function BaseWalletPayment({
             : "Payment transaction was not completed. Retry payment approval to try again.",
         actionKind: kind,
       })
+      if (source.startsWith("auto-")) {
+        autoWalletActionAttemptedKeyRef.current.add(attemptKey)
+      }
       setBaseMobileStepRef.current(kind === "usdc_approve" ? "usdc_authorization_in_wallet" : "payment_in_wallet")
       // Only fire the native wallet deep-link for explicit user-triggered retries.
       // During auto-dispatch the WalletConnect relay already queues the request at
@@ -1432,6 +1507,7 @@ export default function BaseWalletPayment({
         throw new Error("Incomplete payment data returned from server")
       }
       onPaymentCreated?.(paymentId)
+      logBaseV6("payment_created", { paymentId })
       console.log("BASE PAYMENT URL:", paymentUrl)
       if (selectedAsset === "USDC") {
         console.info("[Base USDC] strategy response", {
@@ -1473,6 +1549,12 @@ export default function BaseWalletPayment({
       // ── 1. Get server-confirmed strategy ──────────────────────────────────────
       setBasePayStatus("Preparing payment...")
       console.info("[BASE V6] strategy-resolve-start", { paymentId, walletFamily: capabilities.walletFamily })
+      logBaseV6("usdc_strategy_request_start", {
+        paymentId,
+        walletFamily: capabilities.walletFamily,
+        supportsTypedData: capabilities.supportsTypedData,
+        supportsSendCalls: capabilities.supportsSendCalls,
+      })
       void logBase("v6-strategy-resolve-start", { paymentId, walletFamily: capabilities.walletFamily })
       const strategyRes = await fetch(
         `/api/payments/${encodeURIComponent(paymentId)}/base-v6/strategy`,
@@ -1502,10 +1584,29 @@ export default function BaseWalletPayment({
         walletFamily: capabilities.walletFamily,
         debugSummary: strategyData.debugSummary
       })
+      logBaseV6("usdc_strategy_response", {
+        paymentId,
+        strategy: confirmedStrategy,
+        fallbackStrategy: strategyData.fallbackStrategy || null,
+        relayerAvailable: Boolean(strategyData.relayerAvailable),
+        allowanceSufficient: Boolean(strategyData.allowanceSufficient),
+        requiredUsdcAmount: strategyData.requiredUsdcAmount || "",
+        currentAllowance: strategyData.currentAllowance || "",
+        walletFamily: strategyData.walletFamily || capabilities.walletFamily,
+        supportsTypedData: strategyData.supportsTypedData ?? capabilities.supportsTypedData,
+        supportsSendCalls: strategyData.supportsSendCalls ?? capabilities.supportsSendCalls,
+      })
       void logBase("v6-strategy-confirmed", { paymentId, strategy: confirmedStrategy, walletFamily: capabilities.walletFamily })
       // ── 2. Execute confirmed strategy ─────────────────────────────────────────
       // ── Strategy: usdc_delegated_batch ────────────────────────────────────────
       if (confirmedStrategy === "usdc_delegated_batch") {
+        logBaseV6("usdc_final_payment_tx_start", {
+          paymentId,
+          actionKind: "usdc_delegated",
+          strategy: confirmedStrategy,
+          method: "wallet_sendCalls",
+          requestStarted: true,
+        })
         const delegatedPrepareRes = await fetch(
           `/api/payments/${encodeURIComponent(paymentId)}/base-v6/delegated/prepare`,
           {
@@ -1544,6 +1645,13 @@ export default function BaseWalletPayment({
               ]
             })
             console.info("[BASE V6] delegated-batch-sent", { paymentId })
+            logBaseV6("usdc_final_payment_tx_resolved", {
+              paymentId,
+              actionKind: "usdc_delegated",
+              strategy: confirmedStrategy,
+              method: "wallet_sendCalls",
+              requestStarted: true,
+            })
           } catch (sendCallsErr) {
             const sendMsg = extractErrorMessage(sendCallsErr)
             if (isRejectedError(sendCallsErr, sendMsg)) throw sendCallsErr
@@ -1589,6 +1697,8 @@ export default function BaseWalletPayment({
       }
       // ── Strategy: usdc_eip3009_relayer ────────────────────────────────────────
       if (confirmedStrategy === "usdc_eip3009_relayer") {
+        try {
+          logBaseV6("usdc_eip3009_prepare_start", { paymentId, strategy: confirmedStrategy })
         const prepareRes = await fetch(
           `/api/payments/${encodeURIComponent(paymentId)}/base-v6/prepare`,
           {
@@ -1611,6 +1721,13 @@ export default function BaseWalletPayment({
         let signature = ""
         beginWalletRequest({ kind: "usdc_signature", walletName: input.peerName })
         try {
+          logBaseV6("usdc_sign_typed_data_start", {
+            paymentId,
+            actionKind: "usdc_signature",
+            strategy: confirmedStrategy,
+            method: "eth_signTypedData_v4",
+            requestStarted: true,
+          })
           const rawSig = await Promise.race([
             input.provider.request({
               method: "eth_signTypedData_v4",
@@ -1661,6 +1778,12 @@ export default function BaseWalletPayment({
         }
         setBasePayStatus("Processing payment...")
         console.info("[BASE V6] relay-start", { paymentId })
+        logBaseV6("usdc_relay_start", {
+          paymentId,
+          actionKind: "usdc_signature",
+          strategy: confirmedStrategy,
+          requestStarted: true,
+        })
         const relayRes = await fetch(
           `/api/payments/${encodeURIComponent(paymentId)}/base-v6/relay`,
           {
@@ -1678,8 +1801,35 @@ export default function BaseWalletPayment({
         if (relay.unavailable) throw new Error(relay.message || BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE)
         const relayTxHash = normalizeHexTransactionHash(relay.txHash)
         console.info("[BASE V6] relay-success", { paymentId, txHashPrefix: relayTxHash.slice(0, 10) })
+        logBaseV6("usdc_relay_resolved", {
+          paymentId,
+          actionKind: "usdc_signature",
+          strategy: confirmedStrategy,
+          hasTxHash: true,
+        })
+        logBaseV6("tx_hash_captured", {
+          paymentId,
+          actionKind: "usdc_signature",
+          strategy: confirmedStrategy,
+          hasTxHash: true,
+        })
         setBasePayStatus("Processing payment...")
         return relayTxHash
+        } catch (eip3009Err) {
+          const eip3009Msg = extractErrorMessage(eip3009Err)
+          if (isActualUserRejectedError(eip3009Err, eip3009Msg) || eip3009Msg === BASE_USDC_SIGN_TIMEOUT_MESSAGE) {
+            throw eip3009Err
+          }
+          activeWalletRequestRef.current = null
+          logBaseV6("fallback_required", {
+            paymentId,
+            actionKind: "usdc_signature",
+            strategy: confirmedStrategy,
+            reason: eip3009Msg || "eip3009-failed",
+            fallbackStrategy: "usdc_allowance_two_step",
+          })
+          setBasePayStatus("USDC signature failed. Falling back to wallet transaction approval...")
+        }
       }
       // ── Strategy: usdc_allowance_direct / usdc_allowance_two_step ───���─────────
       const buildRes = await fetch(
@@ -1697,6 +1847,14 @@ export default function BaseWalletPayment({
         throw new Error("Incomplete allowance payment data returned by server")
       }
       const { sufficient, approveTx, paymentTx } = buildData as Required<Pick<BaseUsdcV5AllowancePaymentResponse, "sufficient" | "approveTx" | "paymentTx">>
+      const allowanceExecutionStrategy = sufficient ? "usdc_allowance_direct" : "usdc_allowance_two_step"
+      logBaseV6("usdc_allowance_check", {
+        paymentId,
+        strategy: allowanceExecutionStrategy,
+        allowanceSufficient: Boolean(sufficient),
+        requiredUsdcAmount: buildData.requiredAmount || "",
+        currentAllowance: buildData.currentAllowance || "",
+      })
       input.finalPaymentTxRef.current = paymentTx
       input.finalPaymentIdRef.current = paymentId
       if (!sufficient && approveTx) {
@@ -1728,6 +1886,10 @@ export default function BaseWalletPayment({
       return null
     } catch (error) {
       activeBaseV6PaymentRef.current = null
+      logBaseV6("error", {
+        paymentId,
+        reason: extractErrorMessage(error) || "usdc-v6-execution-failed",
+      })
       throw error
     }
   }, [])
@@ -1847,6 +2009,7 @@ export default function BaseWalletPayment({
             provider: resumeProvider,
             fromAddress,
             txRequest: storedPaymentTx,
+            paymentId: storedPaymentId,
             timeoutMs: BASE_USDC_TX_REQUEST_TIMEOUT_MS,
             timeoutMessage: "Payment transaction was not completed. Retry payment approval to try again.",
             actionKind: "usdc_payment",
@@ -1891,6 +2054,7 @@ export default function BaseWalletPayment({
       if (prefetched) prefetchedPaymentDataRef.current = null
       const paymentData = prefetched ?? await resolvePaymentData()
       createdPaymentId = paymentData.paymentId
+      logBaseV6("payment_loaded", { paymentId: paymentData.paymentId })
       activeAttemptKey = `${paymentData.paymentId}:${selectedAsset}`
       if (activeBasePaymentAttemptRef.current && activeBasePaymentAttemptRef.current === activeAttemptKey) {
         void logBase("auto-resume-skipped", { reason: "active-attempt-lock", activeAttemptKey })
@@ -1923,6 +2087,11 @@ export default function BaseWalletPayment({
       console.log("[Base ETH] provider-ready", { prefetched: Boolean(cachedProvider) })
       void logBase("provider-ready", { prefetched: Boolean(cachedProvider) })
       const walletConnectProvider = settledSession.provider
+      logBaseV6("wallet_session_ready", {
+        paymentId: paymentData.paymentId,
+        hasAccount: Boolean(fromAddress),
+        chainId: settledSession.chainId || base.id,
+      })
       // Route USDC payments to the correct execution path based on strategy/URL.
       // V6: v6_eip3009_relayer strategy or pinetree://base-v6 URL (active path).
       const isBaseV6 = selectedAsset === "USDC" && (
@@ -1984,6 +2153,11 @@ export default function BaseWalletPayment({
         throw new Error("Base USDC payment could not be prepared. Please try again or choose another payment method.")
       }
       const txRequest = cachedTxRequest ?? parseEthereumPaymentUri(paymentData.paymentUrl)
+      logBaseV6("eth_prepare_start", {
+        paymentId: paymentData.paymentId,
+        actionKind: "eth_payment",
+        chainId: txRequest.chainId,
+      })
       void logBase("eth-payment-requested", {
         paymentId: paymentData.paymentId,
         to: txRequest.to,
@@ -2148,9 +2322,18 @@ export default function BaseWalletPayment({
     }
   }, [chain?.id, connector?.id, connector?.name, enforceActivePaymentBeforeWalletConnect, executeBaseV6UsdcPayment, intentId, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, switchChainAsync, waitForWalletConnectSettlement, walletClient, walletConnectConnector])
   const resetBasePaymentAttemptForRetry = useCallback(() => {
+    const hadStaleState = Boolean(
+      activeBasePaymentAttemptRef.current ||
+      activeBaseV6PaymentRef.current ||
+      activeWalletRequestRef.current ||
+      pendingActionKindRef.current ||
+      pendingActionPaymentIdRef.current ||
+      pendingActionInFlightRef.current
+    )
     activeBasePaymentAttemptRef.current = null
     activeBaseV6PaymentRef.current = null
     activeWalletRequestRef.current = null
+    clearPendingWalletAction()
     setWalletRequestUiState("idle")
     setPendingWalletRequestKind(null)
     isSendingBaseTxRef.current = false
@@ -2173,7 +2356,10 @@ export default function BaseWalletPayment({
     setWalletHandoffPending(false)
     usdcFinalPaymentTxRef.current = null
     usdcFinalPaymentIdRef.current = null
-  }, [])
+    if (hadStaleState) {
+      logBaseV6("stale_state_reset", { reason: "new-payment-start" })
+    }
+  }, [clearPendingWalletAction])
   const startWalletConnectPayment = useCallback(() => {
     void (async () => {
       try {
@@ -2575,16 +2761,26 @@ export default function BaseWalletPayment({
     refreshPendingState()
   }, [refreshPendingState])
   useEffect(() => {
+    const hadStaleState = Boolean(
+      activeBasePaymentAttemptRef.current ||
+      activeBaseV6PaymentRef.current ||
+      activeWalletRequestRef.current ||
+      pendingActionKindRef.current ||
+      pendingActionPaymentIdRef.current ||
+      pendingActionInFlightRef.current
+    )
     paymentSubmittedRef.current = false
     isSendingBaseTxRef.current = false
     prefetchedPaymentDataRef.current = null
     prefetchedProviderRef.current = null
     prefetchedTxRequestRef.current = null
+    clearPendingWalletAction()
     autoResumeAttemptedKeyRef.current = null
     autoWalletActionAttemptedKeyRef.current.clear()
     autoWalletActionDispatchingKeyRef.current.clear()
     setBasePayStatus("")
     activeBasePaymentAttemptRef.current = null
+    activeBaseV6PaymentRef.current = null
     activeWalletRequestRef.current = null
     connectedChainIdRef.current = null
     sessionSettleTriggerFiredRef.current = false
@@ -2600,7 +2796,10 @@ export default function BaseWalletPayment({
       clearTimeout(autoResumeTimerRef.current)
       autoResumeTimerRef.current = null
     }
-  }, [pendingPaymentKey, stopAutoResumeRetry])
+    if (hadStaleState) {
+      logBaseV6("stale_state_reset", { reason: "payment-context-change" })
+    }
+  }, [clearPendingWalletAction, pendingPaymentKey, stopAutoResumeRetry])
   useEffect(() => {
     return () => {
       if (autoResumeTimerRef.current) {
@@ -2622,6 +2821,7 @@ export default function BaseWalletPayment({
     if (autoWalletActionAttemptedKeyRef.current.has(attemptKey)) {
       setBaseMobileStepRef.current("fallback_required")
       logBasePay("fallback_required", { actionKind: kind, reason: "auto-dispatch-already-attempted" })
+      logBaseV6("fallback_required", { paymentId, actionKind: kind, reason: "auto-dispatch-already-attempted" })
       return
     }
     if (autoWalletActionDispatchingKeyRef.current.has(attemptKey)) {
@@ -2643,6 +2843,7 @@ export default function BaseWalletPayment({
       if (pendingActionKindRef.current !== kind || pendingActionPaymentIdRef.current !== paymentId) return
       setBaseMobileStepRef.current("fallback_required")
       logBasePay("fallback_required", { actionKind: kind, reason: "auto-dispatch-failed" })
+      logBaseV6("fallback_required", { paymentId, actionKind: kind, reason: "auto-dispatch-failed" })
     })
   }, [pendingWalletActionInFlight, pendingWalletActionReady, selectedAsset])
   useEffect(() => {

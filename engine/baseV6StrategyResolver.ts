@@ -13,7 +13,7 @@
  *   5. usdc_allowance_two_step  — universal fallback; approve then pay
  */
 
-import { Contract, JsonRpcProvider, getAddress } from "ethers"
+import { Contract, JsonRpcProvider, Wallet, getAddress } from "ethers"
 import { getPaymentById } from "@/database"
 import type { StoredPaymentSplitMetadata } from "@/types/payment"
 import type { BasePayWalletCapabilities } from "@/lib/basePay/strategyOrchestrator"
@@ -49,10 +49,16 @@ export type BaseV6StrategyResolution = {
   ok: true
   paymentId: string
   strategy: BaseV6Strategy
+  fallbackStrategy: Exclude<BaseV6Strategy, "base_eth_direct"> | null
   asset: "ETH" | "USDC"
   allowanceSufficient: boolean
   relayerAvailable: boolean
   delegatedAvailable: boolean
+  requiredUsdcAmount: string
+  currentAllowance: string
+  walletFamily: string
+  supportsTypedData: boolean
+  supportsSendCalls: boolean
   expectedWalletPrompts: number
   customerFacingNotice: string
   debugSummary: string
@@ -73,13 +79,21 @@ function requireEvmAddress(label: string, value: string): string {
 
 async function checkRelayerAvailability(): Promise<boolean> {
   try {
-    const { address: relayerAddress } = getBaseV6Relayer()
+    const { address: relayerAddress, privateKey } = getBaseV6Relayer()
     const v6Contract = getBaseV6Contract()
     const provider = new JsonRpcProvider(getRpcUrl("base"), BASE_CHAIN_ID)
+    const derivedRelayerAddress = new Wallet(privateKey).address
+    if (getAddress(derivedRelayerAddress) !== getAddress(relayerAddress)) {
+      console.warn("[BaseV6] env_check", { reason: "relayer-private-key-address-mismatch" })
+      return false
+    }
 
     const contract = new Contract(v6Contract, V6_RELAYER_ABI, provider)
     const isAllowed = (await contract.relayers(relayerAddress)) as boolean
-    if (!isAllowed) return false
+    if (!isAllowed) {
+      console.warn("[BaseV6] env_check", { reason: "relayer-not-allowlisted" })
+      return false
+    }
 
     const relayerBalance = await provider.getBalance(relayerAddress)
     const feeData = await provider.getFeeData()
@@ -93,8 +107,14 @@ async function checkRelayerAvailability(): Promise<boolean> {
     const { maxGasUsd } = getBaseV6GasCap()
     const estimatedGasUsd =
       Number(estimatedGasWei.toString()) * prices.ETH * 1e-18
-    return Number.isFinite(estimatedGasUsd) && estimatedGasUsd <= maxGasUsd
-  } catch {
+    const available = Number.isFinite(estimatedGasUsd) && estimatedGasUsd <= maxGasUsd
+    console.info("[BaseV6] env_check", { relayerAvailable: available })
+    return available
+  } catch (error) {
+    console.warn("[BaseV6] env_check", {
+      relayerAvailable: false,
+      reason: error instanceof Error ? error.message : "relayer-check-failed",
+    })
     return false
   }
 }
@@ -162,10 +182,16 @@ export async function resolveBaseV6Strategy(input: {
         ok: true,
         paymentId,
         strategy: "base_eth_direct",
+        fallbackStrategy: null,
         asset: "ETH",
         allowanceSufficient: false,
         relayerAvailable: false,
         delegatedAvailable: false,
+        requiredUsdcAmount: "0",
+        currentAllowance: "0",
+        walletFamily,
+        supportsTypedData: walletCapabilities.supportsTypedData,
+        supportsSendCalls: walletCapabilities.supportsSendCalls,
         expectedWalletPrompts: 1,
         customerFacingNotice: "Approve payment in your wallet.",
         debugSummary: `asset=ETH strategy=base_eth_direct walletFamily=${walletFamily}`
@@ -206,19 +232,24 @@ export async function resolveBaseV6Strategy(input: {
     const allowanceSufficient = allowanceResult.sufficient
 
     let strategy: BaseV6Strategy
+    let fallbackStrategy: Exclude<BaseV6Strategy, "base_eth_direct"> | null
     let expectedWalletPrompts: number
 
     if (delegatedAvailable) {
       strategy = "usdc_delegated_batch"
+      fallbackStrategy = relayerAvailable ? "usdc_eip3009_relayer" : allowanceSufficient ? "usdc_allowance_direct" : "usdc_allowance_two_step"
       expectedWalletPrompts = 1
     } else if (relayerAvailable) {
       strategy = "usdc_eip3009_relayer"
+      fallbackStrategy = allowanceSufficient ? "usdc_allowance_direct" : "usdc_allowance_two_step"
       expectedWalletPrompts = 1
     } else if (allowanceSufficient) {
       strategy = "usdc_allowance_direct"
+      fallbackStrategy = "usdc_allowance_two_step"
       expectedWalletPrompts = 1
     } else {
       strategy = "usdc_allowance_two_step"
+      fallbackStrategy = null
       expectedWalletPrompts = 2
     }
 
@@ -233,24 +264,32 @@ export async function resolveBaseV6Strategy(input: {
       `allowanceSufficient=${allowanceSufficient}`
     ].join(" | ")
 
-    console.info("[BASE V6] strategy resolved", {
+    console.info("[BaseV6] usdc_strategy_response", {
       paymentId,
       strategy,
-      walletFamily,
-      delegatedAvailable,
       relayerAvailable,
       allowanceSufficient,
-      debugSummary
+      requiredUsdcAmount: allowanceResult.required,
+      currentAllowance: allowanceResult.allowance,
+      walletFamily,
+      supportsTypedData: walletCapabilities.supportsTypedData,
+      supportsSendCalls: walletCapabilities.supportsSendCalls
     })
 
     return {
       ok: true,
       paymentId,
       strategy,
+      fallbackStrategy,
       asset: "USDC",
       allowanceSufficient,
       relayerAvailable,
       delegatedAvailable,
+      requiredUsdcAmount: allowanceResult.required,
+      currentAllowance: allowanceResult.allowance,
+      walletFamily,
+      supportsTypedData: walletCapabilities.supportsTypedData,
+      supportsSendCalls: walletCapabilities.supportsSendCalls,
       expectedWalletPrompts,
       customerFacingNotice:
         strategy === "usdc_allowance_two_step"

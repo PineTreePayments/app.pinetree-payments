@@ -47,9 +47,9 @@ export type BasePayStrategy =
 export type BasePayOrchestrationInput = {
   asset: BasePayAsset
   walletCapabilities: BasePayWalletCapabilities
-  /** Server flag: PINETREE_BASE_DELEGATED_EOA_ENABLED=true */
+  /** Server flag: PINETREE_BASE_V6_DELEGATED_ENABLED=true */
   delegatedEnabled: boolean
-  /** Server flag: V5 relayer configured and gas within cap */
+  /** Server flag: V6 relayer configured and gas within cap */
   relayerAvailable: boolean
   /** Whether payer's current USDC allowance covers the required amount */
   allowanceSufficient: boolean
