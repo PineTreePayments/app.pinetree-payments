@@ -7,7 +7,6 @@ import AmountDisplay from "./AmountDisplay"
 import Keypad from "./Keypad"
 import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
-import BaseWalletPayment from "@/components/payment/BaseWalletPayment"
 
 type Props = {
   locked: boolean
@@ -30,7 +29,6 @@ type Status =
   | "incomplete"
   | "failed"
   | "expired"
-  | "base_wc"
 
 type AvailableMethods = {
   cash: boolean
@@ -97,13 +95,6 @@ export default function POSLayout({ terminalContext }: Props) {
   const [cashDigits, setCashDigits] = useState("")
   const [cashRecording, setCashRecording] = useState(false)
   const [canceling, setCanceling] = useState(false)
-  const [basePaymentAsset, setBasePaymentAsset] = useState<"ETH" | "USDC" | null>(null)
-  const [basePaymentId, setBasePaymentId] = useState("")
-  const [basePaymentUrl, setBasePaymentUrl] = useState("")
-  const [basePaymentUsdAmount, setBasePaymentUsdAmount] = useState(0)
-  const [baseStatusQrCodeUrl, setBaseStatusQrCodeUrl] = useState("")
-  const [baseStatusUrl, setBaseStatusUrl] = useState("")
-
   const resolvedPaymentIdRef = useRef<string>("")
   const resetTimerRef = useRef<NodeJS.Timeout | null>(null)
   const hasScheduledResetRef = useRef(false)
@@ -127,12 +118,6 @@ export default function POSLayout({ terminalContext }: Props) {
     setCashDigits("")
     setCashRecording(false)
     setAvailableMethods({ cash: true, crypto: false, card: false })
-    setBasePaymentAsset(null)
-    setBasePaymentId("")
-    setBasePaymentUrl("")
-    setBasePaymentUsdAmount(0)
-    setBaseStatusQrCodeUrl("")
-    setBaseStatusUrl("")
     resolvedPaymentIdRef.current = ""
   }
 
@@ -199,7 +184,7 @@ export default function POSLayout({ terminalContext }: Props) {
         ? `intentId=${encodeURIComponent(iid)}`
         : ""
 
-    if (!pollParam || (status !== "waiting" && status !== "processing" && status !== "base_wc")) return
+    if (!pollParam || (status !== "waiting" && status !== "processing")) return
 
     const interval = setInterval(async () => {
       try {
@@ -208,27 +193,6 @@ export default function POSLayout({ terminalContext }: Props) {
         const data = await res.json() as {
           status?: string
           paymentId?: string
-          posTerminalOwned?: boolean
-          selectedAsset?: string
-          paymentUrl?: string
-        }
-        // Customer selected a Base asset on hosted checkout — transition POS to WalletConnect controller mode
-        if (!pid && data.posTerminalOwned && data.paymentId && data.selectedAsset && data.paymentUrl && status === "waiting") {
-          const bAsset = String(data.selectedAsset).toUpperCase()
-          if (bAsset === "ETH" || bAsset === "USDC") {
-            setBasePaymentAsset(bAsset)
-            setBasePaymentId(String(data.paymentId))
-            setBasePaymentUrl(String(data.paymentUrl))
-            setBasePaymentUsdAmount(breakdown ? breakdown.totalAmount : subtotalNum)
-            if (resetTimerRef.current) {
-              clearTimeout(resetTimerRef.current)
-              resetTimerRef.current = null
-            }
-            hasScheduledResetRef.current = false
-            setActivePaymentId(String(data.paymentId))
-            setStatus("base_wc")
-            return
-          }
         }
         // If polling by intent and we just learned the paymentId, store it so
         // the direct-payment realtime subscription can start (and future polls
@@ -788,56 +752,6 @@ export default function POSLayout({ terminalContext }: Props) {
           </div>
         )}
 
-        {/* ── BASE WALLETCONNECT (POS terminal owns session) ── */}
-        {status === "base_wc" && basePaymentId && basePaymentUrl && basePaymentAsset && (
-          <div className="space-y-3">
-            {baseStatusQrCodeUrl && (
-              <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3 text-center">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-[#0052FF] mb-1">
-                  Customer Status Screen
-                </p>
-                <p className="text-xs text-gray-500 mb-2">
-                  Customer scans to follow payment progress
-                </p>
-                <Image
-                  src={baseStatusQrCodeUrl}
-                  width={96}
-                  height={96}
-                  alt="Customer payment status QR"
-                  className="mx-auto rounded-lg"
-                />
-                {baseStatusUrl && (
-                  <p className="mt-1.5 text-[10px] text-gray-400 break-all leading-tight">
-                    {baseStatusUrl}
-                  </p>
-                )}
-              </div>
-            )}
-            <BaseWalletPayment
-              paymentId={basePaymentId}
-              paymentUrl={basePaymentUrl}
-              selectedAsset={basePaymentAsset}
-              usdAmount={basePaymentUsdAmount}
-              onSuccess={async (txHash, pid) => {
-                try {
-                  await fetch(`/api/payments/${encodeURIComponent(pid)}/detect`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ txHash }),
-                  })
-                } catch {
-                  // non-fatal — watcher will confirm
-                }
-                setStatus("confirmed")
-              }}
-              onError={(err) => {
-                setPaymentError(err || "Payment failed")
-                setStatus("failed")
-              }}
-              onCancel={resetSale}
-            />
-          </div>
-        )}
 
       </div>
 

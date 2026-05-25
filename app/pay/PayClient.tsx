@@ -228,11 +228,6 @@ export default function PayClient() {
   const walletBrowserMode = searchParams.get("mode")
   const walletBrowserWallet = searchParams.get("wallet")
   const statusOverride = searchParams.get("status")
-  // POS-terminal-controlled Base payments: status-only follow-along mode.
-  // ?paymentId=<id>&mode=status[&asset=ETH|USDC]
-  const posStatusPaymentId = searchParams.get("paymentId")
-  const posStatusAsset = (searchParams.get("asset") || "").toUpperCase()
-  const isPosStatusMode = walletBrowserMode === "status" && Boolean(posStatusPaymentId)
   const solflareAction = searchParams.get("solflare_action")
   const solflareError = searchParams.get("solflare_error")
   const phantomError = searchParams.get("phantom_error")
@@ -266,16 +261,9 @@ export default function PayClient() {
   const [shift4Loading, setShift4Loading] = useState(false)
   const [shift4Error, setShift4Error] = useState("")
 
-  // ── POS status-only mode ───────────────────────────────────────────────────
-  const [posPaymentStatus, setPosPaymentStatus] = useState("")
-  const [posStatusLoaded, setPosStatusLoaded] = useState(false)
-
   // ── Base execution: once Base payment starts, collapse asset selector ──────
   const [baseExecutionActive, setBaseExecutionActive] = useState(false)
   const [solanaExecutionActive, setSolanaExecutionActive] = useState(false)
-  const [posBaseSelecting, setPosBaseSelecting] = useState(false)
-  const [posBaseSelected, setPosBaseSelected] = useState(false)
-  const [posBaseError, setPosBaseError] = useState("")
 
   const handleBaseCancelPayment = useCallback(() => {
     setBaseExecutionActive(false)
@@ -431,40 +419,6 @@ export default function PayClient() {
     }
   }, [intentId, loadIntentCallback])
 
-  async function handlePosBaseSelect(asset: "ETH" | "USDC") {
-    if (!intentId || !checkoutToken) return
-    setPosBaseSelecting(true)
-    setPosBaseError("")
-    try {
-      const res = await fetch(
-        `/api/payment-intents/${encodeURIComponent(intentId)}/select-network`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${checkoutToken}`,
-          },
-          body: JSON.stringify({ network: "base", asset }),
-        }
-      )
-      if (!res.ok) {
-        const err = (await res.json()) as { error?: string }
-        throw new Error(err.error || "Failed to prepare Base payment")
-      }
-      const result = (await res.json()) as { posTerminalOwned?: boolean; paymentId?: string }
-      if (result.paymentId) {
-        void loadIntentCallback()
-      }
-      if (result.posTerminalOwned) {
-        setPosBaseSelected(true)
-      }
-    } catch (err) {
-      setPosBaseError((err as Error).message || "Failed to select Base payment")
-    } finally {
-      setPosBaseSelecting(false)
-    }
-  }
-
   // ── Load intent on mount ───────────────────────────────────────────────────
 
   useEffect(() => {
@@ -481,15 +435,6 @@ export default function PayClient() {
     setSolanaExecutionActive(false)
     setSelectedAssetId("")
   }, [isIntentMode, terminalPaymentStatus])
-
-  useEffect(() => {
-    const isBaseAsset = selectedAssetId === "eth-base" || selectedAssetId === "base-usdc"
-    if (!isBaseAsset) {
-      setPosBaseSelected(false)
-      setPosBaseSelecting(false)
-      setPosBaseError("")
-    }
-  }, [selectedAssetId])
 
   // ── Deselect asset when clicking outside the card list ────────────────────
 
@@ -527,30 +472,6 @@ export default function PayClient() {
     url.searchParams.delete("phantom_error")
     window.history.replaceState({}, "", url.toString())
   }, [phantomError])
-
-  // ── POS status-only mode: poll payment status until terminal state ─────────
-  useEffect(() => {
-    if (!isPosStatusMode || !posStatusPaymentId) return
-    let canceled = false
-    async function poll() {
-      try {
-        const res = await fetch(
-          `/api/payments/status?paymentId=${encodeURIComponent(posStatusPaymentId!)}`,
-          { cache: "no-store" }
-        )
-        if (!res.ok || canceled) return
-        const data = (await res.json()) as { status?: string }
-        const next = String(data.status || "").toUpperCase()
-        setPosPaymentStatus(next)
-        setPosStatusLoaded(true)
-      } catch {
-        // non-fatal — will retry on next interval
-      }
-    }
-    void poll()
-    const handle = setInterval(() => void poll(), 5000)
-    return () => { canceled = true; clearInterval(handle) }
-  }, [isPosStatusMode, posStatusPaymentId])
 
   // ── Poll intent status once a payment has been created ────────────────────
 
@@ -1103,73 +1024,6 @@ export default function PayClient() {
 
   // ── Loading / error screens ────────────────────────────────────────────────
 
-  // POS-terminal-controlled Base payment: status-only follow-along page.
-  // WalletConnect runs on the POS terminal, not here.
-  if (isPosStatusMode && posStatusPaymentId) {
-    const normalizedPosStatus = posPaymentStatus.toUpperCase()
-    const isPosTerminal = TERMINAL_PAYMENT_STATUSES.has(normalizedPosStatus)
-
-    const statusLabel = (() => {
-      if (!posStatusLoaded) return "Loading payment status…"
-      if (!normalizedPosStatus || normalizedPosStatus === "CREATED" || normalizedPosStatus === "PENDING") {
-        return posStatusAsset === "USDC"
-          ? "Awaiting USDC authorization on payment terminal"
-          : "Awaiting payment approval on payment terminal"
-      }
-      if (normalizedPosStatus === "PROCESSING") {
-        return posStatusAsset === "USDC"
-          ? "USDC payment submitted — confirming on Base"
-          : "ETH payment submitted — confirming on Base"
-      }
-      if (normalizedPosStatus === "CONFIRMED") return "Payment confirmed"
-      if (normalizedPosStatus === "FAILED") return "Payment failed"
-      if (normalizedPosStatus === "INCOMPLETE") return "Payment incomplete"
-      if (normalizedPosStatus === "EXPIRED") return "Payment expired"
-      if (normalizedPosStatus === "CANCELED") return "Payment canceled"
-      return "Processing payment…"
-    })()
-
-    return (
-      <PageContainer>
-        <Card className="max-w-md w-full space-y-5 text-center">
-          <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-[#0052FF]">
-              PineTree Payments
-            </p>
-            <h1 className="text-xl font-bold text-gray-900">
-              {posStatusAsset === "ETH" || posStatusAsset === "USDC"
-                ? `Base ${posStatusAsset} Payment`
-                : "Base Payment"}
-            </h1>
-          </div>
-
-          {!posStatusLoaded ? (
-            <div className="flex flex-col items-center gap-3 py-4">
-              <div className="h-10 w-10 rounded-full border-2 border-[#0052FF] border-t-transparent animate-spin" />
-              <p className="text-sm text-gray-500">Loading…</p>
-            </div>
-          ) : isPosTerminal ? (
-            <div className="py-2">
-              <PaymentStatusVisual status={normalizedPosStatus} variant="card" />
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-4 py-4">
-              <div className="h-10 w-10 rounded-full border-2 border-[#0052FF] border-t-transparent animate-spin" />
-              <p className="text-sm font-medium text-gray-700">{statusLabel}</p>
-              <p className="text-xs text-gray-400">
-                Approve the transaction in your wallet app when prompted by the payment terminal.
-              </p>
-            </div>
-          )}
-
-          {posStatusLoaded && !isPosTerminal && (
-            <p className="text-xs text-gray-400">Updating automatically…</p>
-          )}
-        </Card>
-      </PageContainer>
-    )
-  }
-
   if (isSolflareCallbackMode) {
     return (
       <PageContainer>
@@ -1296,8 +1150,6 @@ export default function PayClient() {
   }
 
   if (isIntentMode) {
-    const isPosIntent = Boolean(intentPayload?.terminalId)
-
     const amountSummary = (
       <div className="rounded-2xl border border-[#0052FF]/10 bg-gradient-to-br from-white via-[#f8fbff] to-[#edf5ff] p-4 text-sm text-gray-800 shadow-sm shadow-[#0052FF]/5">
         <div className="flex items-center justify-between">
@@ -1314,28 +1166,6 @@ export default function PayClient() {
         </div>
       </div>
     )
-
-    if (isPosIntent && posBaseSelected) {
-      return (
-        <PageContainer>
-          <Card className="max-w-md w-full space-y-5">
-            <div>
-              <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
-              <h1 className="text-xl font-bold text-gray-900">Base Payment Selected</h1>
-            </div>
-            {amountSummary}
-            <div className="flex flex-col items-center gap-4 py-4 text-center">
-              <div className="h-10 w-10 rounded-full border-2 border-[#0052FF] border-t-transparent animate-spin" />
-              <p className="text-sm font-medium text-gray-700">Waiting for payment approval</p>
-              <p className="text-sm text-gray-500">
-                Follow the prompts in your wallet app when prompted by the payment terminal.
-              </p>
-            </div>
-            <p className="text-xs text-gray-400 text-center">Updating automatically…</p>
-          </Card>
-        </PageContainer>
-      )
-    }
 
     return (
       <PageContainer>
@@ -1442,76 +1272,35 @@ export default function PayClient() {
                           </div>
                         ) : null}
 
-                        {/* ── Base: POS terminal-controlled or in-page wallet execution ── */}
+                        {/* ── Base: WalletConnect on hosted checkout ── */}
                         {asset.network === "base" ? (
-                          isPosIntent ? (
-                            <div className="space-y-3">
-                              {posBaseSelecting ? (
-                                <div className="flex flex-col items-center gap-3 py-4">
-                                  <div className="h-8 w-8 rounded-full border-2 border-[#0052FF] border-t-transparent animate-spin" />
-                                  <p className="text-sm text-gray-600">Confirming…</p>
-                                </div>
-                              ) : posBaseError ? (
-                                <div className="space-y-3">
-                                  <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
-                                    {posBaseError}
-                                  </div>
-                                  <Button fullWidth onClick={() => void handlePosBaseSelect(asset.symbol === "USDC" ? "USDC" : "ETH")}>
-                                    Retry
-                                  </Button>
-                                </div>
-                              ) : (
-                                <div className="space-y-3">
-                                  <p className="text-sm text-gray-600">
-                                    The payment terminal will guide you through the wallet approval.
-                                  </p>
-                                  <Button fullWidth onClick={() => void handlePosBaseSelect(asset.symbol === "USDC" ? "USDC" : "ETH")}>
-                                    Confirm {asset.symbol === "USDC" ? "USDC (Base)" : "ETH (Base)"} Payment
-                                  </Button>
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <BaseWalletPayment
-                              intentId={intentId!}
-                              selectedAsset={asset.symbol === "USDC" ? "USDC" : "ETH"}
-                              usdAmount={displayAmount}
-                              paymentStatus={normalizedPaymentStatus}
-                              checkoutToken={checkoutToken}
-                              onExecutionStarted={() => setBaseExecutionActive(true)}
-                              onCancel={handleBaseCancelPayment}
-                              onPaymentCreated={() => {
-                                void loadIntentCallback()
-                              }}
-                              onSuccess={async (txHash, paymentId) => {
-                                console.log("[PineTreeBaseTrace] PayClient onSuccess", {
-                                  step: "on-success",
-                                  paymentId,
-                                  txHashPrefix: txHash.slice(0, 10)
-                                })
-                                console.log("[PineTreeBaseTrace] PayClient detect POST start", {
-                                  step: "detect-post-start",
-                                  paymentId,
-                                  txHashPrefix: txHash.slice(0, 10)
-                                })
-                                const detectRes = await fetch(
-                                  `/api/payments/${encodeURIComponent(paymentId)}/detect`,
-                                  {
-                                    method: "POST",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({ txHash }),
-                                  }
-                                )
-                                  .catch(() => null)
-                                console.log("[PineTreeBaseTrace] PayClient detect POST done", {
-                                  step: "detect-post-done",
-                                  paymentId,
-                                  status: detectRes?.status ?? "error"
-                                })
-                                await loadIntentCallback()
-                              }}
-                            />
-                          )
+                          <BaseWalletPayment
+                            intentId={intentId!}
+                            selectedAsset={asset.symbol === "USDC" ? "USDC" : "ETH"}
+                            usdAmount={displayAmount}
+                            paymentStatus={normalizedPaymentStatus}
+                            checkoutToken={checkoutToken}
+                            onExecutionStarted={() => setBaseExecutionActive(true)}
+                            onCancel={handleBaseCancelPayment}
+                            onPaymentCreated={() => {
+                              void loadIntentCallback()
+                            }}
+                            onSuccess={async (txHash, paymentId) => {
+                              const detectRes = await fetch(
+                                `/api/payments/${encodeURIComponent(paymentId)}/detect`,
+                                {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ txHash }),
+                                }
+                              ).catch(() => null)
+                              console.log("[PineTreeBaseTrace] detect POST done", {
+                                paymentId,
+                                status: detectRes?.status ?? "error"
+                              })
+                              await loadIntentCallback()
+                            }}
+                          />
                         ) : null}
 
                         {/* ── Solana: canonical engine payment session + wallet links ── */}
