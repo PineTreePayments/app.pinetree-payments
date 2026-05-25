@@ -34,12 +34,19 @@ type DrawerSession = {
   lastEntryAt: string | null
 }
 
+function normalizeTerminalId(value: string | null): string {
+  return String(value || "")
+    .split("?")[0]
+    .split("&")[0]
+    .trim()
+}
+
 export default function TerminalInner() {
 
   const router = useRouter()
   const params = useSearchParams()
 
-  const terminalId = params.get("tid")
+  const terminalId = normalizeTerminalId(params.get("tid"))
 
   const [terminal,setTerminal] = useState<Terminal | null>(null)
   const [unlockMode,setUnlockMode] = useState(false)
@@ -260,6 +267,16 @@ export default function TerminalInner() {
     }
   }
 
+  if (!terminal) {
+    return (
+      <div className="h-screen w-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-sm font-medium text-gray-500">
+          {terminalId ? "Loading terminal..." : "Missing terminal id"}
+        </div>
+      </div>
+    )
+  }
+
   return (
 
     <div className="h-screen w-screen bg-gray-100 flex items-center justify-center relative">
@@ -352,7 +369,7 @@ export default function TerminalInner() {
         </div>
       )}
 
-      {!unlockMode && (terminal === null || shiftStarted || Number(terminal?.drawer_starting_amount ?? 0) === 0) && (
+      {!unlockMode && (shiftStarted || Number(terminal.drawer_starting_amount ?? 0) === 0) && (
         <POSLayout locked={false} terminalContext={terminalContext} />
       )}
 

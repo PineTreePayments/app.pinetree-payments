@@ -59,30 +59,6 @@ type BaseMobileStep =
   | "confirmed"
   | "failed"
   | "fallback_required"
-type BaseV6DebugEvent = {
-  timestamp: string
-  event: string
-  paymentId?: string
-  selectedAsset?: BaseAsset
-  step?: string
-  actionKind?: string
-  strategy?: string
-  hasAccount?: boolean
-  chainId?: number | string | null
-  method?: string
-  providerRequestStarted?: boolean
-  hasTxHash?: boolean
-  allowanceSufficient?: boolean
-  fallbackReason?: string
-  errorCode?: string | number | null
-  errorMessage?: string
-  reason?: string
-  source?: string
-  documentVisibility?: string
-  elapsedConnectionToRequestMs?: number | null
-  elapsedReturnToRequestMs?: number | null
-  elapsedApprovalToFinalRequestMs?: number | null
-}
 type PaymentData = {
   paymentId: string
   paymentUrl: string
@@ -288,15 +264,6 @@ function logBaseV6(event: string, payload: Record<string, unknown> = {}): void {
   ])
   const safePayload = Object.fromEntries(Object.entries(payload).filter(([key]) => allowed.has(key)))
   console.info(`[BaseV6] ${event}`, safePayload)
-  if (typeof window !== "undefined") {
-    const detail: BaseV6DebugEvent = {
-      timestamp: new Date().toLocaleTimeString(),
-      event,
-      ...(safePayload as Partial<BaseV6DebugEvent>),
-      providerRequestStarted: Boolean(safePayload.providerRequestStarted ?? safePayload.requestStarted),
-    }
-    window.dispatchEvent(new CustomEvent<BaseV6DebugEvent>("pinetree:base-v6-debug", { detail }))
-  }
 }
 function extractErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -1020,11 +987,6 @@ export default function BaseWalletPayment({
   const [pendingWalletActionKind, setPendingWalletActionKind] = useState<WalletRequestKind | null>(null)
   const [pendingWalletActionReady, setPendingWalletActionReady] = useState(false)
   const [pendingWalletActionInFlight, setPendingWalletActionInFlight] = useState(false)
-  const [showBaseV6DebugPanel] = useState(() => {
-    if (typeof window === "undefined") return false
-    return new URLSearchParams(window.location.search).get("debugBaseV6") === "1"
-  })
-  const [baseV6DebugEvents, setBaseV6DebugEvents] = useState<BaseV6DebugEvent[]>([])
   // ── Base UI execution state machine ────────────────────────────────────────
   const [execStage, setExecStageRaw] = useState<BaseExecutionStage>("idle")
   const [baseMobileStep, setBaseMobileStepRaw] = useState<BaseMobileStep>("idle")
@@ -1210,7 +1172,7 @@ export default function BaseWalletPayment({
 
     await logBase("walletconnect-settle-timeout", { source, reason: lastReason })
     return null
-  }, [chain?.id, markWalletConnectionApproved, selectedAsset, walletConnectConnector])
+  }, [markWalletConnectionApproved, selectedAsset, walletConnectConnector])
   const beginWalletRequest = useCallback((request: Omit<ActiveWalletRequest, "startedAt" | "pending">) => {
     activeWalletRequestRef.current = {
       ...request,
@@ -1677,15 +1639,6 @@ export default function BaseWalletPayment({
       connectorId: connector?.id || null,
     })
   }, [address, chain?.id, connector?.id, connector?.name, intentId, isConnected])
-  useEffect(() => {
-    if (!showBaseV6DebugPanel) return
-    const handleDebugEvent = (event: Event) => {
-      const detail = (event as CustomEvent<BaseV6DebugEvent>).detail
-      setBaseV6DebugEvents((current) => [detail, ...current].slice(0, 20))
-    }
-    window.addEventListener("pinetree:base-v6-debug", handleDebugEvent)
-    return () => window.removeEventListener("pinetree:base-v6-debug", handleDebugEvent)
-  }, [showBaseV6DebugPanel])
   const refreshPendingState = useCallback(() => {
     const pending = getPendingBaseWalletConnectPayment()
     const matches = pendingPaymentMatches(pending, intentId, selectedAsset)
@@ -2361,10 +2314,10 @@ export default function BaseWalletPayment({
       })
       // Route USDC payments to the correct execution path based on strategy/URL.
       // V6: v6_eip3009_relayer strategy or pinetree://base-v6 URL (active path).
-      const isBaseV6 = selectedAsset === "USDC" && (
-        paymentData.baseUsdcStrategy === "v6_eip3009_relayer" ||
-        paymentData.paymentUrl.startsWith("pinetree://base-v6")
-      )
+      // All USDC payments go through V6 execution regardless of pre-assigned strategy.
+      // executeBaseV6UsdcPayment calls the server strategy endpoint fresh and handles
+      // every branch: delegated_batch, eip3009_relayer, allowance_direct, allowance_two_step.
+      const isBaseV6 = selectedAsset === "USDC"
       createdBaseV6Payment = isBaseV6
       console.log("[PineTreeBaseTrace] BaseWalletPayment branch selected", {
         step: "branch-selection",
@@ -2417,9 +2370,6 @@ export default function BaseWalletPayment({
         }
         return
       }
-      if (selectedAsset === "USDC") {
-        throw new Error("Base USDC payment could not be prepared. Please try again or choose another payment method.")
-      }
       const txRequest = cachedTxRequest ?? parseEthereumPaymentUri(paymentData.paymentUrl)
       logBaseV6("eth_prepare_start", {
         paymentId: paymentData.paymentId,
@@ -2433,12 +2383,58 @@ export default function BaseWalletPayment({
         hasValue: Boolean(txRequest.value),
       })
       transactionPromptStarted = true
-      setExecStageRef.current("confirm_payment")
-      console.log("[BASE UI] awaiting-wallet-confirmation", { paymentId: paymentData.paymentId, asset: "ETH" })
+      // Store for mobile handoff recovery (catch block queues it if provider.request throws).
       pendingEthPaymentTxRef.current = txRequest
-      queuePendingWalletAction({ kind: "eth_payment", paymentId: paymentData.paymentId, ready: true })
+      // Track auto-dispatch attempt so the pending-action system doesn't re-fire
+      // if the user manually retries after a handoff failure.
+      const ethAttemptKey = `${paymentData.paymentId}:${selectedAsset}:eth_payment`
+      setExecStageRef.current("confirm_payment")
+      setBaseMobileStepRef.current("payment_dispatching")
+      setBasePayStatus("Approve payment in your wallet...")
+      // Use the already-settled session provider directly — no second settlement wait.
+      // This keeps the gap between connection approval and payment approval as small
+      // as possible on mobile, eliminating the "bounce back to browser" inconsistency.
+      closeWalletConnectSelectionModal(walletConnectProvider)
+      beginWalletRequest({ kind: "eth_payment", walletName: settledSession.peerName })
+      setBaseMobileStepRef.current("payment_in_wallet")
+      console.log("[BASE UI] eth-payment-direct-dispatch", { paymentId: paymentData.paymentId })
+      const ethTxHash = await sendWalletConnectTransactionWithTimeout({
+        provider: walletConnectProvider,
+        fromAddress,
+        txRequest,
+        paymentId: paymentData.paymentId,
+        timeoutMs: BASE_ETH_TX_REQUEST_TIMEOUT_MS,
+        timeoutMessage: BASE_ETH_TX_TIMEOUT_MESSAGE,
+        actionKind: "eth_payment",
+        onProviderRequestStarted: () => {
+          autoWalletActionAttemptedKeyRef.current.add(ethAttemptKey)
+        },
+        debugTimings: getProviderRequestDebugTimings("eth_payment", "continue-direct"),
+      })
+      resolveWalletRequest()
+      closeWalletConnectSelectionModal(walletConnectProvider)
+      pendingEthPaymentTxRef.current = null
+      clearPendingWalletAction()
+      paymentSubmittedRef.current = true
+      activeBasePaymentAttemptRef.current = null
+      setExecStageRef.current("payment_submitted")
+      setBaseMobileStepRef.current("payment_submitted")
       setIsOpeningWallet(false)
-      setBaseMobileStepRef.current("payment_ready")
+      console.log("[BASE UI] final-tx-submitted", { paymentId: paymentData.paymentId, txHashPrefix: ethTxHash.slice(0, 10), asset: "ETH" })
+      void logBase("eth-payment-submitted", { paymentId: paymentData.paymentId, txHashPrefix: ethTxHash.slice(0, 10) })
+      void logBase("detect-start", { paymentId: paymentData.paymentId, txHashPrefix: ethTxHash.slice(0, 10) })
+      logBasePay("network_confirmation_entered", { hasTxHash: true, actionKind: "eth_payment" })
+      logBaseV6("network_confirmation_entered", { paymentId: paymentData.paymentId, selectedAsset, actionKind: "eth_payment", hasTxHash: true })
+      logBasePay("waiting_for_payment_entered", { hasTxHash: true, actionKind: "eth_payment", step: "network_confirmation" })
+      setExecStageRef.current("detecting")
+      setBaseMobileStepRef.current("network_confirmation")
+      await onSuccess?.(ethTxHash, paymentData.paymentId)
+      void logBase("detect-success", { paymentId: paymentData.paymentId })
+      clearPendingBaseWalletConnectPayment()
+      setHasPendingBaseWcPayment(false)
+      if (intentId) {
+        window.location.href = `/pay?intent=${encodeURIComponent(intentId)}&status=processing`
+      }
       return
     } catch (err) {
       const message = extractErrorMessage(err) || "Failed to open Base payment"
@@ -2588,7 +2584,7 @@ export default function BaseWalletPayment({
     } finally {
       isSendingBaseTxRef.current = false
     }
-  }, [chain?.id, connector?.id, connector?.name, enforceActivePaymentBeforeWalletConnect, executeBaseV6UsdcPayment, intentId, isOnBase, onError, onSuccess, resolvePaymentData, selectedAsset, switchChainAsync, waitForWalletConnectSettlement, walletClient, walletConnectConnector])
+  }, [beginWalletRequest, chain?.id, clearPendingWalletAction, connector?.id, connector?.name, enforceActivePaymentBeforeWalletConnect, executeBaseV6UsdcPayment, getProviderRequestDebugTimings, intentId, isOnBase, onError, onSuccess, resolvePaymentData, resolveWalletRequest, selectedAsset, switchChainAsync, waitForWalletConnectSettlement, walletClient, walletConnectConnector])
   const resetBasePaymentAttemptForRetry = useCallback(() => {
     const hadStaleState = Boolean(
       activeBasePaymentAttemptRef.current ||
@@ -2664,7 +2660,11 @@ export default function BaseWalletPayment({
         onExecutionStarted?.()
         const currentAddress = String(address || "").trim()
         if (isConnected && currentAddress) {
-          // Already connected — skip the connect step
+          // Already connected — skip the connect step.
+          // Mark the session-settle trigger consumed immediately so the useEffect
+          // below does not race and fire a second continueBasePayment call for
+          // the same payment before isSendingBaseTxRef is set.
+          sessionSettleTriggerFiredRef.current = true
           setExecStageRef.current("wallet_connected")
           console.log("[BASE UI] wallet-connected", { source: "already-connected", intentId: intentId || null })
           await continueBasePayment(currentAddress)
@@ -3196,7 +3196,7 @@ export default function BaseWalletPayment({
       document.removeEventListener("visibilitychange", handleVisibilityChange)
       window.removeEventListener("pageshow", handlePageShow)
     }
-  }, [startBaseWalletConnectAutoResumeRetry])
+  }, [selectedAsset, startBaseWalletConnectAutoResumeRetry])
   // Session-settle trigger: fires immediately when wagmi reports a connected address
   // for an active pending Base WalletConnect payment, without waiting for browser focus events.
   // This covers the window where connectAsync resolved (or wagmi reconnected after
@@ -3279,46 +3279,6 @@ export default function BaseWalletPayment({
     }
   }, [continueBasePayment, intentId, markAutomaticResumeAttempt, resumeFromWalletConnectProvider, selectedAsset, stopAutoResumeRetry, walletConnectConnector])
   // ── Render helpers ────────────────────────────────────────────────────────
-  const baseV6DebugPanel = showBaseV6DebugPanel ? (
-    <div className="rounded-xl border border-gray-200 bg-gray-950 p-3 text-[10px] text-gray-100 shadow-sm">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="font-semibold text-white">Base V6 Debug</span>
-        <span className="text-gray-400">{baseV6DebugEvents.length} events</span>
-      </div>
-      <div className="max-h-72 space-y-2 overflow-auto">
-        {baseV6DebugEvents.length === 0 ? (
-          <div className="text-gray-400">Waiting for Base V6 events...</div>
-        ) : baseV6DebugEvents.map((event, index) => {
-          const shortPaymentId = event.paymentId ? `${event.paymentId.slice(0, 6)}...${event.paymentId.slice(-4)}` : "-"
-          return (
-            <div key={`${event.timestamp}-${event.event}-${index}`} className="rounded-lg bg-white/5 p-2">
-              <div className="flex flex-wrap gap-x-2 gap-y-1">
-                <span>{event.timestamp}</span>
-                <span>{event.event}</span>
-                <span>pid:{shortPaymentId}</span>
-                <span>asset:{event.selectedAsset || selectedAsset}</span>
-                <span>step:{event.step || baseMobileStep}</span>
-                <span>action:{event.actionKind || "-"}</span>
-                <span>strategy:{event.strategy || "-"}</span>
-                <span>acct:{String(event.hasAccount ?? Boolean(address))}</span>
-                <span>chain:{String(event.chainId ?? chain?.id ?? "-")}</span>
-                <span>method:{event.method || "-"}</span>
-                <span>started:{String(event.providerRequestStarted ?? false)}</span>
-                <span>tx:{String(event.hasTxHash ?? false)}</span>
-                <span>allow:{String(event.allowanceSufficient ?? false)}</span>
-                <span>vis:{event.documentVisibility || "-"}</span>
-                <span>connReq:{event.elapsedConnectionToRequestMs ?? "-"}</span>
-                <span>returnReq:{event.elapsedReturnToRequestMs ?? "-"}</span>
-                <span>approvalFinal:{event.elapsedApprovalToFinalRequestMs ?? "-"}</span>
-                {(event.fallbackReason || event.reason) ? <span>reason:{String(event.fallbackReason || event.reason)}</span> : null}
-                {(event.errorCode || event.errorMessage) ? <span>err:{String(event.errorCode || "")} {event.errorMessage || ""}</span> : null}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  ) : null
   if (terminalStatus) {
     return (
       <div className="space-y-3">
@@ -3326,7 +3286,6 @@ export default function BaseWalletPayment({
           Base Network Payment
         </div>
         <PaymentStatusVisual status={terminalStatus} variant="card" />
-        {baseV6DebugPanel}
       </div>
     )
   }
@@ -3628,7 +3587,6 @@ export default function BaseWalletPayment({
             </Button>
           </div>
         ) : null}
-        {baseV6DebugPanel}
       </div>
     )
   }
@@ -3667,7 +3625,6 @@ export default function BaseWalletPayment({
         >
           Cancel payment
         </button>
-        {baseV6DebugPanel}
       </div>
     )
   }
@@ -3753,7 +3710,6 @@ export default function BaseWalletPayment({
           )}
         </div>
       )}
-      {baseV6DebugPanel}
     </div>
   )
 }
