@@ -129,6 +129,7 @@ type BaseV6StrategyResponse = {
   asset?: "ETH" | "USDC"
   allowanceSufficient?: boolean
   relayerAvailable?: boolean
+  relayerReason?: string
   delegatedAvailable?: boolean
   requiredUsdcAmount?: string
   currentAllowance?: string
@@ -1903,7 +1904,7 @@ export default function BaseWalletPayment({
           throw new Error("Incomplete Base V6 authorization returned by server")
         }
         setExecStageRef.current("confirm_payment")
-        setBasePayStatus("Approve payment in your wallet...")
+        setBasePayStatus("Authorize USDC payment in your wallet.")
         const typedData = requireBaseUsdcTypedData(prepare.typedData, input.fromAddress)
         const serializedTypedData = serializeTypedDataForWallet(typedData)
         let signTimeoutHandle: ReturnType<typeof setTimeout> | null = null
@@ -3358,7 +3359,9 @@ export default function BaseWalletPayment({
   } else if (execStage === "usdc_authorized") {
     contextMessage = "Sending final payment approval."
   } else if (execStage === "confirm_payment") {
-    contextMessage = "Approve in your wallet"
+    contextMessage = activeWalletRequestRef.current?.kind === "usdc_signature"
+      ? "Authorize USDC payment in your wallet."
+      : "Approve in your wallet."
   } else if (execStage === "submitting_payment") {
     contextMessage = "Submitting payment..."
   } else if (execStage === "payment_submitted" || execStage === "detecting") {
@@ -3410,13 +3413,17 @@ export default function BaseWalletPayment({
     ? "Approve wallet connection"
     : activeWalletRequestKind === "usdc_approve"
       ? "USDC authorization"
-      : selectedAsset === "USDC"
-        ? "Final payment approval"
-        : "Payment approval"
+      : activeWalletRequestKind === "usdc_signature"
+        ? "Authorize USDC payment"
+        : selectedAsset === "USDC"
+          ? "Final payment approval"
+          : "Payment approval"
   const walletRequestDetailCopy =
-    baseMobileStep === "payment_in_wallet" || baseMobileStep === "usdc_authorization_in_wallet"
-      ? "The request has been sent to your wallet. Open your wallet app to approve, then return here."
-      : "Return here after approving in your wallet."
+    activeWalletRequestKind === "usdc_signature"
+      ? "PineTree will securely submit the payment after authorization."
+      : baseMobileStep === "payment_in_wallet" || baseMobileStep === "usdc_authorization_in_wallet"
+        ? "The request has been sent to your wallet. Open your wallet app to approve, then return here."
+        : "Return here after approving in your wallet."
   const fallbackButtonCopy = pendingWalletActionKind === "usdc_approve"
     ? "Retry USDC authorization"
     : pendingWalletActionKind === "eth_payment" || pendingWalletActionKind === "usdc_payment"

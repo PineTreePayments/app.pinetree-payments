@@ -395,6 +395,17 @@ export async function relayBaseV6Payment(input: {
     allowTerminal: false
   })
   const authorization = normalizeAuthorization(input.authorization)
+
+  const nowSec = Math.floor(Date.now() / 1000)
+  if (BigInt(authorization.validBefore) <= BigInt(nowSec)) {
+    console.warn("[BASE V6] relay authorization expired", {
+      paymentId: input.paymentId,
+      validBefore: authorization.validBefore,
+      now: nowSec
+    })
+    throw new Error("USDC authorization has expired. Please authorize again.")
+  }
+
   const typedData = buildBaseV6TypedData({
     payerAddress: context.payerAddress,
     value: context.totalAmount,

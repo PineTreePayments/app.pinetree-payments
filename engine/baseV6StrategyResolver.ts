@@ -53,6 +53,7 @@ export type BaseV6StrategyResolution = {
   asset: "ETH" | "USDC"
   allowanceSufficient: boolean
   relayerAvailable: boolean
+  relayerReason: string
   delegatedAvailable: boolean
   requiredUsdcAmount: string
   currentAllowance: string
@@ -77,7 +78,7 @@ function requireEvmAddress(label: string, value: string): string {
   }
 }
 
-async function checkRelayerAvailability(): Promise<boolean> {
+async function checkRelayerAvailability(): Promise<{ available: boolean; reason: string }> {
   try {
     const { address: relayerAddress, privateKey } = getBaseV6Relayer()
     const v6Contract = getBaseV6Contract()
@@ -85,37 +86,36 @@ async function checkRelayerAvailability(): Promise<boolean> {
     const derivedRelayerAddress = new Wallet(privateKey).address
     if (getAddress(derivedRelayerAddress) !== getAddress(relayerAddress)) {
       console.warn("[BaseV6] env_check", { reason: "relayer-private-key-address-mismatch" })
-      return false
+      return { available: false, reason: "relayer-private-key-address-mismatch" }
     }
 
     const contract = new Contract(v6Contract, V6_RELAYER_ABI, provider)
     const isAllowed = (await contract.relayers(relayerAddress)) as boolean
     if (!isAllowed) {
       console.warn("[BaseV6] env_check", { reason: "relayer-not-allowlisted" })
-      return false
+      return { available: false, reason: "relayer-not-allowlisted" }
     }
 
     const relayerBalance = await provider.getBalance(relayerAddress)
     const feeData = await provider.getFeeData()
     const gasPrice = feeData.maxFeePerGas || feeData.gasPrice
-    if (!gasPrice) return false
+    if (!gasPrice) return { available: false, reason: "no-gas-price" }
 
     const estimatedGasWei = BigInt(200_000) * gasPrice
-    if (relayerBalance < estimatedGasWei) return false
+    if (relayerBalance < estimatedGasWei) return { available: false, reason: "insufficient-relayer-balance" }
 
     const prices = await getMarketPricesUSD()
     const { maxGasUsd } = getBaseV6GasCap()
     const estimatedGasUsd =
       Number(estimatedGasWei.toString()) * prices.ETH * 1e-18
     const available = Number.isFinite(estimatedGasUsd) && estimatedGasUsd <= maxGasUsd
-    console.info("[BaseV6] env_check", { relayerAvailable: available })
-    return available
+    const reason = available ? "" : "gas-cap-exceeded"
+    console.info("[BaseV6] env_check", { relayerAvailable: available, reason: reason || undefined })
+    return { available, reason }
   } catch (error) {
-    console.warn("[BaseV6] env_check", {
-      relayerAvailable: false,
-      reason: error instanceof Error ? error.message : "relayer-check-failed",
-    })
-    return false
+    const reason = error instanceof Error ? error.message : "relayer-check-failed"
+    console.warn("[BaseV6] env_check", { relayerAvailable: false, reason })
+    return { available: false, reason }
   }
 }
 
@@ -186,6 +186,7 @@ export async function resolveBaseV6Strategy(input: {
         asset: "ETH",
         allowanceSufficient: false,
         relayerAvailable: false,
+        relayerReason: "not-applicable-for-eth",
         delegatedAvailable: false,
         requiredUsdcAmount: "0",
         currentAllowance: "0",
@@ -206,8 +207,10 @@ export async function resolveBaseV6Strategy(input: {
         ? BigInt(rawMerchantAmount) + BigInt(rawFeeAmount)
         : BigInt(0)
 
-    const [relayerAvailable, allowanceResult] = await Promise.all([
-      isBaseV6Eip3009Enabled() && !skipEip3009 ? checkRelayerAvailability() : Promise.resolve(false),
+    const [relayerCheck, allowanceResult] = await Promise.all([
+      isBaseV6Eip3009Enabled() && !skipEip3009
+        ? checkRelayerAvailability()
+        : Promise.resolve({ available: false, reason: "eip3009-disabled-or-skipped" }),
       totalRequired > BigInt(0)
         ? (async () => {
             try {
@@ -228,6 +231,8 @@ export async function resolveBaseV6Strategy(input: {
 
     void checkAllowance // used inline above
 
+    const relayerAvailable = relayerCheck.available
+    const relayerReason = relayerCheck.reason
     const delegatedAvailable = isBaseV6DelegatedEnabled() && !skipDelegatedBatch
     const allowanceSufficient = allowanceResult.sufficient
 
@@ -268,6 +273,7 @@ export async function resolveBaseV6Strategy(input: {
       paymentId,
       strategy,
       relayerAvailable,
+      relayerReason: relayerReason || undefined,
       allowanceSufficient,
       requiredUsdcAmount: allowanceResult.required,
       currentAllowance: allowanceResult.allowance,
@@ -284,6 +290,7 @@ export async function resolveBaseV6Strategy(input: {
       asset: "USDC",
       allowanceSufficient,
       relayerAvailable,
+      relayerReason,
       delegatedAvailable,
       requiredUsdcAmount: allowanceResult.required,
       currentAllowance: allowanceResult.allowance,
@@ -293,8 +300,10 @@ export async function resolveBaseV6Strategy(input: {
       expectedWalletPrompts,
       customerFacingNotice:
         strategy === "usdc_allowance_two_step"
-          ? "One-time USDC authorization required, then confirm payment."
-          : "Approve payment in your wallet.",
+          ? "Approve USDC authorization, then approve final payment."
+          : strategy === "usdc_eip3009_relayer"
+            ? "Authorize USDC payment in your wallet."
+            : "Approve payment in your wallet.",
       debugSummary
     }
   } catch (err) {
