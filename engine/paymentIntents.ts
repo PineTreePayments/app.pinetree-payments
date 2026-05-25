@@ -334,7 +334,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
   // Fast-path: reuse an active payment when the intent already has one for the same
   // network and asset. This prevents creating a duplicate payment (and marking the
   // active one INCOMPLETE) when the checkout resumes after a browser suspension —
-  // e.g. when the customer returns from a mobile wallet mid V4 EIP-3009 signing.
+  // e.g. when the customer returns from a mobile wallet mid EIP-3009 signing.
   if (intent.payment_id) {
     const existingPayment = await getPaymentById(intent.payment_id)
     if (existingPayment) {
