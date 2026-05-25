@@ -50,14 +50,17 @@ type BaseMobileStep =
   | "wallet_connecting"
   | "wallet_connected"
   | "usdc_authorization_ready"
+  | "usdc_authorization_dispatching"
   | "usdc_authorization_in_wallet"
   | "usdc_authorization_submitted"
   | "payment_ready"
+  | "payment_dispatching"
   | "payment_in_wallet"
   | "payment_submitted"
   | "network_confirmation"
   | "confirmed"
   | "failed"
+  | "fallback_required"
 type PaymentData = {
   paymentId: string
   paymentUrl: string
@@ -910,6 +913,7 @@ export default function BaseWalletPayment({
   const pendingActionPaymentIdRef = useRef<string | null>(null)
   const pendingActionInFlightRef = useRef(false)
   const dispatchPendingWalletActionRef = useRef<((source?: string) => Promise<boolean>) | null>(null)
+  const autoWalletActionAttemptedKeyRef = useRef<Set<string>>(new Set())
   // Tracks a live wallet request (connect / sign / send) so we know whether
   // the user is currently in-wallet. While pending=true we never show rejection UI.
   const activeWalletRequestRef = useRef<ActiveWalletRequest | null>(null)
@@ -1123,6 +1127,7 @@ export default function BaseWalletPayment({
     setPendingWalletActionKind(input.kind)
     setPendingWalletActionReady(input.ready !== false)
     setPendingWalletActionInFlight(false)
+    setWalletHandoffPending(false)
     preservePendingWalletRequestUi(input.kind)
     if (input.ready !== false) {
       if (input.kind === "usdc_approve") {
@@ -1139,6 +1144,7 @@ export default function BaseWalletPayment({
     if (kind !== "eth_payment" && kind !== "usdc_approve" && kind !== "usdc_payment") return false
     if (!walletConnectConnector) {
       setLocalError("WalletConnect is not configured.")
+      setBaseMobileStepRef.current("fallback_required")
       return false
     }
     const settledSession = await waitForWalletConnectSettlement(`pending-action:${source}`)
@@ -1151,6 +1157,7 @@ export default function BaseWalletPayment({
       })
       setLocalError("Wallet disconnected. Reconnect to continue.")
       setPendingWalletActionReady(true)
+      setBaseMobileStepRef.current("fallback_required")
       return false
     }
     const provider = settledSession.provider
@@ -1163,6 +1170,7 @@ export default function BaseWalletPayment({
     if (!txRequest) {
       setLocalError("Payment confirmation details are no longer available. Tap Try Again to restart.")
       setExecStageRef.current("retryable_error")
+      setBaseMobileStepRef.current("failed")
       clearPendingWalletAction()
       return false
     }
@@ -1172,6 +1180,7 @@ export default function BaseWalletPayment({
     setPendingWalletActionReady(false)
     setLocalError("")
     setIsOpeningWallet(true)
+    setBaseMobileStepRef.current(kind === "usdc_approve" ? "usdc_authorization_dispatching" : "payment_dispatching")
     const stage = kind === "usdc_approve" ? "authorizing_usdc" : "confirm_payment"
     setExecStageRef.current(stage, kind === "usdc_approve" ? { allowance: true } : undefined)
     setBaseMobileStepRef.current(kind === "usdc_approve" ? "usdc_authorization_in_wallet" : "payment_in_wallet")
@@ -1314,6 +1323,7 @@ export default function BaseWalletPayment({
       preservePendingWalletRequestUi(kind)
       setPendingWalletActionReady(true)
       setPendingWalletActionKind(kind)
+      setBaseMobileStepRef.current("fallback_required")
       setExecStageRef.current(kind === "usdc_approve" ? "authorizing_usdc" : "confirm_payment", kind === "usdc_approve" ? { allowance: true } : undefined)
       setBaseUsdcV4Status(
         kind === "usdc_approve"
@@ -2482,6 +2492,7 @@ export default function BaseWalletPayment({
     prefetchedPaymentDataRef.current = null
     prefetchedTxRequestRef.current = null
     autoResumeAttemptedKeyRef.current = null
+    autoWalletActionAttemptedKeyRef.current.clear()
     setBaseUsdcV4Status("")
     setIsResolvingAccount(false)
     clearPendingBaseWalletConnectPayment()
@@ -2934,8 +2945,31 @@ export default function BaseWalletPayment({
   }, [startBaseWalletConnectAutoResumeRetry])
   useEffect(() => {
     if (!pendingWalletActionReady || pendingWalletActionInFlight) return
-    startBaseWalletConnectAutoResumeRetry("pending-wallet-action-ready")
-  }, [pendingWalletActionInFlight, pendingWalletActionReady, startBaseWalletConnectAutoResumeRetry])
+    const kind = pendingActionKindRef.current
+    const paymentId = pendingActionPaymentIdRef.current
+    if (!kind || !paymentId) return
+    if (paymentSubmittedRef.current) return
+    const attemptKey = `${paymentId}:${kind}`
+    if (autoWalletActionAttemptedKeyRef.current.has(attemptKey)) {
+      setBaseMobileStepRef.current("fallback_required")
+      return
+    }
+    autoWalletActionAttemptedKeyRef.current.add(attemptKey)
+    setWalletHandoffPending(false)
+    setBaseMobileStepRef.current(kind === "usdc_approve" ? "usdc_authorization_dispatching" : "payment_dispatching")
+    void logBase("pending-wallet-action-auto-dispatch", {
+      kind,
+      paymentId,
+      selectedAsset,
+      step: kind === "usdc_approve" ? "usdc_authorization_dispatching" : "payment_dispatching",
+    })
+    void dispatchPendingWalletActionRef.current?.(`auto-${kind}`).then((ok) => {
+      if (ok) return
+      if (paymentSubmittedRef.current) return
+      if (pendingActionKindRef.current !== kind || pendingActionPaymentIdRef.current !== paymentId) return
+      setBaseMobileStepRef.current("fallback_required")
+    })
+  }, [pendingWalletActionInFlight, pendingWalletActionReady, selectedAsset])
   useEffect(() => {
     const handleFocus = () => startBaseWalletConnectAutoResumeRetry("focus")
     const handleVisibilityChange = () => startBaseWalletConnectAutoResumeRetry("visibilitychange")
@@ -3056,8 +3090,10 @@ export default function BaseWalletPayment({
   const showUsdcAuthStep = selectedAsset === "USDC" && (
     usedEmergencyAllowance ||
     baseMobileStep === "usdc_authorization_ready" ||
+    baseMobileStep === "usdc_authorization_dispatching" ||
     baseMobileStep === "usdc_authorization_in_wallet" ||
-    baseMobileStep === "usdc_authorization_submitted"
+    baseMobileStep === "usdc_authorization_submitted" ||
+    pendingWalletActionKind === "usdc_approve"
   )
   const walletConnectedStatus: "done" | "active" | "upcoming" =
     baseMobileStep === "wallet_connecting"
@@ -3066,14 +3102,20 @@ export default function BaseWalletPayment({
         ? "upcoming"
         : "done"
   const usdcAuthStatus: "done" | "active" | "upcoming" = showUsdcAuthStep
-    ? baseMobileStep === "usdc_authorization_ready" || baseMobileStep === "usdc_authorization_in_wallet"
+    ? baseMobileStep === "usdc_authorization_ready" ||
+      baseMobileStep === "usdc_authorization_dispatching" ||
+      baseMobileStep === "usdc_authorization_in_wallet" ||
+      (baseMobileStep === "fallback_required" && pendingWalletActionKind === "usdc_approve")
       ? "active"
       : baseMobileStep === "wallet_connecting" || baseMobileStep === "wallet_connected"
         ? "upcoming"
         : "done"
     : "done"
   const confirmPayStatus: "done" | "active" | "upcoming" =
-    baseMobileStep === "payment_ready" || baseMobileStep === "payment_in_wallet"
+    baseMobileStep === "payment_ready" ||
+    baseMobileStep === "payment_dispatching" ||
+    baseMobileStep === "payment_in_wallet" ||
+    (baseMobileStep === "fallback_required" && pendingWalletActionKind !== "usdc_approve")
       ? "active"
       : baseMobileStep === "payment_submitted" || baseMobileStep === "network_confirmation" || baseMobileStep === "confirmed"
         ? "done"
@@ -3109,25 +3151,36 @@ export default function BaseWalletPayment({
   } else if (baseMobileStep === "wallet_connected" || execStage === "preparing_payment") {
     contextMessage = isResolvingAccount ? "Finalizing wallet connection..." : "Preparing payment..."
   } else if (baseMobileStep === "usdc_authorization_ready") {
-    contextMessage = "Ready for one-time USDC authorization"
+    contextMessage = "Preparing one-time USDC authorization..."
+  } else if (baseMobileStep === "usdc_authorization_dispatching") {
+    contextMessage = "Opening USDC authorization in your wallet..."
   } else if (baseMobileStep === "usdc_authorization_in_wallet") {
     contextMessage = "One-time USDC authorization needed in your wallet"
   } else if (baseMobileStep === "usdc_authorization_submitted") {
     contextMessage = "Authorization submitted. Checking allowance..."
   } else if (baseMobileStep === "payment_ready") {
-    contextMessage = "Ready to confirm payment"
+    contextMessage = "Preparing payment confirmation..."
+  } else if (baseMobileStep === "payment_dispatching") {
+    contextMessage = "Opening payment confirmation in your wallet..."
   } else if (baseMobileStep === "payment_in_wallet") {
     contextMessage = "Confirm payment in your wallet"
   } else if (baseMobileStep === "payment_submitted") {
     contextMessage = "Payment submitted"
   } else if (baseMobileStep === "network_confirmation") {
     contextMessage = "Waiting for network confirmation..."
+  } else if (baseMobileStep === "fallback_required") {
+    contextMessage = pendingWalletActionKind === "usdc_approve"
+      ? "USDC authorization needs one more wallet action"
+      : "Payment confirmation needs one more wallet action"
   }
   const walletRequestIsPending = walletRequestUiState === "opening_wallet" || walletRequestUiState === "awaiting_wallet" || walletRequestUiState === "request_sent"
   const activeWalletRequestKind = activeWalletRequestRef.current?.kind ?? pendingWalletRequestKind
   const showWalletPrompt =
-    execStage === "confirm_payment" ||
-    execStage === "authorizing_usdc" ||
+    baseMobileStep === "payment_dispatching" ||
+    baseMobileStep === "payment_in_wallet" ||
+    baseMobileStep === "usdc_authorization_dispatching" ||
+    baseMobileStep === "usdc_authorization_in_wallet" ||
+    ((execStage === "confirm_payment" || execStage === "authorizing_usdc") && baseMobileStep !== "fallback_required") ||
     ((execStage === "connecting_wallet" || execStage === "asset_selected") && walletRequestIsPending)
   const showReturnHereHint =
     (execStage === "connecting_wallet" || execStage === "asset_selected") && !showWalletPrompt
@@ -3137,6 +3190,11 @@ export default function BaseWalletPayment({
       ? "One-time USDC authorization"
       : "Confirm payment in your wallet"
   const walletRequestDetailCopy = "Return here after approving in your wallet."
+  const fallbackButtonCopy = pendingWalletActionKind === "usdc_approve"
+    ? "Approve USDC in wallet"
+    : pendingWalletActionKind === "eth_payment" || pendingWalletActionKind === "usdc_payment"
+      ? "Confirm payment in wallet"
+      : "Continue in wallet"
   function renderStepIcon(status: "done" | "active" | "upcoming") {
     if (status === "done") {
       return (
@@ -3240,7 +3298,7 @@ export default function BaseWalletPayment({
           ) : null}
         </div>
         {execStage !== "payment_submitted" && execStage !== "detecting" && execStage !== "confirmed" ? (
-          (walletHandoffPending || pendingWalletActionReady) && !isOpeningWallet && !pendingWalletActionInFlight ? (
+          baseMobileStep === "fallback_required" && (walletHandoffPending || pendingWalletActionReady) && !isOpeningWallet && !pendingWalletActionInFlight ? (
             <Button
               fullWidth
               onClick={() => {
@@ -3257,7 +3315,7 @@ export default function BaseWalletPayment({
                 triggerBaseAutoResumeRef.current?.("continue-in-wallet-click")
               }}
             >
-              Continue in wallet
+              {fallbackButtonCopy}
             </Button>
           ) : null
         ) : null}
