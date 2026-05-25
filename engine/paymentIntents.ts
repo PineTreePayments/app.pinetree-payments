@@ -331,6 +331,8 @@ export async function selectPaymentIntentNetworkEngine(input: {
     throw new Error("Selected network is not enabled for this merchant")
   }
 
+  const isPosIntent = Boolean(intent.terminal_id)
+
   // Fast-path: reuse an active payment when the intent already has one for the same
   // network and asset. This prevents creating a duplicate payment (and marking the
   // active one INCOMPLETE) when the checkout resumes after a browser suspension —
@@ -342,6 +344,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
       const existingNetwork = String(existingPayment.network || "").toLowerCase().trim()
       const existingMeta = (existingPayment.metadata ?? null) as {
         selectedAsset?: string
+        posTerminalOwned?: boolean
         split?: { baseUsdcStrategy?: string; splitContract?: string }
       } | null
       const existingSelectedAsset = String(existingMeta?.selectedAsset || "").toUpperCase()
@@ -392,6 +395,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
               splitContract: reuseSplitContract
             }
           },
+          posTerminalOwned: Boolean(existingMeta?.posTerminalOwned || (isPosIntent && normalizedNetwork === "base")),
           alreadySelected: true
         }
       }
@@ -420,7 +424,8 @@ export async function selectPaymentIntentNetworkEngine(input: {
           ...(intent.metadata || {}),
           paymentIntentId: intent.id,
           selectedNetwork: normalizedNetwork,
-          selectedAsset
+          selectedAsset,
+          ...(isPosIntent && normalizedNetwork === "base" ? { posTerminalOwned: true } : {})
         }
       }),
       PAYMENT_DETAILS_TIMEOUT_MS,
@@ -499,6 +504,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
           splitContract: persistedSplitContract
         }
       },
+      posTerminalOwned: isPosIntent && normalizedNetwork === "base",
       alreadySelected: false
     }
   } catch (error) {

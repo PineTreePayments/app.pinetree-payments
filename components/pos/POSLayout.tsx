@@ -205,7 +205,31 @@ export default function POSLayout({ terminalContext }: Props) {
       try {
         const res = await fetch(`/api/payments/status?${pollParam}`)
         if (!res.ok) return
-        const data = await res.json()
+        const data = await res.json() as {
+          status?: string
+          paymentId?: string
+          posTerminalOwned?: boolean
+          selectedAsset?: string
+          paymentUrl?: string
+        }
+        // Customer selected a Base asset on hosted checkout — transition POS to WalletConnect controller mode
+        if (!pid && data.posTerminalOwned && data.paymentId && data.selectedAsset && data.paymentUrl && status === "waiting") {
+          const bAsset = String(data.selectedAsset).toUpperCase()
+          if (bAsset === "ETH" || bAsset === "USDC") {
+            setBasePaymentAsset(bAsset)
+            setBasePaymentId(String(data.paymentId))
+            setBasePaymentUrl(String(data.paymentUrl))
+            setBasePaymentUsdAmount(breakdown ? breakdown.totalAmount : subtotalNum)
+            if (resetTimerRef.current) {
+              clearTimeout(resetTimerRef.current)
+              resetTimerRef.current = null
+            }
+            hasScheduledResetRef.current = false
+            setActivePaymentId(String(data.paymentId))
+            setStatus("base_wc")
+            return
+          }
+        }
         // If polling by intent and we just learned the paymentId, store it so
         // the direct-payment realtime subscription can start (and future polls
         // use the faster paymentId path).
@@ -433,47 +457,6 @@ export default function POSLayout({ terminalContext }: Props) {
     }
   }
 
-  async function startBasePayment(asset: "ETH" | "USDC") {
-    if (!digits || subtotalNum <= 0) return
-    setPaymentError("")
-    setBasePaymentAsset(asset)
-    setStatus("waiting")
-    try {
-      const res = await fetch("/api/pos/payment", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...posAuthHeaders(terminalContext?.sessionToken),
-        },
-        body: JSON.stringify({ amount: subtotalNum, currency: "USD", network: "base", asset }),
-      })
-      const data = await res.json()
-      if (!res.ok || !data?.paymentId) {
-        setPaymentError(data?.error || "Payment failed to create")
-        setStatus("failed")
-        return
-      }
-      const pid = String(data.paymentId || "").trim()
-      const pUrl = String(data.paymentUrl || "").trim()
-      const usdAmt = Number(data.breakdown?.totalAmount || subtotalNum)
-      setBasePaymentId(pid)
-      setBasePaymentUrl(pUrl)
-      setBasePaymentUsdAmount(usdAmt)
-      if (data.statusQrCodeUrl) setBaseStatusQrCodeUrl(String(data.statusQrCodeUrl))
-      if (data.statusUrl) setBaseStatusUrl(String(data.statusUrl))
-      hasScheduledResetRef.current = false
-      if (resetTimerRef.current) {
-        clearTimeout(resetTimerRef.current)
-        resetTimerRef.current = null
-      }
-      setActivePaymentId(pid)
-      setStatus("base_wc")
-    } catch {
-      setPaymentError("Failed to create Base payment")
-      setStatus("failed")
-    }
-  }
-
   const displayTotal = breakdown
     ? fmtUsd(breakdown.totalAmount)
     : fmtUsd(subtotalNum)
@@ -572,24 +555,6 @@ export default function POSLayout({ terminalContext }: Props) {
                     Card
                   </Button>
                 </div>
-                {availableMethods.crypto && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      variant="secondary"
-                      fullWidth
-                      onClick={() => void startBasePayment("ETH")}
-                    >
-                      Base ETH
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      fullWidth
-                      onClick={() => void startBasePayment("USDC")}
-                    >
-                      Base USDC
-                    </Button>
-                  </div>
-                )}
                 <Button variant="danger" fullWidth onClick={resetSale}>
                   Cancel Payment
                 </Button>

@@ -72,6 +72,7 @@ type IntentPayload = {
   status?: string | null
   checkoutUrl?: string
   checkoutToken?: string
+  terminalId?: string | null
 }
 
 type WalletOption = {
@@ -272,6 +273,9 @@ export default function PayClient() {
   // ── Base execution: once Base payment starts, collapse asset selector ──────
   const [baseExecutionActive, setBaseExecutionActive] = useState(false)
   const [solanaExecutionActive, setSolanaExecutionActive] = useState(false)
+  const [posBaseSelecting, setPosBaseSelecting] = useState(false)
+  const [posBaseSelected, setPosBaseSelected] = useState(false)
+  const [posBaseError, setPosBaseError] = useState("")
 
   const handleBaseCancelPayment = useCallback(() => {
     setBaseExecutionActive(false)
@@ -427,6 +431,40 @@ export default function PayClient() {
     }
   }, [intentId, loadIntentCallback])
 
+  async function handlePosBaseSelect(asset: "ETH" | "USDC") {
+    if (!intentId || !checkoutToken) return
+    setPosBaseSelecting(true)
+    setPosBaseError("")
+    try {
+      const res = await fetch(
+        `/api/payment-intents/${encodeURIComponent(intentId)}/select-network`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${checkoutToken}`,
+          },
+          body: JSON.stringify({ network: "base", asset }),
+        }
+      )
+      if (!res.ok) {
+        const err = (await res.json()) as { error?: string }
+        throw new Error(err.error || "Failed to prepare Base payment")
+      }
+      const result = (await res.json()) as { posTerminalOwned?: boolean; paymentId?: string }
+      if (result.paymentId) {
+        void loadIntentCallback()
+      }
+      if (result.posTerminalOwned) {
+        setPosBaseSelected(true)
+      }
+    } catch (err) {
+      setPosBaseError((err as Error).message || "Failed to select Base payment")
+    } finally {
+      setPosBaseSelecting(false)
+    }
+  }
+
   // ── Load intent on mount ───────────────────────────────────────────────────
 
   useEffect(() => {
@@ -443,6 +481,15 @@ export default function PayClient() {
     setSolanaExecutionActive(false)
     setSelectedAssetId("")
   }, [isIntentMode, terminalPaymentStatus])
+
+  useEffect(() => {
+    const isBaseAsset = selectedAssetId === "eth-base" || selectedAssetId === "base-usdc"
+    if (!isBaseAsset) {
+      setPosBaseSelected(false)
+      setPosBaseSelecting(false)
+      setPosBaseError("")
+    }
+  }, [selectedAssetId])
 
   // ── Deselect asset when clicking outside the card list ────────────────────
 
@@ -1249,6 +1296,8 @@ export default function PayClient() {
   }
 
   if (isIntentMode) {
+    const isPosIntent = Boolean(intentPayload?.terminalId)
+
     const amountSummary = (
       <div className="rounded-2xl border border-[#0052FF]/10 bg-gradient-to-br from-white via-[#f8fbff] to-[#edf5ff] p-4 text-sm text-gray-800 shadow-sm shadow-[#0052FF]/5">
         <div className="flex items-center justify-between">
@@ -1265,6 +1314,28 @@ export default function PayClient() {
         </div>
       </div>
     )
+
+    if (isPosIntent && posBaseSelected) {
+      return (
+        <PageContainer>
+          <Card className="max-w-md w-full space-y-5">
+            <div>
+              <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
+              <h1 className="text-xl font-bold text-gray-900">Base Payment Selected</h1>
+            </div>
+            {amountSummary}
+            <div className="flex flex-col items-center gap-4 py-4 text-center">
+              <div className="h-10 w-10 rounded-full border-2 border-[#0052FF] border-t-transparent animate-spin" />
+              <p className="text-sm font-medium text-gray-700">Waiting for payment approval</p>
+              <p className="text-sm text-gray-500">
+                Follow the prompts in your wallet app when prompted by the payment terminal.
+              </p>
+            </div>
+            <p className="text-xs text-gray-400 text-center">Updating automatically…</p>
+          </Card>
+        </PageContainer>
+      )
+    }
 
     return (
       <PageContainer>
@@ -1371,47 +1442,76 @@ export default function PayClient() {
                           </div>
                         ) : null}
 
-                        {/* ── Base: in-page wallet execution ────────────── */}
+                        {/* ── Base: POS terminal-controlled or in-page wallet execution ── */}
                         {asset.network === "base" ? (
-                          <BaseWalletPayment
-                            intentId={intentId!}
-                            selectedAsset={asset.symbol === "USDC" ? "USDC" : "ETH"}
-                            usdAmount={displayAmount}
-                            paymentStatus={normalizedPaymentStatus}
-                            checkoutToken={checkoutToken}
-                            onExecutionStarted={() => setBaseExecutionActive(true)}
-                            onCancel={handleBaseCancelPayment}
-                            onPaymentCreated={() => {
-                              void loadIntentCallback()
-                            }}
-                            onSuccess={async (txHash, paymentId) => {
-                              console.log("[PineTreeBaseTrace] PayClient onSuccess", {
-                                step: "on-success",
-                                paymentId,
-                                txHashPrefix: txHash.slice(0, 10)
-                              })
-                              console.log("[PineTreeBaseTrace] PayClient detect POST start", {
-                                step: "detect-post-start",
-                                paymentId,
-                                txHashPrefix: txHash.slice(0, 10)
-                              })
-                              const detectRes = await fetch(
-                                `/api/payments/${encodeURIComponent(paymentId)}/detect`,
-                                {
-                                  method: "POST",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({ txHash }),
-                                }
-                              )
-                                .catch(() => null)
-                              console.log("[PineTreeBaseTrace] PayClient detect POST done", {
-                                step: "detect-post-done",
-                                paymentId,
-                                status: detectRes?.status ?? "error"
-                              })
-                              await loadIntentCallback()
-                            }}
-                          />
+                          isPosIntent ? (
+                            <div className="space-y-3">
+                              {posBaseSelecting ? (
+                                <div className="flex flex-col items-center gap-3 py-4">
+                                  <div className="h-8 w-8 rounded-full border-2 border-[#0052FF] border-t-transparent animate-spin" />
+                                  <p className="text-sm text-gray-600">Confirming…</p>
+                                </div>
+                              ) : posBaseError ? (
+                                <div className="space-y-3">
+                                  <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                                    {posBaseError}
+                                  </div>
+                                  <Button fullWidth onClick={() => void handlePosBaseSelect(asset.symbol === "USDC" ? "USDC" : "ETH")}>
+                                    Retry
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="space-y-3">
+                                  <p className="text-sm text-gray-600">
+                                    The payment terminal will guide you through the wallet approval.
+                                  </p>
+                                  <Button fullWidth onClick={() => void handlePosBaseSelect(asset.symbol === "USDC" ? "USDC" : "ETH")}>
+                                    Confirm {asset.symbol === "USDC" ? "USDC (Base)" : "ETH (Base)"} Payment
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <BaseWalletPayment
+                              intentId={intentId!}
+                              selectedAsset={asset.symbol === "USDC" ? "USDC" : "ETH"}
+                              usdAmount={displayAmount}
+                              paymentStatus={normalizedPaymentStatus}
+                              checkoutToken={checkoutToken}
+                              onExecutionStarted={() => setBaseExecutionActive(true)}
+                              onCancel={handleBaseCancelPayment}
+                              onPaymentCreated={() => {
+                                void loadIntentCallback()
+                              }}
+                              onSuccess={async (txHash, paymentId) => {
+                                console.log("[PineTreeBaseTrace] PayClient onSuccess", {
+                                  step: "on-success",
+                                  paymentId,
+                                  txHashPrefix: txHash.slice(0, 10)
+                                })
+                                console.log("[PineTreeBaseTrace] PayClient detect POST start", {
+                                  step: "detect-post-start",
+                                  paymentId,
+                                  txHashPrefix: txHash.slice(0, 10)
+                                })
+                                const detectRes = await fetch(
+                                  `/api/payments/${encodeURIComponent(paymentId)}/detect`,
+                                  {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ txHash }),
+                                  }
+                                )
+                                  .catch(() => null)
+                                console.log("[PineTreeBaseTrace] PayClient detect POST done", {
+                                  step: "detect-post-done",
+                                  paymentId,
+                                  status: detectRes?.status ?? "error"
+                                })
+                                await loadIntentCallback()
+                              }}
+                            />
+                          )
                         ) : null}
 
                         {/* ── Solana: canonical engine payment session + wallet links ── */}
