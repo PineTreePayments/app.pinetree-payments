@@ -1034,6 +1034,7 @@ export default function BaseWalletPayment({
       const activeRequest = activeWalletRequestRef.current
       try {
         const provider = await getWalletConnectProvider(walletConnectConnector)
+        logBasePay("provider_ready", { ready: true, source })
         const accounts = await provider.request({ method: "eth_accounts", params: [] })
         const resolvedAddress = extractAddressFromConnectResult(accounts)
         let providerChainId: number | null = null
@@ -1080,6 +1081,7 @@ export default function BaseWalletPayment({
             ? "connection-request-pending"
             : "no-provider-account"
       } catch (error) {
+        logBasePay("provider_ready", { ready: false, source })
         lastReason = extractErrorMessage(error) || "provider-unavailable"
       }
 
@@ -1169,6 +1171,7 @@ export default function BaseWalletPayment({
     setPendingWalletActionInFlight(false)
     setWalletHandoffPending(false)
     preservePendingWalletRequestUi(input.kind)
+    logBasePay("queue_next_request", { actionKind: input.kind })
     if (input.ready !== false) {
       if (input.kind === "usdc_approve") {
         setBaseMobileStepRef.current("usdc_authorization_ready")
@@ -2623,6 +2626,7 @@ export default function BaseWalletPayment({
           selectedAsset,
           intentId: intentId || null,
         })
+        logBasePay("connect_start", { selectedAsset, intentId: intentId || null })
         beginWalletRequest({ kind: "connect", walletName: null })
         if (selectedAsset === "ETH" || selectedAsset === "USDC") {
           // Connect first; payment requests wait for a settled WalletConnect account.
@@ -2630,6 +2634,7 @@ export default function BaseWalletPayment({
           let connectResult: Awaited<ReturnType<typeof connectAsync>>
           try {
             connectResult = await connectPromise
+            logBasePay("connect_resolved", { selectedAsset, hasAccount: Boolean(extractAddressFromConnectResult(connectResult)) })
             try {
               closeWalletConnectSelectionModal(await getWalletConnectProvider(walletConnectConnector))
             } catch {
@@ -2686,6 +2691,7 @@ export default function BaseWalletPayment({
           let fromAddress = ""
           try {
             const result = await connectAsync({ connector: walletConnectConnector, chainId: base.id })
+            logBasePay("connect_resolved", { selectedAsset, hasAccount: Boolean(extractAddressFromConnectResult(result)) })
             resolveWalletRequest()
             fromAddress = extractAddressFromConnectResult(result) || currentAddress
             if (fromAddress) {
@@ -2798,6 +2804,7 @@ export default function BaseWalletPayment({
     if (!walletConnectConnector) return false
     try {
       const provider = await getWalletConnectProvider(walletConnectConnector)
+      logBasePay("provider_ready", { ready: true, source })
       const accounts = await provider.request({ method: "eth_accounts", params: [] })
       const providerAddress = extractAddressFromConnectResult(accounts) || String(address || "").trim()
       logBasePay("accounts_detected", { hasAccount: Boolean(providerAddress) })
@@ -2825,6 +2832,7 @@ export default function BaseWalletPayment({
       void continueBasePayment(providerAddress)
       return true
     } catch (error) {
+      logBasePay("provider_ready", { ready: false, source })
       await logBase("auto-resume-provider-check-error", {
         source,
         message: error instanceof Error ? error.message : String(error),
@@ -2904,6 +2912,12 @@ export default function BaseWalletPayment({
     }, 50)
   }, [address, connector, continueBasePayment, intentId, isConnected, isOpeningWallet, markAutomaticResumeAttempt, selectedAsset, stopAutoResumeRetry])
   const startBaseWalletConnectAutoResumeRetry = useCallback((source: string) => {
+    if (source === "focus" || source === "visibilitychange" || source === "pageshow") {
+      logBasePay("browser_return_reconcile", {
+        eventType: source,
+        actionKind: pendingActionKindRef.current || activeWalletRequestRef.current?.kind || null,
+      })
+    }
     if (terminalStatus) return
     if (selectedAsset !== "ETH" && selectedAsset !== "USDC") return
     if (!pendingPaymentMatches(getPendingBaseWalletConnectPayment(), intentId, selectedAsset)) return
@@ -3096,7 +3110,8 @@ export default function BaseWalletPayment({
     if (!walletConnectConnector) return
     let provider: WalletConnectProvider | null = null
     let cancelled = false
-    const handleProviderEvent = (...args: unknown[]) => {
+    const makeProviderEventHandler = (eventName: string) => (...args: unknown[]) => {
+      logBasePay("session_event_received", { eventName })
       const eventAddress = extractAddressFromWalletConnectEvent(args)
       void logBase("auto-resume-provider-event", {
         hasEventAddress: Boolean(eventAddress),
@@ -3123,24 +3138,31 @@ export default function BaseWalletPayment({
       })
       void resumeFromWalletConnectProvider("provider-event")
     }
+    const providerHandlers = {
+      connect: makeProviderEventHandler("connect"),
+      accountsChanged: makeProviderEventHandler("accountsChanged"),
+      chainChanged: makeProviderEventHandler("chainChanged"),
+      session_update: makeProviderEventHandler("session_update"),
+      session_event: makeProviderEventHandler("session_event"),
+    }
     void getWalletConnectProvider(walletConnectConnector)
       .then((resolvedProvider) => {
         if (cancelled) return
         provider = resolvedProvider
-        provider.on?.("connect", handleProviderEvent)
-        provider.on?.("accountsChanged", handleProviderEvent)
-        provider.on?.("chainChanged", handleProviderEvent)
-        provider.on?.("session_update", handleProviderEvent)
-        provider.on?.("session_event", handleProviderEvent)
+        provider.on?.("connect", providerHandlers.connect)
+        provider.on?.("accountsChanged", providerHandlers.accountsChanged)
+        provider.on?.("chainChanged", providerHandlers.chainChanged)
+        provider.on?.("session_update", providerHandlers.session_update)
+        provider.on?.("session_event", providerHandlers.session_event)
       })
       .catch(() => null)
     return () => {
       cancelled = true
-      provider?.removeListener?.("connect", handleProviderEvent)
-      provider?.removeListener?.("accountsChanged", handleProviderEvent)
-      provider?.removeListener?.("chainChanged", handleProviderEvent)
-      provider?.removeListener?.("session_update", handleProviderEvent)
-      provider?.removeListener?.("session_event", handleProviderEvent)
+      provider?.removeListener?.("connect", providerHandlers.connect)
+      provider?.removeListener?.("accountsChanged", providerHandlers.accountsChanged)
+      provider?.removeListener?.("chainChanged", providerHandlers.chainChanged)
+      provider?.removeListener?.("session_update", providerHandlers.session_update)
+      provider?.removeListener?.("session_event", providerHandlers.session_event)
     }
   }, [continueBasePayment, intentId, markAutomaticResumeAttempt, resumeFromWalletConnectProvider, selectedAsset, stopAutoResumeRetry, walletConnectConnector])
   // ── Render helpers ────────────────────────────────────────────────────────
