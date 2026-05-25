@@ -24,6 +24,7 @@ export type PosTerminalContext = {
 export type CreatePosPaymentInput = {
   amount: number
   currency?: string
+  asset?: string
   idempotencyKey?: string
   terminal: PosTerminalContext
 }
@@ -35,6 +36,8 @@ export type CreatePosPaymentResult = {
   state: "CREATED" | "PENDING" | "PROCESSING" | "CONFIRMED" | "FAILED" | "INCOMPLETE"
   paymentUrl: string
   qrCodeUrl: string
+  nativeAmount?: number
+  nativeSymbol?: string
   availableNetworks?: string[]
   routing?: {
     network: string
@@ -151,6 +154,7 @@ export async function createPosPaymentEngine(
     adapterId: routing.adapterId,
     merchantId,
     preferredNetwork: routing.network,
+    asset: input.asset,
     channel: "pos",
     metadata: {
       terminalId: input.terminal.terminalId,
@@ -174,6 +178,8 @@ export async function createPosPaymentEngine(
     state: "PENDING",
     paymentUrl: payment.paymentUrl,
     qrCodeUrl: payment.qrCodeUrl,
+    nativeAmount: payment.nativeAmount,
+    nativeSymbol: payment.nativeSymbol,
     routing: {
       network: routing.network,
       walletId: routing.wallet.id,

@@ -227,6 +227,11 @@ export default function PayClient() {
   const walletBrowserMode = searchParams.get("mode")
   const walletBrowserWallet = searchParams.get("wallet")
   const statusOverride = searchParams.get("status")
+  // POS-terminal-controlled Base payments: status-only follow-along mode.
+  // ?paymentId=<id>&mode=status[&asset=ETH|USDC]
+  const posStatusPaymentId = searchParams.get("paymentId")
+  const posStatusAsset = (searchParams.get("asset") || "").toUpperCase()
+  const isPosStatusMode = walletBrowserMode === "status" && Boolean(posStatusPaymentId)
   const solflareAction = searchParams.get("solflare_action")
   const solflareError = searchParams.get("solflare_error")
   const phantomError = searchParams.get("phantom_error")
@@ -259,6 +264,10 @@ export default function PayClient() {
   // ── Shift4 redirect state (inline — no dedicated component needed) ─────────
   const [shift4Loading, setShift4Loading] = useState(false)
   const [shift4Error, setShift4Error] = useState("")
+
+  // ── POS status-only mode ───────────────────────────────────────────────────
+  const [posPaymentStatus, setPosPaymentStatus] = useState("")
+  const [posStatusLoaded, setPosStatusLoaded] = useState(false)
 
   // ── Base execution: once Base payment starts, collapse asset selector ──────
   const [baseExecutionActive, setBaseExecutionActive] = useState(false)
@@ -471,6 +480,30 @@ export default function PayClient() {
     url.searchParams.delete("phantom_error")
     window.history.replaceState({}, "", url.toString())
   }, [phantomError])
+
+  // ── POS status-only mode: poll payment status until terminal state ─────────
+  useEffect(() => {
+    if (!isPosStatusMode || !posStatusPaymentId) return
+    let canceled = false
+    async function poll() {
+      try {
+        const res = await fetch(
+          `/api/payments/status?paymentId=${encodeURIComponent(posStatusPaymentId!)}`,
+          { cache: "no-store" }
+        )
+        if (!res.ok || canceled) return
+        const data = (await res.json()) as { status?: string }
+        const next = String(data.status || "").toUpperCase()
+        setPosPaymentStatus(next)
+        setPosStatusLoaded(true)
+      } catch {
+        // non-fatal — will retry on next interval
+      }
+    }
+    void poll()
+    const handle = setInterval(() => void poll(), 5000)
+    return () => { canceled = true; clearInterval(handle) }
+  }, [isPosStatusMode, posStatusPaymentId])
 
   // ── Poll intent status once a payment has been created ────────────────────
 
@@ -1022,6 +1055,73 @@ export default function PayClient() {
   }
 
   // ── Loading / error screens ────────────────────────────────────────────────
+
+  // POS-terminal-controlled Base payment: status-only follow-along page.
+  // WalletConnect runs on the POS terminal, not here.
+  if (isPosStatusMode && posStatusPaymentId) {
+    const normalizedPosStatus = posPaymentStatus.toUpperCase()
+    const isPosTerminal = TERMINAL_PAYMENT_STATUSES.has(normalizedPosStatus)
+
+    const statusLabel = (() => {
+      if (!posStatusLoaded) return "Loading payment status…"
+      if (!normalizedPosStatus || normalizedPosStatus === "CREATED" || normalizedPosStatus === "PENDING") {
+        return posStatusAsset === "USDC"
+          ? "Awaiting USDC authorization on payment terminal"
+          : "Awaiting payment approval on payment terminal"
+      }
+      if (normalizedPosStatus === "PROCESSING") {
+        return posStatusAsset === "USDC"
+          ? "USDC payment submitted — confirming on Base"
+          : "ETH payment submitted — confirming on Base"
+      }
+      if (normalizedPosStatus === "CONFIRMED") return "Payment confirmed"
+      if (normalizedPosStatus === "FAILED") return "Payment failed"
+      if (normalizedPosStatus === "INCOMPLETE") return "Payment incomplete"
+      if (normalizedPosStatus === "EXPIRED") return "Payment expired"
+      if (normalizedPosStatus === "CANCELED") return "Payment canceled"
+      return "Processing payment…"
+    })()
+
+    return (
+      <PageContainer>
+        <Card className="max-w-md w-full space-y-5 text-center">
+          <div>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-[#0052FF]">
+              PineTree Payments
+            </p>
+            <h1 className="text-xl font-bold text-gray-900">
+              {posStatusAsset === "ETH" || posStatusAsset === "USDC"
+                ? `Base ${posStatusAsset} Payment`
+                : "Base Payment"}
+            </h1>
+          </div>
+
+          {!posStatusLoaded ? (
+            <div className="flex flex-col items-center gap-3 py-4">
+              <div className="h-10 w-10 rounded-full border-2 border-[#0052FF] border-t-transparent animate-spin" />
+              <p className="text-sm text-gray-500">Loading…</p>
+            </div>
+          ) : isPosTerminal ? (
+            <div className="py-2">
+              <PaymentStatusVisual status={normalizedPosStatus} variant="card" />
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-4 py-4">
+              <div className="h-10 w-10 rounded-full border-2 border-[#0052FF] border-t-transparent animate-spin" />
+              <p className="text-sm font-medium text-gray-700">{statusLabel}</p>
+              <p className="text-xs text-gray-400">
+                Approve the transaction in your wallet app when prompted by the payment terminal.
+              </p>
+            </div>
+          )}
+
+          {posStatusLoaded && !isPosTerminal && (
+            <p className="text-xs text-gray-400">Updating automatically…</p>
+          )}
+        </Card>
+      </PageContainer>
+    )
+  }
 
   if (isSolflareCallbackMode) {
     return (

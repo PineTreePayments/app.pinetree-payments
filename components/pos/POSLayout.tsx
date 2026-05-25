@@ -7,6 +7,7 @@ import AmountDisplay from "./AmountDisplay"
 import Keypad from "./Keypad"
 import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
+import BaseWalletPayment from "@/components/payment/BaseWalletPayment"
 
 type Props = {
   locked: boolean
@@ -29,6 +30,7 @@ type Status =
   | "incomplete"
   | "failed"
   | "expired"
+  | "base_wc"
 
 type AvailableMethods = {
   cash: boolean
@@ -95,6 +97,12 @@ export default function POSLayout({ terminalContext }: Props) {
   const [cashDigits, setCashDigits] = useState("")
   const [cashRecording, setCashRecording] = useState(false)
   const [canceling, setCanceling] = useState(false)
+  const [basePaymentAsset, setBasePaymentAsset] = useState<"ETH" | "USDC" | null>(null)
+  const [basePaymentId, setBasePaymentId] = useState("")
+  const [basePaymentUrl, setBasePaymentUrl] = useState("")
+  const [basePaymentUsdAmount, setBasePaymentUsdAmount] = useState(0)
+  const [baseStatusQrCodeUrl, setBaseStatusQrCodeUrl] = useState("")
+  const [baseStatusUrl, setBaseStatusUrl] = useState("")
 
   const resolvedPaymentIdRef = useRef<string>("")
   const resetTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -119,6 +127,12 @@ export default function POSLayout({ terminalContext }: Props) {
     setCashDigits("")
     setCashRecording(false)
     setAvailableMethods({ cash: true, crypto: false, card: false })
+    setBasePaymentAsset(null)
+    setBasePaymentId("")
+    setBasePaymentUrl("")
+    setBasePaymentUsdAmount(0)
+    setBaseStatusQrCodeUrl("")
+    setBaseStatusUrl("")
     resolvedPaymentIdRef.current = ""
   }
 
@@ -185,7 +199,7 @@ export default function POSLayout({ terminalContext }: Props) {
         ? `intentId=${encodeURIComponent(iid)}`
         : ""
 
-    if (!pollParam || (status !== "waiting" && status !== "processing")) return
+    if (!pollParam || (status !== "waiting" && status !== "processing" && status !== "base_wc")) return
 
     const interval = setInterval(async () => {
       try {
@@ -419,6 +433,47 @@ export default function POSLayout({ terminalContext }: Props) {
     }
   }
 
+  async function startBasePayment(asset: "ETH" | "USDC") {
+    if (!digits || subtotalNum <= 0) return
+    setPaymentError("")
+    setBasePaymentAsset(asset)
+    setStatus("waiting")
+    try {
+      const res = await fetch("/api/pos/payment", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...posAuthHeaders(terminalContext?.sessionToken),
+        },
+        body: JSON.stringify({ amount: subtotalNum, currency: "USD", network: "base", asset }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data?.paymentId) {
+        setPaymentError(data?.error || "Payment failed to create")
+        setStatus("failed")
+        return
+      }
+      const pid = String(data.paymentId || "").trim()
+      const pUrl = String(data.paymentUrl || "").trim()
+      const usdAmt = Number(data.breakdown?.totalAmount || subtotalNum)
+      setBasePaymentId(pid)
+      setBasePaymentUrl(pUrl)
+      setBasePaymentUsdAmount(usdAmt)
+      if (data.statusQrCodeUrl) setBaseStatusQrCodeUrl(String(data.statusQrCodeUrl))
+      if (data.statusUrl) setBaseStatusUrl(String(data.statusUrl))
+      hasScheduledResetRef.current = false
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current)
+        resetTimerRef.current = null
+      }
+      setActivePaymentId(pid)
+      setStatus("base_wc")
+    } catch {
+      setPaymentError("Failed to create Base payment")
+      setStatus("failed")
+    }
+  }
+
   const displayTotal = breakdown
     ? fmtUsd(breakdown.totalAmount)
     : fmtUsd(subtotalNum)
@@ -517,6 +572,24 @@ export default function POSLayout({ terminalContext }: Props) {
                     Card
                   </Button>
                 </div>
+                {availableMethods.crypto && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="secondary"
+                      fullWidth
+                      onClick={() => void startBasePayment("ETH")}
+                    >
+                      Base ETH
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      fullWidth
+                      onClick={() => void startBasePayment("USDC")}
+                    >
+                      Base USDC
+                    </Button>
+                  </div>
+                )}
                 <Button variant="danger" fullWidth onClick={resetSale}>
                   Cancel Payment
                 </Button>
@@ -747,6 +820,57 @@ export default function POSLayout({ terminalContext }: Props) {
             <Button variant="secondary" fullWidth onClick={resetSale}>
               Back
             </Button>
+          </div>
+        )}
+
+        {/* ── BASE WALLETCONNECT (POS terminal owns session) ── */}
+        {status === "base_wc" && basePaymentId && basePaymentUrl && basePaymentAsset && (
+          <div className="space-y-3">
+            {baseStatusQrCodeUrl && (
+              <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3 text-center">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-[#0052FF] mb-1">
+                  Customer Status Screen
+                </p>
+                <p className="text-xs text-gray-500 mb-2">
+                  Customer scans to follow payment progress
+                </p>
+                <Image
+                  src={baseStatusQrCodeUrl}
+                  width={96}
+                  height={96}
+                  alt="Customer payment status QR"
+                  className="mx-auto rounded-lg"
+                />
+                {baseStatusUrl && (
+                  <p className="mt-1.5 text-[10px] text-gray-400 break-all leading-tight">
+                    {baseStatusUrl}
+                  </p>
+                )}
+              </div>
+            )}
+            <BaseWalletPayment
+              paymentId={basePaymentId}
+              paymentUrl={basePaymentUrl}
+              selectedAsset={basePaymentAsset}
+              usdAmount={basePaymentUsdAmount}
+              onSuccess={async (txHash, pid) => {
+                try {
+                  await fetch(`/api/payments/${encodeURIComponent(pid)}/detect`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ txHash }),
+                  })
+                } catch {
+                  // non-fatal — watcher will confirm
+                }
+                setStatus("confirmed")
+              }}
+              onError={(err) => {
+                setPaymentError(err || "Payment failed")
+                setStatus("failed")
+              }}
+              onCancel={resetSale}
+            />
           </div>
         )}
 
