@@ -418,16 +418,21 @@ function getWalletConnectPeerName(provider: WalletConnectProvider): string | nul
   return typeof name === "string" && name.trim() ? name.trim() : null
 }
 function closeWalletConnectSelectionModal(provider?: WalletConnectProvider | null): void {
+  let closed = false
   try {
     const modal = provider?.modal
     if (typeof modal?.close === "function") {
+      logBasePay("appkit_modal_close_attempted", { method: "provider.modal.close" })
       modal.close()
-      logBasePay("walletconnect_modal_close_attempted", { method: "provider.modal.close" })
+      closed = true
+      logBasePay("appkit_modal_closed", { method: "provider.modal.close" })
       return
     }
     if (typeof modal?.closeModal === "function") {
+      logBasePay("appkit_modal_close_attempted", { method: "provider.modal.closeModal" })
       modal.closeModal()
-      logBasePay("walletconnect_modal_close_attempted", { method: "provider.modal.closeModal" })
+      closed = true
+      logBasePay("appkit_modal_closed", { method: "provider.modal.closeModal" })
       return
     }
   } catch {
@@ -438,8 +443,10 @@ function closeWalletConnectSelectionModal(provider?: WalletConnectProvider | nul
     const modalElement = document.querySelector("w3m-modal, appkit-modal") as unknown as {
       close?: () => unknown
     } | null
+    logBasePay("appkit_modal_close_attempted", { method: "dom-modal-close", found: Boolean(modalElement) })
     modalElement?.close?.()
-    logBasePay("walletconnect_modal_close_attempted", { method: "dom-modal-close", found: Boolean(modalElement) })
+    closed = Boolean(modalElement)
+    if (closed) logBasePay("appkit_modal_closed", { method: "dom-modal-close" })
   } catch {
     // Best-effort only.
   }
@@ -457,6 +464,7 @@ function tryOpenWalletNativeUri(provider: WalletConnectProvider): void {
     }
     const uri = source.session?.peer?.metadata?.redirect?.native
     if (typeof uri === "string" && uri.length > 0 && !uri.startsWith("https://") && !uri.startsWith("http://")) {
+      logBasePay("wallet_open_prompt_triggered", { reason: "walletconnect-redirect" })
       console.info("[BASE TRACE] wallet_foreground_attempted", { uri: uri.split("?")[0] })
       window.location.href = uri
     }
@@ -627,7 +635,7 @@ async function sendWalletConnectTransaction(input: {
   const txHash = maybeHexTransactionHash(rawTxHash)
   logBasePay("provider_request_resolved", { actionKind, hasTxHash: Boolean(txHash) })
   if (!txHash) {
-    logBasePay("provider_request_timeout_or_no_result", { actionKind })
+    logBasePay("provider_request_no_response", { actionKind, reason: "no-tx-hash-returned" })
     throw new Error("Wallet did not return a transaction hash.")
   }
   logBasePay("tx_hash_captured", { actionKind, hasTxHash: true })
@@ -1271,9 +1279,19 @@ export default function BaseWalletPayment({
         actionKind: kind,
       })
       setBaseMobileStepRef.current(kind === "usdc_approve" ? "usdc_authorization_in_wallet" : "payment_in_wallet")
-      window.setTimeout(() => { tryOpenWalletNativeUri(provider) }, 300)
+      // Only fire the native wallet deep-link for explicit user-triggered retries.
+      // During auto-dispatch the WalletConnect relay already queues the request at
+      // the wallet via WebSocket / push notification. Auto-firing the native URI
+      // creates an OS-level "Open in [Wallet]?" sheet on top of the PineTree status
+      // screen the moment the user returns from approving the connection — the source
+      // of the observed browser→wallet→browser→wallet ping-pong overlay.
+      if (!source.startsWith("auto-")) {
+        logBasePay("wallet_open_prompt_triggered", { actionKind: kind, reason: "manual-retry-dispatch" })
+        tryOpenWalletNativeUri(provider)
+      }
       const txHash = await txPromise
       resolveWalletRequest()
+      closeWalletConnectSelectionModal(provider)
       pendingActionInFlightRef.current = false
       setPendingWalletActionInFlight(false)
       setPendingWalletActionReady(false)
@@ -1336,6 +1354,8 @@ export default function BaseWalletPayment({
       console.log("[BASE UI] final-tx-submitted", { paymentId, txHashPrefix: txHash.slice(0, 10), asset: kind === "eth_payment" ? "ETH" : "USDC" })
       void logBase(kind === "eth_payment" ? "eth-payment-submitted" : "usdc-payment-submitted", { paymentId, txHashPrefix: txHash.slice(0, 10) })
       void logBase("detect-start", { paymentId, txHashPrefix: txHash.slice(0, 10) })
+      logBasePay("network_confirmation_entered", { hasTxHash: true, actionKind: kind })
+      logBasePay("waiting_for_payment_entered", { hasTxHash: true, actionKind: kind, step: "network_confirmation" })
       setExecStageRef.current("detecting")
       setBaseMobileStepRef.current("network_confirmation")
       await onSuccess?.(txHash, paymentId)
@@ -2221,6 +2241,7 @@ export default function BaseWalletPayment({
         activeBaseUsdcV5PaymentRef.current = null
         setExecStageRef.current("payment_submitted")
         void logBase("detect-start", { paymentId: storedPaymentId, txHashPrefix: resumeTxHash.slice(0, 10) })
+        logBasePay("network_confirmation_entered", { hasTxHash: true, actionKind: "usdc_payment" })
         setExecStageRef.current("detecting")
         await onSuccess?.(resumeTxHash, storedPaymentId)
         void logBase("detect-success", { paymentId: storedPaymentId })
@@ -2332,6 +2353,7 @@ export default function BaseWalletPayment({
         setExecStageRef.current("payment_submitted")
         console.log("[BASE UI] final-tx-submitted", { paymentId: paymentData.paymentId, txHashPrefix: normalizedTxHash.slice(0, 10), asset: "USDC" })
         void logBase("detect-start", { paymentId: paymentData.paymentId, txHashPrefix: normalizedTxHash.slice(0, 10) })
+        logBasePay("network_confirmation_entered", { hasTxHash: true, actionKind: "usdc_payment" })
         setExecStageRef.current("detecting")
         console.log("[BASE UI] detecting", { paymentId: paymentData.paymentId })
         await onSuccess?.(normalizedTxHash, paymentData.paymentId)
@@ -2369,6 +2391,7 @@ export default function BaseWalletPayment({
         setExecStageRef.current("payment_submitted")
         console.log("[BASE UI] final-tx-submitted", { paymentId: paymentData.paymentId, txHashPrefix: normalizedTxHash.slice(0, 10), asset: "USDC", strategy: "v4" })
         void logBase("detect-start", { paymentId: paymentData.paymentId, txHashPrefix: normalizedTxHash.slice(0, 10) })
+        logBasePay("network_confirmation_entered", { hasTxHash: true, actionKind: "usdc_signature" })
         setExecStageRef.current("detecting")
         console.log("[BASE UI] detecting", { paymentId: paymentData.paymentId })
         await onSuccess?.(normalizedTxHash, paymentData.paymentId)
@@ -3260,15 +3283,19 @@ export default function BaseWalletPayment({
   } else if (baseMobileStep === "usdc_authorization_dispatching") {
     contextMessage = "Opening USDC authorization in your wallet..."
   } else if (baseMobileStep === "usdc_authorization_in_wallet") {
-    contextMessage = "One-time USDC authorization needed in your wallet"
+    contextMessage = connectedPeerName
+      ? `Authorization request sent to ${connectedPeerName}`
+      : "Authorization request sent — check your wallet"
   } else if (baseMobileStep === "usdc_authorization_submitted") {
     contextMessage = "Authorization submitted. Checking allowance..."
   } else if (baseMobileStep === "payment_ready") {
     contextMessage = "Preparing payment confirmation..."
   } else if (baseMobileStep === "payment_dispatching") {
-    contextMessage = "Opening payment confirmation in your wallet..."
+    contextMessage = "Sending payment request to your wallet..."
   } else if (baseMobileStep === "payment_in_wallet") {
-    contextMessage = "Approve in your wallet"
+    contextMessage = connectedPeerName
+      ? `Payment request sent to ${connectedPeerName}`
+      : "Payment request sent — check your wallet"
   } else if (baseMobileStep === "payment_submitted") {
     contextMessage = "Payment submitted"
   } else if (baseMobileStep === "network_confirmation") {
@@ -3294,7 +3321,10 @@ export default function BaseWalletPayment({
     : activeWalletRequestKind === "usdc_approve"
       ? "One-time USDC authorization"
       : "Payment approval"
-  const walletRequestDetailCopy = "Return here after approving in your wallet."
+  const walletRequestDetailCopy =
+    baseMobileStep === "payment_in_wallet" || baseMobileStep === "usdc_authorization_in_wallet"
+      ? "The request has been sent to your wallet. Open your wallet app to approve, then return here."
+      : "Return here after approving in your wallet."
   const fallbackButtonCopy = pendingWalletActionKind === "usdc_approve"
     ? "Retry USDC authorization"
     : pendingWalletActionKind === "eth_payment" || pendingWalletActionKind === "usdc_payment"
