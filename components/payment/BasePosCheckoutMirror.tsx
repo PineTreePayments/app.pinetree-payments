@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import QRCode from "react-qr-code"
 import Button from "@/components/ui/Button"
 
 type PosBaseStep =
@@ -34,15 +35,22 @@ type Props = {
 
 const POLL_INTERVAL_MS = 3000
 
-function buildWalletDeepLinks(
-  pairingUri: string
-): Array<{ id: string; label: string; href: string }> {
+function isValidPairingUri(uri: string): boolean {
+  return uri.startsWith("wc:") && uri.includes("@2")
+}
+
+// Wallet shortcuts — each opens the POS-owned WalletConnect pairing URI
+// directly in the respective wallet app. These are secondary to the QR code
+// (which is the primary WalletConnect connection path).
+type WalletShortcut = { id: string; label: string; href: string }
+
+function buildWalletShortcuts(pairingUri: string): WalletShortcut[] {
   const encoded = encodeURIComponent(pairingUri)
   return [
-    { id: "metamask", label: "MetaMask", href: `https://metamask.app.link/wc?uri=${encoded}` },
-    { id: "coinbase", label: "Coinbase Wallet", href: `https://go.cb-w.com/wc?uri=${encoded}` },
-    { id: "trust", label: "Trust Wallet", href: `https://link.trustwallet.com/wc?uri=${encoded}` },
-    { id: "rainbow", label: "Rainbow", href: `rainbow://wc?uri=${encoded}` },
+    { id: "metamask",  label: "MetaMask",        href: `https://metamask.app.link/wc?uri=${encoded}` },
+    { id: "coinbase",  label: "Coinbase Wallet",  href: `https://go.cb-w.com/wc?uri=${encoded}` },
+    { id: "trust",     label: "Trust Wallet",     href: `https://link.trustwallet.com/wc?uri=${encoded}` },
+    { id: "rainbow",   label: "Rainbow",          href: `https://rnbwapp.com/wc?uri=${encoded}` },
   ]
 }
 
@@ -57,10 +65,11 @@ export default function BasePosCheckoutMirror({
   const [session, setSession] = useState<PosBaseSession | null>(null)
   const [selectNetworkError, setSelectNetworkError] = useState("")
   const [paymentReady, setPaymentReady] = useState(false)
+  const [copiedUri, setCopiedUri] = useState(false)
   const selectCalledRef = useRef(false)
   const executionStartedRef = useRef(false)
 
-  // Create the payment on mount by calling select-network
+  // Create the payment record by calling select-network on mount
   useEffect(() => {
     if (selectCalledRef.current) return
     selectCalledRef.current = true
@@ -94,7 +103,7 @@ export default function BasePosCheckoutMirror({
     void run()
   }, [intentId, selectedAsset, checkoutToken, onPaymentCreated])
 
-  // Poll the POS session once the payment record exists
+  // Poll the POS-owned session for the pairing URI and status updates
   const pollSession = useCallback(async () => {
     try {
       const res = await fetch(
@@ -103,11 +112,9 @@ export default function BasePosCheckoutMirror({
       )
       if (!res.ok) return
       const data = (await res.json()) as { session: PosBaseSession | null }
-      if (data.session) {
-        setSession(data.session)
-      }
+      if (data.session) setSession(data.session)
     } catch {
-      // best-effort polling — ignore transient errors
+      // best-effort — ignore transient errors
     }
   }, [intentId])
 
@@ -118,10 +125,10 @@ export default function BasePosCheckoutMirror({
     return () => clearInterval(interval)
   }, [paymentReady, pollSession])
 
-  // Notify parent once the POS starts active execution
+  // Notify parent when the POS enters active execution (wallet connected or beyond)
   useEffect(() => {
-    const step = session?.step
     if (executionStartedRef.current) return
+    const step = session?.step
     if (
       step === "wallet_connected" ||
       step === "payment_sending" ||
@@ -132,6 +139,24 @@ export default function BasePosCheckoutMirror({
       onExecutionStarted?.()
     }
   }, [session?.step, onExecutionStarted])
+
+  // After the customer taps a wallet shortcut, poll immediately so the UI
+  // transitions as soon as the POS registers the connection event.
+  function handleShortcutClick() {
+    void pollSession()
+  }
+
+  async function copyPairingUri(uri: string) {
+    try {
+      await navigator.clipboard.writeText(uri)
+      setCopiedUri(true)
+      setTimeout(() => setCopiedUri(false), 2000)
+    } catch {
+      // silently ignore — clipboard unavailable in some mobile WebViews
+    }
+  }
+
+  // ── Error state ─────────────────────────────────────────────────────────────
 
   if (selectNetworkError) {
     return (
@@ -146,24 +171,29 @@ export default function BasePosCheckoutMirror({
     )
   }
 
+  // ── Waiting for session to be created ───────────────────────────────────────
+
   if (!paymentReady || !session) {
     return (
-      <div className="space-y-4 text-center py-2">
+      <div className="space-y-4 text-center py-4">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052FF] border-t-transparent mx-auto" />
-        <p className="text-sm text-gray-600">Preparing wallet connection…</p>
-        <p className="text-xs text-gray-400">The terminal is setting up your payment session.</p>
+        <p className="text-sm text-gray-600">Preparing secure wallet connection from the payment terminal…</p>
       </div>
     )
   }
 
   const { step, pairingUri } = session
 
+  // ── Awaiting wallet connection ───────────────────────────────────────────────
+
   if (!step || step === "awaiting_wallet") {
-    if (!pairingUri) {
+
+    // Spinner while the POS is still generating the pairing URI
+    if (!pairingUri || !isValidPairingUri(pairingUri)) {
       return (
-        <div className="space-y-4 text-center py-2">
+        <div className="space-y-4 text-center py-4">
           <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052FF] border-t-transparent mx-auto" />
-          <p className="text-sm text-gray-600">Terminal is preparing your wallet connection…</p>
+          <p className="text-sm text-gray-600">Preparing secure wallet connection from the payment terminal…</p>
           <Button variant="danger" fullWidth onClick={onCancel}>
             Cancel
           </Button>
@@ -171,26 +201,70 @@ export default function BasePosCheckoutMirror({
       )
     }
 
-    const wallets = buildWalletDeepLinks(pairingUri)
+    const shortcuts = buildWalletShortcuts(pairingUri)
+
+    // ── WalletConnect-style connection panel ─────────────────────────────────
+    // Layout matches the standard WalletConnect modal experience:
+    //   • QR code is the centerpiece — scan with any WC-compatible wallet
+    //   • Wallet app shortcuts below for mobile users (one tap to open + pair)
+    //   • Copy link at the bottom for manual paste into any wallet
     return (
       <div className="space-y-4">
-        <p className="text-sm text-gray-700 text-center">
-          Open your wallet to approve the {selectedAsset} payment.
+
+        {/* Header */}
+        <div className="text-center space-y-1">
+          <p className="text-sm font-semibold text-gray-900">Connect via WalletConnect</p>
+          <p className="text-xs text-gray-500">
+            Scan with any WalletConnect-compatible wallet app.
+          </p>
+        </div>
+
+        {/* QR code — primary connection path, shown by default */}
+        <div className="flex justify-center">
+          <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
+            <QRCode
+              value={pairingUri}
+              size={176}
+              bgColor="#ffffff"
+              fgColor="#111827"
+            />
+          </div>
+        </div>
+
+        {/* QR scanning instruction */}
+        <p className="text-center text-xs text-gray-400 px-2">
+          Open your wallet, tap WalletConnect, then scan this code.
         </p>
-        <div className="space-y-2">
-          {wallets.map((wallet) => (
+
+        {/* Divider */}
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-px bg-gray-100" />
+          <span className="text-xs text-gray-400 font-medium whitespace-nowrap">Or open a wallet directly</span>
+          <div className="flex-1 h-px bg-gray-100" />
+        </div>
+
+        {/* Wallet shortcuts — 2 × 2 compact grid */}
+        <div className="grid grid-cols-2 gap-2">
+          {shortcuts.map((w) => (
             <a
-              key={wallet.id}
-              href={wallet.href}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl border border-[#0052FF]/20 bg-white px-4 py-3 text-sm font-semibold text-gray-900 shadow-sm transition-all hover:border-[#0052FF]/40 hover:bg-[#0052FF]/5"
+              key={w.id}
+              href={w.href}
+              onClick={handleShortcutClick}
+              className="flex items-center justify-center rounded-xl border border-[#0052FF]/15 bg-white px-3 py-2.5 text-xs font-semibold text-gray-800 shadow-sm transition-all hover:border-[#0052FF]/35 hover:bg-[#0052FF]/5"
             >
-              {wallet.label}
+              {w.label}
             </a>
           ))}
         </div>
-        <p className="text-xs text-gray-400 text-center">
-          Approve the connection request from PineTree Payments in your wallet.
-        </p>
+
+        {/* Copy pairing URI — manual fallback */}
+        <button
+          onClick={() => void copyPairingUri(pairingUri)}
+          className="w-full text-center text-xs text-gray-400 hover:text-gray-600 font-medium py-1"
+        >
+          {copiedUri ? "✓ Copied to clipboard" : "Copy connection link"}
+        </button>
+
         <Button variant="danger" fullWidth onClick={onCancel}>
           Cancel
         </Button>
@@ -198,16 +272,18 @@ export default function BasePosCheckoutMirror({
     )
   }
 
+  // ── Wallet connected — POS is sending the transaction request ───────────────
+
   if (step === "wallet_connected") {
     return (
-      <div className="space-y-4 text-center py-2">
+      <div className="space-y-4 text-center py-4">
         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 mx-auto">
-          <span className="text-green-600 text-lg font-bold">✓</span>
+          <span className="text-green-600 text-xl font-bold">✓</span>
         </div>
-        <p className="text-sm font-semibold text-gray-900">Wallet connected</p>
-        <p className="text-sm text-gray-600">
-          Your terminal is processing the {selectedAsset} payment. Please wait.
-        </p>
+        <div className="space-y-1">
+          <p className="text-sm font-semibold text-gray-900">Wallet connected.</p>
+          <p className="text-sm text-gray-600">Follow the approval prompt in your wallet.</p>
+        </div>
         {session.walletAddressMasked && (
           <p className="text-xs text-gray-400 font-mono">{session.walletAddressMasked}</p>
         )}
@@ -215,33 +291,35 @@ export default function BasePosCheckoutMirror({
     )
   }
 
-  if (step === "payment_sending" || step === "payment_submitted") {
+  // ── Transaction approval requested ──────────────────────────────────────────
+
+  if (step === "payment_sending") {
     return (
-      <div className="space-y-4 text-center py-2">
+      <div className="space-y-4 text-center py-4">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052FF] border-t-transparent mx-auto" />
-        <p className="text-sm font-semibold text-gray-900">
-          {step === "payment_sending" ? "Sending payment…" : "Payment submitted"}
-        </p>
-        <p className="text-sm text-gray-600">
-          {step === "payment_sending"
-            ? "Please approve the transaction in your wallet."
-            : "Transaction submitted — waiting for confirmation."}
-        </p>
+        <div className="space-y-1">
+          <p className="text-sm font-semibold text-gray-900">Approval requested in your wallet.</p>
+          <p className="text-sm text-gray-600">Please approve the transaction in your wallet.</p>
+        </div>
       </div>
     )
   }
 
-  if (step === "confirming") {
+  // ── Submitted / confirming on-chain ─────────────────────────────────────────
+
+  if (step === "payment_submitted" || step === "confirming") {
     return (
-      <div className="space-y-4 text-center py-2">
+      <div className="space-y-4 text-center py-4">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052FF] border-t-transparent mx-auto" />
-        <p className="text-sm font-semibold text-gray-900">Confirming on-chain…</p>
-        <p className="text-sm text-gray-600">
-          Your payment is being confirmed. This usually takes a few seconds.
-        </p>
+        <div className="space-y-1">
+          <p className="text-sm font-semibold text-gray-900">Payment submitted. Confirming on Base.</p>
+          <p className="text-sm text-gray-600">This usually takes a few seconds.</p>
+        </div>
       </div>
     )
   }
+
+  // ── Failed ──────────────────────────────────────────────────────────────────
 
   if (step === "failed") {
     return (
@@ -256,8 +334,10 @@ export default function BasePosCheckoutMirror({
     )
   }
 
+  // ── Fallback spinner ─────────────────────────────────────────────────────────
+
   return (
-    <div className="space-y-4 text-center py-2">
+    <div className="space-y-4 text-center py-4">
       <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052FF] border-t-transparent mx-auto" />
       <p className="text-sm text-gray-600">Processing payment…</p>
     </div>

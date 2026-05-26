@@ -38,7 +38,22 @@ export async function GET(_req: NextRequest, { params }: Params) {
       return NextResponse.json({ session: null })
     }
 
-    return NextResponse.json({ session })
+    // Return only safe mirror fields — no symmetric keys, no raw signatures,
+    // no full wallet addresses. The pairing URI is safe: it contains only the
+    // relay endpoint and a Curve25519 public key used for ECDH key agreement.
+    const mirror = {
+      pairingUri: session.pairingUri ?? null,
+      selectedAsset: session.selectedAsset ?? null,
+      step: session.step ?? null,
+      walletConnected: session.step !== undefined && session.step !== "awaiting_wallet",
+      walletAddressMasked: session.walletAddressMasked ?? null,
+      txHash: session.txHash ?? null,
+      status: session.step ?? null,
+      errorMessage: session.errorMessage ?? null,
+      updatedAt: session.updatedAt,
+    }
+
+    return NextResponse.json({ session: { controller: "pos_terminal" as const, ...mirror } })
   } catch {
     return NextResponse.json({ error: "Failed to read session" }, { status: 500 })
   }

@@ -562,43 +562,64 @@ export default function POSLayout({ terminalContext }: Props) {
     }
   }
 
-  // Detect when the customer selects Base on the hosted checkout
+  // Detect when the customer selects Base on the hosted checkout.
+  // Polls the intent every 3 s until selectedNetwork=base is confirmed, then
+  // starts the POS-owned WalletConnect flow. A one-shot check misses cases
+  // where the DB write for selectedNetwork races with the realtime paymentId event.
   useEffect(() => {
-    if (!activePaymentId || !intentId) return
+    if (!intentId) return
     if (posBaseRunningRef.current) return
 
     let cancelled = false
+    const POLL_MS = 3000
+    const TIMEOUT_MS = 10 * 60 * 1000
+    const startedAt = Date.now()
 
-    const check = async () => {
+    const poll = async (): Promise<void> => {
+      if (cancelled || posBaseRunningRef.current) return
+      if (Date.now() - startedAt > TIMEOUT_MS) return
+
       try {
         const res = await fetch(
           `/api/payment-intents/${encodeURIComponent(intentId)}`,
           { cache: "no-store" }
         )
-        if (!res.ok || cancelled) return
+        if (!res.ok || cancelled || posBaseRunningRef.current) return
         const data = (await res.json()) as {
           selectedNetwork?: string | null
           selectedAsset?: string | null
           paymentUrl?: string | null
+          paymentId?: string | null
         }
+
+        // Sync paymentId to state if realtime missed it
+        const pid = String(data.paymentId || "").trim()
+        if (pid) setActivePaymentId(pid)
+
         const net = String(data.selectedNetwork || "").toLowerCase()
-        if (net === "base" && !cancelled && !posBaseRunningRef.current) {
+        if (net === "base" && pid && !cancelled && !posBaseRunningRef.current) {
           const asset =
             String(data.selectedAsset || "ETH").toUpperCase() === "USDC" ? "USDC" : "ETH"
           const paymentUrl = String(data.paymentUrl || "")
           posBaseRunningRef.current = true
           setPosBaseActive(true)
-          void runPosBaseFlow(activePaymentId, intentId, asset, paymentUrl)
+          void runPosBaseFlow(pid, intentId, asset, paymentUrl)
+          return
         }
       } catch {
-        // non-fatal
+        // non-fatal — retry
+      }
+
+      if (!cancelled && !posBaseRunningRef.current) {
+        await new Promise<void>((r) => setTimeout(r, POLL_MS))
+        void poll()
       }
     }
 
-    void check()
+    void poll()
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePaymentId, intentId])
+  }, [intentId])
 
   /* =========================
      FETCH BREAKDOWN (5s timeout)

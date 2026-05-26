@@ -135,18 +135,45 @@ export async function initPosBaseWalletConnect(): Promise<PosWcInitResult> {
 /**
  * Wait for the wallet to complete the pairing and session handshake.
  * Call this after publishing the pairing URI. Resolves with the connected address.
+ *
+ * Listens for both "connect" and "accountsChanged" because WalletConnect v2
+ * EthereumProvider reliably emits "accountsChanged" with the approved accounts
+ * when a session is established. "connect" alone can be missed in some flows.
  */
 export function waitForWalletConnect(provider: PosWcProvider): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const wcProvider = provider._provider
+    let settled = false
 
-    const onConnect = () => {
-      const address = wcProvider.accounts[0] || ""
+    function settle(address: string) {
+      if (settled) return
+      settled = true
+      wcProvider.off("connect", onConnect)
+      wcProvider.off("accountsChanged", onAccountsChanged)
+      wcProvider.off("disconnect", onDisconnect)
       resolve(address)
     }
 
-    const onDisconnect = () => {
-      reject(new Error("Wallet disconnected before completing pairing"))
+    function fail(err: Error) {
+      if (settled) return
+      settled = true
+      wcProvider.off("connect", onConnect)
+      wcProvider.off("accountsChanged", onAccountsChanged)
+      wcProvider.off("disconnect", onDisconnect)
+      reject(err)
+    }
+
+    function onConnect() {
+      settle(wcProvider.accounts[0] || "")
+    }
+
+    function onAccountsChanged(accounts: unknown) {
+      const arr = Array.isArray(accounts) ? (accounts as string[]) : []
+      if (arr.length > 0) settle(arr[0])
+    }
+
+    function onDisconnect() {
+      fail(new Error("Wallet disconnected before completing pairing"))
     }
 
     // If already connected (session resumed), resolve immediately
@@ -156,12 +183,11 @@ export function waitForWalletConnect(provider: PosWcProvider): Promise<string> {
     }
 
     wcProvider.on("connect", onConnect)
+    wcProvider.on("accountsChanged", onAccountsChanged)
     wcProvider.on("disconnect", onDisconnect)
 
     setTimeout(() => {
-      wcProvider.off("connect", onConnect)
-      wcProvider.off("disconnect", onDisconnect)
-      reject(new Error("Timed out waiting for wallet to connect"))
+      fail(new Error("Timed out waiting for wallet to connect"))
     }, 120_000)
   })
 }
