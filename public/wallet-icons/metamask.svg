@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- White background -->
+  <rect width="1024" height="1024" rx="216" fill="#FFFFFF"/>
+  <!-- Upper head / ear block -->
+  <polygon points="512,128 260,400 512,480 764,400" fill="#E2761B"/>
+  <!-- Left ear inner highlight -->
+  <polygon points="260,400 360,260 512,480" fill="#E4761B"/>
+  <!-- Right ear inner highlight -->
+  <polygon points="764,400 664,260 512,480" fill="#E4761B"/>
+  <!-- Left cheek -->
+  <polygon points="260,400 300,560 512,480" fill="#F6851B"/>
+  <!-- Right cheek -->
+  <polygon points="764,400 724,560 512,480" fill="#F6851B"/>
+  <!-- Left jaw -->
+  <polygon points="300,560 340,700 512,640 512,480" fill="#E4761B"/>
+  <!-- Right jaw -->
+  <polygon points="724,560 684,700 512,640 512,480" fill="#E4761B"/>
+  <!-- Left chin block -->
+  <polygon points="340,700 380,780 512,755 512,640" fill="#D3501E"/>
+  <!-- Right chin block -->
+  <polygon points="684,700 644,780 512,755 512,640" fill="#D3501E"/>
+  <!-- Center chin -->
+  <polygon points="380,780 420,820 512,800 604,820 644,780 512,755" fill="#763D16"/>
+  <!-- Nose -->
+  <ellipse cx="512" cy="610" rx="40" ry="34" fill="#763D16"/>
+  <!-- Left eye white -->
+  <ellipse cx="410" cy="495" rx="42" ry="46" fill="white"/>
+  <!-- Right eye white -->
+  <ellipse cx="614" cy="495" rx="42" ry="46" fill="white"/>
+  <!-- Left pupil -->
+  <ellipse cx="414" cy="500" rx="22" ry="28" fill="#1c1c1c"/>
+  <!-- Right pupil -->
+  <ellipse cx="618" cy="500" rx="22" ry="28" fill="#1c1c1c"/>
+  <!-- Mouth hint -->
+  <path d="M460 680 Q512 710 564 680" stroke="#763D16" stroke-width="12" fill="none" stroke-linecap="round"/>
+</svg>

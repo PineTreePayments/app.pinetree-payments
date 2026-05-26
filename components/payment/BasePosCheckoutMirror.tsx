@@ -33,19 +33,42 @@ type Props = {
   onPaymentCreated?: () => void
 }
 
-const POLL_INTERVAL_MS = 3000
-
 function isValidPairingUri(uri: string): boolean {
   return uri.startsWith("wc:") && uri.includes("@2")
 }
 
 // Centralized wallet shortcut config — each entry deep-links into the wallet
 // using the POS-owned pairing URI. Add or remove entries here only.
-const WALLET_SHORTCUTS: { id: string; label: string; href: (uri: string) => string }[] = [
-  { id: "metamask",  label: "MetaMask",        href: (uri) => `https://metamask.app.link/wc?uri=${encodeURIComponent(uri)}` },
-  { id: "coinbase",  label: "Coinbase Wallet",  href: (uri) => `https://go.cb-w.com/wc?uri=${encodeURIComponent(uri)}` },
-  { id: "trust",     label: "Trust Wallet",     href: (uri) => `https://link.trustwallet.com/wc?uri=${encodeURIComponent(uri)}` },
-  { id: "rainbow",   label: "Rainbow",          href: (uri) => `https://rnbwapp.com/wc?uri=${encodeURIComponent(uri)}` },
+const WALLET_SHORTCUTS: {
+  id: string
+  label: string
+  iconPath: string
+  href: (uri: string) => string
+}[] = [
+  {
+    id: "metamask",
+    label: "MetaMask",
+    iconPath: "/wallet-icons/metamask.svg",
+    href: (uri) => `https://metamask.app.link/wc?uri=${encodeURIComponent(uri)}`,
+  },
+  {
+    id: "coinbase",
+    label: "Coinbase Wallet",
+    iconPath: "/wallet-icons/coinbase-wallet.svg",
+    href: (uri) => `https://go.cb-w.com/wc?uri=${encodeURIComponent(uri)}`,
+  },
+  {
+    id: "trust",
+    label: "Trust Wallet",
+    iconPath: "/wallet-icons/trust-wallet.svg",
+    href: (uri) => `https://link.trustwallet.com/wc?uri=${encodeURIComponent(uri)}`,
+  },
+  {
+    id: "rainbow",
+    label: "Rainbow",
+    iconPath: "/wallet-icons/rainbow.svg",
+    href: (uri) => `https://rnbwapp.com/wc?uri=${encodeURIComponent(uri)}`,
+  },
 ]
 
 type LauncherModalProps = {
@@ -57,6 +80,25 @@ type LauncherModalProps = {
 function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherModalProps) {
   const [showQr, setShowQr] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [search, setSearch] = useState("")
+
+  // Lock body scroll while modal is open (matches WalletPickerModal behaviour)
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow
+    const prevOverflowX = document.body.style.overflowX
+    document.body.style.overflow = "hidden"
+    document.body.style.overflowX = "hidden"
+    return () => {
+      document.body.style.overflow = prevOverflow
+      document.body.style.overflowX = prevOverflowX
+    }
+  }, [])
+
+  const filtered = search.trim()
+    ? WALLET_SHORTCUTS.filter((w) =>
+        w.label.toLowerCase().includes(search.trim().toLowerCase())
+      )
+    : WALLET_SHORTCUTS
 
   async function copyLink() {
     try {
@@ -69,85 +111,113 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center">
-      {/* Backdrop */}
+    <div
+      className="fixed inset-0 z-50 flex w-screen items-end justify-center overflow-hidden bg-black/70 backdrop-blur-md sm:items-center sm:p-6"
+      onClick={onClose}
+    >
       <div
-        className="absolute inset-0 bg-black/50"
-        onClick={onClose}
-      />
-
-      {/* Bottom sheet */}
-      <div className="relative z-10 w-full max-w-md rounded-t-3xl bg-white px-5 pt-4 pb-10 shadow-2xl">
-        {/* Drag handle */}
-        <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-gray-200" />
-
+        className="flex max-h-[90dvh] w-full max-w-full flex-col overflow-hidden rounded-t-[30px] border border-white/10 bg-[#0b0f17] shadow-2xl shadow-black/60 sm:max-w-[520px] sm:rounded-[30px]"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
-        <div className="mb-5 text-center">
-          <p className="text-base font-semibold text-gray-900">Choose your wallet</p>
-          <p className="mt-1 text-xs text-gray-500">
-            WalletConnect will securely connect your wallet to this PineTree terminal.
+        <div className="border-b border-white/10 bg-[#0f1420] px-5 pb-4 pt-5 sm:px-6">
+          <div className="relative flex items-center justify-center">
+            <div className="text-center">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">
+                WalletConnect
+              </p>
+              <h2 className="mt-1 text-xl font-bold text-white">Choose your wallet</h2>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="absolute right-0 top-0 flex h-9 w-9 items-center justify-center rounded-full bg-white/8 text-slate-300 ring-1 ring-white/10 transition hover:bg-white/12 hover:text-white"
+              aria-label="Close wallet picker"
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Search input */}
+          <div className="relative mt-5">
+            <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm text-slate-500">
+              ⌕
+            </span>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search wallets"
+              className="h-12 w-full rounded-2xl border border-white/10 bg-[#171d28] px-4 pl-10 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-[#3b82f6]/70 focus:ring-2 focus:ring-[#0052FF]/20"
+            />
+          </div>
+        </div>
+
+        {/* Scrollable content */}
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-5 py-5 pb-[calc(env(safe-area-inset-bottom)+24px)] sm:px-6">
+
+          {/* Wallet grid */}
+          {filtered.length > 0 ? (
+            <div className="grid grid-cols-2 gap-2 min-[360px]:grid-cols-3 sm:grid-cols-4 sm:gap-3">
+              {filtered.map((w) => (
+                <a
+                  key={w.id}
+                  href={w.href(pairingUri)}
+                  onClick={onWalletClick}
+                  className="group flex min-h-[130px] w-full flex-col items-center justify-between overflow-hidden rounded-[22px] border border-white/10 bg-[#151922] px-2 py-3 text-center shadow-[0_14px_34px_rgba(0,0,0,0.22)] transition-all hover:-translate-y-0.5 hover:border-[#3b82f6]/55 hover:bg-[#1b2330] hover:shadow-[0_18px_44px_rgba(0,82,255,0.18)] sm:min-h-[136px] sm:px-2.5"
+                >
+                  <span className="flex flex-col items-center gap-2">
+                    <span className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-[18px] bg-[#0f172a] shadow-[0_12px_28px_rgba(0,0,0,0.28)] ring-1 ring-white/15 transition group-hover:scale-[1.03]">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={w.iconPath} alt="" className="h-full w-full rounded-[18px] object-contain p-1.5" />
+                    </span>
+                    <span className="line-clamp-2 min-h-[34px] w-full text-xs font-semibold leading-tight text-white sm:text-sm">
+                      {w.label}
+                    </span>
+                  </span>
+                  <span className="max-w-full truncate rounded-full bg-[#0052FF]/18 px-2 py-1 text-[10px] font-semibold text-blue-200 ring-1 ring-blue-300/15">
+                    Open →
+                  </span>
+                </a>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-white/5 px-4 py-3 text-sm text-slate-400 ring-1 ring-white/10">
+              No wallets match your search.
+            </div>
+          )}
+
+          {/* Copy WalletConnect link */}
+          <button
+            onClick={() => void copyLink()}
+            className="w-full rounded-2xl border border-white/10 bg-[#151922] py-3.5 text-sm font-medium text-slate-300 transition hover:border-[#3b82f6]/40 hover:text-white"
+          >
+            {copied ? "✓ Copied to clipboard" : "Copy WalletConnect link"}
+          </button>
+
+          {/* QR toggle — secondary option for another device */}
+          <button
+            onClick={() => setShowQr((v) => !v)}
+            className="w-full py-2 text-xs font-medium text-slate-500 hover:text-slate-300"
+          >
+            {showQr ? "Hide QR code" : "Use another device / Show QR code"}
+          </button>
+
+          {showQr && (
+            <div className="flex flex-col items-center space-y-3">
+              <div className="rounded-2xl border border-white/10 bg-white p-4 shadow-sm">
+                <QRCode value={pairingUri} size={160} bgColor="#ffffff" fgColor="#111827" />
+              </div>
+              <p className="px-2 text-center text-xs text-slate-400">
+                Open your wallet on another device, tap WalletConnect, then scan.
+              </p>
+            </div>
+          )}
+
+          <p className="px-2 text-center text-xs text-slate-500">
+            If your wallet does not open, choose WalletConnect inside your wallet app and paste the
+            connection link.
           </p>
         </div>
-
-        {/* Wallet list */}
-        <div className="mb-4 space-y-2">
-          {WALLET_SHORTCUTS.map((w) => (
-            <a
-              key={w.id}
-              href={w.href(pairingUri)}
-              onClick={onWalletClick}
-              className="flex items-center justify-between rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3.5 text-sm font-semibold text-gray-800 transition-colors hover:border-[#0052FF]/20 hover:bg-[#0052FF]/5 active:bg-[#0052FF]/10"
-            >
-              <span>{w.label}</span>
-              <span className="text-xs font-medium text-[#0052FF]">Open →</span>
-            </a>
-          ))}
-        </div>
-
-        {/* Copy link */}
-        <button
-          onClick={() => void copyLink()}
-          className="mb-2 w-full rounded-xl border border-gray-200 bg-gray-50 py-3 text-sm font-medium text-gray-600 transition-colors hover:border-[#0052FF]/25 hover:text-[#0052FF]"
-        >
-          {copied ? "✓ Copied to clipboard" : "Copy WalletConnect link"}
-        </button>
-
-        {/* QR toggle — for another device only, never the default */}
-        <button
-          onClick={() => setShowQr((v) => !v)}
-          className="w-full py-2 text-xs font-medium text-gray-400 hover:text-gray-600"
-        >
-          {showQr ? "Hide QR code" : "Use another device / Show QR code"}
-        </button>
-
-        {showQr && (
-          <div className="mt-3 flex flex-col items-center space-y-2">
-            <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-              <QRCode
-                value={pairingUri}
-                size={160}
-                bgColor="#ffffff"
-                fgColor="#111827"
-              />
-            </div>
-            <p className="px-2 text-center text-xs text-gray-400">
-              Open your wallet on another device, tap WalletConnect, then scan.
-            </p>
-          </div>
-        )}
-
-        {/* If no wallet opens */}
-        <p className="mt-3 px-2 text-center text-xs text-gray-400">
-          If your wallet does not open, choose WalletConnect inside your wallet app and paste the connection link.
-        </p>
-
-        {/* Close */}
-        <button
-          onClick={onClose}
-          className="mt-4 w-full py-3 text-sm font-medium text-gray-400 hover:text-gray-600"
-        >
-          Close
-        </button>
       </div>
     </div>
   )
@@ -166,6 +236,8 @@ export default function BasePosCheckoutMirror({
   const [paymentReady, setPaymentReady] = useState(false)
   const [copiedUri, setCopiedUri] = useState(false)
   const [showLauncher, setShowLauncher] = useState(false)
+  // burstUntil: epoch ms until which we poll at 1s (set after customer taps Connect)
+  const [burstUntil, setBurstUntil] = useState(0)
   const selectCalledRef = useRef(false)
   const executionStartedRef = useRef(false)
 
@@ -218,12 +290,21 @@ export default function BasePosCheckoutMirror({
     }
   }, [intentId])
 
+  // pairingReady is stable once the URI arrives — drives interval switching
+  const pairingReady = !!(session?.pairingUri && isValidPairingUri(session.pairingUri))
+
+  // Dynamic polling:
+  //   1s — pairingUri not yet available (fast catch-up)
+  //   1s — within 30s burst window after customer taps Connect (detect wallet event ASAP)
+  //   3s — steady state
   useEffect(() => {
     if (!paymentReady) return
+    const isBurst = Date.now() < burstUntil
+    const ms = !pairingReady || isBurst ? 1000 : 3000
     void pollSession()
-    const interval = setInterval(() => void pollSession(), POLL_INTERVAL_MS)
-    return () => clearInterval(interval)
-  }, [paymentReady, pollSession])
+    const timer = setInterval(() => void pollSession(), ms)
+    return () => clearInterval(timer)
+  }, [paymentReady, pollSession, pairingReady, burstUntil])
 
   // Notify parent when the POS enters active execution (wallet connected or beyond)
   useEffect(() => {
@@ -240,8 +321,16 @@ export default function BasePosCheckoutMirror({
     }
   }, [session?.step, onExecutionStarted])
 
-  // After the customer opens a wallet deep-link, poll immediately so the UI
-  // transitions as soon as the POS registers the connection event.
+  // Open the launcher and enable burst polling for 30s so the UI transitions
+  // as soon as the POS registers the wallet connection event.
+  function handleConnectTapped() {
+    setBurstUntil(Date.now() + 30_000)
+    setShowLauncher(true)
+    void pollSession()
+    setTimeout(() => setBurstUntil(0), 30_000)
+  }
+
+  // After the customer taps a wallet deep-link, poll immediately and close modal
   function handleWalletClick() {
     setShowLauncher(false)
     void pollSession()
@@ -262,7 +351,7 @@ export default function BasePosCheckoutMirror({
   if (selectNetworkError) {
     return (
       <div className="space-y-3">
-        <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+        <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
           {selectNetworkError}
         </div>
         <Button variant="danger" fullWidth onClick={onCancel}>
@@ -276,10 +365,12 @@ export default function BasePosCheckoutMirror({
 
   if (!paymentReady || !session) {
     return (
-      <div className="space-y-4 text-center py-4">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052FF] border-t-transparent mx-auto" />
+      <div className="space-y-4 py-4 text-center">
+        <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
         <p className="text-sm text-gray-600">Preparing secure WalletConnect session…</p>
-        <p className="text-xs text-gray-400">The payment terminal is getting your wallet connection ready.</p>
+        <p className="text-xs text-gray-400">
+          The payment terminal is getting your wallet connection ready.
+        </p>
       </div>
     )
   }
@@ -290,13 +381,15 @@ export default function BasePosCheckoutMirror({
 
   if (!step || step === "awaiting_wallet") {
 
-    // Spinner while the POS is still generating the pairing URI
+    // Spinner while POS is still generating the pairing URI
     if (!pairingUri || !isValidPairingUri(pairingUri)) {
       return (
-        <div className="space-y-4 text-center py-4">
-          <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052FF] border-t-transparent mx-auto" />
+        <div className="space-y-4 py-4 text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
           <p className="text-sm text-gray-600">Preparing secure WalletConnect session…</p>
-          <p className="text-xs text-gray-400">The payment terminal is getting your wallet connection ready.</p>
+          <p className="text-xs text-gray-400">
+            The payment terminal is getting your wallet connection ready.
+          </p>
           <Button variant="danger" fullWidth onClick={onCancel}>
             Cancel
           </Button>
@@ -304,33 +397,30 @@ export default function BasePosCheckoutMirror({
       )
     }
 
-    // Pairing URI is ready — primary action is "Connect with WalletConnect"
+    // Pairing URI ready — primary action is "Connect with WalletConnect"
     return (
       <div className="space-y-4">
-        {/* Header */}
-        <div className="text-center space-y-1">
+        <div className="space-y-1 text-center">
           <p className="text-base font-semibold text-gray-900">Connect your wallet</p>
           <p className="text-sm text-gray-500">
             Use WalletConnect to connect your wallet securely.
           </p>
         </div>
 
-        {/* Primary action */}
-        <Button fullWidth onClick={() => setShowLauncher(true)}>
+        <Button fullWidth onClick={handleConnectTapped}>
           Connect with WalletConnect
         </Button>
 
-        {/* Secondary fallbacks */}
         <div className="flex flex-col items-center gap-1">
           <button
             onClick={() => void copyPairingUri(pairingUri)}
-            className="text-xs text-gray-400 hover:text-gray-600 font-medium py-1"
+            className="py-1 text-xs font-medium text-gray-400 hover:text-gray-600"
           >
             {copiedUri ? "✓ Copied to clipboard" : "Copy connection link"}
           </button>
           <button
-            onClick={() => setShowLauncher(true)}
-            className="text-xs text-gray-400 hover:text-gray-600 font-medium py-1"
+            onClick={handleConnectTapped}
+            className="py-1 text-xs font-medium text-gray-400 hover:text-gray-600"
           >
             Trouble connecting?
           </button>
@@ -340,7 +430,6 @@ export default function BasePosCheckoutMirror({
           Cancel
         </Button>
 
-        {/* WalletConnect-style launcher — opens as a bottom sheet */}
         {showLauncher && (
           <WalletLauncherModal
             pairingUri={pairingUri}
@@ -352,20 +441,20 @@ export default function BasePosCheckoutMirror({
     )
   }
 
-  // ── Wallet connected — POS is sending the transaction request ───────────────
+  // ── Wallet connected — POS is preparing the transaction request ─────────────
 
   if (step === "wallet_connected") {
     return (
-      <div className="space-y-4 text-center py-4">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 mx-auto">
-          <span className="text-green-600 text-xl font-bold">✓</span>
+      <div className="space-y-4 py-4 text-center">
+        <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-green-100">
+          <span className="text-xl font-bold text-green-600">✓</span>
         </div>
         <div className="space-y-1">
           <p className="text-sm font-semibold text-gray-900">Wallet connected.</p>
           <p className="text-sm text-gray-600">Follow the approval prompt in your wallet.</p>
         </div>
         {session.walletAddressMasked && (
-          <p className="text-xs text-gray-400 font-mono">{session.walletAddressMasked}</p>
+          <p className="font-mono text-xs text-gray-400">{session.walletAddressMasked}</p>
         )}
       </div>
     )
@@ -376,11 +465,13 @@ export default function BasePosCheckoutMirror({
   if (step === "payment_sending") {
     const isUsdc = session.selectedAsset === "USDC"
     return (
-      <div className="space-y-4 text-center py-4">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052FF] border-t-transparent mx-auto" />
+      <div className="space-y-4 py-4 text-center">
+        <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
         <div className="space-y-1">
           <p className="text-sm font-semibold text-gray-900">
-            {isUsdc ? "Authorize USDC payment in your wallet." : "Approve ETH payment in your wallet."}
+            {isUsdc
+              ? "Authorize USDC payment in your wallet."
+              : "Approve ETH payment in your wallet."}
           </p>
           <p className="text-sm text-gray-600">Please approve the transaction in your wallet.</p>
         </div>
@@ -392,10 +483,12 @@ export default function BasePosCheckoutMirror({
 
   if (step === "payment_submitted" || step === "confirming") {
     return (
-      <div className="space-y-4 text-center py-4">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052FF] border-t-transparent mx-auto" />
+      <div className="space-y-4 py-4 text-center">
+        <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
         <div className="space-y-1">
-          <p className="text-sm font-semibold text-gray-900">Payment submitted. Confirming on Base.</p>
+          <p className="text-sm font-semibold text-gray-900">
+            Payment submitted. Confirming on Base.
+          </p>
           <p className="text-sm text-gray-600">This usually takes a few seconds.</p>
         </div>
       </div>
@@ -407,7 +500,7 @@ export default function BasePosCheckoutMirror({
   if (step === "failed") {
     return (
       <div className="space-y-3">
-        <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+        <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
           {session.errorMessage || "Payment could not be completed. Please try again."}
         </div>
         <Button variant="danger" fullWidth onClick={onCancel}>
@@ -420,8 +513,8 @@ export default function BasePosCheckoutMirror({
   // ── Fallback spinner ─────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-4 text-center py-4">
-      <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052FF] border-t-transparent mx-auto" />
+    <div className="space-y-4 py-4 text-center">
+      <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
       <p className="text-sm text-gray-600">Processing payment…</p>
     </div>
   )

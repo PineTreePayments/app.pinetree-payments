@@ -105,11 +105,42 @@ function parseEthereumUri(uri: string): { to: string; valueHex: string; data: st
   }
 }
 
+// Poll allowance-check after USDC approval tx until sufficient or timeout.
+// Base block time is ~2 s; 10 × 3 s = 30 s max wait before giving up.
+async function waitForAllowanceSufficient(
+  paymentId: string,
+  walletAddress: string
+): Promise<void> {
+  const MAX_ATTEMPTS = 10
+  const DELAY_MS = 3000
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(
+        `/api/payments/${encodeURIComponent(paymentId)}/base-v6/allowance-check`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ payerAddress: walletAddress }),
+        }
+      )
+      const data = (await res.json()) as { ok: boolean; sufficient?: boolean }
+      if (data.ok && data.sufficient) return
+    } catch {
+      // transient — retry
+    }
+    if (attempt < MAX_ATTEMPTS - 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, DELAY_MS))
+    }
+  }
+  throw new Error("USDC allowance did not update after approval. Please try again.")
+}
+
 async function executePosBaseEip3009(
   paymentId: string,
   walletAddress: string,
   provider: PosWcProvider
 ): Promise<string> {
+  console.log("[POS Base USDC] prepare_start", { paymentId })
   const prepareRes = await fetch(
     `/api/payments/${encodeURIComponent(paymentId)}/base-v6/prepare`,
     {
@@ -126,14 +157,24 @@ async function executePosBaseEip3009(
     message?: string
   }
   if (!prepared.ok || !prepared.typedData || !prepared.authorization) {
-    throw new Error(prepared.error || prepared.message || "Failed to prepare EIP-3009 authorization")
+    const errMsg = prepared.error || prepared.message || "Failed to prepare EIP-3009 authorization"
+    console.error("[POS Base USDC] prepare_resolved", { paymentId, ok: false, error: errMsg })
+    throw new Error(errMsg)
   }
+  console.log("[POS Base USDC] prepare_resolved", { paymentId, ok: true })
 
+  console.log("[POS Base USDC] typed_data_request_start", { paymentId })
   const signature = await provider.request<string>({
     method: "eth_signTypedData_v4",
     params: [walletAddress, JSON.stringify(prepared.typedData)],
   })
+  if (typeof signature !== "string" || !signature.startsWith("0x")) {
+    console.error("[POS Base USDC] typed_data_request_resolved", { paymentId, ok: false, reason: "invalid_signature_format" })
+    throw new Error("Wallet did not return a valid EIP-3009 signature")
+  }
+  console.log("[POS Base USDC] typed_data_request_resolved", { paymentId, ok: true })
 
+  console.log("[POS Base USDC] relay_start", { paymentId })
   const relayRes = await fetch(
     `/api/payments/${encodeURIComponent(paymentId)}/base-v6/relay`,
     {
@@ -148,9 +189,22 @@ async function executePosBaseEip3009(
   )
   const relayResult = (await relayRes.json()) as { ok: boolean; txHash?: string; error?: string; message?: string }
   if (!relayResult.ok || !relayResult.txHash) {
-    throw new Error(relayResult.error || relayResult.message || "EIP-3009 relay failed")
+    const errMsg = relayResult.error || relayResult.message || "EIP-3009 relay failed"
+    console.error("[POS Base USDC] relay_resolved", { paymentId, ok: false, error: errMsg })
+    throw new Error(errMsg)
   }
-  return relayResult.txHash
+  const relayTxHash = relayResult.txHash
+  if (!/^0x[a-fA-F0-9]{64}$/.test(relayTxHash)) {
+    console.error("[POS Base USDC] relay_resolved", { paymentId, ok: false, reason: "invalid_txhash_format" })
+    throw new Error("Relay returned an invalid transaction hash")
+  }
+  console.log("[POS Base USDC] relay_resolved", { paymentId, ok: true })
+  console.log("[POS Base USDC] relay_tx_hash_captured", {
+    paymentId,
+    txHashPrefix: relayTxHash.slice(0, 10),
+    txHashSuffix: relayTxHash.slice(-6),
+  })
+  return relayTxHash
 }
 
 async function executePosBaseAllowancePath(
@@ -179,26 +233,38 @@ async function executePosBaseAllowancePath(
   }
 
   if (!built.sufficient && built.approveTx) {
+    console.log("[POS Base USDC] allowance_approve_start", { paymentId })
+    // from is required by WalletConnect v2 to route to the correct account
     await provider.request<string>({
       method: "eth_sendTransaction",
       params: [{
+        from: walletAddress,
         to: built.approveTx.to,
         data: built.approveTx.data,
         value: "0x" + BigInt(built.approveTx.value || "0").toString(16),
         chainId: "0x2105",
       }],
     })
+    console.log("[POS Base USDC] allowance_approve_submitted", { paymentId })
+    // Wait for approval to be mined before sending payment tx (~2 s block time on Base)
+    await waitForAllowanceSufficient(paymentId, walletAddress)
+    console.log("[POS Base USDC] allowance_sufficient", { paymentId })
   }
 
-  return provider.request<string>({
+  const paymentTxHash = await provider.request<string>({
     method: "eth_sendTransaction",
     params: [{
+      from: walletAddress,
       to: built.paymentTx.to,
       data: built.paymentTx.data,
       value: "0x" + BigInt(built.paymentTx.value || "0").toString(16),
       chainId: "0x2105",
     }],
   })
+  if (typeof paymentTxHash !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(paymentTxHash)) {
+    throw new Error("Wallet did not return a valid transaction hash for USDC payment")
+  }
+  return paymentTxHash
 }
 
 export default function POSLayout({ terminalContext }: Props) {
@@ -464,6 +530,7 @@ export default function POSLayout({ terminalContext }: Props) {
     paymentUrl: string
   ): Promise<void> {
     try {
+      console.log("[POS Base WC] session_created", { intentId: iid, paymentId, asset })
       setPosBaseStep("awaiting_wallet")
       await updatePosBaseSession(iid, { step: "awaiting_wallet", selectedAsset: asset })
 
@@ -472,6 +539,7 @@ export default function POSLayout({ terminalContext }: Props) {
 
       posWcProviderRef.current = wcResult.provider
 
+      console.log("[POS Base WC] pairing_uri_published", { intentId: iid, paymentId, asset })
       await updatePosBaseSession(iid, {
         step: "awaiting_wallet",
         pairingUri: wcResult.pairingUri,
@@ -484,6 +552,7 @@ export default function POSLayout({ terminalContext }: Props) {
         ? `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}`
         : ""
 
+      console.log("[POS Base WC] wallet_connected", { intentId: iid, paymentId, asset, maskedAddress })
       setPosBaseStep("wallet_connected")
       await updatePosBaseSession(iid, {
         step: "wallet_connected",
@@ -498,12 +567,28 @@ export default function POSLayout({ terminalContext }: Props) {
       if (asset === "ETH") {
         const parsed = parseEthereumUri(paymentUrl)
         if (!parsed) throw new Error("Invalid Base ETH payment URI")
-        txHash = await wcResult.provider.request<string>({
+
+        console.log("[POS Base ETH] request_start", { paymentId })
+        // from is required by WalletConnect v2 to route to the correct account
+        const rawTxHash = await wcResult.provider.request<string>({
           method: "eth_sendTransaction",
-          params: [{ to: parsed.to, value: parsed.valueHex, data: parsed.data, chainId: "0x2105" }],
+          params: [{ from: walletAddress, to: parsed.to, value: parsed.valueHex, data: parsed.data, chainId: "0x2105" }],
         })
+        console.log("[POS Base ETH] request_resolved", { paymentId, hasTxHash: Boolean(rawTxHash) })
+
+        if (typeof rawTxHash !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(rawTxHash)) {
+          throw new Error("Wallet did not return a valid ETH transaction hash")
+        }
+        txHash = rawTxHash
+        console.log("[POS Base ETH] tx_hash_captured", {
+          paymentId,
+          txHashPrefix: txHash.slice(0, 10),
+          txHashSuffix: txHash.slice(-6),
+        })
+
       } else {
-        // Resolve USDC strategy server-side
+        // ── USDC: resolve strategy, try EIP-3009 relayer, fall back to allowance ──
+        console.log("[POS Base USDC] strategy_selected", { paymentId })
         const strategyRes = await fetch(
           `/api/payments/${encodeURIComponent(paymentId)}/base-v6/strategy`,
           {
@@ -527,27 +612,84 @@ export default function POSLayout({ terminalContext }: Props) {
           error?: string
         }
         if (!strategyData.ok) throw new Error(strategyData.error || "Strategy resolution failed")
+        console.log("[POS Base USDC] strategy_selected", { paymentId, strategy: strategyData.strategy })
+
+        // Try EIP-3009 relayer path; on non-rejection failure fall back to allowance path
+        let usdcTxHash: string | undefined
 
         if (strategyData.strategy === "usdc_eip3009_relayer") {
-          txHash = await executePosBaseEip3009(paymentId, walletAddress, wcResult.provider)
-        } else {
-          txHash = await executePosBaseAllowancePath(paymentId, walletAddress, wcResult.provider)
+          try {
+            usdcTxHash = await executePosBaseEip3009(paymentId, walletAddress, wcResult.provider)
+          } catch (eip3009Err) {
+            const errMsg = eip3009Err instanceof Error ? eip3009Err.message : String(eip3009Err)
+            const isUserRejection =
+              /reject|cancel|denied|user denied/i.test(errMsg) ||
+              (eip3009Err as { code?: number })?.code === 4001
+            if (isUserRejection) {
+              console.log("[POS Base WC] request_rejected", { paymentId, asset: "USDC", errorCode: "wallet_rejected" })
+              throw eip3009Err
+            }
+            // Non-rejection error (e.g. wallet doesn't support eth_signTypedData_v4): fall back
+            console.warn("[POS Base WC] request_failed", {
+              paymentId,
+              asset: "USDC",
+              errorCode: "eip3009_failed_fallback",
+              error: errMsg,
+            })
+            // usdcTxHash remains undefined — allowance path runs below
+          }
         }
+
+        if (usdcTxHash === undefined) {
+          usdcTxHash = await executePosBaseAllowancePath(paymentId, walletAddress, wcResult.provider)
+        }
+
+        txHash = usdcTxHash
+        console.log("[POS Base USDC] detect_start", {
+          paymentId,
+          txHashPrefix: txHash.slice(0, 10),
+          txHashSuffix: txHash.slice(-6),
+        })
       }
 
       setPosBaseStep("payment_submitted")
-      await updatePosBaseSession(iid, { step: "payment_submitted", txHash })
+      await updatePosBaseSession(iid, { step: "payment_submitted" })
 
-      await fetch(`/api/payments/${encodeURIComponent(paymentId)}/detect`, {
+      const detectPrefix = asset === "ETH" ? "[POS Base ETH]" : "[POS Base USDC]"
+      console.log(`${detectPrefix} detect_start`, { paymentId, txHashPrefix: txHash.slice(0, 10) })
+      const detectRes = await fetch(`/api/payments/${encodeURIComponent(paymentId)}/detect`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ txHash }),
-      }).catch(() => null)
+      }).catch((detectErr) => {
+        console.error(`${detectPrefix} detect_start_failed`, {
+          paymentId,
+          error: detectErr instanceof Error ? detectErr.message : String(detectErr),
+        })
+        return null
+      })
+      console.log(`${detectPrefix} detect_resolved`, {
+        paymentId,
+        status: detectRes?.status ?? "network_error",
+      })
 
       setPosBaseStep("confirming")
       await updatePosBaseSession(iid, { step: "confirming" })
     } catch (err) {
       const message = err instanceof Error ? err.message : "Payment failed"
+      const isRejection =
+        /reject|cancel|denied|user denied/i.test(message) ||
+        (err as { code?: number })?.code === 4001
+      console.log(
+        isRejection ? "[POS Base WC] request_rejected" : "[POS Base WC] request_failed",
+        {
+          intentId: iid,
+          paymentId,
+          asset,
+          errorCode: isRejection ? "wallet_rejected" : "wallet_request_failed",
+          error: message,
+        }
+      )
       setPosBaseError(message)
       setPosBaseStep("failed")
       setPaymentError(message)
