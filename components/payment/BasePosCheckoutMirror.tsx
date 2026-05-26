@@ -39,19 +39,118 @@ function isValidPairingUri(uri: string): boolean {
   return uri.startsWith("wc:") && uri.includes("@2")
 }
 
-// Wallet shortcuts — each opens the POS-owned WalletConnect pairing URI
-// directly in the respective wallet app. These are secondary to the QR code
-// (which is the primary WalletConnect connection path).
-type WalletShortcut = { id: string; label: string; href: string }
+// Centralized wallet shortcut config — each entry deep-links into the wallet
+// using the POS-owned pairing URI. Add or remove entries here only.
+const WALLET_SHORTCUTS: { id: string; label: string; href: (uri: string) => string }[] = [
+  { id: "metamask",  label: "MetaMask",        href: (uri) => `https://metamask.app.link/wc?uri=${encodeURIComponent(uri)}` },
+  { id: "coinbase",  label: "Coinbase Wallet",  href: (uri) => `https://go.cb-w.com/wc?uri=${encodeURIComponent(uri)}` },
+  { id: "trust",     label: "Trust Wallet",     href: (uri) => `https://link.trustwallet.com/wc?uri=${encodeURIComponent(uri)}` },
+  { id: "rainbow",   label: "Rainbow",          href: (uri) => `https://rnbwapp.com/wc?uri=${encodeURIComponent(uri)}` },
+]
 
-function buildWalletShortcuts(pairingUri: string): WalletShortcut[] {
-  const encoded = encodeURIComponent(pairingUri)
-  return [
-    { id: "metamask",  label: "MetaMask",        href: `https://metamask.app.link/wc?uri=${encoded}` },
-    { id: "coinbase",  label: "Coinbase Wallet",  href: `https://go.cb-w.com/wc?uri=${encoded}` },
-    { id: "trust",     label: "Trust Wallet",     href: `https://link.trustwallet.com/wc?uri=${encoded}` },
-    { id: "rainbow",   label: "Rainbow",          href: `https://rnbwapp.com/wc?uri=${encoded}` },
-  ]
+type LauncherModalProps = {
+  pairingUri: string
+  onClose: () => void
+  onWalletClick: () => void
+}
+
+function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherModalProps) {
+  const [showQr, setShowQr] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(pairingUri)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // clipboard unavailable in some mobile WebViews
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/50"
+        onClick={onClose}
+      />
+
+      {/* Bottom sheet */}
+      <div className="relative z-10 w-full max-w-md rounded-t-3xl bg-white px-5 pt-4 pb-10 shadow-2xl">
+        {/* Drag handle */}
+        <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-gray-200" />
+
+        {/* Header */}
+        <div className="mb-5 text-center">
+          <p className="text-base font-semibold text-gray-900">Choose your wallet</p>
+          <p className="mt-1 text-xs text-gray-500">
+            WalletConnect will securely connect your wallet to this PineTree terminal.
+          </p>
+        </div>
+
+        {/* Wallet list */}
+        <div className="mb-4 space-y-2">
+          {WALLET_SHORTCUTS.map((w) => (
+            <a
+              key={w.id}
+              href={w.href(pairingUri)}
+              onClick={onWalletClick}
+              className="flex items-center justify-between rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3.5 text-sm font-semibold text-gray-800 transition-colors hover:border-[#0052FF]/20 hover:bg-[#0052FF]/5 active:bg-[#0052FF]/10"
+            >
+              <span>{w.label}</span>
+              <span className="text-xs font-medium text-[#0052FF]">Open →</span>
+            </a>
+          ))}
+        </div>
+
+        {/* Copy link */}
+        <button
+          onClick={() => void copyLink()}
+          className="mb-2 w-full rounded-xl border border-gray-200 bg-gray-50 py-3 text-sm font-medium text-gray-600 transition-colors hover:border-[#0052FF]/25 hover:text-[#0052FF]"
+        >
+          {copied ? "✓ Copied to clipboard" : "Copy WalletConnect link"}
+        </button>
+
+        {/* QR toggle — for another device only, never the default */}
+        <button
+          onClick={() => setShowQr((v) => !v)}
+          className="w-full py-2 text-xs font-medium text-gray-400 hover:text-gray-600"
+        >
+          {showQr ? "Hide QR code" : "Use another device / Show QR code"}
+        </button>
+
+        {showQr && (
+          <div className="mt-3 flex flex-col items-center space-y-2">
+            <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+              <QRCode
+                value={pairingUri}
+                size={160}
+                bgColor="#ffffff"
+                fgColor="#111827"
+              />
+            </div>
+            <p className="px-2 text-center text-xs text-gray-400">
+              Open your wallet on another device, tap WalletConnect, then scan.
+            </p>
+          </div>
+        )}
+
+        {/* If no wallet opens */}
+        <p className="mt-3 px-2 text-center text-xs text-gray-400">
+          If your wallet does not open, choose WalletConnect inside your wallet app and paste the connection link.
+        </p>
+
+        {/* Close */}
+        <button
+          onClick={onClose}
+          className="mt-4 w-full py-3 text-sm font-medium text-gray-400 hover:text-gray-600"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  )
 }
 
 export default function BasePosCheckoutMirror({
@@ -66,6 +165,7 @@ export default function BasePosCheckoutMirror({
   const [selectNetworkError, setSelectNetworkError] = useState("")
   const [paymentReady, setPaymentReady] = useState(false)
   const [copiedUri, setCopiedUri] = useState(false)
+  const [showLauncher, setShowLauncher] = useState(false)
   const selectCalledRef = useRef(false)
   const executionStartedRef = useRef(false)
 
@@ -140,9 +240,10 @@ export default function BasePosCheckoutMirror({
     }
   }, [session?.step, onExecutionStarted])
 
-  // After the customer taps a wallet shortcut, poll immediately so the UI
+  // After the customer opens a wallet deep-link, poll immediately so the UI
   // transitions as soon as the POS registers the connection event.
-  function handleShortcutClick() {
+  function handleWalletClick() {
+    setShowLauncher(false)
     void pollSession()
   }
 
@@ -177,7 +278,8 @@ export default function BasePosCheckoutMirror({
     return (
       <div className="space-y-4 text-center py-4">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052FF] border-t-transparent mx-auto" />
-        <p className="text-sm text-gray-600">Preparing secure wallet connection from the payment terminal…</p>
+        <p className="text-sm text-gray-600">Preparing secure WalletConnect session…</p>
+        <p className="text-xs text-gray-400">The payment terminal is getting your wallet connection ready.</p>
       </div>
     )
   }
@@ -193,7 +295,8 @@ export default function BasePosCheckoutMirror({
       return (
         <div className="space-y-4 text-center py-4">
           <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052FF] border-t-transparent mx-auto" />
-          <p className="text-sm text-gray-600">Preparing secure wallet connection from the payment terminal…</p>
+          <p className="text-sm text-gray-600">Preparing secure WalletConnect session…</p>
+          <p className="text-xs text-gray-400">The payment terminal is getting your wallet connection ready.</p>
           <Button variant="danger" fullWidth onClick={onCancel}>
             Cancel
           </Button>
@@ -201,73 +304,50 @@ export default function BasePosCheckoutMirror({
       )
     }
 
-    const shortcuts = buildWalletShortcuts(pairingUri)
-
-    // ── WalletConnect-style connection panel ─────────────────────────────────
-    // Layout matches the standard WalletConnect modal experience:
-    //   • QR code is the centerpiece — scan with any WC-compatible wallet
-    //   • Wallet app shortcuts below for mobile users (one tap to open + pair)
-    //   • Copy link at the bottom for manual paste into any wallet
+    // Pairing URI is ready — primary action is "Connect with WalletConnect"
     return (
       <div className="space-y-4">
-
         {/* Header */}
         <div className="text-center space-y-1">
-          <p className="text-sm font-semibold text-gray-900">Connect via WalletConnect</p>
-          <p className="text-xs text-gray-500">
-            Scan with any WalletConnect-compatible wallet app.
+          <p className="text-base font-semibold text-gray-900">Connect your wallet</p>
+          <p className="text-sm text-gray-500">
+            Use WalletConnect to connect your wallet securely.
           </p>
         </div>
 
-        {/* QR code — primary connection path, shown by default */}
-        <div className="flex justify-center">
-          <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
-            <QRCode
-              value={pairingUri}
-              size={176}
-              bgColor="#ffffff"
-              fgColor="#111827"
-            />
-          </div>
+        {/* Primary action */}
+        <Button fullWidth onClick={() => setShowLauncher(true)}>
+          Connect with WalletConnect
+        </Button>
+
+        {/* Secondary fallbacks */}
+        <div className="flex flex-col items-center gap-1">
+          <button
+            onClick={() => void copyPairingUri(pairingUri)}
+            className="text-xs text-gray-400 hover:text-gray-600 font-medium py-1"
+          >
+            {copiedUri ? "✓ Copied to clipboard" : "Copy connection link"}
+          </button>
+          <button
+            onClick={() => setShowLauncher(true)}
+            className="text-xs text-gray-400 hover:text-gray-600 font-medium py-1"
+          >
+            Trouble connecting?
+          </button>
         </div>
-
-        {/* QR scanning instruction */}
-        <p className="text-center text-xs text-gray-400 px-2">
-          Open your wallet, tap WalletConnect, then scan this code.
-        </p>
-
-        {/* Divider */}
-        <div className="flex items-center gap-3">
-          <div className="flex-1 h-px bg-gray-100" />
-          <span className="text-xs text-gray-400 font-medium whitespace-nowrap">Or open a wallet directly</span>
-          <div className="flex-1 h-px bg-gray-100" />
-        </div>
-
-        {/* Wallet shortcuts — 2 × 2 compact grid */}
-        <div className="grid grid-cols-2 gap-2">
-          {shortcuts.map((w) => (
-            <a
-              key={w.id}
-              href={w.href}
-              onClick={handleShortcutClick}
-              className="flex items-center justify-center rounded-xl border border-[#0052FF]/15 bg-white px-3 py-2.5 text-xs font-semibold text-gray-800 shadow-sm transition-all hover:border-[#0052FF]/35 hover:bg-[#0052FF]/5"
-            >
-              {w.label}
-            </a>
-          ))}
-        </div>
-
-        {/* Copy pairing URI — manual fallback */}
-        <button
-          onClick={() => void copyPairingUri(pairingUri)}
-          className="w-full text-center text-xs text-gray-400 hover:text-gray-600 font-medium py-1"
-        >
-          {copiedUri ? "✓ Copied to clipboard" : "Copy connection link"}
-        </button>
 
         <Button variant="danger" fullWidth onClick={onCancel}>
           Cancel
         </Button>
+
+        {/* WalletConnect-style launcher — opens as a bottom sheet */}
+        {showLauncher && (
+          <WalletLauncherModal
+            pairingUri={pairingUri}
+            onClose={() => setShowLauncher(false)}
+            onWalletClick={handleWalletClick}
+          />
+        )}
       </div>
     )
   }
@@ -294,11 +374,14 @@ export default function BasePosCheckoutMirror({
   // ── Transaction approval requested ──────────────────────────────────────────
 
   if (step === "payment_sending") {
+    const isUsdc = session.selectedAsset === "USDC"
     return (
       <div className="space-y-4 text-center py-4">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052FF] border-t-transparent mx-auto" />
         <div className="space-y-1">
-          <p className="text-sm font-semibold text-gray-900">Approval requested in your wallet.</p>
+          <p className="text-sm font-semibold text-gray-900">
+            {isUsdc ? "Authorize USDC payment in your wallet." : "Approve ETH payment in your wallet."}
+          </p>
           <p className="text-sm text-gray-600">Please approve the transaction in your wallet.</p>
         </div>
       </div>
