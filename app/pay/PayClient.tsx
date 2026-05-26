@@ -8,6 +8,7 @@ import Button from "@/components/ui/Button"
 import Card from "@/components/ui/Card"
 import PageContainer from "@/components/ui/PageContainer"
 import BaseWalletPayment from "@/components/payment/BaseWalletPayment"
+import BasePosCheckoutMirror from "@/components/payment/BasePosCheckoutMirror"
 import SolanaWalletPayment from "@/components/payment/SolanaWalletPayment"
 import LightningPayment from "@/components/payment/LightningPayment"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
@@ -68,6 +69,7 @@ type IntentPayload = {
   selectedNetwork?: string | null
   selectedAsset?: string | null
   paymentId?: string | null
+  paymentUrl?: string | null
   paymentStatus?: string | null
   status?: string | null
   checkoutUrl?: string
@@ -1272,35 +1274,49 @@ export default function PayClient() {
                           </div>
                         ) : null}
 
-                        {/* ── Base: WalletConnect on hosted checkout ── */}
+                        {/* ── Base: POS-owned WC mirror or customer-owned WC ── */}
                         {asset.network === "base" ? (
-                          <BaseWalletPayment
-                            intentId={intentId!}
-                            selectedAsset={asset.symbol === "USDC" ? "USDC" : "ETH"}
-                            usdAmount={displayAmount}
-                            paymentStatus={normalizedPaymentStatus}
-                            checkoutToken={checkoutToken}
-                            onExecutionStarted={() => setBaseExecutionActive(true)}
-                            onCancel={handleBaseCancelPayment}
-                            onPaymentCreated={() => {
-                              void loadIntentCallback()
-                            }}
-                            onSuccess={async (txHash, paymentId) => {
-                              const detectRes = await fetch(
-                                `/api/payments/${encodeURIComponent(paymentId)}/detect`,
-                                {
-                                  method: "POST",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({ txHash }),
-                                }
-                              ).catch(() => null)
-                              console.log("[PineTreeBaseTrace] detect POST done", {
-                                paymentId,
-                                status: detectRes?.status ?? "error"
-                              })
-                              await loadIntentCallback()
-                            }}
-                          />
+                          intentPayload?.terminalId ? (
+                            <BasePosCheckoutMirror
+                              intentId={intentId!}
+                              selectedAsset={asset.symbol === "USDC" ? "USDC" : "ETH"}
+                              usdAmount={displayAmount}
+                              checkoutToken={checkoutToken}
+                              onExecutionStarted={() => setBaseExecutionActive(true)}
+                              onCancel={handleBaseCancelPayment}
+                              onPaymentCreated={() => {
+                                void loadIntentCallback()
+                              }}
+                            />
+                          ) : (
+                            <BaseWalletPayment
+                              intentId={intentId!}
+                              selectedAsset={asset.symbol === "USDC" ? "USDC" : "ETH"}
+                              usdAmount={displayAmount}
+                              paymentStatus={normalizedPaymentStatus}
+                              checkoutToken={checkoutToken}
+                              onExecutionStarted={() => setBaseExecutionActive(true)}
+                              onCancel={handleBaseCancelPayment}
+                              onPaymentCreated={() => {
+                                void loadIntentCallback()
+                              }}
+                              onSuccess={async (txHash, paymentId) => {
+                                const detectRes = await fetch(
+                                  `/api/payments/${encodeURIComponent(paymentId)}/detect`,
+                                  {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ txHash }),
+                                  }
+                                ).catch(() => null)
+                                console.log("[PineTreeBaseTrace] detect POST done", {
+                                  paymentId,
+                                  status: detectRes?.status ?? "error"
+                                })
+                                await loadIntentCallback()
+                              }}
+                            />
+                          )
                         ) : null}
 
                         {/* ── Solana: canonical engine payment session + wallet links ── */}

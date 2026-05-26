@@ -7,6 +7,11 @@ import AmountDisplay from "./AmountDisplay"
 import Keypad from "./Keypad"
 import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
+import {
+  initPosBaseWalletConnect,
+  waitForWalletConnect,
+  type PosWcProvider,
+} from "@/lib/pos/posBaseWalletConnect"
 
 type Props = {
   locked: boolean
@@ -81,6 +86,121 @@ function posAuthHeaders(token?: string): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+// ── Base V6 POS helpers (defined outside component — no state dependency) ────
+
+function parseEthereumUri(uri: string): { to: string; valueHex: string; data: string } | null {
+  try {
+    const withoutScheme = uri.replace(/^ethereum:/, "")
+    const qIdx = withoutScheme.indexOf("?")
+    const addrPart = qIdx >= 0 ? withoutScheme.slice(0, qIdx) : withoutScheme
+    const to = addrPart.includes("@") ? addrPart.split("@")[0] : addrPart
+    if (!to.startsWith("0x")) return null
+    const params = new URLSearchParams(qIdx >= 0 ? withoutScheme.slice(qIdx + 1) : "")
+    const value = params.get("value") || "0"
+    const data = params.get("data") || "0x"
+    const valueHex = "0x" + BigInt(value).toString(16)
+    return { to, valueHex, data }
+  } catch {
+    return null
+  }
+}
+
+async function executePosBaseEip3009(
+  paymentId: string,
+  walletAddress: string,
+  provider: PosWcProvider
+): Promise<string> {
+  const prepareRes = await fetch(
+    `/api/payments/${encodeURIComponent(paymentId)}/base-v6/prepare`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ payerAddress: walletAddress }),
+    }
+  )
+  const prepared = (await prepareRes.json()) as {
+    ok: boolean
+    typedData?: unknown
+    authorization?: { validAfter: string; validBefore: string; nonce: string }
+    error?: string
+    message?: string
+  }
+  if (!prepared.ok || !prepared.typedData || !prepared.authorization) {
+    throw new Error(prepared.error || prepared.message || "Failed to prepare EIP-3009 authorization")
+  }
+
+  const signature = await provider.request<string>({
+    method: "eth_signTypedData_v4",
+    params: [walletAddress, JSON.stringify(prepared.typedData)],
+  })
+
+  const relayRes = await fetch(
+    `/api/payments/${encodeURIComponent(paymentId)}/base-v6/relay`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        payerAddress: walletAddress,
+        authorization: prepared.authorization,
+        signature,
+      }),
+    }
+  )
+  const relayResult = (await relayRes.json()) as { ok: boolean; txHash?: string; error?: string; message?: string }
+  if (!relayResult.ok || !relayResult.txHash) {
+    throw new Error(relayResult.error || relayResult.message || "EIP-3009 relay failed")
+  }
+  return relayResult.txHash
+}
+
+async function executePosBaseAllowancePath(
+  paymentId: string,
+  walletAddress: string,
+  provider: PosWcProvider
+): Promise<string> {
+  const buildRes = await fetch(
+    `/api/payments/${encodeURIComponent(paymentId)}/base-v6/build-allowance-payment`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ payerAddress: walletAddress }),
+    }
+  )
+  const built = (await buildRes.json()) as {
+    ok: boolean
+    sufficient?: boolean
+    approveTx?: { to: string; data: string; value: string } | null
+    paymentTx?: { to: string; data: string; value: string }
+    error?: string
+    message?: string
+  }
+  if (!built.ok || !built.paymentTx) {
+    throw new Error(built.error || built.message || "Failed to build allowance payment")
+  }
+
+  if (!built.sufficient && built.approveTx) {
+    await provider.request<string>({
+      method: "eth_sendTransaction",
+      params: [{
+        to: built.approveTx.to,
+        data: built.approveTx.data,
+        value: "0x" + BigInt(built.approveTx.value || "0").toString(16),
+        chainId: "0x2105",
+      }],
+    })
+  }
+
+  return provider.request<string>({
+    method: "eth_sendTransaction",
+    params: [{
+      to: built.paymentTx.to,
+      data: built.paymentTx.data,
+      value: "0x" + BigInt(built.paymentTx.value || "0").toString(16),
+      chainId: "0x2105",
+    }],
+  })
+}
+
 export default function POSLayout({ terminalContext }: Props) {
 
   const [digits, setDigits] = useState("")
@@ -99,6 +219,13 @@ export default function POSLayout({ terminalContext }: Props) {
   const resetTimerRef = useRef<NodeJS.Timeout | null>(null)
   const hasScheduledResetRef = useRef(false)
 
+  // ── POS Base WC controller ─────────────────────────────────────────────────
+  const [posBaseActive, setPosBaseActive] = useState(false)
+  const [posBaseStep, setPosBaseStep] = useState("")
+  const [posBaseError, setPosBaseError] = useState("")
+  const posBaseRunningRef = useRef(false)
+  const posWcProviderRef = useRef<PosWcProvider | null>(null)
+
   const subtotalNum = digitsToNumber(digits)
   const displayAmount = digitsToDisplay(digits)
 
@@ -108,6 +235,15 @@ export default function POSLayout({ terminalContext }: Props) {
       resetTimerRef.current = null
     }
     hasScheduledResetRef.current = false
+    // Tear down any active POS Base WC session
+    posBaseRunningRef.current = false
+    if (posWcProviderRef.current) {
+      posWcProviderRef.current.disconnect().catch(() => null)
+      posWcProviderRef.current = null
+    }
+    setPosBaseActive(false)
+    setPosBaseStep("")
+    setPosBaseError("")
     setDigits("")
     setStatus("ready")
     setQrCodeUrl("")
@@ -296,6 +432,173 @@ export default function POSLayout({ terminalContext }: Props) {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intentId])
+
+  /* =========================
+     POS BASE WC FLOW
+     Detects when the customer selects Base on the hosted checkout, then
+     creates and owns the WalletConnect session from the terminal side.
+  ========================= */
+
+  async function updatePosBaseSession(
+    iid: string,
+    updates: Record<string, unknown>
+  ): Promise<void> {
+    try {
+      await fetch(`/api/pos/base-session/${encodeURIComponent(iid)}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...posAuthHeaders(terminalContext?.sessionToken),
+        },
+        body: JSON.stringify(updates),
+      })
+    } catch {
+      // best-effort — session updates are informational
+    }
+  }
+
+  async function runPosBaseFlow(
+    paymentId: string,
+    iid: string,
+    asset: "ETH" | "USDC",
+    paymentUrl: string
+  ): Promise<void> {
+    try {
+      setPosBaseStep("awaiting_wallet")
+      await updatePosBaseSession(iid, { step: "awaiting_wallet", selectedAsset: asset })
+
+      const wcResult = await initPosBaseWalletConnect()
+      if (!wcResult.ok) throw new Error(wcResult.error)
+
+      posWcProviderRef.current = wcResult.provider
+
+      await updatePosBaseSession(iid, {
+        step: "awaiting_wallet",
+        pairingUri: wcResult.pairingUri,
+        selectedAsset: asset,
+      })
+
+      // Wait for customer to open the wallet deep-link and approve pairing
+      const walletAddress = await waitForWalletConnect(wcResult.provider)
+      const maskedAddress = walletAddress
+        ? `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}`
+        : ""
+
+      setPosBaseStep("wallet_connected")
+      await updatePosBaseSession(iid, {
+        step: "wallet_connected",
+        walletAddressMasked: maskedAddress,
+      })
+
+      setPosBaseStep("payment_sending")
+      await updatePosBaseSession(iid, { step: "payment_sending" })
+
+      let txHash: string
+
+      if (asset === "ETH") {
+        const parsed = parseEthereumUri(paymentUrl)
+        if (!parsed) throw new Error("Invalid Base ETH payment URI")
+        txHash = await wcResult.provider.request<string>({
+          method: "eth_sendTransaction",
+          params: [{ to: parsed.to, value: parsed.valueHex, data: parsed.data, chainId: "0x2105" }],
+        })
+      } else {
+        // Resolve USDC strategy server-side
+        const strategyRes = await fetch(
+          `/api/payments/${encodeURIComponent(paymentId)}/base-v6/strategy`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              payerAddress: walletAddress,
+              walletCapabilities: {
+                walletFamily: "walletconnect",
+                supportsTypedData: true,
+                supportsSendCalls: false,
+                skipEip3009: false,
+                skipDelegatedBatch: true,
+              },
+            }),
+          }
+        )
+        const strategyData = (await strategyRes.json()) as {
+          ok: boolean
+          strategy?: string
+          error?: string
+        }
+        if (!strategyData.ok) throw new Error(strategyData.error || "Strategy resolution failed")
+
+        if (strategyData.strategy === "usdc_eip3009_relayer") {
+          txHash = await executePosBaseEip3009(paymentId, walletAddress, wcResult.provider)
+        } else {
+          txHash = await executePosBaseAllowancePath(paymentId, walletAddress, wcResult.provider)
+        }
+      }
+
+      setPosBaseStep("payment_submitted")
+      await updatePosBaseSession(iid, { step: "payment_submitted", txHash })
+
+      await fetch(`/api/payments/${encodeURIComponent(paymentId)}/detect`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ txHash }),
+      }).catch(() => null)
+
+      setPosBaseStep("confirming")
+      await updatePosBaseSession(iid, { step: "confirming" })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Payment failed"
+      setPosBaseError(message)
+      setPosBaseStep("failed")
+      setPaymentError(message)
+      await updatePosBaseSession(iid, { step: "failed", errorMessage: message }).catch(() => null)
+      setStatus("failed")
+    } finally {
+      posBaseRunningRef.current = false
+      if (posWcProviderRef.current) {
+        posWcProviderRef.current.disconnect().catch(() => null)
+        posWcProviderRef.current = null
+      }
+    }
+  }
+
+  // Detect when the customer selects Base on the hosted checkout
+  useEffect(() => {
+    if (!activePaymentId || !intentId) return
+    if (posBaseRunningRef.current) return
+
+    let cancelled = false
+
+    const check = async () => {
+      try {
+        const res = await fetch(
+          `/api/payment-intents/${encodeURIComponent(intentId)}`,
+          { cache: "no-store" }
+        )
+        if (!res.ok || cancelled) return
+        const data = (await res.json()) as {
+          selectedNetwork?: string | null
+          selectedAsset?: string | null
+          paymentUrl?: string | null
+        }
+        const net = String(data.selectedNetwork || "").toLowerCase()
+        if (net === "base" && !cancelled && !posBaseRunningRef.current) {
+          const asset =
+            String(data.selectedAsset || "ETH").toUpperCase() === "USDC" ? "USDC" : "ETH"
+          const paymentUrl = String(data.paymentUrl || "")
+          posBaseRunningRef.current = true
+          setPosBaseActive(true)
+          void runPosBaseFlow(activePaymentId, intentId, asset, paymentUrl)
+        }
+      } catch {
+        // non-fatal
+      }
+    }
+
+    void check()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePaymentId, intentId])
 
   /* =========================
      FETCH BREAKDOWN (5s timeout)
@@ -650,7 +953,56 @@ export default function POSLayout({ terminalContext }: Props) {
         {(status === "waiting" || status === "processing") && (
           <div className="space-y-3">
 
-            {qrCodeUrl ? (
+            {posBaseActive ? (
+              /* Cashier-facing Base WC status */
+              <div className="rounded-2xl border border-blue-100/70 bg-gradient-to-br from-white to-blue-50/40 px-4 py-4 text-center space-y-2">
+                {posBaseStep === "awaiting_wallet" && (
+                  <>
+                    <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Waiting for customer wallet…</p>
+                    <p className="text-xs text-gray-500">Customer is connecting their wallet on the checkout screen.</p>
+                  </>
+                )}
+                {posBaseStep === "wallet_connected" && (
+                  <>
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-100 mx-auto">
+                      <span className="text-green-600 text-sm font-bold">✓</span>
+                    </div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Wallet connected</p>
+                    <p className="text-xs text-gray-500">Sending payment transaction…</p>
+                  </>
+                )}
+                {(posBaseStep === "payment_sending" || posBaseStep === "payment_submitted") && (
+                  <>
+                    <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
+                      {posBaseStep === "payment_sending" ? "Sending transaction…" : "Transaction submitted"}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {posBaseStep === "payment_sending"
+                        ? "Customer is approving in their wallet."
+                        : "Waiting for on-chain confirmation."}
+                    </p>
+                  </>
+                )}
+                {posBaseStep === "confirming" && (
+                  <>
+                    <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Confirming on-chain…</p>
+                    <p className="text-xs text-gray-500">This usually takes a few seconds.</p>
+                  </>
+                )}
+                {!posBaseStep && (
+                  <>
+                    <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Initializing Base payment…</p>
+                  </>
+                )}
+                {posBaseError && (
+                  <p className="text-xs text-red-600 mt-1">{posBaseError}</p>
+                )}
+              </div>
+            ) : qrCodeUrl ? (
               <div className="flex flex-col items-center rounded-2xl border border-blue-100/70 bg-gradient-to-br from-white to-blue-50/40 px-4 py-4 shadow-[0_12px_32px_rgba(0,82,255,0.08)]">
                 <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
                   Scan to Pay

@@ -293,6 +293,7 @@ export async function getPaymentIntentEngine(intentId: string) {
     selectedNetwork: intent.selected_network || null,
     selectedAsset: selectedPaymentMetadata?.selectedAsset || null,
     paymentId: intent.payment_id || null,
+    paymentUrl: selectedPayment?.payment_url || null,
     status: intent.status,
     paymentStatus: selectedPayment?.status || null,
     paymentProviderReference: selectedPayment?.provider_reference || null,
