@@ -2,10 +2,10 @@ import { Interface, getAddress } from "ethers"
 import { getPaymentById } from "@/database"
 import type { StoredPaymentSplitMetadata } from "@/types/payment"
 import {
-  getBaseV6Contract,
-  getBaseV6UsdcToken,
+  getBaseV7Contract,
+  getBaseV7UsdcToken,
   getPineTreeTreasuryWallet,
-  isBaseV6DelegatedEnabled
+  isBaseV7DelegatedEnabled
 } from "./config"
 
 const BASE_CHAIN_ID = 8453
@@ -22,36 +22,36 @@ const USDC_ABI = [
   "function approve(address spender, uint256 amount) returns (bool)"
 ] as const
 
-const V6_ALLOWANCE_ABI = [
+const V7_ALLOWANCE_ABI = [
   "function payUsdcWithAllowance(address merchant,address treasury,uint256 merchantAmount,uint256 feeAmount,string paymentRef)"
 ] as const
 
 const usdcIface = new Interface(USDC_ABI)
-const v6Iface = new Interface(V6_ALLOWANCE_ABI)
+const v7Iface = new Interface(V7_ALLOWANCE_ABI)
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
-export type BaseV6DelegatedWalletCall = {
+export type BaseV7DelegatedWalletCall = {
   to: string
   value: "0x0"
   data: string
 }
 
-export type BaseV6DelegatedPrepareResult = {
+export type BaseV7DelegatedPrepareResult = {
   ok: true
   enabled: boolean
   paymentId: string
   payerAddress: string
-  strategy: "delegated_v6_batch"
+  strategy: "delegated_v7_batch"
   chainId: number
-  calls: BaseV6DelegatedWalletCall[]
+  calls: BaseV7DelegatedWalletCall[]
   requiredUsdcAmount: string
-  v6Contract: string
+  v7Contract: string
   usdcToken: string
   warnings: string[]
 }
 
-export type BaseV6DelegatedStatusResult =
+export type BaseV7DelegatedStatusResult =
   | { ok: true; status: "pending"; txHash: null; warnings: string[] }
   | { ok: true; status: "included"; txHash: string; warnings: string[] }
 
@@ -88,7 +88,7 @@ function normalizeTxHash(value: unknown): string | null {
 
 // ─── Payment context loader ───────────────────────────────────────────────────
 
-async function loadV6DelegatedContext(input: {
+async function loadV7DelegatedContext(input: {
   paymentId: string
   payerAddress: string
 }) {
@@ -108,22 +108,22 @@ async function loadV6DelegatedContext(input: {
   }
 
   if (String(payment.network || "").toLowerCase().trim() !== "base") {
-    throw new Error("Base V6 delegated payment is only available for Base payments")
+    throw new Error("Base V7 delegated payment is only available for Base payments")
   }
 
   const split = ((payment.metadata ?? null) as StoredPaymentSplitMetadata | null)?.split
   if (!split) throw new Error("Payment split metadata is missing")
 
   if (String(split.asset || "").toUpperCase() !== "USDC") {
-    throw new Error("Base V6 delegated payment is only available for Base USDC payments")
+    throw new Error("Base V7 delegated payment is only available for Base USDC payments")
   }
 
-  const v6Contract = requireEvmAddress("PINETREE_BASE_V6_CONTRACT", getBaseV6Contract())
-  if (split.splitContract && !isSameAddress(String(split.splitContract), v6Contract)) {
-    throw new Error("Payment split contract does not match Base V6 contract")
+  const v7Contract = requireEvmAddress("PINETREE_BASE_V7_CONTRACT", getBaseV7Contract())
+  if (split.splitContract && !isSameAddress(String(split.splitContract), v7Contract)) {
+    throw new Error("Payment split contract does not match Base V7 contract")
   }
 
-  const usdcToken = requireEvmAddress("PINETREE_BASE_V6_USDC_TOKEN", getBaseV6UsdcToken())
+  const usdcToken = requireEvmAddress("PINETREE_BASE_V7_USDC_TOKEN", getBaseV7UsdcToken())
   const merchantWallet = requireEvmAddress("merchantWallet", String(split.merchantWallet || ""))
   const treasuryWallet = requireEvmAddress(
     "PINETREE_TREASURY_WALLET_BASE",
@@ -146,7 +146,7 @@ async function loadV6DelegatedContext(input: {
     paymentId,
     payerAddress,
     usdcToken,
-    v6Contract,
+    v7Contract,
     merchantWallet,
     treasuryWallet,
     merchantAmount,
@@ -157,11 +157,11 @@ async function loadV6DelegatedContext(input: {
 
 // ─── Prepare delegated payment ────────────────────────────────────────────────
 
-export async function prepareBaseV6DelegatedPayment(input: {
+export async function prepareBaseV7DelegatedPayment(input: {
   paymentId: string
   payerAddress: string
-}): Promise<BaseV6DelegatedPrepareResult> {
-  const enabled = isBaseV6DelegatedEnabled()
+}): Promise<BaseV7DelegatedPrepareResult> {
+  const enabled = isBaseV7DelegatedEnabled()
   const payerAddress = requireEvmAddress("payerAddress", input.payerAddress)
   const paymentId = String(input.paymentId || "").trim()
 
@@ -171,36 +171,35 @@ export async function prepareBaseV6DelegatedPayment(input: {
       enabled: false,
       paymentId,
       payerAddress,
-      strategy: "delegated_v6_batch",
+      strategy: "delegated_v7_batch",
       chainId: BASE_CHAIN_ID,
       calls: [],
       requiredUsdcAmount: "0",
-      v6Contract: "",
+      v7Contract: "",
       usdcToken: "",
       warnings: [
-        "Base V6 delegated payment is disabled. Set PINETREE_BASE_V6_DELEGATED_ENABLED=true to enable."
+        "Base V7 delegated payment is disabled. Set PINETREE_BASE_V7_DELEGATED_ENABLED=true to enable."
       ]
     }
   }
 
-  console.info("[BASE V6 DELEGATED] prepare-start", {
+  console.info("[BASE V7 DELEGATED] prepare-start", {
     paymentId,
-    payerAddress,
-    strategy: "delegated_v6_batch"
+    strategy: "delegated_v7_batch"
   })
 
-  const context = await loadV6DelegatedContext({ paymentId, payerAddress })
+  const context = await loadV7DelegatedContext({ paymentId, payerAddress })
 
-  const approveCall: BaseV6DelegatedWalletCall = {
+  const approveCall: BaseV7DelegatedWalletCall = {
     to: context.usdcToken,
     value: "0x0",
-    data: usdcIface.encodeFunctionData("approve", [context.v6Contract, context.totalAmount])
+    data: usdcIface.encodeFunctionData("approve", [context.v7Contract, context.totalAmount])
   }
 
-  const paymentCall: BaseV6DelegatedWalletCall = {
-    to: context.v6Contract,
+  const paymentCall: BaseV7DelegatedWalletCall = {
+    to: context.v7Contract,
     value: "0x0",
-    data: v6Iface.encodeFunctionData("payUsdcWithAllowance", [
+    data: v7Iface.encodeFunctionData("payUsdcWithAllowance", [
       context.merchantWallet,
       context.treasuryWallet,
       context.merchantAmount,
@@ -209,9 +208,8 @@ export async function prepareBaseV6DelegatedPayment(input: {
     ])
   }
 
-  console.info("[BASE V6 DELEGATED] prepare-success", {
+  console.info("[BASE V7 DELEGATED] prepare-success", {
     paymentId: context.paymentId,
-    payerAddress: context.payerAddress,
     chainId: BASE_CHAIN_ID,
     requiredUsdcAmount: context.totalAmount.toString()
   })
@@ -221,14 +219,14 @@ export async function prepareBaseV6DelegatedPayment(input: {
     enabled: true,
     paymentId: context.paymentId,
     payerAddress: context.payerAddress,
-    strategy: "delegated_v6_batch",
+    strategy: "delegated_v7_batch",
     chainId: BASE_CHAIN_ID,
     calls: [approveCall, paymentCall],
     requiredUsdcAmount: context.totalAmount.toString(),
-    v6Contract: context.v6Contract,
+    v7Contract: context.v7Contract,
     usdcToken: context.usdcToken,
     warnings: [
-      "Only a final included V6 transaction hash may be sent to /detect.",
+      "Only a final included V7 transaction hash may be sent to /detect.",
       "Do not treat a call id or batch id as a transaction hash."
     ]
   }
@@ -236,18 +234,18 @@ export async function prepareBaseV6DelegatedPayment(input: {
 
 // ─── Resolve delegated status ─────────────────────────────────────────────────
 
-export async function resolveBaseV6DelegatedStatus(input: {
+export async function resolveBaseV7DelegatedStatus(input: {
   callId: string
   payerAddress: string
   txHash?: string | null
-}): Promise<BaseV6DelegatedStatusResult> {
+}): Promise<BaseV7DelegatedStatusResult> {
   requireEvmAddress("payerAddress", input.payerAddress)
   const callId = String(input.callId || "").trim()
   if (!callId) throw new Error("Missing callId")
 
   const txHash = normalizeTxHash(input.txHash)
   if (txHash) {
-    console.info("[BASE V6 DELEGATED] final-tx-resolved", {
+    console.info("[BASE V7 DELEGATED] final-tx-resolved", {
       txHashPrefix: txHash.slice(0, 10),
       source: "delegated-status-route"
     })

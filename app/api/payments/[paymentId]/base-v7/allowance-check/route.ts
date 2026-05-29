@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { checkBaseV6Allowance } from "@/engine/baseV6Relayer"
+import { checkBaseV7Allowance } from "@/engine/baseV7Relayer"
 
 export async function POST(
   req: NextRequest,
@@ -12,11 +12,11 @@ export async function POST(
     const body = (await req.json()) as { payerAddress?: string }
     const payerAddress = String(body.payerAddress || "").trim()
 
-    console.info("[BASE V6] allowance-check route entry", { paymentId, payerAddress })
+    console.info("[POS Base USDC V7] allowance_check_start", { paymentId })
 
-    const result = await checkBaseV6Allowance({ paymentId, payerAddress })
+    const result = await checkBaseV7Allowance({ paymentId, payerAddress })
 
-    console.info("[BASE V6] allowance-check route response", {
+    console.info("[POS Base USDC V7] allowance_check_resolved", {
       paymentId,
       ok: result.ok,
       sufficient: result.ok ? result.sufficient : null
@@ -24,8 +24,8 @@ export async function POST(
 
     return NextResponse.json(result)
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to check Base V6 allowance"
-    console.error("[BASE V6] allowance-check route error", { paymentId, error: message })
+    const message = error instanceof Error ? error.message : "Failed to check Base V7 allowance"
+    console.error("[BASE V7] allowance-check route error", { paymentId, error: message })
     return NextResponse.json({ ok: false, error: message }, { status: 400 })
   }
 }

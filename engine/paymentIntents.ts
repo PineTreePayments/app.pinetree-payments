@@ -352,8 +352,8 @@ export async function selectPaymentIntentNetworkEngine(input: {
 
       if (isActiveStatus && isSameNetwork && isSameAsset) {
         const existingSplit = existingMeta?.split
-        const reuseStrategy = existingSplit?.baseUsdcStrategy === "v6_eip3009_relayer"
-          ? "v6_eip3009_relayer" as const
+        const reuseStrategy = existingSplit?.baseUsdcStrategy === "v7_eip3009_relayer"
+          ? "v7_eip3009_relayer" as const
           : undefined
         const reuseSplitContract = String(existingSplit?.splitContract || "").trim() || undefined
         const reusePaymentUrl = String(existingPayment.payment_url || "").trim()
@@ -469,8 +469,8 @@ export async function selectPaymentIntentNetworkEngine(input: {
       ? String(payment.paymentUrl || "")
       : String(payment.universalUrl || payment.paymentUrl || "")
     const persistedSplit = (persistedPayment.metadata as { split?: Record<string, unknown> } | null)?.split
-    const persistedBaseUsdcStrategy = persistedSplit?.baseUsdcStrategy === "v6_eip3009_relayer"
-      ? "v6_eip3009_relayer"
+    const persistedBaseUsdcStrategy = persistedSplit?.baseUsdcStrategy === "v7_eip3009_relayer"
+      ? "v7_eip3009_relayer"
       : payment.baseUsdcStrategy
     const persistedSplitContract = String(persistedSplit?.splitContract || payment.address || "").trim() || undefined
     const estimatedSats = normalizedNetwork === "bitcoin_lightning"

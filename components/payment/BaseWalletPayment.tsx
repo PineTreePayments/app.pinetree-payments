@@ -24,7 +24,7 @@ type Props = {
   onCancel?: () => void
 }
 type BaseUsdcStrategy =
-  | "v6_eip3009_relayer"
+  | "v7_eip3009_relayer"
   | "delegated_eoa_batch"
   | "allowance_two_step"
   | "allowance_direct"
@@ -110,13 +110,13 @@ type BaseDelegatedPrepareResponse = {
   enabled?: boolean
   paymentId?: string
   payerAddress?: string
-  strategy?: "delegated_eoa_batch" | "delegated_v6_batch"
+  strategy?: "delegated_eoa_batch" | "delegated_v7_batch"
   chainId?: number
   calls?: DelegatedWalletCall[]
   callSummaries?: Array<{ kind: string; to: string; target: string; redacted: boolean }>
   requiredUsdcAmount?: string
   v5Contract?: string
-  v6Contract?: string
+  v7Contract?: string
   usdcToken?: string
   warnings?: string[]
   error?: string
@@ -811,7 +811,7 @@ function resolveBaseUsdcStrategyFromResponse(result: {
     result.metadata?.split?.baseUsdcStrategy || result.baseUsdcStrategy || ""
   ).trim()
   if (
-    strategy === "v6_eip3009_relayer" ||
+    strategy === "v7_eip3009_relayer" ||
     strategy === "delegated_eoa_batch" ||
     strategy === "allowance_two_step" ||
     strategy === "allowance_direct"
@@ -1284,7 +1284,7 @@ export default function BaseWalletPayment({
     while (!allowanceSufficient && Date.now() - pollStartedAt < maxWaitMs) {
       try {
         const checkRes = await fetch(
-          `/api/payments/${encodeURIComponent(input.paymentId)}/base-v6/allowance-check`,
+          `/api/payments/${encodeURIComponent(input.paymentId)}/base-v7/allowance-check`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1331,7 +1331,7 @@ export default function BaseWalletPayment({
         hasAccount: Boolean(input.fromAddress),
       })
       const buildRes = await fetch(
-        `/api/payments/${encodeURIComponent(input.paymentId)}/base-v6/build-allowance-payment`,
+        `/api/payments/${encodeURIComponent(input.paymentId)}/base-v7/build-allowance-payment`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1340,7 +1340,7 @@ export default function BaseWalletPayment({
       )
       const buildData = (await buildRes.json()) as BaseV6UsdcAllowancePaymentResponse
       if (!buildRes.ok || !buildData.ok || !buildData.paymentTx) {
-        throw new Error(buildData.error || "Failed to build final Base V6 USDC payment")
+        throw new Error(buildData.error || "Failed to build final Base USDC payment")
       }
       usdcFinalPaymentTxRef.current = buildData.paymentTx
       usdcFinalPaymentIdRef.current = input.paymentId
@@ -1704,8 +1704,8 @@ export default function BaseWalletPayment({
           paymentId,
           baseUsdcStrategy,
           splitContract,
-          paymentUrlKind: paymentUrl.startsWith("pinetree://base-v6")
-            ? "pinetree://base-v6"
+          paymentUrlKind: paymentUrl.startsWith("pinetree://base-v7")
+            ? "pinetree://base-v7"
             : paymentUrl.startsWith("ethereum:")
               ? "ethereum:"
               : "other"
@@ -1716,7 +1716,7 @@ export default function BaseWalletPayment({
       setIsPreparingPayment(false)
     }
   }, [directBaseUsdcStrategy, directPaymentId, directPaymentUrl, intentId, isIntentMode, onPaymentCreated, selectedAsset])
-  // ─── Base V6 USDC execution ──────────────────────────────────────���─────────
+  // ─── Base V7 USDC execution ──────────────────────────────────────���─────────
   // Calls the server strategy endpoint, then executes the confirmed strategy.
   // No force flag — the server determines the best path.
   const executeBaseV6UsdcPayment = useCallback(async (input: {
@@ -1730,7 +1730,7 @@ export default function BaseWalletPayment({
     finalPaymentIdRef: { current: string | null }
   }): Promise<string | null> => {
     if (activeBaseV6PaymentRef.current === input.paymentData.paymentId) {
-      throw new Error("Base V6 payment is already in progress. Please wait for the current attempt to finish.")
+      throw new Error("Base payment is already in progress. Please wait for the current attempt to finish.")
     }
     activeBaseV6PaymentRef.current = input.paymentData.paymentId
     const paymentId = input.paymentData.paymentId
@@ -1747,7 +1747,7 @@ export default function BaseWalletPayment({
       })
       void logBase("v6-strategy-resolve-start", { paymentId, walletFamily: capabilities.walletFamily })
       const strategyRes = await fetch(
-        `/api/payments/${encodeURIComponent(paymentId)}/base-v6/strategy`,
+        `/api/payments/${encodeURIComponent(paymentId)}/base-v7/strategy`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1765,7 +1765,7 @@ export default function BaseWalletPayment({
       )
       const strategyData = (await strategyRes.json()) as BaseV6StrategyResponse
       if (!strategyRes.ok || !strategyData.ok) {
-        throw new Error(strategyData.error || "Failed to resolve Base V6 payment strategy")
+        throw new Error(strategyData.error || "Failed to resolve Base payment strategy")
       }
       const confirmedStrategy = strategyData.strategy
       console.info("[BASE V6] strategy-confirmed", {
@@ -1798,7 +1798,7 @@ export default function BaseWalletPayment({
           requestStarted: true,
         })
         const delegatedPrepareRes = await fetch(
-          `/api/payments/${encodeURIComponent(paymentId)}/base-v6/delegated/prepare`,
+          `/api/payments/${encodeURIComponent(paymentId)}/base-v7/delegated/prepare`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1890,7 +1890,7 @@ export default function BaseWalletPayment({
         try {
           logBaseV6("usdc_eip3009_prepare_start", { paymentId, strategy: confirmedStrategy })
         const prepareRes = await fetch(
-          `/api/payments/${encodeURIComponent(paymentId)}/base-v6/prepare`,
+          `/api/payments/${encodeURIComponent(paymentId)}/base-v7/prepare`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1898,10 +1898,10 @@ export default function BaseWalletPayment({
           }
         )
         const prepare = (await prepareRes.json()) as BaseV6UsdcPrepareResponse
-        if (!prepareRes.ok) throw new Error(prepare.error || "Failed to prepare Base V6 authorization")
+        if (!prepareRes.ok) throw new Error(prepare.error || "Failed to prepare Base USDC authorization")
         if (prepare.unavailable) throw new Error(prepare.message || BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE)
         if (!prepare.typedData || !prepare.authorization) {
-          throw new Error("Incomplete Base V6 authorization returned by server")
+          throw new Error("Incomplete Base USDC authorization returned by server")
         }
         setExecStageRef.current("confirm_payment")
         setBasePayStatus("Authorize USDC payment in your wallet.")
@@ -1997,7 +1997,7 @@ export default function BaseWalletPayment({
           requestStarted: true,
         })
         const relayRes = await fetch(
-          `/api/payments/${encodeURIComponent(paymentId)}/base-v6/relay`,
+          `/api/payments/${encodeURIComponent(paymentId)}/base-v7/relay`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -2009,7 +2009,7 @@ export default function BaseWalletPayment({
           }
         )
         const relay = (await relayRes.json()) as BaseV6UsdcRelayResponse
-        if (!relayRes.ok) throw new Error(relay.error || "Failed to relay Base V6 payment")
+        if (!relayRes.ok) throw new Error(relay.error || "Failed to relay Base USDC payment")
         if (relay.unavailable) throw new Error(relay.message || BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE)
         const relayTxHash = normalizeHexTransactionHash(relay.txHash)
         console.info("[BASE V6] relay-success", { paymentId, txHashPrefix: relayTxHash.slice(0, 10) })
@@ -2052,7 +2052,7 @@ export default function BaseWalletPayment({
         hasAccount: Boolean(input.fromAddress),
       })
       const buildRes = await fetch(
-        `/api/payments/${encodeURIComponent(paymentId)}/base-v6/build-allowance-payment`,
+        `/api/payments/${encodeURIComponent(paymentId)}/base-v7/build-allowance-payment`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2060,7 +2060,7 @@ export default function BaseWalletPayment({
         }
       )
       const buildData = (await buildRes.json()) as BaseV6UsdcAllowancePaymentResponse
-      if (!buildRes.ok) throw new Error(buildData.error || "Failed to build Base V6 allowance payment")
+      if (!buildRes.ok) throw new Error(buildData.error || "Failed to build Base USDC allowance payment")
       if (buildData.unavailable) throw new Error(buildData.message || BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE)
       if (!buildData.ok || !buildData.paymentTx) {
         throw new Error("Incomplete allowance payment data returned by server")
@@ -2314,8 +2314,8 @@ export default function BaseWalletPayment({
         chainId: settledSession.chainId || base.id,
       })
       // Route USDC payments to the correct execution path based on strategy/URL.
-      // V6: v6_eip3009_relayer strategy or pinetree://base-v6 URL (active path).
-      // All USDC payments go through V6 execution regardless of pre-assigned strategy.
+      // V7: v7_eip3009_relayer strategy or pinetree://base-v7 URL (active path).
+      // All USDC payments go through V7 execution regardless of pre-assigned strategy.
       // executeBaseV6UsdcPayment calls the server strategy endpoint fresh and handles
       // every branch: delegated_batch, eip3009_relayer, allowance_direct, allowance_two_step.
       const isBaseV6 = selectedAsset === "USDC"
@@ -2334,8 +2334,8 @@ export default function BaseWalletPayment({
         console.info("[BASE V6] v6-strategy-detected", {
           paymentId: paymentData.paymentId,
           splitContract: paymentData.splitContract,
-          paymentUrlKind: paymentData.paymentUrl.startsWith("pinetree://base-v6")
-            ? "pinetree://base-v6"
+          paymentUrlKind: paymentData.paymentUrl.startsWith("pinetree://base-v7")
+            ? "pinetree://base-v7"
             : "other"
         })
         const peerName = getWalletConnectPeerName(walletConnectProvider)

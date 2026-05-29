@@ -93,8 +93,8 @@ export async function POST(req: NextRequest, { params }: Params) {
         asset: asset || null,
         baseUsdcStrategy,
         splitContract,
-        paymentUrlKind: paymentUrl.startsWith("pinetree://base-v6")
-          ? "pinetree://base-v6"
+        paymentUrlKind: paymentUrl.startsWith("pinetree://base-v7")
+          ? "pinetree://base-v7"
           : paymentUrl.startsWith("ethereum:")
             ? "ethereum:"
             : "other"

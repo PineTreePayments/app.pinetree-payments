@@ -431,8 +431,8 @@ export async function createPayment(
   ).trim() || undefined
 
   const isBaseUsdcPayment = network === "base" && requestedAsset === "USDC"
-  const baseUsdcStrategy = isBaseUsdcPayment ? "v6_eip3009_relayer" : undefined
-  const isBaseV6Payment = isBaseUsdcPayment
+  const baseUsdcStrategy = isBaseUsdcPayment ? "v7_eip3009_relayer" : undefined
+  const isBaseV7Payment = isBaseUsdcPayment
 
   const splitPayment = await generateSplitPayment({
     merchantWallet: merchantWalletAddress,
@@ -448,8 +448,8 @@ export async function createPayment(
   })
 
   const splitContract = splitPayment.splitContract || extractEvmSplitContractFromPaymentUrl(splitPayment.paymentUrl)
-  const paymentUrlKind = splitPayment.paymentUrl.startsWith("pinetree://base-v6")
-    ? "pinetree://base-v6"
+  const paymentUrlKind = splitPayment.paymentUrl.startsWith("pinetree://base-v7")
+    ? "pinetree://base-v7"
     : splitPayment.paymentUrl.startsWith("ethereum:")
       ? "ethereum:"
       : "other"
@@ -525,7 +525,7 @@ export async function createPayment(
           ? { lightningProviderMetadata: (providerPayment as { metadata?: Record<string, unknown> }).metadata }
           : {}),
         ...(baseUsdcStrategy ? { baseUsdcStrategy } : {}),
-        ...(isBaseV6Payment ? { baseVersion: "v6" as const } : {}),
+        ...(isBaseV7Payment ? { baseVersion: "v7" as const } : {}),
         ...((network === "solana" || network === "base") && requestedAsset === "USDC" ? { asset: "USDC" } : {})
       }
     },

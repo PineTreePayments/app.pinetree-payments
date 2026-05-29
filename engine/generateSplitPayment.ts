@@ -1,7 +1,7 @@
 import QRCode from "qrcode"
 import { Interface } from "ethers"
 import { getMarketPricesUSD } from "./marketPrices"
-import { getBaseV6Contract } from "./config"
+import { getBaseV7Contract } from "./config"
 
 const SPLIT_ETH_ABI = [
   "function splitEth(address merchant, address treasury, uint256 merchantAmountWei, uint256 feeAmountWei, string paymentRef) payable"
@@ -188,11 +188,11 @@ export async function generateSplitPayment(
     } else {
       const chainId = "8453"
 
-      // ── V6 split contract ────────────────────────────────────────────────────
-      evmSplitContract = getBaseV6Contract()
+      // ── V7 split contract ────────────────────────────────────────────────────
+      evmSplitContract = getBaseV7Contract()
 
       if (isUsdc) {
-        paymentUrl = `pinetree://base-v6?paymentId=${encodeURIComponent(String(input.paymentId || ""))}`
+        paymentUrl = `pinetree://base-v7?paymentId=${encodeURIComponent(String(input.paymentId || ""))}`
       } else {
         const totalWei = toWeiString(nativeAmount)
         const calldata = splitEthIface.encodeFunctionData("splitEth", [

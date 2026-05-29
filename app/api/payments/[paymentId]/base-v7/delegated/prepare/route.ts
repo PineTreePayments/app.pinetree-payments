@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prepareBaseV6DelegatedPayment } from "@/engine/baseV6Execution"
+import { prepareBaseV7DelegatedPayment } from "@/engine/baseV7Execution"
 
 export async function POST(
   req: NextRequest,
@@ -12,15 +12,14 @@ export async function POST(
     const body = (await req.json()) as { payerAddress?: string }
     const payerAddress = String(body.payerAddress || "").trim()
 
-    console.info("[BASE V6 DELEGATED] prepare route entry", {
+    console.info("[BASE V7 DELEGATED] prepare route entry", {
       paymentId,
-      payerAddress,
-      strategy: "delegated_v6_batch"
+      strategy: "delegated_v7_batch"
     })
 
-    const result = await prepareBaseV6DelegatedPayment({ paymentId, payerAddress })
+    const result = await prepareBaseV7DelegatedPayment({ paymentId, payerAddress })
 
-    console.info("[BASE V6 DELEGATED] prepare route response", {
+    console.info("[BASE V7 DELEGATED] prepare route response", {
       paymentId,
       enabled: result.enabled,
       callCount: result.calls.length,
@@ -30,8 +29,8 @@ export async function POST(
     return NextResponse.json(result)
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Failed to prepare Base V6 delegated payment"
-    console.error("[BASE V6 DELEGATED] prepare route error", { paymentId, error: message })
+      error instanceof Error ? error.message : "Failed to prepare Base V7 delegated payment"
+    console.error("[BASE V7 DELEGATED] prepare route error", { paymentId, error: message })
     return NextResponse.json({ ok: false, error: message }, { status: 400 })
   }
 }

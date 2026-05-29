@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAdminFromRequest, getRouteErrorStatus } from "@/lib/api/adminAuth"
 import {
-  isBaseV6Configured,
-  isBaseV6DelegatedEnabled,
+  isBaseV7Configured,
+  isBaseV7DelegatedEnabled,
   RPC_URLS,
 } from "@/engine/config"
 
@@ -60,47 +60,47 @@ export async function GET(req: NextRequest) {
       fallback: wc.present ? undefined : "Base ETH and Base USDC payments will fail on connect",
     })
 
-    // ── Base V6 contract + relayer ────────────────────────────────────────────
-    const v6Ready = isBaseV6Configured()
-    const v6Contract = checkEnv(["PINETREE_BASE_V6_CONTRACT"])
-    const v6RelayerAddr = checkEnv(["PINETREE_BASE_V6_RELAYER_ADDRESS"])
-    const v6RelayerKey = checkEnv(["PINETREE_BASE_V6_RELAYER_PRIVATE_KEY"])
-    const v6GasCap = checkEnv(["PINETREE_BASE_V6_MAX_GAS_USD"])
+    // ── Base V7 contract + relayer ────────────────────────────────────────────
+    const v7Ready = isBaseV7Configured()
+    const v7Contract = checkEnv(["PINETREE_BASE_V7_CONTRACT"])
+    const v7RelayerAddr = checkEnv(["PINETREE_BASE_V7_RELAYER_ADDRESS"])
+    const v7RelayerKey = checkEnv(["PINETREE_BASE_V7_RELAYER_PRIVATE_KEY"])
+    const v7GasCap = checkEnv(["PINETREE_BASE_V7_MAX_GAS_USD"])
     checks.push({
-      name: "Base V6 Contract",
-      status: v6Contract.present ? "healthy" : "missing",
+      name: "Base V7 Contract",
+      status: v7Contract.present ? "healthy" : "missing",
       rails: ["base"],
-      detail: v6Contract.present
-        ? `PINETREE_BASE_V6_CONTRACT set`
-        : "PINETREE_BASE_V6_CONTRACT not set — Base payments will fail",
-      fallback: v6Contract.present ? undefined : "All Base payments will fail at payment creation",
+      detail: v7Contract.present
+        ? `PINETREE_BASE_V7_CONTRACT set`
+        : "PINETREE_BASE_V7_CONTRACT not set — Base payments will fail",
+      fallback: v7Contract.present ? undefined : "All Base payments will fail at payment creation",
     })
     checks.push({
-      name: "Base V6 Relayer (EIP-3009)",
-      status: v6Ready ? "healthy" : v6RelayerAddr.present ? "warning" : "missing",
+      name: "Base V7 Relayer (EIP-3009)",
+      status: v7Ready ? "healthy" : v7RelayerAddr.present ? "warning" : "missing",
       rails: ["base"],
-      detail: v6Ready
-        ? "V6 relayer fully configured"
-        : !v6RelayerAddr.present
-          ? "PINETREE_BASE_V6_RELAYER_ADDRESS not set"
-          : !v6RelayerKey.present
-            ? "PINETREE_BASE_V6_RELAYER_PRIVATE_KEY not set"
-            : !v6GasCap.present
-              ? "PINETREE_BASE_V6_MAX_GAS_USD not set"
-              : "V6 relayer configuration incomplete",
-      fallback: v6Ready ? undefined : "USDC EIP-3009 path unavailable; allowance_two_step will be used",
+      detail: v7Ready
+        ? "V7 relayer fully configured"
+        : !v7RelayerAddr.present
+          ? "PINETREE_BASE_V7_RELAYER_ADDRESS not set"
+          : !v7RelayerKey.present
+            ? "PINETREE_BASE_V7_RELAYER_PRIVATE_KEY not set"
+            : !v7GasCap.present
+              ? "PINETREE_BASE_V7_MAX_GAS_USD not set"
+              : "V7 relayer configuration incomplete",
+      fallback: v7Ready ? undefined : "USDC EIP-3009 path unavailable; allowance_two_step will be used",
     })
 
-    // ── Base V6 Delegated (wallet_sendCalls) ──────────────────────────────────
-    const v6DelegatedEnabled = isBaseV6DelegatedEnabled()
+    // ── Base V7 Delegated (wallet_sendCalls) ──────────────────────────────────
+    const v7DelegatedEnabled = isBaseV7DelegatedEnabled()
     checks.push({
-      name: "Base V6 Delegated (wallet_sendCalls)",
-      status: v6DelegatedEnabled ? "healthy" : "warning",
+      name: "Base V7 Delegated (wallet_sendCalls)",
+      status: v7DelegatedEnabled ? "healthy" : "warning",
       rails: ["base"],
-      detail: v6DelegatedEnabled
-        ? "PINETREE_BASE_V6_DELEGATED_ENABLED=true — Coinbase Smart Wallet batch path active"
-        : "PINETREE_BASE_V6_DELEGATED_ENABLED not set or false — batch path disabled",
-      fallback: v6DelegatedEnabled ? undefined : "Coinbase Smart Wallet falls to EIP-3009 or allowance path",
+      detail: v7DelegatedEnabled
+        ? "PINETREE_BASE_V7_DELEGATED_ENABLED=true — Coinbase Smart Wallet batch path active"
+        : "PINETREE_BASE_V7_DELEGATED_ENABLED not set or false — batch path disabled",
+      fallback: v7DelegatedEnabled ? undefined : "Coinbase Smart Wallet falls to EIP-3009 or allowance path",
     })
 
     // ── Solana RPC ────────────────────────────────────────────────────────────

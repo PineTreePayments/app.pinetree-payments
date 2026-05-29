@@ -1,5 +1,5 @@
 /**
- * POS-owned WalletConnect session helper for Base V6 payments.
+ * POS-owned WalletConnect session helper for Base V7 payments.
  *
  * The POS terminal creates and owns the WC session so that all provider.request()
  * calls are made from the stable POS device. The resulting pairing URI is public

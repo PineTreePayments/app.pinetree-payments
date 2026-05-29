@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { relayBaseV6Payment } from "@/engine/baseV6Relayer"
+import { relayBaseV7Payment } from "@/engine/baseV7Relayer"
 
 export async function POST(
   req: NextRequest,
@@ -20,14 +20,13 @@ export async function POST(
     }
     const payerAddress = String(body.payerAddress || "").trim()
 
-    console.info("[BASE V6] relay route entry", {
+    console.info("[BASE V7] relay route entry", {
       paymentId,
-      payerAddress,
       hasAuthorization: Boolean(body.authorization),
       hasSignature: Boolean(body.signature)
     })
 
-    const result = await relayBaseV6Payment({
+    const result = await relayBaseV7Payment({
       paymentId,
       payerAddress,
       authorization: {
@@ -39,13 +38,13 @@ export async function POST(
     })
 
     if (result.ok) {
-      console.info("[BASE V6] relay route success", {
+      console.info("[POS Base USDC V7] relay_resolved", {
         paymentId,
         txHash: (result as { txHash?: string }).txHash || null,
         status: (result as { status?: string }).status || null
       })
     } else {
-      console.warn("[BASE V6] relay route unavailable", {
+      console.warn("[BASE V7] relay route unavailable", {
         paymentId,
         code: (result as Record<string, unknown>).code || null
       })
@@ -53,8 +52,8 @@ export async function POST(
 
     return NextResponse.json(result)
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to relay Base V6 payment"
-    console.error("[BASE V6] relay route error", { paymentId, error: message })
+    const message = error instanceof Error ? error.message : "Failed to relay Base V7 payment"
+    console.error("[BASE V7] relay route error", { paymentId, error: message })
     return NextResponse.json({ ok: false, error: message }, { status: 400 })
   }
 }

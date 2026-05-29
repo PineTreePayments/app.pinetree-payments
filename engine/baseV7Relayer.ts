@@ -17,11 +17,11 @@ import {
 } from "@/database/transactions"
 import type { StoredPaymentSplitMetadata } from "@/types/payment"
 import {
-  getBaseV6AuthValiditySeconds,
-  getBaseV6Contract,
-  getBaseV6GasCap,
-  getBaseV6Relayer,
-  getBaseV6UsdcToken,
+  getBaseV7AuthValiditySeconds,
+  getBaseV7Contract,
+  getBaseV7GasCap,
+  getBaseV7Relayer,
+  getBaseV7UsdcToken,
   getPineTreeTreasuryWallet,
   getRpcUrl
 } from "./config"
@@ -39,7 +39,7 @@ const TERMINAL_PAYMENT_STATUSES = new Set([
   "REFUNDED"
 ])
 
-const V6_ABI = [
+const V7_ABI = [
   "function payUsdcWithAuthorization((address payer,address merchant,address treasury,uint256 merchantAmount,uint256 feeAmount,string paymentRef) payment,(uint256 validAfter,uint256 validBefore,bytes32 nonce) authorization,(uint8 v,bytes32 r,bytes32 s) signature)",
   "function payUsdcWithAllowance(address merchant,address treasury,uint256 merchantAmount,uint256 feeAmount,string paymentRef)",
   "function relayers(address relayer) view returns (bool)",
@@ -56,19 +56,19 @@ const usdcIface = new Interface([
   "function approve(address spender, uint256 amount) returns (bool)"
 ])
 
-const v6Iface = new Interface([
+const v7Iface = new Interface([
   "function payUsdcWithAllowance(address merchant,address treasury,uint256 merchantAmount,uint256 feeAmount,string paymentRef)"
 ])
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type BaseV6Authorization = {
+type BaseV7Authorization = {
   validAfter: string
   validBefore: string
   nonce: string
 }
 
-type BaseV6TypedDataInput = {
+type BaseV7TypedDataInput = {
   payerAddress: string
   value: string | bigint
   validAfter: string | number | bigint
@@ -76,7 +76,7 @@ type BaseV6TypedDataInput = {
   nonce: string
 }
 
-type BaseV6PaymentContext = {
+type BaseV7PaymentContext = {
   paymentId: string
   payerAddress: string
   merchantWallet: string
@@ -87,22 +87,22 @@ type BaseV6PaymentContext = {
   splitContract: string
 }
 
-export type BaseV6UnavailableResponse = {
+export type BaseV7UnavailableResponse = {
   ok: false
   unavailable: true
   code: "BASE_USDC_TEMPORARILY_UNAVAILABLE"
   message: string
 }
 
-export type BaseV6RelayResponse =
+export type BaseV7RelayResponse =
   | { ok: true; status: "submitted"; txHash: string }
-  | BaseV6UnavailableResponse
+  | BaseV7UnavailableResponse
 
-export type BaseV6AllowanceCheckResult =
+export type BaseV7AllowanceCheckResult =
   | { ok: true; allowance: string; required: string; sufficient: boolean }
-  | BaseV6UnavailableResponse
+  | BaseV7UnavailableResponse
 
-export type BaseV6AllowancePaymentResult =
+export type BaseV7AllowancePaymentResult =
   | {
       ok: true
       paymentId: string
@@ -112,11 +112,11 @@ export type BaseV6AllowancePaymentResult =
       approveTx: { to: string; data: string; value: string; chainId: number } | null
       paymentTx: { to: string; data: string; value: string; chainId: number }
     }
-  | BaseV6UnavailableResponse
+  | BaseV7UnavailableResponse
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function unavailable(): BaseV6UnavailableResponse {
+function unavailable(): BaseV7UnavailableResponse {
   return {
     ok: false,
     unavailable: true,
@@ -145,16 +145,16 @@ function requireAtomicAmount(label: string, value: unknown): bigint {
   return amount
 }
 
-function normalizeAuthorization(input: BaseV6Authorization): BaseV6Authorization {
+function normalizeAuthorization(input: BaseV7Authorization): BaseV7Authorization {
   const validAfter = String(input.validAfter ?? "").trim()
   const validBefore = String(input.validBefore ?? "").trim()
   const nonce = String(input.nonce || "").trim()
 
   if (!/^\d+$/.test(validAfter) || !/^\d+$/.test(validBefore)) {
-    throw new Error("Invalid Base V6 authorization validity window")
+    throw new Error("Invalid Base V7 authorization validity window")
   }
   if (!/^0x[a-fA-F0-9]{64}$/.test(nonce)) {
-    throw new Error("Invalid Base V6 authorization nonce")
+    throw new Error("Invalid Base V7 authorization nonce")
   }
   return { validAfter, validBefore, nonce }
 }
@@ -165,11 +165,11 @@ function isSameAddress(left: string, right: string): boolean {
 
 // ─── Payment context loader ───────────────────────────────────────────────────
 
-async function loadV6PaymentContext(input: {
+async function loadV7PaymentContext(input: {
   paymentId: string
   payerAddress: string
   allowTerminal: boolean
-}): Promise<BaseV6PaymentContext> {
+}): Promise<BaseV7PaymentContext> {
   const paymentId = String(input.paymentId || "").trim()
   if (!paymentId) throw new Error("Missing paymentId")
 
@@ -186,7 +186,7 @@ async function loadV6PaymentContext(input: {
   }
 
   if (String(payment.network || "").toLowerCase().trim() !== "base") {
-    throw new Error("Base V6 is only available for Base payments")
+    throw new Error("Base V7 is only available for Base payments")
   }
 
   const split = ((payment.metadata ?? null) as StoredPaymentSplitMetadata | null)?.split
@@ -196,9 +196,9 @@ async function loadV6PaymentContext(input: {
     throw new Error("Payment is not a Base USDC payment")
   }
 
-  const v6Contract = getBaseV6Contract()
-  if (split.splitContract && !isSameAddress(String(split.splitContract), v6Contract)) {
-    throw new Error("Payment split contract does not match Base V6 contract")
+  const v7Contract = getBaseV7Contract()
+  if (split.splitContract && !isSameAddress(String(split.splitContract), v7Contract)) {
+    throw new Error("Payment split contract does not match Base V7 contract")
   }
 
   const merchantWallet = requireEvmAddress("merchantWallet", String(split.merchantWallet || ""))
@@ -226,13 +226,13 @@ async function loadV6PaymentContext(input: {
     merchantAmount,
     feeAmount,
     totalAmount: merchantAmount + feeAmount,
-    splitContract: requireEvmAddress("PINETREE_BASE_V6_CONTRACT", v6Contract)
+    splitContract: requireEvmAddress("PINETREE_BASE_V7_CONTRACT", v7Contract)
   }
 }
 
 // ─── Typed data builder ───────────────────────────────────────────────────────
 
-export function buildBaseV6TypedData(input: BaseV6TypedDataInput) {
+export function buildBaseV7TypedData(input: BaseV7TypedDataInput) {
   const authorization = normalizeAuthorization({
     validAfter: String(input.validAfter),
     validBefore: String(input.validBefore),
@@ -240,7 +240,7 @@ export function buildBaseV6TypedData(input: BaseV6TypedDataInput) {
   })
   const value = String(input.value)
   if (!/^\d+$/.test(value) || BigInt(value) <= BigInt(0)) {
-    throw new Error("Invalid Base V6 authorization value")
+    throw new Error("Invalid Base V7 authorization value")
   }
 
   return {
@@ -248,7 +248,7 @@ export function buildBaseV6TypedData(input: BaseV6TypedDataInput) {
       name: "USD Coin",
       version: "2",
       chainId: BASE_CHAIN_ID,
-      verifyingContract: getBaseV6UsdcToken()
+      verifyingContract: getBaseV7UsdcToken()
     },
     types: {
       ReceiveWithAuthorization: [
@@ -263,7 +263,7 @@ export function buildBaseV6TypedData(input: BaseV6TypedDataInput) {
     primaryType: "ReceiveWithAuthorization",
     message: {
       from: requireEvmAddress("payerAddress", input.payerAddress),
-      to: getBaseV6Contract(),
+      to: getBaseV7Contract(),
       value,
       validAfter: authorization.validAfter,
       validBefore: authorization.validBefore,
@@ -274,13 +274,13 @@ export function buildBaseV6TypedData(input: BaseV6TypedDataInput) {
 
 // ─── Availability check ───────────────────────────────────────────────────────
 
-export async function getBaseV6Availability(): Promise<BaseV6UnavailableResponse | { ok: true }> {
+export async function getBaseV7Availability(): Promise<BaseV7UnavailableResponse | { ok: true }> {
   try {
-    getBaseV6Contract()
-    getBaseV6UsdcToken()
-    getBaseV6Relayer()
-    getBaseV6GasCap()
-    getBaseV6AuthValiditySeconds()
+    getBaseV7Contract()
+    getBaseV7UsdcToken()
+    getBaseV7Relayer()
+    getBaseV7GasCap()
+    getBaseV7AuthValiditySeconds()
     getPineTreeTreasuryWallet("base")
     getRpcUrl("base")
     return { ok: true }
@@ -291,49 +291,48 @@ export async function getBaseV6Availability(): Promise<BaseV6UnavailableResponse
 
 // ─── Prepare authorization ────────────────────────────────────────────────────
 
-export async function prepareBaseV6Authorization(input: {
+export async function prepareBaseV7Authorization(input: {
   paymentId: string
   payerAddress: string
 }) {
-  console.info("[BASE V6] prepare-authorization entry", {
-    paymentId: input.paymentId,
-    payerAddress: input.payerAddress
+  console.info("[BASE V7] prepare-authorization entry", {
+    paymentId: input.paymentId
   })
 
-  const availability = await getBaseV6Availability()
+  const availability = await getBaseV7Availability()
   if (!availability.ok) {
-    console.warn("[BASE V6] prepare-authorization config unavailable", {
+    console.warn("[BASE V7] prepare-authorization config unavailable", {
       paymentId: input.paymentId,
       code: availability.code
     })
     return availability
   }
 
-  let context: BaseV6PaymentContext
+  let context: BaseV7PaymentContext
   try {
-    context = await loadV6PaymentContext({
+    context = await loadV7PaymentContext({
       paymentId: input.paymentId,
       payerAddress: input.payerAddress,
       allowTerminal: false
     })
   } catch (ctxErr) {
     const ctxMsg = ctxErr instanceof Error ? ctxErr.message : String(ctxErr)
-    console.error("[BASE V6] prepare-authorization context load failed", {
+    console.error("[BASE V7] prepare-authorization context load failed", {
       paymentId: input.paymentId,
       error: ctxMsg
     })
     throw ctxErr
   }
 
-  const v6Contract = getBaseV6Contract()
-  const usdcTokenAddress = getBaseV6UsdcToken()
+  const v7Contract = getBaseV7Contract()
+  const usdcTokenAddress = getBaseV7UsdcToken()
   const now = Math.floor(Date.now() / 1000)
-  const authorization: BaseV6Authorization = {
+  const authorization: BaseV7Authorization = {
     validAfter: "0",
-    validBefore: String(now + getBaseV6AuthValiditySeconds()),
+    validBefore: String(now + getBaseV7AuthValiditySeconds()),
     nonce: hexlify(randomBytes(32))
   }
-  const typedData = buildBaseV6TypedData({
+  const typedData = buildBaseV7TypedData({
     payerAddress: context.payerAddress,
     value: context.totalAmount,
     validAfter: authorization.validAfter,
@@ -341,9 +340,9 @@ export async function prepareBaseV6Authorization(input: {
     nonce: authorization.nonce
   })
 
-  console.info("[BASE V6] prepare-authorization success", {
+  console.info("[BASE V7] prepare-authorization success", {
     paymentId: context.paymentId,
-    splitContract: v6Contract,
+    splitContract: v7Contract,
     usdcTokenAddress,
     validBefore: authorization.validBefore
   })
@@ -359,20 +358,19 @@ export async function prepareBaseV6Authorization(input: {
 
 // ─── Relay payment (EIP-3009 path) ───────────────────────────────────────────
 
-export async function relayBaseV6Payment(input: {
+export async function relayBaseV7Payment(input: {
   paymentId: string
   payerAddress: string
-  authorization: BaseV6Authorization
+  authorization: BaseV7Authorization
   signature: string
-}): Promise<BaseV6RelayResponse> {
-  console.info("[BASE V6] relay entry", {
-    paymentId: input.paymentId,
-    payerAddress: input.payerAddress
+}): Promise<BaseV7RelayResponse> {
+  console.info("[BASE V7] relay entry", {
+    paymentId: input.paymentId
   })
 
-  const availability = await getBaseV6Availability()
+  const availability = await getBaseV7Availability()
   if (!availability.ok) {
-    console.warn("[BASE V6] relay config unavailable", {
+    console.warn("[BASE V7] relay config unavailable", {
       paymentId: input.paymentId,
       code: availability.code
     })
@@ -382,14 +380,14 @@ export async function relayBaseV6Payment(input: {
   const existingTransaction = await getTransactionByPaymentId(input.paymentId)
   const existingTxHash = String(existingTransaction?.provider_transaction_id || "").trim()
   if (/^0x[a-fA-F0-9]{64}$/.test(existingTxHash)) {
-    console.info("[BASE V6] relay idempotent — txHash already exists", {
+    console.info("[BASE V7] relay idempotent — txHash already exists", {
       paymentId: input.paymentId,
       txHash: existingTxHash
     })
     return { ok: true, status: "submitted", txHash: existingTxHash }
   }
 
-  const context = await loadV6PaymentContext({
+  const context = await loadV7PaymentContext({
     paymentId: input.paymentId,
     payerAddress: input.payerAddress,
     allowTerminal: false
@@ -398,7 +396,7 @@ export async function relayBaseV6Payment(input: {
 
   const nowSec = Math.floor(Date.now() / 1000)
   if (BigInt(authorization.validBefore) <= BigInt(nowSec)) {
-    console.warn("[BASE V6] relay authorization expired", {
+    console.warn("[BASE V7] relay authorization expired", {
       paymentId: input.paymentId,
       validBefore: authorization.validBefore,
       now: nowSec
@@ -406,7 +404,7 @@ export async function relayBaseV6Payment(input: {
     throw new Error("USDC authorization has expired. Please authorize again.")
   }
 
-  const typedData = buildBaseV6TypedData({
+  const typedData = buildBaseV7TypedData({
     payerAddress: context.payerAddress,
     value: context.totalAmount,
     validAfter: authorization.validAfter,
@@ -418,21 +416,21 @@ export async function relayBaseV6Payment(input: {
   )
 
   if (recovered !== context.payerAddress) {
-    console.error("[BASE V6] relay signature mismatch", {
+    console.error("[BASE V7] relay signature mismatch", {
       paymentId: input.paymentId,
       recovered,
       expected: context.payerAddress
     })
-    throw new Error("Base V6 authorization signature does not match payer")
+    throw new Error("Base V7 authorization signature does not match payer")
   }
 
   const signature = Signature.from(input.signature)
   const provider = new JsonRpcProvider(getRpcUrl("base"), BASE_CHAIN_ID)
-  const { address: configuredRelayerAddress, privateKey } = getBaseV6Relayer()
+  const { address: configuredRelayerAddress, privateKey } = getBaseV7Relayer()
   const relayer = new Wallet(privateKey, provider)
 
   if (getAddress(relayer.address) !== getAddress(configuredRelayerAddress)) {
-    console.error("[BASE V6] relay address mismatch", {
+    console.error("[BASE V7] relay address mismatch", {
       paymentId: input.paymentId,
       configuredRelayerAddress,
       derivedRelayerAddress: relayer.address
@@ -440,7 +438,7 @@ export async function relayBaseV6Payment(input: {
     return unavailable()
   }
 
-  const contract = new Contract(context.splitContract, V6_ABI, relayer)
+  const contract = new Contract(context.splitContract, V7_ABI, relayer)
 
   const [isRelayerAllowed, isPaymentRefUsed, contractTreasury] = await Promise.all([
     contract.relayers(relayer.address) as Promise<boolean>,
@@ -448,7 +446,7 @@ export async function relayBaseV6Payment(input: {
     contract.pineTreeTreasury() as Promise<string>
   ])
 
-  console.info("[BASE V6] relay contract checks", {
+  console.info("[BASE V7] relay contract checks", {
     paymentId: input.paymentId,
     splitContract: context.splitContract,
     relayerAddress: relayer.address,
@@ -459,7 +457,7 @@ export async function relayBaseV6Payment(input: {
   })
 
   if (!isRelayerAllowed) {
-    console.error("[BASE V6] relay not allowlisted", {
+    console.error("[BASE V7] relay not allowlisted", {
       paymentId: input.paymentId,
       relayerAddress: relayer.address,
       splitContract: context.splitContract
@@ -468,11 +466,11 @@ export async function relayBaseV6Payment(input: {
   }
 
   if (isPaymentRefUsed) {
-    throw new Error("Base V6 payment reference has already been used on-chain")
+    throw new Error("Base V7 payment reference has already been used on-chain")
   }
 
   if (getAddress(contractTreasury) !== getAddress(context.treasuryWallet)) {
-    console.error("[BASE V6] relay treasury mismatch", {
+    console.error("[BASE V7] relay treasury mismatch", {
       paymentId: input.paymentId,
       contractTreasury: getAddress(contractTreasury),
       configuredTreasury: context.treasuryWallet
@@ -503,17 +501,17 @@ export async function relayBaseV6Payment(input: {
   const feeData = await provider.getFeeData()
   const gasPrice = feeData.maxFeePerGas || feeData.gasPrice
   if (!gasPrice) {
-    console.warn("[BASE V6] relay no gas price available", { paymentId: input.paymentId })
+    console.warn("[BASE V7] relay no gas price available", { paymentId: input.paymentId })
     return unavailable()
   }
 
   const gasCostWei = estimatedGas * gasPrice
   const prices = await getMarketPricesUSD()
   const gasCostUsd = Number(formatEther(gasCostWei)) * prices.ETH
-  const { maxGasUsd } = getBaseV6GasCap()
+  const { maxGasUsd } = getBaseV7GasCap()
   const relayerBalance = await provider.getBalance(relayer.address)
 
-  console.info("[BASE V6] relay gas check", {
+  console.info("[BASE V7] relay gas check", {
     paymentId: input.paymentId,
     estimatedGas: estimatedGas.toString(),
     gasCostUsd: Number.isFinite(gasCostUsd) ? gasCostUsd.toFixed(6) : "NaN",
@@ -522,7 +520,7 @@ export async function relayBaseV6Payment(input: {
   })
 
   if (!Number.isFinite(gasCostUsd) || gasCostUsd > maxGasUsd) {
-    console.warn("[BASE V6] relay gas cap exceeded", {
+    console.warn("[BASE V7] relay gas cap exceeded", {
       paymentId: input.paymentId,
       gasCostUsd,
       maxGasUsd
@@ -531,7 +529,7 @@ export async function relayBaseV6Payment(input: {
   }
 
   if (relayerBalance < gasCostWei) {
-    console.warn("[BASE V6] relay insufficient ETH balance", {
+    console.warn("[BASE V7] relay insufficient ETH balance", {
       paymentId: input.paymentId,
       gasCostWei: gasCostWei.toString(),
       relayerBalanceWei: relayerBalance.toString()
@@ -539,7 +537,7 @@ export async function relayBaseV6Payment(input: {
     return unavailable()
   }
 
-  console.info("[BASE V6] relay submitting payUsdcWithAuthorization", {
+  console.info("[BASE V7] relay submitting payUsdcWithAuthorization", {
     paymentId: input.paymentId,
     splitContract: context.splitContract,
     relayerAddress: relayer.address
@@ -552,10 +550,10 @@ export async function relayBaseV6Payment(input: {
   )
   const txHash = String(tx.hash || "")
   if (!/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
-    throw new Error("Base V6 relayer did not return a transaction hash")
+    throw new Error("Base V7 relayer did not return a transaction hash")
   }
 
-  console.info("[BASE V6] relay tx submitted", { paymentId: input.paymentId, txHash })
+  console.info("[BASE V7] relay tx submitted", { paymentId: input.paymentId, txHash })
 
   if (existingTransaction?.id) {
     await updateTransactionProviderReference(existingTransaction.id, txHash)
@@ -564,7 +562,7 @@ export async function relayBaseV6Payment(input: {
   try {
     const receipt = await provider.waitForTransaction(txHash, 1, 90_000)
     if (receipt) {
-      console.info("[BASE V6] relay receipt mined", {
+      console.info("[BASE V7] relay receipt mined", {
         paymentId: input.paymentId,
         txHash,
         receiptStatus: receipt.status !== undefined ? String(receipt.status) : "unknown"
@@ -573,7 +571,7 @@ export async function relayBaseV6Payment(input: {
       try {
         await runPaymentWatcher(input.paymentId, { txHash })
       } catch (watcherErr) {
-        console.error("[BASE V6] relay watcher error", {
+        console.error("[BASE V7] relay watcher error", {
           paymentId: input.paymentId,
           txHash,
           error: watcherErr instanceof Error ? watcherErr.message : String(watcherErr)
@@ -581,7 +579,7 @@ export async function relayBaseV6Payment(input: {
       }
     }
   } catch (waitErr) {
-    console.warn("[BASE V6] relay wait-for-receipt timeout — cron will detect", {
+    console.warn("[BASE V7] relay wait-for-receipt timeout — cron will detect", {
       paymentId: input.paymentId,
       txHash,
       error: waitErr instanceof Error ? waitErr.message : String(waitErr)
@@ -593,18 +591,18 @@ export async function relayBaseV6Payment(input: {
 
 // ─── Allowance check ──────────────────────────────────────────────────────────
 
-export async function checkBaseV6Allowance(input: {
+export async function checkBaseV7Allowance(input: {
   paymentId: string
   payerAddress: string
-}): Promise<BaseV6AllowanceCheckResult> {
+}): Promise<BaseV7AllowanceCheckResult> {
   try {
-    const context = await loadV6PaymentContext({
+    const context = await loadV7PaymentContext({
       paymentId: input.paymentId,
       payerAddress: input.payerAddress,
       allowTerminal: false
     })
     const provider = new JsonRpcProvider(getRpcUrl("base"), BASE_CHAIN_ID)
-    const usdcContract = new Contract(getBaseV6UsdcToken(), USDC_ABI, provider)
+    const usdcContract = new Contract(getBaseV7UsdcToken(), USDC_ABI, provider)
     const rawAllowance = (await usdcContract.allowance(
       context.payerAddress,
       context.splitContract
@@ -614,7 +612,7 @@ export async function checkBaseV6Allowance(input: {
     const required = context.totalAmount.toString()
     const sufficient = rawAllowance >= context.totalAmount
 
-    console.info("[BASE V6] allowance check", {
+    console.info("[BASE V7] allowance check", {
       paymentId: context.paymentId,
       allowance,
       required,
@@ -623,7 +621,7 @@ export async function checkBaseV6Allowance(input: {
     return { ok: true, allowance, required, sufficient }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error("[BASE V6] allowance check failed", {
+    console.error("[BASE V7] allowance check failed", {
       paymentId: input.paymentId,
       error: message
     })
@@ -633,20 +631,20 @@ export async function checkBaseV6Allowance(input: {
 
 // ─── Build allowance-path transactions ───────────────────────────────────────
 
-export async function buildBaseV6AllowancePayment(input: {
+export async function buildBaseV7AllowancePayment(input: {
   paymentId: string
   payerAddress: string
-}): Promise<BaseV6AllowancePaymentResult> {
-  let context: BaseV6PaymentContext
+}): Promise<BaseV7AllowancePaymentResult> {
+  let context: BaseV7PaymentContext
   try {
-    context = await loadV6PaymentContext({
+    context = await loadV7PaymentContext({
       paymentId: input.paymentId,
       payerAddress: input.payerAddress,
       allowTerminal: false
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error("[BASE V6] build-allowance-payment context error", {
+    console.error("[BASE V7] build-allowance-payment context error", {
       paymentId: input.paymentId,
       error: message
     })
@@ -655,7 +653,7 @@ export async function buildBaseV6AllowancePayment(input: {
 
   try {
     const provider = new JsonRpcProvider(getRpcUrl("base"), BASE_CHAIN_ID)
-    const usdcContract = new Contract(getBaseV6UsdcToken(), USDC_ABI, provider)
+    const usdcContract = new Contract(getBaseV7UsdcToken(), USDC_ABI, provider)
     const rawAllowance = (await usdcContract.allowance(
       context.payerAddress,
       context.splitContract
@@ -666,7 +664,7 @@ export async function buildBaseV6AllowancePayment(input: {
     const approveTx = sufficient
       ? null
       : {
-          to: getBaseV6UsdcToken(),
+          to: getBaseV7UsdcToken(),
           data: usdcIface.encodeFunctionData("approve", [
             context.splitContract,
             context.totalAmount
@@ -677,7 +675,7 @@ export async function buildBaseV6AllowancePayment(input: {
 
     const paymentTx = {
       to: context.splitContract,
-      data: v6Iface.encodeFunctionData("payUsdcWithAllowance", [
+      data: v7Iface.encodeFunctionData("payUsdcWithAllowance", [
         context.merchantWallet,
         context.treasuryWallet,
         context.merchantAmount,
@@ -688,7 +686,7 @@ export async function buildBaseV6AllowancePayment(input: {
       chainId: BASE_CHAIN_ID
     }
 
-    console.info("[BASE V6] build-allowance-payment ready", {
+    console.info("[BASE V7] build-allowance-payment ready", {
       paymentId: context.paymentId,
       sufficient,
       currentAllowance: rawAllowance.toString(),
@@ -706,7 +704,7 @@ export async function buildBaseV6AllowancePayment(input: {
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error("[BASE V6] build-allowance-payment failed", {
+    console.error("[BASE V7] build-allowance-payment failed", {
       paymentId: input.paymentId,
       error: message
     })

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { resolveBaseV6Strategy } from "@/engine/baseV6StrategyResolver"
+import { resolveBaseV7Strategy } from "@/engine/baseV7StrategyResolver"
 import type { BasePayWalletCapabilities } from "@/lib/basePay/strategyOrchestrator"
 
 export async function POST(
@@ -23,16 +23,16 @@ export async function POST(
       skipDelegatedBatch: body.walletCapabilities?.skipDelegatedBatch ?? true
     }
 
-    console.info("[BaseV6] usdc_strategy_request_start", {
+    console.info("[POS Base USDC V7] strategy_selected", {
       paymentId,
       walletFamily: walletCapabilities.walletFamily,
       supportsTypedData: walletCapabilities.supportsTypedData,
       supportsSendCalls: walletCapabilities.supportsSendCalls
     })
 
-    const result = await resolveBaseV6Strategy({ paymentId, payerAddress, walletCapabilities })
+    const result = await resolveBaseV7Strategy({ paymentId, payerAddress, walletCapabilities })
 
-    console.info("[BaseV6] usdc_strategy_response", {
+    console.info("[BaseV7] usdc_strategy_response", {
       paymentId,
       strategy: result.ok ? result.strategy : null,
       fallbackStrategy: result.ok ? result.fallbackStrategy : null,
@@ -47,8 +47,8 @@ export async function POST(
 
     return NextResponse.json(result)
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to resolve Base V6 strategy"
-    console.error("[BaseV6] error", { paymentId, reason: message })
+    const message = error instanceof Error ? error.message : "Failed to resolve Base V7 strategy"
+    console.error("[BaseV7] error", { paymentId, reason: message })
     return NextResponse.json({ ok: false, error: message }, { status: 400 })
   }
 }

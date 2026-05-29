@@ -170,7 +170,7 @@ export function assertSplitRailConfig(network: string): void {
   }
 
   if (normalized === "base") {
-    assertBaseV6Config()
+    assertBaseV7Config()
     return
   }
 
@@ -191,61 +191,61 @@ export function assertSplitRailConfig(network: string): void {
   // Direct mode (PINETREE_EVM_SPLIT_MODE not set or "direct"): no contract required
 }
 
-// ─── Base V6 config ───────────────────────────────────────────────────────────
+// ─── Base V7 config ───────────────────────────────────────────────────────────
 
-export function getBaseV6Contract(): string {
+export function getBaseV7Contract(): string {
   return requireEvmAddress(
-    "PINETREE_BASE_V6_CONTRACT",
-    process.env.PINETREE_BASE_V6_CONTRACT || ""
+    "PINETREE_BASE_V7_CONTRACT",
+    process.env.PINETREE_BASE_V7_CONTRACT || ""
   )
 }
 
-export function getBaseV6UsdcToken(): string {
+export function getBaseV7UsdcToken(): string {
   const tokenAddress = requireEvmAddress(
-    "PINETREE_BASE_V6_USDC_TOKEN",
-    process.env.PINETREE_BASE_V6_USDC_TOKEN || BASE_NATIVE_USDC_ADDRESS
+    "PINETREE_BASE_V7_USDC_TOKEN",
+    process.env.PINETREE_BASE_V7_USDC_TOKEN || BASE_NATIVE_USDC_ADDRESS
   )
   if (tokenAddress.toLowerCase() !== BASE_NATIVE_USDC_ADDRESS.toLowerCase()) {
     throw new Error(
-      "Invalid PINETREE_BASE_V6_USDC_TOKEN. Base V6 requires native Base USDC " +
+      "Invalid PINETREE_BASE_V7_USDC_TOKEN. Base V7 requires native Base USDC " +
         `${BASE_NATIVE_USDC_ADDRESS}.`
     )
   }
   return tokenAddress
 }
 
-export function getBaseV6Relayer(): { address: string; privateKey: string } {
+export function getBaseV7Relayer(): { address: string; privateKey: string } {
   const address = requireEvmAddress(
-    "PINETREE_BASE_V6_RELAYER_ADDRESS",
-    process.env.PINETREE_BASE_V6_RELAYER_ADDRESS || ""
+    "PINETREE_BASE_V7_RELAYER_ADDRESS",
+    process.env.PINETREE_BASE_V7_RELAYER_ADDRESS || ""
   )
-  const privateKey = String(process.env.PINETREE_BASE_V6_RELAYER_PRIVATE_KEY || "").trim()
+  const privateKey = String(process.env.PINETREE_BASE_V7_RELAYER_PRIVATE_KEY || "").trim()
 
   if (!privateKey) {
-    throw new Error("Missing required environment variable: PINETREE_BASE_V6_RELAYER_PRIVATE_KEY")
+    throw new Error("Missing required environment variable: PINETREE_BASE_V7_RELAYER_PRIVATE_KEY")
   }
   if (!isPrivateKey(privateKey)) {
     throw new Error(
-      "Invalid PINETREE_BASE_V6_RELAYER_PRIVATE_KEY. Expected a 0x-prefixed 32-byte private key."
+      "Invalid PINETREE_BASE_V7_RELAYER_PRIVATE_KEY. Expected a 0x-prefixed 32-byte private key."
     )
   }
   return { address, privateKey }
 }
 
-export function getBaseV6GasCap(): { maxGasUsd: number } {
-  const raw = String(process.env.PINETREE_BASE_V6_MAX_GAS_USD || "").trim()
+export function getBaseV7GasCap(): { maxGasUsd: number } {
+  const raw = String(process.env.PINETREE_BASE_V7_MAX_GAS_USD || "").trim()
   if (!raw) {
-    throw new Error("Missing required environment variable: PINETREE_BASE_V6_MAX_GAS_USD")
+    throw new Error("Missing required environment variable: PINETREE_BASE_V7_MAX_GAS_USD")
   }
   const maxGasUsd = Number(raw)
   if (!Number.isFinite(maxGasUsd) || maxGasUsd <= 0) {
-    throw new Error("Invalid PINETREE_BASE_V6_MAX_GAS_USD. Expected a finite number greater than 0.")
+    throw new Error("Invalid PINETREE_BASE_V7_MAX_GAS_USD. Expected a finite number greater than 0.")
   }
   return { maxGasUsd }
 }
 
-export function getBaseV6AuthValiditySeconds(): number {
-  const raw = String(process.env.PINETREE_BASE_V6_AUTH_VALIDITY_SECONDS || "").trim()
+export function getBaseV7AuthValiditySeconds(): number {
+  const raw = String(process.env.PINETREE_BASE_V7_AUTH_VALIDITY_SECONDS || "").trim()
   const seconds = raw ? Number(raw) : DEFAULT_BASE_USDC_AUTH_VALIDITY_SECONDS
 
   if (
@@ -254,31 +254,31 @@ export function getBaseV6AuthValiditySeconds(): number {
     seconds > MAX_BASE_USDC_AUTH_VALIDITY_SECONDS
   ) {
     throw new Error(
-      "Invalid PINETREE_BASE_V6_AUTH_VALIDITY_SECONDS. Expected a finite number between " +
+      "Invalid PINETREE_BASE_V7_AUTH_VALIDITY_SECONDS. Expected a finite number between " +
         `${MIN_BASE_USDC_AUTH_VALIDITY_SECONDS} and ${MAX_BASE_USDC_AUTH_VALIDITY_SECONDS}.`
     )
   }
   return Math.floor(seconds)
 }
 
-export function isBaseV6DelegatedEnabled(): boolean {
-  return String(process.env.PINETREE_BASE_V6_DELEGATED_ENABLED || "")
+export function isBaseV7DelegatedEnabled(): boolean {
+  return String(process.env.PINETREE_BASE_V7_DELEGATED_ENABLED || "")
     .toLowerCase()
     .trim() === "true"
 }
 
-export function isBaseV6Eip3009Enabled(): boolean {
-  const raw = String(process.env.PINETREE_BASE_V6_EIP3009_ENABLED || "").toLowerCase().trim()
+export function isBaseV7Eip3009Enabled(): boolean {
+  const raw = String(process.env.PINETREE_BASE_V7_EIP3009_ENABLED || "").toLowerCase().trim()
   // Default true — opt-out by setting to "false"
   return raw !== "false"
 }
 
-export function assertBaseV6Config(): void {
-  getBaseV6Contract()
-  getBaseV6UsdcToken()
-  getBaseV6Relayer()
-  getBaseV6GasCap()
-  getBaseV6AuthValiditySeconds()
+export function assertBaseV7Config(): void {
+  getBaseV7Contract()
+  getBaseV7UsdcToken()
+  getBaseV7Relayer()
+  getBaseV7GasCap()
+  getBaseV7AuthValiditySeconds()
 
   requireEvmAddress(
     "PINETREE_TREASURY_WALLET_BASE",
@@ -286,9 +286,9 @@ export function assertBaseV6Config(): void {
   )
 }
 
-export function isBaseV6Configured(): boolean {
+export function isBaseV7Configured(): boolean {
   try {
-    assertBaseV6Config()
+    assertBaseV7Config()
     return true
   } catch {
     return false
