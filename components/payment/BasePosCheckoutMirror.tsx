@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import QRCode from "react-qr-code"
 import Button from "@/components/ui/Button"
 import BASE_WALLETS from "@/lib/payment/baseWallets"
 
@@ -51,8 +50,6 @@ type LauncherModalProps = {
 }
 
 function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherModalProps) {
-  const [showQr, setShowQr] = useState(false)
-  const [copied, setCopied] = useState(false)
   const [search, setSearch] = useState("")
 
   // Lock body scroll while modal is open (matches WalletPickerModal behaviour)
@@ -74,16 +71,6 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
         w.label.toLowerCase().includes(search.trim().toLowerCase())
       )
     : enabledWallets
-
-  async function copyLink() {
-    try {
-      await navigator.clipboard.writeText(pairingUri)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // clipboard unavailable in some mobile WebViews
-    }
-  }
 
   return (
     <div
@@ -170,37 +157,6 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
             </div>
           )}
 
-          {/* Copy WalletConnect link — low-priority fallback inside modal only */}
-          <button
-            onClick={() => void copyLink()}
-            className="w-full rounded-2xl border border-white/10 bg-[#151922] py-3.5 text-sm font-medium text-slate-300 transition hover:border-[#3b82f6]/40 hover:text-white"
-          >
-            {copied ? "✓ Copied to clipboard" : "Copy WalletConnect link"}
-          </button>
-
-          {/* QR toggle — secondary, for scanning from another device only */}
-          <button
-            onClick={() => setShowQr((v) => !v)}
-            className="w-full py-2 text-xs font-medium text-slate-500 hover:text-slate-300"
-          >
-            {showQr ? "Hide QR code" : "Use another device / Show QR code"}
-          </button>
-
-          {showQr && (
-            <div className="flex flex-col items-center space-y-3">
-              <div className="rounded-2xl border border-white/10 bg-white p-4 shadow-sm">
-                <QRCode value={pairingUri} size={160} bgColor="#ffffff" fgColor="#111827" />
-              </div>
-              <p className="px-2 text-center text-xs text-slate-400">
-                Open your wallet on another device, tap WalletConnect, then scan.
-              </p>
-            </div>
-          )}
-
-          <p className="px-2 text-center text-xs text-slate-500">
-            If your wallet does not open, choose WalletConnect inside your wallet app and paste
-            the connection link.
-          </p>
         </div>
       </div>
     </div>

@@ -2527,10 +2527,7 @@ export default function BaseWalletPayment({
           method: "POST",
           headers: checkoutToken ? { Authorization: `Bearer ${checkoutToken}` } : {},
         }).catch(() => null)
-        if (intentId) {
-          window.location.href = `/pay?intent=${encodeURIComponent(intentId)}&status=cancelled`
-          return
-        }
+        // Keep checkout open — customer can still try another rail (Solana, Lightning).
       }
       if (isRetryableUsdcSigningFailure) {
         if (!isHandoff) {

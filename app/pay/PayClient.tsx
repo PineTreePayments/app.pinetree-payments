@@ -268,6 +268,7 @@ export default function PayClient() {
   const [solanaExecutionActive, setSolanaExecutionActive] = useState(false)
 
   const handleBaseCancelPayment = useCallback(() => {
+    clearStaleBaseExecutionSessionStorage()
     setBaseExecutionActive(false)
     setSelectedAssetId("")
   }, [])

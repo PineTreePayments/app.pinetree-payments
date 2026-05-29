@@ -1,26 +1,45 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" fill="none">
-  <!--
-    MetaMask placeholder icon — clean geometric orange diamond.
-    Replace with the official MetaMask SVG (https://metamask.io/press-kit/)
-    once brand assets are confirmed for use.
-  -->
-  <defs>
-    <linearGradient id="mm-bg" x1="0" y1="0" x2="108" y2="108" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#F6851B"/>
-      <stop offset="1" stop-color="#CD6116"/>
-    </linearGradient>
-  </defs>
-  <rect width="108" height="108" rx="22" fill="url(#mm-bg)"/>
-  <!-- Outer diamond -->
-  <polygon points="54,14 90,54 54,94 18,54" fill="white" opacity="0.18"/>
-  <!-- Inner top facet -->
-  <polygon points="54,14 90,54 54,54" fill="white" opacity="0.30"/>
-  <!-- Inner bottom facet -->
-  <polygon points="54,54 90,54 54,94" fill="white" opacity="0.10"/>
-  <!-- Left facet -->
-  <polygon points="54,14 54,54 18,54" fill="white" opacity="0.22"/>
-  <!-- Centre highlight -->
-  <circle cx="54" cy="54" r="12" fill="white" opacity="0.20"/>
-  <!-- M letterform -->
-  <path d="M38 66 L38 42 L54 58 L70 42 L70 66" stroke="white" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" fill="none"/>
+  <rect width="108" height="108" rx="22" fill="#FFFFFF"/>
+  <!-- Main orange body/fur -->
+  <ellipse cx="54" cy="60" rx="40" ry="37" fill="#E2761B"/>
+  <!-- Left ear outer -->
+  <polygon points="16,52 26,18 44,48" fill="#E2761B"/>
+  <!-- Left ear inner -->
+  <polygon points="20,50 28,23 42,46" fill="#D7C1B3"/>
+  <!-- Right ear outer -->
+  <polygon points="92,52 82,18 64,48" fill="#E2761B"/>
+  <!-- Right ear inner -->
+  <polygon points="88,50 80,23 66,46" fill="#D7C1B3"/>
+  <!-- Dark top shadow -->
+  <path d="M26,34 Q54,24 82,34 L78,54 Q54,46 30,54 Z" fill="#233447"/>
+  <!-- Left eye mask -->
+  <ellipse cx="40" cy="60" rx="13" ry="12" fill="#763D16"/>
+  <!-- Right eye mask -->
+  <ellipse cx="68" cy="60" rx="13" ry="12" fill="#763D16"/>
+  <!-- Light face -->
+  <path d="M40,70 Q54,75 68,70 Q70,84 62,92 L54,94 L46,92 Q38,84 40,70 Z" fill="#D7C1B3"/>
+  <!-- Left cheek -->
+  <path d="M27,64 Q37,62 40,70 Q38,82 30,82 Q20,76 22,66 Z" fill="#C0AC9D"/>
+  <!-- Right cheek -->
+  <path d="M81,64 Q71,62 68,70 Q70,82 78,82 Q88,76 86,66 Z" fill="#C0AC9D"/>
+  <!-- Left eye white -->
+  <ellipse cx="40" cy="59" rx="8" ry="8" fill="white"/>
+  <!-- Left iris -->
+  <ellipse cx="40" cy="59" rx="5" ry="5" fill="#763D16"/>
+  <!-- Left pupil -->
+  <circle cx="40" cy="59" r="2.5" fill="#000000"/>
+  <circle cx="38.5" cy="57.5" r="1.4" fill="white" opacity="0.65"/>
+  <!-- Right eye white -->
+  <ellipse cx="68" cy="59" rx="8" ry="8" fill="white"/>
+  <!-- Right iris -->
+  <ellipse cx="68" cy="59" rx="5" ry="5" fill="#763D16"/>
+  <!-- Right pupil -->
+  <circle cx="68" cy="59" r="2.5" fill="#000000"/>
+  <circle cx="66.5" cy="57.5" r="1.4" fill="white" opacity="0.65"/>
+  <!-- Nose bridge (orange) -->
+  <path d="M48,74 Q54,72 60,74 Q57,78 54,78 Q51,78 48,74 Z" fill="#E4751F"/>
+  <!-- Nose tip (dark) -->
+  <ellipse cx="54" cy="80" rx="5" ry="3.5" fill="#233447"/>
+  <!-- Mouth -->
+  <path d="M49,86 Q54,90 59,86" stroke="#CD6116" stroke-width="1.5" fill="none" stroke-linecap="round"/>
 </svg>
