@@ -1,36 +1,35 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <!-- White background -->
-  <rect width="1024" height="1024" rx="216" fill="#FFFFFF"/>
-  <!-- Upper head / ear block -->
-  <polygon points="512,128 260,400 512,480 764,400" fill="#E2761B"/>
-  <!-- Left ear inner highlight -->
-  <polygon points="260,400 360,260 512,480" fill="#E4761B"/>
-  <!-- Right ear inner highlight -->
-  <polygon points="764,400 664,260 512,480" fill="#E4761B"/>
-  <!-- Left cheek -->
-  <polygon points="260,400 300,560 512,480" fill="#F6851B"/>
-  <!-- Right cheek -->
-  <polygon points="764,400 724,560 512,480" fill="#F6851B"/>
-  <!-- Left jaw -->
-  <polygon points="300,560 340,700 512,640 512,480" fill="#E4761B"/>
-  <!-- Right jaw -->
-  <polygon points="724,560 684,700 512,640 512,480" fill="#E4761B"/>
-  <!-- Left chin block -->
-  <polygon points="340,700 380,780 512,755 512,640" fill="#D3501E"/>
-  <!-- Right chin block -->
-  <polygon points="684,700 644,780 512,755 512,640" fill="#D3501E"/>
-  <!-- Center chin -->
-  <polygon points="380,780 420,820 512,800 604,820 644,780 512,755" fill="#763D16"/>
-  <!-- Nose -->
-  <ellipse cx="512" cy="610" rx="40" ry="34" fill="#763D16"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
+  <rect width="200" height="200" rx="42" fill="white"/>
+  <!-- Left ear outer -->
+  <path d="M55 90 L46 18 L88 70 Z" fill="#CD6116"/>
+  <!-- Right ear outer -->
+  <path d="M145 90 L154 18 L112 70 Z" fill="#CD6116"/>
+  <!-- Left ear highlight -->
+  <path d="M58 84 L51 28 L84 68 Z" fill="#E4761B"/>
+  <!-- Right ear highlight -->
+  <path d="M142 84 L149 28 L116 68 Z" fill="#E4761B"/>
+  <!-- Fox head -->
+  <ellipse cx="100" cy="122" rx="56" ry="52" fill="#E4761B"/>
+  <!-- Face lighter patch -->
+  <ellipse cx="100" cy="128" rx="40" ry="36" fill="#F6851B"/>
   <!-- Left eye white -->
-  <ellipse cx="410" cy="495" rx="42" ry="46" fill="white"/>
-  <!-- Right eye white -->
-  <ellipse cx="614" cy="495" rx="42" ry="46" fill="white"/>
+  <ellipse cx="79" cy="110" rx="14" ry="16" fill="white"/>
   <!-- Left pupil -->
-  <ellipse cx="414" cy="500" rx="22" ry="28" fill="#1c1c1c"/>
+  <ellipse cx="81" cy="113" rx="8" ry="10" fill="#1C1C1C"/>
+  <!-- Left eye highlight -->
+  <circle cx="85" cy="108" r="3" fill="white" opacity="0.55"/>
+  <!-- Right eye white -->
+  <ellipse cx="121" cy="110" rx="14" ry="16" fill="white"/>
   <!-- Right pupil -->
-  <ellipse cx="618" cy="500" rx="22" ry="28" fill="#1c1c1c"/>
-  <!-- Mouth hint -->
-  <path d="M460 680 Q512 710 564 680" stroke="#763D16" stroke-width="12" fill="none" stroke-linecap="round"/>
+  <ellipse cx="123" cy="113" rx="8" ry="10" fill="#1C1C1C"/>
+  <!-- Right eye highlight -->
+  <circle cx="127" cy="108" r="3" fill="white" opacity="0.55"/>
+  <!-- Snout muzzle -->
+  <ellipse cx="100" cy="144" rx="22" ry="16" fill="#CD6116"/>
+  <!-- Nose centre darkening -->
+  <ellipse cx="100" cy="130" rx="11" ry="7" fill="#C45A0B"/>
+  <!-- Nose -->
+  <path d="M91 130 Q100 124 109 130 Q109 140 100 144 Q91 140 91 130 Z" fill="#1A1A1A"/>
+  <!-- Mouth -->
+  <path d="M88 151 Q100 160 112 151" stroke="#763D16" stroke-width="3.5" fill="none" stroke-linecap="round"/>
 </svg>

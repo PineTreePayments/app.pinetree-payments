@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" fill="none">
+  <defs>
+    <linearGradient id="uni-bg" x1="0" y1="0" x2="108" y2="108" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FC72FF"/>
+      <stop offset="1" stop-color="#FF007A"/>
+    </linearGradient>
+  </defs>
+  <rect width="108" height="108" rx="22" fill="url(#uni-bg)"/>
+  <!-- Neck + body -->
+  <path d="M20 95 Q20 74 32 64 Q44 54 58 52 Q66 52 72 46 Q76 38 74 26"
+        stroke="white" stroke-width="13" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Head -->
+  <ellipse cx="70" cy="54" rx="20" ry="18" fill="white"/>
+  <!-- Snout -->
+  <ellipse cx="82" cy="60" rx="10" ry="8" fill="white"/>
+  <!-- Horn -->
+  <polygon points="62,36 72,10 80,34" fill="white"/>
+  <!-- Eye -->
+  <circle cx="74" cy="50" r="4.5" fill="#FF007A"/>
+  <circle cx="75" cy="49" r="1.8" fill="white" opacity="0.7"/>
+  <!-- Mane -->
+  <path d="M52 52 Q44 40 46 26 Q52 36 54 50" fill="white" opacity="0.65"/>
+</svg>

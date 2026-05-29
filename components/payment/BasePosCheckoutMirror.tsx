@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import QRCode from "react-qr-code"
 import Button from "@/components/ui/Button"
+import BASE_WALLETS from "@/lib/payment/baseWallets"
 
 type PosBaseStep =
   | "awaiting_wallet"
@@ -37,39 +38,11 @@ function isValidPairingUri(uri: string): boolean {
   return uri.startsWith("wc:") && uri.includes("@2")
 }
 
-// Centralized wallet shortcut config — each entry deep-links into the wallet
-// using the POS-owned pairing URI. Add or remove entries here only.
-const WALLET_SHORTCUTS: {
-  id: string
-  label: string
-  iconPath: string
-  href: (uri: string) => string
-}[] = [
-  {
-    id: "metamask",
-    label: "MetaMask",
-    iconPath: "/wallet-icons/metamask.svg",
-    href: (uri) => `https://metamask.app.link/wc?uri=${encodeURIComponent(uri)}`,
-  },
-  {
-    id: "coinbase",
-    label: "Coinbase Wallet",
-    iconPath: "/wallet-icons/coinbase-wallet.svg",
-    href: (uri) => `https://go.cb-w.com/wc?uri=${encodeURIComponent(uri)}`,
-  },
-  {
-    id: "trust",
-    label: "Trust Wallet",
-    iconPath: "/wallet-icons/trust-wallet.svg",
-    href: (uri) => `https://link.trustwallet.com/wc?uri=${encodeURIComponent(uri)}`,
-  },
-  {
-    id: "rainbow",
-    label: "Rainbow",
-    iconPath: "/wallet-icons/rainbow.svg",
-    href: (uri) => `https://rnbwapp.com/wc?uri=${encodeURIComponent(uri)}`,
-  },
-]
+// ─────────────────────────────────────────────────────────────────────────────
+// WalletLauncherModal
+// Dark bottom sheet that lets the customer pick a wallet deep-link into the
+// POS-owned WalletConnect pairing URI. Styled to match WalletPickerModal.
+// ─────────────────────────────────────────────────────────────────────────────
 
 type LauncherModalProps = {
   pairingUri: string
@@ -94,11 +67,13 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
     }
   }, [])
 
+  const enabledWallets = BASE_WALLETS.filter((w) => w.enabled !== false)
+
   const filtered = search.trim()
-    ? WALLET_SHORTCUTS.filter((w) =>
+    ? enabledWallets.filter((w) =>
         w.label.toLowerCase().includes(search.trim().toLowerCase())
       )
-    : WALLET_SHORTCUTS
+    : enabledWallets
 
   async function copyLink() {
     try {
@@ -119,12 +94,12 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
         className="flex max-h-[90dvh] w-full max-w-full flex-col overflow-hidden rounded-t-[30px] border border-white/10 bg-[#0b0f17] shadow-2xl shadow-black/60 sm:max-w-[520px] sm:rounded-[30px]"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
+        {/* ── Header ── */}
         <div className="border-b border-white/10 bg-[#0f1420] px-5 pb-4 pt-5 sm:px-6">
           <div className="relative flex items-center justify-center">
             <div className="text-center">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">
-                WalletConnect
+                Base Network
               </p>
               <h2 className="mt-1 text-xl font-bold text-white">Choose your wallet</h2>
             </div>
@@ -138,7 +113,7 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
             </button>
           </div>
 
-          {/* Search input */}
+          {/* Search */}
           <div className="relative mt-5">
             <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm text-slate-500">
               ⌕
@@ -152,11 +127,15 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
           </div>
         </div>
 
-        {/* Scrollable content */}
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-5 py-5 pb-[calc(env(safe-area-inset-bottom)+24px)] sm:px-6">
+        {/* ── Scrollable content ── */}
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-5 py-5 pb-[calc(env(safe-area-inset-bottom)+24px)] sm:px-6">
 
           {/* Wallet grid */}
           {filtered.length > 0 ? (
+            <div className="space-y-3">
+              <p className="px-1 text-[11px] font-semibold uppercase tracking-widest text-slate-500">
+                Base-compatible wallets
+              </p>
             <div className="grid grid-cols-2 gap-2 min-[360px]:grid-cols-3 sm:grid-cols-4 sm:gap-3">
               {filtered.map((w) => (
                 <a
@@ -168,7 +147,11 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
                   <span className="flex flex-col items-center gap-2">
                     <span className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-[18px] bg-[#0f172a] shadow-[0_12px_28px_rgba(0,0,0,0.28)] ring-1 ring-white/15 transition group-hover:scale-[1.03]">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={w.iconPath} alt="" className="h-full w-full rounded-[18px] object-contain p-1.5" />
+                      <img
+                        src={w.iconPath}
+                        alt=""
+                        className="h-full w-full rounded-[18px] object-contain p-1.5"
+                      />
                     </span>
                     <span className="line-clamp-2 min-h-[34px] w-full text-xs font-semibold leading-tight text-white sm:text-sm">
                       {w.label}
@@ -180,13 +163,14 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
                 </a>
               ))}
             </div>
+            </div>
           ) : (
             <div className="rounded-2xl bg-white/5 px-4 py-3 text-sm text-slate-400 ring-1 ring-white/10">
               No wallets match your search.
             </div>
           )}
 
-          {/* Copy WalletConnect link */}
+          {/* Copy WalletConnect link — low-priority fallback inside modal only */}
           <button
             onClick={() => void copyLink()}
             className="w-full rounded-2xl border border-white/10 bg-[#151922] py-3.5 text-sm font-medium text-slate-300 transition hover:border-[#3b82f6]/40 hover:text-white"
@@ -194,7 +178,7 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
             {copied ? "✓ Copied to clipboard" : "Copy WalletConnect link"}
           </button>
 
-          {/* QR toggle — secondary option for another device */}
+          {/* QR toggle — secondary, for scanning from another device only */}
           <button
             onClick={() => setShowQr((v) => !v)}
             className="w-full py-2 text-xs font-medium text-slate-500 hover:text-slate-300"
@@ -214,14 +198,21 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
           )}
 
           <p className="px-2 text-center text-xs text-slate-500">
-            If your wallet does not open, choose WalletConnect inside your wallet app and paste the
-            connection link.
+            If your wallet does not open, choose WalletConnect inside your wallet app and paste
+            the connection link.
           </p>
         </div>
       </div>
     </div>
   )
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BasePosCheckoutMirror
+// Customer-facing component for POS-created Base payments.
+// The POS terminal owns the WalletConnect session; this component mirrors
+// the POS session state and provides the wallet deep-link launcher.
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function BasePosCheckoutMirror({
   intentId,
@@ -234,9 +225,8 @@ export default function BasePosCheckoutMirror({
   const [session, setSession] = useState<PosBaseSession | null>(null)
   const [selectNetworkError, setSelectNetworkError] = useState("")
   const [paymentReady, setPaymentReady] = useState(false)
-  const [copiedUri, setCopiedUri] = useState(false)
   const [showLauncher, setShowLauncher] = useState(false)
-  // burstUntil: epoch ms until which we poll at 1s (set after customer taps Connect)
+  // burstUntil: epoch ms until which we poll at 1s (activated after tapping Connect)
   const [burstUntil, setBurstUntil] = useState(0)
   const selectCalledRef = useRef(false)
   const executionStartedRef = useRef(false)
@@ -290,12 +280,12 @@ export default function BasePosCheckoutMirror({
     }
   }, [intentId])
 
-  // pairingReady is stable once the URI arrives — drives interval switching
+  // pairingReady switches from false → true exactly once; drives interval switching
   const pairingReady = !!(session?.pairingUri && isValidPairingUri(session.pairingUri))
 
   // Dynamic polling:
-  //   1s — pairingUri not yet available (fast catch-up)
-  //   1s — within 30s burst window after customer taps Connect (detect wallet event ASAP)
+  //   1s — pairingUri not yet available (fast catch-up while POS generates URI)
+  //   1s — within 30s burst window after customer taps Connect (detect wallet ASAP)
   //   3s — steady state
   useEffect(() => {
     if (!paymentReady) return
@@ -336,16 +326,6 @@ export default function BasePosCheckoutMirror({
     void pollSession()
   }
 
-  async function copyPairingUri(uri: string) {
-    try {
-      await navigator.clipboard.writeText(uri)
-      setCopiedUri(true)
-      setTimeout(() => setCopiedUri(false), 2000)
-    } catch {
-      // silently ignore — clipboard unavailable in some mobile WebViews
-    }
-  }
-
   // ── Error state ─────────────────────────────────────────────────────────────
 
   if (selectNetworkError) {
@@ -361,7 +341,7 @@ export default function BasePosCheckoutMirror({
     )
   }
 
-  // ── Waiting for session to be created ───────────────────────────────────────
+  // ── Waiting for payment to be created ───────────────────────────────────────
 
   if (!paymentReady || !session) {
     return (
@@ -397,34 +377,19 @@ export default function BasePosCheckoutMirror({
       )
     }
 
-    // Pairing URI ready — primary action is "Connect with WalletConnect"
+    // Pairing URI ready — clean card: title, Connect button, Cancel only
     return (
       <div className="space-y-4">
         <div className="space-y-1 text-center">
           <p className="text-base font-semibold text-gray-900">Connect your wallet</p>
           <p className="text-sm text-gray-500">
-            Use WalletConnect to connect your wallet securely.
+            Open your wallet app and approve the connection.
           </p>
         </div>
 
         <Button fullWidth onClick={handleConnectTapped}>
           Connect with WalletConnect
         </Button>
-
-        <div className="flex flex-col items-center gap-1">
-          <button
-            onClick={() => void copyPairingUri(pairingUri)}
-            className="py-1 text-xs font-medium text-gray-400 hover:text-gray-600"
-          >
-            {copiedUri ? "✓ Copied to clipboard" : "Copy connection link"}
-          </button>
-          <button
-            onClick={handleConnectTapped}
-            className="py-1 text-xs font-medium text-gray-400 hover:text-gray-600"
-          >
-            Trouble connecting?
-          </button>
-        </div>
 
         <Button variant="danger" fullWidth onClick={onCancel}>
           Cancel
