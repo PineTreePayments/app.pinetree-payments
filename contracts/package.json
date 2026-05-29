@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "deploy:base": "hardhat run scripts/deploy.js --network base"
+    "deploy:base": "hardhat run scripts/deploy.js --network base",
+    "deploy:v7": "hardhat run scripts/deploy-v7.js --network base",
+    "allowlist:v7": "hardhat run scripts/allowlist-relayer-v7.js --network base"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
