@@ -267,9 +267,10 @@ export default function PayClient() {
   const [baseExecutionActive, setBaseExecutionActive] = useState(false)
   const [solanaExecutionActive, setSolanaExecutionActive] = useState(false)
 
-  const handleBaseCancelPayment = useCallback(() => {
+  const resetBaseRailSelectionOnly = useCallback(() => {
     clearStaleBaseExecutionSessionStorage()
     setBaseExecutionActive(false)
+    setShift4Error("")
     setSelectedAssetId("")
   }, [])
 
@@ -1284,7 +1285,7 @@ export default function PayClient() {
                               usdAmount={displayAmount}
                               checkoutToken={checkoutToken}
                               onExecutionStarted={() => setBaseExecutionActive(true)}
-                              onCancel={handleBaseCancelPayment}
+                              onCancel={resetBaseRailSelectionOnly}
                               onPaymentCreated={() => {
                                 void loadIntentCallback()
                               }}
@@ -1297,7 +1298,7 @@ export default function PayClient() {
                               paymentStatus={normalizedPaymentStatus}
                               checkoutToken={checkoutToken}
                               onExecutionStarted={() => setBaseExecutionActive(true)}
-                              onCancel={handleBaseCancelPayment}
+                              onCancel={resetBaseRailSelectionOnly}
                               onPaymentCreated={() => {
                                 void loadIntentCallback()
                               }}

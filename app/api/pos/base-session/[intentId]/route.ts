@@ -76,7 +76,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "Payment intent not found" }, { status: 404 })
     }
 
-    const body = (await req.json()) as Partial<PosBaseSession>
+    const body = (await req.json()) as Partial<PosBaseSession> & { clear?: boolean }
 
     if (body.step && !ALLOWED_STEPS.has(body.step)) {
       return NextResponse.json({ error: "Invalid step value" }, { status: 400 })
@@ -87,6 +87,21 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
 
     const existingMeta = (intent.metadata || {}) as Record<string, unknown>
+    if (body.clear === true) {
+      const restMetadata = { ...existingMeta }
+      delete restMetadata.pos_base_session
+      const { error } = await supabaseAdmin
+        .from("payment_intents")
+        .update({ metadata: restMetadata, updated_at: new Date().toISOString() })
+        .eq("id", id)
+
+      if (error) {
+        throw new Error(`DB update failed: ${error.message}`)
+      }
+
+      return NextResponse.json({ ok: true, session: null })
+    }
+
     const existingSession = (existingMeta.pos_base_session || {}) as Partial<PosBaseSession>
 
     const updated: PosBaseSession = {

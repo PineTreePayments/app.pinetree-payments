@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Button from "@/components/ui/Button"
 import BASE_WALLETS from "@/lib/payment/baseWallets"
+import type { BaseWalletApiEntry } from "@/lib/payment/baseWallets"
 
 type PosBaseStep =
   | "awaiting_wallet"
@@ -51,6 +52,7 @@ type LauncherModalProps = {
 
 function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherModalProps) {
   const [search, setSearch] = useState("")
+  const [explorerWallets, setExplorerWallets] = useState<BaseWalletApiEntry[] | null>(null)
 
   // Lock body scroll while modal is open (matches WalletPickerModal behaviour)
   useEffect(() => {
@@ -64,7 +66,40 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
     }
   }, [])
 
-  const enabledWallets = BASE_WALLETS.filter((w) => w.enabled !== false)
+  useEffect(() => {
+    let cancelled = false
+
+    const loadWallets = async () => {
+      try {
+        const res = await fetch(
+          `/api/walletconnect/base-wallets?pairingUri=${encodeURIComponent(pairingUri)}`,
+          { cache: "no-store" }
+        )
+        if (!res.ok) return
+        const data = (await res.json()) as { wallets?: BaseWalletApiEntry[] }
+        if (!cancelled && Array.isArray(data.wallets)) {
+          setExplorerWallets(data.wallets)
+        }
+      } catch {
+        // Keep the local Explorer cache fallback.
+      }
+    }
+
+    void loadWallets()
+
+    return () => {
+      cancelled = true
+    }
+  }, [pairingUri])
+
+  const fallbackWallets: BaseWalletApiEntry[] = BASE_WALLETS.map((w) => ({
+    ...w,
+    href: w.href(pairingUri),
+  }))
+
+  const enabledWallets = (explorerWallets || fallbackWallets).filter(
+    (w) => w.enabled !== false && Boolean(w.href)
+  )
 
   const filtered = search.trim()
     ? enabledWallets.filter((w) =>
@@ -78,7 +113,7 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
       onClick={onClose}
     >
       <div
-        className="flex max-h-[90dvh] w-full max-w-full flex-col overflow-hidden rounded-t-[30px] border border-white/10 bg-[#0b0f17] shadow-2xl shadow-black/60 sm:max-w-[520px] sm:rounded-[30px]"
+        className="flex max-h-[90dvh] w-full max-w-full flex-col overflow-hidden rounded-t-[30px] border border-white/10 bg-[#0b0f17] shadow-2xl shadow-black/60 sm:max-w-[600px] sm:rounded-[30px]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* ── Header ── */}
@@ -127,7 +162,7 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
               {filtered.map((w) => (
                 <a
                   key={w.id}
-                  href={w.href(pairingUri)}
+                  href={w.href}
                   onClick={onWalletClick}
                   className="group flex min-h-[130px] w-full flex-col items-center justify-between overflow-hidden rounded-[22px] border border-white/10 bg-[#151922] px-2 py-3 text-center shadow-[0_14px_34px_rgba(0,0,0,0.22)] transition-all hover:-translate-y-0.5 hover:border-[#3b82f6]/55 hover:bg-[#1b2330] hover:shadow-[0_18px_44px_rgba(0,82,255,0.18)] sm:min-h-[136px] sm:px-2.5"
                 >
@@ -135,9 +170,9 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
                     <span className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-[18px] bg-[#0f172a] shadow-[0_12px_28px_rgba(0,0,0,0.28)] ring-1 ring-white/15 transition group-hover:scale-[1.03]">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
-                        src={w.iconPath}
+                        src={w.iconSrc}
                         alt=""
-                        className="h-full w-full rounded-[18px] object-contain p-1.5"
+                        className="h-full w-full rounded-[18px] object-contain p-1"
                       />
                     </span>
                     <span className="line-clamp-2 min-h-[34px] w-full text-xs font-semibold leading-tight text-white sm:text-sm">

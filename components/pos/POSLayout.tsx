@@ -292,11 +292,9 @@ export default function POSLayout({ terminalContext }: Props) {
   const hasScheduledResetRef = useRef(false)
 
   // ── POS Base WC controller ─────────────────────────────────────────────────
-  const [posBaseActive, setPosBaseActive] = useState(false)
-  const [posBaseStep, setPosBaseStep] = useState("")
-  const [posBaseError, setPosBaseError] = useState("")
   const posBaseRunningRef = useRef(false)
   const posWcProviderRef = useRef<PosWcProvider | null>(null)
+  const activePaymentIdRef = useRef("")
 
   const subtotalNum = digitsToNumber(digits)
   const displayAmount = digitsToDisplay(digits)
@@ -313,14 +311,12 @@ export default function POSLayout({ terminalContext }: Props) {
       posWcProviderRef.current.disconnect().catch(() => null)
       posWcProviderRef.current = null
     }
-    setPosBaseActive(false)
-    setPosBaseStep("")
-    setPosBaseError("")
     setDigits("")
     setStatus("ready")
     setQrCodeUrl("")
     setIntentId("")
     setActivePaymentId("")
+    activePaymentIdRef.current = ""
     setPaymentError("")
     setBreakdown(null)
     setCashDigits("")
@@ -346,7 +342,11 @@ export default function POSLayout({ terminalContext }: Props) {
     resetSale()
   }
 
-  function applyPaymentStatus(dbStatus: string) {
+  function applyPaymentStatus(dbStatus: string, sourcePaymentId?: string) {
+    if (sourcePaymentId && activePaymentIdRef.current && sourcePaymentId !== activePaymentIdRef.current) {
+      return
+    }
+
     const next = resolveUiStatus(dbStatus)
     if (!next) return
 
@@ -406,9 +406,11 @@ export default function POSLayout({ terminalContext }: Props) {
         // the direct-payment realtime subscription can start (and future polls
         // use the faster paymentId path).
         if (!pid && data.paymentId) {
-          setActivePaymentId(String(data.paymentId))
+          const nextPaymentId = String(data.paymentId)
+          activePaymentIdRef.current = nextPaymentId
+          setActivePaymentId(nextPaymentId)
         }
-        applyPaymentStatus(String(data?.status || ""))
+        applyPaymentStatus(String(data?.status || ""), pid || String(data.paymentId || ""))
       } catch {
         // non-fatal — realtime is the primary update path
       }
@@ -436,7 +438,7 @@ export default function POSLayout({ terminalContext }: Props) {
           filter: `id=eq.${activePaymentId}`
         },
         (payload) => {
-          applyPaymentStatus(String(payload.new.status || ""))
+          applyPaymentStatus(String(payload.new.status || ""), activePaymentId)
         }
       )
       .subscribe()
@@ -461,7 +463,12 @@ export default function POSLayout({ terminalContext }: Props) {
         clearTimeout(resetTimerRef.current)
         resetTimerRef.current = null
       }
+      if (paymentChannel) {
+        supabase.removeChannel(paymentChannel)
+        paymentChannel = null
+      }
       resolvedPaymentIdRef.current = pid
+      activePaymentIdRef.current = pid
       setActivePaymentId(pid)
 
       paymentChannel = supabase
@@ -475,7 +482,7 @@ export default function POSLayout({ terminalContext }: Props) {
             filter: `id=eq.${pid}`
           },
           (payload) => {
-            applyPaymentStatus(String(payload.new.status || ""))
+            applyPaymentStatus(String(payload.new.status || ""), pid)
           }
         )
         .subscribe()
@@ -529,15 +536,60 @@ export default function POSLayout({ terminalContext }: Props) {
     }
   }
 
+  async function isCurrentBasePayment(iid: string, paymentId: string): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/payment-intents/${encodeURIComponent(iid)}`, { cache: "no-store" })
+      if (!res.ok) return false
+      const data = (await res.json()) as {
+        selectedNetwork?: string | null
+        paymentId?: string | null
+      }
+      return (
+        String(data.selectedNetwork || "").toLowerCase() === "base" &&
+        String(data.paymentId || "") === paymentId
+      )
+    } catch {
+      return false
+    }
+  }
+
+  async function abandonPosBaseAttempt(iid: string): Promise<void> {
+    await updatePosBaseSession(iid, { clear: true })
+  }
+
+  function createBasePaymentSupersededWatcher(iid: string, paymentId: string): {
+    cancel: () => void
+    promise: Promise<never>
+  } {
+    let interval: number | null = null
+    const promise = new Promise<never>((_, reject) => {
+      interval = window.setInterval(() => {
+        void isCurrentBasePayment(iid, paymentId).then((isCurrent) => {
+          if (isCurrent) return
+          if (interval !== null) window.clearInterval(interval)
+          interval = null
+          reject(new Error("Base payment attempt abandoned"))
+        })
+      }, 1000)
+    })
+    return {
+      cancel: () => {
+        if (interval !== null) window.clearInterval(interval)
+        interval = null
+      },
+      promise,
+    }
+  }
+
   async function runPosBaseFlow(
     paymentId: string,
     iid: string,
     asset: "ETH" | "USDC",
     paymentUrl: string
   ): Promise<void> {
+    let finalTxHashSubmitted = false
     try {
       console.log("[POS Base WC] session_created", { intentId: iid, paymentId, asset })
-      setPosBaseStep("awaiting_wallet")
       await updatePosBaseSession(iid, { step: "awaiting_wallet", selectedAsset: asset })
 
       const wcResult = await initPosBaseWalletConnect()
@@ -553,20 +605,30 @@ export default function POSLayout({ terminalContext }: Props) {
       })
 
       // Wait for customer to open the wallet deep-link and approve pairing
-      const walletAddress = await waitForWalletConnect(wcResult.provider)
+      const supersededWatcher = createBasePaymentSupersededWatcher(iid, paymentId)
+      const walletAddress = await Promise.race([
+        waitForWalletConnect(wcResult.provider),
+        supersededWatcher.promise,
+      ]).finally(() => supersededWatcher.cancel())
+      if (!(await isCurrentBasePayment(iid, paymentId))) {
+        await abandonPosBaseAttempt(iid)
+        return
+      }
       const maskedAddress = walletAddress
         ? `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}`
         : ""
 
       console.log("[POS Base WC] wallet_connected", { intentId: iid, paymentId, asset, maskedAddress })
-      setPosBaseStep("wallet_connected")
       await updatePosBaseSession(iid, {
         step: "wallet_connected",
         walletAddressMasked: maskedAddress,
       })
 
-      setPosBaseStep("payment_sending")
       await updatePosBaseSession(iid, { step: "payment_sending" })
+      if (!(await isCurrentBasePayment(iid, paymentId))) {
+        await abandonPosBaseAttempt(iid)
+        return
+      }
 
       let txHash: string
 
@@ -658,8 +720,8 @@ export default function POSLayout({ terminalContext }: Props) {
         })
       }
 
-      setPosBaseStep("payment_submitted")
       await updatePosBaseSession(iid, { step: "payment_submitted" })
+      finalTxHashSubmitted = true
 
       const detectPrefix = asset === "ETH" ? "[POS Base ETH]" : "[POS Base USDC]"
       console.log(`${detectPrefix} detect_start`, { paymentId, txHashPrefix: txHash.slice(0, 10) })
@@ -679,13 +741,15 @@ export default function POSLayout({ terminalContext }: Props) {
         status: detectRes?.status ?? "network_error",
       })
 
-      setPosBaseStep("confirming")
       await updatePosBaseSession(iid, { step: "confirming" })
     } catch (err) {
       const message = err instanceof Error ? err.message : "Payment failed"
       const isRejection =
         /reject|cancel|denied|user denied/i.test(message) ||
         (err as { code?: number })?.code === 4001
+      const isAbandonedBeforeFinalTx =
+        !finalTxHashSubmitted &&
+        (isRejection || /base payment attempt abandoned|timed out waiting for wallet to connect|wallet disconnected/i.test(message))
       console.log(
         isRejection ? "[POS Base WC] request_rejected" : "[POS Base WC] request_failed",
         {
@@ -696,8 +760,11 @@ export default function POSLayout({ terminalContext }: Props) {
           error: message,
         }
       )
-      setPosBaseError(message)
-      setPosBaseStep("failed")
+      const stillCurrentBasePayment = await isCurrentBasePayment(iid, paymentId)
+      if (isAbandonedBeforeFinalTx || !stillCurrentBasePayment) {
+        await abandonPosBaseAttempt(iid)
+        return
+      }
       setPaymentError(message)
       await updatePosBaseSession(iid, { step: "failed", errorMessage: message }).catch(() => null)
       setStatus("failed")
@@ -742,7 +809,10 @@ export default function POSLayout({ terminalContext }: Props) {
 
         // Sync paymentId to state if realtime missed it
         const pid = String(data.paymentId || "").trim()
-        if (pid) setActivePaymentId(pid)
+        if (pid) {
+          activePaymentIdRef.current = pid
+          setActivePaymentId(pid)
+        }
 
         const net = String(data.selectedNetwork || "").toLowerCase()
         if (net === "base" && pid && !cancelled && !posBaseRunningRef.current) {
@@ -750,7 +820,6 @@ export default function POSLayout({ terminalContext }: Props) {
             String(data.selectedAsset || "ETH").toUpperCase() === "USDC" ? "USDC" : "ETH"
           const paymentUrl = String(data.paymentUrl || "")
           posBaseRunningRef.current = true
-          setPosBaseActive(true)
           void runPosBaseFlow(pid, intentId, asset, paymentUrl)
           return
         }
@@ -881,6 +950,7 @@ export default function POSLayout({ terminalContext }: Props) {
           clearTimeout(resetTimerRef.current)
           resetTimerRef.current = null
         }
+        activePaymentIdRef.current = returnedPaymentId
         setActivePaymentId(returnedPaymentId)
       }
 
@@ -1122,56 +1192,7 @@ export default function POSLayout({ terminalContext }: Props) {
         {(status === "waiting" || status === "processing") && (
           <div className="space-y-3">
 
-            {posBaseActive ? (
-              /* Cashier-facing Base WC status */
-              <div className="rounded-2xl border border-blue-100/70 bg-gradient-to-br from-white to-blue-50/40 px-4 py-4 text-center space-y-2">
-                {posBaseStep === "awaiting_wallet" && (
-                  <>
-                    <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Waiting for customer wallet…</p>
-                    <p className="text-xs text-gray-500">Customer is connecting their wallet on the checkout screen.</p>
-                  </>
-                )}
-                {posBaseStep === "wallet_connected" && (
-                  <>
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-100 mx-auto">
-                      <span className="text-green-600 text-sm font-bold">✓</span>
-                    </div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Wallet connected</p>
-                    <p className="text-xs text-gray-500">Sending payment transaction…</p>
-                  </>
-                )}
-                {(posBaseStep === "payment_sending" || posBaseStep === "payment_submitted") && (
-                  <>
-                    <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
-                      {posBaseStep === "payment_sending" ? "Sending transaction…" : "Transaction submitted"}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {posBaseStep === "payment_sending"
-                        ? "Customer is approving in their wallet."
-                        : "Waiting for on-chain confirmation."}
-                    </p>
-                  </>
-                )}
-                {posBaseStep === "confirming" && (
-                  <>
-                    <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Confirming on-chain…</p>
-                    <p className="text-xs text-gray-500">This usually takes a few seconds.</p>
-                  </>
-                )}
-                {!posBaseStep && (
-                  <>
-                    <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Initializing Base payment…</p>
-                  </>
-                )}
-                {posBaseError && (
-                  <p className="text-xs text-red-600 mt-1">{posBaseError}</p>
-                )}
-              </div>
-            ) : qrCodeUrl ? (
+            {qrCodeUrl ? (
               <div className="flex flex-col items-center rounded-2xl border border-blue-100/70 bg-gradient-to-br from-white to-blue-50/40 px-4 py-4 shadow-[0_12px_32px_rgba(0,82,255,0.08)]">
                 <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
                   Scan to Pay
