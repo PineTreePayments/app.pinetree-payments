@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getPaymentById, getPaymentIntentById } from "@/database"
 import { runPaymentWatcher } from "@/engine/checkPaymentOnce"
+import { processPaymentEvent } from "@/engine/eventProcessor"
 import { verifyCheckoutSession } from "@/lib/api/checkoutAuth"
+import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
+import { isSpeedPaymentPaid, retrieveSpeedPayment } from "@/providers/lightning/speedClient"
 
 type Params = { params: Promise<{ paymentId: string }> }
 
@@ -38,11 +41,12 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Payment not found" }, { status: 404 })
   }
 
+  const provider = String(payment.provider || "").toLowerCase()
   if (
-    String(payment.provider || "").toLowerCase() !== "lightning_nwc" ||
+    (provider !== "lightning_nwc" && provider !== SPEED_PROVIDER_NAME) ||
     String(payment.network || "").toLowerCase() !== "bitcoin_lightning"
   ) {
-    return NextResponse.json({ error: "Payment is not a Bitcoin Lightning NWC payment" }, { status: 400 })
+    return NextResponse.json({ error: "Payment is not a supported Bitcoin Lightning payment" }, { status: 400 })
   }
 
   const currentStatus = String(payment.status || "").toUpperCase()
@@ -50,6 +54,32 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({
       checked: false,
       status: currentStatus
+    })
+  }
+
+  if (provider === SPEED_PROVIDER_NAME) {
+    const speedPaymentId = String(payment.provider_reference || "").trim()
+    if (!speedPaymentId) {
+      return NextResponse.json({ error: "Missing Speed payment reference" }, { status: 400 })
+    }
+
+    const speedPayment = await retrieveSpeedPayment(speedPaymentId)
+    const detected = isSpeedPaymentPaid(speedPayment)
+
+    if (detected) {
+      await processPaymentEvent({
+        type: "payment.confirmed",
+        paymentId,
+        feeCaptureValidated: true
+      })
+    }
+
+    const updatedPayment = await getPaymentById(paymentId)
+    return NextResponse.json({
+      checked: true,
+      detected,
+      speedStatus: String(speedPayment.status || ""),
+      status: String(updatedPayment?.status || payment.status || "").toUpperCase()
     })
   }
 

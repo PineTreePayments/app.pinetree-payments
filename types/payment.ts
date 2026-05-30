@@ -3,6 +3,7 @@ export type PaymentAdapterId =
   | "shift4"
   | "solana"
   | "base"
+  | "lightning_speed"
   | "lightning_nwc"
 
 // Backwards-compatible alias while the codebase is refactored from
@@ -20,6 +21,7 @@ export const PAYMENT_ADAPTER_NETWORKS: Readonly<Record<PaymentAdapterId, readonl
   base: ["base"],
   coinbase: ["base"],
   shift4: ["shift4"],
+  lightning_speed: ["bitcoin_lightning"],
   lightning_nwc: ["bitcoin_lightning"]
 } as const
 
@@ -36,9 +38,11 @@ export function normalizePaymentAdapter(value?: string): PaymentAdapterId | unde
     normalized === "shift4" ||
     normalized === "solana" ||
     normalized === "base" ||
+    normalized === "lightning_speed" ||
+    normalized === "speed" ||
     normalized === "lightning_nwc"
   ) {
-    return normalized as PaymentAdapterId
+    return (normalized === "speed" ? "lightning_speed" : normalized) as PaymentAdapterId
   }
 
   return undefined

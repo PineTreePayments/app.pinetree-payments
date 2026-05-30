@@ -29,6 +29,7 @@ import {
 } from "./config"
 import { getMerchantCredential } from "@/database/merchants"
 import { getMerchantNwcUriForPayment } from "./lightningNwc"
+import { getMerchantSpeedProvider, SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { getMarketPricesUSD } from "./marketPrices"
 
 type PaymentMetadata = {
@@ -385,7 +386,16 @@ export async function createPayment(
   // The provider adapter must not query the database — all DB reads happen here in the engine.
   let nwcUri: string | undefined
   let btcPriceUsd: number | undefined
+  let speedMerchantAccountId: string | undefined
   if (network === "bitcoin_lightning") {
+    if (providerName === SPEED_PROVIDER_NAME) {
+      const speedSetup = await getMerchantSpeedProvider(input.merchantId)
+      if (!speedSetup?.accountId || !speedSetup.readyForPayments) {
+        throw new Error("Speed Lightning is not ready. Save a merchant Speed Account ID and pass the PineTree Speed platform test.")
+      }
+      speedMerchantAccountId = speedSetup.accountId
+      merchantWalletAddress = speedMerchantAccountId
+    } else {
     const nwcSetup = await getMerchantNwcUriForPayment(input.merchantId)
     if (!nwcSetup) {
       throw new Error("Lightning wallet not connected. Please connect an NWC-compatible Lightning wallet in your dashboard.")
@@ -396,6 +406,7 @@ export async function createPayment(
     nwcUri = nwcSetup.nwcUri
     const prices = await getMarketPricesUSD()
     btcPriceUsd = prices.BTC
+    }
   }
 
   const providerPayment = network === "bitcoin_lightning" && provider.createLightningInvoice
@@ -405,7 +416,7 @@ export async function createPayment(
         pinetreeFee,
         grossAmount,
         currency: input.currency,
-        merchantWallet: merchantWalletAddress,
+        merchantWallet: speedMerchantAccountId || merchantWalletAddress,
         pinetreeWallet,
         merchantId: input.merchantId,
         providerApiKey,

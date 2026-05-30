@@ -10,6 +10,7 @@ import type { PaymentAdapterId } from "@/types/payment"
 import { normalizeProvider, normalizeWalletNetwork } from "./providerMappings"
 import { getProviderMetadata, isProviderHealthy, providerSupportsFeeAtPaymentTime } from "./providerRegistry"
 import { loadProviders } from "./loadProviders"
+import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 
 // Wallet-rail adapter per network — used when merchant_providers has no rows yet
 const NETWORK_DEFAULT_ADAPTER: Partial<Record<string, PaymentAdapterId>> = {
@@ -19,6 +20,7 @@ const NETWORK_DEFAULT_ADAPTER: Partial<Record<string, PaymentAdapterId>> = {
 
 function adapterMeetsNetworkRequirements(adapterId: PaymentAdapterId, network: string): boolean {
   if (network === "bitcoin_lightning") {
+    if (adapterId === SPEED_PROVIDER_NAME) return providerSupportsFeeAtPaymentTime(adapterId)
     // NWC collects PineTree fees post-payment via merchant-authorized pay_invoice.
     // It deliberately does not capture fees at payment time — that is correct by design.
     if (adapterId === "lightning_nwc") return true
@@ -34,6 +36,8 @@ function sortAdapterIds(
 ): PaymentAdapterId[] {
   const preferred = String(defaultAdapterId || "").toLowerCase().trim()
   return [...adapterIds].sort((left, right) => {
+    if (!preferred && left === SPEED_PROVIDER_NAME && right !== SPEED_PROVIDER_NAME) return -1
+    if (!preferred && right === SPEED_PROVIDER_NAME && left !== SPEED_PROVIDER_NAME) return 1
     if (left === preferred && right !== preferred) return -1
     if (right === preferred && left !== preferred) return 1
     return left.localeCompare(right)
@@ -57,6 +61,7 @@ export async function chooseBestAdapter(input: {
 
   const merchantProviders = await getMerchantProviders(input.merchantId)
   const connectedAdapterIds = merchantProviders
+    .filter((provider) => provider.enabled !== false)
     .map((provider) => normalizeProvider(provider.provider))
     .filter((value): value is PaymentAdapterId => Boolean(value))
 

@@ -1,7 +1,6 @@
 import { supabase, supabaseAdmin } from "./supabase"
 import type { NwcCapabilities } from "@/providers/lightning/nwcClient"
 import type { SpeedMode } from "@/providers/lightning/speedClient"
-import { maskSpeedKey } from "@/providers/lightning/speedClient"
 
 const db = supabaseAdmin || supabase
 
@@ -9,21 +8,16 @@ const db = supabaseAdmin || supabase
 
 export const SPEED_PROVIDER_NAME = "lightning_speed"
 
-/**
- * WARNING: Speed secret keys are stored as plain JSONB credentials.
- * No encryption helper exists in this project — this matches the existing NWC URI pattern.
- * PRODUCTION BLOCKER: Implement field-level encryption for speed_secret_key
- * before going live with real merchant keys.
- */
 type SpeedCredentials = {
-  speed_secret_key: string
-  speed_publishable_key?: string
   speed_account_id?: string
-  webhook_secret?: string
-  mode: SpeedMode
-  account_status?: string
-  tested_at?: string
-  provider_model: "speed_merchant_account"
+  speed_account_status?: string
+  payout_destination?: string
+  payout_type?: string
+  setup_status?: string
+  last_tested_at?: string
+  mode?: SpeedMode
+  provider_model: "pine_tree_speed_platform"
+  notes?: string[]
 }
 
 export type MerchantSpeedStatus = {
@@ -31,10 +25,15 @@ export type MerchantSpeedStatus = {
   connected: boolean
   mode: SpeedMode
   accountId: string | null
-  webhookConfigured: boolean
-  maskedKey: string | null
-  testedAt: string | null
+  accountStatus: string | null
+  payoutDestination: string | null
+  payoutType: string | null
+  setupStatus: string
+  lastTestedAt: string | null
+  providerModel: "pine_tree_speed_platform"
+  notes: string[]
   status: string
+  readyForPayments: boolean
 }
 
 function buildSpeedStatus(
@@ -47,10 +46,18 @@ function buildSpeedStatus(
     connected: true,
     mode: creds.mode || "unknown",
     accountId: creds.speed_account_id || null,
-    webhookConfigured: Boolean(creds.webhook_secret),
-    maskedKey: creds.speed_secret_key ? maskSpeedKey(creds.speed_secret_key) : null,
-    testedAt: creds.tested_at || null,
-    status: String(status)
+    accountStatus: creds.speed_account_status || null,
+    payoutDestination: creds.payout_destination || null,
+    payoutType: creds.payout_type || null,
+    setupStatus: creds.setup_status || "pending_speed_connect_confirmation",
+    lastTestedAt: creds.last_tested_at || null,
+    providerModel: "pine_tree_speed_platform",
+    notes: Array.isArray(creds.notes) ? creds.notes : [],
+    status: String(status),
+    readyForPayments: Boolean(
+      creds.speed_account_id &&
+      (creds.setup_status === "ready" || creds.setup_status === "ready_for_payments")
+    )
   }
 }
 
@@ -69,39 +76,43 @@ export async function getMerchantSpeedProvider(
   if (!data?.credentials) return null
 
   const creds = data.credentials as SpeedCredentials
-  if (!creds.speed_secret_key) return null
+  if (creds.provider_model !== "pine_tree_speed_platform") return null
 
   return buildSpeedStatus(String(data.id), String(data.status), creds)
 }
 
 /**
- * Save or update a merchant's Speed connection.
- *
- * SECURITY: speed_secret_key is a server-only secret.
- * Never return it to the client. Use getMerchantSpeedProvider (masked) for UI.
+ * Save or update merchant Speed settlement/onboarding placeholders.
+ * No merchant-owned Speed API credentials are accepted or stored by default.
  */
 export async function saveMerchantSpeedConnection(
   merchantId: string,
   params: {
-    secretKey: string
-    publishableKey?: string
     accountId?: string
-    webhookSecret?: string
-    mode: SpeedMode
     accountStatus?: string
+    payoutDestination?: string
+    payoutType?: string
+    setupStatus?: string
+    mode?: SpeedMode
+    notes?: string[]
+    enabled?: boolean
   }
 ): Promise<{ providerRowId: string }> {
   const now = new Date().toISOString()
 
   const credentials: SpeedCredentials = {
-    speed_secret_key: params.secretKey,
-    speed_publishable_key: params.publishableKey || undefined,
     speed_account_id: params.accountId || undefined,
-    webhook_secret: params.webhookSecret || undefined,
-    mode: params.mode,
-    account_status: params.accountStatus || "active",
-    tested_at: now,
-    provider_model: "speed_merchant_account"
+    speed_account_status: params.accountStatus || (params.accountId ? "configured" : "pending"),
+    payout_destination: params.payoutDestination || undefined,
+    payout_type: params.payoutType || undefined,
+    setup_status: params.setupStatus || "pending_speed_connect_confirmation",
+    mode: params.mode || "unknown",
+    last_tested_at: now,
+    provider_model: "pine_tree_speed_platform",
+    notes: params.notes || [
+      "PineTree creates Speed Lightning payments through its platform account.",
+      "Merchant settlement uses the configured Speed account ID."
+    ]
   }
 
   const { data: existing } = await db
@@ -114,7 +125,12 @@ export async function saveMerchantSpeedConnection(
   if (existing?.id) {
     await db
       .from("merchant_providers")
-      .update({ credentials, status: "connected", updated_at: now })
+      .update({
+        credentials,
+        status: "connected",
+        enabled: Boolean(params.enabled),
+        updated_at: now
+      })
       .eq("id", existing.id)
 
     return { providerRowId: String(existing.id) }
@@ -126,7 +142,7 @@ export async function saveMerchantSpeedConnection(
       merchant_id: merchantId,
       provider: SPEED_PROVIDER_NAME,
       status: "connected",
-      enabled: false,
+      enabled: Boolean(params.enabled),
       credentials,
       created_at: now,
       updated_at: now

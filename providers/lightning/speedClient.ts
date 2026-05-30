@@ -1,26 +1,41 @@
 /**
  * PineTree Speed Lightning Client
  *
- * Handles Speed API authentication and connection testing for merchant accounts.
- * Merchants connect their own Speed account via secret API key.
+ * Default Speed Lightning uses PineTree's own Speed/TrySpeed platform account.
+ * Merchant-owned Speed API keys are not part of the default provider flow.
  *
- * Authentication: HTTP Basic Auth, secret key as username, empty password.
+ * Authentication: HTTP Basic Auth, PineTree's SPEED_API_KEY as username, empty password.
  * Base URL: https://api.tryspeed.com (overridable via SPEED_API_BASE_URL env).
  *
- * Test endpoint used for validation: GET /v1/payments?limit=1
- * This is a harmless read-only list. Returns 401 for invalid keys.
- * If Speed changes its API paths, update TEST_ENDPOINT and the error handling below.
+ * Test endpoint used for validation: GET /payments?limit=1
+ * This is a harmless read-only list. Returns 401 for invalid platform credentials.
  *
- * SECURITY: Never log or return the secret key. Use maskSpeedKey in all logs.
+ * SECURITY: Never log or return SPEED_API_KEY.
  */
 
-const SPEED_API_BASE_URL =
-  (process.env.SPEED_API_BASE_URL || "https://api.tryspeed.com").replace(/\/$/, "")
+import { createHmac, timingSafeEqual } from "crypto"
 
-const TEST_ENDPOINT = "/v1/payments?limit=1"
+const DEFAULT_SPEED_API_BASE_URL = "https://api.tryspeed.com"
+const TEST_ENDPOINT = "/payments?limit=1"
 const REQUEST_TIMEOUT_MS = 12_000
+const SPEED_VERSION = "2022-10-15"
 
-export type SpeedMode = "test" | "live" | "unknown"
+export type SpeedMode = "test" | "live" | "production" | "unknown"
+
+export type PineTreeSpeedConfigStatus = {
+  configured: boolean
+  mode: SpeedMode
+  apiBaseUrl: string
+  dashboardUrl: string | null
+  platformAccountIdConfigured: boolean
+  webhookSecretConfigured: boolean
+  missing: string[]
+  warnings: string[]
+  environmentKeyMismatch: boolean
+  paymentProcessingLive: boolean
+  settlementPathStatus: "ready" | "missing_platform_env" | "missing_merchant_speed_account" | "environment_key_mismatch"
+  providerModel: "pine_tree_speed_platform"
+}
 
 export type SpeedConnectionResult = {
   connected: boolean
@@ -29,107 +44,372 @@ export type SpeedConnectionResult = {
   displayName: string | null
   email: string | null
   notes: string[]
+  config: PineTreeSpeedConfigStatus
+}
+
+export type SpeedPaymentTransfer = {
+  transfer_id?: string | null
+  destination_account?: string | null
+  percentage?: number | null
+  fixed_amount?: number | null
+  created_type?: string | null
+  amount?: number | null
+  description?: string | null
+}
+
+export type SpeedPaymentObject = {
+  id: string
+  object?: string
+  status?: string
+  currency?: string
+  amount?: number
+  target_currency?: string
+  target_amount?: number
+  target_amount_paid?: number | null
+  payment_request?: string
+  payment_method_options?: {
+    lightning?: {
+      payment_request?: string
+      id?: string
+    }
+  }
+  checkout_url?: string
+  hosted_url?: string
+  url?: string
+  metadata?: Record<string, unknown>
+  transfers?: SpeedPaymentTransfer[]
+  expires_at?: number
+  created?: number
+  modified?: number
+}
+
+export type CreateSpeedLightningPaymentParams = {
+  amount: number
+  currency: string
+  merchantAmount: number
+  pineTreeFeeAmount: number
+  merchantSpeedAccountId: string
+  pineTreePaymentId: string
+  pineTreePaymentIntentId?: string | null
+  merchantId: string
+  ttlSeconds?: number
+  metadata?: Record<string, unknown>
+}
+
+export type CreateSpeedLightningPaymentResult = {
+  speedPaymentId: string
+  paymentRequest: string
+  paymentUrl: string
+  hostedUrl?: string
+  status: string
+  merchantTransferPercentage: number
+  transfers: SpeedPaymentTransfer[]
+  metadata: Record<string, unknown>
+  raw: SpeedPaymentObject
+}
+
+function getSpeedApiBaseUrl(): string {
+  return (process.env.SPEED_API_BASE_URL || DEFAULT_SPEED_API_BASE_URL).replace(/\/$/, "")
 }
 
 /**
- * Infer Speed mode from key prefix.
- * sk_test_... → test, sk_live_... → live, anything else → unknown.
+ * Infer Speed mode from explicit env first, then from key prefix.
  */
-export function inferSpeedMode(secretKey: string): SpeedMode {
-  const key = String(secretKey || "").trim()
+export function inferSpeedMode(apiKey?: string | null): SpeedMode {
+  const envMode = String(process.env.SPEED_ENVIRONMENT || "").trim().toLowerCase()
+  if (envMode === "test" || envMode === "live" || envMode === "production") return envMode
+
+  const key = String(apiKey || "").trim()
   if (key.startsWith("sk_test_")) return "test"
   if (key.startsWith("sk_live_")) return "live"
   return "unknown"
 }
 
-/**
- * Mask a Speed secret key for safe logging.
- * Never call with the raw key in a log statement — pass the masked result only.
- */
-export function maskSpeedKey(secretKey: string): string {
-  const key = String(secretKey || "").trim()
-  if (!key) return "***"
-  if (key.length <= 12) return "***"
-  return `${key.slice(0, 8)}...${key.slice(-4)}`
+export function getPineTreeSpeedConfigStatus(): PineTreeSpeedConfigStatus {
+  const apiKey = String(process.env.SPEED_API_KEY || "").trim()
+  const envMode = String(process.env.SPEED_ENVIRONMENT || "").trim().toLowerCase()
+  const apiBaseUrl = getSpeedApiBaseUrl()
+  const dashboardUrl = String(process.env.SPEED_DASHBOARD_URL || "").trim() || null
+  const missing: string[] = []
+  const warnings: string[] = []
+
+  if (!apiKey) missing.push("SPEED_API_KEY")
+  if (!String(process.env.SPEED_WEBHOOK_SECRET || "").trim()) missing.push("SPEED_WEBHOOK_SECRET")
+
+  const explicitProduction = envMode === "production" || envMode === "live"
+  const explicitTest = envMode === "test"
+  const environmentKeyMismatch = Boolean(
+    (explicitProduction && apiKey.startsWith("sk_test_")) ||
+    (explicitTest && apiKey.startsWith("sk_live_"))
+  )
+
+  if (environmentKeyMismatch) {
+    warnings.push(
+      explicitProduction
+        ? "SPEED_ENVIRONMENT is production/live but SPEED_API_KEY looks like a test key."
+        : "SPEED_ENVIRONMENT is test but SPEED_API_KEY looks like a live key."
+    )
+  }
+
+  return {
+    configured: missing.length === 0 && !environmentKeyMismatch,
+    mode: inferSpeedMode(apiKey),
+    apiBaseUrl,
+    dashboardUrl,
+    platformAccountIdConfigured: Boolean(
+      String(process.env.SPEED_PLATFORM_ACCOUNT_ID || "").trim()
+    ),
+    webhookSecretConfigured: Boolean(String(process.env.SPEED_WEBHOOK_SECRET || "").trim()),
+    missing,
+    warnings,
+    environmentKeyMismatch,
+    paymentProcessingLive: missing.length === 0 && !environmentKeyMismatch,
+    settlementPathStatus: environmentKeyMismatch
+      ? "environment_key_mismatch"
+      : missing.length === 0
+        ? "ready"
+        : "missing_platform_env",
+    providerModel: "pine_tree_speed_platform"
+  }
 }
 
-/**
- * Test a merchant's Speed secret API key by calling a read-only endpoint.
- *
- * SECURITY: The secretKey parameter is a server-only secret.
- * Never pass it to the client, log it, or include it in any response.
- *
- * Returns a SpeedConnectionResult describing connection status and inferred mode.
- * Throws if the API is unreachable or the key is clearly invalid.
- */
-export async function testSpeedConnection(secretKey: string): Promise<SpeedConnectionResult> {
-  const key = String(secretKey || "").trim()
-  if (!key) throw new Error("Speed secret key is required")
+function getSpeedApiKey(): string {
+  const apiKey = String(process.env.SPEED_API_KEY || "").trim()
+  if (!apiKey) {
+    throw new Error("PineTree Speed platform is missing SPEED_API_KEY")
+  }
+  return apiKey
+}
 
-  const mode = inferSpeedMode(key)
+function getSpeedAuthHeaders(): Record<string, string> {
+  const authToken = Buffer.from(`${getSpeedApiKey()}:`).toString("base64")
+  return {
+    Authorization: `Basic ${authToken}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    "speed-version": SPEED_VERSION
+  }
+}
 
-  // Basic Auth: base64(key:)
-  const authToken = Buffer.from(`${key}:`).toString("base64")
-
+async function speedRequest<T>(
+  path: string,
+  init?: Omit<RequestInit, "headers"> & { headers?: Record<string, string> }
+): Promise<T> {
+  const config = getPineTreeSpeedConfigStatus()
   let response: Response
+
   try {
-    response = await fetch(`${SPEED_API_BASE_URL}${TEST_ENDPOINT}`, {
-      method: "GET",
+    response = await fetch(`${config.apiBaseUrl}${path}`, {
+      ...init,
       headers: {
-        Authorization: `Basic ${authToken}`,
-        "Content-Type": "application/json",
-        Accept: "application/json"
+        ...getSpeedAuthHeaders(),
+        ...(init?.headers || {})
       },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+      signal: init?.signal || AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     throw new Error(
       message.includes("timed out") || message.includes("timeout")
-        ? "Speed API request timed out — check your connection and try again"
+        ? "Speed API request timed out. Check PineTree's Speed platform connectivity."
         : `Speed API unreachable: ${message}`
     )
   }
 
   if (response.status === 401) {
-    throw new Error(
-      "Speed API key is invalid — authentication failed. Check that you copied the full secret key."
-    )
+    throw new Error("PineTree Speed platform API key is invalid.")
   }
 
   if (response.status === 403) {
-    throw new Error(
-      "Speed API key was accepted but does not have permission to list payments. Check your key's access level in Speed."
-    )
+    throw new Error("PineTree Speed platform API key lacks permission for this Speed operation.")
   }
 
-  // 404 can mean no payments yet, or a changed endpoint path — treat as success for auth purposes
-  // Any unexpected 5xx means Speed is temporarily unavailable
-  if (response.status >= 500) {
-    throw new Error(
-      `Speed API returned server error ${response.status} — Speed may be temporarily unavailable`
-    )
+  if (!response.ok) {
+    const body = await response.text().catch(() => "")
+    throw new Error(`Speed API returned ${response.status}${body ? `: ${body.slice(0, 300)}` : ""}`)
   }
 
-  if (!response.ok && response.status !== 404) {
-    throw new Error(`Speed API returned ${response.status} — check credentials and try again`)
-  }
+  return response.json() as Promise<T>
+}
 
-  const notes: string[] = []
-  if (mode === "unknown") {
-    notes.push(
-      "Could not detect test or live mode from key prefix. Speed test keys start with sk_test_ and live keys with sk_live_."
-    )
+/**
+ * Test PineTree's server-side Speed platform credentials.
+ *
+ * Returns sanitized connection status only. Does not expose or log SPEED_API_KEY.
+ */
+export async function testPineTreeSpeedConnection(): Promise<SpeedConnectionResult> {
+  const config = getPineTreeSpeedConfigStatus()
+  await speedRequest<unknown>(TEST_ENDPOINT, { method: "GET" })
+
+  const notes: string[] = [
+    "PineTree platform credential test passed.",
+    "Speed Lightning payments require a merchant Speed account ID before checkout is enabled."
+  ]
+
+  if (config.mode === "unknown") {
+    notes.push("Could not detect test or live mode from SPEED_ENVIRONMENT or SPEED_API_KEY prefix.")
   }
+  notes.push(...config.warnings)
 
   return {
     connected: true,
-    mode,
-    // Account details are not available from the payments list endpoint.
-    // A future /v1/account endpoint call could populate these.
+    mode: config.mode,
     accountId: null,
     displayName: null,
     email: null,
-    notes
+    notes,
+    config
   }
+}
+
+function roundPercentage(value: number): number {
+  return Math.floor(value * 1_000_000) / 1_000_000
+}
+
+export function calculateSpeedMerchantTransferPercentage(
+  merchantAmount: number,
+  grossAmount: number
+): number {
+  const merchant = Number(merchantAmount)
+  const gross = Number(grossAmount)
+  if (!Number.isFinite(merchant) || merchant <= 0) {
+    throw new Error("Speed merchant amount must be greater than zero")
+  }
+  if (!Number.isFinite(gross) || gross <= 0 || merchant > gross) {
+    throw new Error("Speed gross amount must be greater than or equal to merchant amount")
+  }
+
+  // Speed splits are percentage based. Truncating to six decimals avoids
+  // accidentally over-routing the merchant leg above the intended gross split;
+  // the retained dust remains with PineTree alongside the service fee.
+  return roundPercentage((merchant / gross) * 100)
+}
+
+function getLightningPaymentRequest(payment: SpeedPaymentObject): string {
+  return String(
+    payment.payment_request ||
+      payment.payment_method_options?.lightning?.payment_request ||
+      ""
+  ).trim()
+}
+
+export async function createSpeedLightningPayment(
+  params: CreateSpeedLightningPaymentParams
+): Promise<CreateSpeedLightningPaymentResult> {
+  const merchantSpeedAccountId = String(params.merchantSpeedAccountId || "").trim()
+  if (!merchantSpeedAccountId) {
+    throw new Error("Merchant Speed account ID is required for Speed Lightning payments.")
+  }
+
+  const grossAmount = Number(params.amount)
+  const merchantAmount = Number(params.merchantAmount)
+  const pineTreeFeeAmount = Number(params.pineTreeFeeAmount)
+  if (!Number.isFinite(grossAmount) || grossAmount <= 0) {
+    throw new Error("Speed payment amount must be greater than zero")
+  }
+
+  const merchantTransferPercentage = calculateSpeedMerchantTransferPercentage(
+    merchantAmount,
+    grossAmount
+  )
+  const paymentIntentId = String(params.pineTreePaymentIntentId || "").trim()
+  const metadata: Record<string, unknown> = {
+    ...(params.metadata || {}),
+    pineTreePaymentId: params.pineTreePaymentId,
+    pineTreePaymentIntentId: paymentIntentId || undefined,
+    merchantId: params.merchantId,
+    merchantAmount,
+    pineTreeFeeAmount,
+    grossAmount,
+    provider: "lightning_speed",
+    merchantSpeedAccountId,
+    merchantTransferPercentage
+  }
+
+  const body = {
+    currency: params.currency || "USD",
+    amount: grossAmount,
+    target_currency: "SATS",
+    payment_methods: ["lightning"],
+    metadata,
+    transfers: [
+      {
+        destination_account: merchantSpeedAccountId,
+        percentage: merchantTransferPercentage,
+        description: `Merchant settlement for PineTree payment ${params.pineTreePaymentId}`
+      }
+    ],
+    ...(params.ttlSeconds ? { ttl: params.ttlSeconds } : {})
+  }
+
+  const payment = await speedRequest<SpeedPaymentObject>("/payments", {
+    method: "POST",
+    body: JSON.stringify(body)
+  })
+
+  const paymentRequest = getLightningPaymentRequest(payment)
+  if (!payment.id || !paymentRequest) {
+    throw new Error("Speed did not return a Lightning payment request.")
+  }
+
+  const hostedUrl = String(payment.hosted_url || payment.checkout_url || payment.url || "").trim()
+
+  return {
+    speedPaymentId: payment.id,
+    paymentRequest,
+    paymentUrl: `lightning:${paymentRequest}`,
+    hostedUrl: hostedUrl || undefined,
+    status: String(payment.status || "unpaid"),
+    merchantTransferPercentage,
+    transfers: Array.isArray(payment.transfers) ? payment.transfers : [],
+    metadata,
+    raw: payment
+  }
+}
+
+export async function retrieveSpeedPayment(paymentId: string): Promise<SpeedPaymentObject> {
+  const id = String(paymentId || "").trim()
+  if (!id) throw new Error("Missing Speed payment ID")
+  return speedRequest<SpeedPaymentObject>(`/payments/${encodeURIComponent(id)}`, { method: "GET" })
+}
+
+export function verifySpeedWebhookSignature(
+  rawBody: string,
+  headers: Record<string, string | undefined | null>
+): boolean {
+  const secret = String(process.env.SPEED_WEBHOOK_SECRET || "").trim()
+  if (!secret || !secret.startsWith("wsec_")) return false
+
+  const signatureHeader = String(headers["webhook-signature"] || "").trim()
+  const timestamp = String(headers["webhook-timestamp"] || "").trim()
+  const webhookId = String(headers["webhook-id"] || "").trim()
+  if (!signatureHeader || !timestamp || !webhookId || !rawBody) return false
+
+  const signature = signatureHeader
+    .split(" ")
+    .find((part) => part.startsWith("v1,"))
+    ?.slice("v1,".length) || signatureHeader.replace(/^v1,/, "")
+  if (!signature) return false
+
+  let secretBytes: Buffer
+  try {
+    secretBytes = Buffer.from(secret.slice("wsec_".length), "base64")
+  } catch {
+    return false
+  }
+
+  const signedPayload = `${webhookId}.${timestamp}.${rawBody}`
+  const expected = createHmac("sha256", secretBytes)
+    .update(signedPayload, "utf8")
+    .digest("base64")
+
+  const actualBuffer = Buffer.from(signature)
+  const expectedBuffer = Buffer.from(expected)
+  if (actualBuffer.length !== expectedBuffer.length) return false
+  return timingSafeEqual(actualBuffer, expectedBuffer)
+}
+
+export function isSpeedPaymentPaid(payment: Pick<SpeedPaymentObject, "status">): boolean {
+  const status = String(payment.status || "").toLowerCase().trim()
+  return status === "paid" || status === "confirmed"
 }

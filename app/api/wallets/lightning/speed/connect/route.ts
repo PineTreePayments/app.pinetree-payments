@@ -1,20 +1,14 @@
 /**
- * POST /api/wallets/lightning/speed/connect
+ * /api/wallets/lightning/speed/connect
  *
- * Connects or disconnects a merchant's Speed account.
- * action "connect": test credentials then save; returns sanitized status.
- * action "disconnect": remove Speed provider row; does NOT touch NWC.
- *
- * SECURITY:
- * - secretKey is a server-only secret. Never return it in any response.
- * - Credentials are saved with the DB helper which stores them server-side only.
- * - Use maskSpeedKey for all log statements.
+ * Default Speed uses PineTree's Speed platform account.
+ * Merchants do not submit Speed API keys here.
  */
 
 import { NextRequest, NextResponse } from "next/server"
 import {
-  testSpeedConnection,
-  maskSpeedKey
+  getPineTreeSpeedConfigStatus,
+  testPineTreeSpeedConnection
 } from "@/providers/lightning/speedClient"
 import {
   saveMerchantSpeedConnection,
@@ -22,6 +16,21 @@ import {
   getMerchantSpeedProvider
 } from "@/database/merchantProviders"
 import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
+
+type SpeedConnectBody = {
+  action?: string
+  speedAccountId?: string
+  speedAccountStatus?: string
+  payoutDestination?: string
+  payoutType?: string
+  setupStatus?: string
+  notes?: string[]
+}
+
+function sanitizeOptionalString(value: unknown): string | undefined {
+  const trimmed = String(value || "").trim()
+  return trimmed || undefined
+}
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   let merchantId: string
@@ -34,13 +43,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     )
   }
 
-  let body: {
-    action?: string
-    secretKey?: string
-    publishableKey?: string
-    accountId?: string
-    webhookSecret?: string
-  } = {}
+  let body: SpeedConnectBody = {}
   try {
     body = await req.json()
   } catch {
@@ -48,61 +51,56 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const action = String(body.action || "connect").trim().toLowerCase()
+  const rawBody = body as Record<string, unknown>
 
-  // ── Disconnect ────────────────────────────────────────────────────────────
+  if ("secretKey" in rawBody || "publishableKey" in rawBody || "webhookSecret" in rawBody) {
+    return NextResponse.json(
+      { error: "Merchant-owned Speed API keys are not accepted by the default Speed setup." },
+      { status: 400 }
+    )
+  }
+
   if (action === "disconnect") {
     await disconnectMerchantSpeedConnection(merchantId)
-    console.info("[api/speed/connect] Speed connection disconnected", { merchantId })
+    console.info("[api/speed/connect] Speed settlement setup cleared", { merchantId })
     return NextResponse.json({
       success: true,
       connected: false,
-      message: "Speed Lightning disconnected."
+      platformStatus: getPineTreeSpeedConfigStatus(),
+      speedStatus: null,
+      message: "Speed settlement setup cleared. PineTree platform credentials were not changed."
     })
   }
 
-  // ── Connect ───────────────────────────────────────────────────────────────
-  const secretKey = String(body.secretKey || "").trim()
-  if (!secretKey) {
-    return NextResponse.json({ error: "secretKey is required" }, { status: 400 })
+  const platformStatus = getPineTreeSpeedConfigStatus()
+  const speedAccountId = sanitizeOptionalString(body.speedAccountId)
+  if (!speedAccountId) {
+    return NextResponse.json(
+      { error: "Merchant Speed Account ID is required for Speed Lightning payments." },
+      { status: 400 }
+    )
   }
 
-  const publishableKey = String(body.publishableKey || "").trim() || undefined
-  const accountId = String(body.accountId || "").trim() || undefined
-  const webhookSecret = String(body.webhookSecret || "").trim() || undefined
-
-  console.info("[api/speed/connect] Testing Speed credentials before save", {
-    merchantId,
-    keyMasked: maskSpeedKey(secretKey)
-  })
-
-  // Test credentials before saving — do not save if connection fails
-  let connectionResult
   try {
-    connectionResult = await testSpeedConnection(secretKey)
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Speed connection test failed"
-    return NextResponse.json({
-      success: false,
-      error: `Connection test failed: ${message}`
-    }, { status: 200 })
-  }
-
-  // Save the connection server-side — secret key never leaves the server
-  try {
+    const platformTest = await testPineTreeSpeedConnection()
     const { providerRowId } = await saveMerchantSpeedConnection(merchantId, {
-      secretKey,
-      publishableKey,
-      accountId: accountId || connectionResult.accountId || undefined,
-      webhookSecret,
-      mode: connectionResult.mode,
-      accountStatus: "active"
+      accountId: speedAccountId,
+      accountStatus: sanitizeOptionalString(body.speedAccountStatus) || "configured",
+      payoutDestination: sanitizeOptionalString(body.payoutDestination),
+      payoutType: sanitizeOptionalString(body.payoutType),
+      setupStatus: sanitizeOptionalString(body.setupStatus) || "ready_for_payments",
+      mode: platformStatus.mode,
+      notes: Array.isArray(body.notes) ? body.notes.map(String).filter(Boolean) : [
+        "PineTree Speed platform test passed.",
+        "Merchant Speed account ID configured for split settlement."
+      ],
+      enabled: platformTest.connected && platformTest.config.paymentProcessingLive
     })
 
-    console.info("[api/speed/connect] Speed connection saved", {
+    console.info("[api/speed/connect] Speed settlement setup saved", {
       merchantId,
       providerRowId,
-      mode: connectionResult.mode,
-      keyMasked: maskSpeedKey(secretKey)
+      providerModel: "pine_tree_speed_platform"
     })
 
     const speedStatus = await getMerchantSpeedProvider(merchantId)
@@ -110,19 +108,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({
       success: true,
       connected: true,
-      mode: connectionResult.mode,
-      accountId: connectionResult.accountId,
-      notes: connectionResult.notes,
+      mode: platformStatus.mode,
+      platformStatus,
       speedStatus,
-      message:
-        connectionResult.mode === "test"
-          ? "Speed connected in test mode. Switch to a live key when ready for production payments."
-          : connectionResult.mode === "live"
-            ? "Speed connected. Payment processing integration pending — this connection is for setup only."
-            : "Speed connected. Payment processing integration pending."
+      message: "Speed Lightning setup saved. PineTree can create Speed Lightning payments for this merchant."
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to save Speed connection"
+    const message = err instanceof Error ? err.message : "Failed to save Speed setup"
     console.error("[api/speed/connect] Save failed", { merchantId, error: message })
     return NextResponse.json({ error: message }, { status: 500 })
   }
@@ -139,11 +131,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     )
   }
 
-  const speedStatus = await getMerchantSpeedProvider(merchantId)
+  const [speedStatus, platformStatus] = await Promise.all([
+    getMerchantSpeedProvider(merchantId),
+    Promise.resolve(getPineTreeSpeedConfigStatus())
+  ])
 
   return NextResponse.json({
     success: true,
     connected: Boolean(speedStatus),
+    platformStatus,
     speedStatus: speedStatus || null
   })
 }

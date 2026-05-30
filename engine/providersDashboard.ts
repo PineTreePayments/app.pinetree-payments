@@ -3,8 +3,7 @@ import { refreshWalletBalancesEngine } from "./walletOverview"
 import { loadProviders } from "./loadProviders"
 import { getProviderMetadata } from "./providerRegistry"
 import { getLightningNwcReadiness, SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
-import type { SpeedMode } from "@/providers/lightning/speedClient"
-import { maskSpeedKey } from "@/providers/lightning/speedClient"
+import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
 
 const db = supabaseAdmin || supabase
 
@@ -63,7 +62,7 @@ function hasNwcConnection(row?: ProviderRow | null): boolean {
 }
 
 function getLightningCapabilities() {
-  const metadata = getProviderMetadata("lightning_nwc")
+  const metadata = getProviderMetadata(SPEED_PROVIDER_NAME) || getProviderMetadata("lightning_nwc")
   const capabilities = metadata?.capabilities
 
   return {
@@ -87,7 +86,7 @@ function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
   const lightningStatus = getLightningDashboardStatus(nwcRow)
 
   // Exclude raw internal rows — sanitized rows are synthesized below.
-  // This prevents nwc_uri and speed_secret_key from ever reaching the UI.
+  // This prevents nwc_uri or other raw internal credentials from ever reaching the UI.
   const decoratedRows: ProviderRow[] = rows.filter(
     (row) =>
       row.provider !== "lightning" &&
@@ -132,42 +131,86 @@ function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
   }
 
   // ── Speed Lightning (Recommended) ─────────────────────────────────────────
-  // Synthesize a safe row — never include speed_secret_key in the response.
+  const platformStatus = getPineTreeSpeedConfigStatus()
   if (speedRow && (speedRow.status === "connected" || speedRow.status === "active")) {
     const rawCreds = speedRow.credentials || {}
-    const mode = (rawCreds.mode as SpeedMode) || "unknown"
-    const rawKey = typeof rawCreds.speed_secret_key === "string" ? rawCreds.speed_secret_key : ""
+    const hasMerchantSpeedAccount = Boolean(String(rawCreds.speed_account_id || "").trim())
+    const readyForPayments = platformStatus.configured && hasMerchantSpeedAccount && Boolean(speedRow.enabled)
     const safeSpeedCredentials: JsonObject = {
-      mode,
-      masked_key: rawKey ? maskSpeedKey(rawKey) : null,
+      mode: platformStatus.mode,
       account_id: (rawCreds.speed_account_id as string | null) ?? null,
-      webhook_configured: Boolean(rawCreds.webhook_secret),
-      tested_at: (rawCreds.tested_at as string | null) ?? null,
-      provider_model: "speed_merchant_account"
+      account_status: (rawCreds.speed_account_status as string | null) ?? null,
+      payout_destination: (rawCreds.payout_destination as string | null) ?? null,
+      payout_type: (rawCreds.payout_type as string | null) ?? null,
+      setup_status:
+        (rawCreds.setup_status as string | null) ?? "pending_speed_connect_confirmation",
+      last_tested_at: (rawCreds.last_tested_at as string | null) ?? null,
+      provider_model: "pine_tree_speed_platform",
+      platform_configured: platformStatus.configured,
+      platform_missing: platformStatus.missing,
+      platform_account_id_configured: platformStatus.platformAccountIdConfigured,
+      platform_webhook_secret_configured: platformStatus.webhookSecretConfigured,
+      payment_processing_live: readyForPayments,
+      settlement_path_status: readyForPayments ? "ready" : hasMerchantSpeedAccount ? platformStatus.settlementPathStatus : "missing_merchant_speed_account",
+      dashboard_url: platformStatus.dashboardUrl
     }
 
     decoratedRows.push({
       provider: SPEED_PROVIDER_NAME,
       status: speedRow.status,
-      enabled: false,
+      enabled: readyForPayments,
       credentials: safeSpeedCredentials,
-      dashboard_status: "connected" as LightningDashboardStatus,
-      capabilities: null,
+      dashboard_status: platformStatus.configured ? "connected" as LightningDashboardStatus : "provider_unavailable" as LightningDashboardStatus,
+      capabilities: {
+        supportsLightningInvoice: true,
+        supportsFeeAtPaymentTime: true,
+        supportsSplitSettlement: true,
+        supportsWebhookConfirmation: platformStatus.webhookSecretConfigured
+      },
       readiness: {
-        ready: false,
-        missingPermissions: [],
-        reason: "Speed setup connected. Payment processing integration is pending."
+        ready: readyForPayments,
+        missingPermissions: [
+          ...platformStatus.missing,
+          ...(hasMerchantSpeedAccount ? [] : ["speed_account_id"])
+        ],
+        reason: readyForPayments
+          ? null
+          : platformStatus.configured
+            ? "Add the merchant Speed Account ID and pass the platform test before enabling Speed Lightning."
+            : "PineTree Speed platform env is missing. Payment processing is not live."
       }
     })
   } else {
     decoratedRows.push({
       provider: SPEED_PROVIDER_NAME,
-      status: "disconnected",
+      status: platformStatus.configured ? "configured" : "missing_env",
       enabled: false,
-      credentials: {},
-      dashboard_status: "not_configured" as LightningDashboardStatus,
-      capabilities: null,
-      readiness: null
+      credentials: {
+        mode: platformStatus.mode,
+        provider_model: "pine_tree_speed_platform",
+        platform_configured: platformStatus.configured,
+        platform_missing: platformStatus.missing,
+        platform_account_id_configured: platformStatus.platformAccountIdConfigured,
+        platform_webhook_secret_configured: platformStatus.webhookSecretConfigured,
+        payment_processing_live: false,
+        settlement_path_status: platformStatus.configured ? "missing_merchant_speed_account" : platformStatus.settlementPathStatus,
+        setup_status: "pending_speed_connect_confirmation",
+        dashboard_url: platformStatus.dashboardUrl
+      },
+      dashboard_status: platformStatus.configured ? "connected" as LightningDashboardStatus : "provider_unavailable" as LightningDashboardStatus,
+      capabilities: {
+        supportsLightningInvoice: true,
+        supportsFeeAtPaymentTime: true,
+        supportsSplitSettlement: true,
+        supportsWebhookConfirmation: platformStatus.webhookSecretConfigured
+      },
+      readiness: {
+        ready: false,
+        missingPermissions: [...platformStatus.missing, "speed_account_id"],
+        reason: platformStatus.configured
+          ? "Add the merchant Speed Account ID before enabling Speed Lightning."
+          : "PineTree Speed platform env is missing. Payment processing is not live."
+      }
     })
   }
 

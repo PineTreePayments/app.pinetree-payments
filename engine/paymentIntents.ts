@@ -14,7 +14,7 @@ import { PINETREE_FEE } from "./config"
 import { markPaymentIncomplete } from "./paymentStateActions"
 import { loadProviders } from "./loadProviders"
 import { getMerchantProviders } from "@/database/merchants"
-import { getLightningNwcReadiness } from "@/database/merchantProviders"
+import { getLightningNwcReadiness, SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { getProviderMetadata, isProviderHealthy, providerSupportsFeeAtPaymentTime } from "./providerRegistry"
 
 const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base", "shift4", "bitcoin_lightning"]
@@ -106,7 +106,9 @@ function isProviderAvailableForCheckout(
   enabledProviders: Set<string>
 ): boolean {
   if (network === "bitcoin_lightning") {
-    return enabledProviders.has("lightning") || enabledProviders.has("lightning_nwc")
+    return enabledProviders.has(SPEED_PROVIDER_NAME) ||
+      enabledProviders.has("lightning") ||
+      enabledProviders.has("lightning_nwc")
   }
   const providerKey = walletNetworkToProviderKey(network)
   if (!providerKey) return false
@@ -210,6 +212,17 @@ export async function getMerchantAvailableNetworks(merchantId: string): Promise<
       if (!metadata.capabilities?.supportsLightningInvoice) return false
       if (!isProviderHealthy(providerId)) return false
       // NWC uses polling and post-payment fee — does not require webhook or atomic fee capture
+      if (providerId === SPEED_PROVIDER_NAME) {
+        const credentials = (provider.credentials || {}) as {
+          speed_account_id?: string
+          setup_status?: string
+        }
+        const setupStatus = String(credentials.setup_status || "").trim()
+        return Boolean(
+          String(credentials.speed_account_id || "").trim() &&
+          (setupStatus === "ready_for_payments" || setupStatus === "ready")
+        )
+      }
       if (providerId === "lightning_nwc") {
         const credentials = (provider.credentials || {}) as { capabilities?: Parameters<typeof getLightningNwcReadiness>[0] }
         return getLightningNwcReadiness(credentials.capabilities).ready

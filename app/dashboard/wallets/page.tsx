@@ -2106,7 +2106,7 @@ export default function WalletsPage() {
                         </div>
                         <p className="text-sm font-semibold text-gray-950">Speed Lightning</p>
                         <p className="mt-1 text-sm leading-6 text-gray-600">
-                          Most merchants should use Speed Lightning when available. Speed handles Lightning invoices, payment status, and webhook confirmations — no wallet permissions required.
+                          Most merchants should use Speed Lightning when available. PineTree processes Lightning payments through Speed, keeps its $0.15 service fee, and sends the remaining merchant amount to the configured Speed account.
                         </p>
                         <div className="mt-3 flex flex-wrap items-center gap-3">
                           <a
@@ -2115,7 +2115,7 @@ export default function WalletsPage() {
                             rel="noopener noreferrer"
                             className={pineTreeSecondaryActionButton}
                           >
-                            Create Speed Account
+                            Learn About Speed
                           </a>
                           <span className="text-xs text-gray-400">PineTree Speed integration coming soon</span>
                         </div>

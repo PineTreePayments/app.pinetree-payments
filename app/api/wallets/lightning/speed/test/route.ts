@@ -1,17 +1,12 @@
 /**
  * POST /api/wallets/lightning/speed/test
  *
- * Tests a merchant's Speed secret API key against the Speed API.
- * Accepts: secretKey (required), publishableKey (optional), webhookSecret (optional)
- *
- * Returns sanitized connection status only — never echoes the secret key back.
- *
- * SECURITY: The secretKey is a server-only secret. Never log it or include it
- * in any response. Use maskSpeedKey for all log statements.
+ * Tests PineTree's server-side Speed platform credentials.
+ * Does not accept merchant-owned Speed API keys.
  */
 
 import { NextRequest, NextResponse } from "next/server"
-import { testSpeedConnection, maskSpeedKey } from "@/providers/lightning/speedClient"
+import { testPineTreeSpeedConnection } from "@/providers/lightning/speedClient"
 import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -25,40 +20,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     )
   }
 
-  let body: { secretKey?: string; publishableKey?: string; webhookSecret?: string } = {}
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: "Invalid request body" }, { status: 400 })
+  const body = await req.json().catch(() => null) as Record<string, unknown> | null
+  if (body && ("secretKey" in body || "publishableKey" in body || "webhookSecret" in body)) {
+    return NextResponse.json(
+      { error: "Merchant-owned Speed API keys are not accepted by the default Speed test." },
+      { status: 400 }
+    )
   }
 
-  const secretKey = String(body.secretKey || "").trim()
-  if (!secretKey) {
-    return NextResponse.json({ error: "secretKey is required" }, { status: 400 })
-  }
-
-  console.info("[api/speed/test] Testing Speed connection", {
-    merchantId,
-    keyMasked: maskSpeedKey(secretKey)
-  })
+  console.info("[api/speed/test] Testing PineTree Speed platform connection", { merchantId })
 
   try {
-    const result = await testSpeedConnection(secretKey)
+    const result = await testPineTreeSpeedConnection()
 
     return NextResponse.json({
       success: true,
       connected: result.connected,
       mode: result.mode,
       accountId: result.accountId,
-      notes: result.notes
+      notes: result.notes,
+      platformStatus: result.config
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Speed connection test failed"
-    console.warn("[api/speed/test] Test failed", {
-      merchantId,
-      keyMasked: maskSpeedKey(secretKey),
-      error: message
-    })
+    const message = err instanceof Error ? err.message : "Speed platform connection test failed"
+    console.warn("[api/speed/test] PineTree platform test failed", { merchantId, error: message })
 
     return NextResponse.json({
       success: false,

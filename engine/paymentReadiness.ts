@@ -1,5 +1,7 @@
 import { getMerchantProviders } from "@/database/merchants"
 import { getMerchantWallets } from "@/database/merchantWallets"
+import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
+import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
 import {
   normalizePaymentAdapter,
   adapterSupportsNetwork,
@@ -12,7 +14,7 @@ import {
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 import { isProviderHealthy } from "./providerRegistry"
 
-type ReadinessNetwork = "solana" | "base"
+type ReadinessNetwork = "solana" | "base" | "bitcoin_lightning"
 
 type NetworkReadiness = {
   network: ReadinessNetwork
@@ -47,7 +49,7 @@ function maskAddress(address?: string | null): string | undefined {
 export async function getPaymentReadinessEngine(input: { merchantId?: string }) {
   const merchantId = String(input.merchantId || "").trim() || undefined
 
-  const networks: ReadinessNetwork[] = ["solana", "base"]
+  const networks: ReadinessNetwork[] = ["solana", "base", "bitcoin_lightning"]
 
   const connectedProviders = merchantId ? await getMerchantProviders(merchantId) : []
   const connectedAdapterIds = connectedProviders
@@ -73,6 +75,43 @@ export async function getPaymentReadinessEngine(input: { merchantId?: string }) 
         )
       : []
     const walletAddress = merchantId ? walletByNetwork.get(network) : undefined
+
+    const speedProvider = connectedProviders.find(
+      (provider) => String(provider.provider || "").toLowerCase().trim() === SPEED_PROVIDER_NAME
+    )
+    if (network === "bitcoin_lightning") {
+      const speedConfig = getPineTreeSpeedConfigStatus()
+      const speedCredentials = (speedProvider?.credentials || {}) as {
+        speed_account_id?: string
+        setup_status?: string
+      }
+      const speedAccountId = String(speedCredentials.speed_account_id || "").trim()
+      const setupStatus = String(speedCredentials.setup_status || "").trim()
+      const speedReady = Boolean(
+        speedConfig.configured &&
+        speedProvider?.enabled !== false &&
+        speedAccountId &&
+        (setupStatus === "ready_for_payments" || setupStatus === "ready")
+      )
+
+      return {
+        network,
+        adapters: {
+          available: Boolean(speedProvider && speedReady),
+          connected: speedProvider ? [SPEED_PROVIDER_NAME] : []
+        },
+        wallet: {
+          connected: Boolean(speedAccountId),
+          addressPreview: maskAddress(speedAccountId)
+        },
+        treasury: {
+          configured: speedConfig.configured,
+          validFormat: speedConfig.configured,
+          addressPreview: undefined,
+          error: speedConfig.configured ? undefined : speedConfig.missing.join(", ")
+        }
+      }
+    }
 
     let treasuryAddress = ""
     let configured = false
@@ -108,7 +147,9 @@ export async function getPaymentReadinessEngine(input: { merchantId?: string }) 
     }
   })
 
-  const supportedIntentNetworks = details.filter((item) => item.network === "solana" || item.network === "base")
+  const supportedIntentNetworks = details.filter((item) =>
+    item.network === "solana" || item.network === "base" || item.network === "bitcoin_lightning"
+  )
   const readyNetworks = supportedIntentNetworks.filter(
     (item) => item.adapters.available && item.wallet.connected && item.treasury.configured && item.treasury.validFormat
   )

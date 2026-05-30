@@ -17,15 +17,15 @@ const providerZeusIosUrl = process.env.NEXT_PUBLIC_ZEUS_IOS_URL || "https://apps
 const providerZeusAndroidUrl = process.env.NEXT_PUBLIC_ZEUS_ANDROID_URL || "https://play.google.com/store/apps/details?id=app.zeusln"
 const providerZeusDocsUrl = process.env.NEXT_PUBLIC_ZEUS_DOCS_URL || "https://zeusln.app"
 
-// Speed Lightning — merchant-facing onboarding and dashboard links
-const speedSignupUrl = process.env.NEXT_PUBLIC_SPEED_SIGNUP_URL || "https://www.tryspeed.com"
+// Speed Lightning — PineTree/admin setup links only; secrets stay server-side.
 const speedLoginUrl = process.env.NEXT_PUBLIC_SPEED_LOGIN_URL || "https://app.tryspeed.com"
-// Exact deep links to API Keys and Webhooks sections are not confirmed —
-// using the Developers root as a safe default. Update NEXT_PUBLIC_SPEED_API_KEYS_URL
-// and NEXT_PUBLIC_SPEED_WEBHOOKS_URL in .env if Speed provides stable deep links.
-const speedApiKeysUrl = process.env.NEXT_PUBLIC_SPEED_API_KEYS_URL || "https://app.tryspeed.com/developers"
-const speedWebhooksUrl = process.env.NEXT_PUBLIC_SPEED_WEBHOOKS_URL || "https://app.tryspeed.com/developers"
+const speedApiKeysUrl = process.env.NEXT_PUBLIC_SPEED_API_KEYS_URL || "https://app.tryspeed.com/apikeys/standard-keys"
+const speedWebhooksUrl = process.env.NEXT_PUBLIC_SPEED_WEBHOOKS_URL || "https://app.tryspeed.com/webhooks"
 const speedDocsUrl = process.env.NEXT_PUBLIC_SPEED_DOCS_URL || "https://docs.tryspeed.com"
+const speedApiDocsUrl = process.env.NEXT_PUBLIC_SPEED_API_DOCS_URL || "https://apidocs.tryspeed.com"
+const speedAssociatedAccountsUrl = process.env.NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL || "https://app.tryspeed.com/settings/associated-accounts"
+const speedAutoPayoutUrl = process.env.NEXT_PUBLIC_SPEED_AUTO_PAYOUT_URL || "https://app.tryspeed.com/auto-payout"
+const speedWebhookEndpointUrl = "https://app.pinetree-payments.com/api/webhooks/speed"
 
 type ProviderCredentials = {
   api_key?: string
@@ -199,17 +199,16 @@ export default function ProvidersPage() {
   const [loading, setLoading] = useState(false)
 
   // Speed Lightning setup state
-  const [speedSecretKey, setSpeedSecretKey] = useState("")
-  const [speedPublishableKey, setSpeedPublishableKey] = useState("")
-  const [speedWebhookSecret, setSpeedWebhookSecret] = useState("")
   const [speedTestResult, setSpeedTestResult] = useState<{
     success: boolean
     connected?: boolean
     mode?: string
     notes?: string[]
+    platformStatus?: ProviderCredentials
     error?: string
   } | null>(null)
   const [speedTesting, setSpeedTesting] = useState(false)
+  const [speedAccountId, setSpeedAccountId] = useState("")
 
   const [smartRouting, setSmartRouting] = useState(false)
   const [autoConversion, setAutoConversion] = useState(false)
@@ -238,11 +237,9 @@ export default function ProvidersPage() {
     setWalletSessionStatus(null)
     setWalletMobileDeeplink(null)
     didToastSyncRef.current = false
-    setSpeedSecretKey("")
-    setSpeedPublishableKey("")
-    setSpeedWebhookSecret("")
     setSpeedTestResult(null)
     setSpeedTesting(false)
+    setSpeedAccountId("")
 
     if (pollerRef.current) {
       clearInterval(pollerRef.current)
@@ -449,8 +446,10 @@ export default function ProvidersPage() {
     if (provider === "lightning_speed") {
       const p = getProvider(provider)
       if (!p || p.dashboard_status === "not_configured") return "Not configured"
-      if (p.dashboard_status === "connected") return "Connected"
-      return "Not configured"
+      if (p.dashboard_status === "provider_unavailable") return "Missing env"
+      if (p.readiness?.ready) return "Ready"
+      if (p.dashboard_status === "connected") return "Needs account ID"
+      return "Needs setup"
     }
 
     const wallet = getWallet(provider)
@@ -699,11 +698,9 @@ export default function ProvidersPage() {
       setNwcWalletLabel("")
       setNwcTestResult(null)
     } else if (provider === "speed") {
-      // Speed form always starts blank — secret key is never pre-populated
-      setSpeedSecretKey("")
-      setSpeedPublishableKey("")
-      setSpeedWebhookSecret("")
       setSpeedTestResult(null)
+      const speedProvider = getProvider("lightning_speed")
+      setSpeedAccountId(String(speedProvider?.credentials?.account_id || ""))
     } else if (p?.credentials?.api_key) {
       setInputValue(p.credentials.api_key)
     } else if (p?.credentials?.wallet) {
@@ -782,13 +779,7 @@ export default function ProvidersPage() {
     }
   }
 
-  async function testSpeedApiKey() {
-    const key = speedSecretKey.trim()
-    if (!key) {
-      toast.error("Paste your Speed secret API key first")
-      return
-    }
-
+  async function testPineTreeSpeedPlatform() {
     setSpeedTesting(true)
     setSpeedTestResult(null)
 
@@ -799,8 +790,7 @@ export default function ProvidersPage() {
 
       const res = await fetch("/api/wallets/lightning/speed/test", {
         method: "POST",
-        headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ secretKey: key })
+        headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" }
       })
 
       const data = await res.json().catch(() => null)
@@ -815,6 +805,7 @@ export default function ProvidersPage() {
         connected: Boolean(data?.connected),
         mode: data?.mode || "unknown",
         notes: Array.isArray(data?.notes) ? data.notes : [],
+        platformStatus: data?.platformStatus || undefined,
         error: data?.error || undefined
       })
     } catch (err) {
@@ -824,11 +815,7 @@ export default function ProvidersPage() {
     }
   }
 
-  async function saveSpeedConnection() {
-    const key = speedSecretKey.trim()
-    if (!key) { toast.error("Speed secret API key is required"); return }
-    if (!speedTestResult?.connected) { toast.error("Test the connection first"); return }
-
+  async function saveSpeedSetup() {
     setLoading(true)
 
     try {
@@ -841,9 +828,7 @@ export default function ProvidersPage() {
         headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "connect",
-          secretKey: key,
-          publishableKey: speedPublishableKey.trim() || undefined,
-          webhookSecret: speedWebhookSecret.trim() || undefined
+          speedAccountId: speedAccountId.trim()
         })
       })
 
@@ -854,7 +839,7 @@ export default function ProvidersPage() {
         return
       }
 
-      toast.success(data?.message || "Speed Lightning connected")
+      toast.success(data?.message || "Speed platform setup saved")
       closeProviderModal()
       await loadAll()
     } catch (err) {
@@ -1105,8 +1090,8 @@ export default function ProvidersPage() {
 
   function statusTone(status: string) {
     if (status === "Connected") return "blue"
-    if (status === "Needs verification" || status === "Needs permissions") return "amber"
-    if (status === "Provider unavailable") return "red"
+    if (status === "Needs verification" || status === "Needs permissions" || status === "Setup only") return "amber"
+    if (status === "Provider unavailable" || status === "Missing env") return "red"
     return "default"
   }
 
@@ -1350,88 +1335,96 @@ export default function ProvidersPage() {
           <div className="grid gap-3 sm:grid-cols-2">
             {/* Recommended: Speed Lightning */}
             {(() => {
-              const speedConnected = getStatus("lightning_speed") === "Connected"
               const speedProvider = getProvider("lightning_speed")
-              const speedMode = String(speedProvider?.credentials?.mode || "")
-              const speedMaskedKey = String(speedProvider?.credentials?.masked_key || "")
+              const speedCredentials = speedProvider?.credentials || {}
+              const platformConfigured = Boolean(speedCredentials.platform_configured)
+              const dashboardUrl = String(speedCredentials.dashboard_url || "")
+              const speedMode = String(speedCredentials.mode || "")
+              const setupStatus = String(speedCredentials.setup_status || "pending_speed_connect_confirmation")
+              const platformMissing = Array.isArray(speedCredentials.platform_missing)
+                ? speedCredentials.platform_missing.map(String).join(", ")
+                : ""
               return (
                 <div className="flex flex-col rounded-xl border border-blue-100 bg-blue-50/40 p-4">
                   <div className="mb-2 flex flex-wrap items-center gap-2">
                     <span className="rounded-full bg-blue-600 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
                       Recommended
                     </span>
-                    {speedConnected && (
-                      <ProviderStatusPill label="Connected" tone="blue" className="shrink-0" />
-                    )}
+                    <ProviderStatusPill
+                      label={platformConfigured ? "Platform configured" : "Missing env"}
+                      tone={platformConfigured ? "blue" : "amber"}
+                      className="shrink-0"
+                    />
                   </div>
 
-                  <p className="text-sm font-semibold text-gray-950">Speed Lightning</p>
+                  <p className="text-sm font-semibold text-gray-950">Recommended: Speed Lightning</p>
                   <p className="mt-1.5 text-sm leading-5 text-gray-600">
-                    Recommended for most merchants. Connect your Speed account API key and accept Bitcoin Lightning payments without managing a wallet node.
+                    PineTree processes Lightning payments through Speed. PineTree keeps its $0.15 service fee and sends the remaining merchant amount to your configured Speed account.
                   </p>
 
-                  {speedConnected && (
-                    <div className="mt-3 rounded-lg border border-blue-100 bg-white px-3 py-2.5">
-                      <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Connected</span>
+                  <div className="mt-3 rounded-lg border border-blue-100 bg-white px-3 py-2.5">
+                      <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Platform status</span>
                       <span className="mt-1 block text-sm font-medium text-gray-950">
-                        {speedMode === "test" ? "Test mode" : speedMode === "live" ? "Live mode" : "Speed"}
-                        {speedMaskedKey ? ` • ${speedMaskedKey}` : ""}
+                        {platformConfigured ? "PineTree Speed env configured" : `PineTree Speed env missing${platformMissing ? `: ${platformMissing}` : ""}`}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-gray-500">
+                        {speedMode === "test" ? "Test mode" : speedMode === "live" || speedMode === "production" ? "Production mode" : "Mode unknown"}
+                      </span>
+                      <span className="mt-1 block text-xs text-amber-600">
+                        {Boolean(speedCredentials.payment_processing_live) ? "Speed payments ready" : "Speed payments need setup"}
                       </span>
                       <span className="mt-0.5 block text-xs text-amber-600">
-                        Setup connected — payment processing integration pending
+                        {String(speedCredentials.account_id || "") ? "Merchant Speed Account ID configured" : "Merchant Speed Account ID missing"}
                       </span>
-                    </div>
-                  )}
+                      <span className="mt-0.5 block text-xs text-gray-500">
+                        Setup status: {setupStatus.replace(/_/g, " ")}
+                      </span>
+                  </div>
 
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <a href={speedSignupUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                      Create account
-                    </a>
-                    <a href={speedLoginUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                      Log in
-                    </a>
                     <a href={speedApiKeysUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                      API keys
+                      Open Speed API Keys
                     </a>
                     <a href={speedWebhooksUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                      Webhooks
+                      Open Speed Webhooks
+                    </a>
+                    <a href={speedAssociatedAccountsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                      Open Associated Accounts
+                    </a>
+                    <a href={speedAutoPayoutUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                      Open Auto Payout
+                    </a>
+                    <a href={speedDocsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                      Learn about Speed
+                    </a>
+                    <a href={dashboardUrl || speedLoginUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                      Open Speed Dashboard
                     </a>
                   </div>
 
                   <div className="mt-auto flex items-center gap-2 pt-4">
-                    {speedConnected ? (
-                      <>
-                        <button
-                          onClick={() => openProvider("speed")}
-                          className={`h-9 rounded-md border border-gray-300 bg-white px-3.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-400 hover:bg-gray-50`}
-                        >
-                          Manage
-                        </button>
-                        <button
-                          onClick={disconnectSpeed}
-                          className="h-9 rounded-md border border-red-200 bg-white px-3.5 text-sm font-semibold text-red-600 shadow-sm transition hover:bg-red-50"
-                        >
-                          Disconnect
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        onClick={() => openProvider("speed")}
-                        className="h-9 rounded-md border border-blue-600 bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-                      >
-                        Connect Speed
-                      </button>
-                    )}
+                    <button
+                      onClick={() => openProvider("speed")}
+                      className="h-9 rounded-md border border-blue-600 bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+                    >
+                      View Setup
+                    </button>
+                    <button
+                      onClick={disconnectSpeed}
+                      className="h-9 rounded-md border border-red-200 bg-white px-3.5 text-sm font-semibold text-red-600 shadow-sm transition hover:bg-red-50"
+                    >
+                      Clear Setup
+                    </button>
                   </div>
                 </div>
               )
             })()}
 
-            {/* Advanced: Direct Lightning Wallet (NWC) */}
+            {/* Advanced/Beta: Direct Lightning Wallet (NWC) */}
             <div className="flex flex-col rounded-xl border border-gray-200 bg-gray-50/60 p-4">
               <div className="mb-2">
                 <span className="rounded-full border border-gray-300 bg-white px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-                  Advanced
+                  Advanced/Beta
                 </span>
               </div>
               <p className="text-sm font-semibold text-gray-950">Direct Lightning Wallet</p>
@@ -1648,93 +1641,66 @@ export default function ProvidersPage() {
             {activeProvider === "speed" && (
               <div className="space-y-4">
                 <div className="rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3">
-                  <p className="text-sm font-semibold text-gray-900">Speed Lightning — Merchant Setup</p>
+                  <p className="text-sm font-semibold text-gray-900">Recommended: Speed Lightning</p>
                   <p className="mt-1 text-sm leading-5 text-gray-600">
-                    Connect your Speed account with your secret API key. Speed handles invoice creation and payment confirmation.
+                    PineTree processes Lightning payments through Speed. PineTree keeps its $0.15 service fee and sends the remaining merchant amount to your configured Speed account.
                   </p>
                 </div>
 
                 <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Setup steps</p>
-                  <ol className="list-decimal list-inside space-y-1 text-sm leading-6 text-gray-600">
-                    <li>Create or log in to your Speed account.</li>
-                    <li>Go to Developers → API Keys.</li>
-                    <li>Copy your Secret API key.</li>
-                    <li>Paste it below, then test and save.</li>
-                    <li>Add the PineTree webhook endpoint in Speed once payment processing is enabled.</li>
-                  </ol>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Setup status</p>
+                  <div className="space-y-1 text-sm leading-6 text-gray-600">
+                    <p>PineTree Speed env configured or missing is shown on the Speed card.</p>
+                    <p>Speed payments are enabled only after the platform test passes and a merchant Speed Account ID is saved.</p>
+                    <p>Speed webhook URL: {speedWebhookEndpointUrl}</p>
+                    <p>Configure this endpoint inside PineTree&apos;s Speed dashboard, not inside each merchant account.</p>
+                    <p>Merchants do not enter Speed secret API keys, publishable keys, or webhook secrets.</p>
+                  </div>
                 </div>
+
+                <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm leading-6 text-gray-600">
+                  <p className="font-semibold text-gray-900">Account ID roles</p>
+                  <p>PineTree Platform Account ID: PineTree&apos;s own Speed account, stored in Vercel as SPEED_PLATFORM_ACCOUNT_ID if needed.</p>
+                  <p>Merchant Speed Account ID: the merchant destination account for payment splits, stored per merchant below.</p>
+                </div>
+
+                <label className="block">
+                  <span className="text-sm font-semibold text-gray-900">Merchant Speed Account ID</span>
+                  <span className="mt-0.5 block text-xs text-gray-500">
+                    Use the merchant&apos;s Speed account ID as the destination account for payment splits. PineTree&apos;s own Speed API key and webhook secret stay in Vercel.
+                  </span>
+                  <input
+                    value={speedAccountId}
+                    onChange={(e) => setSpeedAccountId(e.target.value)}
+                    placeholder="acct_..."
+                    className={lightningInputClass()}
+                    autoComplete="off"
+                  />
+                </label>
 
                 <div className="flex flex-wrap gap-2">
-                  <a href={speedSignupUrl} target="_blank" rel="noopener noreferrer" className={actionButtonClass()}>
-                    Create Speed account
-                  </a>
-                  <a href={speedLoginUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                    Log in to Speed
-                  </a>
                   <a href={speedApiKeysUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                    Open API keys
+                    Open Speed API Keys
                   </a>
                   <a href={speedWebhooksUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                    Open Webhooks
+                    Open Speed Webhooks
                   </a>
-                  <a href={speedDocsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                    Docs
+                  <a href={speedAssociatedAccountsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                    Open Associated Accounts
+                  </a>
+                  <a href={speedAutoPayoutUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                    Open Auto Payout
+                  </a>
+                  <a href={String(getProvider("lightning_speed")?.credentials?.dashboard_url || speedLoginUrl)} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                    Open Speed Dashboard
+                  </a>
+                  <a href={speedDocsUrl} target="_blank" rel="noopener noreferrer" className={actionButtonClass()}>
+                    Learn about Speed
+                  </a>
+                  <a href={speedApiDocsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                    API Docs
                   </a>
                 </div>
-
-                <label className="block">
-                  <span className="text-sm font-semibold text-gray-900">
-                    Speed secret API key <span className="text-red-500">*</span>
-                  </span>
-                  <span className="mt-0.5 block text-xs text-gray-500">
-                    Found in Speed → Developers → API Keys. Starts with{" "}
-                    <span className="font-mono">sk_test_</span> (test) or{" "}
-                    <span className="font-mono">sk_live_</span> (live).
-                  </span>
-                  <input
-                    type="password"
-                    value={speedSecretKey}
-                    onChange={(e) => { setSpeedSecretKey(e.target.value); setSpeedTestResult(null) }}
-                    placeholder="sk_test_... or sk_live_..."
-                    className={lightningInputClass()}
-                    autoComplete="off"
-                  />
-                  <span className="mt-1 block text-xs text-gray-400">
-                    Stored server-side only. Never shown after saving.
-                  </span>
-                </label>
-
-                <label className="block">
-                  <span className="text-sm font-semibold text-gray-900">
-                    Publishable key <span className="font-normal text-gray-500">(optional)</span>
-                  </span>
-                  <input
-                    type="text"
-                    value={speedPublishableKey}
-                    onChange={(e) => setSpeedPublishableKey(e.target.value)}
-                    placeholder="pk_test_... or pk_live_..."
-                    className={lightningInputClass()}
-                    autoComplete="off"
-                  />
-                </label>
-
-                <label className="block">
-                  <span className="text-sm font-semibold text-gray-900">
-                    Webhook secret <span className="font-normal text-gray-500">(optional)</span>
-                  </span>
-                  <span className="mt-0.5 block text-xs text-gray-500">
-                    Add after setting up the PineTree webhook endpoint in Speed. Enables signature verification.
-                  </span>
-                  <input
-                    type="password"
-                    value={speedWebhookSecret}
-                    onChange={(e) => setSpeedWebhookSecret(e.target.value)}
-                    placeholder="whsec_..."
-                    className={lightningInputClass()}
-                    autoComplete="off"
-                  />
-                </label>
 
                 {speedTestResult && (
                   <div className={`rounded-xl border px-4 py-3 ${
@@ -1746,7 +1712,7 @@ export default function ProvidersPage() {
                       speedTestResult.connected ? "text-green-800" : "text-amber-900"
                     }`}>
                       {speedTestResult.connected
-                        ? `Speed connected — ${speedTestResult.mode === "test" ? "test mode" : speedTestResult.mode === "live" ? "live mode" : "mode unknown"}`
+                        ? `PineTree Speed platform reachable - ${speedTestResult.mode === "test" ? "test mode" : speedTestResult.mode === "live" || speedTestResult.mode === "production" ? "production mode" : "mode unknown"}`
                         : "Could not connect to Speed"}
                     </p>
                     {speedTestResult.connected && speedTestResult.notes && speedTestResult.notes.length > 0 && (
@@ -1761,7 +1727,7 @@ export default function ProvidersPage() {
                     )}
                     {speedTestResult.connected && (
                       <p className="mt-1 text-xs text-green-700">
-                        Key is valid. Click Save to store this connection.
+                        Platform env is reachable. Save the Merchant Speed Account ID to enable payments.
                       </p>
                     )}
                   </div>
@@ -1779,8 +1745,8 @@ export default function ProvidersPage() {
                   <div className="flex flex-col gap-2 sm:flex-row">
                     <button
                       type="button"
-                      onClick={testSpeedApiKey}
-                      disabled={speedTesting || !speedSecretKey.trim()}
+                      onClick={testPineTreeSpeedPlatform}
+                      disabled={speedTesting}
                       className={`${secondaryButtonClass()} w-full sm:w-auto`}
                     >
                       {speedTesting ? "Testing..." : "Test Connection"}
@@ -1788,11 +1754,11 @@ export default function ProvidersPage() {
 
                     <button
                       type="button"
-                      onClick={saveSpeedConnection}
-                      disabled={loading || !speedSecretKey.trim() || !speedTestResult?.connected}
+                      onClick={saveSpeedSetup}
+                      disabled={loading || !speedAccountId.trim()}
                       className={`${primaryButtonClass()} w-full sm:w-auto`}
                     >
-                      {loading ? "Connecting..." : "Save Connection"}
+                      {loading ? "Saving..." : "Save Setup"}
                     </button>
                   </div>
                 </div>
