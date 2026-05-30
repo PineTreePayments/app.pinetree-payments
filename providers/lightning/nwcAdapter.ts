@@ -10,7 +10,7 @@
 
 import type { ProviderAdapter, ProviderCapabilities, LightningInvoiceRequest, LightningInvoiceStatus } from "@/types/provider"
 import { registerProvider } from "@/engine/providerRegistry"
-import { makeNwcInvoice, lookupNwcInvoice, validateNwcUri } from "./nwcClient"
+import { makeNwcInvoice, validateNwcUri } from "./nwcClient"
 import QRCode from "qrcode"
 
 export const NWC_NETWORK = "bitcoin_lightning"
@@ -49,13 +49,15 @@ export const nwcAdapter: ProviderAdapter = {
       throw new Error(`Invalid NWC connection: ${error}`)
     }
 
-    // Convert USD merchant amount to millisatoshis
+    // Convert gross USD amount to millisatoshis. The merchant wallet receives
+    // the gross customer payment first; PineTree collects its fee separately
+    // after invoice settlement through NWC pay_invoice.
     const btcPriceUsd = input.btcPriceUsd
     if (!btcPriceUsd || btcPriceUsd <= 0) {
       throw new Error("NWC adapter requires btcPriceUsd to convert USD amount to sats")
     }
 
-    const amountUsd = Number(input.merchantAmount)
+    const amountUsd = Number(input.grossAmount)
     const amountSats = Math.ceil((amountUsd / btcPriceUsd) * 100_000_000)
     const amountMsat = amountSats * 1000
 
@@ -88,6 +90,9 @@ export const nwcAdapter: ProviderAdapter = {
         amountSats,
         amountMsat,
         btcPriceUsd,
+        invoiceAmountUsd: amountUsd,
+        merchantAmountUsd: Number(input.merchantAmount),
+        pinetreeFeeUsd: Number(input.pinetreeFee),
         createdAt: invoiceResult.createdAt
       }
     }

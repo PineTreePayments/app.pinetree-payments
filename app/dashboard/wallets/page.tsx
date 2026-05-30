@@ -32,6 +32,9 @@ type NwcConnectionStatus = {
   canLookupInvoice: boolean
   canPayInvoice: boolean
   canCollectFee: boolean
+  ready: boolean
+  missingPermissions: string[]
+  readinessReason: string | null
   lastTestedAt: string | null
   connectionError: string | null
 }
@@ -78,7 +81,11 @@ type ActivityFilter = "all" | "completed" | "failed" | "drafts"
 type NwcTestResult = {
   success: boolean
   connected: boolean
+  ready?: boolean
+  missingPermissions?: string[]
+  readinessReason?: string
   canMakeInvoice: boolean
+  canLookupInvoice?: boolean
   canPayInvoice: boolean
   canCollectFee: boolean
   walletAlias?: string
@@ -1225,9 +1232,9 @@ export default function WalletsPage() {
                         Receive
                       </span>
                     )}
-                    {nwcConnected && rail.nwcConnectionStatus?.canCollectFee && (
+                    {nwcConnected && rail.nwcConnectionStatus?.ready && (
                       <span className="rounded-full border border-[#0052FF]/15 bg-[#0052FF]/5 px-2 py-0.5 text-[10px] font-semibold text-[#0052FF]">
-                        Auto-fee
+                        Ready
                       </span>
                     )}
                     {!nwcConnected && (
@@ -1508,9 +1515,9 @@ export default function WalletsPage() {
                         />
                         <StatTile
                           label="Fee Collection"
-                          value={nwcStatus?.canCollectFee ? "Automatic" : nwcStatus?.connected ? "Manual" : "—"}
-                          helper={nwcStatus?.canCollectFee ? "$0.15 fee auto-collected post-payment" : "Wallet needs pay_invoice for auto-fee"}
-                          tone={nwcStatus?.canCollectFee ? "blue" : "amber"}
+                          value={nwcStatus?.ready ? "Ready" : nwcStatus?.connected ? "Not Ready" : "—"}
+                          helper={nwcStatus?.ready ? "PineTree can collect the $0.15 service-fee invoice" : `Missing NWC permissions: ${(nwcStatus?.missingPermissions || ["make_invoice", "lookup_invoice", "pay_invoice"]).join(", ")}`}
+                          tone={nwcStatus?.ready ? "blue" : "amber"}
                         />
                         <StatTile
                           label="Last Sync"
@@ -1923,22 +1930,26 @@ export default function WalletsPage() {
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div>
                             <p className="text-sm font-semibold text-gray-950">{nwcStatus.walletLabel || "Lightning Wallet"}</p>
-                            <p className="mt-1 text-sm leading-6 text-gray-600">NWC wallet connected and ready to receive payments.</p>
+                            <p className="mt-1 text-sm leading-6 text-gray-600">
+                              {nwcStatus.ready
+                                ? "NWC wallet connected and ready for live Lightning payments."
+                                : "NWC wallet connected, but live Lightning payments are unavailable until all required permissions are granted."}
+                            </p>
                           </div>
-                          <NetworkStatusPill label="Connected" tone="blue" />
+                          <NetworkStatusPill label={nwcStatus.ready ? "Ready" : "Needs Permissions"} tone={nwcStatus.ready ? "blue" : "amber"} />
                         </div>
                         <div className="mt-4 grid grid-cols-3 gap-2">
                           <CapabilityBadge label="Receive" value={nwcStatus.canMakeInvoice ? "Yes" : "No"} tone={nwcStatus.canMakeInvoice ? "blue" : "slate"} />
                           <CapabilityBadge label="Lookup" value={nwcStatus.canLookupInvoice ? "Yes" : "No"} tone={nwcStatus.canLookupInvoice ? "blue" : "slate"} />
-                          <CapabilityBadge label="Auto-fee" value={nwcStatus.canCollectFee ? "Yes" : "No"} tone={nwcStatus.canCollectFee ? "blue" : "amber"} />
+                          <CapabilityBadge label="Fee Pay" value={nwcStatus.canPayInvoice ? "Yes" : "No"} tone={nwcStatus.canPayInvoice ? "blue" : "amber"} />
                         </div>
                       </div>
 
-                      {!nwcStatus.canCollectFee && (
+                      {!nwcStatus.ready && (
                         <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
-                          <p className="text-sm font-semibold text-gray-950">Automatic Fee Collection Unavailable</p>
+                          <p className="text-sm font-semibold text-gray-950">Lightning Payments Not Ready</p>
                           <p className="mt-1 text-sm leading-6 text-gray-700">
-                            Your wallet does not support pay_invoice. PineTree cannot automatically collect its $0.15 fee. Consider connecting a wallet with full NWC permissions.
+                            Bitcoin Lightning requires NWC permissions to create invoices, check invoice status, and pay PineTree&apos;s $0.15 service-fee invoice. Missing: {nwcStatus.missingPermissions.join(", ")}.
                           </p>
                         </div>
                       )}
@@ -1946,7 +1957,7 @@ export default function WalletsPage() {
                       <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
                         <p className="text-sm font-semibold text-gray-950">Connect a Different Wallet</p>
                         <p className="mt-1 text-sm leading-6 text-gray-600">
-                          Paste a new NWC URI to replace the current connection. The wallet must support invoice creation, payment lookup, and fee handling.
+                          Paste a new NWC URI to replace the current connection. The wallet must support make_invoice, lookup_invoice, and pay_invoice.
                         </p>
                         <div className="mt-3 space-y-2">
                           <input
@@ -1967,11 +1978,11 @@ export default function WalletsPage() {
                           {nwcTestResult && (
                             <div className={cx(
                               "rounded-2xl border p-4",
-                              nwcTestResult.success ? "border-[#0052FF]/15 bg-[#0052FF]/5" : "border-amber-200 bg-amber-50/70"
+                              nwcTestResult.ready ? "border-[#0052FF]/15 bg-[#0052FF]/5" : "border-amber-200 bg-amber-50/70"
                             )}>
                               <div className="flex items-center justify-between gap-3">
                                 <p className="text-sm font-semibold text-gray-950">
-                                  {nwcTestResult.success ? "Connection successful" : "Connection issue"}
+                                  {nwcTestResult.ready ? "Ready for live payments" : nwcTestResult.connected ? "Connected, not ready" : "Connection issue"}
                                 </p>
                                 <NetworkStatusPill label={nwcTestResult.connected ? "Reachable" : "Unreachable"} tone={nwcTestResult.connected ? "blue" : "slate"} />
                               </div>
@@ -1981,7 +1992,7 @@ export default function WalletsPage() {
                               <div className="mt-3 grid grid-cols-3 gap-2">
                                 <CapabilityBadge label="Receive" value={nwcTestResult.canMakeInvoice ? "Yes" : "No"} tone={nwcTestResult.canMakeInvoice ? "blue" : "slate"} />
                                 <CapabilityBadge label="Pay" value={nwcTestResult.canPayInvoice ? "Yes" : "No"} tone={nwcTestResult.canPayInvoice ? "blue" : "slate"} />
-                                <CapabilityBadge label="Auto-fee" value={nwcTestResult.canCollectFee ? "Yes" : "No"} tone={nwcTestResult.canCollectFee ? "blue" : "amber"} />
+                                <CapabilityBadge label="Fee Pay" value={nwcTestResult.canPayInvoice ? "Yes" : "No"} tone={nwcTestResult.canPayInvoice ? "blue" : "amber"} />
                               </div>
                               {nwcTestResult.error && (
                                 <p className="mt-2 text-sm text-red-700">{nwcTestResult.error}</p>
@@ -1991,7 +2002,7 @@ export default function WalletsPage() {
                           {nwcTestResult && !nwcTestResult.canPayInvoice && (
                             <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
                               <p className="text-sm leading-6 text-amber-800">
-                                This wallet cannot support PineTree fee handling. Try Alby Hub or another NWC wallet.
+                                Lightning live payments stay unavailable until the wallet grants pay_invoice. PineTree uses it only to pay the $0.15 service-fee invoice, and wallet-side spending limits should be enabled when available.
                               </p>
                             </div>
                           )}
@@ -1999,7 +2010,7 @@ export default function WalletsPage() {
                             <button type="button" onClick={testNwcUri} disabled={nwcTestLoading || !nwcUri.trim()} className={cx(pineTreeSecondaryActionButton, "flex-1 justify-center disabled:cursor-not-allowed disabled:opacity-55")}>
                               {nwcTestLoading ? "Testing..." : "Test"}
                             </button>
-                            <button type="button" onClick={connectNwcWallet} disabled={nwcConnectLoading || !nwcUri.trim() || !nwcTestResult?.success || nwcTestResult?.canPayInvoice === false} className={cx(pineTreePrimaryButton, "flex-1 disabled:cursor-not-allowed disabled:opacity-55")}>
+                            <button type="button" onClick={connectNwcWallet} disabled={nwcConnectLoading || !nwcUri.trim()} className={cx(pineTreePrimaryButton, "flex-1 disabled:cursor-not-allowed disabled:opacity-55")}>
                               {nwcConnectLoading ? "Saving..." : "Save New Wallet"}
                             </button>
                           </div>
@@ -2094,7 +2105,7 @@ export default function WalletsPage() {
                       </div>
 
                       <p className="text-xs leading-5 text-gray-500">
-                        Your wallet must allow PineTree to request invoices, verify payments, and handle PineTree platform fees.
+                        Bitcoin Lightning requires an NWC wallet connection with permission to create invoices, check invoice status, and automatically pay PineTree&apos;s $0.15 service-fee invoice. If your wallet does not grant pay_invoice, Lightning payments cannot be enabled.
                       </p>
 
                       <div className="space-y-2">
@@ -2119,11 +2130,11 @@ export default function WalletsPage() {
                       {nwcTestResult && (
                         <div className={cx(
                           "rounded-2xl border p-4",
-                          nwcTestResult.success ? "border-[#0052FF]/15 bg-[#0052FF]/5" : "border-amber-200 bg-amber-50/70"
+                          nwcTestResult.ready ? "border-[#0052FF]/15 bg-[#0052FF]/5" : "border-amber-200 bg-amber-50/70"
                         )}>
                           <div className="flex items-center justify-between gap-3">
                             <p className="text-sm font-semibold text-gray-950">
-                              {nwcTestResult.success ? "Connection successful" : "Connection issue"}
+                              {nwcTestResult.ready ? "Ready for live payments" : nwcTestResult.connected ? "Connected, not ready" : "Connection issue"}
                             </p>
                             <NetworkStatusPill label={nwcTestResult.connected ? "Reachable" : "Unreachable"} tone={nwcTestResult.connected ? "blue" : "slate"} />
                           </div>
@@ -2133,7 +2144,7 @@ export default function WalletsPage() {
                           <div className="mt-3 grid grid-cols-3 gap-2">
                             <CapabilityBadge label="Receive" value={nwcTestResult.canMakeInvoice ? "Yes" : "No"} tone={nwcTestResult.canMakeInvoice ? "blue" : "slate"} />
                             <CapabilityBadge label="Pay" value={nwcTestResult.canPayInvoice ? "Yes" : "No"} tone={nwcTestResult.canPayInvoice ? "blue" : "slate"} />
-                            <CapabilityBadge label="Auto-fee" value={nwcTestResult.canCollectFee ? "Yes" : "No"} tone={nwcTestResult.canCollectFee ? "blue" : "amber"} />
+                            <CapabilityBadge label="Fee Pay" value={nwcTestResult.canPayInvoice ? "Yes" : "No"} tone={nwcTestResult.canPayInvoice ? "blue" : "amber"} />
                           </div>
                           {nwcTestResult.error && (
                             <p className="mt-2 text-sm text-red-700">{nwcTestResult.error}</p>
@@ -2143,9 +2154,9 @@ export default function WalletsPage() {
 
                       {nwcTestResult && !nwcTestResult.canPayInvoice && (
                         <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
-                          <p className="text-sm font-semibold text-gray-950">Wallet Not Compatible</p>
+                          <p className="text-sm font-semibold text-gray-950">Connected, Not Ready</p>
                           <p className="mt-1 text-sm leading-6 text-amber-800">
-                            This wallet cannot support PineTree fee handling. Try Alby Hub or another NWC wallet.
+                            Lightning live payments stay unavailable until the wallet grants pay_invoice. PineTree uses it only to pay the $0.15 service-fee invoice, and wallet-side spending limits should be enabled when available.
                           </p>
                         </div>
                       )}
@@ -2154,7 +2165,7 @@ export default function WalletsPage() {
                         <button type="button" onClick={testNwcUri} disabled={nwcTestLoading || !nwcUri.trim()} className={cx(pineTreeSecondaryActionButton, "flex-1 justify-center disabled:cursor-not-allowed disabled:opacity-55")}>
                           {nwcTestLoading ? "Testing..." : "Test Connection"}
                         </button>
-                        <button type="button" onClick={connectNwcWallet} disabled={nwcConnectLoading || !nwcUri.trim() || !nwcTestResult?.success || nwcTestResult?.canPayInvoice === false} className={cx(pineTreePrimaryButton, "flex-1 disabled:cursor-not-allowed disabled:opacity-55")}>
+                        <button type="button" onClick={connectNwcWallet} disabled={nwcConnectLoading || !nwcUri.trim()} className={cx(pineTreePrimaryButton, "flex-1 disabled:cursor-not-allowed disabled:opacity-55")}>
                           {nwcConnectLoading ? "Saving..." : "Save Wallet"}
                         </button>
                       </div>

@@ -13,6 +13,7 @@
  */
 
 import { supabaseAdmin, supabase } from "@/database"
+import { createLedgerEntry } from "@/database/ledgerEntries"
 import { getMerchantNwcSetup } from "@/database/merchantProviders"
 import { payNwcInvoice, maskNwcUri } from "@/providers/lightning/nwcClient"
 import { getMarketPricesUSD } from "./marketPrices"
@@ -58,6 +59,12 @@ export async function getFeeAmountSats(feeUsd: number = PINETREE_FEE): Promise<{
   return { feeAmountSats, btcPriceUsd }
 }
 
+function isExpectedFeeAmount(actualMsat: unknown, expectedSats: number): boolean {
+  const actual = Number(actualMsat)
+  if (!Number.isFinite(actual) || actual <= 0) return false
+  return actual === expectedSats * 1000
+}
+
 // ─── Fee Collection ───────────────────────────────────────────────────────────
 
 /**
@@ -98,13 +105,14 @@ export async function collectNwcPlatformFee(
     return { status: "FAILED", errorMessage: "Merchant NWC setup not found" }
   }
 
-  if (!merchantNwc.capabilities?.canPayInvoice) {
-    await recordFeeStatus(paymentId, "NOT_REQUIRED", {
-      reason: "Merchant NWC wallet cannot pay invoices — fee collection not supported"
+  if (!merchantNwc.readiness.ready) {
+    await recordFeeStatus(paymentId, "FAILED", {
+      reason: merchantNwc.readiness.reason || "Merchant NWC wallet is missing required live-payment permissions",
+      missingPermissions: merchantNwc.readiness.missingPermissions
     })
     return {
-      status: "NOT_REQUIRED",
-      errorMessage: "Wallet does not support pay_invoice — fee collection unavailable"
+      status: "FAILED",
+      errorMessage: merchantNwc.readiness.reason || "Merchant NWC wallet is missing required live-payment permissions"
     }
   }
 
@@ -132,6 +140,9 @@ export async function collectNwcPlatformFee(
     const feeAmountMsat = feeAmountSats * 1000
     const description = `PineTree platform fee — payment ${paymentId}`
     const invoiceResult = await makeNwcInvoice(treasuryNwcUri, feeAmountMsat, description, 600)
+    if (!isExpectedFeeAmount(invoiceResult.amountMsat, feeAmountSats)) {
+      throw new Error("Treasury invoice amount mismatch")
+    }
     treasuryInvoice = invoiceResult.invoice
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : "Treasury invoice creation failed"
@@ -157,6 +168,26 @@ export async function collectNwcPlatformFee(
       feeAmountSats,
       btcPriceUsd
     })
+
+    try {
+      await createLedgerEntry({
+        payment_id: paymentId,
+        merchant_id: merchantId,
+        provider: "lightning_nwc",
+        network: "bitcoin_lightning",
+        asset: "BTC",
+        amount: feeAmountSats,
+        usd_value: PINETREE_FEE,
+        direction: "platform_fee_out",
+        status: "CONFIRMED"
+      })
+    } catch (err) {
+      await recordFeeStatus(paymentId, "PAID", {
+        feeAmountSats,
+        btcPriceUsd,
+        ledgerWarning: err instanceof Error ? err.message : "Fee ledger entry failed"
+      })
+    }
 
     return { status: "PAID", preimage: payResult.preimage, feeAmountSats }
   } catch (err) {
@@ -210,12 +241,10 @@ async function recordFeeStatus(
  */
 export async function getMerchantNwcUriForPayment(
   merchantId: string
-): Promise<{ nwcUri: string; walletLabel: string } | null> {
+): Promise<Awaited<ReturnType<typeof getMerchantNwcSetup>> | null> {
   const setup = await getMerchantNwcSetup(merchantId)
   if (!setup) return null
 
-  return {
-    nwcUri: setup.nwcUri,
-    walletLabel: setup.walletLabel
-  }
+  return setup
 }
+

@@ -19,7 +19,8 @@ import {
 import {
   saveMerchantNwcConnection,
   disconnectMerchantNwc,
-  getMerchantNwcStatus
+  getMerchantNwcStatus,
+  getLightningNwcReadiness
 } from "@/database/merchantProviders"
 import {
   requireMerchantIdFromRequest,
@@ -87,12 +88,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }, { status: 200 })
   }
 
-  if (!capabilities.canMakeInvoice) {
-    return NextResponse.json({
-      success: false,
-      error: "This wallet cannot create invoices. PineTree Lightning requires the make_invoice permission. Please connect a supported NWC wallet."
-    }, { status: 200 })
-  }
+  const readiness = getLightningNwcReadiness(capabilities)
 
   // Save the connection — nwcUri is stored server-side only
   try {
@@ -108,6 +104,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       providerRowId,
       walletLabel,
       canMakeInvoice: capabilities.canMakeInvoice,
+      canLookupInvoice: capabilities.canLookupInvoice,
       canPayInvoice: capabilities.canPayInvoice
     })
 
@@ -116,14 +113,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({
       success: true,
       connected: true,
+      ready: readiness.ready,
+      missingPermissions: readiness.missingPermissions,
+      readinessReason: readiness.reason,
       walletLabel,
       canMakeInvoice: capabilities.canMakeInvoice,
       canLookupInvoice: capabilities.canLookupInvoice,
       canPayInvoice: capabilities.canPayInvoice,
-      canCollectFee: capabilities.canMakeInvoice && capabilities.canPayInvoice,
+      canCollectFee: readiness.ready,
       walletAlias: capabilities.walletAlias,
       nwcStatus,
-      message: "Lightning wallet connected successfully."
+      message: readiness.ready
+        ? "Lightning wallet connected and ready for live payments."
+        : "Lightning wallet saved, but live payments are unavailable until the missing NWC permissions are granted."
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to save wallet connection"

@@ -141,19 +141,16 @@ export async function checkNwcPaymentOnce(paymentId: string): Promise<boolean> {
     return false
   }
 
-  // Fee collection fires after the customer payment is CONFIRMED.
-  // Failure here must never reverse or block the CONFIRMED status.
-  const merchantId = payment.merchant_id
-  void (async () => {
-    try {
-      await collectNwcPlatformFee(paymentId, merchantId)
-    } catch (err) {
-      console.error("[nwc/check] Unexpected error in collectNwcPlatformFee", {
-        paymentId,
-        error: err instanceof Error ? err.message : String(err)
-      })
-    }
-  })()
+  // Fee collection starts after the customer payment is CONFIRMED. Failure here
+  // is recorded separately and must never reverse the customer payment.
+  try {
+    await collectNwcPlatformFee(paymentId, payment.merchant_id)
+  } catch (err) {
+    console.error("[nwc/check] Unexpected error in collectNwcPlatformFee", {
+      paymentId,
+      error: err instanceof Error ? err.message : String(err)
+    })
+  }
 
   return true
 }

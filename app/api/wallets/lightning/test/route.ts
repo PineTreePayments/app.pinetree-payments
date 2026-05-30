@@ -2,14 +2,12 @@
  * POST /api/wallets/lightning/test
  *
  * Tests an NWC connection string by calling `get_info` on the wallet relay.
- * Returns the wallet's supported capabilities.
- *
- * Thin API layer — all logic is in providers/lightning/nwcClient.ts.
- * The NWC URI is NEVER logged or returned after this request.
+ * Returns the wallet's supported capabilities without returning the NWC URI.
  */
 
 import { NextRequest, NextResponse } from "next/server"
 import { testNwcConnection, validateNwcUri, maskNwcUri } from "@/providers/lightning/nwcClient"
+import { getLightningNwcReadiness } from "@/database/merchantProviders"
 import {
   requireMerchantIdFromRequest,
   getRouteErrorStatus
@@ -43,6 +41,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({
       success: false,
       connected: false,
+      ready: false,
       error: parseError || "Invalid NWC URI format"
     }, { status: 400 })
   }
@@ -54,34 +53,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   try {
     const capabilities = await testNwcConnection(nwcUri)
-
-    const canCollectFee = capabilities.canMakeInvoice && capabilities.canPayInvoice
-
-    if (!capabilities.canMakeInvoice) {
-      return NextResponse.json({
-        success: false,
-        connected: true,
-        canMakeInvoice: false,
-        canPayInvoice: capabilities.canPayInvoice,
-        canCollectFee: false,
-        supportedMethods: capabilities.supportedMethods,
-        walletAlias: capabilities.walletAlias,
-        error: "This wallet cannot create invoices — PineTree Lightning requires make_invoice permission."
-      }, { status: 200 })
-    }
+    const readiness = getLightningNwcReadiness(capabilities)
 
     return NextResponse.json({
-      success: true,
+      success: readiness.ready,
       connected: true,
+      ready: readiness.ready,
+      missingPermissions: readiness.missingPermissions,
+      readinessReason: readiness.reason,
       canMakeInvoice: capabilities.canMakeInvoice,
       canLookupInvoice: capabilities.canLookupInvoice,
       canPayInvoice: capabilities.canPayInvoice,
-      canCollectFee,
+      canCollectFee: readiness.ready,
       supportedMethods: capabilities.supportedMethods,
       walletAlias: capabilities.walletAlias,
-      message: canCollectFee
-        ? "Wallet connected. Invoice creation and PineTree fee handling are supported."
-        : "Wallet connected. Invoice creation is supported. Automatic fee collection requires pay_invoice permission."
+      message: readiness.ready
+        ? "Wallet ready. Invoice creation, invoice lookup, and PineTree service-fee collection are supported."
+        : readiness.reason || "This wallet is connected but is not ready for live Bitcoin Lightning payments.",
+      error: readiness.ready ? undefined : readiness.reason
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : "NWC connection test failed"
@@ -93,6 +82,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({
       success: false,
       connected: false,
+      ready: false,
       error: message
     }, { status: 200 })
   }

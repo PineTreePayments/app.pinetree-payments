@@ -14,6 +14,7 @@ import { PINETREE_FEE } from "./config"
 import { markPaymentIncomplete } from "./paymentStateActions"
 import { loadProviders } from "./loadProviders"
 import { getMerchantProviders } from "@/database/merchants"
+import { getLightningNwcReadiness } from "@/database/merchantProviders"
 import { getProviderMetadata, isProviderHealthy, providerSupportsFeeAtPaymentTime } from "./providerRegistry"
 
 const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base", "shift4", "bitcoin_lightning"]
@@ -209,7 +210,10 @@ export async function getMerchantAvailableNetworks(merchantId: string): Promise<
       if (!metadata.capabilities?.supportsLightningInvoice) return false
       if (!isProviderHealthy(providerId)) return false
       // NWC uses polling and post-payment fee — does not require webhook or atomic fee capture
-      if (providerId === "lightning_nwc") return true
+      if (providerId === "lightning_nwc") {
+        const credentials = (provider.credentials || {}) as { capabilities?: Parameters<typeof getLightningNwcReadiness>[0] }
+        return getLightningNwcReadiness(credentials.capabilities).ready
+      }
       return Boolean(
         metadata.capabilities?.supportsWebhookConfirmation &&
         providerSupportsFeeAtPaymentTime(providerId)

@@ -228,7 +228,24 @@ export default function LightningPayment({
     } finally {
       setLoading(false)
     }
-  }, [intentId, onPaymentCreated])
+  }, [checkoutToken, intentId, onPaymentCreated])
+
+  const checkLightningStatus = useCallback(async () => {
+    const paymentId = String(payment?.paymentId || "").trim()
+    if (!paymentId || !checkoutToken || terminalStatus) return
+
+    try {
+      const res = await fetch(`/api/payments/${encodeURIComponent(paymentId)}/lightning/check`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${checkoutToken}` },
+      })
+      if (res.ok) {
+        onPaymentCreated?.()
+      }
+    } catch {
+      // Status checks are opportunistic; the customer can still retry manually.
+    }
+  }, [checkoutToken, onPaymentCreated, payment?.paymentId, terminalStatus])
 
   useEffect(() => {
     if (autoPrepareStartedRef.current || hasInvoice) return
@@ -236,12 +253,22 @@ export default function LightningPayment({
     void prepareInvoice()
   }, [hasInvoice, prepareInvoice])
 
+  useEffect(() => {
+    if (!hasInvoice || terminalStatus || !checkoutToken) return
+    void checkLightningStatus()
+    const interval = window.setInterval(() => {
+      void checkLightningStatus()
+    }, 4_000)
+    return () => window.clearInterval(interval)
+  }, [checkLightningStatus, checkoutToken, hasInvoice, terminalStatus])
+
   // When the customer returns to this page after being sent to a Lightning wallet,
   // surface recovery actions if no payment was completed.
   useEffect(() => {
     function handleReturn() {
       if (!walletLaunchedRef.current) return
       setNoPayAfterReturn(true)
+      void checkLightningStatus()
       void logLightning("wallet_returned_without_payment", { walletName: launchedWalletName || null, rail: "lightning" })
     }
     function handleVisibility() {
@@ -253,7 +280,7 @@ export default function LightningPayment({
       document.removeEventListener("visibilitychange", handleVisibility)
       window.removeEventListener("pageshow", handleReturn)
     }
-  }, [])
+  }, [checkLightningStatus, launchedWalletName])
 
   const openLightningWallet = useCallback((wallet: LightningWallet) => {
     if (!invoiceUri) return
@@ -315,7 +342,7 @@ export default function LightningPayment({
     void logLightning("app_store_fallback_triggered", { walletId: wallet.id, rail: "lightning", reason: "no_invoice_url_builder" })
     window.open(installUrl, "_blank", "noopener,noreferrer")
     setPendingWalletId("")
-  }, [invoiceUri])
+  }, [invoiceUri, onExecutionStarted])
 
   const walletPickerSections: WalletPickerSection[] = useMemo(() => {
     const query = normalizeWalletName(walletSearch)

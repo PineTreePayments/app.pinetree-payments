@@ -17,6 +17,9 @@ import {
 
 export type NwcConnectionStatus = {
   connected: boolean
+  ready: boolean
+  missingPermissions: string[]
+  readinessReason: string | null
   walletLabel: string | null
   canMakeInvoice: boolean
   canLookupInvoice: boolean
@@ -100,6 +103,9 @@ function buildNwcConnectionStatus(
   if (!nwcStatus) {
     return {
       connected: false,
+      ready: false,
+      missingPermissions: ["make_invoice", "lookup_invoice", "pay_invoice"],
+      readinessReason: "Connect an NWC wallet before enabling Bitcoin Lightning.",
       walletLabel: null,
       canMakeInvoice: false,
       canLookupInvoice: false,
@@ -112,11 +118,14 @@ function buildNwcConnectionStatus(
   const caps = nwcStatus.capabilities
   return {
     connected: true,
+    ready: nwcStatus.readiness.ready,
+    missingPermissions: nwcStatus.readiness.missingPermissions,
+    readinessReason: nwcStatus.readiness.reason,
     walletLabel: nwcStatus.walletLabel,
     canMakeInvoice: Boolean(caps?.canMakeInvoice),
     canLookupInvoice: Boolean(caps?.canLookupInvoice),
     canPayInvoice: Boolean(caps?.canPayInvoice),
-    canCollectFee: Boolean(caps?.canMakeInvoice && caps?.canPayInvoice),
+    canCollectFee: nwcStatus.readiness.ready,
     lastTestedAt: nwcStatus.lastTestedAt,
     connectionError: null
   }

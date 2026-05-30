@@ -3,6 +3,36 @@ import type { NwcCapabilities } from "@/providers/lightning/nwcClient"
 
 const db = supabaseAdmin || supabase
 
+export const REQUIRED_NWC_PAYMENT_METHODS = [
+  "make_invoice",
+  "lookup_invoice",
+  "pay_invoice"
+] as const
+
+export type LightningNwcReadiness = {
+  ready: boolean
+  missingPermissions: string[]
+  reason: string | null
+}
+
+export function getLightningNwcReadiness(
+  capabilities?: Partial<NwcCapabilities> | null
+): LightningNwcReadiness {
+  const missingPermissions: string[] = []
+
+  if (!capabilities?.canMakeInvoice) missingPermissions.push("make_invoice")
+  if (!capabilities?.canLookupInvoice) missingPermissions.push("lookup_invoice")
+  if (!capabilities?.canPayInvoice) missingPermissions.push("pay_invoice")
+
+  return {
+    ready: missingPermissions.length === 0,
+    missingPermissions,
+    reason: missingPermissions.length
+      ? `Bitcoin Lightning requires NWC permissions: ${missingPermissions.join(", ")}.`
+      : null
+  }
+}
+
 // ─── NWC Provider Functions ───────────────────────────────────────────────────
 
 export type MerchantNwcSetup = {
@@ -10,6 +40,7 @@ export type MerchantNwcSetup = {
   nwcUri: string
   walletLabel: string
   capabilities: NwcCapabilities | null
+  readiness: LightningNwcReadiness
   lastTestedAt: string | null
   status: string
 }
@@ -46,6 +77,7 @@ export async function getMerchantNwcSetup(
     nwcUri,
     walletLabel,
     capabilities: rawCapabilities || null,
+    readiness: getLightningNwcReadiness(rawCapabilities || null),
     lastTestedAt,
     status: String(data.status || "")
   }
@@ -60,6 +92,7 @@ export type MerchantNwcStatus = {
   connected: boolean
   walletLabel: string
   capabilities: NwcCapabilities | null
+  readiness: LightningNwcReadiness
   lastTestedAt: string | null
   status: string
 }
@@ -75,6 +108,7 @@ export async function getMerchantNwcStatus(
     connected: true,
     walletLabel: setup.walletLabel,
     capabilities: setup.capabilities,
+    readiness: setup.readiness,
     lastTestedAt: setup.lastTestedAt,
     status: setup.status
   }
@@ -93,6 +127,7 @@ export async function saveMerchantNwcConnection(
   capabilities: NwcCapabilities
 ): Promise<{ providerRowId: string }> {
   const now = new Date().toISOString()
+  const readiness = getLightningNwcReadiness(capabilities)
 
   const credentials = {
     nwc_uri: nwcUri,
@@ -111,13 +146,18 @@ export async function saveMerchantNwcConnection(
     .maybeSingle()
 
   if (existing?.id) {
+    const update: Record<string, unknown> = {
+      credentials,
+      status: "connected",
+      updated_at: now
+    }
+    if (!readiness.ready) {
+      update.enabled = false
+    }
+
     await db
       .from("merchant_providers")
-      .update({
-        credentials,
-        status: "connected",
-        updated_at: now
-      })
+      .update(update)
       .eq("id", existing.id)
 
     return { providerRowId: String(existing.id) }
@@ -159,4 +199,3 @@ export async function disconnectMerchantNwc(merchantId: string): Promise<void> {
     .eq("provider", "lightning_nwc")
     .in("status", ["connected", "active"])
 }
-

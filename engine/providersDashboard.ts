@@ -2,6 +2,7 @@ import { supabaseAdmin, supabase } from "@/database"
 import { refreshWalletBalancesEngine } from "./walletOverview"
 import { loadProviders } from "./loadProviders"
 import { getProviderMetadata } from "./providerRegistry"
+import { getLightningNwcReadiness } from "@/database/merchantProviders"
 
 const db = supabaseAdmin || supabase
 
@@ -26,6 +27,11 @@ type ProviderRow = {
     supportsFeeAtPaymentTime?: boolean
     supportsSplitSettlement?: boolean
     supportsWebhookConfirmation?: boolean
+  } | null
+  readiness?: {
+    ready: boolean
+    missingPermissions: string[]
+    reason: string | null
   } | null
 }
 
@@ -84,6 +90,9 @@ function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
   )
 
   if (nwcRow) {
+    const readiness = getLightningNwcReadiness(
+      nwcRow.credentials?.capabilities as Parameters<typeof getLightningNwcReadiness>[0]
+    )
     // Expose only safe credential fields — never nwc_uri
     const safeCredentials: JsonObject = {
       wallet_label: String(nwcRow.credentials?.wallet_label || "Lightning Wallet"),
@@ -97,7 +106,8 @@ function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
       enabled: lightningStatus === "connected" ? Boolean(nwcRow.enabled) : false,
       credentials: safeCredentials,
       dashboard_status: lightningStatus,
-      capabilities: lightningCapabilities
+      capabilities: lightningCapabilities,
+      readiness
     })
   } else {
     decoratedRows.push({
@@ -106,7 +116,12 @@ function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
       enabled: false,
       credentials: {},
       dashboard_status: "not_configured" as LightningDashboardStatus,
-      capabilities: lightningCapabilities
+      capabilities: lightningCapabilities,
+      readiness: {
+        ready: false,
+        missingPermissions: ["make_invoice", "lookup_invoice", "pay_invoice"],
+        reason: "Connect an NWC wallet before enabling Bitcoin Lightning."
+      }
     })
   }
 
@@ -227,7 +242,7 @@ export async function toggleProviderEngine(
   if (provider === "lightning" && enabled) {
     const { data, error: lookupError } = await db
       .from("merchant_providers")
-      .select("id")
+      .select("id, credentials")
       .eq("merchant_id", merchantId)
       .eq("provider", "lightning_nwc")
       .in("status", ["connected", "active"])
@@ -238,7 +253,14 @@ export async function toggleProviderEngine(
     }
 
     if (!data) {
-      throw new Error("Connect a Lightning wallet first to enable Bitcoin Lightning payments.")
+      throw new Error("Connect a Lightning wallet with make_invoice, lookup_invoice, and pay_invoice before enabling Bitcoin Lightning payments.")
+    }
+
+    const readiness = getLightningNwcReadiness(
+      (data.credentials as JsonObject | null | undefined)?.capabilities as Parameters<typeof getLightningNwcReadiness>[0]
+    )
+    if (!readiness.ready) {
+      throw new Error(readiness.reason || "Lightning wallet is connected but not ready for live payments.")
     }
   }
 

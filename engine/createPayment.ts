@@ -390,6 +390,9 @@ export async function createPayment(
     if (!nwcSetup) {
       throw new Error("Lightning wallet not connected. Please connect an NWC-compatible Lightning wallet in your dashboard.")
     }
+    if (!nwcSetup.readiness.ready) {
+      throw new Error(nwcSetup.readiness.reason || "Lightning wallet is connected but not ready for live payments.")
+    }
     nwcUri = nwcSetup.nwcUri
     const prices = await getMarketPricesUSD()
     btcPriceUsd = prices.BTC

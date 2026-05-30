@@ -48,6 +48,11 @@ type ProviderRecord = {
     supportsSplitSettlement?: boolean
     supportsWebhookConfirmation?: boolean
   } | null
+  readiness?: {
+    ready: boolean
+    missingPermissions: string[]
+    reason: string | null
+  } | null
 }
 
 type WalletRecord = {
@@ -163,9 +168,14 @@ export default function ProvidersPage() {
   const [nwcWalletLabel, setNwcWalletLabel] = useState("")
   const [nwcTestResult, setNwcTestResult] = useState<{
     success: boolean
+    connected?: boolean
+    ready?: boolean
+    missingPermissions?: string[]
+    readinessReason?: string
     canMakeInvoice?: boolean
     canPayInvoice?: boolean
     canLookupInvoice?: boolean
+    canCollectFee?: boolean
     walletAlias?: string
     error?: string
   } | null>(null)
@@ -397,6 +407,7 @@ export default function ProvidersPage() {
       if (!p || p.dashboard_status === "not_configured") return "Not configured"
       if (p.dashboard_status === "address_needs_verification") return "Needs verification"
       if (p.dashboard_status === "provider_unavailable") return "Provider unavailable"
+      if (p.dashboard_status === "connected" && p.readiness && !p.readiness.ready) return "Needs permissions"
       if (p.dashboard_status === "connected") return "Connected"
       return "Not configured"
     }
@@ -803,7 +814,7 @@ export default function ProvidersPage() {
           return
         }
 
-        toast.success("Lightning wallet connected")
+        toast.success(data?.message || "Lightning wallet connected")
         closeProviderModal()
         await loadAll()
         return
@@ -932,7 +943,7 @@ export default function ProvidersPage() {
 
   function statusTone(status: string) {
     if (status === "Connected") return "blue"
-    if (status === "Needs verification") return "amber"
+    if (status === "Needs verification" || status === "Needs permissions") return "amber"
     if (status === "Provider unavailable") return "red"
     return "default"
   }
@@ -1208,8 +1219,8 @@ export default function ProvidersPage() {
 
             {activeProvider === "lightning" && (
               <div className="space-y-4">
-                <p className="text-sm text-gray-600">
-                  Connect any NWC-compatible Lightning wallet (Zeus, Alby, Mutiny, and others).
+                <p className="text-sm leading-6 text-gray-600">
+                  Connect an NWC-compatible wallet such as Zeus, Alby Hub, or Alby Go. Bitcoin Lightning requires permission to create invoices, check invoice status, and automatically pay PineTree&apos;s $0.15 service-fee invoice. If pay_invoice is missing, the wallet can be saved but live Lightning payments stay unavailable.
                 </p>
 
                 <label className="block">
@@ -1223,9 +1234,21 @@ export default function ProvidersPage() {
                     autoComplete="off"
                   />
                   <span className="mt-1 block text-xs text-gray-500">
-                    Found in your wallet under Nostr Wallet Connect or NWC. Stored securely — never exposed after saving.
+                    Found in your wallet under Nostr Wallet Connect or NWC. Stored server-side and never exposed after saving.
                   </span>
                 </label>
+
+                <div className="flex flex-wrap gap-2">
+                  <a href="https://zeusln.app" target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                    Download Zeus
+                  </a>
+                  <a href="https://getalby.com" target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                    Open Alby
+                  </a>
+                  <a href="https://guides.getalby.com/user-guide/alby-account-and-browser-extension/alby-hub/nwc" target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                    Setup Docs
+                  </a>
+                </div>
 
                 <label className="block">
                   <span className="text-sm font-semibold text-gray-900">
@@ -1240,10 +1263,12 @@ export default function ProvidersPage() {
                 </label>
 
                 {nwcTestResult && (
-                  <div className={`rounded-xl border px-4 py-3 text-sm ${nwcTestResult.success ? "border-green-200 bg-green-50 text-green-800" : "border-red-200 bg-red-50 text-red-700"}`}>
-                    {nwcTestResult.success
-                      ? `Connected${nwcTestResult.walletAlias ? ` · ${nwcTestResult.walletAlias}` : ""}${nwcTestResult.canMakeInvoice ? " · Can receive payments" : ""}`
-                      : nwcTestResult.error || "Connection failed"}
+                  <div className={`rounded-xl border px-4 py-3 text-sm ${nwcTestResult.ready ? "border-green-200 bg-green-50 text-green-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                    {nwcTestResult.ready
+                      ? `Ready for live payments${nwcTestResult.walletAlias ? ` - ${nwcTestResult.walletAlias}` : ""}`
+                      : nwcTestResult.connected
+                        ? `Connected, not ready. Missing: ${(nwcTestResult.missingPermissions || []).join(", ") || "required NWC permissions"}`
+                        : nwcTestResult.error || "Connection failed"}
                   </div>
                 )}
 
@@ -1474,3 +1499,5 @@ export default function ProvidersPage() {
     </div>
   )
 }
+
+
