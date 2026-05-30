@@ -35,25 +35,43 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
-## Speed Bitcoin Lightning
+## Speed Bitcoin Lightning (Merchant Setup Shell)
 
-PineTree uses platform Speed credentials from the server environment. Merchants only enter a Speed Account ID and BTC Lightning Address in the Providers tab. Customers pay with any compatible Bitcoin Lightning wallet.
+Merchants connect their own Speed account to PineTree. Each merchant provides their own Speed API key via the Providers dashboard. PineTree does not use a shared platform Speed account.
 
-Add these to `.env.local` for local development, and add them to Vercel Project Settings -> Environment Variables for deployed production. Redeploy Vercel after changing environment variables. Do not commit real secrets.
+**Status:** Speed setup (credential entry, test, save, disconnect) is implemented. Speed payment processing (invoice creation, webhook confirmation) is pending a future integration phase. A connected Speed provider shows as "Setup connected — payment processing pending."
+
+**What Speed setup covers:**
+- Merchant enters their Speed secret API key in the Providers dashboard
+- PineTree tests the key against the Speed API before saving
+- Key is stored server-side only (never returned to the browser)
+- Mode (test/live) is inferred from the key prefix (`sk_test_` / `sk_live_`)
+
+**Server-only env var (add to `.env.local` / Vercel env):**
 
 ```bash
-SPEED_API_KEY=
-SPEED_PUBLISHABLE_KEY=
+# Speed API base URL — defaults to https://api.tryspeed.com if not set
 SPEED_API_BASE_URL=https://api.tryspeed.com
-SPEED_WEBHOOK_SECRET=
-SPEED_ENVIRONMENT=production
-SPEED_PLATFORM_ACCOUNT_ID=
-SPEED_DASHBOARD_URL=
-SPEED_BANK_SETUP_URL=
+```
+
+**Public env vars (UI links — optional, safe defaults used if not set):**
+
+```bash
+NEXT_PUBLIC_SPEED_SIGNUP_URL=https://www.tryspeed.com
+NEXT_PUBLIC_SPEED_LOGIN_URL=https://app.tryspeed.com
+NEXT_PUBLIC_SPEED_API_KEYS_URL=https://app.tryspeed.com/developers
+NEXT_PUBLIC_SPEED_WEBHOOKS_URL=https://app.tryspeed.com/developers
+NEXT_PUBLIC_SPEED_DOCS_URL=https://docs.tryspeed.com
+NEXT_PUBLIC_SPEED_API_DOCS_URL=https://apidocs.tryspeed.com
+```
+
+Update `NEXT_PUBLIC_SPEED_API_KEYS_URL` and `NEXT_PUBLIC_SPEED_WEBHOOKS_URL` if Speed provides stable deep links to those specific sections.
+
+**Credential security note:** Speed secret keys are currently stored as plain JSONB in `merchant_providers.credentials`. This matches the existing NWC URI storage pattern. Field-level encryption for Speed secret keys is a **production blocker** that must be addressed before live merchant keys are stored.
+
+**NWC Direct Lightning Wallet (Advanced):** Available for technical merchants. Requires a Nostr Wallet Connect URI and `make_invoice`, `lookup_invoice`, `pay_invoice` permissions. See the Providers dashboard → Advanced Direct Lightning Wallet section.
+
+```bash
 PINETREE_LIGHTNING_SUPPORTS_FEE_AT_PAYMENT_TIME=true
 PINETREE_LIGHTNING_SUPPORTS_SPLIT_SETTLEMENT=true
 ```
-
-`SPEED_API_KEY` and `SPEED_WEBHOOK_SECRET` are server-only secrets. Do not prefix secret keys with `NEXT_PUBLIC_`. `SPEED_PUBLISHABLE_KEY` may be stored for future client-side Speed features, but it is not required by the current checkout flow.
-`SPEED_DASHBOARD_URL` is optional and must be an HTTPS URL. When configured, authenticated merchants with a connected Speed provider can open it from the Wallets Speed Setup tab.
-`SPEED_BANK_SETUP_URL` is optional and must be an HTTPS URL. Use it only for a safe provider-hosted bank settlement or payout setup page; PineTree must not store merchant provider usernames or passwords.

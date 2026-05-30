@@ -1221,8 +1221,9 @@ export default function WalletsPage() {
                       {rail.walletLabel || "Bitcoin Lightning"}
                     </p>
                     <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
-                      <NetworkStatusPill label="Direct Lightning" tone="slate" className="min-h-6 px-2 text-[10px]" />
+                      <NetworkStatusPill label="Direct Wallet (NWC)" tone="slate" className="min-h-6 px-2 text-[10px]" />
                       <NetworkStatusPill label="Bitcoin Lightning" tone="slate" className="min-h-6 px-2 text-[10px]" />
+                      <NetworkStatusPill label="Advanced" tone="amber" className="min-h-6 px-2 text-[10px]" />
                     </div>
                   </div>
                   <NetworkStatusPill
@@ -1260,7 +1261,7 @@ export default function WalletsPage() {
                 </div>
 
                 <span className="mt-4 text-xs font-semibold text-blue-700 opacity-80 transition group-hover:opacity-100">
-                  {nwcConnected ? "Manage" : "Connect Wallet"}
+                  {nwcConnected ? "Manage" : "Connect Direct Wallet"}
                 </span>
               </button>
             )
@@ -1933,6 +1934,12 @@ export default function WalletsPage() {
                 <div className={walletDetailPanelClass}>
                   {nwcStatus?.connected ? (
                     <>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                          Advanced — Direct Lightning Wallet (NWC)
+                        </span>
+                      </div>
+
                       <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div>
@@ -2090,11 +2097,42 @@ export default function WalletsPage() {
                     </>
                   ) : (
                     <>
+                      {/* Recommended: Speed Lightning */}
+                      <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
+                        <div className="mb-2">
+                          <span className="rounded-full bg-blue-600 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                            Recommended
+                          </span>
+                        </div>
+                        <p className="text-sm font-semibold text-gray-950">Speed Lightning</p>
+                        <p className="mt-1 text-sm leading-6 text-gray-600">
+                          Most merchants should use Speed Lightning when available. Speed handles Lightning invoices, payment status, and webhook confirmations — no wallet permissions required.
+                        </p>
+                        <div className="mt-3 flex flex-wrap items-center gap-3">
+                          <a
+                            href="https://tryspeed.com"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={pineTreeSecondaryActionButton}
+                          >
+                            Create Speed Account
+                          </a>
+                          <span className="text-xs text-gray-400">PineTree Speed integration coming soon</span>
+                        </div>
+                      </div>
+
+                      {/* Advanced: Direct Lightning Wallet (NWC) */}
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full border border-gray-300 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                          Advanced — Direct Lightning Wallet (NWC)
+                        </span>
+                      </div>
+
                       <div className="space-y-4 rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
                         <div>
-                          <p className="text-sm font-semibold text-gray-950">Connect your Lightning wallet</p>
+                          <p className="text-sm font-semibold text-gray-950">Advanced setup: Direct Lightning wallet</p>
                           <p className="mt-1 text-xs leading-5 text-gray-600">
-                            Create a PineTree connection in your Lightning wallet, enable the three required permissions, then paste the connection string below.
+                            For technical merchants using Zeus, Alby Hub, or an NWC-compatible wallet. Requires manual wallet permissions and a spending limit for PineTree service-fee collection. Create a PineTree connection in your wallet, enable the three required permissions, then paste the connection string below.
                           </p>
                         </div>
 

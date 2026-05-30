@@ -2,7 +2,9 @@ import { supabaseAdmin, supabase } from "@/database"
 import { refreshWalletBalancesEngine } from "./walletOverview"
 import { loadProviders } from "./loadProviders"
 import { getProviderMetadata } from "./providerRegistry"
-import { getLightningNwcReadiness } from "@/database/merchantProviders"
+import { getLightningNwcReadiness, SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
+import type { SpeedMode } from "@/providers/lightning/speedClient"
+import { maskSpeedKey } from "@/providers/lightning/speedClient"
 
 const db = supabaseAdmin || supabase
 
@@ -80,20 +82,24 @@ function getLightningDashboardStatus(row?: ProviderRow | null): LightningDashboa
 function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
   const providersByKey = new Map(rows.map((row) => [row.provider, row]))
   const nwcRow = providersByKey.get("lightning_nwc")
+  const speedRow = providersByKey.get(SPEED_PROVIDER_NAME)
   const lightningCapabilities = getLightningCapabilities()
   const lightningStatus = getLightningDashboardStatus(nwcRow)
 
-  // Exclude raw lightning/lightning_nwc rows — a sanitized "lightning" row is synthesized below.
-  // This prevents nwc_uri (a private key) from ever reaching the UI via the providers response.
+  // Exclude raw internal rows — sanitized rows are synthesized below.
+  // This prevents nwc_uri and speed_secret_key from ever reaching the UI.
   const decoratedRows: ProviderRow[] = rows.filter(
-    (row) => row.provider !== "lightning" && row.provider !== "lightning_nwc"
+    (row) =>
+      row.provider !== "lightning" &&
+      row.provider !== "lightning_nwc" &&
+      row.provider !== SPEED_PROVIDER_NAME
   )
 
+  // ── NWC Lightning (Advanced) ──────────────────────────────────────────────
   if (nwcRow) {
     const readiness = getLightningNwcReadiness(
       nwcRow.credentials?.capabilities as Parameters<typeof getLightningNwcReadiness>[0]
     )
-    // Expose only safe credential fields — never nwc_uri
     const safeCredentials: JsonObject = {
       wallet_label: String(nwcRow.credentials?.wallet_label || "Lightning Wallet"),
       last_tested_at: (nwcRow.credentials?.last_tested_at as string | null) ?? null,
@@ -122,6 +128,46 @@ function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
         missingPermissions: ["make_invoice", "lookup_invoice", "pay_invoice"],
         reason: "Connect an NWC wallet before enabling Bitcoin Lightning."
       }
+    })
+  }
+
+  // ── Speed Lightning (Recommended) ─────────────────────────────────────────
+  // Synthesize a safe row — never include speed_secret_key in the response.
+  if (speedRow && (speedRow.status === "connected" || speedRow.status === "active")) {
+    const rawCreds = speedRow.credentials || {}
+    const mode = (rawCreds.mode as SpeedMode) || "unknown"
+    const rawKey = typeof rawCreds.speed_secret_key === "string" ? rawCreds.speed_secret_key : ""
+    const safeSpeedCredentials: JsonObject = {
+      mode,
+      masked_key: rawKey ? maskSpeedKey(rawKey) : null,
+      account_id: (rawCreds.speed_account_id as string | null) ?? null,
+      webhook_configured: Boolean(rawCreds.webhook_secret),
+      tested_at: (rawCreds.tested_at as string | null) ?? null,
+      provider_model: "speed_merchant_account"
+    }
+
+    decoratedRows.push({
+      provider: SPEED_PROVIDER_NAME,
+      status: speedRow.status,
+      enabled: false,
+      credentials: safeSpeedCredentials,
+      dashboard_status: "connected" as LightningDashboardStatus,
+      capabilities: null,
+      readiness: {
+        ready: false,
+        missingPermissions: [],
+        reason: "Speed setup connected. Payment processing integration is pending."
+      }
+    })
+  } else {
+    decoratedRows.push({
+      provider: SPEED_PROVIDER_NAME,
+      status: "disconnected",
+      enabled: false,
+      credentials: {},
+      dashboard_status: "not_configured" as LightningDashboardStatus,
+      capabilities: null,
+      readiness: null
     })
   }
 
@@ -297,6 +343,12 @@ export async function disconnectProviderEngine(merchantId: string, provider: str
         .eq("merchant_id", merchantId)
         .eq("asset", "SOL")
     }
+  }
+
+  // Speed disconnect is handled via its dedicated route — not this general path.
+  // The Speed card disconnect button calls /api/wallets/lightning/speed/connect directly.
+  if (provider === SPEED_PROVIDER_NAME) {
+    throw new Error("Use the Speed Lightning disconnect route to disconnect Speed.")
   }
 
   // Map UI provider key "lightning" to the actual DB row key "lightning_nwc"
