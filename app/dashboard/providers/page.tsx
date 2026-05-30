@@ -11,6 +11,12 @@ import {
   ProviderStatusPill
 } from "@/components/dashboard/DashboardPrimitives"
 
+const providerAlbyHubAppsUrl = process.env.NEXT_PUBLIC_ALBY_HUB_APPS_URL || "https://getalby.com/hub/apps"
+const providerAlbyNwcDocsUrl = process.env.NEXT_PUBLIC_ALBY_NWC_DOCS_URL || "https://guides.getalby.com/user-guide/alby-account-and-browser-extension/alby-hub/nwc"
+const providerZeusIosUrl = process.env.NEXT_PUBLIC_ZEUS_IOS_URL || "https://apps.apple.com/us/app/zeus-ln/id1456038895"
+const providerZeusAndroidUrl = process.env.NEXT_PUBLIC_ZEUS_ANDROID_URL || "https://play.google.com/store/apps/details?id=app.zeusln"
+const providerZeusDocsUrl = process.env.NEXT_PUBLIC_ZEUS_DOCS_URL || "https://zeusln.app"
+
 type ProviderCredentials = {
   api_key?: string
   wallet?: string
@@ -712,17 +718,24 @@ export default function ProvidersPage() {
       const data = await res.json().catch(() => null)
 
       if (!res.ok) {
-        setNwcTestResult({ success: false, error: data?.error || "Connection test failed" })
+        setNwcTestResult({ success: false, connected: false, error: data?.error || "Connection test failed" })
         return
       }
 
       setNwcTestResult({
-        success: true,
+        success: Boolean(data?.success),
+        connected: Boolean(data?.connected),
+        ready: Boolean(data?.ready),
+        missingPermissions: Array.isArray(data?.missingPermissions) ? data.missingPermissions : [],
+        readinessReason: data?.readinessReason || undefined,
         canMakeInvoice: Boolean(data?.canMakeInvoice),
+        canLookupInvoice: Boolean(data?.canLookupInvoice),
+        canPayInvoice: Boolean(data?.canPayInvoice),
+        canCollectFee: Boolean(data?.canCollectFee),
         walletAlias: data?.walletAlias || ""
       })
     } catch (err) {
-      setNwcTestResult({ success: false, error: err instanceof Error ? err.message : "Test failed" })
+      setNwcTestResult({ success: false, connected: false, error: err instanceof Error ? err.message : "Test failed" })
     } finally {
       setNwcTesting(false)
     }
@@ -1219,12 +1232,43 @@ export default function ProvidersPage() {
 
             {activeProvider === "lightning" && (
               <div className="space-y-4">
-                <p className="text-sm leading-6 text-gray-600">
-                  Connect an NWC-compatible wallet such as Zeus, Alby Hub, or Alby Go. Bitcoin Lightning requires permission to create invoices, check invoice status, and automatically pay PineTree&apos;s $0.15 service-fee invoice. If pay_invoice is missing, the wallet can be saved but live Lightning payments stay unavailable.
-                </p>
+                <div className="rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3">
+                  <p className="text-sm font-semibold text-gray-900">Connect your Lightning wallet</p>
+                  <p className="mt-1 text-sm leading-5 text-gray-600">
+                    Use Zeus, Alby Hub, or any NWC-compatible Lightning wallet. PineTree needs permission to create invoices, check payment status, and pay its $0.15 service fee after each customer payment.
+                  </p>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Get your wallet ready</p>
+                  <div className="flex flex-wrap gap-2">
+                    <a href={providerAlbyHubAppsUrl} target="_blank" rel="noopener noreferrer" className={actionButtonClass()}>
+                      Open Alby Hub Apps
+                    </a>
+                    <a href={providerZeusIosUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                      Zeus (iOS)
+                    </a>
+                    <a href={providerZeusAndroidUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                      Zeus (Android)
+                    </a>
+                    <a href={providerAlbyNwcDocsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                      Alby Setup Guide
+                    </a>
+                    <a href={providerZeusDocsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                      Zeus Guide
+                    </a>
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-gray-500">
+                    In Alby Hub: Apps &rarr; Add App &rarr; enable make_invoice, lookup_invoice, pay_invoice &rarr; set a spending budget &rarr; copy the connection string.
+                    In Zeus: Settings &rarr; Embedded Node &rarr; Nostr Wallet Connect &rarr; Add connection &rarr; enable the same permissions.
+                  </p>
+                </div>
 
                 <label className="block">
-                  <span className="text-sm font-semibold text-gray-900">NWC Connection String</span>
+                  <span className="text-sm font-semibold text-gray-900">Wallet connection string</span>
+                  <span className="mt-0.5 block text-xs text-gray-500">
+                    Found in your wallet under &ldquo;Nostr Wallet Connect&rdquo; or &ldquo;NWC&rdquo;. Starts with <span className="font-mono">nostr+walletconnect://</span>
+                  </span>
                   <input
                     type="password"
                     value={nwcUri}
@@ -1233,42 +1277,56 @@ export default function ProvidersPage() {
                     className={lightningInputClass()}
                     autoComplete="off"
                   />
-                  <span className="mt-1 block text-xs text-gray-500">
-                    Found in your wallet under Nostr Wallet Connect or NWC. Stored server-side and never exposed after saving.
+                  <span className="mt-1 block text-xs text-gray-400">
+                    Stored securely on PineTree servers. Never shown again after saving.
                   </span>
                 </label>
 
-                <div className="flex flex-wrap gap-2">
-                  <a href="https://zeusln.app" target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                    Download Zeus
-                  </a>
-                  <a href="https://getalby.com" target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                    Open Alby
-                  </a>
-                  <a href="https://guides.getalby.com/user-guide/alby-account-and-browser-extension/alby-hub/nwc" target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                    Setup Docs
-                  </a>
-                </div>
-
                 <label className="block">
                   <span className="text-sm font-semibold text-gray-900">
-                    Wallet Label <span className="font-normal text-gray-500">(optional)</span>
+                    Wallet name <span className="font-normal text-gray-500">(optional)</span>
                   </span>
                   <input
                     value={nwcWalletLabel}
                     onChange={(e) => setNwcWalletLabel(e.target.value)}
-                    placeholder="e.g. Zeus Wallet"
+                    placeholder="e.g. Alby Hub, Zeus Wallet"
                     className={lightningInputClass()}
                   />
                 </label>
 
                 {nwcTestResult && (
-                  <div className={`rounded-xl border px-4 py-3 text-sm ${nwcTestResult.ready ? "border-green-200 bg-green-50 text-green-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
-                    {nwcTestResult.ready
-                      ? `Ready for live payments${nwcTestResult.walletAlias ? ` - ${nwcTestResult.walletAlias}` : ""}`
-                      : nwcTestResult.connected
-                        ? `Connected, not ready. Missing: ${(nwcTestResult.missingPermissions || []).join(", ") || "required NWC permissions"}`
-                        : nwcTestResult.error || "Connection failed"}
+                  <div className={`rounded-xl border px-4 py-3 ${nwcTestResult.ready ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}`}>
+                    <p className={`text-sm font-semibold ${nwcTestResult.ready ? "text-green-800" : "text-amber-900"}`}>
+                      {nwcTestResult.ready
+                        ? `Ready for live Lightning payments${nwcTestResult.walletAlias ? ` — ${nwcTestResult.walletAlias}` : ""}`
+                        : nwcTestResult.connected
+                          ? "Connected, but not ready for live payments"
+                          : "Could not connect to wallet"}
+                    </p>
+                    {nwcTestResult.connected && !nwcTestResult.ready && (
+                      <div className="mt-2 space-y-1">
+                        {(nwcTestResult.missingPermissions || []).map((perm) => (
+                          <p key={perm} className="text-xs text-amber-800">
+                            Missing:{" "}
+                            {perm === "make_invoice"
+                              ? "Create invoices"
+                              : perm === "lookup_invoice"
+                                ? "Check payment status"
+                                : perm === "pay_invoice"
+                                  ? "Pay PineTree service fee ($0.15 per payment)"
+                                  : perm}
+                          </p>
+                        ))}
+                        {(nwcTestResult.missingPermissions || []).includes("pay_invoice") && (
+                          <p className="mt-1 text-xs text-amber-700">
+                            PineTree needs pay_invoice only to collect its $0.15 service fee after each customer payment. Enable a spending limit in your wallet to restrict PineTree to this fee only.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {!nwcTestResult.connected && nwcTestResult.error && (
+                      <p className="mt-1 text-xs text-amber-800">{nwcTestResult.error}</p>
+                    )}
                   </div>
                 )}
 
