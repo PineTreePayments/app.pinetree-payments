@@ -1259,8 +1259,7 @@ export default function ProvidersPage() {
                     </a>
                   </div>
                   <p className="mt-2 text-xs leading-5 text-gray-500">
-                    In Alby Hub: Apps &rarr; Add App &rarr; enable make_invoice, lookup_invoice, pay_invoice &rarr; set a spending budget &rarr; copy the connection string.
-                    In Zeus: Settings &rarr; Embedded Node &rarr; Nostr Wallet Connect &rarr; Add connection &rarr; enable the same permissions.
+                    Enable three permissions: create invoices, check payment status, and pay PineTree&apos;s $0.15 service fee. For step-by-step instructions, open the <strong>Wallets</strong> page and use the Manage Wallet tab.
                   </p>
                 </div>
 
