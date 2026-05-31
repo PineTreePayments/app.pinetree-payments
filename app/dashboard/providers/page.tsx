@@ -1548,11 +1548,11 @@ export default function ProvidersPage() {
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="mb-4 flex items-start justify-between gap-4">
-              <h2 className="text-lg font-semibold text-black">
+              <h2 className="text-lg font-semibold text-gray-950">
                 {activeProvider === "solana"
-                  ? "Connect Wallet to Solana Pay"
+                  ? "Set Up Solana Pay"
                   : activeProvider === "base"
-                    ? "Connect Wallet to Base Pay"
+                    ? "Set Up Base Pay"
                     : activeProvider === "lightning"
                       ? "Bitcoin Lightning"
                     : `Connect ${activeProvider}`}
@@ -1816,9 +1816,18 @@ export default function ProvidersPage() {
 
 
             {(activeProvider === "solana" || activeProvider === "base") && (
-              <p className="text-sm text-black mb-4">
-                Choose a wallet, open it on mobile, or paste your address
-              </p>
+              <div className="mb-5 space-y-1">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-600">
+                  <span className="font-semibold text-gray-950">
+                    {activeProvider === "solana" ? "Solana Pay" : "Base Pay"}
+                  </span>
+                  <span className="text-gray-400">·</span>
+                  <span>Settlement: <span className="font-semibold text-gray-950">Connected wallet</span></span>
+                </div>
+                <p className="text-sm leading-5 text-gray-500">
+                  Connect the wallet that will receive payments. Funds go directly to this address when customers pay.
+                </p>
+              </div>
             )}
 
             {activeProvider === "coinbase" && (
@@ -1852,73 +1861,76 @@ export default function ProvidersPage() {
 
             {(activeProvider === "solana" || activeProvider === "base") && (
               <div className="mb-4 space-y-4">
-                {activeProvider === "solana" && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <button
-                      onClick={() => {
-                        setSelectedWalletType("PHANTOM")
-                        setShowMobileConnect(false)
-                      }}
-                      className={optionButtonClass(selectedWalletType === "PHANTOM")}
-                    >
-                      Phantom
-                    </button>
 
-                    <button
-                      onClick={() => {
-                        setSelectedWalletType("SOLFLARE")
-                        setShowMobileConnect(false)
-                      }}
-                      className={optionButtonClass(selectedWalletType === "SOLFLARE")}
-                    >
-                      Solflare
-                    </button>
+                {/* Step 1 — wallet selection */}
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    {activeProvider === "solana" ? "Choose wallet" : "Choose wallet"}
+                  </p>
+                  {activeProvider === "solana" && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["PHANTOM", "SOLFLARE"] as const).map((wt) => (
+                        <button
+                          key={wt}
+                          type="button"
+                          onClick={() => { setSelectedWalletType(wt); setShowMobileConnect(false) }}
+                          className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
+                            selectedWalletType === wt
+                              ? "border-[#0052FF] bg-[#0052FF]/5 text-[#0052FF]"
+                              : "border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+                          }`}
+                        >
+                          {wt === "PHANTOM" ? "Phantom" : "Solflare"}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {activeProvider === "base" && (
+                    <div className="grid grid-cols-3 gap-2">
+                      {(["BASEAPP", "METAMASK", "TRUST"] as const).map((wt) => (
+                        <button
+                          key={wt}
+                          type="button"
+                          onClick={() => { setSelectedWalletType(wt); setShowMobileConnect(false) }}
+                          className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
+                            selectedWalletType === wt
+                              ? "border-[#0052FF] bg-[#0052FF]/5 text-[#0052FF]"
+                              : "border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+                          }`}
+                        >
+                          {wt === "BASEAPP" ? "Base Wallet" : wt === "METAMASK" ? "MetaMask" : "Trust Wallet"}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Primary — scan QR with mobile wallet (placeholder) */}
+                <div className="rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-950">Scan with mobile wallet</p>
+                      <p className="mt-1 text-sm leading-5 text-gray-600">
+                        Open your wallet app and scan the QR code to connect and approve.
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-500 shadow-sm ring-1 ring-gray-200/80">
+                      Coming soon
+                    </span>
                   </div>
-                )}
-
-                {activeProvider === "base" && (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <button
-                      onClick={() => {
-                        setSelectedWalletType("BASEAPP")
-                        setShowMobileConnect(false)
-                      }}
-                      className={optionButtonClass(selectedWalletType === "BASEAPP")}
-                    >
-                      Base Wallet
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setSelectedWalletType("METAMASK")
-                        setShowMobileConnect(false)
-                      }}
-                      className={optionButtonClass(selectedWalletType === "METAMASK")}
-                    >
-                      MetaMask
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setSelectedWalletType("TRUST")
-                        setShowMobileConnect(false)
-                      }}
-                      className={optionButtonClass(selectedWalletType === "TRUST")}
-                    >
-                      Trust Wallet
-                    </button>
+                  <div className="mt-3 flex h-24 items-center justify-center rounded-lg border border-dashed border-[#0052FF]/20 bg-white/70">
+                    <p className="text-xs text-gray-400">QR code will appear here</p>
                   </div>
-                )}
+                </div>
 
-                <div className="flex flex-col sm:flex-row gap-2">
+                {/* Secondary — open mobile wallet (works now via deep-link) */}
+                <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <p className="text-sm font-semibold text-gray-950">Open in mobile wallet</p>
+                  <p className="mt-1 text-sm leading-5 text-gray-600">
+                    Tap to open your selected wallet app and approve the connection from your phone.
+                  </p>
                   <button
-                    onClick={() => saveProvider(activeProvider)}
-                    className={actionButtonClass() + " flex-1"}
-                  >
-                    Connect on This Device
-                  </button>
-
-                  <button
+                    type="button"
                     onClick={async () => {
                       if (activeProvider === "solana") {
                         await openSolanaMobileWallet(selectedWalletType)
@@ -1926,47 +1938,68 @@ export default function ProvidersPage() {
                         await openBaseMobileWallet()
                       }
                     }}
-                    className={actionButtonClass()}
+                    className="mt-3 rounded-lg border border-[#0052FF] bg-[#0052FF] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!selectedWalletType}
                   >
                     Open Mobile Wallet
                   </button>
+
+                  {showMobileConnect && (
+                    <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50/80 p-3 text-center">
+                      {walletSessionStatus === "pending" && (
+                        <p className="text-xs text-gray-600">Waiting for mobile wallet approval…</p>
+                      )}
+                      {walletSessionStatus === "connected" && (
+                        <p className="text-xs font-semibold text-[#0052FF]">Mobile wallet connected — review and save below.</p>
+                      )}
+                      {activeProvider === "base" && walletMobileDeeplink && (
+                        <a
+                          href={walletMobileDeeplink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-1 inline-block text-xs text-blue-600 underline"
+                        >
+                          Open wallet manually
+                        </a>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                {showMobileConnect && (
-                  <div className="border rounded-lg p-4 bg-white flex flex-col items-center gap-3">
-                    {walletSessionStatus === "pending" && (
-                      <p className="text-xs text-black">
-                        Waiting for mobile wallet approval...
-                      </p>
-                    )}
-                    {walletSessionStatus === "connected" && (
-                      <p className="text-xs text-blue-600">
-                        Mobile wallet connected. Review and save.
-                      </p>
-                    )}
-        {activeProvider === "base" && walletMobileDeeplink ? (
-          <a
-            href={walletMobileDeeplink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-blue-600 underline"
-          >
-            Open wallet manually
-          </a>
-        ) : null}
-                  </div>
-                )}
+                {/* Tertiary — connect on this device */}
+                <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <p className="text-sm font-semibold text-gray-950">Connect on this device</p>
+                  <p className="mt-1 text-sm leading-5 text-gray-600">
+                    If your wallet browser extension is installed, connect directly from this page.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => saveProvider(activeProvider)}
+                    className="mt-3 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!selectedWalletType}
+                  >
+                    Connect on This Device
+                  </button>
+                </div>
 
-                <input
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  placeholder={
-                    activeProvider === "solana"
-                      ? "Paste Solana wallet"
-                      : "Paste Base wallet"
-                  }
-                  className="w-full border border-gray-300 rounded p-2 text-black bg-white"
-                />
+                {/* Fallback — paste address */}
+                <details className="rounded-xl border border-gray-200 bg-white">
+                  <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-gray-600 hover:text-gray-800">
+                    Or paste wallet address manually
+                  </summary>
+                  <div className="border-t border-gray-100 px-4 py-3 space-y-2">
+                    <p className="text-xs leading-5 text-gray-500">
+                      Only use this if wallet connection is not available. Verify the address is on the correct network before saving.
+                    </p>
+                    <input
+                      value={inputValue}
+                      onChange={(e) => setInputValue(e.target.value)}
+                      placeholder={activeProvider === "solana" ? "Solana wallet address" : "Base wallet address (0x…)"}
+                      className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-50"
+                    />
+                  </div>
+                </details>
+
               </div>
             )}
 

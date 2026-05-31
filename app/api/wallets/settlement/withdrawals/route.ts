@@ -1,0 +1,127 @@
+/**
+ * Settlement Withdrawal API
+ *
+ * POST action="prepare"   — validate, build unsigned tx (Solana) or tx params (Base), create record
+ * POST action="submit"    — record tx hash / signature after merchant signs
+ * POST action="cancel"    — cancel a PREPARED / AWAITING_SIGNATURE withdrawal
+ * GET                     — list withdrawal history for the authenticated merchant
+ *
+ * PineTree never stores private keys or signing material.
+ * All fund movement is signed by the merchant's own wallet extension.
+ */
+
+import { NextRequest, NextResponse } from "next/server"
+import {
+  requireMerchantIdFromRequest,
+  getRouteErrorStatus
+} from "@/lib/api/merchantAuth"
+import {
+  prepareSettlementWithdrawal,
+  submitSettlementWithdrawal,
+  cancelSettlementWithdrawal,
+  checkSettlementWithdrawalStatus,
+  getSettlementWithdrawalHistory
+} from "@/engine/settlementWithdrawals"
+
+function errorResponse(message: string, status: number) {
+  return NextResponse.json({ error: message }, { status })
+}
+
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  let merchantId: string
+  try {
+    merchantId = await requireMerchantIdFromRequest(req)
+  } catch (err) {
+    return errorResponse("Unauthorized", getRouteErrorStatus(err))
+  }
+
+  try {
+    const url = new URL(req.url)
+    const limit = Math.min(Number(url.searchParams.get("limit") || "20") || 20, 50)
+    const withdrawals = await getSettlementWithdrawalHistory(merchantId, { limit })
+    return NextResponse.json({ success: true, withdrawals })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to load withdrawal history"
+    return errorResponse(message, getRouteErrorStatus(err, 500))
+  }
+}
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  let merchantId: string
+  try {
+    merchantId = await requireMerchantIdFromRequest(req)
+  } catch (err) {
+    return errorResponse("Unauthorized", getRouteErrorStatus(err))
+  }
+
+  let body: Record<string, unknown>
+  try {
+    body = await req.json()
+  } catch {
+    return errorResponse("Invalid request body", 400)
+  }
+
+  const action = String(body.action || "").trim().toLowerCase()
+
+  try {
+    if (action === "prepare") {
+      const settlementDestinationId = String(body.settlement_destination_id || "").trim()
+      const walletId                 = body.wallet_id != null ? String(body.wallet_id).trim() : null
+      const walletAddress            = String(body.wallet_address || "").trim()
+      const walletNetwork            = String(body.wallet_network || "").trim()
+      const amount                   = String(body.amount || "").trim()
+
+      if (!settlementDestinationId) return errorResponse("settlement_destination_id is required", 400)
+      if (!walletAddress)           return errorResponse("wallet_address is required", 400)
+      if (!walletNetwork)           return errorResponse("wallet_network is required", 400)
+      if (!amount)                  return errorResponse("amount is required", 400)
+
+      const result = await prepareSettlementWithdrawal(merchantId, {
+        settlementDestinationId,
+        walletId,
+        walletAddress,
+        walletNetwork,
+        amount
+      })
+
+      return NextResponse.json({
+        success: true,
+        withdrawal: result.withdrawal,
+        unsigned_tx_base64: result.unsignedTxBase64 ?? null,
+        tx_params: result.txParams ?? null
+      })
+    }
+
+    if (action === "submit") {
+      const id      = String(body.id || "").trim()
+      const txHash  = String(body.tx_hash || "").trim()
+
+      if (!id)      return errorResponse("id is required", 400)
+      if (!txHash)  return errorResponse("tx_hash is required", 400)
+
+      const withdrawal = await submitSettlementWithdrawal(merchantId, id, txHash)
+      return NextResponse.json({ success: true, withdrawal })
+    }
+
+    if (action === "cancel") {
+      const id = String(body.id || "").trim()
+      if (!id) return errorResponse("id is required", 400)
+
+      const withdrawal = await cancelSettlementWithdrawal(merchantId, id)
+      return NextResponse.json({ success: true, withdrawal })
+    }
+
+    if (action === "checkstatus") {
+      const id = String(body.id || "").trim()
+      if (!id) return errorResponse("id is required", 400)
+
+      const { withdrawal, chainStatus } = await checkSettlementWithdrawalStatus(merchantId, id)
+      return NextResponse.json({ success: true, withdrawal, chainStatus })
+    }
+
+    return errorResponse(`Unknown action: ${action}`, 400)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Request failed"
+    return errorResponse(message, getRouteErrorStatus(err, 500))
+  }
+}

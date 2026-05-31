@@ -1,6 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import { Transaction } from "@solana/web3.js"
+import { getDetectedSolanaWallets, getSolanaTransactionSignature } from "@/lib/wallets/solana"
 import { supabase } from "@/lib/supabaseClient"
 import {
   CompactMetricTile,
@@ -75,7 +77,7 @@ type WalletOverviewResponse = {
   error?: string
 }
 
-type DetailTab = "overview" | "send" | "cash_out" | "lightning_wallet" | "activity" | "settings"
+type DetailTab = "overview" | "send" | "settlement" | "lightning_wallet" | "activity" | "settings"
 type ActivityFilter = "all" | "completed" | "failed" | "drafts"
 
 type NwcTestResult = {
@@ -201,6 +203,112 @@ type OffRampProviderOption = {
   apiProvider: "moonpay" | null
 }
 
+// ─── Settlement destinations ──────────────────────────────────────────────────
+
+type SettlementDestination = {
+  id: string
+  label: string
+  exchange_name: string
+  asset: string
+  network: string
+  address: string
+  memo_or_tag: string | null
+  is_default: boolean
+  created_at: string
+}
+
+type DestinationForm = {
+  id: string | null
+  label: string
+  exchangeName: string
+  assetNetwork: string
+  address: string
+  memoOrTag: string
+  isDefault: boolean
+  confirmed: boolean
+}
+
+const SETTLEMENT_ASSET_NETWORK_OPTIONS = [
+  { value: "SOL|solana",  label: "SOL on Solana",  asset: "SOL",  network: "solana" },
+  { value: "USDC|solana", label: "USDC on Solana", asset: "USDC", network: "solana" },
+  { value: "USDC|base",   label: "USDC on Base",   asset: "USDC", network: "base" },
+  { value: "ETH|base",    label: "ETH on Base",    asset: "ETH",  network: "base" },
+]
+
+const SETTLEMENT_EXCHANGE_OPTIONS = [
+  "Coinbase",
+  "Kraken",
+  "Gemini",
+  "Robinhood",
+  "Strike",
+  "Custom Wallet",
+]
+
+function emptyDestinationForm(): DestinationForm {
+  return {
+    id: null,
+    label: "",
+    exchangeName: "",
+    assetNetwork: "",
+    address: "",
+    memoOrTag: "",
+    isDefault: false,
+    confirmed: false
+  }
+}
+
+function getExplorerTxUrl(network: string, txHash: string): string | null {
+  if (!txHash) return null
+  const n = network.toLowerCase()
+  if (n === "solana") return `https://solscan.io/tx/${txHash}`
+  if (n === "base")   return `https://basescan.org/tx/${txHash}`
+  return null
+}
+
+function destAssetNetworkValue(dest: SettlementDestination) {
+  return `${dest.asset}|${dest.network}`
+}
+
+function formatSettlementAddress(address: string) {
+  if (address.length <= 16) return address
+  return `${address.slice(0, 8)}…${address.slice(-6)}`
+}
+
+type SettlementWithdrawal = {
+  id: string
+  settlement_destination_id: string
+  destination_label: string
+  exchange_name: string
+  asset: string
+  network: string
+  amount: number
+  destination_address: string
+  memo_or_tag: string | null
+  status: string
+  tx_hash: string | null
+  failure_reason: string | null
+  created_at: string
+  submitted_at: string | null
+}
+
+type BaseTxParams = {
+  from: string
+  to: string
+  value: string
+  data: string
+  gas: string
+}
+
+type WithdrawPrepareResult = {
+  withdrawal: SettlementWithdrawal
+  unsigned_tx_base64: string | null
+  tx_params: BaseTxParams | null
+}
+
+type WithdrawStep = "review" | "preparing" | "prepared" | "signing" | "submitted" | "failed"
+
+// ─── End settlement types ─────────────────────────────────────────────────────
+
 const supportedOffRampProviders: OffRampProviderOption[] = [
   {
     id: "alchemy_pay",
@@ -255,6 +363,11 @@ const pineTreeSecondaryActionButton =
   "inline-flex w-fit items-center justify-center rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-4 focus:ring-gray-100 disabled:cursor-not-allowed disabled:opacity-55"
 
 const walletDetailPanelClass = "min-h-[430px] space-y-4"
+
+// Gas/fee reserves for safe "Withdraw All" calculations.
+// These are client-side safety buffers only — the wallet still estimates final network fees.
+const BASE_ETH_GAS_RESERVE    = 0.00015   // ETH reserved for gas on Base
+const SOLANA_SOL_FEE_RESERVE  = 0.01      // SOL reserved for fees and rent on Solana
 
 const albyHubAppsUrl = process.env.NEXT_PUBLIC_ALBY_HUB_APPS_URL || "https://getalby.com/hub/apps"
 const albyNwcDocsUrl = process.env.NEXT_PUBLIC_ALBY_NWC_DOCS_URL || "https://guides.getalby.com/user-guide/alby-account-and-browser-extension/alby-hub/nwc"
@@ -596,9 +709,52 @@ export default function WalletsPage() {
   const [nwcInstructionsOpen, setNwcInstructionsOpen] = useState(false)
   const nwcInputRef = useRef<HTMLInputElement>(null)
 
+  // Settlement destination state
+  const [settlementDestinations, setSettlementDestinations] = useState<SettlementDestination[]>([])
+  const [destLoading, setDestLoading] = useState(false)
+  const [destLoadError, setDestLoadError] = useState<string | null>(null)
+  const [destModalOpen, setDestModalOpen] = useState(false)
+  const [destForm, setDestForm] = useState<DestinationForm>(emptyDestinationForm())
+  const [destSaving, setDestSaving] = useState(false)
+  const [destSaveError, setDestSaveError] = useState<string | null>(null)
+  const [destDeleteConfirmId, setDestDeleteConfirmId] = useState<string | null>(null)
+  const [destDeleting, setDestDeleting] = useState(false)
+  const [withdrawReview, setWithdrawReview] = useState<SettlementDestination | null>(null)
+  const [destSettingDefault, setDestSettingDefault] = useState<string | null>(null)
+  const [settlementMode, setSettlementMode] = useState<"manual" | "end_of_day" | "auto">("manual")
+  const [settlementPrefSaving, setSettlementPrefSaving] = useState(false)
+  const [moveMoneyOpen, setMoveMoneyOpen] = useState(false)
+  // USDC balance state
+  const [usdcBalance, setUsdcBalance] = useState<number | null>(null)
+  const [usdcBalanceLoading, setUsdcBalanceLoading] = useState(false)
+  const [usdcBalanceError, setUsdcBalanceError] = useState<string | null>(null)
+  const [usdcBalanceRefreshedAt, setUsdcBalanceRefreshedAt] = useState<string | null>(null)
+  // Withdrawal status check state
+  const [checkingStatusId, setCheckingStatusId] = useState<string | null>(null)
+  const [checkedPendingIds, setCheckedPendingIds] = useState<string[]>([])
+  // Withdrawal execution state
+  const [withdrawStep, setWithdrawStep] = useState<WithdrawStep>("review")
+  const [withdrawAmount, setWithdrawAmount] = useState("")
+  const [withdrawRecord, setWithdrawRecord] = useState<WithdrawPrepareResult | null>(null)
+  const [withdrawError, setWithdrawError] = useState<string | null>(null)
+  const [withdrawTxHash, setWithdrawTxHash] = useState<string | null>(null)
+  // Settlement history
+  const [settlementHistory, setSettlementHistory] = useState<SettlementWithdrawal[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+
   useEffect(() => {
     loadOverview(false)
   }, [])
+
+  useEffect(() => {
+    if (activeTab === "settlement" && selectedWallet && !selectedWallet.isLightning) {
+      loadSettlementDestinations()
+      loadSettlementHistory()
+      refreshSettlementBalances()
+      loadSettlementPreferences()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, selectedWallet?.id])
 
   useEffect(() => {
     const defaultAsset = getDefaultCashOutAsset(selectedWallet)
@@ -625,6 +781,34 @@ export default function WalletsPage() {
     setNwcConnectSuccess(null)
     setNwcSetupWallet(null)
     setNwcInstructionsOpen(false)
+    // Settlement destination reset
+    setSettlementDestinations([])
+    setDestLoading(false)
+    setDestLoadError(null)
+    setDestModalOpen(false)
+    setDestForm(emptyDestinationForm())
+    setDestSaveError(null)
+    setDestDeleteConfirmId(null)
+    setDestDeleting(false)
+    setWithdrawReview(null)
+    setDestSettingDefault(null)
+    setSettlementMode("manual")
+    setSettlementPrefSaving(false)
+    setMoveMoneyOpen(false)
+    setUsdcBalance(null)
+    setUsdcBalanceLoading(false)
+    setUsdcBalanceError(null)
+    setUsdcBalanceRefreshedAt(null)
+    setCheckingStatusId(null)
+    setCheckedPendingIds([])
+    // Withdrawal flow reset
+    setWithdrawStep("review")
+    setWithdrawAmount("")
+    setWithdrawRecord(null)
+    setWithdrawError(null)
+    setWithdrawTxHash(null)
+    setSettlementHistory([])
+    setHistoryLoading(false)
   }, [selectedWallet])
 
   async function loadOverview(refresh: boolean) {
@@ -744,6 +928,364 @@ export default function WalletsPage() {
     }
     return token
   }
+
+  // ── Settlement destination API calls ────────────────────────────────────────
+
+  async function loadSettlementDestinations() {
+    setDestLoading(true)
+    setDestLoadError(null)
+    try {
+      const token = await getMerchantToken()
+      const res = await fetch("/api/wallets/settlement/destinations", {
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+        cache: "no-store"
+      })
+      const payload = await res.json().catch(() => null) as { success?: boolean; destinations?: SettlementDestination[]; error?: string } | null
+      if (!res.ok || !payload?.success) throw new Error(payload?.error || "Failed to load destinations")
+      setSettlementDestinations(payload.destinations || [])
+    } catch (err) {
+      setDestLoadError(err instanceof Error ? err.message : "Failed to load destinations")
+    } finally {
+      setDestLoading(false)
+    }
+  }
+
+  async function saveSettlementDestination() {
+    const option = SETTLEMENT_ASSET_NETWORK_OPTIONS.find((o) => o.value === destForm.assetNetwork)
+    if (!option) { setDestSaveError("Select an asset and network."); return }
+
+    setDestSaving(true)
+    setDestSaveError(null)
+    try {
+      const token = await getMerchantToken()
+      const body = destForm.id
+        ? {
+            action: "update",
+            id: destForm.id,
+            label: destForm.label,
+            exchange_name: destForm.exchangeName,
+            asset: option.asset,
+            network: option.network,
+            address: destForm.address,
+            memo_or_tag: destForm.memoOrTag || null,
+            is_default: destForm.isDefault
+          }
+        : {
+            action: "create",
+            label: destForm.label,
+            exchange_name: destForm.exchangeName,
+            asset: option.asset,
+            network: option.network,
+            address: destForm.address,
+            memo_or_tag: destForm.memoOrTag || null,
+            is_default: destForm.isDefault
+          }
+
+      const res = await fetch("/api/wallets/settlement/destinations", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify(body)
+      })
+      const payload = await res.json().catch(() => null) as { success?: boolean; destinations?: SettlementDestination[]; error?: string } | null
+      if (!res.ok || !payload?.success) throw new Error(payload?.error || "Save failed")
+      setSettlementDestinations(payload.destinations || [])
+      setDestModalOpen(false)
+      setDestForm(emptyDestinationForm())
+    } catch (err) {
+      setDestSaveError(err instanceof Error ? err.message : "Save failed")
+    } finally {
+      setDestSaving(false)
+    }
+  }
+
+  async function setPreferredDestination(id: string) {
+    setDestSettingDefault(id)
+    try {
+      const token = await getMerchantToken()
+      const res = await fetch("/api/wallets/settlement/destinations", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({ action: "setDefault", id })
+      })
+      const payload = await res.json().catch(() => null) as { success?: boolean; destinations?: SettlementDestination[] } | null
+      if (payload?.success) setSettlementDestinations(payload.destinations || [])
+    } catch {
+      // Non-critical — silently absorb
+    } finally {
+      setDestSettingDefault(null)
+    }
+  }
+
+  async function deleteSettlementDestination(id: string) {
+    setDestDeleting(true)
+    try {
+      const token = await getMerchantToken()
+      const res = await fetch("/api/wallets/settlement/destinations", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({ action: "delete", id })
+      })
+      const payload = await res.json().catch(() => null) as { success?: boolean; destinations?: SettlementDestination[]; error?: string } | null
+      if (!res.ok || !payload?.success) throw new Error(payload?.error || "Delete failed")
+      setSettlementDestinations(payload.destinations || [])
+      setDestDeleteConfirmId(null)
+    } catch (err) {
+      setDestLoadError(err instanceof Error ? err.message : "Delete failed")
+    } finally {
+      setDestDeleting(false)
+    }
+  }
+
+  // ── Settlement preference API calls ──────────────────────────────────────────
+
+  async function loadSettlementPreferences() {
+    try {
+      const token = await getMerchantToken()
+      const res = await fetch("/api/wallets/settlement/preferences", {
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+        cache: "no-store"
+      })
+      const payload = await res.json().catch(() => null) as { success?: boolean; mode?: string } | null
+      if (payload?.success && payload.mode) {
+        setSettlementMode(payload.mode as "manual" | "end_of_day" | "auto")
+      }
+    } catch {
+      // Preferences are non-critical; silently fall back to "manual"
+    }
+  }
+
+  async function saveSettlementPreference(mode: "manual" | "end_of_day" | "auto") {
+    setSettlementPrefSaving(true)
+    try {
+      const token = await getMerchantToken()
+      await fetch("/api/wallets/settlement/preferences", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({ mode })
+      })
+    } catch {
+      // Non-critical — preference is still applied locally
+    } finally {
+      setSettlementPrefSaving(false)
+    }
+  }
+
+  // ── Settlement balance and status API calls ───────────────────────────────────
+
+  async function refreshSettlementBalances() {
+    if (!selectedWallet || selectedWallet.isLightning) return
+    const network = selectedWallet.rail
+    const address = selectedWallet.referenceTitle
+    if (network !== "base" && network !== "solana") return
+
+    setUsdcBalanceLoading(true)
+    setUsdcBalanceError(null)
+    try {
+      const token = await getMerchantToken()
+      const res = await fetch(
+        `/api/wallets/settlement/balances?wallet_address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`,
+        { headers: { Authorization: `Bearer ${token}` }, credentials: "include", cache: "no-store" }
+      )
+      const payload = await res.json().catch(() => null) as {
+        success?: boolean
+        usdc?: number | null
+        usdcError?: string | null
+        refreshedAt?: string
+      } | null
+      if (payload?.success) {
+        setUsdcBalance(payload.usdc ?? null)
+        setUsdcBalanceRefreshedAt(payload.refreshedAt ?? null)
+        if (payload.usdcError) setUsdcBalanceError("Unable to refresh USDC balance right now.")
+      }
+    } catch {
+      setUsdcBalanceError("Unable to refresh USDC balance right now.")
+    } finally {
+      setUsdcBalanceLoading(false)
+    }
+  }
+
+  async function checkWithdrawalStatus(id: string) {
+    setCheckingStatusId(id)
+    try {
+      const token = await getMerchantToken()
+      const res = await fetch("/api/wallets/settlement/withdrawals", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({ action: "checkStatus", id })
+      })
+      const payload = await res.json().catch(() => null) as {
+        success?: boolean
+        withdrawal?: SettlementWithdrawal
+        chainStatus?: string
+        error?: string
+      } | null
+      if (payload?.success && payload.withdrawal) {
+        setSettlementHistory((prev) =>
+          prev.map((w) => (w.id === id ? { ...w, ...payload.withdrawal } : w)) as SettlementWithdrawal[]
+        )
+        if (payload.chainStatus === "pending") {
+          setCheckedPendingIds((prev) => prev.includes(id) ? prev : [...prev, id])
+        }
+      }
+    } catch {
+      // Non-critical — user can retry
+    } finally {
+      setCheckingStatusId(null)
+    }
+  }
+
+  // ── Settlement withdrawal API calls ──────────────────────────────────────────
+
+  async function loadSettlementHistory() {
+    setHistoryLoading(true)
+    try {
+      const token = await getMerchantToken()
+      const res = await fetch("/api/wallets/settlement/withdrawals?limit=10", {
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+        cache: "no-store"
+      })
+      const payload = await res.json().catch(() => null) as { success?: boolean; withdrawals?: SettlementWithdrawal[] } | null
+      if (payload?.success) setSettlementHistory(payload.withdrawals || [])
+    } catch {
+      // History is non-critical — silently ignore load failures
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  async function prepareWithdrawal() {
+    if (!withdrawReview || !selectedWallet) return
+    if (!withdrawAmount.trim() || Number(withdrawAmount) <= 0) {
+      setWithdrawError("Enter a valid withdrawal amount greater than zero.")
+      return
+    }
+    setWithdrawStep("preparing")
+    setWithdrawError(null)
+    try {
+      const token = await getMerchantToken()
+      const res = await fetch("/api/wallets/settlement/withdrawals", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({
+          action: "prepare",
+          settlement_destination_id: withdrawReview.id,
+          wallet_id: selectedWallet.id,
+          wallet_address: selectedWallet.referenceTitle,
+          wallet_network: selectedWallet.rail,
+          amount: withdrawAmount.trim()
+        })
+      })
+      const payload = await res.json().catch(() => null) as (WithdrawPrepareResult & { success?: boolean; error?: string }) | null
+      if (!res.ok || !payload?.success) throw new Error(payload?.error || "Preparation failed")
+      setWithdrawRecord(payload)
+      setWithdrawStep("prepared")
+    } catch (err) {
+      setWithdrawError(err instanceof Error ? err.message : "Preparation failed")
+      setWithdrawStep("failed")
+    }
+  }
+
+  async function signAndSubmitWithdrawal() {
+    if (!withdrawRecord || !selectedWallet) return
+    setWithdrawStep("signing")
+    setWithdrawError(null)
+
+    try {
+      let txHash: string
+
+      if (withdrawRecord.withdrawal.network === "solana" && withdrawRecord.unsigned_tx_base64) {
+        // ── Solana signing ────────────────────────────────────────────────────
+        const wallets = getDetectedSolanaWallets()
+        // Prefer the wallet whose connected public key matches the merchant address
+        const walletEntry = wallets.find(
+          (w) => String(w.provider.publicKey?.toString() || "") === selectedWallet.referenceTitle
+        ) || wallets[0]
+
+        if (!walletEntry) {
+          throw new Error("No Solana wallet detected. Install Phantom or Solflare and ensure it is unlocked.")
+        }
+
+        await walletEntry.provider.connect()
+
+        const tx = Transaction.from(Buffer.from(withdrawRecord.unsigned_tx_base64, "base64"))
+        const signResult = await walletEntry.provider.signAndSendTransaction(tx)
+        txHash = getSolanaTransactionSignature(signResult)
+
+        if (!txHash) throw new Error("No transaction signature returned from wallet.")
+
+      } else if (withdrawRecord.withdrawal.network === "base" && withdrawRecord.tx_params) {
+        // ── Base signing ──────────────────────────────────────────────────────
+        const eth = (window as Window & {
+          ethereum?: { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> }
+        }).ethereum
+
+        if (!eth) {
+          throw new Error("No Ethereum wallet detected. Install MetaMask or Base Wallet and ensure it is unlocked.")
+        }
+
+        const params = withdrawRecord.tx_params
+        const rawResult = await eth.request({
+          method: "eth_sendTransaction",
+          params: [{
+            from: params.from,
+            to: params.to,
+            value: params.value,
+            data: params.data,
+            gas: params.gas
+          }]
+        })
+        txHash = String(rawResult || "").trim()
+        if (!txHash) throw new Error("No transaction hash returned from wallet.")
+
+      } else {
+        throw new Error("Missing transaction data. Please prepare the withdrawal again.")
+      }
+
+      setWithdrawTxHash(txHash)
+
+      // ── Record hash on server ─────────────────────────────────────────────
+      const token = await getMerchantToken()
+      const submitRes = await fetch("/api/wallets/settlement/withdrawals", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({ action: "submit", id: withdrawRecord.withdrawal.id, tx_hash: txHash })
+      })
+      const submitPayload = await submitRes.json().catch(() => null) as { success?: boolean; error?: string } | null
+      if (!submitRes.ok || !submitPayload?.success) {
+        // Hash was broadcast — don't block the success state, just note the record error
+        console.warn("[settlement] Hash broadcast but server record update failed:", submitPayload?.error)
+      }
+
+      setWithdrawStep("submitted")
+      // Refresh history
+      await loadSettlementHistory()
+
+    } catch (err) {
+      setWithdrawError(err instanceof Error ? err.message : "Wallet signing failed")
+      setWithdrawStep("failed")
+    }
+  }
+
+  // ── End settlement withdrawal API calls ───────────────────────────────────────
+
+  // ── End settlement destination API calls ─────────────────────────────────────
 
   async function requestCashOutQuote() {
     if (!selectedWallet || !cashOutAsset) return
@@ -1108,6 +1650,74 @@ export default function WalletsPage() {
   )
   const activityGroupOrder = ["Recent activity", "Completed", "Needs attention", "Drafts"]
 
+  const settlementSummary = useMemo(() => {
+    // Per-asset/network preferred destinations map
+    const preferredByAssetNetwork: Record<string, SettlementDestination> = {}
+    for (const dest of settlementDestinations) {
+      if (dest.is_default) {
+        preferredByAssetNetwork[`${dest.asset}|${dest.network}`] = dest
+      }
+    }
+
+    // Current wallet context
+    const walletRail   = selectedWallet?.rail ?? ""
+    const walletAsset  = selectedWallet?.assetSymbol ?? ""
+    const nativeBalance = Number(selectedWallet?.nativeBalance ?? 0)
+
+    // Preferred destinations for the current wallet
+    const preferredForNative = (walletAsset && walletRail)
+      ? (preferredByAssetNetwork[`${walletAsset}|${walletRail}`] ?? null)
+      : null
+    const preferredForUsdc = walletRail
+      ? (preferredByAssetNetwork[`USDC|${walletRail}`] ?? null)
+      : null
+
+    // Gas-safe "Withdraw All" amounts
+    const nativeReserve = walletRail === "base" ? BASE_ETH_GAS_RESERVE
+      : walletRail === "solana" ? SOLANA_SOL_FEE_RESERVE
+        : 0
+    const nativeWithdrawAll = Math.max(0, nativeBalance - nativeReserve)
+    const nativeEnoughForWithdrawal = nativeBalance > nativeReserve && nativeWithdrawAll > 0
+    const usdcWithdrawAll = (usdcBalance !== null && usdcBalance > 0) ? usdcBalance : null
+
+    // Pending and history
+    const pendingWithdrawals = settlementHistory.filter((w) =>
+      ["PREPARED", "AWAITING_SIGNATURE", "SUBMITTED"].includes(w.status)
+    )
+    const now = new Date()
+    const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+    const thisMonthDone = settlementHistory.filter(
+      (w) =>
+        (w.status === "SUBMITTED" || w.status === "CONFIRMED") &&
+        new Date(w.created_at) >= firstOfMonth
+    )
+    const monthlyTotal = thisMonthDone.reduce((sum, w) => sum + Number(w.amount), 0)
+    const lastWithdrawal = settlementHistory.find(
+      (w) => w.status === "SUBMITTED" || w.status === "CONFIRMED"
+    )
+
+    return {
+      preferredByAssetNetwork,
+      preferredForNative,
+      preferredForUsdc,
+      // Legacy keys kept for backwards compat
+      preferredDestLabel: preferredForNative?.label ?? null,
+      preferredDestExchange: preferredForNative?.exchange_name ?? null,
+      destinationCount: settlementDestinations.length,
+      pendingWithdrawals,
+      pendingCount: pendingWithdrawals.length,
+      thisMonthCount: thisMonthDone.length,
+      monthlyTotal,
+      lastWithdrawalDate: lastWithdrawal?.submitted_at ?? lastWithdrawal?.created_at ?? null,
+      walletRail,
+      walletAsset,
+      nativeReserve,
+      nativeWithdrawAll,
+      nativeEnoughForWithdrawal,
+      usdcWithdrawAll
+    }
+  }, [settlementDestinations, settlementHistory, selectedWallet, usdcBalance])
+
   const detailTabs: Array<{ id: DetailTab; label: string }> = selectedWallet?.isLightning
     ? [
       { id: "overview", label: "Overview" },
@@ -1117,7 +1727,7 @@ export default function WalletsPage() {
     : [
       { id: "overview", label: "Overview" },
       { id: "send", label: "Send" },
-      { id: "cash_out", label: "Cash Out" },
+      { id: "settlement", label: "Settlement" },
       { id: "activity", label: "Activity" },
       { id: "settings", label: "Settings" }
     ]
@@ -1171,26 +1781,25 @@ export default function WalletsPage() {
         emptyText="Wallet insights will appear when connected wallets or account balances are available."
       />
 
-      <DashboardSection title="Cash Out Setup" titleTone="blue">
+      <DashboardSection title="Settlement" titleTone="blue">
         <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <p className="text-base font-semibold text-gray-950">Cash Out Setup</p>
-                <NetworkStatusPill label="Off-ramp Provider" tone="slate" className="min-h-6 px-2 text-[10px]" />
-                <NetworkStatusPill label="Provider pending" tone="amber" className="min-h-6 px-2 text-[10px]" />
+                <p className="text-base font-semibold text-gray-950">Settlement</p>
+                <NetworkStatusPill label="Withdrawal to Exchange" tone="blue" className="min-h-6 px-2 text-[10px]" />
+                <NetworkStatusPill label="Provider Cash Out pending" tone="slate" className="min-h-6 px-2 text-[10px]" />
               </div>
               <p className="mt-2 text-sm leading-6 text-gray-600">
-                PineTree Cash Out is being configured for approved off-ramp providers.
+                Send supported crypto balances to an exchange address you control, or connect an approved provider for direct bank cash-out. Open a connected wallet to access settlement options.
               </p>
-              <p className="mt-2 text-xs leading-5 text-gray-500">{offRampAvailabilityCopy}</p>
             </div>
             <button
               type="button"
               disabled
               className={cx(pineTreeDisabledButton, "shrink-0 lg:w-auto")}
             >
-              Provider Setup Pending
+              Add Exchange Destination
             </button>
           </div>
         </div>
@@ -1404,14 +2013,14 @@ export default function WalletsPage() {
           <div
             role="dialog"
             aria-modal="true"
-            aria-label="Cash Out setup"
+            aria-label="Settlement setup"
             className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-t-3xl border border-white/70 bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,0.22)] sm:rounded-2xl"
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
-                  Cash Out Setup
+                  Settlement Setup
                 </p>
                 <h2 className="mt-1 text-lg font-semibold text-gray-950">Off-Ramp Provider Setup</h2>
               </div>
@@ -1443,6 +2052,181 @@ export default function WalletsPage() {
               >
                 Provider Setup Pending
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {destModalOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-3"
+          onMouseDown={() => { setDestModalOpen(false); setDestSaveError(null) }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={destForm.id ? "Edit exchange destination" : "Add exchange destination"}
+            className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl border border-white/70 bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,0.22)] sm:rounded-2xl"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
+                  Settlement
+                </p>
+                <h2 className="mt-1 text-lg font-semibold text-gray-950">
+                  {destForm.id ? "Edit Exchange Destination" : "Add Exchange Destination"}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setDestModalOpen(false); setDestSaveError(null) }}
+                className="inline-flex h-8 shrink-0 items-center justify-center rounded-full bg-gray-100 px-3 text-[11px] font-semibold text-gray-700 shadow-sm transition hover:bg-gray-200 focus:outline-none focus:ring-4 focus:ring-gray-100"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              {/* Exchange */}
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Exchange</span>
+                <select
+                  value={destForm.exchangeName}
+                  onChange={(e) => setDestForm((f) => ({ ...f, exchangeName: e.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-semibold text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                >
+                  <option value="">Select exchange…</option>
+                  {SETTLEMENT_EXCHANGE_OPTIONS.map((ex) => (
+                    <option key={ex} value={ex}>{ex}</option>
+                  ))}
+                </select>
+              </label>
+
+              {/* Label */}
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Label</span>
+                <span className="ml-1.5 text-[10px] text-gray-400">(e.g. "Coinbase USDC")</span>
+                <input
+                  type="text"
+                  value={destForm.label}
+                  onChange={(e) => setDestForm((f) => ({ ...f, label: e.target.value.slice(0, 80) }))}
+                  placeholder="My Coinbase USDC wallet"
+                  className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                />
+              </label>
+
+              {/* Asset / Network */}
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Asset / Network</span>
+                <select
+                  value={destForm.assetNetwork}
+                  onChange={(e) => setDestForm((f) => ({ ...f, assetNetwork: e.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-semibold text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                >
+                  <option value="">Select asset and network…</option>
+                  {SETTLEMENT_ASSET_NETWORK_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </label>
+
+              {/* Address */}
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Wallet Address</span>
+                <input
+                  type="text"
+                  value={destForm.address}
+                  onChange={(e) => setDestForm((f) => ({ ...f, address: e.target.value.trim() }))}
+                  placeholder={
+                    destForm.assetNetwork.includes("base")
+                      ? "0x…"
+                      : destForm.assetNetwork.includes("solana")
+                        ? "Solana public key"
+                        : "Destination address"
+                  }
+                  className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 font-mono text-sm text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+
+              {/* Memo / Tag */}
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">
+                  Memo / Tag
+                  <span className="ml-1.5 font-normal text-gray-400">(optional)</span>
+                </span>
+                <input
+                  type="text"
+                  value={destForm.memoOrTag}
+                  onChange={(e) => setDestForm((f) => ({ ...f, memoOrTag: e.target.value.slice(0, 200) }))}
+                  placeholder="Required by some exchanges"
+                  className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                />
+              </label>
+
+              {/* Default */}
+              <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={destForm.isDefault}
+                  onChange={(e) => setDestForm((f) => ({ ...f, isDefault: e.target.checked }))}
+                  className="h-4 w-4 rounded border-gray-300 text-[#0052FF] focus:ring-[#0052FF]"
+                />
+                <span className="text-sm font-semibold text-gray-800">Set as default destination</span>
+              </label>
+
+              {/* Warning */}
+              <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3">
+                <p className="text-xs leading-5 text-amber-900">
+                  PineTree does not verify exchange deposit requirements. Confirm the asset, network, and deposit address in your exchange account before saving.
+                </p>
+              </div>
+
+              {/* Confirmation */}
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={destForm.confirmed}
+                  onChange={(e) => setDestForm((f) => ({ ...f, confirmed: e.target.checked }))}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-[#0052FF] focus:ring-[#0052FF]"
+                />
+                <span className="text-sm leading-5 text-gray-700">
+                  I confirm this destination supports the selected asset and network.
+                </span>
+              </label>
+
+              {destSaveError && (
+                <div className="rounded-xl border border-red-100 bg-red-50/70 p-3 text-sm text-red-800">
+                  {destSaveError}
+                </div>
+              )}
+
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => { setDestModalOpen(false); setDestSaveError(null) }}
+                  className={pineTreeSecondaryActionButton}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={saveSettlementDestination}
+                  disabled={
+                    destSaving ||
+                    !destForm.label.trim() ||
+                    !destForm.exchangeName ||
+                    !destForm.assetNetwork ||
+                    !destForm.address.trim() ||
+                    !destForm.confirmed
+                  }
+                  className={cx(pineTreePrimaryButton, "disabled:cursor-not-allowed disabled:opacity-55")}
+                >
+                  {destSaving ? "Saving…" : "Save Destination"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1628,304 +2412,1029 @@ export default function WalletsPage() {
                 </div>
               )}
 
-              {activeTab === "cash_out" && (
+              {activeTab === "settlement" && (
                 <div className={walletDetailPanelClass}>
                   {selectedWallet.isLightning ? (
                     <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
                       <p className="text-sm font-semibold text-gray-950">Lightning Wallet</p>
                       <p className="mt-1 text-sm leading-6 text-gray-600">
-                        Direct Lightning wallets receive Bitcoin instantly. Cash-out to your bank is managed separately outside PineTree.
+                        Direct Lightning wallets receive Bitcoin instantly. Settlement is managed separately outside PineTree.
                       </p>
                     </div>
+                  ) : withdrawReview ? (
+                    /* ── Withdrawal flow ────────────────────────────────────────── */
+                    <div className="space-y-4">
+                      {/* Back button — only show when not submitted */}
+                      {withdrawStep !== "submitted" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setWithdrawReview(null)
+                            setWithdrawStep("review")
+                            setWithdrawAmount("")
+                            setWithdrawRecord(null)
+                            setWithdrawError(null)
+                            setWithdrawTxHash(null)
+                          }}
+                          className="flex items-center gap-1.5 text-sm font-semibold text-[#0052FF] hover:underline focus:outline-none"
+                        >
+                          ← Back to Destinations
+                        </button>
+                      )}
+
+                      {/* Step indicator */}
+                      <div className="flex items-center gap-1 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                        {(["Review", "Prepare", "Confirm", "Done"] as const).map((label, i) => {
+                          const stepActive =
+                            (i === 0 && (withdrawStep === "review" || withdrawStep === "failed")) ||
+                            (i === 1 && (withdrawStep === "preparing" || withdrawStep === "prepared")) ||
+                            (i === 2 && withdrawStep === "signing") ||
+                            (i === 3 && withdrawStep === "submitted")
+                          const stepDone =
+                            (i === 0 && withdrawStep !== "review" && withdrawStep !== "failed") ||
+                            (i === 1 && (withdrawStep === "signing" || withdrawStep === "submitted")) ||
+                            (i === 2 && withdrawStep === "submitted")
+                          return (
+                            <div key={label} className="flex shrink-0 items-center gap-1">
+                              {i > 0 && <div className="h-px w-3 shrink-0 bg-gray-200" />}
+                              <span className={cx(
+                                "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
+                                stepActive ? "bg-[#0052FF] text-white"
+                                  : stepDone ? "bg-[#0052FF]/20 text-[#0052FF]"
+                                    : "bg-gray-100 text-gray-400"
+                              )}>
+                                {stepDone ? "✓" : String(i + 1)}
+                              </span>
+                              <span className={cx(
+                                "text-[11px] font-semibold",
+                                stepActive ? "text-gray-950"
+                                  : stepDone ? "text-[#0052FF]"
+                                    : "text-gray-400"
+                              )}>
+                                {label}
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* ── Step: review + enter amount ── */}
+                      {(withdrawStep === "review" || withdrawStep === "failed") && (
+                        <>
+                          <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4 shadow-[0_8px_24px_rgba(0,82,255,0.06)]">
+                            <p className="text-base font-semibold text-gray-950">Withdraw to Exchange</p>
+                            <p className="mt-1 text-sm leading-6 text-gray-700">
+                              Your wallet will prompt you to approve this transaction. PineTree does not move funds — you sign and broadcast directly.
+                            </p>
+                          </div>
+
+                          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                            <div className="space-y-3">
+                              <CompactStatusRow label="Destination"    value={withdrawReview.label} />
+                              <CompactStatusRow label="Exchange"       value={withdrawReview.exchange_name} />
+                              <CompactStatusRow label="Asset / Network" value={`${withdrawReview.asset} on ${withdrawReview.network}`} />
+                              <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-3.5 py-3">
+                                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-400">Address</span>
+                                <div className="flex min-w-0 items-center gap-2">
+                                  <span className="min-w-0 truncate font-mono text-sm font-semibold text-gray-800" title={withdrawReview.address}>
+                                    {formatSettlementAddress(withdrawReview.address)}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => copyToClipboard(withdrawReview.address)}
+                                    className="shrink-0 inline-flex items-center rounded-md border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-600 shadow-sm transition hover:border-gray-300 hover:bg-gray-50"
+                                  >
+                                    {copiedRef ? "Copied" : "Copy"}
+                                  </button>
+                                </div>
+                              </div>
+                              {withdrawReview.memo_or_tag && (
+                                <CompactStatusRow label="Memo / Tag" value={withdrawReview.memo_or_tag} />
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Wallet balance info — balance-aware */}
+                          {(withdrawReview.network === selectedWallet?.rail) && (() => {
+                            const isNativeAsset = withdrawReview.asset === selectedWallet.assetSymbol
+                            const isUsdc = withdrawReview.asset === "USDC"
+                            const nativeBal = Number(selectedWallet.nativeBalance ?? 0)
+                            const withdrawAmt = Number(withdrawAmount) || 0
+                            const nativeExceeds = isNativeAsset && withdrawAmt > nativeBal && nativeBal > 0
+                            const usdcExceeds = isUsdc && usdcBalance !== null && withdrawAmt > usdcBalance && usdcBalance >= 0
+                            return (
+                              <div className="rounded-xl border border-gray-100 bg-gray-50/70 px-4 py-3">
+                                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-400">
+                                  Available balance
+                                </p>
+                                <div className="mt-1 space-y-0.5">
+                                  {isNativeAsset && (
+                                    <p className="text-sm font-semibold text-gray-800">
+                                      {nativeBal.toFixed(selectedWallet.decimals)} {selectedWallet.assetSymbol}
+                                    </p>
+                                  )}
+                                  {isUsdc && (
+                                    <p className="text-sm font-semibold text-gray-800">
+                                      {usdcBalanceLoading
+                                        ? "USDC: loading…"
+                                        : usdcBalance !== null
+                                          ? `${usdcBalance.toFixed(2)} USDC`
+                                          : usdcBalanceError
+                                            ? "USDC balance unavailable"
+                                            : "USDC: — (tap Refresh in summary)"}
+                                    </p>
+                                  )}
+                                  {!isNativeAsset && !isUsdc && (
+                                    <p className="text-sm text-gray-600">
+                                      Verify in your wallet before withdrawing.
+                                    </p>
+                                  )}
+                                </div>
+                                {nativeExceeds && (
+                                  <p className="mt-2 text-xs font-semibold text-amber-700">
+                                    Amount exceeds detected balance. Reduce the amount or refresh balance.
+                                  </p>
+                                )}
+                                {usdcExceeds && (
+                                  <p className="mt-2 text-xs font-semibold text-amber-700">
+                                    Amount exceeds detected USDC balance. Reduce the amount or refresh.
+                                  </p>
+                                )}
+                                {isUsdc && usdcBalance === null && !usdcBalanceLoading && !usdcBalanceError && (
+                                  <p className="mt-1 text-[10px] text-gray-400">
+                                    Balance will be verified by your wallet and network during signing.
+                                  </p>
+                                )}
+                                {isUsdc && usdcBalanceError && (
+                                  <p className="mt-1 text-[10px] text-gray-400">
+                                    Balance will be verified by your wallet and network during signing.
+                                  </p>
+                                )}
+                              </div>
+                            )
+                          })()}
+
+                          {/* Amount input */}
+                          <label className="block">
+                            <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">
+                              Amount ({withdrawReview.asset})
+                            </span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={withdrawAmount}
+                              onChange={(e) => {
+                                setWithdrawAmount(e.target.value)
+                                setWithdrawError(null)
+                              }}
+                              placeholder="0.00"
+                              className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-semibold text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                            />
+                          </label>
+
+                          {/* Safety warnings */}
+                          <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3.5">
+                            <p className="text-xs font-semibold text-amber-900">Before confirming</p>
+                            <ul className="mt-1.5 list-disc list-inside space-y-0.5 text-xs leading-5 text-amber-800">
+                              <li>PineTree cannot reverse transfers sent to the wrong network or address.</li>
+                              <li>Confirm your exchange deposit address supports this exact asset and network.</li>
+                              <li>PineTree does not control your exchange account or bank withdrawal process.</li>
+                            </ul>
+                          </div>
+
+                          {/* Network mismatch warning */}
+                          {withdrawReview.network !== selectedWallet?.rail && (
+                            <div className="rounded-xl border border-red-100 bg-red-50/70 p-3.5 text-sm text-red-800">
+                              Network mismatch: this destination is for <strong>{withdrawReview.network}</strong> but your connected wallet is on <strong>{selectedWallet?.rail}</strong>. Please select a matching destination or connect the correct wallet.
+                            </div>
+                          )}
+
+                          {withdrawError && (
+                            <div className="rounded-xl border border-red-100 bg-red-50/70 p-3.5 text-sm text-red-800">
+                              {withdrawError}
+                            </div>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={prepareWithdrawal}
+                            disabled={
+                              !withdrawAmount.trim() ||
+                              Number(withdrawAmount) <= 0 ||
+                              withdrawReview.network !== selectedWallet?.rail
+                            }
+                            className={cx(pineTreePrimaryButton, "w-full disabled:cursor-not-allowed disabled:opacity-55")}
+                          >
+                            Prepare Withdrawal
+                          </button>
+                        </>
+                      )}
+
+                      {/* ── Step: preparing (loading) ── */}
+                      {withdrawStep === "preparing" && (
+                        <div className="rounded-2xl border border-gray-100 bg-gray-50/70 px-4 py-8 text-center">
+                          <p className="text-sm font-semibold text-gray-700">Validating and preparing transaction…</p>
+                          <p className="mt-1 text-xs text-gray-500">Building unsigned transaction for your wallet to sign.</p>
+                        </div>
+                      )}
+
+                      {/* ── Step: prepared — ready to sign ── */}
+                      {withdrawStep === "prepared" && withdrawRecord && (
+                        <>
+                          <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                            <p className="text-base font-semibold text-gray-950">Transaction Prepared</p>
+                            <p className="mt-1 text-sm leading-6 text-gray-700">
+                              The transaction has been validated and prepared. Click Confirm in Wallet — your wallet extension will open and ask you to approve.
+                            </p>
+                          </div>
+
+                          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                            <div className="space-y-3">
+                              <CompactStatusRow label="Destination"    value={withdrawReview.label} />
+                              <CompactStatusRow label="Asset / Network" value={`${withdrawRecord.withdrawal.asset} on ${withdrawRecord.withdrawal.network}`} />
+                              <CompactStatusRow label="Amount"         value={`${withdrawRecord.withdrawal.amount} ${withdrawRecord.withdrawal.asset}`} />
+                              <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-3.5 py-3">
+                                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-400">To Address</span>
+                                <span className="min-w-0 truncate font-mono text-sm font-semibold text-gray-800" title={withdrawRecord.withdrawal.destination_address}>
+                                  {formatSettlementAddress(withdrawRecord.withdrawal.destination_address)}
+                                </span>
+                              </div>
+                              {withdrawRecord.withdrawal.memo_or_tag && (
+                                <CompactStatusRow label="Memo / Tag" value={withdrawRecord.withdrawal.memo_or_tag} />
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-gray-100 bg-gray-50/70 p-3.5 text-xs leading-5 text-gray-600">
+                            Your wallet will open and ask you to approve this transaction. PineTree does not have access to your wallet keys — you control the approval.
+                          </div>
+
+                          {withdrawError && (
+                            <div className="rounded-xl border border-red-100 bg-red-50/70 p-3.5 text-sm text-red-800">
+                              {withdrawError}
+                            </div>
+                          )}
+
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setWithdrawStep("review")
+                                setWithdrawError(null)
+                              }}
+                              className={pineTreeSecondaryActionButton}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={signAndSubmitWithdrawal}
+                              className={cx(pineTreePrimaryButton, "flex-1")}
+                            >
+                              Confirm in Wallet
+                            </button>
+                          </div>
+                        </>
+                      )}
+
+                      {/* ── Step: signing (waiting for wallet) ── */}
+                      {withdrawStep === "signing" && (
+                        <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 px-4 py-8 text-center">
+                          <p className="text-sm font-semibold text-gray-950">Waiting for wallet approval…</p>
+                          <p className="mt-1 text-xs text-gray-600">
+                            Your wallet extension should have opened. Approve the transaction to proceed.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* ── Step: submitted ── */}
+                      {withdrawStep === "submitted" && withdrawRecord && (
+                        <>
+                          <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                            <p className="text-base font-semibold text-gray-950">Withdrawal Submitted</p>
+                            <p className="mt-1 text-sm leading-6 text-gray-700">
+                              Your transaction was signed and broadcast. It may take a few moments to appear on-chain.
+                            </p>
+                          </div>
+
+                          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                            <div className="space-y-3">
+                              <CompactStatusRow label="Destination"    value={withdrawRecord.withdrawal.destination_label} />
+                              <CompactStatusRow label="Asset / Network" value={`${withdrawRecord.withdrawal.asset} on ${withdrawRecord.withdrawal.network}`} />
+                              <CompactStatusRow label="Amount"         value={`${withdrawRecord.withdrawal.amount} ${withdrawRecord.withdrawal.asset}`} />
+                              <CompactStatusRow label="Status"         value="Submitted" />
+                            </div>
+                            {withdrawTxHash && (
+                              <div className="mt-4">
+                                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-400">Transaction Hash</p>
+                                <div className="mt-1 flex flex-wrap items-center gap-2">
+                                  <span className="min-w-0 truncate font-mono text-xs text-gray-700" title={withdrawTxHash}>
+                                    {formatSettlementAddress(withdrawTxHash)}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => copyToClipboard(withdrawTxHash)}
+                                    className="shrink-0 inline-flex items-center rounded-md border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-600 shadow-sm transition hover:border-gray-300 hover:bg-gray-50"
+                                  >
+                                    {copiedRef ? "Copied" : "Copy"}
+                                  </button>
+                                  {getExplorerTxUrl(withdrawRecord.withdrawal.network, withdrawTxHash) && (
+                                    <a
+                                      href={getExplorerTxUrl(withdrawRecord.withdrawal.network, withdrawTxHash)!}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="shrink-0 inline-flex items-center rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700 shadow-sm transition hover:bg-blue-100"
+                                    >
+                                      View on Explorer
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="rounded-xl border border-gray-100 bg-gray-50/70 p-3.5 text-xs leading-5 text-gray-600">
+                            Confirmation happens on-chain. PineTree will not mark this confirmed automatically — check the explorer link above to verify receipt.
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setWithdrawReview(null)
+                              setWithdrawStep("review")
+                              setWithdrawAmount("")
+                              setWithdrawRecord(null)
+                              setWithdrawError(null)
+                              setWithdrawTxHash(null)
+                            }}
+                            className={pineTreeSecondaryActionButton}
+                          >
+                            Back to Destinations
+                          </button>
+                        </>
+                      )}
+                    </div>
                   ) : (
+                    /* ── Main settlement tab ── */
                     <>
-                      <div className="rounded-2xl border border-[#0052FF]/20 bg-[#0052FF]/5 p-4 shadow-[0_8px_24px_rgba(0,82,255,0.07)]">
-                        <p className="text-base font-semibold text-gray-950">PineTree Cash Out</p>
-                        <p className="mt-1 text-sm font-semibold text-[#0052FF]">
-                          {isOffRampProviderActive
-                            ? "Payouts are processed through the configured off-ramp provider."
-                            : "Off-ramp provider setup pending"}
-                        </p>
-                        <p className="mt-2 text-sm leading-6 text-gray-700">
-                          Cash-out will let merchants move supported crypto balances to a bank account through an approved provider.
-                        </p>
-                        {selectedWallet.rail === "base" ? (
-                          <p className="mt-3 border-t border-[#0052FF]/10 pt-3 text-xs leading-5 text-gray-600">
-                            Availability depends on provider approval, region, asset, network, and payout method.
-                          </p>
-                        ) : (
-                          <p className="mt-3 border-t border-[#0052FF]/10 pt-3 text-xs leading-5 text-gray-600">
-                            Availability depends on provider approval, region, asset, network, and payout method.
-                          </p>
+                      {/* ── Settlement Summary ── */}
+                      <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4 shadow-[0_8px_24px_rgba(0,82,255,0.06)]">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#0052FF]">Settlement Center</p>
+                        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          {/* Balance tile */}
+                          <div className="rounded-xl border border-white/70 bg-white/60 p-3">
+                            <div className="flex items-center justify-between gap-1">
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Balance</p>
+                              {(selectedWallet?.rail === "base" || selectedWallet?.rail === "solana") && (
+                                <button type="button" onClick={refreshSettlementBalances} disabled={usdcBalanceLoading}
+                                  className="text-[10px] font-semibold text-[#0052FF] hover:underline disabled:opacity-40 focus:outline-none">
+                                  {usdcBalanceLoading ? "…" : "Refresh"}
+                                </button>
+                              )}
+                            </div>
+                            <p className="mt-1 truncate text-sm font-semibold text-gray-950" title={`${Number(selectedWallet?.nativeBalance ?? 0)} ${selectedWallet?.assetSymbol}`}>
+                              {Number(selectedWallet?.nativeBalance ?? 0).toFixed(Math.min(selectedWallet?.decimals ?? 6, 6))} {selectedWallet?.assetSymbol}
+                            </p>
+                            {(selectedWallet?.rail === "base" || selectedWallet?.rail === "solana") && (
+                              <p className={cx("mt-0.5 text-[10px]", usdcBalanceError ? "text-amber-600" : "text-gray-400")}>
+                                {usdcBalanceLoading ? "USDC: loading…"
+                                  : usdcBalanceError ? "USDC: unavailable"
+                                  : usdcBalance !== null ? `USDC: ${usdcBalance.toFixed(2)}`
+                                  : "USDC: —"}
+                              </p>
+                            )}
+                            {usdcBalanceRefreshedAt && !usdcBalanceLoading && (
+                              <p className="mt-0.5 text-[9px] text-gray-300" title={usdcBalanceRefreshedAt}>
+                                refreshed {new Date(usdcBalanceRefreshedAt).toLocaleTimeString()}
+                              </p>
+                            )}
+                          </div>
+                          {/* Preferred destination tile */}
+                          <div className="rounded-xl border border-white/70 bg-white/60 p-3">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Preferred</p>
+                            <p className="mt-1 truncate text-sm font-semibold text-gray-950">
+                              {settlementSummary.preferredForNative?.label ?? "Not set"}
+                            </p>
+                            <p className="mt-0.5 truncate text-[10px] text-gray-400">
+                              {settlementSummary.preferredForNative
+                                ? `${settlementSummary.preferredForNative.exchange_name} · ${settlementSummary.walletAsset}`
+                                : `For ${settlementSummary.walletAsset} on ${settlementSummary.walletRail || "—"}`}
+                            </p>
+                          </div>
+                          {/* Pending tile */}
+                          <div className="rounded-xl border border-white/70 bg-white/60 p-3">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Pending</p>
+                            <p className={cx("mt-1 text-sm font-semibold", settlementSummary.pendingCount > 0 ? "text-amber-700" : "text-gray-950")}>
+                              {settlementSummary.pendingCount}
+                            </p>
+                            <p className="mt-0.5 text-[10px] text-gray-400">
+                              {settlementSummary.pendingCount > 0 ? "Need attention" : "None"}
+                            </p>
+                          </div>
+                          {/* This month tile */}
+                          <div className="rounded-xl border border-white/70 bg-white/60 p-3">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">This month</p>
+                            <p className="mt-1 text-sm font-semibold text-gray-950">
+                              {settlementSummary.thisMonthCount > 0 ? `${settlementSummary.thisMonthCount} sent` : "—"}
+                            </p>
+                            <p className="mt-0.5 truncate text-[10px] text-gray-400">
+                              {settlementSummary.monthlyTotal > 0 ? `≈ ${settlementSummary.monthlyTotal.toFixed(4)}` : "No activity"}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Move Money button */}
+                        {!moveMoneyOpen && (settlementSummary.walletRail === "base" || settlementSummary.walletRail === "solana") && (
+                          <button
+                            type="button"
+                            onClick={() => setMoveMoneyOpen(true)}
+                            className={cx(pineTreePrimaryButton, "mt-4 w-full")}
+                          >
+                            Move Money →
+                          </button>
+                        )}
+                        {moveMoneyOpen && (
+                          <button
+                            type="button"
+                            onClick={() => setMoveMoneyOpen(false)}
+                            className={cx(pineTreeSecondaryActionButton, "mt-4 w-full justify-center")}
+                          >
+                            Close Move Money
+                          </button>
                         )}
                       </div>
 
-                      {cashOutUnavailable && (
-                        <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
-                          <p className="text-sm leading-6 text-gray-600">
-                            PineTree Cash Out is not available for this wallet network yet.
-                          </p>
-                        </div>
-                      )}
+                      {/* ── Move Money Panel ── */}
+                      {moveMoneyOpen && !withdrawReview && (
+                        <div className="rounded-2xl border border-gray-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                          <div className="border-b border-gray-100 px-4 py-3">
+                            <p className="text-sm font-semibold text-gray-950">Move Money</p>
+                            <p className="mt-0.5 text-xs leading-5 text-gray-500">
+                              Each withdrawal is a separate merchant-approved transaction.
+                            </p>
+                          </div>
 
-                      {!cashOutUnavailable && !isOffRampProviderActive && (
-                        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-semibold text-gray-950">Provider Setup Pending</p>
-                              <p className="mt-1 text-sm leading-6 text-gray-600">
-                                Base and Solana cash-out will activate after PineTree connects an approved off-ramp provider.
+                          <div className="divide-y divide-gray-100">
+                            {/* ── Native asset card ── */}
+                            <div className="p-4">
+                              <p className="text-sm font-semibold text-gray-950">
+                                {settlementSummary.walletAsset} on {settlementSummary.walletRail}
                               </p>
-                            </div>
-                            <NetworkStatusPill label="Pending" tone="amber" />
-                          </div>
-                          <div className="mt-4 flex flex-wrap gap-1.5">
-                            {offRampSupportedAssets.map((asset) => (
-                              <div
-                                key={asset}
-                                className="rounded-full border border-[#0052FF]/10 bg-[#0052FF]/5 px-2.5 py-1 text-[11px] font-semibold text-[#0052FF]/60"
-                              >
-                                {asset}
+                              <div className="mt-2 space-y-0.5 text-xs text-gray-600">
+                                <p>Available: <span className="font-semibold">{Number(selectedWallet?.nativeBalance ?? 0).toFixed(Math.min(selectedWallet?.decimals ?? 6, 6))} {settlementSummary.walletAsset}</span></p>
+                                <p className="text-gray-400">Gas/fee reserve: {settlementSummary.nativeReserve} {settlementSummary.walletAsset}</p>
+                                <p>Withdraw All amount: <span className="font-semibold">{settlementSummary.nativeWithdrawAll.toFixed(Math.min(selectedWallet?.decimals ?? 6, 6))} {settlementSummary.walletAsset}</span></p>
                               </div>
-                            ))}
-                          </div>
-                          <button
-                            type="button"
-                            disabled
-                            className={cx(pineTreeDisabledButton, "mt-4")}
-                          >
-                            Provider Setup Pending
-                          </button>
-                        </div>
-                      )}
-
-                      {!cashOutUnavailable && isOffRampProviderActive && (
-                        <>
-                          <div className="grid gap-3 md:grid-cols-2">
-                            <label className="block rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
-                              <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
-                                Asset
-                              </span>
-                              <select
-                                value={cashOutAsset?.label || ""}
-                                onChange={(event) => {
-                                  const next = cashOutAssetOptions.find((option) => option.label === event.target.value) || null
-                                  setCashOutAsset(next)
-                                  setCashOutQuote(null)
-                                  setCashOutSession(null)
-                                  setCashOutError(null)
-                                  setCashOutInfo(null)
-                                  setCashOutDepositPreview(null)
-                                  setCashOutApprovalPreview(null)
-                                }}
-                                className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
-                              >
-                                {cashOutAssetOptions.map((option) => (
-                                  <option key={option.label} value={option.label}>
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-
-                            <label className="block rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
-                              <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
-                                Amount
-                              </span>
-                              <input
-                                type="number"
-                                min="0"
-                                step="any"
-                                value={cashOutAmount}
-                                onChange={(event) => {
-                                  setCashOutAmount(event.target.value)
-                                  setCashOutQuote(null)
-                                  setCashOutSession(null)
-                                  setCashOutError(null)
-                                  setCashOutInfo(null)
-                                  setCashOutDepositPreview(null)
-                                  setCashOutApprovalPreview(null)
-                                }}
-                                placeholder="0.00"
-                                className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
-                              />
-                            </label>
-                          </div>
-
-                          <div className="grid gap-3 md:grid-cols-2">
-                            <DisabledField label="Payout Method" value="Bank transfer through configured provider" />
-                            <label className="block rounded-xl border border-gray-100 bg-gray-50/70 p-3.5">
-                              <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
-                                Merchant State
-                              </span>
-                              <input
-                                value={cashOutState}
-                                onChange={(event) => {
-                                  setCashOutState(event.target.value.toUpperCase().slice(0, 2))
-                                  setCashOutQuote(null)
-                                  setCashOutSession(null)
-                                  setCashOutError(null)
-                                  setCashOutInfo(null)
-                                  setCashOutDepositPreview(null)
-                                  setCashOutApprovalPreview(null)
-                                }}
-                                placeholder="Optional"
-                                className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-semibold text-gray-700 outline-none"
-                              />
-                            </label>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={requestCashOutQuote}
-                            disabled={cashOutLoading || !cashOutAsset}
-                            className={cx(pineTreePrimaryButton, "w-full disabled:cursor-not-allowed disabled:opacity-55")}
-                          >
-                            {cashOutLoading ? "Getting Quote..." : "Get Cash Out Quote"}
-                          </button>
-
-                          {cashOutQuote && (
-                            <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-                              <div className="flex flex-wrap items-center justify-between gap-3">
-                                <div>
-                                  <p className="text-sm font-semibold text-gray-950">Provider Quote</p>
-                                  <p className="mt-1 text-xs text-gray-500">
-                                    {cashOutQuote.cryptoAmount} {cashOutQuote.asset} to {cashOutQuote.fiatCurrency}
-                                  </p>
-                                </div>
-                                <NetworkStatusPill label={cashOutSession?.status || "QUOTE_READY"} tone="blue" />
-                              </div>
-                              <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                                <DisabledField
-                                  label="Payout"
-                                  value={formatCashOutAmount(cashOutQuote.quoteFiatAmount, cashOutQuote.fiatCurrency)}
-                                />
-                                <DisabledField
-                                  label="Fees"
-                                  value={formatCashOutAmount(cashOutQuote.totalFeeAmount, cashOutQuote.fiatCurrency)}
-                                />
-                                <DisabledField label="Provider" value="Configured provider" />
-                              </div>
-                              <button
-                                type="button"
-                                onClick={continueWithProvider}
-                                disabled={cashOutWidgetLoading || !cashOutSession}
-                                className={cx(pineTreePrimaryButton, "mt-4 w-full disabled:cursor-not-allowed disabled:opacity-55")}
-                              >
-                                {cashOutWidgetLoading ? "Preparing provider..." : "Continue with Provider"}
-                              </button>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </>
-                  )}
-
-                  {cashOutError && (
-                    <div className="rounded-2xl border border-red-100 bg-red-50/70 p-4 text-sm leading-6 text-red-800">
-                      {cashOutError}
-                    </div>
-                  )}
-
-                  {cashOutInfo && (
-                    <div className="rounded-2xl border border-blue-100 bg-blue-50/80 p-4 text-sm leading-6 text-blue-900">
-                      {cashOutInfo}
-                    </div>
-                  )}
-
-                  {!selectedWallet.isLightning && cashOutSession?.status === "AWAITING_APPROVAL" && (
-                    <>
-                      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-semibold text-gray-950">
-                              Provider Deposit Instructions
-                            </p>
-                            <p className="mt-1 text-sm leading-6 text-gray-600">
-                              After the provider flow supplies deposit instructions, PineTree will prepare the wallet approval step here.
-                            </p>
-                          </div>
-                          <NetworkStatusPill
-                            label={cashOutDepositPreview?.instructionReady ? "Ready" : "Waiting"}
-                            tone={cashOutDepositPreview?.instructionReady ? "blue" : "amber"}
-                          />
-                        </div>
-
-                        {cashOutDepositPreview && (
-                          <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50/80 p-3 text-sm leading-6 text-gray-600">
-                            <p>
-                              {cashOutDepositPreview.instructionReady
-                                ? "Deposit instructions are available for preview."
-                                : "Waiting for provider deposit instructions."}
-                            </p>
-                            {cashOutDepositPreview.depositAddress && (
-                              <div className="mt-3 space-y-2 rounded-lg border border-gray-200 bg-white/80 p-3 font-mono text-xs text-gray-700">
-                                <p className="break-all">
-                                  Deposit address: {cashOutDepositPreview.depositAddress}
+                              <p className="mt-2 text-xs text-gray-500">
+                                {settlementSummary.preferredForNative
+                                  ? `→ ${settlementSummary.preferredForNative.label} · ${settlementSummary.preferredForNative.exchange_name}`
+                                  : `No preferred destination for ${settlementSummary.walletAsset} on ${settlementSummary.walletRail}.`}
+                              </p>
+                              {!settlementSummary.nativeEnoughForWithdrawal && settlementSummary.preferredForNative && (
+                                <p className="mt-2 text-xs font-semibold text-amber-700">
+                                  Not enough {settlementSummary.walletAsset} available after {settlementSummary.nativeReserve} {settlementSummary.walletAsset} gas/fee reserve.
                                 </p>
-                                {cashOutDepositPreview.memo && (
-                                  <p className="break-all">Memo: {cashOutDepositPreview.memo}</p>
-                                )}
-                                {cashOutDepositPreview.destinationTag && (
-                                  <p className="break-all">
-                                    Destination tag: {cashOutDepositPreview.destinationTag}
+                              )}
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  disabled={!settlementSummary.preferredForNative || !settlementSummary.nativeEnoughForWithdrawal}
+                                  onClick={() => {
+                                    if (!settlementSummary.preferredForNative) return
+                                    setWithdrawReview(settlementSummary.preferredForNative)
+                                    setWithdrawAmount(settlementSummary.nativeWithdrawAll.toFixed(Math.min(selectedWallet?.decimals ?? 6, 8)))
+                                    setWithdrawStep("review")
+                                    setWithdrawRecord(null)
+                                    setWithdrawError(null)
+                                    setWithdrawTxHash(null)
+                                    setMoveMoneyOpen(false)
+                                  }}
+                                  className={cx(pineTreePrimaryButton, "disabled:cursor-not-allowed disabled:opacity-55")}
+                                >
+                                  Withdraw All
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!settlementSummary.preferredForNative}
+                                  onClick={() => {
+                                    if (!settlementSummary.preferredForNative) return
+                                    setWithdrawReview(settlementSummary.preferredForNative)
+                                    setWithdrawAmount("")
+                                    setWithdrawStep("review")
+                                    setWithdrawRecord(null)
+                                    setWithdrawError(null)
+                                    setWithdrawTxHash(null)
+                                    setMoveMoneyOpen(false)
+                                  }}
+                                  className={cx(pineTreeSecondaryActionButton, "disabled:cursor-not-allowed disabled:opacity-55")}
+                                >
+                                  Enter Amount
+                                </button>
+                              </div>
+                              {!settlementSummary.preferredForNative && (
+                                <p className="mt-2 text-xs text-amber-700">
+                                  Set a preferred destination for {settlementSummary.walletAsset} on {settlementSummary.walletRail} in the Exchange Destinations section below.
+                                </p>
+                              )}
+                            </div>
+
+                            {/* ── USDC card ── */}
+                            {(settlementSummary.walletRail === "base" || settlementSummary.walletRail === "solana") && (
+                              <div className="p-4">
+                                <p className="text-sm font-semibold text-gray-950">
+                                  USDC on {settlementSummary.walletRail}
+                                </p>
+                                <div className="mt-2 space-y-0.5 text-xs text-gray-600">
+                                  {usdcBalanceLoading ? (
+                                    <p className="text-gray-400">Loading USDC balance…</p>
+                                  ) : usdcBalance !== null ? (
+                                    <p>Available: <span className="font-semibold">{usdcBalance.toFixed(2)} USDC</span></p>
+                                  ) : (
+                                    <p className="text-gray-400">USDC balance unknown — tap Refresh in the summary above.</p>
+                                  )}
+                                  <p className="text-gray-400">No gas deduction for USDC (network fees paid in {settlementSummary.walletAsset})</p>
+                                </div>
+                                <p className="mt-2 text-xs text-gray-500">
+                                  {settlementSummary.preferredForUsdc
+                                    ? `→ ${settlementSummary.preferredForUsdc.label} · ${settlementSummary.preferredForUsdc.exchange_name}`
+                                    : `No preferred destination for USDC on ${settlementSummary.walletRail}.`}
+                                </p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={!settlementSummary.preferredForUsdc || !settlementSummary.usdcWithdrawAll}
+                                    onClick={() => {
+                                      if (!settlementSummary.preferredForUsdc || !settlementSummary.usdcWithdrawAll) return
+                                      setWithdrawReview(settlementSummary.preferredForUsdc)
+                                      setWithdrawAmount(settlementSummary.usdcWithdrawAll.toFixed(2))
+                                      setWithdrawStep("review")
+                                      setWithdrawRecord(null)
+                                      setWithdrawError(null)
+                                      setWithdrawTxHash(null)
+                                      setMoveMoneyOpen(false)
+                                    }}
+                                    className={cx(pineTreePrimaryButton, "disabled:cursor-not-allowed disabled:opacity-55")}
+                                  >
+                                    Withdraw All USDC
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={!settlementSummary.preferredForUsdc}
+                                    onClick={() => {
+                                      if (!settlementSummary.preferredForUsdc) return
+                                      setWithdrawReview(settlementSummary.preferredForUsdc)
+                                      setWithdrawAmount("")
+                                      setWithdrawStep("review")
+                                      setWithdrawRecord(null)
+                                      setWithdrawError(null)
+                                      setWithdrawTxHash(null)
+                                      setMoveMoneyOpen(false)
+                                    }}
+                                    className={cx(pineTreeSecondaryActionButton, "disabled:cursor-not-allowed disabled:opacity-55")}
+                                  >
+                                    Enter Amount
+                                  </button>
+                                </div>
+                                {!settlementSummary.preferredForUsdc && (
+                                  <p className="mt-2 text-xs text-amber-700">
+                                    Set a preferred destination for USDC on {settlementSummary.walletRail} in the Exchange Destinations section below.
                                   </p>
                                 )}
                               </div>
                             )}
                           </div>
-                        )}
 
-                        <button
-                          type="button"
-                          onClick={checkDepositInstructions}
-                          disabled={cashOutPreviewLoading}
-                          className={cx(pineTreePrimaryButton, "mt-4 w-full disabled:cursor-not-allowed disabled:opacity-55")}
-                        >
-                          {cashOutPreviewLoading ? "Checking..." : "Check Deposit Instructions"}
-                        </button>
-                      </div>
-
-                      <div className="rounded-2xl border border-gray-200 bg-gray-50/80 p-4">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-semibold text-gray-950">Wallet Approval</p>
-                            <p className="mt-1 text-sm leading-6 text-gray-600">
-                              Wallet approval is not enabled yet. PineTree will not move funds without explicit merchant approval.
+                          <div className="border-t border-gray-100 px-4 py-3">
+                            <p className="text-[11px] leading-5 text-gray-500">
+                              PineTree prepares the transaction, but your wallet must approve it. PineTree cannot reverse transfers sent to the wrong address or network.
                             </p>
                           </div>
-                          <NetworkStatusPill
-                            label={cashOutApprovalPreview?.approvalReady ? "Preview ready" : "Disabled"}
-                            tone={cashOutApprovalPreview?.approvalReady ? "blue" : "slate"}
-                          />
+                        </div>
+                      )}
+
+                      {/* ── Pending Withdrawals ── */}
+                      {settlementSummary.pendingCount > 0 && (
+                        <div className="rounded-2xl border border-amber-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                          <div className="flex items-center justify-between gap-3 border-b border-amber-100 px-4 py-3">
+                            <p className="text-sm font-semibold text-amber-900">Pending Withdrawals</p>
+                            <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800">
+                              {settlementSummary.pendingCount}
+                            </span>
+                          </div>
+                          <div className="divide-y divide-gray-100">
+                            {settlementSummary.pendingWithdrawals.map((w) => {
+                              const statusClass =
+                                w.status === "SUBMITTED"
+                                  ? "bg-[#0052FF]/10 text-[#0052FF]"
+                                  : "bg-amber-100 text-amber-800"
+                              const explorerUrl = w.tx_hash ? getExplorerTxUrl(w.network, w.tx_hash) : null
+                              const canResume = w.status === "PREPARED" || w.status === "AWAITING_SIGNATURE"
+                              return (
+                                <div key={w.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                                  <div className="min-w-0">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <p className="text-sm font-semibold text-gray-950">{w.destination_label}</p>
+                                      <span className={cx("rounded-full px-2 py-0.5 text-[10px] font-semibold", statusClass)}>
+                                        {w.status.replace(/_/g, " ")}
+                                      </span>
+                                    </div>
+                                    <p className="mt-0.5 text-xs text-gray-500">
+                                      {w.amount} {w.asset} · {w.network} · {w.exchange_name}
+                                    </p>
+                                    {w.tx_hash && (
+                                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                                        <span className="font-mono text-[10px] text-gray-400" title={w.tx_hash}>
+                                          {formatSettlementAddress(w.tx_hash)}
+                                        </span>
+                                        {explorerUrl && (
+                                          <a href={explorerUrl} target="_blank" rel="noopener noreferrer"
+                                            className="text-[10px] font-semibold text-blue-600 hover:underline">
+                                            Explorer ↗
+                                          </a>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    {canResume && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const dest = settlementDestinations.find((d) => d.id === w.settlement_destination_id)
+                                          if (!dest) return
+                                          setWithdrawReview(dest)
+                                          setWithdrawAmount(String(w.amount))
+                                          setWithdrawStep("review")
+                                          setWithdrawRecord(null)
+                                          setWithdrawError(null)
+                                          setWithdrawTxHash(null)
+                                        }}
+                                        className={pineTreeSecondaryActionButton}
+                                      >
+                                        Resume
+                                      </button>
+                                    )}
+                                    {w.status === "SUBMITTED" && (
+                                      <button
+                                        type="button"
+                                        onClick={() => checkWithdrawalStatus(w.id)}
+                                        disabled={checkingStatusId === w.id}
+                                        className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:border-gray-300 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        {checkingStatusId === w.id ? "Checking…" : "Check status"}
+                                      </button>
+                                    )}
+                                    {checkedPendingIds.includes(w.id) && w.status === "SUBMITTED" && (
+                                      <span className="text-[11px] text-gray-500">Still waiting for confirmation.</span>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ── Exchange Destinations ── */}
+                      <div className="rounded-2xl border border-gray-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                        <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
+                          <p className="text-sm font-semibold text-gray-950">Exchange Destinations</p>
+                          <NetworkStatusPill label="Active" tone="blue" className="shrink-0" />
                         </div>
 
-                        {cashOutApprovalPreview && (
-                          <p className="mt-3 rounded-xl border border-gray-100 bg-white/80 p-3 text-sm leading-6 text-gray-600">
-                            {cashOutApprovalPreview.message ||
-                              "Wallet approval will be enabled after the provider supplies deposit instructions."}
+                        <div className="p-4">
+                          <p className="text-sm leading-6 text-gray-600">
+                            Send supported balances to an exchange address you control, then sell or withdraw through your exchange account.
                           </p>
-                        )}
 
-                        <button
-                          type="button"
-                          disabled
-                          className={cx(pineTreeNeutralDisabledButton, "mt-4")}
-                        >
-                          Prepare Wallet Approval - Coming Soon
+                          {destLoadError && (
+                            <div className="mt-3 rounded-xl border border-red-100 bg-red-50/70 p-3 text-sm text-red-800">
+                              {destLoadError}
+                            </div>
+                          )}
+
+                          {destLoading ? (
+                            <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50/70 px-4 py-6 text-center text-sm text-gray-500">
+                              Loading destinations…
+                            </div>
+                          ) : settlementDestinations.length === 0 ? (
+                            <div className="mt-4 rounded-xl border border-dashed border-gray-200 bg-gray-50/50 px-4 py-6 text-center">
+                              <p className="text-sm font-semibold text-gray-700">No exchange destinations saved</p>
+                              <p className="mt-1 text-xs leading-5 text-gray-500">
+                                Add an exchange wallet address to start using the withdrawal flow.
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="mt-4 space-y-3">
+                              {settlementDestinations.map((dest) => {
+                                const isCompatible = dest.network === selectedWallet?.rail
+                                return (
+                                  <div
+                                    key={dest.id}
+                                    className={cx(
+                                      "rounded-2xl border p-4 transition",
+                                      dest.is_default
+                                        ? "border-[#0052FF]/20 bg-[#0052FF]/5"
+                                        : "border-gray-100 bg-gray-50/70"
+                                    )}
+                                  >
+                                    <div className="flex flex-wrap items-start justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <p className="text-sm font-semibold text-gray-950">{dest.label}</p>
+                                          {dest.is_default && (
+                                            <span className="rounded-full border border-[#0052FF]/25 bg-[#0052FF]/10 px-2 py-0.5 text-[10px] font-semibold text-[#0052FF]">
+                                              Preferred · {dest.asset}
+                                            </span>
+                                          )}
+                                          {!isCompatible && selectedWallet?.rail && (
+                                            <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                                              Different network
+                                            </span>
+                                          )}
+                                        </div>
+                                        <p className="mt-0.5 text-xs text-gray-500">{dest.exchange_name}</p>
+                                      </div>
+                                      <span className="shrink-0 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-700 shadow-sm">
+                                        {dest.asset} · {dest.network}
+                                      </span>
+                                    </div>
+                                    <p className="mt-2 font-mono text-xs text-gray-500" title={dest.address}>
+                                      {formatSettlementAddress(dest.address)}
+                                    </p>
+                                    {dest.memo_or_tag && (
+                                      <p className="mt-1 text-xs text-gray-400">Memo: {dest.memo_or_tag}</p>
+                                    )}
+
+                                    {destDeleteConfirmId === dest.id ? (
+                                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                                        <p className="text-xs font-semibold text-gray-700">Delete this destination?</p>
+                                        <button
+                                          type="button"
+                                          onClick={() => setDestDeleteConfirmId(null)}
+                                          disabled={destDeleting}
+                                          className={pineTreeSecondaryActionButton}
+                                        >
+                                          Cancel
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => deleteSettlementDestination(dest.id)}
+                                          disabled={destDeleting}
+                                          className={pineTreeDangerActionButton}
+                                        >
+                                          {destDeleting ? "Deleting…" : "Delete"}
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="mt-3 flex flex-wrap gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setDestForm({
+                                              id: dest.id,
+                                              label: dest.label,
+                                              exchangeName: dest.exchange_name,
+                                              assetNetwork: destAssetNetworkValue(dest),
+                                              address: dest.address,
+                                              memoOrTag: dest.memo_or_tag || "",
+                                              isDefault: dest.is_default,
+                                              confirmed: true
+                                            })
+                                            setDestSaveError(null)
+                                            setDestModalOpen(true)
+                                          }}
+                                          className={pineTreeSecondaryActionButton}
+                                        >
+                                          Edit
+                                        </button>
+                                        {!dest.is_default && (
+                                          <button
+                                            type="button"
+                                            onClick={() => setPreferredDestination(dest.id)}
+                                            disabled={destSettingDefault === dest.id}
+                                            className={pineTreeSecondaryActionButton}
+                                          >
+                                            {destSettingDefault === dest.id ? "Saving…" : "Set Preferred"}
+                                          </button>
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={() => setDestDeleteConfirmId(dest.id)}
+                                          className={pineTreeDangerActionButton}
+                                        >
+                                          Delete
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setWithdrawReview(dest)}
+                                          disabled={!isCompatible}
+                                          title={!isCompatible && selectedWallet?.rail
+                                            ? `This destination is for ${dest.network} — connect a ${dest.network} wallet to withdraw`
+                                            : undefined}
+                                          className={cx(
+                                            pineTreeSecondaryActionButton,
+                                            !isCompatible && "cursor-not-allowed opacity-40"
+                                          )}
+                                        >
+                                          Withdraw
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDestForm(emptyDestinationForm())
+                              setDestSaveError(null)
+                              setDestModalOpen(true)
+                            }}
+                            className={cx(pineTreePrimaryButton, "mt-4 w-full")}
+                          >
+                            Add Exchange Destination
+                          </button>
+
+                          <p className="mt-3 text-xs leading-5 text-gray-500">
+                            PineTree does not control your exchange account or bank withdrawal process.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* ── Provider Cash Out ── */}
+                      <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-gray-950">Provider Cash Out</p>
+                            <p className="mt-1 text-sm leading-6 text-gray-600">
+                              Connect an approved provider to convert supported crypto balances into USD and send funds to a bank account.
+                            </p>
+                          </div>
+                          <NetworkStatusPill label="Provider required" tone="slate" className="shrink-0" />
+                        </div>
+                        <button type="button" disabled className={cx(pineTreeDisabledButton, "mt-4")}>
+                          Provider Setup Pending
                         </button>
                       </div>
-                    </>
-                  )}
 
-                  {!selectedWallet.isLightning && (
-                    <button
-                      type="button"
-                      disabled
-                      className={pineTreeDisabledButton}
-                    >
-                      Wallet Approval Disabled
-                    </button>
+                      {/* ── Settlement Mode (UI-only preference) ── */}
+                      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                        <p className="text-sm font-semibold text-gray-950">Settlement Mode</p>
+                        <p className="mt-1 text-xs leading-5 text-gray-500">
+                          Choose how and when balances move to your exchange destination.
+                        </p>
+                        <div className="mt-3 space-y-2">
+                          {([
+                            { value: "manual" as const, label: "Manual withdrawals", detail: "Initiate each withdrawal yourself, on demand.", available: true },
+                            { value: "end_of_day" as const, label: "End-of-day batch", detail: "PineTree prepares a daily batch for your approval.", available: false },
+                            { value: "auto" as const, label: "Automatic settlement", detail: "Auto-settle after each payment. Requires wallet session support.", available: false }
+                          ]).map((option) => (
+                            <label
+                              key={option.value}
+                              className={cx(
+                                "flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition",
+                                settlementMode === option.value
+                                  ? "border-[#0052FF]/25 bg-[#0052FF]/5"
+                                  : "border-gray-100 bg-gray-50/60",
+                                !option.available && "cursor-not-allowed opacity-60"
+                              )}
+                            >
+                              <input
+                                type="radio"
+                                name="settlement_mode"
+                                value={option.value}
+                                checked={settlementMode === option.value}
+                                disabled={!option.available}
+                                onChange={() => {
+                                  if (!option.available) return
+                                  setSettlementMode(option.value)
+                                  saveSettlementPreference(option.value)
+                                }}
+                                className="mt-0.5 h-4 w-4 accent-[#0052FF]"
+                              />
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="text-sm font-semibold text-gray-900">{option.label}</p>
+                                  {!option.available && (
+                                    <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-400">
+                                      Coming soon
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="mt-0.5 text-xs leading-5 text-gray-500">{option.detail}</p>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                        <p className="mt-3 text-[11px] leading-5 text-gray-400">
+                          {settlementPrefSaving ? "Saving preference…" : "Preference saved to your account."}
+                        </p>
+                      </div>
+
+                      {/* ── Settlement Activity ── */}
+                      <div className="rounded-2xl border border-gray-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                        <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
+                          <p className="text-sm font-semibold text-gray-950">Settlement Activity</p>
+                          {settlementSummary.thisMonthCount > 0 && (
+                            <span className="rounded-full border border-[#0052FF]/20 bg-[#0052FF]/5 px-2.5 py-0.5 text-[11px] font-semibold text-[#0052FF]">
+                              {settlementSummary.thisMonthCount} this month
+                            </span>
+                          )}
+                        </div>
+                        <div className="p-4">
+                          {historyLoading ? (
+                            <p className="text-center text-sm text-gray-500">Loading…</p>
+                          ) : settlementHistory.length === 0 ? (
+                            <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50/50 px-4 py-6 text-center">
+                              <p className="text-sm text-gray-500">No withdrawal activity yet.</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              {settlementHistory.map((w) => {
+                                const explorerUrl = w.tx_hash ? getExplorerTxUrl(w.network, w.tx_hash) : null
+                                const statusClass: Record<string, string> = {
+                                  DRAFT:              "bg-gray-100 text-gray-500",
+                                  PREPARED:           "bg-amber-100 text-amber-800",
+                                  AWAITING_SIGNATURE: "bg-amber-100 text-amber-800",
+                                  SUBMITTED:          "bg-blue-100 text-blue-700",
+                                  CONFIRMED:          "bg-[#0052FF]/10 text-[#0052FF]",
+                                  FAILED:             "bg-red-100 text-red-700",
+                                  CANCELLED:          "bg-gray-100 text-gray-400"
+                                }
+                                const pill = statusClass[w.status] ?? "bg-gray-100 text-gray-500"
+                                return (
+                                  <div key={w.id} className="rounded-xl border border-gray-100 p-3">
+                                    <div className="flex flex-wrap items-start justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <p className="text-sm font-semibold text-gray-950">{w.destination_label}</p>
+                                        <p className="mt-0.5 text-xs text-gray-500">{w.exchange_name}</p>
+                                      </div>
+                                      <span className={cx("shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold", pill)}>
+                                        {w.status.replace(/_/g, " ")}
+                                      </span>
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600">
+                                      <span className="font-semibold">{w.amount} {w.asset}</span>
+                                      <span className="text-gray-300">·</span>
+                                      <span>{w.network}</span>
+                                      <span className="text-gray-300">·</span>
+                                      <span className="text-gray-400">{formatChicagoDateTime(w.created_at)}</span>
+                                    </div>
+                                    {w.tx_hash && (
+                                      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                                        <span className="font-mono text-[10px] text-gray-400" title={w.tx_hash}>
+                                          {formatSettlementAddress(w.tx_hash)}
+                                        </span>
+                                        {explorerUrl && (
+                                          <a
+                                            href={explorerUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-[10px] font-semibold text-blue-600 hover:underline"
+                                          >
+                                            View on Explorer ↗
+                                          </a>
+                                        )}
+                                      </div>
+                                    )}
+                                    {w.submitted_at && (
+                                      <p className="mt-1 text-[10px] text-gray-400">
+                                        Submitted: {formatChicagoDateTime(w.submitted_at)}
+                                      </p>
+                                    )}
+                                    {w.failure_reason && (
+                                      <p className="mt-1 text-xs leading-5 text-red-600">{w.failure_reason}</p>
+                                    )}
+                                    {w.status === "SUBMITTED" && (
+                                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => checkWithdrawalStatus(w.id)}
+                                          disabled={checkingStatusId === w.id}
+                                          className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-700 shadow-sm transition hover:border-gray-300 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                          {checkingStatusId === w.id ? "Checking…" : "Check status"}
+                                        </button>
+                                        {checkedPendingIds.includes(w.id) && (
+                                          <span className="text-[11px] text-gray-500">
+                                            Still waiting for network confirmation.
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </>
                   )}
                 </div>
               )}
