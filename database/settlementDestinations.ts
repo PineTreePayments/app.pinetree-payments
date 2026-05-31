@@ -15,9 +15,32 @@ export type SettlementDestinationRecord = {
   address: string
   memo_or_tag: string | null
   is_default: boolean
+  account_type: SettlementDestinationAccountType
+  source: SettlementDestinationSource
+  connected_provider: SettlementDestinationConnectedProvider | null
+  external_account_name: string | null
+  external_account_id: string | null
+  institution_name: string | null
+  last_verified_at: string | null
   created_at: string
   updated_at: string
 }
+
+export type SettlementDestinationAccountType =
+  | "business_exchange"
+  | "personal_exchange"
+  | "external_wallet"
+  | "other"
+
+export type SettlementDestinationSource =
+  | "manual"
+  | "mesh"
+  | "provider_import"
+  | "unknown"
+
+export type SettlementDestinationConnectedProvider =
+  | "mesh"
+  | "manual"
 
 export type CreateSettlementDestinationInput = {
   merchantId: string
@@ -28,6 +51,13 @@ export type CreateSettlementDestinationInput = {
   address: string
   memoOrTag?: string | null
   isDefault?: boolean
+  accountType?: SettlementDestinationAccountType
+  source?: SettlementDestinationSource
+  connectedProvider?: SettlementDestinationConnectedProvider | null
+  externalAccountName?: string | null
+  externalAccountId?: string | null
+  institutionName?: string | null
+  lastVerifiedAt?: string | null
 }
 
 export type UpdateSettlementDestinationInput = {
@@ -40,6 +70,13 @@ export type UpdateSettlementDestinationInput = {
   address?: string
   memoOrTag?: string | null
   isDefault?: boolean
+  accountType?: SettlementDestinationAccountType
+  source?: SettlementDestinationSource
+  connectedProvider?: SettlementDestinationConnectedProvider | null
+  externalAccountName?: string | null
+  externalAccountId?: string | null
+  institutionName?: string | null
+  lastVerifiedAt?: string | null
 }
 
 function normalize(row: Record<string, unknown>): SettlementDestinationRecord {
@@ -53,9 +90,38 @@ function normalize(row: Record<string, unknown>): SettlementDestinationRecord {
     address: String(row.address || ""),
     memo_or_tag: row.memo_or_tag != null ? String(row.memo_or_tag) : null,
     is_default: Boolean(row.is_default),
+    account_type: normalizeAccountType(row.account_type),
+    source: normalizeSource(row.source),
+    connected_provider: normalizeConnectedProvider(row.connected_provider),
+    external_account_name: row.external_account_name != null ? String(row.external_account_name) : null,
+    external_account_id: row.external_account_id != null ? String(row.external_account_id) : null,
+    institution_name: row.institution_name != null ? String(row.institution_name) : null,
+    last_verified_at: row.last_verified_at != null ? String(row.last_verified_at) : null,
     created_at: String(row.created_at || ""),
     updated_at: String(row.updated_at || "")
   }
+}
+
+function normalizeAccountType(value: unknown): SettlementDestinationAccountType {
+  const normalized = String(value || "").trim()
+  if (normalized === "business_exchange" || normalized === "personal_exchange" || normalized === "external_wallet" || normalized === "other") {
+    return normalized
+  }
+  return "other"
+}
+
+function normalizeSource(value: unknown): SettlementDestinationSource {
+  const normalized = String(value || "").trim()
+  if (normalized === "manual" || normalized === "mesh" || normalized === "provider_import" || normalized === "unknown") {
+    return normalized
+  }
+  return "manual"
+}
+
+function normalizeConnectedProvider(value: unknown): SettlementDestinationConnectedProvider | null {
+  const normalized = String(value || "").trim()
+  if (normalized === "mesh" || normalized === "manual") return normalized
+  return null
 }
 
 export async function listSettlementDestinations(
@@ -123,6 +189,13 @@ export async function createSettlementDestination(
       address: input.address.trim(),
       memo_or_tag: input.memoOrTag?.trim() || null,
       is_default: Boolean(input.isDefault),
+      account_type: input.accountType || "other",
+      source: input.source || "manual",
+      connected_provider: input.connectedProvider || "manual",
+      external_account_name: input.externalAccountName?.trim() || null,
+      external_account_id: input.externalAccountId?.trim() || null,
+      institution_name: input.institutionName?.trim() || null,
+      last_verified_at: input.lastVerifiedAt || null,
       updated_at: now
     })
     .select("*")
@@ -148,6 +221,13 @@ export async function updateSettlementDestination(
   if (input.address !== undefined)     update.address      = input.address.trim()
   if (input.memoOrTag !== undefined)   update.memo_or_tag  = input.memoOrTag?.trim() || null
   if (input.isDefault !== undefined)   update.is_default   = Boolean(input.isDefault)
+  if (input.accountType !== undefined) update.account_type = input.accountType
+  if (input.source !== undefined) update.source = input.source
+  if (input.connectedProvider !== undefined) update.connected_provider = input.connectedProvider
+  if (input.externalAccountName !== undefined) update.external_account_name = input.externalAccountName?.trim() || null
+  if (input.externalAccountId !== undefined) update.external_account_id = input.externalAccountId?.trim() || null
+  if (input.institutionName !== undefined) update.institution_name = input.institutionName?.trim() || null
+  if (input.lastVerifiedAt !== undefined) update.last_verified_at = input.lastVerifiedAt || null
 
   const { data, error } = await db
     .from(TABLE)

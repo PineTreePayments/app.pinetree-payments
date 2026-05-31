@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { Transaction } from "@solana/web3.js"
 import { getDetectedSolanaWallets, getSolanaTransactionSignature } from "@/lib/wallets/solana"
 import { supabase } from "@/lib/supabaseClient"
+import { getSpeedDashboardLinks } from "@/lib/speedDashboardLinks"
 import {
   CompactMetricTile,
   DashboardHeroCard,
@@ -214,8 +215,27 @@ type SettlementDestination = {
   address: string
   memo_or_tag: string | null
   is_default: boolean
+  account_type: SettlementDestinationAccountType
+  source: SettlementDestinationSource
+  connected_provider: "mesh" | "manual" | null
+  external_account_name: string | null
+  external_account_id: string | null
+  institution_name: string | null
+  last_verified_at: string | null
   created_at: string
 }
+
+type SettlementDestinationAccountType =
+  | "business_exchange"
+  | "personal_exchange"
+  | "external_wallet"
+  | "other"
+
+type SettlementDestinationSource =
+  | "manual"
+  | "mesh"
+  | "provider_import"
+  | "unknown"
 
 type DestinationForm = {
   id: string | null
@@ -226,6 +246,8 @@ type DestinationForm = {
   memoOrTag: string
   isDefault: boolean
   confirmed: boolean
+  accountType: SettlementDestinationAccountType
+  personalExchangeAcknowledged: boolean
 }
 
 const SETTLEMENT_ASSET_NETWORK_OPTIONS = [
@@ -253,8 +275,31 @@ function emptyDestinationForm(): DestinationForm {
     address: "",
     memoOrTag: "",
     isDefault: false,
-    confirmed: false
+    confirmed: false,
+    accountType: "business_exchange",
+    personalExchangeAcknowledged: false
   }
+}
+
+const DESTINATION_ACCOUNT_TYPE_OPTIONS: Array<{ value: SettlementDestinationAccountType; label: string }> = [
+  { value: "business_exchange", label: "Business exchange account, recommended" },
+  { value: "personal_exchange", label: "Personal exchange account" },
+  { value: "external_wallet", label: "External wallet" },
+  { value: "other", label: "Other" }
+]
+
+const MESH_CONNECT_ENABLED = process.env.NEXT_PUBLIC_MESH_CONNECT_ENABLED === "true"
+
+function getDestinationAccountTypeLabel(type?: string | null) {
+  if (type === "business_exchange") return "Business Exchange"
+  if (type === "personal_exchange") return "Personal Exchange"
+  if (type === "external_wallet") return "External Wallet"
+  return "Other"
+}
+
+function getDestinationSourceLabel(dest: Pick<SettlementDestination, "source" | "connected_provider">) {
+  if (dest.source === "mesh" || dest.connected_provider === "mesh") return "Mesh Connected"
+  return "Manual"
 }
 
 function getExplorerTxUrl(network: string, txHash: string): string | null {
@@ -402,6 +447,14 @@ const albyNwcDocsUrl = process.env.NEXT_PUBLIC_ALBY_NWC_DOCS_URL || "https://gui
 const zeusIosUrl = process.env.NEXT_PUBLIC_ZEUS_IOS_URL || "https://apps.apple.com/us/app/zeus-ln/id1456038895"
 const zeusAndroidUrl = process.env.NEXT_PUBLIC_ZEUS_ANDROID_URL || "https://play.google.com/store/apps/details?id=app.zeusln"
 const zeusNwcDocsUrl = process.env.NEXT_PUBLIC_ZEUS_DOCS_URL || "https://zeusln.app"
+const lightningSpeedLinks = getSpeedDashboardLinks([
+  "dashboard",
+  "autoSwap",
+  "payouts",
+  "apiKeys",
+  "webhooks",
+  "docs"
+])
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ")
@@ -1037,7 +1090,11 @@ export default function WalletsPage() {
             wallet_network: selectedWallet?.rail || null,
             address: destForm.address,
             memo_or_tag: destForm.memoOrTag || null,
-            is_default: false
+            is_default: false,
+            account_type: destForm.accountType,
+            source: "manual",
+            connected_provider: "manual",
+            personal_exchange_acknowledged: destForm.personalExchangeAcknowledged
           }
         : {
             action: "create",
@@ -1048,7 +1105,11 @@ export default function WalletsPage() {
             wallet_network: selectedWallet?.rail || null,
             address: destForm.address,
             memo_or_tag: destForm.memoOrTag || null,
-            is_default: false
+            is_default: false,
+            account_type: destForm.accountType,
+            source: "manual",
+            connected_provider: "manual",
+            personal_exchange_acknowledged: destForm.personalExchangeAcknowledged
           }
 
       const res = await fetch("/api/wallets/settlement/destinations", {
@@ -2314,6 +2375,65 @@ export default function WalletsPage() {
                 </select>
               </label>
 
+              <div>
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Destination type</span>
+                <div className="mt-2 grid gap-2">
+                  {DESTINATION_ACCOUNT_TYPE_OPTIONS.map((option) => (
+                    <label
+                      key={option.value}
+                      className={cx(
+                        "flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 transition",
+                        destForm.accountType === option.value
+                          ? "border-[#0052FF]/30 bg-[#0052FF]/5"
+                          : "border-gray-200 bg-white hover:bg-gray-50"
+                      )}
+                    >
+                      <input
+                        type="radio"
+                        name="destination-account-type"
+                        value={option.value}
+                        checked={destForm.accountType === option.value}
+                        onChange={() => setDestForm((f) => ({
+                          ...f,
+                          accountType: option.value,
+                          personalExchangeAcknowledged: option.value === "personal_exchange" ? f.personalExchangeAcknowledged : false
+                        }))}
+                        className="h-4 w-4 border-gray-300 text-[#0052FF] focus:ring-[#0052FF]"
+                      />
+                      <span className="text-sm font-semibold text-gray-800">{option.label}</span>
+                    </label>
+                  ))}
+                </div>
+                {destForm.accountType === "business_exchange" && (
+                  <p className="mt-2 rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-3 text-xs leading-5 text-gray-700">
+                    Recommended for business funds, accounting, and bank withdrawal records.
+                  </p>
+                )}
+                {destForm.accountType === "personal_exchange" && (
+                  <div className="mt-2 rounded-xl border border-amber-100 bg-amber-50/70 p-3">
+                    <p className="text-xs leading-5 text-amber-900">
+                      For business payments, PineTree recommends using an exchange account and bank account registered to the business. Personal exchange accounts may create accounting, tax, or compliance issues.
+                    </p>
+                    <label className="mt-2 flex cursor-pointer items-start gap-2">
+                      <input
+                        type="checkbox"
+                        checked={destForm.personalExchangeAcknowledged}
+                        onChange={(e) => setDestForm((f) => ({ ...f, personalExchangeAcknowledged: e.target.checked }))}
+                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-[#0052FF] focus:ring-[#0052FF]"
+                      />
+                      <span className="text-xs font-semibold leading-5 text-amber-900">
+                        I understand this destination may not be registered to the business.
+                      </span>
+                    </label>
+                  </div>
+                )}
+                {destForm.accountType === "external_wallet" && (
+                  <p className="mt-2 rounded-xl border border-gray-100 bg-gray-50/70 p-3 text-xs leading-5 text-gray-600">
+                    Use this for a self-custody wallet or cold wallet you control.
+                  </p>
+                )}
+              </div>
+
               {/* Label */}
               <label className="block">
                 <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Nickname</span>
@@ -2382,6 +2502,9 @@ export default function WalletsPage() {
                 <p className="text-xs leading-5 text-amber-900">
                   Saved destinations make future sends faster. They do not change where customer payments are received.
                 </p>
+                <p className="mt-1 text-xs leading-5 text-amber-900">
+                  PineTree helps you save destinations and prepare transfers. For business funds, use exchange and bank accounts registered to your business whenever possible.
+                </p>
               </div>
 
               {/* Confirmation */}
@@ -2420,7 +2543,8 @@ export default function WalletsPage() {
                     !destForm.exchangeName ||
                     !destForm.assetNetwork ||
                     !destForm.address.trim() ||
-                    !destForm.confirmed
+                    !destForm.confirmed ||
+                    (destForm.accountType === "personal_exchange" && !destForm.personalExchangeAcknowledged)
                   }
                   className={cx(pineTreePrimaryButton, "disabled:cursor-not-allowed disabled:opacity-55")}
                 >
@@ -2639,10 +2763,22 @@ export default function WalletsPage() {
                               </option>
                               {sendSavedDestinations.map((dest) => (
                                 <option key={dest.id} value={dest.id}>
-                                  {dest.label} - {formatSettlementAddress(dest.address)}
+                                  {dest.label} - {getDestinationAccountTypeLabel(dest.account_type)} - {formatSettlementAddress(dest.address)}
                                 </option>
                               ))}
                             </select>
+                            {selectedSendDestination && (
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-700">
+                                  {getDestinationAccountTypeLabel(selectedSendDestination.account_type)}
+                                </span>
+                                {selectedSendDestination.account_type === "personal_exchange" && (
+                                  <span className="text-xs font-semibold text-amber-700">
+                                    Personal account selected. Business exchange accounts are recommended for business funds.
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </label>
                         ) : (
                           <label className="block">
@@ -3529,6 +3665,17 @@ export default function WalletsPage() {
                                       <div className="min-w-0">
                                         <div className="flex flex-wrap items-center gap-2">
                                           <p className="text-sm font-semibold text-gray-950">{dest.label}</p>
+                                          <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-700">
+                                            {getDestinationAccountTypeLabel(dest.account_type)}
+                                          </span>
+                                          <span className={cx(
+                                            "rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+                                            dest.source === "mesh" || dest.connected_provider === "mesh"
+                                              ? "border-[#0052FF]/25 bg-[#0052FF]/10 text-[#0052FF]"
+                                              : "border-gray-200 bg-white text-gray-600"
+                                          )}>
+                                            {getDestinationSourceLabel(dest)}
+                                          </span>
                                           {false && dest.is_default && (
                                             <span className="rounded-full border border-[#0052FF]/25 bg-[#0052FF]/10 px-2 py-0.5 text-[10px] font-semibold text-[#0052FF]">
                                               Preferred · {dest.asset}
@@ -3586,7 +3733,9 @@ export default function WalletsPage() {
                                               address: dest.address,
                                               memoOrTag: dest.memo_or_tag || "",
                                               isDefault: false,
-                                              confirmed: true
+                                              confirmed: true,
+                                              accountType: dest.account_type || "other",
+                                              personalExchangeAcknowledged: dest.account_type === "personal_exchange"
                                             })
                                             setDestSaveError(null)
                                             setDestModalOpen(true)
@@ -3634,21 +3783,31 @@ export default function WalletsPage() {
                             </div>
                           )}
 
-                          <button
-                            type="button"
-                          onClick={() => {
-                            const firstOption = destinationAssetOptions[0]
-                            setDestForm({ ...emptyDestinationForm(), assetNetwork: firstOption?.value || "" })
-                            setDestSaveError(null)
-                            setDestModalOpen(true)
-                          }}
-                            className={cx(pineTreePrimaryButton, "mt-4")}
-                          >
-                            Add Destination
-                          </button>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const firstOption = destinationAssetOptions[0]
+                                setDestForm({ ...emptyDestinationForm(), assetNetwork: firstOption?.value || "" })
+                                setDestSaveError(null)
+                                setDestModalOpen(true)
+                              }}
+                              className={pineTreePrimaryButton}
+                            >
+                              Add Destination
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!MESH_CONNECT_ENABLED}
+                              title="Connect an exchange to import deposit addresses automatically."
+                              className={cx(pineTreeSecondaryActionButton, "disabled:cursor-not-allowed disabled:opacity-55")}
+                            >
+                              {MESH_CONNECT_ENABLED ? "Connect Exchange" : "Connect Exchange Coming Soon"}
+                            </button>
+                          </div>
 
                           <p className="mt-3 text-xs leading-5 text-gray-500">
-                            Saved destinations do not change where customer payments are received.
+                            Connect an exchange to import deposit addresses automatically. Saved destinations do not change where customer payments are received.
                           </p>
                         </div>
                       </div>
@@ -3854,6 +4013,47 @@ export default function WalletsPage() {
 
               {activeTab === "lightning_wallet" && selectedWallet.isLightning && (
                 <div className={walletDetailPanelClass}>
+                  <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-950">Speed Lightning</p>
+                        <p className="mt-1 text-sm leading-6 text-gray-600">
+                          Use Speed for Lightning invoices, auto-swap, and settlement settings.
+                        </p>
+                      </div>
+                      <NetworkStatusPill label="Managed in TrySpeed" tone="blue" className="shrink-0" />
+                    </div>
+                    <p className="mt-3 text-xs leading-5 text-gray-600">
+                      Auto-swap and payout controls are managed in your TrySpeed account. PineTree uses your Speed setup to create invoices and track Lightning payments.
+                    </p>
+                    {lightningSpeedLinks.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {lightningSpeedLinks.map((link) => (
+                          <a key={link.key} href={link.url} target="_blank" rel="noopener noreferrer" className={pineTreeSecondaryActionButton}>
+                            {link.label}
+                          </a>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-xs text-gray-500">Speed dashboard links are not configured yet.</p>
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-gray-100 bg-white p-3">
+                    <button
+                      type="button"
+                      onClick={() => setNwcAdvancedOpen((open) => !open)}
+                      className="flex w-full items-center justify-between gap-3 text-left text-sm font-semibold text-gray-950"
+                    >
+                      <span>Advanced NWC Wallet</span>
+                      <span className="text-xs text-gray-400">{nwcAdvancedOpen ? "Hide" : "Show"}</span>
+                    </button>
+                    <p className="mt-1 px-0.5 text-xs leading-5 text-gray-500">
+                      Connect a direct Lightning wallet only if you manage your own NWC connection.
+                    </p>
+                  </div>
+
+                  <div className={cx("space-y-4", !nwcAdvancedOpen && "hidden")}>
                   {nwcStatus?.connected ? (
                     <>
                       <div className="flex items-center gap-2">
@@ -3926,14 +4126,14 @@ export default function WalletsPage() {
                             type="text"
                             value={nwcUri}
                             onChange={(e) => { setNwcUri(e.target.value); setNwcTestResult(null); setNwcConnectError(null); setNwcConnectSuccess(null) }}
-                            placeholder="nostr+walletconnect://..."
+                            placeholder="NWC connection string"
                             className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 font-mono text-xs text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
                           />
                           <input
                             type="text"
                             value={nwcWalletLabel}
                             onChange={(e) => setNwcWalletLabel(e.target.value)}
-                            placeholder="Wallet name (optional)"
+                            placeholder="Wallet label"
                             className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
                           />
                           {nwcTestResult && (
@@ -3987,11 +4187,11 @@ export default function WalletsPage() {
                             </div>
                           )}
                           <div className="flex gap-2">
-                            <button type="button" onClick={testNwcUri} disabled={nwcTestLoading || !nwcUri.trim()} className={cx(pineTreeSecondaryActionButton, "flex-1 justify-center disabled:cursor-not-allowed disabled:opacity-55")}>
+                            {false && <button type="button" onClick={testNwcUri} disabled={nwcTestLoading || !nwcUri.trim()} className={cx(pineTreeSecondaryActionButton, "flex-1 justify-center disabled:cursor-not-allowed disabled:opacity-55")}>
                               {nwcTestLoading ? "Testing..." : "Test Connection"}
-                            </button>
+                            </button>}
                             <button type="button" onClick={connectNwcWallet} disabled={nwcConnectLoading || !nwcUri.trim()} className={cx(pineTreePrimaryButton, "flex-1 disabled:cursor-not-allowed disabled:opacity-55")}>
-                              {nwcConnectLoading ? "Saving..." : "Save New Wallet"}
+                              {nwcConnectLoading ? "Saving..." : "Connect NWC Wallet"}
                             </button>
                           </div>
                         </div>
@@ -4020,7 +4220,7 @@ export default function WalletsPage() {
                   ) : (
                     <>
                       {/* Recommended: Speed Lightning */}
-                      <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
+                      {false && <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
                         <div className="mb-2">
                           <span className="rounded-full bg-blue-600 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
                             Recommended
@@ -4049,7 +4249,7 @@ export default function WalletsPage() {
                         <p className="mt-3 text-xs text-gray-500">
                           Speed payout controls will appear after Speed settlement support is connected.
                         </p>
-                      </div>
+                      </div>}
 
                       {/* Advanced: Direct Lightning Wallet (NWC) */}
                       <div className="flex items-center gap-2">
@@ -4071,9 +4271,9 @@ export default function WalletsPage() {
 
                       <div className={cx("space-y-4 rounded-2xl border border-gray-100 bg-gray-50/70 p-4", !nwcAdvancedOpen && "hidden")}>
                         <div>
-                          <p className="text-sm font-semibold text-gray-950">Advanced setup: Direct Lightning wallet</p>
+                          <p className="text-sm font-semibold text-gray-950">Advanced NWC Wallet</p>
                           <p className="mt-1 text-xs leading-5 text-gray-600">
-                            For technical merchants using Zeus, Alby Hub, or an NWC-compatible wallet. Requires manual wallet permissions and a spending limit for PineTree service-fee collection. Create a PineTree connection in your wallet, enable the three required permissions, then paste the connection string below.
+                            Connect a direct Lightning wallet only if you manage your own NWC connection.
                           </p>
                         </div>
 
@@ -4174,34 +4374,34 @@ export default function WalletsPage() {
                             type="text"
                             value={nwcUri}
                             onChange={(e) => { setNwcUri(e.target.value); setNwcTestResult(null); setNwcConnectError(null); setNwcConnectSuccess(null) }}
-                            placeholder="nostr+walletconnect://..."
+                            placeholder="NWC connection string"
                             className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 font-mono text-xs text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
                           />
                           <input
                             type="text"
                             value={nwcWalletLabel}
                             onChange={(e) => setNwcWalletLabel(e.target.value)}
-                            placeholder="Wallet name (optional, e.g. Alby Hub)"
+                            placeholder="Wallet label"
                             className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
                           />
                         </div>
 
                         <div className="flex gap-2">
-                          <button
+                          {false && <button
                             type="button"
                             onClick={testNwcUri}
                             disabled={nwcTestLoading || !nwcUri.trim()}
                             className={cx(pineTreeSecondaryActionButton, "flex-1 justify-center disabled:cursor-not-allowed disabled:opacity-55")}
                           >
                             {nwcTestLoading ? "Testing..." : "Test Connection"}
-                          </button>
+                          </button>}
                           <button
                             type="button"
                             onClick={connectNwcWallet}
                             disabled={nwcConnectLoading || !nwcUri.trim()}
                             className={cx(pineTreePrimaryButton, "flex-1 disabled:cursor-not-allowed disabled:opacity-55")}
                           >
-                            {nwcConnectLoading ? "Saving..." : "Connect Wallet"}
+                            {nwcConnectLoading ? "Saving..." : "Connect NWC Wallet"}
                           </button>
                         </div>
                       </div>
@@ -4267,6 +4467,8 @@ export default function WalletsPage() {
                       )}
                     </>
                   )}
+
+                  </div>
 
                   {nwcConnectError && (
                     <div className="rounded-2xl border border-red-100 bg-red-50/70 p-3 text-sm leading-6 text-red-800">

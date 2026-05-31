@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
+import { getSpeedDashboardLinks } from "@/lib/speedDashboardLinks"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
 import { toast } from "sonner"
 import {
@@ -17,13 +18,21 @@ const providerZeusIosUrl = process.env.NEXT_PUBLIC_ZEUS_IOS_URL || "https://apps
 const providerZeusAndroidUrl = process.env.NEXT_PUBLIC_ZEUS_ANDROID_URL || "https://play.google.com/store/apps/details?id=app.zeusln"
 const providerZeusDocsUrl = process.env.NEXT_PUBLIC_ZEUS_DOCS_URL || "https://zeusln.app"
 
-// Speed Lightning — PineTree/admin setup links only; secrets stay server-side.
-const speedLoginUrl = process.env.NEXT_PUBLIC_SPEED_LOGIN_URL || "https://app.tryspeed.com"
-const speedApiKeysUrl = process.env.NEXT_PUBLIC_SPEED_API_KEYS_URL || "https://app.tryspeed.com/apikeys/standard-keys"
-const speedWebhooksUrl = process.env.NEXT_PUBLIC_SPEED_WEBHOOKS_URL || "https://app.tryspeed.com/webhooks"
-const speedDocsUrl = process.env.NEXT_PUBLIC_SPEED_DOCS_URL || "https://docs.tryspeed.com"
-const speedAssociatedAccountsUrl = process.env.NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL || "https://app.tryspeed.com/settings/associated-accounts"
-const speedAutoPayoutUrl = process.env.NEXT_PUBLIC_SPEED_AUTO_PAYOUT_URL || "https://app.tryspeed.com/auto-payout"
+const providerSpeedSetupLinks = getSpeedDashboardLinks([
+  "dashboard",
+  "accountId",
+  "apiKeys",
+  "webhooks",
+  "autoSwap",
+  "payouts",
+  "docs"
+])
+const speedLoginUrl = providerSpeedSetupLinks.find((link) => link.key === "dashboard")?.url || ""
+const speedApiKeysUrl = providerSpeedSetupLinks.find((link) => link.key === "apiKeys")?.url || ""
+const speedWebhooksUrl = providerSpeedSetupLinks.find((link) => link.key === "webhooks")?.url || ""
+const speedDocsUrl = providerSpeedSetupLinks.find((link) => link.key === "docs")?.url || ""
+const speedAssociatedAccountsUrl = providerSpeedSetupLinks.find((link) => link.key === "accountId")?.url || ""
+const speedAutoPayoutUrl = providerSpeedSetupLinks.find((link) => link.key === "payouts")?.url || ""
 
 type ProviderCredentials = {
   api_key?: string
@@ -1343,7 +1352,10 @@ export default function ProvidersPage() {
                 </div>
 
                 <p className="pt-1 text-sm leading-5 text-gray-600">
-                  Accept Bitcoin Lightning payments through PineTree&apos;s Speed setup.
+                  Use Speed for Lightning invoices, auto-swap, and settlement settings.
+                </p>
+                <p className="text-xs leading-5 text-gray-500">
+                  Auto-swap and payout controls are managed in your TrySpeed account. PineTree uses your Speed setup to create invoices and track Lightning payments.
                 </p>
               </div>
 
@@ -1357,6 +1369,18 @@ export default function ProvidersPage() {
                   </div>
                 )}
               </div>
+
+              {providerSpeedSetupLinks.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {providerSpeedSetupLinks.map((link) => (
+                    <a key={link.key} href={link.url} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                      {link.label}
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 text-xs text-gray-500">Speed dashboard links are not configured yet.</p>
+              )}
 
               <div className="mt-auto flex items-center justify-between gap-3 border-t border-gray-100 pt-4">
                 <button
@@ -1593,7 +1617,7 @@ export default function ProvidersPage() {
                         : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
                     }`}
                   >
-                    <span className="block text-sm font-semibold">Advanced/Beta: Direct Lightning Wallet</span>
+                    <span className="block text-sm font-semibold">Advanced NWC Wallet</span>
                     <span className="mt-1 block text-xs leading-5 text-gray-600">NWC wallet connection</span>
                   </button>
                 </div>
@@ -1601,7 +1625,7 @@ export default function ProvidersPage() {
                 {lightningSetupTab === "speed" ? (
                   <div className="space-y-4">
                     <p className="text-sm leading-5 text-gray-600">
-                      Use the merchant&apos;s Speed Account ID as the destination account for Lightning payment splits. PineTree&apos;s Speed API key and webhook secret stay in Vercel.
+                      Use the merchant&apos;s Speed Account ID for Lightning payment setup. Auto-swap and payout controls are managed in TrySpeed.
                     </p>
 
                     <label className="block">
@@ -1618,17 +1642,17 @@ export default function ProvidersPage() {
                       />
                     </label>
 
-                    <div className="flex flex-wrap gap-2">
-                      <a href={speedLoginUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                        Speed Dashboard
-                      </a>
-                      <a href={speedAssociatedAccountsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                        Associated Accounts
-                      </a>
-                      <a href={speedAutoPayoutUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                        Auto Payout
-                      </a>
-                    </div>
+                    {providerSpeedSetupLinks.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {providerSpeedSetupLinks.map((link) => (
+                          <a key={link.key} href={link.url} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                            {link.label}
+                          </a>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-500">Speed dashboard links are not configured yet.</p>
+                    )}
 
                     <div className="rounded-xl border border-gray-200 bg-white">
                       <button
@@ -1691,9 +1715,9 @@ export default function ProvidersPage() {
 
                 <div className={lightningSetupTab === "nwc" ? "space-y-4" : "hidden"}>
                 <div className="rounded-xl border border-gray-200 bg-gray-50/60 px-4 py-3">
-                  <p className="text-sm font-semibold text-gray-900">Advanced — Direct Lightning Wallet</p>
+                  <p className="text-sm font-semibold text-gray-900">Advanced NWC Wallet</p>
                   <p className="mt-1 text-sm leading-5 text-gray-600">
-                    For technical merchants using Zeus, Alby Hub, or another NWC-compatible wallet. Most merchants should use Speed Lightning instead.
+                    Connect a direct Lightning wallet only if you manage your own NWC connection.
                   </p>
                 </div>
 
@@ -1722,7 +1746,7 @@ export default function ProvidersPage() {
                 </div>
 
                 <label className="block">
-                  <span className="text-sm font-semibold text-gray-900">Wallet connection string</span>
+                  <span className="text-sm font-semibold text-gray-900">NWC connection string</span>
                   <span className="mt-0.5 block text-xs text-gray-500">
                     Found in your wallet under &ldquo;Nostr Wallet Connect&rdquo; or &ldquo;NWC&rdquo;. Starts with <span className="font-mono">nostr+walletconnect://</span>
                   </span>
@@ -1730,7 +1754,7 @@ export default function ProvidersPage() {
                     type="password"
                     value={nwcUri}
                     onChange={(e) => { setNwcUri(e.target.value); setNwcTestResult(null) }}
-                    placeholder="nostr+walletconnect://..."
+                    placeholder="NWC connection string"
                     className={lightningInputClass()}
                     autoComplete="off"
                   />
@@ -1741,12 +1765,12 @@ export default function ProvidersPage() {
 
                 <label className="block">
                   <span className="text-sm font-semibold text-gray-900">
-                    Wallet name <span className="font-normal text-gray-500">(optional)</span>
+                    Wallet label
                   </span>
                   <input
                     value={nwcWalletLabel}
                     onChange={(e) => setNwcWalletLabel(e.target.value)}
-                    placeholder="e.g. Alby Hub, Zeus Wallet"
+                    placeholder="Wallet label"
                     className={lightningInputClass()}
                   />
                 </label>
@@ -1796,7 +1820,7 @@ export default function ProvidersPage() {
                       type="button"
                       onClick={testNwcConnection}
                       disabled={nwcTesting || !nwcUri.trim()}
-                      className={`${secondaryButtonClass()} w-full sm:w-auto`}
+                      className={`hidden ${secondaryButtonClass()} w-full sm:w-auto`}
                     >
                       {nwcTesting ? "Testing..." : "Test Connection"}
                     </button>
@@ -1806,7 +1830,7 @@ export default function ProvidersPage() {
                       disabled={loading || !nwcUri.trim()}
                       className={`${primaryButtonClass()} w-full sm:w-auto`}
                     >
-                      {loading ? "Connecting..." : "Connect Wallet"}
+                      {loading ? "Connecting..." : "Connect NWC Wallet"}
                     </button>
                   </div>
                 </div>

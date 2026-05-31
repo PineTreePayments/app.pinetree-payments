@@ -27,9 +27,33 @@ import {
   SETTLEMENT_ASSET_OPTIONS,
   SETTLEMENT_EXCHANGE_OPTIONS
 } from "@/engine/settlementDestinations"
+import type {
+  SettlementDestinationAccountType,
+  SettlementDestinationConnectedProvider,
+  SettlementDestinationSource
+} from "@/database/settlementDestinations"
 
 function errorResponse(message: string, status: number) {
   return NextResponse.json({ error: message }, { status })
+}
+
+type DestinationUpdatePayload = {
+  label?: string
+  exchangeName?: string
+  asset?: string
+  network?: string
+  walletNetwork?: string
+  address?: string
+  memoOrTag?: string | null
+  isDefault?: boolean
+  accountType?: SettlementDestinationAccountType
+  source?: SettlementDestinationSource
+  connectedProvider?: SettlementDestinationConnectedProvider | null
+  externalAccountName?: string | null
+  externalAccountId?: string | null
+  institutionName?: string | null
+  lastVerifiedAt?: string | null
+  personalExchangeAcknowledged?: boolean
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -75,7 +99,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (action === "create") {
       const network = String(body.network || "").trim()
       const walletNetwork = String(body.wallet_network || "").trim()
-      if (walletNetwork && network && walletNetwork !== network) {
+      if (walletNetwork && network && walletNetwork.toLowerCase() !== network.toLowerCase()) {
         return errorResponse("Saved destination network must match the selected wallet network.", 400)
       }
       const dest = await createSettlementDestinationEngine(merchantId, {
@@ -83,9 +107,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         exchangeName: String(body.exchange_name || "").trim(),
         asset:        String(body.asset        || "").trim(),
         network,
+        walletNetwork,
         address:      String(body.address      || "").trim(),
         memoOrTag:    body.memo_or_tag != null ? String(body.memo_or_tag).trim() : null,
-        isDefault:    Boolean(body.is_default)
+        isDefault:    Boolean(body.is_default),
+        accountType:  String(body.account_type || "other").trim() as SettlementDestinationAccountType,
+        source:       String(body.source || "manual").trim() as SettlementDestinationSource,
+        connectedProvider: body.connected_provider != null
+          ? String(body.connected_provider).trim() as SettlementDestinationConnectedProvider
+          : "manual",
+        externalAccountName: body.external_account_name != null ? String(body.external_account_name).trim() : null,
+        externalAccountId: body.external_account_id != null ? String(body.external_account_id).trim() : null,
+        institutionName: body.institution_name != null ? String(body.institution_name).trim() : null,
+        lastVerifiedAt: body.last_verified_at != null ? String(body.last_verified_at).trim() : null,
+        personalExchangeAcknowledged: Boolean(body.personal_exchange_acknowledged)
       })
 
       const destinations = await getSettlementDestinationsEngine(merchantId)
@@ -96,18 +131,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const id = String(body.id || "").trim()
       if (!id) return errorResponse("id is required", 400)
 
-      const update: Record<string, unknown> = {}
+      const update: DestinationUpdatePayload = {}
       if (body.label        !== undefined) update.label        = String(body.label).trim()
       if (body.exchange_name !== undefined) update.exchangeName = String(body.exchange_name).trim()
       if (body.asset        !== undefined) update.asset        = String(body.asset).trim()
       if (body.network      !== undefined) update.network      = String(body.network).trim()
       const walletNetwork = String(body.wallet_network || "").trim()
-      if (walletNetwork && update.network && walletNetwork !== update.network) {
+      if (walletNetwork) update.walletNetwork = walletNetwork
+      if (walletNetwork && update.network && walletNetwork.toLowerCase() !== String(update.network).toLowerCase()) {
         return errorResponse("Saved destination network must match the selected wallet network.", 400)
       }
       if (body.address      !== undefined) update.address      = String(body.address).trim()
       if (body.memo_or_tag  !== undefined) update.memoOrTag    = body.memo_or_tag != null ? String(body.memo_or_tag).trim() : null
       if (body.is_default   !== undefined) update.isDefault    = Boolean(body.is_default)
+      if (body.account_type !== undefined) update.accountType = String(body.account_type).trim() as SettlementDestinationAccountType
+      if (body.source !== undefined) update.source = String(body.source).trim() as SettlementDestinationSource
+      if (body.connected_provider !== undefined) update.connectedProvider = body.connected_provider != null ? String(body.connected_provider).trim() as SettlementDestinationConnectedProvider : null
+      if (body.external_account_name !== undefined) update.externalAccountName = body.external_account_name != null ? String(body.external_account_name).trim() : null
+      if (body.external_account_id !== undefined) update.externalAccountId = body.external_account_id != null ? String(body.external_account_id).trim() : null
+      if (body.institution_name !== undefined) update.institutionName = body.institution_name != null ? String(body.institution_name).trim() : null
+      if (body.last_verified_at !== undefined) update.lastVerifiedAt = body.last_verified_at != null ? String(body.last_verified_at).trim() : null
+      if (body.personal_exchange_acknowledged !== undefined) {
+        update.personalExchangeAcknowledged = Boolean(body.personal_exchange_acknowledged)
+      }
 
       const dest = await updateSettlementDestinationEngine(merchantId, id, update)
       const destinations = await getSettlementDestinationsEngine(merchantId)

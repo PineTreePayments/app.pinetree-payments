@@ -59,17 +59,17 @@ SPEED_PUBLISHABLE_KEY=<PineTree Speed live publishable key if future client/Spee
 Public dashboard links:
 
 ```bash
-NEXT_PUBLIC_SPEED_SIGNUP_URL=https://www.tryspeed.com
-NEXT_PUBLIC_SPEED_LOGIN_URL=https://app.tryspeed.com
-NEXT_PUBLIC_SPEED_API_KEYS_URL=https://app.tryspeed.com/apikeys/standard-keys
-NEXT_PUBLIC_SPEED_WEBHOOKS_URL=https://app.tryspeed.com/webhooks
-NEXT_PUBLIC_SPEED_DOCS_URL=https://docs.tryspeed.com
-NEXT_PUBLIC_SPEED_API_DOCS_URL=https://apidocs.tryspeed.com
-NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL=https://app.tryspeed.com/settings/associated-accounts
-NEXT_PUBLIC_SPEED_AUTO_PAYOUT_URL=https://app.tryspeed.com/auto-payout
+NEXT_PUBLIC_SPEED_DASHBOARD_URL=<TrySpeed dashboard URL>
+NEXT_PUBLIC_SPEED_ACCOUNT_ID_URL=<TrySpeed account ID / associated accounts URL>
+NEXT_PUBLIC_SPEED_API_KEYS_URL=<TrySpeed API keys URL>
+NEXT_PUBLIC_SPEED_WEBHOOKS_URL=<TrySpeed webhooks URL>
+NEXT_PUBLIC_SPEED_AUTOSWAP_URL=<TrySpeed auto-swap settings URL>
+NEXT_PUBLIC_SPEED_PAYOUTS_URL=<TrySpeed payout settings URL>
+NEXT_PUBLIC_SPEED_SETTLEMENTS_URL=<TrySpeed settlement settings URL>
+NEXT_PUBLIC_SPEED_DOCS_URL=<TrySpeed docs URL>
 ```
 
-Never expose `SPEED_API_KEY` or `SPEED_WEBHOOK_SECRET` to the browser. Use only `NEXT_PUBLIC_` variables for dashboard links.
+Never expose `SPEED_API_KEY` or `SPEED_WEBHOOK_SECRET` to the browser. Use only `NEXT_PUBLIC_` variables for dashboard links. Older public aliases still supported by the UI are `NEXT_PUBLIC_SPEED_LOGIN_URL`, `NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL`, `NEXT_PUBLIC_SPEED_AUTO_SWAP_URL`, and `NEXT_PUBLIC_SPEED_AUTO_PAYOUT_URL`.
 
 Merchant Speed setup in `merchant_providers.credentials` stores only safe settlement/onboarding fields:
 
