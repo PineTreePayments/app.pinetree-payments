@@ -165,6 +165,68 @@ export type PrepareWithdrawalResult = {
   txParams?: BaseTxParams
 }
 
+export type PrepareDirectWalletTransferResult = {
+  transfer: {
+    id: null
+    wallet_id: string | null
+    asset: string
+    network: string
+    amount: number
+    destination_address: string
+    destination_label: string
+    status: "PREPARED"
+    estimated_fee_label: string
+  }
+  // Solana-specific
+  unsignedTxBase64?: string
+  // Base-specific
+  txParams?: BaseTxParams
+}
+
+function validateTransferDestinationAddress(network: string, address: string): void {
+  const n = network.toLowerCase()
+  const a = address.trim()
+
+  if (n === "base" || n === "ethereum") {
+    if (!/^0x[a-fA-F0-9]{40}$/.test(a)) {
+      throw Object.assign(new Error("Invalid destination address format for Base."), { status: 422 })
+    }
+    return
+  }
+
+  if (n === "solana") {
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a)) {
+      throw Object.assign(new Error("Invalid destination address format for Solana."), { status: 422 })
+    }
+    return
+  }
+
+  throw Object.assign(new Error(`Unsupported network: ${network}.`), { status: 422 })
+}
+
+function validateTransferAmount(amount: string): number {
+  const amountNum = Number(amount)
+  if (!Number.isFinite(amountNum) || amountNum <= 0) {
+    throw Object.assign(new Error("Amount must be a positive number."), { status: 422 })
+  }
+  return amountNum
+}
+
+function validateSupportedTransferCombo(asset: string, network: string, label: string): void {
+  const supportedCombos = [
+    ["SOL", "solana"],
+    ["USDC", "solana"],
+    ["USDC", "base"],
+    ["ETH", "base"]
+  ]
+  if (!supportedCombos.some(([a, n]) => a === asset && n === network)) {
+    throw Object.assign(
+      new Error(`${label} not supported for ${asset} on ${network}.`),
+      { status: 422 }
+    )
+  }
+}
+
 export async function prepareSettlementWithdrawal(
   merchantId: string,
   input: {
@@ -208,36 +270,14 @@ export async function prepareSettlementWithdrawal(
 
   // ── Validate address format ───────────────────────────────────────────────
   const address = dest.address.trim()
-  if (destNetwork === "base" || destNetwork === "ethereum") {
-    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      throw Object.assign(new Error("Invalid destination address format for Base."), { status: 422 })
-    }
-  } else if (destNetwork === "solana") {
-    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
-      throw Object.assign(new Error("Invalid destination address format for Solana."), { status: 422 })
-    }
-  }
+  validateTransferDestinationAddress(destNetwork, address)
 
   // ── Validate amount ───────────────────────────────────────────────────────
-  const amountNum = Number(input.amount)
-  if (!Number.isFinite(amountNum) || amountNum <= 0) {
-    throw Object.assign(new Error("Amount must be a positive number."), { status: 422 })
-  }
+  const amountNum = validateTransferAmount(input.amount)
 
   // ── Validate asset/network combination ───────────────────────────────────
   const asset = dest.asset.toUpperCase()
-  const supportedCombos = [
-    ["SOL", "solana"],
-    ["USDC", "solana"],
-    ["USDC", "base"],
-    ["ETH", "base"]
-  ]
-  if (!supportedCombos.some(([a, n]) => a === asset && n === destNetwork)) {
-    throw Object.assign(
-      new Error(`Withdrawal not supported for ${asset} on ${dest.network}.`),
-      { status: 422 }
-    )
-  }
+  validateSupportedTransferCombo(asset, destNetwork, "Withdrawal")
 
   // ── Build network-specific tx data ────────────────────────────────────────
   const senderAddress = input.walletAddress || walletForNetwork!.wallet_address
@@ -275,6 +315,71 @@ export async function prepareSettlementWithdrawal(
 }
 
 // ─── Submit tx hash / signature ───────────────────────────────────────────────
+
+export async function prepareDirectWalletTransfer(
+  merchantId: string,
+  input: {
+    walletId: string | null
+    walletAddress: string
+    walletNetwork: string
+    asset: string
+    destinationAddress: string
+    amount: string
+  }
+): Promise<PrepareDirectWalletTransferResult> {
+  const walletNetwork = input.walletNetwork.toLowerCase()
+  const asset = input.asset.trim().toUpperCase()
+  const amountNum = validateTransferAmount(input.amount)
+  const destinationAddress = input.destinationAddress.trim()
+  const senderAddress = input.walletAddress.trim()
+
+  if (!senderAddress) {
+    throw Object.assign(new Error("wallet_address is required."), { status: 400 })
+  }
+
+  validateSupportedTransferCombo(asset, walletNetwork, "Send")
+  validateTransferDestinationAddress(walletNetwork, destinationAddress)
+
+  const merchantWallets = await getMerchantWallets(merchantId)
+  const walletForNetwork = merchantWallets.find(
+    (w) => w.network.toLowerCase() === walletNetwork && w.wallet_address
+  )
+  if (!walletForNetwork) {
+    throw Object.assign(
+      new Error(`No connected wallet found for ${walletNetwork}. Connect a wallet on the Providers page first.`),
+      { status: 422 }
+    )
+  }
+
+  let unsignedTxBase64: string | undefined
+  let txParams: BaseTxParams | undefined
+
+  if (walletNetwork === "solana") {
+    unsignedTxBase64 = await buildSolanaWithdrawalUnsignedTx(
+      senderAddress, destinationAddress, asset, input.amount
+    )
+  } else if (walletNetwork === "base") {
+    txParams = asset === "ETH"
+      ? buildBaseEthTxParams(senderAddress, destinationAddress, input.amount)
+      : buildBaseUsdcTxParams(senderAddress, destinationAddress, input.amount)
+  }
+
+  return {
+    transfer: {
+      id: null,
+      wallet_id: input.walletId,
+      asset,
+      network: walletNetwork,
+      amount: amountNum,
+      destination_address: destinationAddress,
+      destination_label: "Direct send",
+      status: "PREPARED",
+      estimated_fee_label: "wallet will estimate"
+    },
+    unsignedTxBase64,
+    txParams
+  }
+}
 
 export async function submitSettlementWithdrawal(
   merchantId: string,

@@ -306,6 +306,25 @@ type WithdrawPrepareResult = {
 }
 
 type WithdrawStep = "review" | "preparing" | "prepared" | "signing" | "submitted" | "failed"
+type SendStep = "form" | "review" | "preparing" | "prepared" | "signing" | "submitted" | "failed"
+
+type DirectSendTransfer = {
+  id: null
+  wallet_id: string | null
+  asset: "SOL" | "USDC" | "ETH"
+  network: "solana" | "base"
+  amount: number
+  destination_address: string
+  destination_label: string
+  status: "PREPARED"
+  estimated_fee_label: string
+}
+
+type DirectSendPrepareResult = {
+  transfer: DirectSendTransfer
+  unsigned_tx_base64: string | null
+  tx_params: BaseTxParams | null
+}
 
 // ─── End settlement types ─────────────────────────────────────────────────────
 
@@ -439,6 +458,14 @@ function getCashOutAssetOptions(wallet: SelectedWallet | null): CashOutAssetOpti
 
 function getDefaultCashOutAsset(wallet: SelectedWallet | null) {
   return getCashOutAssetOptions(wallet)[0] || null
+}
+
+function getSendAssetOptions(wallet: SelectedWallet | null): CashOutAssetOption[] {
+  return getCashOutAssetOptions(wallet)
+}
+
+function getDefaultSendAsset(wallet: SelectedWallet | null) {
+  return getSendAssetOptions(wallet)[0] || null
 }
 
 function formatCashOutAmount(value: number | null | undefined, currency = "USD") {
@@ -738,20 +765,32 @@ export default function WalletsPage() {
   const [withdrawRecord, setWithdrawRecord] = useState<WithdrawPrepareResult | null>(null)
   const [withdrawError, setWithdrawError] = useState<string | null>(null)
   const [withdrawTxHash, setWithdrawTxHash] = useState<string | null>(null)
+  const [sendAsset, setSendAsset] = useState<CashOutAssetOption | null>(() => getDefaultSendAsset(null))
+  const [sendDestination, setSendDestination] = useState("")
+  const [sendAmount, setSendAmount] = useState("")
+  const [sendStep, setSendStep] = useState<SendStep>("form")
+  const [sendRecord, setSendRecord] = useState<DirectSendPrepareResult | null>(null)
+  const [sendError, setSendError] = useState<string | null>(null)
+  const [sendTxHash, setSendTxHash] = useState<string | null>(null)
   // Settlement history
   const [settlementHistory, setSettlementHistory] = useState<SettlementWithdrawal[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [settlementActivityExpanded, setSettlementActivityExpanded] = useState(false)
+  const [settlementAdvancedOpen, setSettlementAdvancedOpen] = useState(false)
+  const [nwcAdvancedOpen, setNwcAdvancedOpen] = useState(false)
 
   useEffect(() => {
     loadOverview(false)
   }, [])
 
   useEffect(() => {
-    if (activeTab === "settlement" && selectedWallet && !selectedWallet.isLightning) {
-      loadSettlementDestinations()
-      loadSettlementHistory()
+    if ((activeTab === "settlement" || activeTab === "send") && selectedWallet && !selectedWallet.isLightning) {
       refreshSettlementBalances()
-      loadSettlementPreferences()
+      if (activeTab === "settlement") {
+        loadSettlementDestinations()
+        loadSettlementHistory()
+        loadSettlementPreferences()
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, selectedWallet?.id])
@@ -759,6 +798,13 @@ export default function WalletsPage() {
   useEffect(() => {
     const defaultAsset = getDefaultCashOutAsset(selectedWallet)
     setCashOutAsset(defaultAsset)
+    setSendAsset(getDefaultSendAsset(selectedWallet))
+    setSendDestination("")
+    setSendAmount("")
+    setSendStep("form")
+    setSendRecord(null)
+    setSendError(null)
+    setSendTxHash(null)
     setCashOutAmount("")
     setCashOutState("")
     setCashOutQuote(null)
@@ -809,6 +855,9 @@ export default function WalletsPage() {
     setWithdrawTxHash(null)
     setSettlementHistory([])
     setHistoryLoading(false)
+    setSettlementActivityExpanded(false)
+    setSettlementAdvancedOpen(false)
+    setNwcAdvancedOpen(false)
   }, [selectedWallet])
 
   async function loadOverview(refresh: boolean) {
@@ -1287,6 +1336,104 @@ export default function WalletsPage() {
 
   // ── End settlement destination API calls ─────────────────────────────────────
 
+  async function prepareDirectSend() {
+    if (!selectedWallet || !sendAsset) return
+    if (!sendDestination.trim()) {
+      setSendError("Enter a destination address.")
+      return
+    }
+    if (!sendAmount.trim() || Number(sendAmount) <= 0) {
+      setSendError("Enter a valid amount greater than zero.")
+      return
+    }
+
+    setSendStep("preparing")
+    setSendError(null)
+    try {
+      const token = await getMerchantToken()
+      const res = await fetch("/api/wallets/settlement/withdrawals", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({
+          action: "prepare_direct",
+          wallet_id: selectedWallet.id,
+          wallet_address: selectedWallet.referenceTitle,
+          wallet_network: selectedWallet.rail,
+          asset: sendAsset.asset,
+          destination_address: sendDestination.trim(),
+          amount: sendAmount.trim()
+        })
+      })
+      const payload = await res.json().catch(() => null) as (DirectSendPrepareResult & { success?: boolean; error?: string }) | null
+      if (!res.ok || !payload?.success) throw new Error(payload?.error || "Send preparation failed")
+      setSendRecord(payload)
+      setSendStep("prepared")
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : "Send preparation failed")
+      setSendStep("failed")
+    }
+  }
+
+  async function signAndSubmitDirectSend() {
+    if (!sendRecord || !selectedWallet) return
+    setSendStep("signing")
+    setSendError(null)
+
+    try {
+      let txHash: string
+
+      if (sendRecord.transfer.network === "solana" && sendRecord.unsigned_tx_base64) {
+        const wallets = getDetectedSolanaWallets()
+        const walletEntry = wallets.find(
+          (w) => String(w.provider.publicKey?.toString() || "") === selectedWallet.referenceTitle
+        ) || wallets[0]
+
+        if (!walletEntry) {
+          throw new Error("No Solana wallet detected. Install Phantom or Solflare and ensure it is unlocked.")
+        }
+
+        await walletEntry.provider.connect()
+        const tx = Transaction.from(Buffer.from(sendRecord.unsigned_tx_base64, "base64"))
+        const signResult = await walletEntry.provider.signAndSendTransaction(tx)
+        txHash = getSolanaTransactionSignature(signResult)
+        if (!txHash) throw new Error("No transaction signature returned from wallet.")
+      } else if (sendRecord.transfer.network === "base" && sendRecord.tx_params) {
+        const eth = (window as Window & {
+          ethereum?: { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> }
+        }).ethereum
+
+        if (!eth) {
+          throw new Error("No Ethereum wallet detected. Install MetaMask or Base Wallet and ensure it is unlocked.")
+        }
+
+        const params = sendRecord.tx_params
+        const rawResult = await eth.request({
+          method: "eth_sendTransaction",
+          params: [{
+            from: params.from,
+            to: params.to,
+            value: params.value,
+            data: params.data,
+            gas: params.gas
+          }]
+        })
+        txHash = String(rawResult || "").trim()
+        if (!txHash) throw new Error("No transaction hash returned from wallet.")
+      } else {
+        throw new Error("Missing transaction data. Please review the send again.")
+      }
+
+      setSendTxHash(txHash)
+      setSendStep("submitted")
+      await refreshSettlementBalances()
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : "Wallet signing failed")
+      setSendStep("failed")
+    }
+  }
+
   async function requestCashOutQuote() {
     if (!selectedWallet || !cashOutAsset) return
     if (!isOffRampProviderActive || !currentOffRampProvider?.apiProvider) {
@@ -1631,6 +1778,7 @@ export default function WalletsPage() {
     ? getExplorerUrl(selectedWallet.rail, selectedWallet.referenceTitle)
     : null
   const cashOutAssetOptions = getCashOutAssetOptions(selectedWallet)
+  const sendAssetOptions = getSendAssetOptions(selectedWallet)
   const cashOutUnavailable = selectedWallet?.isLightning || cashOutAssetOptions.length === 0
   const nwcStatus = selectedWallet?.nwcConnectionStatus || null
   const lightningActivity = recentOperations
@@ -2383,32 +2531,181 @@ export default function WalletsPage() {
 
               {activeTab === "send" && !selectedWallet.isLightning && (
                 <div className={walletDetailPanelClass}>
-                  <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
-                    <p className="text-sm font-semibold text-blue-900">
-                      Send crypto to any valid wallet or exchange address.
-                    </p>
-                    <p className="mt-1 text-sm leading-6 text-blue-900/75">
-                      PineTree will prepare wallet operation payloads only after this workflow is enabled.
-                    </p>
-                  </div>
+                  {sendStep === "form" || sendStep === "failed" ? (
+                    <>
+                      <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                        <p className="text-sm font-semibold text-gray-950">Send from this wallet</p>
+                        <p className="mt-1 text-sm leading-6 text-gray-600">
+                          Only send to an address on the selected network.
+                        </p>
+                      </div>
 
-                  <div className="grid gap-3">
-                    <DisabledField label="Asset" value={selectedWallet.assetSymbol} />
-                    <DisabledField label="Destination Address" value="Coming soon" />
-                    <DisabledField label="Amount" value="Coming soon" />
-                  </div>
+                      <div className="grid gap-3">
+                        <label className="block">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Asset</span>
+                          <select
+                            value={sendAsset ? `${sendAsset.asset}|${sendAsset.network}` : ""}
+                            onChange={(e) => {
+                              const option = sendAssetOptions.find((item) => `${item.asset}|${item.network}` === e.target.value) || null
+                              setSendAsset(option)
+                              setSendError(null)
+                            }}
+                            className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-semibold text-gray-900 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                          >
+                            {sendAssetOptions.map((option) => (
+                              <option key={`${option.asset}|${option.network}`} value={`${option.asset}|${option.network}`}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="block">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Destination address</span>
+                          <input
+                            type="text"
+                            value={sendDestination}
+                            onChange={(e) => { setSendDestination(e.target.value); setSendError(null) }}
+                            placeholder={selectedWallet.rail === "base" ? "0x..." : "Solana address"}
+                            className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 font-mono text-sm text-gray-900 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Amount</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={sendAmount}
+                            onChange={(e) => { setSendAmount(e.target.value); setSendError(null) }}
+                            placeholder="0.00"
+                            className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-semibold text-gray-900 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                          />
+                        </label>
+                      </div>
 
-                  <button
-                    type="button"
-                    disabled
-                    className={pineTreeNeutralDisabledButton}
-                  >
-                    Prepare Send - Coming Soon
-                  </button>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <CompactStatusRow
+                          label="Available"
+                          value={sendAsset?.asset === "USDC"
+                            ? (usdcBalanceLoading ? "Loading..." : usdcBalance !== null ? `${usdcBalance.toFixed(2)} USDC` : "USDC unavailable")
+                            : `${Number(selectedWallet.nativeBalance ?? 0).toFixed(Math.min(selectedWallet.decimals, 6))} ${selectedWallet.assetSymbol}`}
+                        />
+                        <CompactStatusRow label="Network" value={sendAsset?.network === "base" ? "Base" : "Solana"} />
+                      </div>
 
-                  <p className="text-center text-[11px] text-gray-500">
-                    PineTree never moves funds without merchant approval.
-                  </p>
+                      {sendError && (
+                        <div className="rounded-2xl border border-red-100 bg-red-50/70 p-3 text-sm leading-6 text-red-700">
+                          {sendError}
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab("overview")}
+                          className={pineTreeSecondaryActionButton}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSendStep("review")}
+                          disabled={!sendAsset || !sendDestination.trim() || !sendAmount.trim() || Number(sendAmount) <= 0}
+                          className={cx(pineTreePrimaryButton, "disabled:cursor-not-allowed disabled:opacity-55")}
+                        >
+                          Review Send
+                        </button>
+                      </div>
+                    </>
+                  ) : null}
+
+                  {sendStep === "review" && sendAsset && (
+                    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                      <p className="text-sm font-semibold text-gray-950">Review Send</p>
+                      <div className="mt-3 grid gap-2">
+                        <CompactStatusRow label="Asset" value={sendAsset.asset} />
+                        <CompactStatusRow label="Network" value={sendAsset.network === "base" ? "Base" : "Solana"} />
+                        <CompactStatusRow label="Amount" value={`${sendAmount} ${sendAsset.asset}`} />
+                        <CompactStatusRow label="Destination" value={formatSettlementAddress(sendDestination)} />
+                        <CompactStatusRow label="Estimated fee" value="wallet will estimate" />
+                      </div>
+                      <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-xs leading-5 text-amber-800">
+                        Only send to an address on the selected network. Your wallet must approve before funds move.
+                      </p>
+                      {sendError && (
+                        <p className="mt-3 rounded-xl border border-red-100 bg-red-50/70 p-3 text-sm leading-6 text-red-700">
+                          {sendError}
+                        </p>
+                      )}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button type="button" onClick={() => setSendStep("form")} className={pineTreeSecondaryActionButton}>
+                          Cancel
+                        </button>
+                        <button type="button" onClick={prepareDirectSend} className={pineTreePrimaryButton}>
+                          Confirm in Wallet
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {sendStep === "preparing" && (
+                    <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4 text-sm text-gray-600">
+                      Preparing wallet transaction...
+                    </div>
+                  )}
+
+                  {sendStep === "prepared" && sendRecord && (
+                    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                      <p className="text-sm font-semibold text-gray-950">Confirm in Wallet</p>
+                      <div className="mt-3 grid gap-2">
+                        <CompactStatusRow label="Asset" value={sendRecord.transfer.asset} />
+                        <CompactStatusRow label="Network" value={sendRecord.transfer.network === "base" ? "Base" : "Solana"} />
+                        <CompactStatusRow label="Amount" value={`${sendRecord.transfer.amount} ${sendRecord.transfer.asset}`} />
+                        <CompactStatusRow label="Destination" value={formatSettlementAddress(sendRecord.transfer.destination_address)} />
+                        <CompactStatusRow label="Estimated fee" value={sendRecord.transfer.estimated_fee_label} />
+                      </div>
+                      {sendError && (
+                        <p className="mt-3 rounded-xl border border-red-100 bg-red-50/70 p-3 text-sm leading-6 text-red-700">
+                          {sendError}
+                        </p>
+                      )}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button type="button" onClick={() => setSendStep("review")} className={pineTreeSecondaryActionButton}>
+                          Back
+                        </button>
+                        <button type="button" onClick={signAndSubmitDirectSend} className={pineTreePrimaryButton}>
+                          Confirm in Wallet
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {sendStep === "signing" && (
+                    <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4 text-sm font-semibold text-[#0052FF]">
+                      Waiting for wallet approval...
+                    </div>
+                  )}
+
+                  {sendStep === "submitted" && sendRecord && (
+                    <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                      <p className="text-sm font-semibold text-gray-950">Send Submitted</p>
+                      <div className="mt-3 grid gap-2">
+                        <CompactStatusRow label="Amount" value={`${sendRecord.transfer.amount} ${sendRecord.transfer.asset}`} />
+                        <CompactStatusRow label="Destination" value={formatSettlementAddress(sendRecord.transfer.destination_address)} />
+                        {sendTxHash && <CompactStatusRow label="Transaction" value={formatSettlementAddress(sendTxHash)} />}
+                      </div>
+                      {sendTxHash && getExplorerTxUrl(sendRecord.transfer.network, sendTxHash) && (
+                        <a
+                          href={getExplorerTxUrl(sendRecord.transfer.network, sendTxHash) || "#"}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={cx(pineTreeSecondaryActionButton, "mt-3")}
+                        >
+                          View on Explorer
+                        </a>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2780,7 +3077,7 @@ export default function WalletsPage() {
                     <>
                       {/* ── Settlement Summary ── */}
                       <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4 shadow-[0_8px_24px_rgba(0,82,255,0.06)]">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#0052FF]">Settlement Center</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#0052FF]">Settlement Summary</p>
                         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                           {/* Balance tile */}
                           <div className="rounded-xl border border-white/70 bg-white/60 p-3">
@@ -2849,7 +3146,7 @@ export default function WalletsPage() {
                           <button
                             type="button"
                             onClick={() => setMoveMoneyOpen(true)}
-                            className={cx(pineTreePrimaryButton, "mt-4 w-full")}
+                            className={cx(pineTreePrimaryButton, "mt-4")}
                           >
                             Move Money →
                           </button>
@@ -2858,7 +3155,7 @@ export default function WalletsPage() {
                           <button
                             type="button"
                             onClick={() => setMoveMoneyOpen(false)}
-                            className={cx(pineTreeSecondaryActionButton, "mt-4 w-full justify-center")}
+                            className={cx(pineTreeSecondaryActionButton, "mt-4")}
                           >
                             Close Move Money
                           </button>
@@ -2870,9 +3167,7 @@ export default function WalletsPage() {
                         <div className="rounded-2xl border border-gray-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                           <div className="border-b border-gray-100 px-4 py-3">
                             <p className="text-sm font-semibold text-gray-950">Move Money</p>
-                            <p className="mt-0.5 text-xs leading-5 text-gray-500">
-                              Each withdrawal is a separate merchant-approved transaction.
-                            </p>
+                            <p className="mt-0.5 text-xs leading-5 text-gray-500">Move funds to your exchange account.</p>
                           </div>
 
                           <div className="divide-y divide-gray-100">
@@ -3255,7 +3550,7 @@ export default function WalletsPage() {
                               setDestSaveError(null)
                               setDestModalOpen(true)
                             }}
-                            className={cx(pineTreePrimaryButton, "mt-4 w-full")}
+                            className={cx(pineTreePrimaryButton, "mt-4")}
                           >
                             Add Exchange Destination
                           </button>
@@ -3267,12 +3562,23 @@ export default function WalletsPage() {
                       </div>
 
                       {/* ── Provider Cash Out ── */}
-                      <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
+                      <div className="rounded-2xl border border-gray-100 bg-white p-3">
+                        <button
+                          type="button"
+                          onClick={() => setSettlementAdvancedOpen((open) => !open)}
+                          className="flex w-full items-center justify-between gap-3 text-left text-sm font-semibold text-gray-950"
+                        >
+                          <span>Advanced</span>
+                          <span className="text-xs text-gray-400">{settlementAdvancedOpen ? "Hide" : "Show"}</span>
+                        </button>
+                      </div>
+
+                      <div className={cx("rounded-2xl border border-gray-100 bg-gray-50/70 p-4", !settlementAdvancedOpen && "hidden")}>
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-gray-950">Provider Cash Out</p>
                             <p className="mt-1 text-sm leading-6 text-gray-600">
-                              Connect an approved provider to convert supported crypto balances into USD and send funds to a bank account.
+                              Provider bank cash-out requires an approved provider.
                             </p>
                           </div>
                           <NetworkStatusPill label="Provider required" tone="slate" className="shrink-0" />
@@ -3283,7 +3589,7 @@ export default function WalletsPage() {
                       </div>
 
                       {/* ── Settlement Mode (UI-only preference) ── */}
-                      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                      <div className={cx("rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]", !settlementAdvancedOpen && "hidden")}>
                         <p className="text-sm font-semibold text-gray-950">Settlement Mode</p>
                         <p className="mt-1 text-xs leading-5 text-gray-500">
                           Choose how and when balances move to your exchange destination.
@@ -3355,7 +3661,7 @@ export default function WalletsPage() {
                             </div>
                           ) : (
                             <div className="space-y-2">
-                              {settlementHistory.map((w) => {
+                              {(settlementActivityExpanded ? settlementHistory : settlementHistory.slice(0, 5)).map((w) => {
                                 const explorerUrl = w.tx_hash ? getExplorerTxUrl(w.network, w.tx_hash) : null
                                 const statusClass: Record<string, string> = {
                                   DRAFT:              "bg-gray-100 text-gray-500",
@@ -3430,6 +3736,15 @@ export default function WalletsPage() {
                                   </div>
                                 )
                               })}
+                              {settlementHistory.length > 5 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSettlementActivityExpanded((open) => !open)}
+                                  className={pineTreeSecondaryActionButton}
+                                >
+                                  {settlementActivityExpanded ? "Show Less" : "View All Activity"}
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -3613,9 +3928,9 @@ export default function WalletsPage() {
                             Recommended
                           </span>
                         </div>
-                        <p className="text-sm font-semibold text-gray-950">Speed Lightning</p>
+                        <p className="text-sm font-semibold text-gray-950">Recommended: Speed Lightning</p>
                         <p className="mt-1 text-sm leading-6 text-gray-600">
-                          Most merchants should use Speed Lightning when available. PineTree processes Lightning payments through Speed, keeps its $0.15 service fee, and sends the remaining merchant amount to the configured Speed account.
+                          Use Speed for Lightning invoices, fee split, and merchant settlement.
                         </p>
                         <div className="mt-3 flex flex-wrap items-center gap-3">
                           <a
@@ -3624,10 +3939,18 @@ export default function WalletsPage() {
                             rel="noopener noreferrer"
                             className={pineTreeSecondaryActionButton}
                           >
-                            Learn About Speed
+                            Open Speed Dashboard
                           </a>
-                          <span className="text-xs text-gray-400">PineTree Speed integration coming soon</span>
+                          <a
+                            href="/dashboard/providers"
+                            className={pineTreeSecondaryActionButton}
+                          >
+                            Manage Speed Setup
+                          </a>
                         </div>
+                        <p className="mt-3 text-xs text-gray-500">
+                          Speed payout controls will appear after Speed settlement support is connected.
+                        </p>
                       </div>
 
                       {/* Advanced: Direct Lightning Wallet (NWC) */}
@@ -3637,7 +3960,18 @@ export default function WalletsPage() {
                         </span>
                       </div>
 
-                      <div className="space-y-4 rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
+                      <div className="rounded-2xl border border-gray-100 bg-white p-3">
+                        <button
+                          type="button"
+                          onClick={() => setNwcAdvancedOpen((open) => !open)}
+                          className="flex w-full items-center justify-between gap-3 text-left text-sm font-semibold text-gray-950"
+                        >
+                          <span>Advanced NWC setup</span>
+                          <span className="text-xs text-gray-400">{nwcAdvancedOpen ? "Hide" : "Show"}</span>
+                        </button>
+                      </div>
+
+                      <div className={cx("space-y-4 rounded-2xl border border-gray-100 bg-gray-50/70 p-4", !nwcAdvancedOpen && "hidden")}>
                         <div>
                           <p className="text-sm font-semibold text-gray-950">Advanced setup: Direct Lightning wallet</p>
                           <p className="mt-1 text-xs leading-5 text-gray-600">
@@ -3963,7 +4297,7 @@ export default function WalletsPage() {
                           Disconnect this wallet from PineTree. Historical transactions stay saved.
                         </p>
                       </div>
-                      <NetworkStatusPill label="No fund movement" tone="slate" />
+                      <NetworkStatusPill label="Manual approval required" tone="slate" />
                     </div>
 
                     {disconnectError && (

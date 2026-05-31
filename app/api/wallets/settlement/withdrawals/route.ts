@@ -17,6 +17,7 @@ import {
 } from "@/lib/api/merchantAuth"
 import {
   prepareSettlementWithdrawal,
+  prepareDirectWalletTransfer,
   submitSettlementWithdrawal,
   cancelSettlementWithdrawal,
   checkSettlementWithdrawalStatus,
@@ -87,6 +88,37 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({
         success: true,
         withdrawal: result.withdrawal,
+        unsigned_tx_base64: result.unsignedTxBase64 ?? null,
+        tx_params: result.txParams ?? null
+      })
+    }
+
+    if (action === "prepare_direct") {
+      const walletId            = body.wallet_id != null ? String(body.wallet_id).trim() : null
+      const walletAddress       = String(body.wallet_address || "").trim()
+      const walletNetwork       = String(body.wallet_network || "").trim()
+      const asset               = String(body.asset || "").trim()
+      const destinationAddress  = String(body.destination_address || "").trim()
+      const amount              = String(body.amount || "").trim()
+
+      if (!walletAddress)      return errorResponse("wallet_address is required", 400)
+      if (!walletNetwork)      return errorResponse("wallet_network is required", 400)
+      if (!asset)              return errorResponse("asset is required", 400)
+      if (!destinationAddress) return errorResponse("destination_address is required", 400)
+      if (!amount)             return errorResponse("amount is required", 400)
+
+      const result = await prepareDirectWalletTransfer(merchantId, {
+        walletId,
+        walletAddress,
+        walletNetwork,
+        asset,
+        destinationAddress,
+        amount
+      })
+
+      return NextResponse.json({
+        success: true,
+        transfer: result.transfer,
         unsigned_tx_base64: result.unsignedTxBase64 ?? null,
         tx_params: result.txParams ?? null
       })
