@@ -19,6 +19,7 @@ import {
   prepareSettlementWithdrawal,
   prepareDirectWalletTransfer,
   submitSettlementWithdrawal,
+  recordDirectSendSubmission,
   cancelSettlementWithdrawal,
   checkSettlementWithdrawalStatus,
   getSettlementWithdrawalHistory
@@ -132,6 +133,39 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (!txHash)  return errorResponse("tx_hash is required", 400)
 
       const withdrawal = await submitSettlementWithdrawal(merchantId, id, txHash)
+      return NextResponse.json({ success: true, withdrawal })
+    }
+
+    if (action === "submit_direct") {
+      const walletId            = body.wallet_id != null ? String(body.wallet_id).trim() : null
+      const asset               = String(body.asset || "").trim()
+      const network             = String(body.network || "").trim()
+      const amount              = String(body.amount || "").trim()
+      const destinationAddress  = String(body.destination_address || "").trim()
+      const destinationLabel    = body.destination_label != null ? String(body.destination_label).trim() : null
+      const destinationKindRaw  = String(body.destination_kind || "").trim()
+      const txHash              = String(body.tx_hash || "").trim()
+
+      if (!asset)              return errorResponse("asset is required", 400)
+      if (!network)            return errorResponse("network is required", 400)
+      if (!amount)             return errorResponse("amount is required", 400)
+      if (!destinationAddress) return errorResponse("destination_address is required", 400)
+      if (!txHash)             return errorResponse("tx_hash is required", 400)
+      if (destinationKindRaw !== "manual_address" && destinationKindRaw !== "saved_destination") {
+        return errorResponse("destination_kind must be manual_address or saved_destination", 400)
+      }
+
+      const withdrawal = await recordDirectSendSubmission(merchantId, {
+        walletId,
+        asset,
+        network,
+        amount,
+        destinationAddress,
+        destinationLabel,
+        destinationKind: destinationKindRaw,
+        txHash
+      })
+
       return NextResponse.json({ success: true, withdrawal })
     }
 

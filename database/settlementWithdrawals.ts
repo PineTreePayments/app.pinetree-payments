@@ -17,7 +17,9 @@ export type SettlementWithdrawalRecord = {
   id: string
   merchant_id: string
   wallet_id: string | null
-  settlement_destination_id: string
+  settlement_destination_id: string | null
+  movement_type: string
+  destination_kind: string | null
   destination_label: string
   exchange_name: string
   asset: string
@@ -37,7 +39,9 @@ export type SettlementWithdrawalRecord = {
 export type CreateSettlementWithdrawalInput = {
   merchantId: string
   walletId?: string | null
-  settlementDestinationId: string
+  settlementDestinationId?: string | null
+  movementType?: string
+  destinationKind?: string | null
   destinationLabel: string
   exchangeName: string
   asset: string
@@ -53,7 +57,9 @@ function normalize(row: Record<string, unknown>): SettlementWithdrawalRecord {
     id: String(row.id || ""),
     merchant_id: String(row.merchant_id || ""),
     wallet_id: row.wallet_id != null ? String(row.wallet_id) : null,
-    settlement_destination_id: String(row.settlement_destination_id || ""),
+    settlement_destination_id: row.settlement_destination_id != null ? String(row.settlement_destination_id) : null,
+    movement_type: String(row.movement_type || "saved_destination_withdrawal"),
+    destination_kind: row.destination_kind != null ? String(row.destination_kind) : null,
     destination_label: String(row.destination_label || ""),
     exchange_name: String(row.exchange_name || ""),
     asset: String(row.asset || ""),
@@ -81,7 +87,9 @@ export async function createSettlementWithdrawal(
     .insert({
       merchant_id: input.merchantId,
       wallet_id: input.walletId || null,
-      settlement_destination_id: input.settlementDestinationId,
+      settlement_destination_id: input.settlementDestinationId || null,
+      movement_type: input.movementType || "saved_destination_withdrawal",
+      destination_kind: input.destinationKind || "saved_destination",
       destination_label: input.destinationLabel,
       exchange_name: input.exchangeName,
       asset: input.asset.trim().toUpperCase(),
@@ -100,6 +108,24 @@ export async function createSettlementWithdrawal(
   }
 
   return normalize(data as Record<string, unknown>)
+}
+
+export async function getSettlementWithdrawalByTxHash(
+  merchantId: string,
+  txHash: string
+): Promise<SettlementWithdrawalRecord | null> {
+  const cleanHash = txHash.trim()
+  if (!cleanHash) return null
+
+  const { data, error } = await db
+    .from(TABLE)
+    .select("*")
+    .eq("merchant_id", merchantId)
+    .eq("tx_hash", cleanHash)
+    .maybeSingle()
+
+  if (error) throw new Error(`Failed to get settlement withdrawal by tx hash: ${error.message}`)
+  return data ? normalize(data as Record<string, unknown>) : null
 }
 
 export async function getSettlementWithdrawal(

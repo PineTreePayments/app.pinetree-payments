@@ -276,7 +276,9 @@ function formatSettlementAddress(address: string) {
 
 type SettlementWithdrawal = {
   id: string
-  settlement_destination_id: string
+  settlement_destination_id: string | null
+  movement_type?: string
+  destination_kind?: string | null
   destination_label: string
   exchange_name: string
   asset: string
@@ -307,6 +309,7 @@ type WithdrawPrepareResult = {
 
 type WithdrawStep = "review" | "preparing" | "prepared" | "signing" | "submitted" | "failed"
 type SendStep = "form" | "review" | "preparing" | "prepared" | "signing" | "submitted" | "failed"
+type SendDestinationMode = "saved" | "manual"
 
 type DirectSendTransfer = {
   id: null
@@ -324,6 +327,12 @@ type DirectSendPrepareResult = {
   transfer: DirectSendTransfer
   unsigned_tx_base64: string | null
   tx_params: BaseTxParams | null
+}
+
+type DirectSendSubmitResponse = {
+  success?: boolean
+  withdrawal?: SettlementWithdrawal
+  error?: string
 }
 
 // ─── End settlement types ─────────────────────────────────────────────────────
@@ -466,6 +475,11 @@ function getSendAssetOptions(wallet: SelectedWallet | null): CashOutAssetOption[
 
 function getDefaultSendAsset(wallet: SelectedWallet | null) {
   return getSendAssetOptions(wallet)[0] || null
+}
+
+function getDestinationAssetOptions(wallet: SelectedWallet | null) {
+  if (!wallet || wallet.isLightning) return []
+  return SETTLEMENT_ASSET_NETWORK_OPTIONS.filter((option) => option.network === wallet.rail)
 }
 
 function formatCashOutAmount(value: number | null | undefined, currency = "USD") {
@@ -766,6 +780,8 @@ export default function WalletsPage() {
   const [withdrawError, setWithdrawError] = useState<string | null>(null)
   const [withdrawTxHash, setWithdrawTxHash] = useState<string | null>(null)
   const [sendAsset, setSendAsset] = useState<CashOutAssetOption | null>(() => getDefaultSendAsset(null))
+  const [sendDestinationMode, setSendDestinationMode] = useState<SendDestinationMode>("saved")
+  const [sendSavedDestinationId, setSendSavedDestinationId] = useState("")
   const [sendDestination, setSendDestination] = useState("")
   const [sendAmount, setSendAmount] = useState("")
   const [sendStep, setSendStep] = useState<SendStep>("form")
@@ -785,9 +801,9 @@ export default function WalletsPage() {
 
   useEffect(() => {
     if ((activeTab === "settlement" || activeTab === "send") && selectedWallet && !selectedWallet.isLightning) {
+      loadSettlementDestinations()
       refreshSettlementBalances()
       if (activeTab === "settlement") {
-        loadSettlementDestinations()
         loadSettlementHistory()
         loadSettlementPreferences()
       }
@@ -799,6 +815,8 @@ export default function WalletsPage() {
     const defaultAsset = getDefaultCashOutAsset(selectedWallet)
     setCashOutAsset(defaultAsset)
     setSendAsset(getDefaultSendAsset(selectedWallet))
+    setSendDestinationMode("saved")
+    setSendSavedDestinationId("")
     setSendDestination("")
     setSendAmount("")
     setSendStep("form")
@@ -1016,9 +1034,10 @@ export default function WalletsPage() {
             exchange_name: destForm.exchangeName,
             asset: option.asset,
             network: option.network,
+            wallet_network: selectedWallet?.rail || null,
             address: destForm.address,
             memo_or_tag: destForm.memoOrTag || null,
-            is_default: destForm.isDefault
+            is_default: false
           }
         : {
             action: "create",
@@ -1026,9 +1045,10 @@ export default function WalletsPage() {
             exchange_name: destForm.exchangeName,
             asset: option.asset,
             network: option.network,
+            wallet_network: selectedWallet?.rail || null,
             address: destForm.address,
             memo_or_tag: destForm.memoOrTag || null,
-            is_default: destForm.isDefault
+            is_default: false
           }
 
       const res = await fetch("/api/wallets/settlement/destinations", {
@@ -1338,8 +1358,9 @@ export default function WalletsPage() {
 
   async function prepareDirectSend() {
     if (!selectedWallet || !sendAsset) return
-    if (!sendDestination.trim()) {
-      setSendError("Enter a destination address.")
+    const destinationAddress = activeSendDestinationAddress.trim()
+    if (!destinationAddress) {
+      setSendError(sendDestinationMode === "saved" ? "Choose a saved destination or enter an address manually." : "Enter a destination address.")
       return
     }
     if (!sendAmount.trim() || Number(sendAmount) <= 0) {
@@ -1362,7 +1383,7 @@ export default function WalletsPage() {
           wallet_address: selectedWallet.referenceTitle,
           wallet_network: selectedWallet.rail,
           asset: sendAsset.asset,
-          destination_address: sendDestination.trim(),
+          destination_address: destinationAddress,
           amount: sendAmount.trim()
         })
       })
@@ -1426,8 +1447,39 @@ export default function WalletsPage() {
       }
 
       setSendTxHash(txHash)
+      const token = await getMerchantToken()
+      const submitRes = await fetch("/api/wallets/settlement/withdrawals", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({
+          action: "submit_direct",
+          wallet_id: selectedWallet.id,
+          asset: sendRecord.transfer.asset,
+          network: sendRecord.transfer.network,
+          amount: String(sendRecord.transfer.amount),
+          destination_address: sendRecord.transfer.destination_address,
+          destination_label: selectedSendDestination?.label || null,
+          destination_kind: selectedSendDestination ? "saved_destination" : "manual_address",
+          tx_hash: txHash
+        })
+      })
+      const submitPayload = await submitRes.json().catch(() => null) as DirectSendSubmitResponse | null
+      if (!submitRes.ok || !submitPayload?.success) {
+        throw new Error(submitPayload?.error || "Send was submitted, but activity could not be saved.")
+      }
+      if (submitPayload.withdrawal) {
+        setSettlementHistory((prev) => {
+          const existing = prev.some((item) => item.id === submitPayload.withdrawal?.id)
+          return existing
+            ? prev.map((item) => item.id === submitPayload.withdrawal?.id ? submitPayload.withdrawal as SettlementWithdrawal : item)
+            : [submitPayload.withdrawal as SettlementWithdrawal, ...prev]
+        })
+      }
       setSendStep("submitted")
       await refreshSettlementBalances()
+      await loadSettlementHistory()
     } catch (err) {
       setSendError(err instanceof Error ? err.message : "Wallet signing failed")
       setSendStep("failed")
@@ -1779,6 +1831,17 @@ export default function WalletsPage() {
     : null
   const cashOutAssetOptions = getCashOutAssetOptions(selectedWallet)
   const sendAssetOptions = getSendAssetOptions(selectedWallet)
+  const destinationAssetOptions = getDestinationAssetOptions(selectedWallet)
+  const sendSavedDestinations = settlementDestinations.filter((dest) =>
+    sendAsset && dest.asset === sendAsset.asset && dest.network === sendAsset.network
+  )
+  const savedDestinationsForWallet = settlementDestinations.filter((dest) =>
+    selectedWallet && !selectedWallet.isLightning && dest.network === selectedWallet.rail
+  )
+  const selectedSendDestination = sendSavedDestinations.find((dest) => dest.id === sendSavedDestinationId) || null
+  const activeSendDestinationAddress = sendDestinationMode === "saved"
+    ? selectedSendDestination?.address || ""
+    : sendDestination
   const cashOutUnavailable = selectedWallet?.isLightning || cashOutAssetOptions.length === 0
   const nwcStatus = selectedWallet?.nwcConnectionStatus || null
   const lightningActivity = recentOperations
@@ -2213,17 +2276,17 @@ export default function WalletsPage() {
           <div
             role="dialog"
             aria-modal="true"
-            aria-label={destForm.id ? "Edit exchange destination" : "Add exchange destination"}
+            aria-label={destForm.id ? "Edit saved destination" : "Add saved destination"}
             className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl border border-white/70 bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,0.22)] sm:rounded-2xl"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
-                  Settlement
+                  Saved Destination
                 </p>
                 <h2 className="mt-1 text-lg font-semibold text-gray-950">
-                  {destForm.id ? "Edit Exchange Destination" : "Add Exchange Destination"}
+                  {destForm.id ? "Edit Saved Destination" : "Add Saved Destination"}
                 </h2>
               </div>
               <button
@@ -2238,7 +2301,7 @@ export default function WalletsPage() {
             <div className="mt-5 space-y-4">
               {/* Exchange */}
               <label className="block">
-                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Exchange</span>
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Exchange or label type</span>
                 <select
                   value={destForm.exchangeName}
                   onChange={(e) => setDestForm((f) => ({ ...f, exchangeName: e.target.value }))}
@@ -2253,7 +2316,7 @@ export default function WalletsPage() {
 
               {/* Label */}
               <label className="block">
-                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Label</span>
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Nickname</span>
                 <span className="ml-1.5 text-[10px] text-gray-400">(e.g. "Coinbase USDC")</span>
                 <input
                   type="text"
@@ -2273,7 +2336,7 @@ export default function WalletsPage() {
                   className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-semibold text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
                 >
                   <option value="">Select asset and network…</option>
-                  {SETTLEMENT_ASSET_NETWORK_OPTIONS.map((opt) => (
+                  {destinationAssetOptions.map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </select>
@@ -2314,21 +2377,10 @@ export default function WalletsPage() {
                 />
               </label>
 
-              {/* Default */}
-              <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
-                <input
-                  type="checkbox"
-                  checked={destForm.isDefault}
-                  onChange={(e) => setDestForm((f) => ({ ...f, isDefault: e.target.checked }))}
-                  className="h-4 w-4 rounded border-gray-300 text-[#0052FF] focus:ring-[#0052FF]"
-                />
-                <span className="text-sm font-semibold text-gray-800">Set as default destination</span>
-              </label>
-
               {/* Warning */}
               <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3">
                 <p className="text-xs leading-5 text-amber-900">
-                  PineTree does not verify exchange deposit requirements. Confirm the asset, network, and deposit address in your exchange account before saving.
+                  Saved destinations make future sends faster. They do not change where customer payments are received.
                 </p>
               </div>
 
@@ -2341,7 +2393,7 @@ export default function WalletsPage() {
                   className="mt-0.5 h-4 w-4 rounded border-gray-300 text-[#0052FF] focus:ring-[#0052FF]"
                 />
                 <span className="text-sm leading-5 text-gray-700">
-                  I confirm this destination supports the selected asset and network.
+                  I confirm this address supports the selected asset and network.
                 </span>
               </label>
 
@@ -2536,7 +2588,7 @@ export default function WalletsPage() {
                       <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
                         <p className="text-sm font-semibold text-gray-950">Send from this wallet</p>
                         <p className="mt-1 text-sm leading-6 text-gray-600">
-                          Only send to an address on the selected network.
+                          Choose a saved destination or enter a wallet address manually.
                         </p>
                       </div>
 
@@ -2548,6 +2600,7 @@ export default function WalletsPage() {
                             onChange={(e) => {
                               const option = sendAssetOptions.find((item) => `${item.asset}|${item.network}` === e.target.value) || null
                               setSendAsset(option)
+                              setSendSavedDestinationId("")
                               setSendError(null)
                             }}
                             className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-semibold text-gray-900 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
@@ -2560,15 +2613,49 @@ export default function WalletsPage() {
                           </select>
                         </label>
                         <label className="block">
-                          <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Destination address</span>
-                          <input
-                            type="text"
-                            value={sendDestination}
-                            onChange={(e) => { setSendDestination(e.target.value); setSendError(null) }}
-                            placeholder={selectedWallet.rail === "base" ? "0x..." : "Solana address"}
-                            className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 font-mono text-sm text-gray-900 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
-                          />
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Destination mode</span>
+                          <select
+                            value={sendDestinationMode}
+                            onChange={(e) => {
+                              setSendDestinationMode(e.target.value as SendDestinationMode)
+                              setSendError(null)
+                            }}
+                            className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-semibold text-gray-900 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                          >
+                            <option value="saved">Use saved destination</option>
+                            <option value="manual">Enter address manually</option>
+                          </select>
                         </label>
+                        {sendDestinationMode === "saved" ? (
+                          <label className="block">
+                            <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Saved destination</span>
+                            <select
+                              value={sendSavedDestinationId}
+                              onChange={(e) => { setSendSavedDestinationId(e.target.value); setSendError(null) }}
+                              className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-semibold text-gray-900 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                            >
+                              <option value="">
+                                {sendSavedDestinations.length ? "Choose saved destination..." : "No saved destinations for this asset"}
+                              </option>
+                              {sendSavedDestinations.map((dest) => (
+                                <option key={dest.id} value={dest.id}>
+                                  {dest.label} - {formatSettlementAddress(dest.address)}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ) : (
+                          <label className="block">
+                            <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Destination address</span>
+                            <input
+                              type="text"
+                              value={sendDestination}
+                              onChange={(e) => { setSendDestination(e.target.value); setSendError(null) }}
+                              placeholder={selectedWallet.rail === "base" ? "0x..." : "Solana address"}
+                              className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 font-mono text-sm text-gray-900 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+                            />
+                          </label>
+                        )}
                         <label className="block">
                           <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Amount</span>
                           <input
@@ -2610,7 +2697,7 @@ export default function WalletsPage() {
                         <button
                           type="button"
                           onClick={() => setSendStep("review")}
-                          disabled={!sendAsset || !sendDestination.trim() || !sendAmount.trim() || Number(sendAmount) <= 0}
+                          disabled={!sendAsset || !activeSendDestinationAddress.trim() || !sendAmount.trim() || Number(sendAmount) <= 0}
                           className={cx(pineTreePrimaryButton, "disabled:cursor-not-allowed disabled:opacity-55")}
                         >
                           Review Send
@@ -2626,7 +2713,8 @@ export default function WalletsPage() {
                         <CompactStatusRow label="Asset" value={sendAsset.asset} />
                         <CompactStatusRow label="Network" value={sendAsset.network === "base" ? "Base" : "Solana"} />
                         <CompactStatusRow label="Amount" value={`${sendAmount} ${sendAsset.asset}`} />
-                        <CompactStatusRow label="Destination" value={formatSettlementAddress(sendDestination)} />
+                        {selectedSendDestination && <CompactStatusRow label="Destination nickname" value={selectedSendDestination.label} />}
+                        <CompactStatusRow label="Destination address" value={formatSettlementAddress(activeSendDestinationAddress)} />
                         <CompactStatusRow label="Estimated fee" value="wallet will estimate" />
                       </div>
                       <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-xs leading-5 text-amber-800">
@@ -2661,7 +2749,8 @@ export default function WalletsPage() {
                         <CompactStatusRow label="Asset" value={sendRecord.transfer.asset} />
                         <CompactStatusRow label="Network" value={sendRecord.transfer.network === "base" ? "Base" : "Solana"} />
                         <CompactStatusRow label="Amount" value={`${sendRecord.transfer.amount} ${sendRecord.transfer.asset}`} />
-                        <CompactStatusRow label="Destination" value={formatSettlementAddress(sendRecord.transfer.destination_address)} />
+                        {selectedSendDestination && <CompactStatusRow label="Destination nickname" value={selectedSendDestination.label} />}
+                        <CompactStatusRow label="Destination address" value={formatSettlementAddress(sendRecord.transfer.destination_address)} />
                         <CompactStatusRow label="Estimated fee" value={sendRecord.transfer.estimated_fee_label} />
                       </div>
                       {sendError && (
@@ -2704,6 +2793,13 @@ export default function WalletsPage() {
                           View on Explorer
                         </a>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab("settlement")}
+                        className={cx(pineTreeSecondaryActionButton, "mt-3 ml-2")}
+                      >
+                        View in Activity
+                      </button>
                     </div>
                   )}
                 </div>
@@ -3076,7 +3172,7 @@ export default function WalletsPage() {
                     /* ── Main settlement tab ── */
                     <>
                       {/* ── Settlement Summary ── */}
-                      <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4 shadow-[0_8px_24px_rgba(0,82,255,0.06)]">
+                      <div className="hidden">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#0052FF]">Settlement Summary</p>
                         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                           {/* Balance tile */}
@@ -3107,9 +3203,9 @@ export default function WalletsPage() {
                               </p>
                             )}
                           </div>
-                          {/* Preferred destination tile */}
+                          {/* Saved destination tile */}
                           <div className="rounded-xl border border-white/70 bg-white/60 p-3">
-                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Preferred</p>
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Saved address</p>
                             <p className="mt-1 truncate text-sm font-semibold text-gray-950">
                               {settlementSummary.preferredForNative?.label ?? "Not set"}
                             </p>
@@ -3163,7 +3259,7 @@ export default function WalletsPage() {
                       </div>
 
                       {/* ── Move Money Panel ── */}
-                      {moveMoneyOpen && !withdrawReview && (
+                      {false && moveMoneyOpen && !withdrawReview && (
                         <div className="rounded-2xl border border-gray-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                           <div className="border-b border-gray-100 px-4 py-3">
                             <p className="text-sm font-semibold text-gray-950">Move Money</p>
@@ -3183,8 +3279,8 @@ export default function WalletsPage() {
                               </div>
                               <p className="mt-2 text-xs text-gray-500">
                                 {settlementSummary.preferredForNative
-                                  ? `→ ${settlementSummary.preferredForNative.label} · ${settlementSummary.preferredForNative.exchange_name}`
-                                  : `No preferred destination for ${settlementSummary.walletAsset} on ${settlementSummary.walletRail}.`}
+                                  ? `→ ${settlementSummary.preferredForNative?.label ?? ""} · ${settlementSummary.preferredForNative?.exchange_name ?? ""}`
+                                  : `No saved address for ${settlementSummary.walletAsset} on ${settlementSummary.walletRail}.`}
                               </p>
                               {!settlementSummary.nativeEnoughForWithdrawal && settlementSummary.preferredForNative && (
                                 <p className="mt-2 text-xs font-semibold text-amber-700">
@@ -3229,7 +3325,7 @@ export default function WalletsPage() {
                               </div>
                               {!settlementSummary.preferredForNative && (
                                 <p className="mt-2 text-xs text-amber-700">
-                                  Set a preferred destination for {settlementSummary.walletAsset} on {settlementSummary.walletRail} in the Exchange Destinations section below.
+                                  Add a saved address for {settlementSummary.walletAsset} on {settlementSummary.walletRail}.
                                 </p>
                               )}
                             </div>
@@ -3244,7 +3340,7 @@ export default function WalletsPage() {
                                   {usdcBalanceLoading ? (
                                     <p className="text-gray-400">Loading USDC balance…</p>
                                   ) : usdcBalance !== null ? (
-                                    <p>Available: <span className="font-semibold">{usdcBalance.toFixed(2)} USDC</span></p>
+                                    <p>Available: <span className="font-semibold">{(usdcBalance ?? 0).toFixed(2)} USDC</span></p>
                                   ) : (
                                     <p className="text-gray-400">USDC balance unknown — tap Refresh in the summary above.</p>
                                   )}
@@ -3252,8 +3348,8 @@ export default function WalletsPage() {
                                 </div>
                                 <p className="mt-2 text-xs text-gray-500">
                                   {settlementSummary.preferredForUsdc
-                                    ? `→ ${settlementSummary.preferredForUsdc.label} · ${settlementSummary.preferredForUsdc.exchange_name}`
-                                    : `No preferred destination for USDC on ${settlementSummary.walletRail}.`}
+                                    ? `→ ${settlementSummary.preferredForUsdc?.label ?? ""} · ${settlementSummary.preferredForUsdc?.exchange_name ?? ""}`
+                                    : `No saved address for USDC on ${settlementSummary.walletRail}.`}
                                 </p>
                                 <div className="mt-3 flex flex-wrap gap-2">
                                   <button
@@ -3293,7 +3389,7 @@ export default function WalletsPage() {
                                 </div>
                                 {!settlementSummary.preferredForUsdc && (
                                   <p className="mt-2 text-xs text-amber-700">
-                                    Set a preferred destination for USDC on {settlementSummary.walletRail} in the Exchange Destinations section below.
+                                    Add a saved address for USDC on {settlementSummary.walletRail}.
                                   </p>
                                 )}
                               </div>
@@ -3309,7 +3405,7 @@ export default function WalletsPage() {
                       )}
 
                       {/* ── Pending Withdrawals ── */}
-                      {settlementSummary.pendingCount > 0 && (
+                      {false && settlementSummary.pendingCount > 0 && (
                         <div className="rounded-2xl border border-amber-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                           <div className="flex items-center justify-between gap-3 border-b border-amber-100 px-4 py-3">
                             <p className="text-sm font-semibold text-amber-900">Pending Withdrawals</p>
@@ -3394,13 +3490,13 @@ export default function WalletsPage() {
                       {/* ── Exchange Destinations ── */}
                       <div className="rounded-2xl border border-gray-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                         <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
-                          <p className="text-sm font-semibold text-gray-950">Exchange Destinations</p>
-                          <NetworkStatusPill label="Active" tone="blue" className="shrink-0" />
+                          <p className="text-sm font-semibold text-gray-950">Saved Destinations</p>
+                          <NetworkStatusPill label="Address book" tone="blue" className="shrink-0" />
                         </div>
 
                         <div className="p-4">
                           <p className="text-sm leading-6 text-gray-600">
-                            Send supported balances to an exchange address you control, then sell or withdraw through your exchange account.
+                            Save exchange or wallet addresses you use often.
                           </p>
 
                           {destLoadError && (
@@ -3413,32 +3509,27 @@ export default function WalletsPage() {
                             <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50/70 px-4 py-6 text-center text-sm text-gray-500">
                               Loading destinations…
                             </div>
-                          ) : settlementDestinations.length === 0 ? (
+                          ) : savedDestinationsForWallet.length === 0 ? (
                             <div className="mt-4 rounded-xl border border-dashed border-gray-200 bg-gray-50/50 px-4 py-6 text-center">
-                              <p className="text-sm font-semibold text-gray-700">No exchange destinations saved</p>
+                              <p className="text-sm font-semibold text-gray-700">No saved destinations</p>
                               <p className="mt-1 text-xs leading-5 text-gray-500">
-                                Add an exchange wallet address to start using the withdrawal flow.
+                                Add a saved address to make future sends faster.
                               </p>
                             </div>
                           ) : (
                             <div className="mt-4 space-y-3">
-                              {settlementDestinations.map((dest) => {
+                              {savedDestinationsForWallet.map((dest) => {
                                 const isCompatible = dest.network === selectedWallet?.rail
                                 return (
                                   <div
                                     key={dest.id}
-                                    className={cx(
-                                      "rounded-2xl border p-4 transition",
-                                      dest.is_default
-                                        ? "border-[#0052FF]/20 bg-[#0052FF]/5"
-                                        : "border-gray-100 bg-gray-50/70"
-                                    )}
+                                    className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4 transition"
                                   >
                                     <div className="flex flex-wrap items-start justify-between gap-2">
                                       <div className="min-w-0">
                                         <div className="flex flex-wrap items-center gap-2">
                                           <p className="text-sm font-semibold text-gray-950">{dest.label}</p>
-                                          {dest.is_default && (
+                                          {false && dest.is_default && (
                                             <span className="rounded-full border border-[#0052FF]/25 bg-[#0052FF]/10 px-2 py-0.5 text-[10px] font-semibold text-[#0052FF]">
                                               Preferred · {dest.asset}
                                             </span>
@@ -3494,7 +3585,7 @@ export default function WalletsPage() {
                                               assetNetwork: destAssetNetworkValue(dest),
                                               address: dest.address,
                                               memoOrTag: dest.memo_or_tag || "",
-                                              isDefault: dest.is_default,
+                                              isDefault: false,
                                               confirmed: true
                                             })
                                             setDestSaveError(null)
@@ -3504,7 +3595,7 @@ export default function WalletsPage() {
                                         >
                                           Edit
                                         </button>
-                                        {!dest.is_default && (
+                                        {false && !dest.is_default && (
                                           <button
                                             type="button"
                                             onClick={() => setPreferredDestination(dest.id)}
@@ -3521,7 +3612,7 @@ export default function WalletsPage() {
                                         >
                                           Delete
                                         </button>
-                                        <button
+                                        {false && <button
                                           type="button"
                                           onClick={() => setWithdrawReview(dest)}
                                           disabled={!isCompatible}
@@ -3534,7 +3625,7 @@ export default function WalletsPage() {
                                           )}
                                         >
                                           Withdraw
-                                        </button>
+                                        </button>}
                                       </div>
                                     )}
                                   </div>
@@ -3545,18 +3636,19 @@ export default function WalletsPage() {
 
                           <button
                             type="button"
-                            onClick={() => {
-                              setDestForm(emptyDestinationForm())
-                              setDestSaveError(null)
-                              setDestModalOpen(true)
-                            }}
+                          onClick={() => {
+                            const firstOption = destinationAssetOptions[0]
+                            setDestForm({ ...emptyDestinationForm(), assetNetwork: firstOption?.value || "" })
+                            setDestSaveError(null)
+                            setDestModalOpen(true)
+                          }}
                             className={cx(pineTreePrimaryButton, "mt-4")}
                           >
-                            Add Exchange Destination
+                            Add Destination
                           </button>
 
                           <p className="mt-3 text-xs leading-5 text-gray-500">
-                            PineTree does not control your exchange account or bank withdrawal process.
+                            Saved destinations do not change where customer payments are received.
                           </p>
                         </div>
                       </div>
@@ -3589,7 +3681,7 @@ export default function WalletsPage() {
                       </div>
 
                       {/* ── Settlement Mode (UI-only preference) ── */}
-                      <div className={cx("rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]", !settlementAdvancedOpen && "hidden")}>
+                      {false && <div className={cx("rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]", !settlementAdvancedOpen && "hidden")}>
                         <p className="text-sm font-semibold text-gray-950">Settlement Mode</p>
                         <p className="mt-1 text-xs leading-5 text-gray-500">
                           Choose how and when balances move to your exchange destination.
@@ -3640,12 +3732,12 @@ export default function WalletsPage() {
                         <p className="mt-3 text-[11px] leading-5 text-gray-400">
                           {settlementPrefSaving ? "Saving preference…" : "Preference saved to your account."}
                         </p>
-                      </div>
+                      </div>}
 
                       {/* ── Settlement Activity ── */}
                       <div className="rounded-2xl border border-gray-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                         <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
-                          <p className="text-sm font-semibold text-gray-950">Settlement Activity</p>
+                          <p className="text-sm font-semibold text-gray-950">Recent Activity</p>
                           {settlementSummary.thisMonthCount > 0 && (
                             <span className="rounded-full border border-[#0052FF]/20 bg-[#0052FF]/5 px-2.5 py-0.5 text-[11px] font-semibold text-[#0052FF]">
                               {settlementSummary.thisMonthCount} this month
@@ -3657,12 +3749,16 @@ export default function WalletsPage() {
                             <p className="text-center text-sm text-gray-500">Loading…</p>
                           ) : settlementHistory.length === 0 ? (
                             <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50/50 px-4 py-6 text-center">
-                              <p className="text-sm text-gray-500">No withdrawal activity yet.</p>
+                              <p className="text-sm text-gray-500">No recent sends yet.</p>
                             </div>
                           ) : (
                             <div className="space-y-2">
                               {(settlementActivityExpanded ? settlementHistory : settlementHistory.slice(0, 5)).map((w) => {
                                 const explorerUrl = w.tx_hash ? getExplorerTxUrl(w.network, w.tx_hash) : null
+                                const isDirectManual = w.movement_type === "direct_send" && w.destination_kind === "manual_address"
+                                const destinationDisplay = isDirectManual
+                                  ? `Manual address · ${formatSettlementAddress(w.destination_address)}`
+                                  : w.destination_label || formatSettlementAddress(w.destination_address)
                                 const statusClass: Record<string, string> = {
                                   DRAFT:              "bg-gray-100 text-gray-500",
                                   PREPARED:           "bg-amber-100 text-amber-800",
@@ -3677,8 +3773,10 @@ export default function WalletsPage() {
                                   <div key={w.id} className="rounded-xl border border-gray-100 p-3">
                                     <div className="flex flex-wrap items-start justify-between gap-2">
                                       <div className="min-w-0">
-                                        <p className="text-sm font-semibold text-gray-950">{w.destination_label}</p>
-                                        <p className="mt-0.5 text-xs text-gray-500">{w.exchange_name}</p>
+                                        <p className="text-sm font-semibold text-gray-950">Sent {w.asset}</p>
+                                        <p className="mt-0.5 truncate text-xs text-gray-500" title={w.destination_address}>
+                                          {destinationDisplay}
+                                        </p>
                                       </div>
                                       <span className={cx("shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold", pill)}>
                                         {w.status.replace(/_/g, " ")}
@@ -4284,8 +4382,8 @@ export default function WalletsPage() {
                     <p className="mt-2 text-sm font-semibold text-gray-950">{selectedWallet.displayName}</p>
                   </div>
                   <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Default Payment Wallet</p>
-                    <p className="mt-2 text-sm text-gray-600">Managed by PineTree payment routing settings.</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Payment Receiving Wallet</p>
+                    <p className="mt-2 text-sm text-gray-600">Customer payments continue to use your connected merchant wallet.</p>
                   </div>
                   <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">

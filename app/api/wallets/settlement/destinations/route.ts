@@ -73,11 +73,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   try {
     if (action === "create") {
+      const network = String(body.network || "").trim()
+      const walletNetwork = String(body.wallet_network || "").trim()
+      if (walletNetwork && network && walletNetwork !== network) {
+        return errorResponse("Saved destination network must match the selected wallet network.", 400)
+      }
       const dest = await createSettlementDestinationEngine(merchantId, {
         label:        String(body.label        || "").trim(),
         exchangeName: String(body.exchange_name || "").trim(),
         asset:        String(body.asset        || "").trim(),
-        network:      String(body.network      || "").trim(),
+        network,
         address:      String(body.address      || "").trim(),
         memoOrTag:    body.memo_or_tag != null ? String(body.memo_or_tag).trim() : null,
         isDefault:    Boolean(body.is_default)
@@ -96,6 +101,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (body.exchange_name !== undefined) update.exchangeName = String(body.exchange_name).trim()
       if (body.asset        !== undefined) update.asset        = String(body.asset).trim()
       if (body.network      !== undefined) update.network      = String(body.network).trim()
+      const walletNetwork = String(body.wallet_network || "").trim()
+      if (walletNetwork && update.network && walletNetwork !== update.network) {
+        return errorResponse("Saved destination network must match the selected wallet network.", 400)
+      }
       if (body.address      !== undefined) update.address      = String(body.address).trim()
       if (body.memo_or_tag  !== undefined) update.memoOrTag    = body.memo_or_tag != null ? String(body.memo_or_tag).trim() : null
       if (body.is_default   !== undefined) update.isDefault    = Boolean(body.is_default)

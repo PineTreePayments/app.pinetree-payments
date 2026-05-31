@@ -21,6 +21,7 @@ import {
   createSettlementWithdrawal,
   updateSettlementWithdrawalStatus,
   listSettlementWithdrawalsForMerchant,
+  getSettlementWithdrawalByTxHash,
   type SettlementWithdrawalRecord
 } from "@/database/settlementWithdrawals"
 
@@ -410,6 +411,58 @@ export async function submitSettlementWithdrawal(
 }
 
 // ─── Cancel ───────────────────────────────────────────────────────────────────
+
+export async function recordDirectSendSubmission(
+  merchantId: string,
+  input: {
+    walletId: string | null
+    asset: string
+    network: string
+    amount: string
+    destinationAddress: string
+    destinationLabel?: string | null
+    destinationKind: "manual_address" | "saved_destination"
+    txHash: string
+  }
+): Promise<SettlementWithdrawalRecord> {
+  const cleanHash = input.txHash.trim()
+  if (!cleanHash) throw Object.assign(new Error("tx_hash is required."), { status: 400 })
+
+  const existing = await getSettlementWithdrawalByTxHash(merchantId, cleanHash)
+  if (existing) return existing
+
+  const network = input.network.toLowerCase()
+  const asset = input.asset.trim().toUpperCase()
+  const address = input.destinationAddress.trim()
+  const amountNum = validateTransferAmount(input.amount)
+
+  validateSupportedTransferCombo(asset, network, "Send")
+  validateTransferDestinationAddress(network, address)
+
+  const label = String(input.destinationLabel || "").trim() ||
+    (input.destinationKind === "saved_destination" ? "Saved destination" : "Manual address")
+
+  const record = await createSettlementWithdrawal({
+    merchantId,
+    walletId: input.walletId,
+    settlementDestinationId: null,
+    movementType: "direct_send",
+    destinationKind: input.destinationKind,
+    destinationLabel: label,
+    exchangeName: input.destinationKind === "saved_destination" ? "Saved destination" : "Manual address",
+    asset,
+    network,
+    amount: amountNum,
+    destinationAddress: address,
+    memoOrTag: null,
+    status: "SUBMITTED"
+  })
+
+  return updateSettlementWithdrawalStatus(merchantId, record.id, "SUBMITTED", {
+    txHash: cleanHash,
+    submittedAt: new Date().toISOString()
+  })
+}
 
 export async function cancelSettlementWithdrawal(
   merchantId: string,
