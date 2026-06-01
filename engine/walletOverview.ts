@@ -43,6 +43,7 @@ export type WalletOverviewItem = {
   id: string
   network: string
   provider: string | null
+  wallet_type: string | null
   wallet_address: string
   assetSymbol: "SOL" | "ETH"
   nativeBalance: number
@@ -438,6 +439,7 @@ export async function getWalletOverviewEngine(
         id: w.id,
         network: w.network,
         provider: w.provider || w.wallet_type || null,
+        wallet_type: w.wallet_type || null,
         wallet_address: w.wallet_address,
         assetSymbol,
         nativeBalance,

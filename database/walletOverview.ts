@@ -11,6 +11,16 @@ export type MerchantWalletRow = {
 
 const db = supabaseAdmin || supabase
 
+function oneWalletPerRail(rows: MerchantWalletRow[]) {
+  const byNetwork = new Map<string, MerchantWalletRow>()
+  for (const row of rows) {
+    const network = String(row.network || "").toLowerCase().trim()
+    if (!network || byNetwork.has(network)) continue
+    byNetwork.set(network, row)
+  }
+  return Array.from(byNetwork.values())
+}
+
 export async function getMerchantWalletRows(merchantId: string) {
   const { data, error } = await db
     .from("merchant_wallets")
@@ -21,7 +31,7 @@ export async function getMerchantWalletRows(merchantId: string) {
     throw new Error(`Failed to load merchant wallets: ${error.message}`)
   }
 
-  return (data || []) as MerchantWalletRow[]
+  return oneWalletPerRail((data || []) as MerchantWalletRow[])
 }
 
 export async function getAllMerchantWalletRows() {

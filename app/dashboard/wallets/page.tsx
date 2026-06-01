@@ -10,7 +10,6 @@ import {
   type MerchantWcProvider
 } from "@/lib/wallets/merchantBaseWalletConnect"
 import {
-  initMerchantSolanaWalletConnect,
   type MerchantSolanaWcProvider
 } from "@/lib/wallets/merchantSolanaWalletConnect"
 import { supabase } from "@/lib/supabaseClient"
@@ -32,6 +31,7 @@ type WalletItem = {
   id: string
   network: string
   provider: string | null
+  wallet_type?: string | null
   wallet_address: string
   assetSymbol: "SOL" | "ETH"
   nativeBalance: number
@@ -110,6 +110,8 @@ type SelectedWallet = {
   displayName: string
   rail: "bitcoin_lightning" | "solana" | "base" | "ethereum"
   provider: string
+  walletType: string | null
+  approvalWalletType: ApprovalWalletType | null
   networkLabel: string
   reference: string
   referenceTitle: string
@@ -121,6 +123,8 @@ type SelectedWallet = {
   isLightning: boolean
   nwcConnectionStatus?: NwcConnectionStatus | null
 }
+
+type ApprovalWalletType = "phantom" | "solflare" | "base" | "metamask" | "trust"
 
 type CashOutAssetOption = {
   label: string
@@ -516,6 +520,69 @@ function formatProvider(name?: string | null, network?: string) {
   if (network === "ethereum") return "MetaMask"
 
   return formatDashboardProvider(name)
+}
+
+function normalizeApprovalWalletType(
+  raw: string | null | undefined,
+  rail: SelectedWallet["rail"]
+): ApprovalWalletType | null {
+  const value = String(raw || "").toLowerCase().replace(/[^a-z0-9]+/g, "")
+
+  if (rail === "solana") {
+    if (value.includes("phantom")) return "phantom"
+    if (value.includes("solflare")) return "solflare"
+    return null
+  }
+
+  if (rail === "base") {
+    if (value.includes("metamask")) return "metamask"
+    if (value.includes("trust")) return "trust"
+    if (value.includes("baseapp") || value.includes("base") || value.includes("coinbase")) return "base"
+    return null
+  }
+
+  return null
+}
+
+function approvalWalletLabel(type: ApprovalWalletType | null, rail: SelectedWallet["rail"]): string {
+  if (type === "phantom") return "Phantom"
+  if (type === "solflare") return "Solflare"
+  if (type === "metamask") return "MetaMask"
+  if (type === "trust") return "Trust Wallet"
+  if (type === "base") return "Base Wallet"
+  return rail === "solana" ? "Solana wallet" : rail === "base" ? "Base wallet" : "wallet"
+}
+
+function normalizeAddressForCompare(address: string | null | undefined) {
+  return String(address || "").trim().toLowerCase()
+}
+
+type Eip1193ApprovalProvider = {
+  isCoinbaseWallet?: boolean
+  isBaseWallet?: boolean
+  isMetaMask?: boolean
+  isTrust?: boolean
+  isTrustWallet?: boolean
+  providers?: Eip1193ApprovalProvider[]
+  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>
+}
+
+function getInjectedBaseApprovalProvider(type: ApprovalWalletType | null): Eip1193ApprovalProvider | null {
+  if (typeof window === "undefined") return null
+  const eth = (window as Window & { ethereum?: Eip1193ApprovalProvider }).ethereum
+  if (!eth) return null
+  const providers = Array.isArray(eth.providers) && eth.providers.length > 0 ? eth.providers : [eth]
+
+  if (type === "base") {
+    return providers.find((p) => p?.isCoinbaseWallet || p?.isBaseWallet) || null
+  }
+  if (type === "metamask") {
+    return providers.find((p) => p?.isMetaMask && !p?.isCoinbaseWallet) || null
+  }
+  if (type === "trust") {
+    return providers.find((p) => p?.isTrust || p?.isTrustWallet) || null
+  }
+  return null
 }
 
 function formatWalletAddress(address: string) {
@@ -923,7 +990,7 @@ export default function WalletsPage() {
   const [meshImportResult, setMeshImportResult] = useState<{ imported: number; updated: number } | null>(null)
 
   // Merchant WalletConnect send state
-  type MerchantWcStep = "idle" | "initializing" | "pairing" | "connected" | "signing" | "submitted" | "rejected" | "expired" | "error"
+  type MerchantWcStep = "idle" | "initializing" | "pairing" | "connected" | "requesting" | "signing" | "approved" | "recording" | "submitted" | "rejected" | "expired" | "error"
   const [merchantWcStep, setMerchantWcStep] = useState<MerchantWcStep>("idle")
   const [merchantWcPairingUri, setMerchantWcPairingUri] = useState<string | null>(null)
   const [merchantWcError, setMerchantWcError] = useState<string | null>(null)
@@ -1210,6 +1277,11 @@ export default function WalletsPage() {
 
   async function startWalletConnectSend() {
     if (!sendRecord?.tx_params || !selectedWallet) return
+    if (selectedWallet.rail !== "base" || !selectedWallet.approvalWalletType) {
+      setMerchantWcError("This connected wallet does not currently support PineTree mobile send approval.")
+      setMerchantWcStep("error")
+      return
+    }
     if (!walletConnectConfigured) {
       setMerchantWcError("WalletConnect is not configured.")
       setMerchantWcStep("error")
@@ -1243,9 +1315,22 @@ export default function WalletsPage() {
       const address = await waitForMerchantWalletConnect(result.provider)
       setMerchantWcStep("connected")
 
+      if (normalizeAddressForCompare(address) !== normalizeAddressForCompare(selectedWallet.referenceTitle)) {
+        await result.provider.disconnect().catch(() => {})
+        throw new Error("Connected wallet does not match the merchant wallet saved for Base Pay.")
+      }
+
+      const chainId = await result.provider.request<string>("eth_chainId").catch(() => "")
+      if (String(chainId).toLowerCase() !== "0x2105" && String(chainId) !== "8453") {
+        await result.provider.disconnect().catch(() => {})
+        throw new Error("Connected wallet is not on Base.")
+      }
+
       // Short pause so the user sees "Wallet connected" before signing prompt
       await new Promise<void>((r) => setTimeout(r, 600))
 
+      setMerchantWcStep("requesting")
+      await new Promise<void>((r) => setTimeout(r, 200))
       setMerchantWcStep("signing")
       setSendStep("signing")
 
@@ -1258,9 +1343,11 @@ export default function WalletsPage() {
         gas: params.gas
       }])
 
-      if (!txHash) throw new Error("No transaction hash returned from wallet.")
+      if (!txHash) throw new Error("Wallet connected, but transaction approval was not completed.")
 
+      setMerchantWcStep("approved")
       setSendTxHash(txHash)
+      setMerchantWcStep("recording")
       await recordSubmittedDirectSend(txHash)
 
       setSendStep("submitted")
@@ -1285,67 +1372,8 @@ export default function WalletsPage() {
 
   async function startSolanaWalletConnectSend() {
     if (!sendRecord?.unsigned_tx_base64 || !selectedWallet) return
-    if (!walletConnectConfigured) {
-      setMerchantWcError("WalletConnect is not configured.")
-      setMerchantWcStep("error")
-      return
-    }
-    if (directSendSubmittingRef.current || sendStep === "signing") return
-    directSendSubmittingRef.current = true
-
-    setMerchantWcStep("initializing")
-    setMerchantWcError(null)
-    setMerchantWcPairingUri(null)
-
-    if (merchantWcProviderRef.current) {
-      merchantWcProviderRef.current.disconnect().catch(() => {})
-      merchantWcProviderRef.current = null
-    }
-    if (merchantSolanaWcProviderRef.current) {
-      merchantSolanaWcProviderRef.current.disconnect().catch(() => {})
-      merchantSolanaWcProviderRef.current = null
-    }
-
-    try {
-      const result = await initMerchantSolanaWalletConnect()
-      if (!result.ok) throw new Error(result.error)
-
-      merchantSolanaWcProviderRef.current = result.provider
-      setMerchantWcPairingUri(result.pairingUri)
-      setMerchantWcStep("pairing")
-
-      await result.provider.waitForConnect()
-      setMerchantWcStep("connected")
-      await new Promise<void>((r) => setTimeout(r, 600))
-
-      setMerchantWcStep("signing")
-      setSendStep("signing")
-
-      const tx = Transaction.from(Buffer.from(sendRecord.unsigned_tx_base64, "base64"))
-      const txHash = await result.provider.signAndSendTransaction(tx)
-      if (!txHash) throw new Error("No transaction signature returned from wallet.")
-
-      setSendTxHash(txHash)
-      await recordSubmittedDirectSend(txHash)
-
-      setSendStep("submitted")
-      setMerchantWcStep("submitted")
-      setMerchantWcPairingUri(null)
-      await result.provider.disconnect().catch(() => {})
-      merchantSolanaWcProviderRef.current = null
-      await refreshSettlementBalances()
-      await loadSettlementHistory()
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Solana WalletConnect approval failed"
-      setMerchantWcError(msg)
-      setMerchantWcStep(getMerchantApprovalFailureStep(msg))
-      setSendError(msg)
-      setSendStep("failed")
-      await merchantSolanaWcProviderRef.current?.disconnect().catch(() => {})
-      merchantSolanaWcProviderRef.current = null
-    } finally {
-      directSendSubmittingRef.current = false
-    }
+    setMerchantWcError("Mobile approval for this Solana wallet is not supported yet. Use Approve on this device.")
+    setMerchantWcStep("error")
   }
 
   // ── Settlement destination API calls ────────────────────────────────────────
@@ -1922,27 +1950,51 @@ export default function WalletsPage() {
       let txHash: string
 
       if (sendRecord.transfer.network === "solana" && sendRecord.unsigned_tx_base64) {
-        const wallets = getDetectedSolanaWallets()
-        const walletEntry = wallets.find(
-          (w) => String(w.provider.publicKey?.toString() || "") === selectedWallet.referenceTitle
-        ) || wallets[0]
-
-        if (!walletEntry) {
-          throw new Error("No Solana wallet detected. Install Phantom or Solflare and ensure it is unlocked.")
+        const expectedType = selectedWallet.approvalWalletType
+        if (expectedType !== "phantom" && expectedType !== "solflare") {
+          throw new Error("Connected Solana wallet type is not supported for same-device approval.")
         }
 
-        await walletEntry.provider.connect()
+        const wallets = getDetectedSolanaWallets()
+        const walletEntry = wallets.find(
+          (w) => normalizeApprovalWalletType(w.name, "solana") === expectedType
+        )
+
+        if (!walletEntry) {
+          throw new Error(`No ${approvalWalletLabel(expectedType, "solana")} wallet detected. Install it and ensure it is unlocked.`)
+        }
+
+        const connectResult = await walletEntry.provider.connect()
+        const connectedAddress = String(
+          (connectResult as { publicKey?: { toString: () => string } } | null)?.publicKey?.toString() ||
+          walletEntry.provider.publicKey?.toString() ||
+          ""
+        )
+        if (normalizeAddressForCompare(connectedAddress) !== normalizeAddressForCompare(selectedWallet.referenceTitle)) {
+          throw new Error("Connected wallet does not match the merchant wallet saved for Solana Pay.")
+        }
+
         const tx = Transaction.from(Buffer.from(sendRecord.unsigned_tx_base64, "base64"))
         const signResult = await walletEntry.provider.signAndSendTransaction(tx)
         txHash = getSolanaTransactionSignature(signResult)
         if (!txHash) throw new Error("No transaction signature returned from wallet.")
       } else if (sendRecord.transfer.network === "base" && sendRecord.tx_params) {
-        const eth = (window as Window & {
-          ethereum?: { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> }
-        }).ethereum
+        const expectedType = selectedWallet.approvalWalletType
+        const eth = getInjectedBaseApprovalProvider(expectedType)
 
         if (!eth) {
-          throw new Error("No Ethereum wallet detected. Install MetaMask or Base Wallet and ensure it is unlocked.")
+          throw new Error(`No ${approvalWalletLabel(expectedType, "base")} wallet detected. Install it and ensure it is unlocked.`)
+        }
+
+        const chainId = await eth.request({ method: "eth_chainId" }).catch(() => "")
+        if (String(chainId).toLowerCase() !== "0x2105" && String(chainId) !== "8453") {
+          throw new Error("Connected wallet is not on Base.")
+        }
+
+        const accountsResponse = await eth.request({ method: "eth_requestAccounts" })
+        const account = Array.isArray(accountsResponse) ? String(accountsResponse[0] || "") : ""
+        if (normalizeAddressForCompare(account) !== normalizeAddressForCompare(selectedWallet.referenceTitle)) {
+          throw new Error("Connected wallet does not match the merchant wallet saved for Base Pay.")
         }
 
         const params = sendRecord.tx_params
@@ -2242,6 +2294,8 @@ export default function WalletsPage() {
       displayName: label,
       rail: "bitcoin_lightning",
       provider: rail.provider,
+      walletType: null,
+      approvalWalletType: null,
       networkLabel: "Bitcoin Lightning",
       reference: label,
       referenceTitle: label,
@@ -2257,12 +2311,16 @@ export default function WalletsPage() {
 
   function buildConnectedWallet(w: WalletItem): SelectedWallet {
     const rail = normalizeWalletNetwork(w.network)
+    const rawWalletType = w.wallet_type || w.provider || null
+    const approvalWalletType = normalizeApprovalWalletType(rawWalletType, rail)
 
     return {
       id: w.id,
       displayName: formatProvider(w.provider, w.network),
       rail,
       provider: formatProvider(w.provider, w.network),
+      walletType: rawWalletType,
+      approvalWalletType,
       networkLabel: formatDashboardNetwork(w.network),
       reference: formatWalletAddress(w.wallet_address),
       referenceTitle: w.wallet_address,
@@ -2341,6 +2399,12 @@ export default function WalletsPage() {
   const activeSendDestinationAddress = sendDestinationMode === "saved"
     ? selectedSendDestination?.address || ""
     : sendDestination
+  const approvalWalletName = selectedWallet
+    ? approvalWalletLabel(selectedWallet.approvalWalletType, selectedWallet.rail)
+    : "wallet"
+  const canUseBaseWalletConnect =
+    Boolean(walletConnectConfigured && selectedWallet?.rail === "base" && selectedWallet.approvalWalletType)
+  const canUseSolanaWalletConnect = false
   const cashOutUnavailable = selectedWallet?.isLightning || cashOutAssetOptions.length === 0
   const nwcStatus = selectedWallet?.nwcConnectionStatus || null
   const lightningActivity = recentOperations
@@ -3548,15 +3612,14 @@ export default function WalletsPage() {
 
                       {/* Approval options */}
                       <div className="mt-4 space-y-2">
-                        {/* Option 1: Scan with phone */}
+                        {/* Option 1: wallet-specific scan */}
                         {sendRecord.transfer.network === "base" ? (
-                          // Base: Real WalletConnect QR flow
                           <div className="rounded-xl border border-gray-200 bg-white p-3">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <p className="text-sm font-semibold text-gray-950">Scan with phone</p>
+                                <p className="text-sm font-semibold text-gray-950">Scan with {approvalWalletName}</p>
                                 <p className="mt-0.5 text-xs leading-5 text-gray-600">
-                                  Use Base Wallet, MetaMask, or Trust Wallet on your phone to approve.
+                                  Use {approvalWalletName} on your phone to approve this Base transfer.
                                 </p>
                               </div>
                             </div>
@@ -3566,10 +3629,10 @@ export default function WalletsPage() {
                               <button
                                 type="button"
                                 onClick={startWalletConnectSend}
-                                disabled={!walletConnectConfigured || directSendSubmittingRef.current}
+                                disabled={!canUseBaseWalletConnect || directSendSubmittingRef.current}
                                 className={cx(pineTreeSecondaryActionButton, "mt-2")}
                               >
-                                {walletConnectConfigured ? "Show QR Code" : "WalletConnect is not configured."}
+                                {walletConnectConfigured ? `Show ${approvalWalletName} QR Code` : "WalletConnect is not configured."}
                               </button>
                             ) : merchantWcStep === "initializing" ? (
                               <p className="mt-2 text-xs text-gray-500">Generating QR code...</p>
@@ -3579,13 +3642,19 @@ export default function WalletsPage() {
                                   <QRCodeSVG value={merchantWcPairingUri} size={180} />
                                 </div>
                                 <p className="text-center text-xs text-gray-500">
-                                  Scan with your wallet app. Waiting for connection...
+                                  Waiting for phone scan...
                                 </p>
                               </div>
                             ) : merchantWcStep === "connected" ? (
-                              <p className="mt-2 text-xs font-semibold text-[#0052FF]">Wallet connected - waiting for approval...</p>
+                              <p className="mt-2 text-xs font-semibold text-[#0052FF]">Wallet connected.</p>
+                            ) : merchantWcStep === "requesting" ? (
+                              <p className="mt-2 text-xs font-semibold text-[#0052FF]">Sending transaction approval request...</p>
                             ) : merchantWcStep === "signing" ? (
-                              <p className="mt-2 text-xs font-semibold text-[#0052FF]">Waiting for approval...</p>
+                              <p className="mt-2 text-xs font-semibold text-[#0052FF]">Waiting for transaction approval...</p>
+                            ) : merchantWcStep === "approved" ? (
+                              <p className="mt-2 text-xs font-semibold text-[#0052FF]">Transaction approved, tx hash received.</p>
+                            ) : merchantWcStep === "recording" ? (
+                              <p className="mt-2 text-xs font-semibold text-[#0052FF]">Recording activity...</p>
                             ) : merchantWcStep === "submitted" ? (
                               <p className="mt-2 text-xs font-semibold text-[#0052FF]">Transaction submitted.</p>
                             ) : merchantWcStep === "rejected" ? (
@@ -3602,9 +3671,9 @@ export default function WalletsPage() {
                           <div className="rounded-xl border border-gray-200 bg-white p-3">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <p className="text-sm font-semibold text-gray-950">Scan with phone</p>
+                                <p className="text-sm font-semibold text-gray-600">Scan with {approvalWalletName}</p>
                                 <p className="mt-0.5 text-xs leading-5 text-gray-600">
-                                  Use a Solana WalletConnect wallet that supports transaction submission.
+                                  Mobile approval for this Solana wallet is not supported yet. Use Approve on this device.
                                 </p>
                               </div>
                             </div>
@@ -3612,10 +3681,10 @@ export default function WalletsPage() {
                               <button
                                 type="button"
                                 onClick={startSolanaWalletConnectSend}
-                                disabled={!walletConnectConfigured || directSendSubmittingRef.current}
+                                disabled={!canUseSolanaWalletConnect || directSendSubmittingRef.current}
                                 className={cx(pineTreeSecondaryActionButton, "mt-2")}
                               >
-                                {walletConnectConfigured ? "Show QR Code" : "WalletConnect is not configured."}
+                                This connected wallet does not currently support PineTree mobile send approval.
                               </button>
                             ) : merchantWcStep === "initializing" ? (
                               <p className="mt-2 text-xs text-gray-500">Generating QR code...</p>
@@ -3644,15 +3713,15 @@ export default function WalletsPage() {
                           </div>
                         )}
 
-                        {/* Option 2: Open mobile wallet — deferred for both */}
+                        {/* Option 2: wallet-specific open app */}
                         <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-3">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                              <p className="text-sm font-semibold text-gray-600">Open mobile wallet</p>
+                              <p className="text-sm font-semibold text-gray-600">Open {approvalWalletName}</p>
                               <p className="mt-0.5 text-xs leading-5 text-gray-400">
                                 {sendRecord.transfer.network === "solana"
-                                  ? "Wallet-specific Phantom/Solflare deeplink signing is not configured; use the WalletConnect QR when supported."
-                                  : "Wallet deeplink signing is not yet configured. Use Scan with phone instead."}
+                                  ? `${approvalWalletName} mobile deeplink signing is not configured with a returned signature. Use Approve on this device.`
+                                  : `${approvalWalletName} mobile deeplink signing is not configured with a returned tx hash. Use Scan with ${approvalWalletName} instead.`}
                               </p>
                             </div>
                             <span className="shrink-0 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-400">
@@ -3665,9 +3734,7 @@ export default function WalletsPage() {
                         <div className="rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-3">
                           <p className="text-sm font-semibold text-gray-950">Approve on this device</p>
                           <p className="mt-0.5 text-xs leading-5 text-gray-600">
-                            {sendRecord.transfer.network === "solana"
-                              ? "If Phantom or Solflare is installed and unlocked on this device, approve here."
-                              : "If MetaMask or Base Wallet is installed and unlocked on this device, approve here."}
+                            If {approvalWalletName} is installed, unlocked, and using the saved merchant address, approve here.
                           </p>
                         </div>
                       </div>
@@ -3705,7 +3772,7 @@ export default function WalletsPage() {
                           disabled={directSendSubmittingRef.current}
                           className={pineTreePrimaryButton}
                         >
-                          Confirm in Wallet
+                          Confirm in {approvalWalletName}
                         </button>
                       </div>
                     </div>

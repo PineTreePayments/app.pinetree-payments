@@ -46,6 +46,16 @@ type WalletRow = {
   status?: string | null
 }
 
+function oneWalletPerRail(wallets: WalletRow[]): WalletRow[] {
+  const byNetwork = new Map<string, WalletRow>()
+  for (const wallet of wallets) {
+    const network = String(wallet.network || "").toLowerCase().trim()
+    if (!network || byNetwork.has(network)) continue
+    byNetwork.set(network, wallet)
+  }
+  return Array.from(byNetwork.values())
+}
+
 export type ProvidersDashboardData = {
   providers: ProviderRow[]
   wallets: WalletRow[]
@@ -295,7 +305,7 @@ export async function getProvidersDashboardEngine(merchantId: string): Promise<P
 
   return {
     providers: decorateProviderRows((providersRes.data || []) as ProviderRow[]),
-    wallets: walletsRes.data || [],
+    wallets: oneWalletPerRail((walletsRes.data || []) as WalletRow[]),
     settings
   }
 }
@@ -434,15 +444,28 @@ export async function saveProviderEngine(args: {
       ? `SOL-${walletType || "MANUAL"}`
       : `ETH-${walletType || "BASEAPP"}`
 
-    const { data: existing, error: existingError } = await db
+    const { data: existingRows, error: existingError } = await db
       .from("merchant_wallets")
       .select("id")
       .eq("merchant_id", merchantId)
       .eq("network", provider)
-      .maybeSingle()
 
     if (existingError) {
       throw new Error(`Failed checking wallet row: ${existingError.message}`)
+    }
+
+    const existing = (existingRows || [])[0] || null
+
+    if (existingRows && existingRows.length > 1) {
+      const duplicateIds = existingRows.slice(1).map((row) => row.id)
+      const { error: duplicateDeleteError } = await db
+        .from("merchant_wallets")
+        .delete()
+        .in("id", duplicateIds)
+
+      if (duplicateDeleteError) {
+        throw new Error(`Failed enforcing one wallet per rail: ${duplicateDeleteError.message}`)
+      }
     }
 
     if (existing?.id) {

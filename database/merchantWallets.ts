@@ -24,6 +24,21 @@ function providerToNetworks(provider: string): string[] {
 // are returned — they have no entry in merchant_wallets.
 const WALLET_BASED_PROVIDERS = new Set(["solana", "base", "coinbase"])
 
+function oneWalletPerRail(wallets: MerchantWallet[]) {
+  const sorted = [...wallets].sort((a, b) => {
+    const primaryDelta = Number(Boolean(b.is_primary)) - Number(Boolean(a.is_primary))
+    if (primaryDelta !== 0) return primaryDelta
+    return String(b.created_at || "").localeCompare(String(a.created_at || ""))
+  })
+  const byNetwork = new Map<string, MerchantWallet>()
+  for (const wallet of sorted) {
+    const network = String(wallet.network || "").toLowerCase().trim()
+    if (!network || byNetwork.has(network)) continue
+    byNetwork.set(network, wallet)
+  }
+  return Array.from(byNetwork.values())
+}
+
 async function getConnectedProviderNetworks(merchantId: string): Promise<Set<string> | null> {
   const { data, error } = await supabase
     .from("merchant_providers")
@@ -79,15 +94,14 @@ export async function getMerchantWallets(merchantId: string) {
 
   if (connectedNetworks === null) {
     // No provider configuration found — use wallets directly
-    return allWallets.sort((a, b) => Number(Boolean(b.is_primary)) - Number(Boolean(a.is_primary)))
+    return oneWalletPerRail(allWallets)
   }
 
-  return allWallets
+  return oneWalletPerRail(allWallets
     .filter((wallet) => {
       const network = String(wallet.network || "").toLowerCase().trim()
       return connectedNetworks.has(network)
-    })
-    .sort((a, b) => Number(Boolean(b.is_primary)) - Number(Boolean(a.is_primary)))
+    }))
 }
 
 /**
