@@ -21,17 +21,14 @@ const providerZeusDocsUrl = process.env.NEXT_PUBLIC_ZEUS_DOCS_URL || "https://ze
 const providerSpeedSetupLinks = getSpeedDashboardLinks([
   "dashboard",
   "accountId",
-  "apiKeys",
-  "webhooks",
   "autoSwap",
   "payouts",
   "docs"
 ])
 const speedLoginUrl = providerSpeedSetupLinks.find((link) => link.key === "dashboard")?.url || ""
-const speedApiKeysUrl = providerSpeedSetupLinks.find((link) => link.key === "apiKeys")?.url || ""
-const speedWebhooksUrl = providerSpeedSetupLinks.find((link) => link.key === "webhooks")?.url || ""
 const speedDocsUrl = providerSpeedSetupLinks.find((link) => link.key === "docs")?.url || ""
 const speedAssociatedAccountsUrl = providerSpeedSetupLinks.find((link) => link.key === "accountId")?.url || ""
+const speedAutoSwapUrl = providerSpeedSetupLinks.find((link) => link.key === "autoSwap")?.url || ""
 const speedAutoPayoutUrl = providerSpeedSetupLinks.find((link) => link.key === "payouts")?.url || ""
 
 type ProviderCredentials = {
@@ -208,7 +205,6 @@ export default function ProvidersPage() {
   // Speed Lightning setup state
   const [speedAccountId, setSpeedAccountId] = useState("")
   const [lightningSetupTab, setLightningSetupTab] = useState<"speed" | "nwc">("speed")
-  const [speedAdminLinksOpen, setSpeedAdminLinksOpen] = useState(false)
   const [speedSetupStep, setSpeedSetupStep] = useState<1 | 2>(1)
   const [speedTestResult, setSpeedTestResult] = useState<{
     success: boolean
@@ -248,7 +244,6 @@ export default function ProvidersPage() {
     didToastSyncRef.current = false
     setSpeedAccountId("")
     setLightningSetupTab("speed")
-    setSpeedAdminLinksOpen(false)
     setSpeedTestResult(null)
     setSpeedTesting(false)
     setSpeedSetupStep(1)
@@ -711,7 +706,6 @@ export default function ProvidersPage() {
       setNwcWalletLabel("")
       setNwcTestResult(null)
       setLightningSetupTab("speed")
-      setSpeedAdminLinksOpen(false)
       setSpeedTestResult(null)
       setSpeedAccountId(String(getProvider("lightning_speed")?.credentials?.account_id || ""))
       // Start at step 1 if no account ID saved, step 2 if already configured
@@ -1559,17 +1553,14 @@ export default function ProvidersPage() {
                   </div>
 
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <a href={speedApiKeysUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                      Open Speed API Keys
-                    </a>
-                    <a href={speedWebhooksUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                      Open Speed Webhooks
-                    </a>
                     <a href={speedAssociatedAccountsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
                       Open Associated Accounts
                     </a>
+                    <a href={speedAutoSwapUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                      Auto-Swap Settings
+                    </a>
                     <a href={speedAutoPayoutUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                      Open Auto Payout
+                      Payout Settings
                     </a>
                     <a href={speedDocsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
                       Learn about Speed
@@ -1773,21 +1764,22 @@ export default function ProvidersPage() {
                             )
                           })()}
 
-                          <button
-                            type="button"
-                            onClick={() => setSpeedSetupStep(2)}
-                            className={`${primaryButtonClass()} w-full`}
-                          >
-                            I have a Speed account →
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={closeProviderModal}
-                            className={`${secondaryButtonClass()} w-full`}
-                          >
-                            Cancel
-                          </button>
+                          <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
+                            <button
+                              type="button"
+                              onClick={closeProviderModal}
+                              className={`${secondaryButtonClass()} w-full sm:w-auto`}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSpeedSetupStep(2)}
+                              className={`${primaryButtonClass()} w-full sm:w-auto`}
+                            >
+                              I have a Speed account →
+                            </button>
+                          </div>
                         </div>
                       )}
 
@@ -1802,7 +1794,7 @@ export default function ProvidersPage() {
                               Enter Account ID
                             </h3>
                             <p className="mt-2 text-sm leading-6 text-gray-600">
-                              Add your Merchant Speed Account ID. PineTree uses it to route Lightning payments to your Speed account. PineTree&apos;s API key and webhook secret stay server-side.
+                              Add your Merchant Speed Account ID. PineTree uses it to route Lightning payments to your Speed account.
                             </p>
                           </div>
 
@@ -1811,7 +1803,7 @@ export default function ProvidersPage() {
                             <input
                               value={speedAccountId}
                               onChange={(e) => setSpeedAccountId(e.target.value)}
-                              placeholder="acct_..."
+                              placeholder="Speed Account ID"
                               className={lightningInputClass()}
                               autoComplete="off"
                             />
@@ -1839,7 +1831,7 @@ export default function ProvidersPage() {
                           {/* Additional merchant shortcut links */}
                           {(() => {
                             const extraLinks = providerSpeedSetupLinks.filter(
-                              (l) => !["apiKeys", "webhooks", "accountId", "docs"].includes(l.key)
+                              (l) => !["accountId", "docs"].includes(l.key)
                             )
                             return extraLinks.length > 0 ? (
                               <div className="flex flex-wrap gap-2">
@@ -1852,36 +1844,6 @@ export default function ProvidersPage() {
                             ) : null
                           })()}
 
-                          {/* Admin section */}
-                          <div className="rounded-xl border border-gray-200 bg-white">
-                            <button
-                              type="button"
-                              onClick={() => setSpeedAdminLinksOpen((open) => !open)}
-                              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-                            >
-                              <span className="text-sm font-medium text-gray-500">PineTree admin setup links</span>
-                              <span className="text-xs text-gray-400">{speedAdminLinksOpen ? "Hide" : "Show"}</span>
-                            </button>
-                            {speedAdminLinksOpen ? (
-                              <div className="border-t border-gray-100 px-4 py-3">
-                                <p className="mb-3 text-xs leading-5 text-gray-500">
-                                  PineTree admin setup links. Merchants do not need API keys or webhooks.
-                                </p>
-                                <div className="flex flex-wrap gap-2">
-                                  {speedApiKeysUrl && (
-                                    <a href={speedApiKeysUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                                      Speed API Keys
-                                    </a>
-                                  )}
-                                  {speedWebhooksUrl && (
-                                    <a href={speedWebhooksUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                                      Speed Webhooks
-                                    </a>
-                                  )}
-                                </div>
-                              </div>
-                            ) : null}
-                          </div>
 
                           {/* Current setup status */}
                           <div className="rounded-xl border border-gray-200 bg-white/70 px-4 py-3">
