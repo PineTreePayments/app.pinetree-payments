@@ -4,13 +4,20 @@
  * Protocol: X25519 ECDH shared secret + NaCl box encryption (tweetnacl).
  * Encoding: base58 for all keys, nonces, and encrypted payloads (bs58 v4).
  *
+ * When sessionId is provided, storage uses session-scoped localStorage keys
+ * (pinetree_sf_keypair_{sessionId} / pinetree_sf_session_{sessionId}) so the
+ * keypair survives iOS Safari app-switch redirects.
+ *
+ * When sessionId is omitted, the original sessionStorage behaviour is
+ * preserved for backward compatibility with other callers (PayClient etc.).
+ *
  * Docs: https://docs.solflare.com/solflare/technical/deeplinks
  */
 
 import nacl from "tweetnacl"
 import bs58 from "bs58"
 
-// ── Storage keys ──────────────────────────────────────────────────────────────
+// ── Storage keys (no-sessionId path, original behaviour) ─────────────────────
 
 const KEYPAIR_KEY = "pinetree_sf_keypair"
 const SESSION_KEY = "pinetree_sf_session"
@@ -28,9 +35,11 @@ type StoredKeypair = { publicKey: number[]; secretKey: number[] }
 
 // ── Keypair management ────────────────────────────────────────────────────────
 
-function loadStoredKeypair(): nacl.BoxKeyPair | null {
+function loadStoredKeypair(sessionId?: string): nacl.BoxKeyPair | null {
   try {
-    const raw = sessionStorage.getItem(KEYPAIR_KEY)
+    const storage = sessionId ? localStorage : sessionStorage
+    const key = sessionId ? `pinetree_sf_keypair_${sessionId}` : KEYPAIR_KEY
+    const raw = storage.getItem(key)
     if (!raw) return null
     const parsed = JSON.parse(raw) as StoredKeypair
     return {
@@ -42,9 +51,11 @@ function loadStoredKeypair(): nacl.BoxKeyPair | null {
   }
 }
 
-function saveKeypair(kp: nacl.BoxKeyPair): void {
-  sessionStorage.setItem(
-    KEYPAIR_KEY,
+function saveKeypair(kp: nacl.BoxKeyPair, sessionId?: string): void {
+  const storage = sessionId ? localStorage : sessionStorage
+  const key = sessionId ? `pinetree_sf_keypair_${sessionId}` : KEYPAIR_KEY
+  storage.setItem(
+    key,
     JSON.stringify({
       publicKey: Array.from(kp.publicKey),
       secretKey: Array.from(kp.secretKey),
@@ -54,28 +65,29 @@ function saveKeypair(kp: nacl.BoxKeyPair): void {
 
 /**
  * Returns the stored dapp X25519 keypair, or creates a new one.
- * The keypair must persist across the connect redirect so we can
- * decrypt the connect response using the same private key.
+ * When sessionId is provided, uses localStorage (survives iOS app-switch).
  */
-export function getDappKeypair(): nacl.BoxKeyPair {
-  return loadStoredKeypair() ?? createAndStoreKeypair()
+export function getDappKeypair(sessionId?: string): nacl.BoxKeyPair {
+  return loadStoredKeypair(sessionId) ?? createAndStoreKeypair(sessionId)
 }
 
 /**
  * Generates a fresh dapp keypair and persists it.
  * Call once per connect attempt so each session starts clean.
  */
-export function createAndStoreKeypair(): nacl.BoxKeyPair {
+export function createAndStoreKeypair(sessionId?: string): nacl.BoxKeyPair {
   const kp = nacl.box.keyPair()
-  saveKeypair(kp)
+  saveKeypair(kp, sessionId)
   return kp
 }
 
 // ── Session management ────────────────────────────────────────────────────────
 
-export function getStoredSession(): SolflareSession | null {
+export function getStoredSession(sessionId?: string): SolflareSession | null {
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY)
+    const storage = sessionId ? localStorage : sessionStorage
+    const key = sessionId ? `pinetree_sf_session_${sessionId}` : SESSION_KEY
+    const raw = storage.getItem(key)
     if (!raw) return null
     return JSON.parse(raw) as SolflareSession
   } catch {
@@ -83,14 +95,23 @@ export function getStoredSession(): SolflareSession | null {
   }
 }
 
-export function storeSession(session: SolflareSession): void {
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(session))
+export function storeSession(session: SolflareSession, sessionId?: string): void {
+  if (sessionId) {
+    localStorage.setItem(`pinetree_sf_session_${sessionId}`, JSON.stringify(session))
+  } else {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(session))
+  }
 }
 
-export function clearSolflareSession(): void {
-  sessionStorage.removeItem(SESSION_KEY)
-  sessionStorage.removeItem(KEYPAIR_KEY)
-  sessionStorage.removeItem(PENDING_PID_KEY)
+export function clearSolflareSession(sessionId?: string): void {
+  if (sessionId) {
+    localStorage.removeItem(`pinetree_sf_keypair_${sessionId}`)
+    localStorage.removeItem(`pinetree_sf_session_${sessionId}`)
+  } else {
+    sessionStorage.removeItem(SESSION_KEY)
+    sessionStorage.removeItem(KEYPAIR_KEY)
+    sessionStorage.removeItem(PENDING_PID_KEY)
+  }
 }
 
 // ── Pending payment ID (bridged across the connect redirect) ──────────────────
@@ -108,8 +129,8 @@ export function consumePendingPaymentId(): string | null {
 
 // ── Shared-secret helper ──────────────────────────────────────────────────────
 
-function sharedSecret(sfPublicKey: string): Uint8Array {
-  const kp = getDappKeypair()
+function sharedSecret(sfPublicKey: string, sessionId?: string): Uint8Array {
+  const kp = getDappKeypair(sessionId)
   return nacl.box.before(bs58.decode(sfPublicKey), kp.secretKey)
 }
 
@@ -121,10 +142,15 @@ function sharedSecret(sfPublicKey: string): Uint8Array {
  *
  * @param redirectLink - Full URL Solflare will redirect to after connect,
  *   e.g. https://example.com/pay?intent=abc&solflare_action=connect_callback
- * @param appUrl - Origin of the dapp, used by Solflare to display dapp metadata.
+ * @param appUrl       - Origin of the dapp, used by Solflare to display dapp metadata.
+ * @param sessionId    - When provided, keypair is stored in session-scoped localStorage.
  */
-export function buildConnectUrl(redirectLink: string, appUrl: string): string {
-  const kp = createAndStoreKeypair()
+export function buildConnectUrl(
+  redirectLink: string,
+  appUrl: string,
+  sessionId?: string,
+): string {
+  const kp = createAndStoreKeypair(sessionId)
   const params = new URLSearchParams({
     dapp_encryption_public_key: bs58.encode(kp.publicKey),
     cluster: "mainnet-beta",
@@ -138,19 +164,20 @@ export function buildConnectUrl(redirectLink: string, appUrl: string): string {
  * Builds a Solflare UL v1 signAndSendTransaction URL.
  * The transaction + session are encrypted in the payload.
  *
- * @param transactionBase64 - Base64-encoded serialized Solana transaction
- *   (as returned by /api/solana/build-wallet-transaction).
- * @param session - Active Solflare session from a prior connect.
- * @param redirectLink - Full URL Solflare will redirect to after signing.
+ * @param transactionBase64 - Base64-encoded serialized Solana transaction.
+ * @param session           - Active Solflare session from a prior connect.
+ * @param redirectLink      - Full URL Solflare will redirect to after signing.
+ * @param sessionId         - When provided, reads keypair from session-scoped localStorage.
  */
 export function buildSignAndSendUrl(
   transactionBase64: string,
   session: SolflareSession,
   redirectLink: string,
+  sessionId?: string,
 ): string {
-  const kp = getDappKeypair()
+  const kp = getDappKeypair(sessionId)
   const nonce = nacl.randomBytes(24)
-  const secret = sharedSecret(session.sfPublicKey)
+  const secret = sharedSecret(session.sfPublicKey, sessionId)
 
   // Convert base64 transaction bytes → base58 (Solflare protocol requirement)
   const txBase58 = bs58.encode(Buffer.from(transactionBase64, "base64"))
@@ -176,15 +203,20 @@ export function buildSignAndSendUrl(
  * Expected params added by Solflare:
  *   solflare_encryption_public_key, nonce, data
  * Decrypted data contains: { public_key, session }
+ *
+ * @param sessionId - When provided, reads keypair from session-scoped localStorage.
  */
-export function decryptConnectResponse(params: URLSearchParams): SolflareSession | null {
+export function decryptConnectResponse(
+  params: URLSearchParams,
+  sessionId?: string,
+): SolflareSession | null {
   try {
     const sfPublicKey = params.get("solflare_encryption_public_key")
     const data = params.get("data")
     const nonce = params.get("nonce")
     if (!sfPublicKey || !data || !nonce) return null
 
-    const secret = sharedSecret(sfPublicKey)
+    const secret = sharedSecret(sfPublicKey, sessionId)
     const decrypted = nacl.box.open.after(bs58.decode(data), bs58.decode(nonce), secret)
     if (!decrypted) return null
 
@@ -210,16 +242,19 @@ export function decryptConnectResponse(params: URLSearchParams): SolflareSession
  * Expected params added by Solflare on success: nonce, data
  * Decrypted data contains: { signature }
  * Falls back to reading the unencrypted `signature` param if decryption fails.
+ *
+ * @param sessionId - When provided, reads keypair from session-scoped localStorage.
  */
 export function decryptSignResponse(
   params: URLSearchParams,
   sfPublicKey: string,
+  sessionId?: string,
 ): string | null {
   try {
     const data = params.get("data")
     const nonce = params.get("nonce")
     if (data && nonce) {
-      const secret = sharedSecret(sfPublicKey)
+      const secret = sharedSecret(sfPublicKey, sessionId)
       const decrypted = nacl.box.open.after(bs58.decode(data), bs58.decode(nonce), secret)
       if (decrypted) {
         const parsed = JSON.parse(new TextDecoder().decode(decrypted)) as {

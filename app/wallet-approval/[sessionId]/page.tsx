@@ -107,6 +107,7 @@ function walletDisplayName(type: WalletType | string): string {
 }
 
 function getAppUrl(): string {
+  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL
   if (typeof window === "undefined") return "https://app.pinetree-payments.com"
   return window.location.origin
 }
@@ -264,43 +265,92 @@ export default function WalletApprovalPage({
     const action = searchParams.get("phantom_action")
     if (!action) return false
 
+    const sid = loadedSession.id
     const appUrl = getAppUrl()
-    const baseRedirect = `${appUrl}/wallet-approval/${loadedSession.id}`
+    const baseRedirect = `${appUrl}/wallet-approval/${sid}`
+
+    // Safe debug logging — no private keys, secrets, or decrypted payloads
+    console.debug("[Phantom callback]", {
+      action,
+      paramNames: Array.from(searchParams.keys()),
+      hasEncPubKey: searchParams.has("phantom_encryption_public_key"),
+      hasData: searchParams.has("data"),
+      hasNonce: searchParams.has("nonce"),
+      hasErrorCode: searchParams.has("errorCode"),
+      hasErrorMessage: searchParams.has("errorMessage"),
+      hasDappKeypair: (() => { try { return localStorage.getItem(`pinetree_ph_keypair_${sid}`) !== null } catch { return false } })(),
+      hasPhantomSession: getStoredPhantomSession(sid) !== null,
+      sessionId: sid,
+    })
+
+    // Check for user rejection before any decrypt attempt
+    const errCode = searchParams.get("errorCode")
+    const errMsg = searchParams.get("errorMessage") || ""
+    if (errCode || errMsg.toLowerCase().includes("reject") || errMsg.toLowerCase().includes("cancel")) {
+      setStatusMessage(`Transaction rejected in Phantom.${errMsg ? ` (${errMsg})` : ""}`)
+      setPageStatus("rejected")
+      await patchSessionStatus(sid, "rejected", `Phantom rejected: ${errMsg || errCode}`)
+      clearPhantomSession(sid)
+      return true
+    }
 
     if (action === "connect") {
-      // Phantom connect callback — decrypt session, proceed to sign
-      const phantomSession = decryptPhantomConnectResponse(searchParams)
-      if (!phantomSession) {
-        setStatusMessage("Failed to decrypt Phantom connect response. Please try again.")
+      const paramNames = Array.from(searchParams.keys())
+      const hasEncPubKey = searchParams.has("phantom_encryption_public_key")
+      const hasData = searchParams.has("data")
+      const hasNonce = searchParams.has("nonce")
+
+      if (!hasEncPubKey || !hasData || !hasNonce) {
+        const missing = (
+          [!hasEncPubKey && "phantom_encryption_public_key", !hasData && "data", !hasNonce && "nonce"] as (string | false)[]
+        ).filter(Boolean) as string[]
+        console.debug("[Phantom connect] missing params:", missing, "available:", paramNames)
+        setStatusMessage(
+          "Phantom returned to PineTree, but PineTree could not decrypt the approval response. " +
+          "This usually means the browser lost the approval keypair or Phantom returned an unexpected payload. " +
+          `(Missing: ${missing.join(", ")})`
+        )
         setPageStatus("failed")
-        await patchSessionStatus(loadedSession.id, "failed", "Phantom connect decrypt failed")
+        // Recoverable — do not mark session as permanently failed on server
+        return true
+      }
+
+      const phantomSession = decryptPhantomConnectResponse(sid, searchParams)
+      if (!phantomSession) {
+        const hasDappKeypair = (() => { try { return localStorage.getItem(`pinetree_ph_keypair_${sid}`) !== null } catch { return false } })()
+        console.debug("[Phantom connect decrypt failed]", { hasDappKeypair, sessionId: sid })
+        setStatusMessage(
+          "Phantom returned to PineTree, but PineTree could not decrypt the approval response. " +
+          "This usually means the browser lost the approval keypair or Phantom returned an unexpected payload."
+        )
+        setPageStatus("failed")
+        // Recoverable — do not mark session as permanently failed on server
         return true
       }
 
       // Validate public key matches merchant wallet address
       if (normalizeAddress(phantomSession.publicKey) !== normalizeAddress(loadedSession.wallet_address)) {
-        clearPhantomSession()
-        setStatusMessage(
-          "Connected wallet does not match the merchant wallet saved for this rail."
-        )
+        clearPhantomSession(sid)
+        setStatusMessage("Connected wallet does not match the merchant wallet saved for this rail.")
         setPageStatus("failed")
-        await patchSessionStatus(loadedSession.id, "failed", "Phantom public key mismatch")
+        await patchSessionStatus(sid, "failed", "Phantom public key mismatch")
         return true
       }
 
-      storePhantomSession(phantomSession)
-      await patchSessionStatus(loadedSession.id, "wallet_connected")
+      storePhantomSession(sid, phantomSession)
+      await patchSessionStatus(sid, "wallet_connected")
 
       const txBase64 = loadedSession.prepared_payload.unsigned_tx_base64
       if (!txBase64) {
         setStatusMessage("Missing prepared transaction data.")
         setPageStatus("failed")
-        await patchSessionStatus(loadedSession.id, "failed", "Missing unsigned_tx_base64")
+        await patchSessionStatus(sid, "failed", "Missing unsigned_tx_base64")
         return true
       }
 
-      await patchSessionStatus(loadedSession.id, "approval_requested")
+      await patchSessionStatus(sid, "approval_requested")
       const signUrl = buildPhantomSignAndSendUrl(
+        sid,
         txBase64,
         phantomSession,
         `${baseRedirect}?phantom_action=sign`
@@ -310,36 +360,29 @@ export default function WalletApprovalPage({
     }
 
     if (action === "sign") {
-      // Phantom sign callback — extract signature, complete session
-      const phantomSession = getStoredPhantomSession()
+      const phantomSession = getStoredPhantomSession(sid)
       if (!phantomSession) {
+        console.debug("[Phantom sign] session not found in localStorage", { sessionId: sid })
         setStatusMessage("Phantom session not found. Please start the approval again.")
         setPageStatus("failed")
-        await patchSessionStatus(loadedSession.id, "failed", "Phantom session lost")
+        await patchSessionStatus(sid, "failed", "Phantom session lost after sign redirect")
         return true
       }
 
-      const signature = decryptPhantomSignResponse(searchParams, phantomSession.phPublicKey)
+      const signature = decryptPhantomSignResponse(sid, searchParams, phantomSession.phPublicKey)
       if (!signature) {
-        const errCode = searchParams.get("errorCode")
-        if (errCode === "4001" || searchParams.get("errorMessage")?.toLowerCase().includes("reject")) {
-          setStatusMessage("Transaction rejected in Phantom.")
-          setPageStatus("rejected")
-          await patchSessionStatus(loadedSession.id, "rejected", "User rejected in Phantom")
-          clearPhantomSession()
-          return true
-        }
+        console.debug("[Phantom sign decrypt failed]", { sessionId: sid, hasData: searchParams.has("data"), hasNonce: searchParams.has("nonce") })
         setStatusMessage("Failed to extract signature from Phantom response.")
         setPageStatus("failed")
-        await patchSessionStatus(loadedSession.id, "failed", "Phantom sign decrypt failed")
+        await patchSessionStatus(sid, "failed", "Phantom sign decrypt failed")
         return true
       }
 
-      clearPhantomSession()
+      clearPhantomSession(sid)
       setPageStatus("recording")
       setStatusMessage("Recording transaction...")
 
-      const result = await completeSession(loadedSession.id, { signature })
+      const result = await completeSession(sid, { signature })
       if (result.ok) {
         setPageStatus("submitted")
         setStatusMessage("Transaction submitted.")
@@ -360,77 +403,122 @@ export default function WalletApprovalPage({
     const action = searchParams.get("solflare_action")
     if (!action) return false
 
+    const sid = loadedSession.id
     const appUrl = getAppUrl()
-    const baseRedirect = `${appUrl}/wallet-approval/${loadedSession.id}`
+    const baseRedirect = `${appUrl}/wallet-approval/${sid}`
+
+    // Safe debug logging — no private keys, secrets, or decrypted payloads
+    console.debug("[Solflare callback]", {
+      action,
+      paramNames: Array.from(searchParams.keys()),
+      hasSfEncPubKey: searchParams.has("solflare_encryption_public_key"),
+      hasData: searchParams.has("data"),
+      hasNonce: searchParams.has("nonce"),
+      hasErrorCode: searchParams.has("errorCode"),
+      hasErrorMessage: searchParams.has("errorMessage"),
+      hasDappKeypair: (() => { try { return localStorage.getItem(`pinetree_sf_keypair_${sid}`) !== null } catch { return false } })(),
+      hasSolflareSession: getSolflareStoredSession(sid) !== null,
+      sessionId: sid,
+    })
+
+    // Check for user rejection before any decrypt attempt
+    const errCode = searchParams.get("errorCode")
+    const errMsg = searchParams.get("errorMessage") || ""
+    if (errCode || errMsg.toLowerCase().includes("reject") || errMsg.toLowerCase().includes("cancel")) {
+      setStatusMessage(`Transaction rejected in Solflare.${errMsg ? ` (${errMsg})` : ""}`)
+      setPageStatus("rejected")
+      await patchSessionStatus(sid, "rejected", `Solflare rejected: ${errMsg || errCode}`)
+      clearSolflareSession(sid)
+      return true
+    }
 
     if (action === "connect") {
-      const solflareSession = decryptSolflareConnectResponse(searchParams)
-      if (!solflareSession) {
-        setStatusMessage("Failed to decrypt Solflare connect response. Please try again.")
+      const paramNames = Array.from(searchParams.keys())
+      const hasSfEncPubKey = searchParams.has("solflare_encryption_public_key")
+      const hasData = searchParams.has("data")
+      const hasNonce = searchParams.has("nonce")
+
+      if (!hasSfEncPubKey || !hasData || !hasNonce) {
+        const missing = (
+          [!hasSfEncPubKey && "solflare_encryption_public_key", !hasData && "data", !hasNonce && "nonce"] as (string | false)[]
+        ).filter(Boolean) as string[]
+        console.debug("[Solflare connect] missing params:", missing, "available:", paramNames)
+        setStatusMessage(
+          "Solflare returned to PineTree, but PineTree could not decrypt the approval response. " +
+          "This usually means the browser lost the approval keypair or Solflare returned an unexpected payload. " +
+          `(Missing: ${missing.join(", ")})`
+        )
         setPageStatus("failed")
-        await patchSessionStatus(loadedSession.id, "failed", "Solflare connect decrypt failed")
+        // Recoverable — do not mark session as permanently failed on server
+        return true
+      }
+
+      const solflareSession = decryptSolflareConnectResponse(searchParams, sid)
+      if (!solflareSession) {
+        console.debug("[Solflare connect decrypt failed]", { sessionId: sid })
+        setStatusMessage(
+          "Solflare returned to PineTree, but PineTree could not decrypt the approval response. " +
+          "This usually means the browser lost the approval keypair or Solflare returned an unexpected payload."
+        )
+        setPageStatus("failed")
+        // Recoverable — do not mark session as permanently failed on server
         return true
       }
 
       if (normalizeAddress(solflareSession.publicKey) !== normalizeAddress(loadedSession.wallet_address)) {
-        clearSolflareSession()
+        clearSolflareSession(sid)
         setStatusMessage("Connected wallet does not match the merchant wallet saved for this rail.")
         setPageStatus("failed")
-        await patchSessionStatus(loadedSession.id, "failed", "Solflare public key mismatch")
+        await patchSessionStatus(sid, "failed", "Solflare public key mismatch")
         return true
       }
 
-      storeSolflareSession(solflareSession)
-      await patchSessionStatus(loadedSession.id, "wallet_connected")
+      storeSolflareSession(solflareSession, sid)
+      await patchSessionStatus(sid, "wallet_connected")
 
       const txBase64 = loadedSession.prepared_payload.unsigned_tx_base64
       if (!txBase64) {
         setStatusMessage("Missing prepared transaction data.")
         setPageStatus("failed")
-        await patchSessionStatus(loadedSession.id, "failed", "Missing unsigned_tx_base64")
+        await patchSessionStatus(sid, "failed", "Missing unsigned_tx_base64")
         return true
       }
 
-      await patchSessionStatus(loadedSession.id, "approval_requested")
+      await patchSessionStatus(sid, "approval_requested")
       const signUrl = buildSolflareSignAndSendUrl(
         txBase64,
         solflareSession,
-        `${baseRedirect}?solflare_action=sign`
+        `${baseRedirect}?solflare_action=sign`,
+        sid
       )
       window.location.href = signUrl
       return true
     }
 
     if (action === "sign") {
-      const solflareSession = getSolflareStoredSession()
+      const solflareSession = getSolflareStoredSession(sid)
       if (!solflareSession) {
+        console.debug("[Solflare sign] session not found in localStorage", { sessionId: sid })
         setStatusMessage("Solflare session not found. Please start the approval again.")
         setPageStatus("failed")
-        await patchSessionStatus(loadedSession.id, "failed", "Solflare session lost")
+        await patchSessionStatus(sid, "failed", "Solflare session lost after sign redirect")
         return true
       }
 
-      const signature = decryptSolflareSignResponse(searchParams, solflareSession.sfPublicKey)
+      const signature = decryptSolflareSignResponse(searchParams, solflareSession.sfPublicKey, sid)
       if (!signature) {
-        const errCode = searchParams.get("errorCode")
-        if (errCode === "4001" || searchParams.get("errorMessage")?.toLowerCase().includes("reject")) {
-          setStatusMessage("Transaction rejected in Solflare.")
-          setPageStatus("rejected")
-          await patchSessionStatus(loadedSession.id, "rejected", "User rejected in Solflare")
-          clearSolflareSession()
-          return true
-        }
+        console.debug("[Solflare sign decrypt failed]", { sessionId: sid })
         setStatusMessage("Failed to extract signature from Solflare response.")
         setPageStatus("failed")
-        await patchSessionStatus(loadedSession.id, "failed", "Solflare sign decrypt failed")
+        await patchSessionStatus(sid, "failed", "Solflare sign decrypt failed")
         return true
       }
 
-      clearSolflareSession()
+      clearSolflareSession(sid)
       setPageStatus("recording")
       setStatusMessage("Recording transaction...")
 
-      const result = await completeSession(loadedSession.id, { signature })
+      const result = await completeSession(sid, { signature })
       if (result.ok) {
         setPageStatus("submitted")
         setStatusMessage("Transaction submitted.")
@@ -752,6 +840,7 @@ export default function WalletApprovalPage({
     }
 
     const connectUrl = buildPhantomConnectUrl(
+      session.id,
       `${baseRedirect}?phantom_action=connect`,
       appUrl
     )
@@ -775,7 +864,8 @@ export default function WalletApprovalPage({
 
     const connectUrl = buildSolflareConnectUrl(
       `${baseRedirect}?solflare_action=connect`,
-      appUrl
+      appUrl,
+      session.id
     )
     window.location.href = connectUrl
   }
@@ -968,6 +1058,8 @@ export default function WalletApprovalPage({
                   <button
                     type="button"
                     onClick={() => {
+                      if (session?.wallet_type === "phantom")  clearPhantomSession(session.id)
+                      else if (session?.wallet_type === "solflare") clearSolflareSession(session.id)
                       signingRef.current = false
                       setPageStatus("ready")
                       setStatusMessage("")
@@ -988,6 +1080,8 @@ export default function WalletApprovalPage({
                   <button
                     type="button"
                     onClick={() => {
+                      if (session?.wallet_type === "phantom")  clearPhantomSession(session.id)
+                      else if (session?.wallet_type === "solflare") clearSolflareSession(session.id)
                       signingRef.current = false
                       setPageStatus("ready")
                       setStatusMessage("")

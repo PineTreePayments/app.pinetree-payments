@@ -4,19 +4,16 @@
  * Protocol: X25519 ECDH shared secret + NaCl box encryption (tweetnacl).
  * Encoding: base58 for all keys, nonces, and encrypted payloads (bs58 v4).
  *
- * Nearly identical to lib/solflareDeeplink.ts but targets Phantom's endpoints
- * and uses phantom_encryption_public_key in the connect response.
+ * All storage functions take sessionId so each approval session is isolated
+ * in localStorage (survives iOS Safari app-switch; sessionStorage does not).
+ *
+ * Keys: pinetree_ph_keypair_{sessionId} / pinetree_ph_session_{sessionId}
  *
  * Docs: https://docs.phantom.com/phantom-deeplinks/provider-methods
  */
 
 import nacl from "tweetnacl"
 import bs58 from "bs58"
-
-// ── Storage keys (approval-page-scoped, kept separate from Solflare keys) ─────
-
-const KEYPAIR_KEY = "pinetree_ph_keypair"
-const SESSION_KEY = "pinetree_ph_session"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -28,11 +25,21 @@ export type PhantomSession = {
 
 type StoredKeypair = { publicKey: number[]; secretKey: number[] }
 
+// ── Storage key builders ──────────────────────────────────────────────────────
+
+function keypairKey(sessionId: string): string {
+  return `pinetree_ph_keypair_${sessionId}`
+}
+
+function sessionKey(sessionId: string): string {
+  return `pinetree_ph_session_${sessionId}`
+}
+
 // ── Keypair management ────────────────────────────────────────────────────────
 
-function loadStoredKeypair(): nacl.BoxKeyPair | null {
+function loadStoredKeypair(sessionId: string): nacl.BoxKeyPair | null {
   try {
-    const raw = sessionStorage.getItem(KEYPAIR_KEY)
+    const raw = localStorage.getItem(keypairKey(sessionId))
     if (!raw) return null
     const parsed = JSON.parse(raw) as StoredKeypair
     return {
@@ -44,9 +51,9 @@ function loadStoredKeypair(): nacl.BoxKeyPair | null {
   }
 }
 
-function saveKeypair(kp: nacl.BoxKeyPair): void {
-  sessionStorage.setItem(
-    KEYPAIR_KEY,
+function saveKeypair(sessionId: string, kp: nacl.BoxKeyPair): void {
+  localStorage.setItem(
+    keypairKey(sessionId),
     JSON.stringify({
       publicKey: Array.from(kp.publicKey),
       secretKey: Array.from(kp.secretKey),
@@ -54,21 +61,21 @@ function saveKeypair(kp: nacl.BoxKeyPair): void {
   )
 }
 
-export function getDappKeypair(): nacl.BoxKeyPair {
-  return loadStoredKeypair() ?? createAndStoreKeypair()
+export function getDappKeypair(sessionId: string): nacl.BoxKeyPair {
+  return loadStoredKeypair(sessionId) ?? createAndStoreKeypair(sessionId)
 }
 
-export function createAndStoreKeypair(): nacl.BoxKeyPair {
+export function createAndStoreKeypair(sessionId: string): nacl.BoxKeyPair {
   const kp = nacl.box.keyPair()
-  saveKeypair(kp)
+  saveKeypair(sessionId, kp)
   return kp
 }
 
 // ── Session management ────────────────────────────────────────────────────────
 
-export function getStoredPhantomSession(): PhantomSession | null {
+export function getStoredPhantomSession(sessionId: string): PhantomSession | null {
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY)
+    const raw = localStorage.getItem(sessionKey(sessionId))
     if (!raw) return null
     return JSON.parse(raw) as PhantomSession
   } catch {
@@ -76,19 +83,19 @@ export function getStoredPhantomSession(): PhantomSession | null {
   }
 }
 
-export function storePhantomSession(session: PhantomSession): void {
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(session))
+export function storePhantomSession(sessionId: string, session: PhantomSession): void {
+  localStorage.setItem(sessionKey(sessionId), JSON.stringify(session))
 }
 
-export function clearPhantomSession(): void {
-  sessionStorage.removeItem(SESSION_KEY)
-  sessionStorage.removeItem(KEYPAIR_KEY)
+export function clearPhantomSession(sessionId: string): void {
+  localStorage.removeItem(sessionKey(sessionId))
+  localStorage.removeItem(keypairKey(sessionId))
 }
 
 // ── Shared-secret helper ──────────────────────────────────────────────────────
 
-function sharedSecret(phPublicKey: string): Uint8Array {
-  const kp = getDappKeypair()
+function sharedSecret(sessionId: string, phPublicKey: string): Uint8Array {
+  const kp = getDappKeypair(sessionId)
   return nacl.box.before(bs58.decode(phPublicKey), kp.secretKey)
 }
 
@@ -96,14 +103,20 @@ function sharedSecret(phPublicKey: string): Uint8Array {
 
 /**
  * Builds a Phantom UL v1 connect URL.
- * Generates a fresh dapp keypair so each connect attempt uses a new key.
+ * Generates a fresh dapp keypair (stored in localStorage) so each connect
+ * attempt uses a new key and the same key survives the iOS app-switch redirect.
  *
+ * @param sessionId    - Approval session UUID (used as localStorage key suffix).
  * @param redirectLink - Full URL Phantom will redirect to after connect,
  *   e.g. https://app.pinetree-payments.com/wallet-approval/abc?phantom_action=connect
- * @param appUrl - Origin of the dapp, displayed by Phantom.
+ * @param appUrl       - Origin of the dapp, displayed by Phantom.
  */
-export function buildPhantomConnectUrl(redirectLink: string, appUrl: string): string {
-  const kp = createAndStoreKeypair()
+export function buildPhantomConnectUrl(
+  sessionId: string,
+  redirectLink: string,
+  appUrl: string,
+): string {
+  const kp = createAndStoreKeypair(sessionId)
   const params = new URLSearchParams({
     dapp_encryption_public_key: bs58.encode(kp.publicKey),
     cluster: "mainnet-beta",
@@ -115,20 +128,22 @@ export function buildPhantomConnectUrl(redirectLink: string, appUrl: string): st
 
 /**
  * Builds a Phantom UL v1 signAndSendTransaction URL.
- * The transaction + session are encrypted in the payload.
+ * The transaction + session are encrypted with the stored dapp keypair.
  *
- * @param transactionBase64 - Base64-encoded serialized Solana transaction.
- * @param session - Active Phantom session from a prior connect.
- * @param redirectLink - Full URL Phantom will redirect to after signing.
+ * @param sessionId          - Approval session UUID.
+ * @param transactionBase64  - Base64-encoded serialized Solana transaction.
+ * @param session            - Active Phantom session from a prior connect.
+ * @param redirectLink       - Full URL Phantom will redirect to after signing.
  */
 export function buildPhantomSignAndSendUrl(
+  sessionId: string,
   transactionBase64: string,
   session: PhantomSession,
   redirectLink: string,
 ): string {
-  const kp = getDappKeypair()
+  const kp = getDappKeypair(sessionId)
   const nonce = nacl.randomBytes(24)
-  const secret = sharedSecret(session.phPublicKey)
+  const secret = sharedSecret(sessionId, session.phPublicKey)
 
   // Convert base64 transaction bytes → base58 (Phantom protocol requirement)
   const txBase58 = bs58.encode(Buffer.from(transactionBase64, "base64"))
@@ -151,18 +166,20 @@ export function buildPhantomSignAndSendUrl(
  * Decrypts the Phantom connect response params.
  * Returns a PhantomSession on success, null on failure.
  *
- * Expected params added by Phantom:
- *   phantom_encryption_public_key, nonce, data
+ * Expected params added by Phantom: phantom_encryption_public_key, nonce, data
  * Decrypted data contains: { public_key, session }
  */
-export function decryptPhantomConnectResponse(params: URLSearchParams): PhantomSession | null {
+export function decryptPhantomConnectResponse(
+  sessionId: string,
+  params: URLSearchParams,
+): PhantomSession | null {
   try {
     const phPublicKey = params.get("phantom_encryption_public_key")
     const data = params.get("data")
     const nonce = params.get("nonce")
     if (!phPublicKey || !data || !nonce) return null
 
-    const secret = sharedSecret(phPublicKey)
+    const secret = sharedSecret(sessionId, phPublicKey)
     const decrypted = nacl.box.open.after(bs58.decode(data), bs58.decode(nonce), secret)
     if (!decrypted) return null
 
@@ -186,6 +203,7 @@ export function decryptPhantomConnectResponse(params: URLSearchParams): PhantomS
  * Decrypted data contains: { signature }
  */
 export function decryptPhantomSignResponse(
+  sessionId: string,
   params: URLSearchParams,
   phPublicKey: string,
 ): string | null {
@@ -193,7 +211,7 @@ export function decryptPhantomSignResponse(
     const data = params.get("data")
     const nonce = params.get("nonce")
     if (data && nonce) {
-      const secret = sharedSecret(phPublicKey)
+      const secret = sharedSecret(sessionId, phPublicKey)
       const decrypted = nacl.box.open.after(bs58.decode(data), bs58.decode(nonce), secret)
       if (decrypted) {
         const parsed = JSON.parse(new TextDecoder().decode(decrypted)) as {
