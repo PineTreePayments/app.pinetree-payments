@@ -557,6 +557,18 @@ function getDestinationAssetOptions(wallet: SelectedWallet | null) {
   return SETTLEMENT_ASSET_NETWORK_OPTIONS.filter((option) => option.network === wallet.rail)
 }
 
+function networkDisplayLabel(network: string): string {
+  if (network === "solana") return "Solana"
+  if (network === "base") return "Base"
+  if (network === "ethereum") return "Ethereum"
+  if (network === "bitcoin_lightning") return "Bitcoin Lightning"
+  return network ? network.charAt(0).toUpperCase() + network.slice(1) : ""
+}
+
+function assetNetworkDisplayLabel(asset: string, network: string): string {
+  return `${asset} on ${networkDisplayLabel(network)}`
+}
+
 function getMeshImportOptions(walletNetwork: string) {
   if (walletNetwork === "solana") {
     return [
@@ -887,6 +899,10 @@ export default function WalletsPage() {
   const [nwcAdvancedOpen, setNwcAdvancedOpen] = useState(false)
   const [addressBookNotice, setAddressBookNotice] = useState<string | null>(null)
 
+  // Global Address Book modal state (wallet-neutral view of all saved addresses)
+  const [addressBookOpen, setAddressBookOpen] = useState(false)
+  const [addressBookFilter, setAddressBookFilter] = useState<"all" | "solana" | "base">("all")
+
   // Mesh exchange connection state
   const [meshLinking, setMeshLinking] = useState(false)
   const [meshLinkError, setMeshLinkError] = useState<string | null>(null)
@@ -911,6 +927,15 @@ export default function WalletsPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, selectedWallet?.id])
+
+  // Load all destinations when the global Address Book opens (no wallet required)
+  useEffect(() => {
+    if (addressBookOpen) {
+      loadSettlementDestinations()
+      setAddressBookFilter("all")
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addressBookOpen])
 
   useEffect(() => {
     const defaultAsset = getDefaultCashOutAsset(selectedWallet)
@@ -977,6 +1002,8 @@ export default function WalletsPage() {
     setSettlementActivityExpanded(false)
     setSettlementAdvancedOpen(false)
     setNwcAdvancedOpen(false)
+    // Address book notice clears on wallet change (the modal itself stays open if already open)
+    setAddressBookNotice(null)
     // Mesh state reset
     setMeshLinking(false)
     setMeshLinkError(null)
@@ -2110,6 +2137,14 @@ export default function WalletsPage() {
   const savedDestinationsForWallet = settlementDestinations.filter((dest) =>
     selectedWallet && !selectedWallet.isLightning && dest.network === selectedWallet.rail
   )
+  const addressBookFilteredDestinations = settlementDestinations.filter((dest) => {
+    if (addressBookFilter === "all") return true
+    return dest.network === addressBookFilter
+  })
+  // When the global address book is open without a selected wallet, allow all networks in the Add Address form
+  const activeAddressFormOptions = (addressBookOpen && !selectedWallet)
+    ? SETTLEMENT_ASSET_NETWORK_OPTIONS
+    : destinationAssetOptions
   const firstAddressBookWallet = wallets[0] ? buildConnectedWallet(wallets[0]) : null
   const selectedSendDestination = sendSavedDestinations.find((dest) => dest.id === sendSavedDestinationId) || null
   const activeSendDestinationAddress = sendDestinationMode === "saved"
@@ -2270,22 +2305,18 @@ export default function WalletsPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <p className="text-base font-semibold text-gray-950">Wallet Addresses</p>
-                <NetworkStatusPill label="Exchange address book" tone="blue" className="min-h-6 px-2 text-[10px]" />
+                <p className="text-base font-semibold text-gray-950">PineTree Address Book</p>
+                <NetworkStatusPill label="Global address book" tone="blue" className="min-h-6 px-2 text-[10px]" />
               </div>
               <p className="mt-2 text-sm leading-5 text-gray-600">
-                Save exchange or wallet addresses for faster sends.
+                Saved exchange and wallet addresses for faster sends.
               </p>
             </div>
             <button
               type="button"
               onClick={() => {
-                if (!firstAddressBookWallet) {
-                  setAddressBookNotice("Open a connected Solana or Base wallet to manage saved addresses.")
-                  return
-                }
                 setAddressBookNotice(null)
-                openWalletDetail(firstAddressBookWallet, "settlement")
+                setAddressBookOpen(true)
               }}
               className={cx(pineTreeSecondaryActionButton, "shrink-0 sm:w-auto")}
             >
@@ -2550,6 +2581,205 @@ export default function WalletsPage() {
         </div>
       )}
 
+      {/* ── Global Address Book Modal ───────────────────────────────────────── */}
+      {addressBookOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/50 p-0 sm:items-start sm:p-6"
+          onMouseDown={() => setAddressBookOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="PineTree Address Book"
+            className="relative mt-0 max-h-[94dvh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-white/70 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.22)] sm:mt-8 sm:rounded-2xl"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
+                  Address Book
+                </p>
+                <h2 className="mt-0.5 text-lg font-semibold text-gray-950">PineTree Address Book</h2>
+                <p className="mt-0.5 text-xs leading-5 text-gray-500">
+                  Saved exchange and wallet addresses for faster sends. Addresses shown here span all connected wallets.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAddressBookOpen(false)}
+                className="inline-flex h-8 shrink-0 items-center justify-center rounded-full bg-gray-100 px-3 text-[11px] font-semibold text-gray-700 shadow-sm transition hover:bg-gray-200 focus:outline-none focus:ring-4 focus:ring-gray-100"
+              >
+                Close
+              </button>
+            </div>
+
+            {/* Network filter tabs */}
+            <div className="flex items-center gap-1 border-b border-gray-100 px-5 py-2.5">
+              {(["all", "solana", "base"] as const).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setAddressBookFilter(f)}
+                  className={cx(
+                    "rounded-lg px-3 py-1.5 text-xs font-semibold transition",
+                    addressBookFilter === f
+                      ? "bg-[#0052FF] text-white shadow-sm"
+                      : "text-gray-500 hover:bg-gray-100"
+                  )}
+                >
+                  {f === "all" ? "All" : networkDisplayLabel(f)}
+                </button>
+              ))}
+              <span className="ml-auto text-xs text-gray-400">
+                {addressBookFilteredDestinations.length} address{addressBookFilteredDestinations.length === 1 ? "" : "es"}
+              </span>
+            </div>
+
+            {/* Address list */}
+            <div className="p-5">
+              {destLoadError && (
+                <div className="mb-4 rounded-xl border border-red-100 bg-red-50/70 p-3 text-sm text-red-800">
+                  {destLoadError}
+                </div>
+              )}
+
+              {destLoading ? (
+                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 px-4 py-8 text-center text-sm text-gray-500">
+                  Loading addresses…
+                </div>
+              ) : addressBookFilteredDestinations.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50/50 px-4 py-10 text-center">
+                  <p className="text-sm font-semibold text-gray-700">
+                    {addressBookFilter === "all" ? "No saved addresses yet" : `No ${networkDisplayLabel(addressBookFilter)} addresses saved`}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-gray-500">
+                    Add an address below to make future sends faster.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {addressBookFilteredDestinations.map((dest) => (
+                    <div key={dest.id} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm transition hover:border-[#0052FF]/20">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-gray-950">{dest.label}</p>
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                            <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
+                              {getDestinationAccountTypeLabel(dest.account_type)}
+                            </span>
+                            <span className={cx(
+                              "rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+                              dest.source === "mesh" || dest.connected_provider === "mesh"
+                                ? "border-[#0052FF]/25 bg-[#0052FF]/10 text-[#0052FF]"
+                                : "border-gray-200 bg-gray-50 text-gray-500"
+                            )}>
+                              {getDestinationSourceLabel(dest)}
+                            </span>
+                            {dest.institution_name && (
+                              <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-medium text-gray-500">
+                                {dest.institution_name}
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-0.5 text-[11px] text-gray-400">{dest.exchange_name}</p>
+                        </div>
+                        <span className="shrink-0 rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 px-2.5 py-1 text-[11px] font-semibold text-[#0052FF]">
+                          {assetNetworkDisplayLabel(dest.asset, dest.network)}
+                        </span>
+                      </div>
+                      <p className="mt-2 font-mono text-xs text-gray-400" title={dest.address}>
+                        {formatSettlementAddress(dest.address)}
+                      </p>
+                      {dest.memo_or_tag && (
+                        <p className="mt-0.5 text-[10px] text-gray-400">Memo: {dest.memo_or_tag}</p>
+                      )}
+
+                      {destDeleteConfirmId === dest.id ? (
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <p className="text-xs font-semibold text-gray-700">Delete this address?</p>
+                          <button type="button" onClick={() => setDestDeleteConfirmId(null)} disabled={destDeleting} className={pineTreeSecondaryActionButton}>
+                            Cancel
+                          </button>
+                          <button type="button" onClick={() => deleteSettlementDestination(dest.id)} disabled={destDeleting} className={pineTreeDangerActionButton}>
+                            {destDeleting ? "Deleting…" : "Delete"}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDestForm({
+                                id: dest.id,
+                                label: dest.label,
+                                exchangeName: dest.exchange_name,
+                                assetNetwork: destAssetNetworkValue(dest),
+                                address: dest.address,
+                                memoOrTag: dest.memo_or_tag || "",
+                                isDefault: false,
+                                confirmed: true,
+                                accountType: dest.account_type || "other",
+                                personalExchangeAcknowledged: dest.account_type === "personal_exchange"
+                              })
+                              setDestSaveError(null)
+                              setDestModalOpen(true)
+                            }}
+                            className={pineTreeSecondaryActionButton}
+                          >
+                            Edit
+                          </button>
+                          <button type="button" onClick={() => setDestDeleteConfirmId(dest.id)} className={pineTreeDangerActionButton}>
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Footer actions */}
+            <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setDestForm({ ...emptyDestinationForm(), assetNetwork: SETTLEMENT_ASSET_NETWORK_OPTIONS[0].value })
+                  setDestSaveError(null)
+                  setDestModalOpen(true)
+                }}
+                className={pineTreePrimaryButton}
+              >
+                Add Address
+              </button>
+              {MESH_CONNECT_ENABLED ? (
+                <button
+                  type="button"
+                  onClick={connectExchange}
+                  disabled={meshLinking}
+                  className={pineTreeSecondaryActionButton}
+                >
+                  {meshLinking ? "Connecting..." : "Connect Exchange"}
+                </button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button type="button" disabled className={cx(pineTreeSecondaryActionButton, "cursor-not-allowed opacity-55")}>
+                    Connect Exchange
+                  </button>
+                  <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-500">
+                    Not configured
+                  </span>
+                </div>
+              )}
+              <p className="w-full text-xs leading-5 text-gray-400">
+                Saved addresses do not affect where customer payments are received.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {destModalOpen && (
         <div
           className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-3"
@@ -2677,7 +2907,7 @@ export default function WalletsPage() {
                   className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-semibold text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
                 >
                   <option value="">Select asset and network…</option>
-                  {destinationAssetOptions.map((opt) => (
+                  {activeAddressFormOptions.map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </select>
@@ -3113,15 +3343,29 @@ export default function WalletsPage() {
 
                   {sendStep === "prepared" && sendRecord && (
                     <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                      <p className="text-sm font-semibold text-gray-950">Confirm in Wallet</p>
+                      <p className="text-sm font-semibold text-gray-950">Approve Transfer</p>
                       <div className="mt-3 grid gap-2">
                         <CompactStatusRow label="Asset" value={sendRecord.transfer.asset} />
-                        <CompactStatusRow label="Network" value={sendRecord.transfer.network === "base" ? "Base" : "Solana"} />
+                        <CompactStatusRow label="Network" value={networkDisplayLabel(sendRecord.transfer.network)} />
                         <CompactStatusRow label="Amount" value={`${sendRecord.transfer.amount} ${sendRecord.transfer.asset}`} />
                         {selectedSendDestination && <CompactStatusRow label="Destination nickname" value={selectedSendDestination.label} />}
                         <CompactStatusRow label="Destination address" value={formatSettlementAddress(sendRecord.transfer.destination_address)} />
                         <CompactStatusRow label="Estimated fee" value={sendRecord.transfer.estimated_fee_label} />
                       </div>
+
+                      {/* Approval method info */}
+                      <div className="mt-3 rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-3">
+                        <p className="text-xs font-semibold text-gray-800">Approve on this device</p>
+                        <p className="mt-1 text-xs leading-5 text-gray-600">
+                          {sendRecord.transfer.network === "solana"
+                            ? "Your Phantom or Solflare browser extension must be installed and unlocked on this device."
+                            : "Your MetaMask or Base Wallet browser extension must be installed and unlocked on this device."}
+                        </p>
+                        <p className="mt-1.5 text-[10px] leading-4 text-gray-400">
+                          Mobile wallet approval for sends is not yet available. Use a device where your wallet extension is installed and sign from there.
+                        </p>
+                      </div>
+
                       {sendError && (
                         <p className="mt-3 rounded-xl border border-red-100 bg-red-50/70 p-3 text-sm leading-6 text-red-700">
                           {sendError}
@@ -3205,27 +3449,39 @@ export default function WalletsPage() {
                         ) : (
                           <div className="space-y-2">
                             {savedDestinationsForWallet.map((dest) => (
-                              <div key={dest.id} className="rounded-xl border border-gray-100 bg-gray-50/70 p-3">
+                              <div key={dest.id} className="rounded-2xl border border-gray-100 bg-white p-3.5 shadow-sm transition hover:border-[#0052FF]/20">
                                 <div className="flex flex-wrap items-start justify-between gap-2">
-                                  <div className="min-w-0">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <p className="min-w-0 truncate text-sm font-semibold text-gray-950">{dest.label}</p>
-                                      <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-700">
+                                  <div className="min-w-0 flex-1">
+                                    <p className="min-w-0 truncate text-sm font-semibold text-gray-950">{dest.label}</p>
+                                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                      <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
                                         {getDestinationAccountTypeLabel(dest.account_type)}
                                       </span>
-                                      <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-600">
+                                      <span className={cx(
+                                        "rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+                                        dest.source === "mesh" || dest.connected_provider === "mesh"
+                                          ? "border-[#0052FF]/25 bg-[#0052FF]/10 text-[#0052FF]"
+                                          : "border-gray-200 bg-gray-50 text-gray-500"
+                                      )}>
                                         {dest.source === "mesh" || dest.connected_provider === "mesh" ? "Mesh Connected" : "Manual"}
                                       </span>
+                                      {dest.institution_name && (
+                                        <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-medium text-gray-500">
+                                          {dest.institution_name}
+                                        </span>
+                                      )}
                                     </div>
-                                    <p className="mt-1 text-xs text-gray-500">{dest.exchange_name}</p>
                                   </div>
-                                  <span className="shrink-0 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-700">
-                                    {dest.asset} · {dest.network}
+                                  <span className="shrink-0 rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 px-2.5 py-1 text-[11px] font-semibold text-[#0052FF]">
+                                    {assetNetworkDisplayLabel(dest.asset, dest.network)}
                                   </span>
                                 </div>
-                                <p className="mt-2 truncate font-mono text-xs text-gray-500" title={dest.address}>
+                                <p className="mt-2 truncate font-mono text-xs text-gray-400" title={dest.address}>
                                   {formatSettlementAddress(dest.address)}
                                 </p>
+                                {dest.memo_or_tag && (
+                                  <p className="mt-0.5 text-[10px] text-gray-400">Memo: {dest.memo_or_tag}</p>
+                                )}
 
                                 {destDeleteConfirmId === dest.id ? (
                                   <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -3453,7 +3709,7 @@ export default function WalletsPage() {
                             <div className="space-y-3">
                               <CompactStatusRow label="Destination"    value={withdrawReview.label} />
                               <CompactStatusRow label="Exchange"       value={withdrawReview.exchange_name} />
-                              <CompactStatusRow label="Asset / Network" value={`${withdrawReview.asset} on ${withdrawReview.network}`} />
+                              <CompactStatusRow label="Asset / Network" value={`${withdrawReview.asset} on ${networkDisplayLabel(withdrawReview.network)}`} />
                               <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-3.5 py-3">
                                 <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-400">Address</span>
                                 <div className="flex min-w-0 items-center gap-2">
@@ -3567,7 +3823,7 @@ export default function WalletsPage() {
                           {/* Network mismatch warning */}
                           {withdrawReview.network !== selectedWallet?.rail && (
                             <div className="rounded-xl border border-red-100 bg-red-50/70 p-3.5 text-sm text-red-800">
-                              Network mismatch: this destination is for <strong>{withdrawReview.network}</strong> but your connected wallet is on <strong>{selectedWallet?.rail}</strong>. Please select a matching destination or connect the correct wallet.
+                              Network mismatch: this destination is for <strong>{networkDisplayLabel(withdrawReview.network)}</strong> but your connected wallet is on <strong>{networkDisplayLabel(selectedWallet?.rail ?? "")}</strong>. Please select a matching destination or connect the correct wallet.
                             </div>
                           )}
 
@@ -3613,7 +3869,7 @@ export default function WalletsPage() {
                           <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                             <div className="space-y-3">
                               <CompactStatusRow label="Destination"    value={withdrawReview.label} />
-                              <CompactStatusRow label="Asset / Network" value={`${withdrawRecord.withdrawal.asset} on ${withdrawRecord.withdrawal.network}`} />
+                              <CompactStatusRow label="Asset / Network" value={`${withdrawRecord.withdrawal.asset} on ${networkDisplayLabel(withdrawRecord.withdrawal.network)}`} />
                               <CompactStatusRow label="Amount"         value={`${withdrawRecord.withdrawal.amount} ${withdrawRecord.withdrawal.asset}`} />
                               <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-3.5 py-3">
                                 <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-400">To Address</span>
@@ -3682,7 +3938,7 @@ export default function WalletsPage() {
                           <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                             <div className="space-y-3">
                               <CompactStatusRow label="Destination"    value={withdrawRecord.withdrawal.destination_label} />
-                              <CompactStatusRow label="Asset / Network" value={`${withdrawRecord.withdrawal.asset} on ${withdrawRecord.withdrawal.network}`} />
+                              <CompactStatusRow label="Asset / Network" value={`${withdrawRecord.withdrawal.asset} on ${networkDisplayLabel(withdrawRecord.withdrawal.network)}`} />
                               <CompactStatusRow label="Amount"         value={`${withdrawRecord.withdrawal.amount} ${withdrawRecord.withdrawal.asset}`} />
                               <CompactStatusRow label="Status"         value="Submitted" />
                             </div>
@@ -3999,7 +4255,7 @@ export default function WalletsPage() {
                                       </span>
                                     </div>
                                     <p className="mt-0.5 text-xs text-gray-500">
-                                      {w.amount} {w.asset} · {w.network} · {w.exchange_name}
+                                      {w.amount} {w.asset} · {networkDisplayLabel(w.network)} · {w.exchange_name}
                                     </p>
                                     {w.tx_hash && (
                                       <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -4091,26 +4347,26 @@ export default function WalletsPage() {
                                 return (
                                   <div
                                     key={dest.id}
-                                    className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4 transition"
+                                    className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm transition hover:border-[#0052FF]/20"
                                   >
                                     <div className="flex flex-wrap items-start justify-between gap-2">
-                                      <div className="min-w-0">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                          <p className="text-sm font-semibold text-gray-950">{dest.label}</p>
-                                          <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-700">
+                                      <div className="min-w-0 flex-1">
+                                        <p className="text-sm font-semibold text-gray-950">{dest.label}</p>
+                                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                          <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
                                             {getDestinationAccountTypeLabel(dest.account_type)}
                                           </span>
                                           <span className={cx(
                                             "rounded-full border px-2 py-0.5 text-[10px] font-semibold",
                                             dest.source === "mesh" || dest.connected_provider === "mesh"
                                               ? "border-[#0052FF]/25 bg-[#0052FF]/10 text-[#0052FF]"
-                                              : "border-gray-200 bg-white text-gray-600"
+                                              : "border-gray-200 bg-gray-50 text-gray-500"
                                           )}>
                                             {getDestinationSourceLabel(dest)}
                                           </span>
-                                          {false && dest.is_default && (
-                                            <span className="rounded-full border border-[#0052FF]/25 bg-[#0052FF]/10 px-2 py-0.5 text-[10px] font-semibold text-[#0052FF]">
-                                              Preferred · {dest.asset}
+                                          {dest.institution_name && (
+                                            <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-medium text-gray-500">
+                                              {dest.institution_name}
                                             </span>
                                           )}
                                           {!isCompatible && selectedWallet?.rail && (
@@ -4119,17 +4375,17 @@ export default function WalletsPage() {
                                             </span>
                                           )}
                                         </div>
-                                        <p className="mt-0.5 text-xs text-gray-500">{dest.exchange_name}</p>
+                                        <p className="mt-0.5 text-[11px] text-gray-400">{dest.exchange_name}</p>
                                       </div>
-                                      <span className="shrink-0 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-700 shadow-sm">
-                                        {dest.asset} · {dest.network}
+                                      <span className="shrink-0 rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 px-2.5 py-1 text-[11px] font-semibold text-[#0052FF]">
+                                        {assetNetworkDisplayLabel(dest.asset, dest.network)}
                                       </span>
                                     </div>
-                                    <p className="mt-2 font-mono text-xs text-gray-500" title={dest.address}>
+                                    <p className="mt-2 font-mono text-xs text-gray-400" title={dest.address}>
                                       {formatSettlementAddress(dest.address)}
                                     </p>
                                     {dest.memo_or_tag && (
-                                      <p className="mt-1 text-xs text-gray-400">Memo: {dest.memo_or_tag}</p>
+                                      <p className="mt-0.5 text-[10px] text-gray-400">Memo: {dest.memo_or_tag}</p>
                                     )}
 
                                     {destDeleteConfirmId === dest.id ? (
@@ -4198,7 +4454,7 @@ export default function WalletsPage() {
                                           onClick={() => setWithdrawReview(dest)}
                                           disabled={!isCompatible}
                                           title={!isCompatible && selectedWallet?.rail
-                                            ? `This destination is for ${dest.network} — connect a ${dest.network} wallet to withdraw`
+                                            ? `This destination is for ${networkDisplayLabel(dest.network)} — connect a ${networkDisplayLabel(dest.network)} wallet to withdraw`
                                             : undefined}
                                           className={cx(
                                             pineTreeSecondaryActionButton,
@@ -4469,7 +4725,7 @@ export default function WalletsPage() {
                                     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600">
                                       <span className="font-semibold">{w.amount} {w.asset}</span>
                                       <span className="text-gray-300">·</span>
-                                      <span>{w.network}</span>
+                                      <span>{networkDisplayLabel(w.network)}</span>
                                       <span className="text-gray-300">·</span>
                                       <span className="text-gray-400">{formatChicagoDateTime(w.created_at)}</span>
                                     </div>
