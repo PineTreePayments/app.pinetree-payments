@@ -3310,14 +3310,14 @@ export default function WalletsPage() {
                       <p className="text-sm font-semibold text-gray-950">Review Send</p>
                       <div className="mt-3 grid gap-2">
                         <CompactStatusRow label="Asset" value={sendAsset.asset} />
-                        <CompactStatusRow label="Network" value={sendAsset.network === "base" ? "Base" : "Solana"} />
+                        <CompactStatusRow label="Network" value={networkDisplayLabel(sendAsset.network)} />
                         <CompactStatusRow label="Amount" value={`${sendAmount} ${sendAsset.asset}`} />
                         {selectedSendDestination && <CompactStatusRow label="Destination nickname" value={selectedSendDestination.label} />}
                         <CompactStatusRow label="Destination address" value={formatSettlementAddress(activeSendDestinationAddress)} />
                         <CompactStatusRow label="Estimated fee" value="wallet will estimate" />
                       </div>
                       <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-xs leading-5 text-amber-800">
-                        Only send to an address on the selected network. Your wallet must approve before funds move.
+                        Only send to an address on the selected network. Your wallet will prompt you to approve before funds move.
                       </p>
                       {sendError && (
                         <p className="mt-3 rounded-xl border border-red-100 bg-red-50/70 p-3 text-sm leading-6 text-red-700">
@@ -3329,7 +3329,7 @@ export default function WalletsPage() {
                           Cancel
                         </button>
                         <button type="button" onClick={prepareDirectSend} className={pineTreePrimaryButton}>
-                          Confirm in Wallet
+                          Continue to Approval
                         </button>
                       </div>
                     </div>
@@ -3343,27 +3343,63 @@ export default function WalletsPage() {
 
                   {sendStep === "prepared" && sendRecord && (
                     <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                      <p className="text-sm font-semibold text-gray-950">Approve Transfer</p>
+                      {/* Transaction summary */}
+                      <p className="text-sm font-semibold text-gray-950">Approve from your wallet</p>
+                      <p className="mt-1 text-xs leading-5 text-gray-500">
+                        Use the phone or device that holds this wallet to approve the transfer.
+                      </p>
                       <div className="mt-3 grid gap-2">
                         <CompactStatusRow label="Asset" value={sendRecord.transfer.asset} />
                         <CompactStatusRow label="Network" value={networkDisplayLabel(sendRecord.transfer.network)} />
                         <CompactStatusRow label="Amount" value={`${sendRecord.transfer.amount} ${sendRecord.transfer.asset}`} />
-                        {selectedSendDestination && <CompactStatusRow label="Destination nickname" value={selectedSendDestination.label} />}
-                        <CompactStatusRow label="Destination address" value={formatSettlementAddress(sendRecord.transfer.destination_address)} />
-                        <CompactStatusRow label="Estimated fee" value={sendRecord.transfer.estimated_fee_label} />
+                        {selectedSendDestination && <CompactStatusRow label="Destination" value={selectedSendDestination.label} />}
+                        <CompactStatusRow label="Address" value={formatSettlementAddress(sendRecord.transfer.destination_address)} />
+                        <CompactStatusRow label="Fee" value={sendRecord.transfer.estimated_fee_label} />
                       </div>
 
-                      {/* Approval method info */}
-                      <div className="mt-3 rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-3">
-                        <p className="text-xs font-semibold text-gray-800">Approve on this device</p>
-                        <p className="mt-1 text-xs leading-5 text-gray-600">
-                          {sendRecord.transfer.network === "solana"
-                            ? "Your Phantom or Solflare browser extension must be installed and unlocked on this device."
-                            : "Your MetaMask or Base Wallet browser extension must be installed and unlocked on this device."}
-                        </p>
-                        <p className="mt-1.5 text-[10px] leading-4 text-gray-400">
-                          Mobile wallet approval for sends is not yet available. Use a device where your wallet extension is installed and sign from there.
-                        </p>
+                      {/* Approval options */}
+                      <div className="mt-4 space-y-2">
+                        {/* Option 1: Scan with phone — deferred */}
+                        <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-gray-600">Scan with phone</p>
+                              <p className="mt-0.5 text-xs leading-5 text-gray-400">
+                                Mobile approval QR is not yet configured for merchant sends.
+                              </p>
+                            </div>
+                            <span className="shrink-0 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-400">
+                              Coming soon
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Option 2: Open mobile wallet — deferred */}
+                        <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-gray-600">Open mobile wallet</p>
+                              <p className="mt-0.5 text-xs leading-5 text-gray-400">
+                                {sendRecord.transfer.network === "solana"
+                                  ? "Phantom and Solflare mobile approval is not yet configured for sends."
+                                  : "Base Wallet, MetaMask, and Trust Wallet mobile approval is not yet configured for sends."}
+                              </p>
+                            </div>
+                            <span className="shrink-0 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-400">
+                              Coming soon
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Option 3: Approve on this device — working fallback */}
+                        <div className="rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-3">
+                          <p className="text-sm font-semibold text-gray-950">Approve on this device</p>
+                          <p className="mt-0.5 text-xs leading-5 text-gray-600">
+                            {sendRecord.transfer.network === "solana"
+                              ? "If Phantom or Solflare is installed and unlocked on this device, you can approve here."
+                              : "If MetaMask or Base Wallet is installed and unlocked on this device, you can approve here."}
+                          </p>
+                        </div>
                       </div>
 
                       {sendError && (
