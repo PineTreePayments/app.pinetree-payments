@@ -1,5 +1,9 @@
 import type { Transaction, VersionedTransaction } from "@solana/web3.js"
 
+// Disabled in merchant Send UI because generic Solana WalletConnect cannot be constrained
+// to Phantom/Solflare and may open unsupported wallets. Keep this helper unused until
+// wallet-specific mobile signing callback support is implemented.
+
 const SOLANA_MAINNET_CHAIN_ID = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
 const SOLANA_DEPRECATED_MAINNET_CHAIN_ID = "solana:4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZ"
 const SOLANA_SIGN_AND_SEND = "solana_signAndSendTransaction"

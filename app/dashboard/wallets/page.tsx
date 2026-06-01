@@ -9,9 +9,6 @@ import {
   waitForMerchantWalletConnect,
   type MerchantWcProvider
 } from "@/lib/wallets/merchantBaseWalletConnect"
-import {
-  type MerchantSolanaWcProvider
-} from "@/lib/wallets/merchantSolanaWalletConnect"
 import { supabase } from "@/lib/supabaseClient"
 import { getSpeedDashboardLinks } from "@/lib/speedDashboardLinks"
 import {
@@ -977,7 +974,6 @@ export default function WalletsPage() {
   const [merchantWcPairingUri, setMerchantWcPairingUri] = useState<string | null>(null)
   const [merchantWcError, setMerchantWcError] = useState<string | null>(null)
   const merchantWcProviderRef = useRef<MerchantWcProvider | null>(null)
-  const merchantSolanaWcProviderRef = useRef<MerchantSolanaWcProvider | null>(null)
   const directSendSubmittingRef = useRef(false)
 
   useEffect(() => {
@@ -1075,10 +1071,6 @@ export default function WalletsPage() {
     if (merchantWcProviderRef.current) {
       merchantWcProviderRef.current.disconnect().catch(() => {})
       merchantWcProviderRef.current = null
-    }
-    if (merchantSolanaWcProviderRef.current) {
-      merchantSolanaWcProviderRef.current.disconnect().catch(() => {})
-      merchantSolanaWcProviderRef.current = null
     }
     directSendSubmittingRef.current = false
     setMerchantWcStep("idle")
@@ -1281,11 +1273,6 @@ export default function WalletsPage() {
       merchantWcProviderRef.current.disconnect().catch(() => {})
       merchantWcProviderRef.current = null
     }
-    if (merchantSolanaWcProviderRef.current) {
-      merchantSolanaWcProviderRef.current.disconnect().catch(() => {})
-      merchantSolanaWcProviderRef.current = null
-    }
-
     try {
       const result = await initMerchantBaseWalletConnect()
       if (!result.ok) throw new Error(result.error)
@@ -1350,12 +1337,6 @@ export default function WalletsPage() {
     } finally {
       directSendSubmittingRef.current = false
     }
-  }
-
-  async function startSolanaWalletConnectSend() {
-    if (!sendRecord?.unsigned_tx_base64 || !selectedWallet) return
-    setMerchantWcError("Mobile approval for this Solana wallet is not supported yet. Use Approve on this device.")
-    setMerchantWcStep("error")
   }
 
   // ── Settlement destination API calls ────────────────────────────────────────
@@ -2381,7 +2362,6 @@ export default function WalletsPage() {
     : "wallet"
   const canUseBaseWalletConnect =
     Boolean(walletConnectConfigured && selectedWallet?.rail === "base" && selectedWallet.approvalWalletType)
-  const canUseSolanaWalletConnect = false
   const cashOutUnavailable = selectedWallet?.isLightning || cashOutAssetOptions.length === 0
   const nwcStatus = selectedWallet?.nwcConnectionStatus || null
   const lightningActivity = recentOperations
@@ -3578,67 +3558,43 @@ export default function WalletsPage() {
                             )}
                           </div>
                         ) : (
-                          <div className="rounded-xl border border-gray-200 bg-white p-3">
+                          <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <p className="text-sm font-semibold text-gray-600">Scan with {approvalWalletName}</p>
+                                <p className="text-sm font-semibold text-gray-700">Mobile approval unavailable for {approvalWalletName}</p>
                                 <p className="mt-0.5 text-xs leading-5 text-gray-600">
-                                  Mobile approval for this Solana wallet is not supported yet. Use Approve on this device.
+                                  {approvalWalletName} mobile approval requires wallet-specific signing callback support. Use same-device approval for now.
                                 </p>
                               </div>
+                              <span className="shrink-0 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-400">
+                                Unavailable
+                              </span>
                             </div>
-                            {merchantWcStep === "idle" || merchantWcStep === "error" ? (
-                              <button
-                                type="button"
-                                onClick={startSolanaWalletConnectSend}
-                                disabled={!canUseSolanaWalletConnect || directSendSubmittingRef.current}
-                                className={cx(pineTreeSecondaryActionButton, "mt-2")}
-                              >
-                                This connected wallet does not currently support PineTree mobile send approval.
-                              </button>
-                            ) : merchantWcStep === "initializing" ? (
-                              <p className="mt-2 text-xs text-gray-500">Generating QR code...</p>
-                            ) : merchantWcStep === "pairing" && merchantWcPairingUri ? (
-                              <div className="mt-2 space-y-2">
-                                <div className="flex justify-center rounded-xl border border-gray-200 bg-white p-3">
-                                  <QRCodeSVG value={merchantWcPairingUri} size={180} />
-                                </div>
-                                <p className="text-center text-xs text-gray-500">Waiting for phone scan...</p>
-                              </div>
-                            ) : merchantWcStep === "connected" ? (
-                              <p className="mt-2 text-xs font-semibold text-[#0052FF]">Wallet connected - waiting for approval...</p>
-                            ) : merchantWcStep === "signing" ? (
-                              <p className="mt-2 text-xs font-semibold text-[#0052FF]">Waiting for approval...</p>
-                            ) : merchantWcStep === "submitted" ? (
-                              <p className="mt-2 text-xs font-semibold text-[#0052FF]">Transaction submitted.</p>
-                            ) : merchantWcStep === "rejected" ? (
-                              <p className="mt-2 text-xs font-semibold text-red-600">Rejected.</p>
-                            ) : merchantWcStep === "expired" ? (
-                              <p className="mt-2 text-xs font-semibold text-amber-700">Expired.</p>
-                            ) : null}
-
-                            {merchantWcError && ["error", "rejected", "expired"].includes(merchantWcStep) && (
-                              <p className="mt-2 text-xs text-red-600">{merchantWcError}</p>
-                            )}
+                            <button
+                              type="button"
+                              disabled
+                              className={cx(pineTreeSecondaryActionButton, "mt-2 cursor-not-allowed opacity-55")}
+                            >
+                              Scan with {approvalWalletName} unavailable
+                            </button>
                           </div>
                         )}
 
-                        {/* Option 2: wallet-specific open app */}
-                        <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold text-gray-600">Open {approvalWalletName}</p>
-                              <p className="mt-0.5 text-xs leading-5 text-gray-400">
-                                {sendRecord.transfer.network === "solana"
-                                  ? `${approvalWalletName} mobile deeplink signing is not configured with a returned signature. Use Approve on this device.`
-                                  : `${approvalWalletName} mobile deeplink signing is not configured with a returned tx hash. Use Scan with ${approvalWalletName} instead.`}
-                              </p>
+                        {sendRecord.transfer.network === "base" && (
+                          <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-gray-600">Open {approvalWalletName}</p>
+                                <p className="mt-0.5 text-xs leading-5 text-gray-400">
+                                  {approvalWalletName} mobile deeplink signing is not configured with a returned tx hash. Use Scan with {approvalWalletName} instead.
+                                </p>
+                              </div>
+                              <span className="shrink-0 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-400">
+                                Coming soon
+                              </span>
                             </div>
-                            <span className="shrink-0 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-400">
-                              Coming soon
-                            </span>
                           </div>
-                        </div>
+                        )}
 
                         {/* Option 3: Approve on this device — working fallback */}
                         <div className="rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-3">
@@ -3665,10 +3621,6 @@ export default function WalletsPage() {
                             if (merchantWcProviderRef.current) {
                               merchantWcProviderRef.current.disconnect().catch(() => {})
                               merchantWcProviderRef.current = null
-                            }
-                            if (merchantSolanaWcProviderRef.current) {
-                              merchantSolanaWcProviderRef.current.disconnect().catch(() => {})
-                              merchantSolanaWcProviderRef.current = null
                             }
                             directSendSubmittingRef.current = false
                           }}
