@@ -382,6 +382,28 @@ type DirectSendSubmitResponse = {
 
 // ─── End settlement types ─────────────────────────────────────────────────────
 
+// Mesh SDK callback payload shape (onIntegrationConnected)
+type MeshIntegrationData = {
+  accessToken?: {
+    accountTokens?: Array<{
+      accessToken: string
+      accountId?: string
+      accountName?: string
+    }>
+    brokerType?: string
+    brokerName?: string
+  }
+  integrationId?: string
+  institutionName?: string
+  institutionId?: string
+}
+
+type MeshActiveConnection = {
+  id: string
+  institutionName: string | null
+  accessToken: string | null
+}
+
 const supportedOffRampProviders: OffRampProviderOption[] = [
   {
     id: "alchemy_pay",
@@ -533,6 +555,22 @@ function getDefaultSendAsset(wallet: SelectedWallet | null) {
 function getDestinationAssetOptions(wallet: SelectedWallet | null) {
   if (!wallet || wallet.isLightning) return []
   return SETTLEMENT_ASSET_NETWORK_OPTIONS.filter((option) => option.network === wallet.rail)
+}
+
+function getMeshImportOptions(walletNetwork: string) {
+  if (walletNetwork === "solana") {
+    return [
+      { asset: "SOL",  network: "solana", label: "SOL on Solana" },
+      { asset: "USDC", network: "solana", label: "USDC on Solana" }
+    ]
+  }
+  if (walletNetwork === "base") {
+    return [
+      { asset: "ETH",  network: "base", label: "ETH on Base" },
+      { asset: "USDC", network: "base", label: "USDC on Base" }
+    ]
+  }
+  return []
 }
 
 function formatCashOutAmount(value: number | null | undefined, currency = "USD") {
@@ -847,18 +885,28 @@ export default function WalletsPage() {
   const [settlementActivityExpanded, setSettlementActivityExpanded] = useState(false)
   const [settlementAdvancedOpen, setSettlementAdvancedOpen] = useState(false)
   const [nwcAdvancedOpen, setNwcAdvancedOpen] = useState(false)
+  const [addressBookNotice, setAddressBookNotice] = useState<string | null>(null)
+
+  // Mesh exchange connection state
+  const [meshLinking, setMeshLinking] = useState(false)
+  const [meshLinkError, setMeshLinkError] = useState<string | null>(null)
+  const [meshImportStep, setMeshImportStep] = useState<"idle" | "connected" | "importing" | "done">("idle")
+  const [meshConnection, setMeshConnection] = useState<MeshActiveConnection | null>(null)
+  const [meshImportAssets, setMeshImportAssets] = useState<string[]>([])
+  const [meshImporting, setMeshImporting] = useState(false)
+  const [meshImportError, setMeshImportError] = useState<string | null>(null)
+  const [meshImportResult, setMeshImportResult] = useState<{ imported: number; updated: number } | null>(null)
 
   useEffect(() => {
     loadOverview(false)
   }, [])
 
   useEffect(() => {
-    if ((activeTab === "settlement" || activeTab === "send") && selectedWallet && !selectedWallet.isLightning) {
+    if ((activeTab === "settlement" || activeTab === "send" || activeTab === "activity") && selectedWallet && !selectedWallet.isLightning) {
       loadSettlementDestinations()
       refreshSettlementBalances()
-      if (activeTab === "settlement") {
+      if (activeTab === "settlement" || activeTab === "activity") {
         loadSettlementHistory()
-        loadSettlementPreferences()
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -929,6 +977,15 @@ export default function WalletsPage() {
     setSettlementActivityExpanded(false)
     setSettlementAdvancedOpen(false)
     setNwcAdvancedOpen(false)
+    // Mesh state reset
+    setMeshLinking(false)
+    setMeshLinkError(null)
+    setMeshImportStep("idle")
+    setMeshConnection(null)
+    setMeshImportAssets([])
+    setMeshImporting(false)
+    setMeshImportError(null)
+    setMeshImportResult(null)
   }, [selectedWallet])
 
   async function loadOverview(refresh: boolean) {
@@ -1130,6 +1187,160 @@ export default function WalletsPage() {
       setDestSaving(false)
     }
   }
+
+  function openAddSavedAddress(assetNetwork?: string) {
+    const firstOption = destinationAssetOptions[0]
+    setDestForm({
+      ...emptyDestinationForm(),
+      assetNetwork: assetNetwork || firstOption?.value || ""
+    })
+    setDestSaveError(null)
+    setDestModalOpen(true)
+  }
+
+  // ── Mesh exchange connection handlers ──────────────────────────────────────
+
+  async function connectExchange() {
+    if (!MESH_CONNECT_ENABLED || meshLinking) return
+    setMeshLinking(true)
+    setMeshLinkError(null)
+    setMeshImportStep("idle")
+    setMeshConnection(null)
+    setMeshImportResult(null)
+
+    try {
+      const token = await getMerchantToken()
+      const res = await fetch("/api/mesh/link-token", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
+        cache: "no-store"
+      })
+      const payload = (await res.json().catch(() => null)) as {
+        success?: boolean
+        link_token?: string
+        error?: string
+      } | null
+
+      if (!res.ok || !payload?.success || !payload.link_token) {
+        throw new Error(payload?.error || "Failed to get Mesh link token")
+      }
+
+      const { createLink } = await import("@meshconnect/web-link-sdk")
+
+      const meshLink = createLink({
+        clientId: process.env.NEXT_PUBLIC_MESH_CLIENT_ID || "",
+        onIntegrationConnected: async (data: MeshIntegrationData) => {
+          setMeshLinking(false)
+          await handleMeshConnected(data)
+        },
+        onExit: (err?: string) => {
+          setMeshLinking(false)
+          if (err) setMeshLinkError(String(err))
+        },
+        onEvent: () => {}
+      })
+
+      meshLink.openLink(payload.link_token)
+    } catch (err) {
+      setMeshLinking(false)
+      setMeshLinkError(err instanceof Error ? err.message : "Failed to connect exchange")
+    }
+  }
+
+  async function handleMeshConnected(integration: MeshIntegrationData) {
+    try {
+      const accountTokens = integration.accessToken?.accountTokens || []
+      const primaryToken  = accountTokens[0]
+      const accessToken   = primaryToken?.accessToken || null
+      const accountId     = primaryToken?.accountId   || null
+      const brokerName    = integration.accessToken?.brokerName || null
+
+      const token = await getMerchantToken()
+      const res = await fetch("/api/mesh/connect-callback", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({
+          integration_id:   integration.integrationId   || null,
+          institution_name: integration.institutionName || brokerName,
+          institution_id:   integration.institutionId   || null,
+          broker_name:      brokerName,
+          account_id:       accountId
+        })
+      })
+      const payload = (await res.json().catch(() => null)) as {
+        success?: boolean
+        connection?: { id: string; institution_name: string | null }
+        error?: string
+      } | null
+
+      if (!res.ok || !payload?.success || !payload.connection) {
+        throw new Error(payload?.error || "Failed to save exchange connection")
+      }
+
+      const resolvedName = payload.connection.institution_name || brokerName || null
+      setMeshConnection({ id: payload.connection.id, institutionName: resolvedName, accessToken })
+
+      // Pre-select all available asset options for this wallet context
+      const walletNetwork = selectedWallet?.rail || ""
+      setMeshImportAssets(getMeshImportOptions(walletNetwork).map((o) => `${o.asset}|${o.network}`))
+      setMeshImportStep("connected")
+    } catch (err) {
+      setMeshLinkError(err instanceof Error ? err.message : "Failed to save exchange connection")
+    }
+  }
+
+  async function importMeshAddresses() {
+    if (!meshConnection || meshImportAssets.length === 0) return
+    setMeshImporting(true)
+    setMeshImportError(null)
+
+    try {
+      const token  = await getMerchantToken()
+      const assets = meshImportAssets.map((val) => {
+        const [asset, network] = val.split("|")
+        return { asset, network }
+      })
+
+      const res = await fetch("/api/mesh/import-addresses", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({
+          connection_id:    meshConnection.id,
+          access_token:     meshConnection.accessToken,
+          wallet_network:   selectedWallet?.rail,
+          institution_name: meshConnection.institutionName,
+          assets
+        })
+      })
+      const payload = (await res.json().catch(() => null)) as {
+        success?: boolean
+        imported?: number
+        updated?: number
+        destinations?: SettlementDestination[]
+        errors?: string[]
+        error?: string
+      } | null
+
+      if (!res.ok || !payload?.success) {
+        throw new Error(payload?.error || "Import failed")
+      }
+
+      setSettlementDestinations(payload.destinations || [])
+      setMeshImportResult({ imported: payload.imported || 0, updated: payload.updated || 0 })
+      setMeshImportStep("done")
+    } catch (err) {
+      setMeshImportError(err instanceof Error ? err.message : "Import failed")
+    } finally {
+      setMeshImporting(false)
+    }
+  }
+
+  // ── End Mesh handlers ──────────────────────────────────────────────────────
 
   async function setPreferredDestination(id: string) {
     setDestSettingDefault(id)
@@ -1899,6 +2110,7 @@ export default function WalletsPage() {
   const savedDestinationsForWallet = settlementDestinations.filter((dest) =>
     selectedWallet && !selectedWallet.isLightning && dest.network === selectedWallet.rail
   )
+  const firstAddressBookWallet = wallets[0] ? buildConnectedWallet(wallets[0]) : null
   const selectedSendDestination = sendSavedDestinations.find((dest) => dest.id === sendSavedDestinationId) || null
   const activeSendDestinationAddress = sendDestinationMode === "saved"
     ? selectedSendDestination?.address || ""
@@ -1999,7 +2211,7 @@ export default function WalletsPage() {
     : [
       { id: "overview", label: "Overview" },
       { id: "send", label: "Send" },
-      { id: "settlement", label: "Settlement" },
+      { id: "settlement", label: "Wallet Config" },
       { id: "activity", label: "Activity" },
       { id: "settings", label: "Settings" }
     ]
@@ -2053,27 +2265,36 @@ export default function WalletsPage() {
         emptyText="Wallet insights will appear when connected wallets or account balances are available."
       />
 
-      <DashboardSection title="Settlement" titleTone="blue">
+      <DashboardSection title="Wallet Addresses" titleTone="blue">
         <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <p className="text-base font-semibold text-gray-950">Settlement</p>
-                <NetworkStatusPill label="Withdrawal to Exchange" tone="blue" className="min-h-6 px-2 text-[10px]" />
-                <NetworkStatusPill label="Provider Cash Out pending" tone="slate" className="min-h-6 px-2 text-[10px]" />
+                <p className="text-base font-semibold text-gray-950">Wallet Addresses</p>
+                <NetworkStatusPill label="Exchange address book" tone="blue" className="min-h-6 px-2 text-[10px]" />
               </div>
-              <p className="mt-2 text-sm leading-6 text-gray-600">
-                Send supported crypto balances to an exchange address you control, or connect an approved provider for direct bank cash-out. Open a connected wallet to access settlement options.
+              <p className="mt-2 text-sm leading-5 text-gray-600">
+                Save exchange or wallet addresses for faster sends.
               </p>
             </div>
             <button
               type="button"
-              disabled
-              className={cx(pineTreeDisabledButton, "shrink-0 lg:w-auto")}
+              onClick={() => {
+                if (!firstAddressBookWallet) {
+                  setAddressBookNotice("Open a connected Solana or Base wallet to manage saved addresses.")
+                  return
+                }
+                setAddressBookNotice(null)
+                openWalletDetail(firstAddressBookWallet, "settlement")
+              }}
+              className={cx(pineTreeSecondaryActionButton, "shrink-0 sm:w-auto")}
             >
-              Add Exchange Destination
+              Manage Addresses
             </button>
           </div>
+          {addressBookNotice && (
+            <p className="mt-3 text-xs leading-5 text-gray-500">{addressBookNotice}</p>
+          )}
         </div>
       </DashboardSection>
 
@@ -2337,17 +2558,17 @@ export default function WalletsPage() {
           <div
             role="dialog"
             aria-modal="true"
-            aria-label={destForm.id ? "Edit saved destination" : "Add saved destination"}
-            className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl border border-white/70 bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,0.22)] sm:rounded-2xl"
+            aria-label={destForm.id ? "Edit saved address" : "Add saved address"}
+            className="max-h-[94dvh] w-full max-w-lg overflow-y-auto rounded-t-3xl border border-white/70 bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,0.22)] sm:max-h-[92vh] sm:rounded-2xl"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
-                  Saved Destination
+                  Saved Address
                 </p>
                 <h2 className="mt-1 text-lg font-semibold text-gray-950">
-                  {destForm.id ? "Edit Saved Destination" : "Add Saved Destination"}
+                  {destForm.id ? "Edit Saved Address" : "Add Saved Address"}
                 </h2>
               </div>
               <button
@@ -2362,7 +2583,7 @@ export default function WalletsPage() {
             <div className="mt-5 space-y-4">
               {/* Exchange */}
               <label className="block">
-                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Exchange or label type</span>
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Exchange / wallet</span>
                 <select
                   value={destForm.exchangeName}
                   onChange={(e) => setDestForm((f) => ({ ...f, exchangeName: e.target.value }))}
@@ -2376,7 +2597,7 @@ export default function WalletsPage() {
               </label>
 
               <div>
-                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Destination type</span>
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Address type</span>
                 <div className="mt-2 grid gap-2">
                   {DESTINATION_ACCOUNT_TYPE_OPTIONS.map((option) => (
                     <label
@@ -2449,7 +2670,7 @@ export default function WalletsPage() {
 
               {/* Asset / Network */}
               <label className="block">
-                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Asset / Network</span>
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Asset/network</span>
                 <select
                   value={destForm.assetNetwork}
                   onChange={(e) => setDestForm((f) => ({ ...f, assetNetwork: e.target.value }))}
@@ -2500,7 +2721,7 @@ export default function WalletsPage() {
               {/* Warning */}
               <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3">
                 <p className="text-xs leading-5 text-amber-900">
-                  Saved destinations make future sends faster. They do not change where customer payments are received.
+                  Saved addresses make future sends faster. They do not change where customer payments are received.
                 </p>
                 <p className="mt-1 text-xs leading-5 text-amber-900">
                   PineTree helps you save destinations and prepare transfers. For business funds, use exchange and bank accounts registered to your business whenever possible.
@@ -2526,7 +2747,7 @@ export default function WalletsPage() {
                 </div>
               )}
 
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <div className="sticky bottom-0 -mx-5 -mb-5 flex flex-col-reverse gap-2 border-t border-gray-100 bg-white p-4 sm:mx-0 sm:mb-0 sm:flex-row sm:justify-end sm:border-t-0 sm:p-0">
                 <button
                   type="button"
                   onClick={() => { setDestModalOpen(false); setDestSaveError(null) }}
@@ -2548,7 +2769,7 @@ export default function WalletsPage() {
                   }
                   className={cx(pineTreePrimaryButton, "disabled:cursor-not-allowed disabled:opacity-55")}
                 >
-                  {destSaving ? "Saving…" : "Save Destination"}
+                  {destSaving ? "Saving..." : "Save Address"}
                 </button>
               </div>
             </div>
@@ -2709,10 +2930,10 @@ export default function WalletsPage() {
                 <div className={walletDetailPanelClass}>
                   {sendStep === "form" || sendStep === "failed" ? (
                     <>
-                      <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                      <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-3">
                         <p className="text-sm font-semibold text-gray-950">Send from this wallet</p>
-                        <p className="mt-1 text-sm leading-6 text-gray-600">
-                          Choose a saved destination or enter a wallet address manually.
+                        <p className="mt-1 text-sm leading-5 text-gray-600">
+                          Choose a saved address or enter one manually.
                         </p>
                       </div>
 
@@ -2752,14 +2973,14 @@ export default function WalletsPage() {
                         </label>
                         {sendDestinationMode === "saved" ? (
                           <label className="block">
-                            <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Saved destination</span>
+                            <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Saved address</span>
                             <select
                               value={sendSavedDestinationId}
                               onChange={(e) => { setSendSavedDestinationId(e.target.value); setSendError(null) }}
                               className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-semibold text-gray-900 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
                             >
                               <option value="">
-                                {sendSavedDestinations.length ? "Choose saved destination..." : "No saved destinations for this asset"}
+                                {sendSavedDestinations.length ? "Choose saved address..." : "No saved address for this asset"}
                               </option>
                               {sendSavedDestinations.map((dest) => (
                                 <option key={dest.id} value={dest.id}>
@@ -2777,6 +2998,18 @@ export default function WalletsPage() {
                                     Personal account selected. Business exchange accounts are recommended for business funds.
                                   </span>
                                 )}
+                              </div>
+                            )}
+                            {!selectedSendDestination && sendSavedDestinations.length === 0 && sendAsset && (
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <span className="text-xs text-gray-500">No saved address for this asset yet.</span>
+                                <button
+                                  type="button"
+                                  onClick={() => openAddSavedAddress(`${sendAsset.asset}|${sendAsset.network}`)}
+                                  className="text-xs font-semibold text-[#0052FF] hover:underline"
+                                >
+                                  Add Address
+                                </button>
                               </div>
                             )}
                           </label>
@@ -2931,7 +3164,7 @@ export default function WalletsPage() {
                       )}
                       <button
                         type="button"
-                        onClick={() => setActiveTab("settlement")}
+                        onClick={() => setActiveTab("activity")}
                         className={cx(pineTreeSecondaryActionButton, "mt-3 ml-2")}
                       >
                         View in Activity
@@ -2943,7 +3176,206 @@ export default function WalletsPage() {
 
               {activeTab === "settlement" && (
                 <div className={walletDetailPanelClass}>
-                  {selectedWallet.isLightning ? (
+                  {!selectedWallet.isLightning && !withdrawReview ? (
+                    <div className="rounded-2xl border border-gray-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                      <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-gray-950">Saved Addresses</p>
+                          <p className="mt-0.5 text-xs text-gray-500">Save exchange or wallet addresses you use often.</p>
+                        </div>
+                        <NetworkStatusPill label="Address Book" tone="blue" className="shrink-0" />
+                      </div>
+
+                      <div className="p-4">
+                        {destLoadError && (
+                          <div className="mb-3 rounded-xl border border-red-100 bg-red-50/70 p-3 text-sm text-red-800">
+                            {destLoadError}
+                          </div>
+                        )}
+
+                        {destLoading ? (
+                          <div className="rounded-xl border border-gray-100 bg-gray-50/70 px-4 py-5 text-center text-sm text-gray-500">
+                            Loading addresses...
+                          </div>
+                        ) : savedDestinationsForWallet.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50/50 px-4 py-5 text-center">
+                            <p className="text-sm font-semibold text-gray-700">No saved addresses</p>
+                            <p className="mt-1 text-xs leading-5 text-gray-500">Add an address to make future sends faster.</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {savedDestinationsForWallet.map((dest) => (
+                              <div key={dest.id} className="rounded-xl border border-gray-100 bg-gray-50/70 p-3">
+                                <div className="flex flex-wrap items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <p className="min-w-0 truncate text-sm font-semibold text-gray-950">{dest.label}</p>
+                                      <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-700">
+                                        {getDestinationAccountTypeLabel(dest.account_type)}
+                                      </span>
+                                      <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-600">
+                                        {dest.source === "mesh" || dest.connected_provider === "mesh" ? "Mesh Connected" : "Manual"}
+                                      </span>
+                                    </div>
+                                    <p className="mt-1 text-xs text-gray-500">{dest.exchange_name}</p>
+                                  </div>
+                                  <span className="shrink-0 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-700">
+                                    {dest.asset} · {dest.network}
+                                  </span>
+                                </div>
+                                <p className="mt-2 truncate font-mono text-xs text-gray-500" title={dest.address}>
+                                  {formatSettlementAddress(dest.address)}
+                                </p>
+
+                                {destDeleteConfirmId === dest.id ? (
+                                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                                    <p className="text-xs font-semibold text-gray-700">Delete this address?</p>
+                                    <button type="button" onClick={() => setDestDeleteConfirmId(null)} disabled={destDeleting} className={pineTreeSecondaryActionButton}>
+                                      Cancel
+                                    </button>
+                                    <button type="button" onClick={() => deleteSettlementDestination(dest.id)} disabled={destDeleting} className={pineTreeDangerActionButton}>
+                                      {destDeleting ? "Deleting..." : "Delete"}
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setDestForm({
+                                          id: dest.id,
+                                          label: dest.label,
+                                          exchangeName: dest.exchange_name,
+                                          assetNetwork: destAssetNetworkValue(dest),
+                                          address: dest.address,
+                                          memoOrTag: dest.memo_or_tag || "",
+                                          isDefault: false,
+                                          confirmed: true,
+                                          accountType: dest.account_type || "other",
+                                          personalExchangeAcknowledged: dest.account_type === "personal_exchange"
+                                        })
+                                        setDestSaveError(null)
+                                        setDestModalOpen(true)
+                                      }}
+                                      className={pineTreeSecondaryActionButton}
+                                    >
+                                      Edit
+                                    </button>
+                                    <button type="button" onClick={() => setDestDeleteConfirmId(dest.id)} className={pineTreeDangerActionButton}>
+                                      Delete
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+                          <button type="button" onClick={() => openAddSavedAddress()} className={pineTreePrimaryButton}>
+                            Add Address
+                          </button>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={MESH_CONNECT_ENABLED ? connectExchange : undefined}
+                              disabled={!MESH_CONNECT_ENABLED || meshLinking}
+                              title={MESH_CONNECT_ENABLED
+                                ? "Connect an exchange to import deposit addresses automatically."
+                                : "Set MESH_CLIENT_ID, MESH_CLIENT_SECRET, and NEXT_PUBLIC_MESH_CONNECT_ENABLED=true to enable."}
+                              className={cx(pineTreeSecondaryActionButton, "disabled:cursor-not-allowed disabled:opacity-55")}
+                            >
+                              {meshLinking ? "Connecting..." : "Connect Exchange"}
+                            </button>
+                            {!MESH_CONNECT_ENABLED && (
+                              <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-500">
+                                Not configured
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {meshLinkError && (
+                          <p className="mt-2 text-xs font-semibold text-red-700">{meshLinkError}</p>
+                        )}
+                        {MESH_CONNECT_ENABLED && meshImportStep === "connected" && meshConnection && (
+                          <div className="mt-4 rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                            <p className="text-sm font-semibold text-gray-950">Import Exchange Addresses</p>
+                            {meshConnection.institutionName && (
+                              <p className="mt-0.5 text-xs text-gray-500">Connected to {meshConnection.institutionName}</p>
+                            )}
+                            <div className="mt-3 space-y-2">
+                              {getMeshImportOptions(selectedWallet?.rail || "").map((opt) => {
+                                const key = `${opt.asset}|${opt.network}`
+                                return (
+                                  <label key={key} className="flex cursor-pointer items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={meshImportAssets.includes(key)}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setMeshImportAssets((prev) => [...prev, key])
+                                        } else {
+                                          setMeshImportAssets((prev) => prev.filter((k) => k !== key))
+                                        }
+                                      }}
+                                      className="h-4 w-4 rounded border-gray-300"
+                                    />
+                                    <span className="text-sm font-semibold text-gray-800">{opt.label}</span>
+                                  </label>
+                                )
+                              })}
+                            </div>
+                            {meshImportError && (
+                              <p className="mt-3 text-xs font-semibold text-red-700">{meshImportError}</p>
+                            )}
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={importMeshAddresses}
+                                disabled={meshImporting || meshImportAssets.length === 0}
+                                className={cx(pineTreePrimaryButton, "disabled:cursor-not-allowed disabled:opacity-55")}
+                              >
+                                {meshImporting ? "Importing..." : "Import Selected"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => { setMeshImportStep("idle"); setMeshConnection(null); setMeshImportError(null) }}
+                                disabled={meshImporting}
+                                className={pineTreeSecondaryActionButton}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                            <p className="mt-3 text-xs leading-5 text-gray-500">
+                              Mesh imports exchange deposit addresses. PineTree Send still prepares transfers for wallet approval.
+                            </p>
+                          </div>
+                        )}
+                        {MESH_CONNECT_ENABLED && meshImportStep === "done" && meshImportResult && (
+                          <div className="mt-4 rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                            <p className="text-sm font-semibold text-gray-950">Import Complete</p>
+                            <p className="mt-1 text-sm leading-6 text-gray-600">
+                              {meshImportResult.imported > 0 && `${meshImportResult.imported} address${meshImportResult.imported === 1 ? "" : "es"} imported. `}
+                              {meshImportResult.updated > 0 && `${meshImportResult.updated} verified. `}
+                              {meshImportResult.imported === 0 && meshImportResult.updated === 0 && "No new addresses found."}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => { setMeshImportStep("idle"); setMeshConnection(null); setMeshImportResult(null) }}
+                              className={cx(pineTreeSecondaryActionButton, "mt-3")}
+                            >
+                              Done
+                            </button>
+                          </div>
+                        )}
+                        <p className="mt-3 text-xs leading-5 text-gray-500">
+                          {MESH_CONNECT_ENABLED
+                            ? "Connect an exchange to import deposit addresses. Saved addresses do not change where customer payments are received."
+                            : "Mesh integration will let merchants import exchange deposit addresses automatically."}
+                        </p>
+                      </div>
+                    </div>
+                  ) : selectedWallet.isLightning ? (
                     <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
                       <p className="text-sm font-semibold text-gray-950">Lightning Wallet</p>
                       <p className="mt-1 text-sm leading-6 text-gray-600">
@@ -3307,9 +3739,9 @@ export default function WalletsPage() {
                   ) : (
                     /* ── Main settlement tab ── */
                     <>
-                      {/* ── Settlement Summary ── */}
+                      {/* ── Address Book Summary ── */}
                       <div className="hidden">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#0052FF]">Settlement Summary</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#0052FF]">Address Book Summary</p>
                         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                           {/* Balance tile */}
                           <div className="rounded-xl border border-white/70 bg-white/60 p-3">
@@ -3373,14 +3805,14 @@ export default function WalletsPage() {
                           </div>
                         </div>
 
-                        {/* Move Money button */}
+                        {/* Send shortcut button */}
                         {!moveMoneyOpen && (settlementSummary.walletRail === "base" || settlementSummary.walletRail === "solana") && (
                           <button
                             type="button"
                             onClick={() => setMoveMoneyOpen(true)}
                             className={cx(pineTreePrimaryButton, "mt-4")}
                           >
-                            Move Money →
+                            Send Shortcut →
                           </button>
                         )}
                         {moveMoneyOpen && (
@@ -3389,16 +3821,16 @@ export default function WalletsPage() {
                             onClick={() => setMoveMoneyOpen(false)}
                             className={cx(pineTreeSecondaryActionButton, "mt-4")}
                           >
-                            Close Move Money
+                            Close Shortcut
                           </button>
                         )}
                       </div>
 
-                      {/* ── Move Money Panel ── */}
+                      {/* ── Send Shortcut Panel ── */}
                       {false && moveMoneyOpen && !withdrawReview && (
                         <div className="rounded-2xl border border-gray-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                           <div className="border-b border-gray-100 px-4 py-3">
-                            <p className="text-sm font-semibold text-gray-950">Move Money</p>
+                            <p className="text-sm font-semibold text-gray-950">Send Shortcut</p>
                             <p className="mt-0.5 text-xs leading-5 text-gray-500">Move funds to your exchange account.</p>
                           </div>
 
@@ -3626,7 +4058,7 @@ export default function WalletsPage() {
                       {/* ── Exchange Destinations ── */}
                       <div className="rounded-2xl border border-gray-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                         <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
-                          <p className="text-sm font-semibold text-gray-950">Saved Destinations</p>
+                          <p className="text-sm font-semibold text-gray-950">Saved Addresses</p>
                           <NetworkStatusPill label="Address book" tone="blue" className="shrink-0" />
                         </div>
 
@@ -3794,25 +4226,104 @@ export default function WalletsPage() {
                               }}
                               className={pineTreePrimaryButton}
                             >
-                              Add Destination
+                              Add Address
                             </button>
                             <button
                               type="button"
-                              disabled={!MESH_CONNECT_ENABLED}
-                              title="Connect an exchange to import deposit addresses automatically."
+                              onClick={MESH_CONNECT_ENABLED ? connectExchange : undefined}
+                              disabled={!MESH_CONNECT_ENABLED || meshLinking}
+                              title={MESH_CONNECT_ENABLED
+                                ? "Connect an exchange to import deposit addresses automatically."
+                                : "Set MESH_CLIENT_ID, MESH_CLIENT_SECRET, and NEXT_PUBLIC_MESH_CONNECT_ENABLED=true to enable."}
                               className={cx(pineTreeSecondaryActionButton, "disabled:cursor-not-allowed disabled:opacity-55")}
                             >
-                              {MESH_CONNECT_ENABLED ? "Connect Exchange" : "Connect Exchange Coming Soon"}
+                              {meshLinking ? "Connecting..." : "Connect Exchange"}
                             </button>
                           </div>
 
+                          {meshLinkError && (
+                            <p className="mt-2 text-xs font-semibold text-red-700">{meshLinkError}</p>
+                          )}
+                          {MESH_CONNECT_ENABLED && meshImportStep === "connected" && meshConnection && (
+                            <div className="mt-4 rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                              <p className="text-sm font-semibold text-gray-950">Import Exchange Addresses</p>
+                              {meshConnection.institutionName && (
+                                <p className="mt-0.5 text-xs text-gray-500">Connected to {meshConnection.institutionName}</p>
+                              )}
+                              <div className="mt-3 space-y-2">
+                                {getMeshImportOptions(selectedWallet?.rail || "").map((opt) => {
+                                  const key = `${opt.asset}|${opt.network}`
+                                  return (
+                                    <label key={key} className="flex cursor-pointer items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={meshImportAssets.includes(key)}
+                                        onChange={(e) => {
+                                          if (e.target.checked) {
+                                            setMeshImportAssets((prev) => [...prev, key])
+                                          } else {
+                                            setMeshImportAssets((prev) => prev.filter((k) => k !== key))
+                                          }
+                                        }}
+                                        className="h-4 w-4 rounded border-gray-300"
+                                      />
+                                      <span className="text-sm font-semibold text-gray-800">{opt.label}</span>
+                                    </label>
+                                  )
+                                })}
+                              </div>
+                              {meshImportError && (
+                                <p className="mt-3 text-xs font-semibold text-red-700">{meshImportError}</p>
+                              )}
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={importMeshAddresses}
+                                  disabled={meshImporting || meshImportAssets.length === 0}
+                                  className={cx(pineTreePrimaryButton, "disabled:cursor-not-allowed disabled:opacity-55")}
+                                >
+                                  {meshImporting ? "Importing..." : "Import Selected"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setMeshImportStep("idle"); setMeshConnection(null); setMeshImportError(null) }}
+                                  disabled={meshImporting}
+                                  className={pineTreeSecondaryActionButton}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                              <p className="mt-3 text-xs leading-5 text-gray-500">
+                                Mesh imports exchange deposit addresses. PineTree Send still prepares transfers for wallet approval.
+                              </p>
+                            </div>
+                          )}
+                          {MESH_CONNECT_ENABLED && meshImportStep === "done" && meshImportResult && (
+                            <div className="mt-4 rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                              <p className="text-sm font-semibold text-gray-950">Import Complete</p>
+                              <p className="mt-1 text-sm leading-6 text-gray-600">
+                                {meshImportResult.imported > 0 && `${meshImportResult.imported} address${meshImportResult.imported === 1 ? "" : "es"} imported. `}
+                                {meshImportResult.updated > 0 && `${meshImportResult.updated} verified. `}
+                                {meshImportResult.imported === 0 && meshImportResult.updated === 0 && "No new addresses found."}
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => { setMeshImportStep("idle"); setMeshConnection(null); setMeshImportResult(null) }}
+                                className={cx(pineTreeSecondaryActionButton, "mt-3")}
+                              >
+                                Done
+                              </button>
+                            </div>
+                          )}
                           <p className="mt-3 text-xs leading-5 text-gray-500">
-                            Connect an exchange to import deposit addresses automatically. Saved destinations do not change where customer payments are received.
+                            {MESH_CONNECT_ENABLED
+                              ? "Connect an exchange to import deposit addresses. Saved destinations do not change where customer payments are received."
+                              : "Connect an exchange to import deposit addresses automatically. Saved destinations do not change where customer payments are received."}
                           </p>
                         </div>
                       </div>
 
-                      {/* ── Provider Cash Out ── */}
+                      {/* ── Exchange Connection ── */}
                       <div className="rounded-2xl border border-gray-100 bg-white p-3">
                         <button
                           type="button"
@@ -3827,21 +4338,35 @@ export default function WalletsPage() {
                       <div className={cx("rounded-2xl border border-gray-100 bg-gray-50/70 p-4", !settlementAdvancedOpen && "hidden")}>
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="text-sm font-semibold text-gray-950">Provider Cash Out</p>
+                            <p className="text-sm font-semibold text-gray-950">Connect Exchange</p>
                             <p className="mt-1 text-sm leading-6 text-gray-600">
-                              Provider bank cash-out requires an approved provider.
+                              {MESH_CONNECT_ENABLED
+                                ? "Connect an exchange to import deposit addresses automatically."
+                                : "Mesh integration will let merchants import exchange deposit addresses automatically."}
                             </p>
                           </div>
-                          <NetworkStatusPill label="Provider required" tone="slate" className="shrink-0" />
+                          <NetworkStatusPill
+                            label={MESH_CONNECT_ENABLED ? "Configured" : "Not configured"}
+                            tone={MESH_CONNECT_ENABLED ? "blue" : "slate"}
+                            className="shrink-0"
+                          />
                         </div>
-                        <button type="button" disabled className={cx(pineTreeDisabledButton, "mt-4")}>
-                          Provider Setup Pending
+                        <button
+                          type="button"
+                          onClick={MESH_CONNECT_ENABLED ? connectExchange : undefined}
+                          disabled={!MESH_CONNECT_ENABLED || meshLinking}
+                          className={cx(MESH_CONNECT_ENABLED ? pineTreePrimaryButton : pineTreeDisabledButton, "mt-4")}
+                        >
+                          {meshLinking ? "Connecting..." : MESH_CONNECT_ENABLED ? "Connect Exchange" : "Not Configured"}
                         </button>
+                        <p className="mt-3 text-xs leading-5 text-gray-500">
+                          Mesh imports exchange deposit addresses. PineTree Send still prepares transfers for wallet approval.
+                        </p>
                       </div>
 
-                      {/* ── Settlement Mode (UI-only preference) ── */}
+                      {/* ── Address Book Mode (UI-only preference) ── */}
                       {false && <div className={cx("rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]", !settlementAdvancedOpen && "hidden")}>
-                        <p className="text-sm font-semibold text-gray-950">Settlement Mode</p>
+                        <p className="text-sm font-semibold text-gray-950">Address Book Mode</p>
                         <p className="mt-1 text-xs leading-5 text-gray-500">
                           Choose how and when balances move to your exchange destination.
                         </p>
@@ -4486,7 +5011,77 @@ export default function WalletsPage() {
 
               {activeTab === "activity" && (
                 <div className={walletDetailPanelClass}>
-                  {selectedWallet.isLightning && lightningActivity.length > 0 ? (
+                  {!selectedWallet.isLightning ? (
+                    <div className="rounded-2xl border border-gray-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                      <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
+                        <p className="text-sm font-semibold text-gray-950">Recent Activity</p>
+                        <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-[11px] font-semibold text-gray-600">
+                          Recent 5
+                        </span>
+                      </div>
+                      <div className="p-4">
+                        {historyLoading ? (
+                          <p className="text-center text-sm text-gray-500">Loading...</p>
+                        ) : settlementHistory.length === 0 ? (
+                          <p className="rounded-xl border border-dashed border-gray-200 bg-gray-50/50 px-4 py-5 text-center text-sm text-gray-500">
+                            No recent sends yet.
+                          </p>
+                        ) : (
+                          <div className="space-y-2">
+                            {settlementHistory.slice(0, 5).map((w) => {
+                              const explorerUrl = w.tx_hash ? getExplorerTxUrl(w.network, w.tx_hash) : null
+                              const isDirectManual = w.movement_type === "direct_send" && w.destination_kind === "manual_address"
+                              const destinationDisplay = isDirectManual
+                                ? `Manual address · ${formatSettlementAddress(w.destination_address)}`
+                                : w.destination_label || formatSettlementAddress(w.destination_address)
+                              const statusClass: Record<string, string> = {
+                                DRAFT: "bg-gray-100 text-gray-500",
+                                PREPARED: "bg-amber-100 text-amber-800",
+                                AWAITING_SIGNATURE: "bg-amber-100 text-amber-800",
+                                SUBMITTED: "bg-blue-100 text-blue-700",
+                                CONFIRMED: "bg-[#0052FF]/10 text-[#0052FF]",
+                                FAILED: "bg-red-100 text-red-700",
+                                CANCELLED: "bg-gray-100 text-gray-400"
+                              }
+                              return (
+                                <div key={w.id} className="rounded-xl border border-gray-100 p-3">
+                                  <div className="flex flex-wrap items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-semibold text-gray-950">{w.amount} {w.asset}</p>
+                                      <p className="mt-0.5 truncate text-xs text-gray-500" title={w.destination_address}>
+                                        {destinationDisplay}
+                                      </p>
+                                    </div>
+                                    <span className={cx("shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold", statusClass[w.status] ?? "bg-gray-100 text-gray-500")}>
+                                      {w.status.replace(/_/g, " ")}
+                                    </span>
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+                                    <span>{formatChicagoDateTime(w.created_at)}</span>
+                                    {explorerUrl && (
+                                      <a href={explorerUrl} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-600 hover:underline">
+                                        Explorer
+                                      </a>
+                                    )}
+                                    {w.status === "SUBMITTED" && (
+                                      <button
+                                        type="button"
+                                        onClick={() => checkWithdrawalStatus(w.id)}
+                                        disabled={checkingStatusId === w.id}
+                                        className="font-semibold text-blue-600 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        {checkingStatusId === w.id ? "Checking..." : "Check Status"}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : selectedWallet.isLightning && lightningActivity.length > 0 ? (
                     <>
                       <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                         {([
