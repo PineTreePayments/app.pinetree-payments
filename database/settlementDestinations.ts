@@ -4,6 +4,7 @@ const db = supabaseAdmin || supabase
 
 const TABLE = "merchant_settlement_destinations"
 const MAX_DESTINATIONS_PER_MERCHANT = 20
+const BASE_COLUMNS = "id, merchant_id, label, exchange_name, asset, network, address, memo_or_tag, is_default, created_at, updated_at"
 
 export type SettlementDestinationRecord = {
   id: string
@@ -124,16 +125,70 @@ function normalizeConnectedProvider(value: unknown): SettlementDestinationConnec
   return null
 }
 
+function isMissingOptionalMetadataColumn(error: { code?: string; message?: string } | null | undefined): boolean {
+  const message = String(error?.message || "").toLowerCase()
+  return (
+    error?.code === "PGRST204" ||
+    (message.includes("schema cache") && (
+      message.includes("account_type") ||
+      message.includes("source") ||
+      message.includes("connected_provider") ||
+      message.includes("external_account_name") ||
+      message.includes("external_account_id") ||
+      message.includes("institution_name") ||
+      message.includes("last_verified_at")
+    ))
+  )
+}
+
+function baseInsertPayload(input: CreateSettlementDestinationInput, now: string): Record<string, unknown> {
+  return {
+    merchant_id: input.merchantId,
+    label: input.label.trim(),
+    exchange_name: input.exchangeName.trim(),
+    asset: input.asset.trim().toUpperCase(),
+    network: input.network.trim().toLowerCase(),
+    address: input.address.trim(),
+    memo_or_tag: input.memoOrTag?.trim() || null,
+    is_default: Boolean(input.isDefault),
+    updated_at: now
+  }
+}
+
+function metadataInsertPayload(input: CreateSettlementDestinationInput): Record<string, unknown> {
+  return {
+    account_type: input.accountType || "external_wallet",
+    source: input.source || "manual",
+    connected_provider: input.connectedProvider || "manual",
+    external_account_name: input.externalAccountName?.trim() || null,
+    external_account_id: input.externalAccountId?.trim() || null,
+    institution_name: input.institutionName?.trim() || null,
+    last_verified_at: input.lastVerifiedAt || null
+  }
+}
+
 export async function listSettlementDestinations(
   merchantId: string
 ): Promise<SettlementDestinationRecord[]> {
-  const { data, error } = await db
+  let { data, error } = await db
     .from(TABLE)
     .select("*")
     .eq("merchant_id", merchantId)
     .order("is_default", { ascending: false })
     .order("created_at", { ascending: true })
     .limit(MAX_DESTINATIONS_PER_MERCHANT)
+
+  if (isMissingOptionalMetadataColumn(error)) {
+    const retry = await db
+      .from(TABLE)
+      .select(BASE_COLUMNS)
+      .eq("merchant_id", merchantId)
+      .order("is_default", { ascending: false })
+      .order("created_at", { ascending: true })
+      .limit(MAX_DESTINATIONS_PER_MERCHANT)
+    data = retry.data
+    error = retry.error
+  }
 
   if (error) {
     throw new Error(`Failed to list settlement destinations: ${error.message}`)
@@ -146,12 +201,23 @@ export async function getSettlementDestination(
   merchantId: string,
   id: string
 ): Promise<SettlementDestinationRecord | null> {
-  const { data, error } = await db
+  let { data, error } = await db
     .from(TABLE)
     .select("*")
     .eq("merchant_id", merchantId)
     .eq("id", id)
     .maybeSingle()
+
+  if (isMissingOptionalMetadataColumn(error)) {
+    const retry = await db
+      .from(TABLE)
+      .select(BASE_COLUMNS)
+      .eq("merchant_id", merchantId)
+      .eq("id", id)
+      .maybeSingle()
+    data = retry.data
+    error = retry.error
+  }
 
   if (error) {
     throw new Error(`Failed to get settlement destination: ${error.message}`)
@@ -178,28 +244,21 @@ export async function createSettlementDestination(
 ): Promise<SettlementDestinationRecord> {
   const now = new Date().toISOString()
 
-  const { data, error } = await db
+  let { data, error } = await db
     .from(TABLE)
-    .insert({
-      merchant_id: input.merchantId,
-      label: input.label.trim(),
-      exchange_name: input.exchangeName.trim(),
-      asset: input.asset.trim().toUpperCase(),
-      network: input.network.trim().toLowerCase(),
-      address: input.address.trim(),
-      memo_or_tag: input.memoOrTag?.trim() || null,
-      is_default: Boolean(input.isDefault),
-      account_type: input.accountType || "other",
-      source: input.source || "manual",
-      connected_provider: input.connectedProvider || "manual",
-      external_account_name: input.externalAccountName?.trim() || null,
-      external_account_id: input.externalAccountId?.trim() || null,
-      institution_name: input.institutionName?.trim() || null,
-      last_verified_at: input.lastVerifiedAt || null,
-      updated_at: now
-    })
+    .insert({ ...baseInsertPayload(input, now), ...metadataInsertPayload(input) })
     .select("*")
     .single()
+
+  if (isMissingOptionalMetadataColumn(error)) {
+    const retry = await db
+      .from(TABLE)
+      .insert(baseInsertPayload(input, now))
+      .select(BASE_COLUMNS)
+      .single()
+    data = retry.data
+    error = retry.error
+  }
 
   if (error || !data) {
     throw new Error(`Failed to create settlement destination: ${error?.message || "No data returned"}`)
@@ -213,6 +272,7 @@ export async function updateSettlementDestination(
 ): Promise<SettlementDestinationRecord> {
   const now = new Date().toISOString()
   const update: Record<string, unknown> = { updated_at: now }
+  const metadataUpdate: Record<string, unknown> = {}
 
   if (input.label !== undefined)       update.label        = input.label.trim()
   if (input.exchangeName !== undefined) update.exchange_name = input.exchangeName.trim()
@@ -221,21 +281,33 @@ export async function updateSettlementDestination(
   if (input.address !== undefined)     update.address      = input.address.trim()
   if (input.memoOrTag !== undefined)   update.memo_or_tag  = input.memoOrTag?.trim() || null
   if (input.isDefault !== undefined)   update.is_default   = Boolean(input.isDefault)
-  if (input.accountType !== undefined) update.account_type = input.accountType
-  if (input.source !== undefined) update.source = input.source
-  if (input.connectedProvider !== undefined) update.connected_provider = input.connectedProvider
-  if (input.externalAccountName !== undefined) update.external_account_name = input.externalAccountName?.trim() || null
-  if (input.externalAccountId !== undefined) update.external_account_id = input.externalAccountId?.trim() || null
-  if (input.institutionName !== undefined) update.institution_name = input.institutionName?.trim() || null
-  if (input.lastVerifiedAt !== undefined) update.last_verified_at = input.lastVerifiedAt || null
+  if (input.accountType !== undefined) metadataUpdate.account_type = input.accountType
+  if (input.source !== undefined) metadataUpdate.source = input.source
+  if (input.connectedProvider !== undefined) metadataUpdate.connected_provider = input.connectedProvider
+  if (input.externalAccountName !== undefined) metadataUpdate.external_account_name = input.externalAccountName?.trim() || null
+  if (input.externalAccountId !== undefined) metadataUpdate.external_account_id = input.externalAccountId?.trim() || null
+  if (input.institutionName !== undefined) metadataUpdate.institution_name = input.institutionName?.trim() || null
+  if (input.lastVerifiedAt !== undefined) metadataUpdate.last_verified_at = input.lastVerifiedAt || null
 
-  const { data, error } = await db
+  let { data, error } = await db
     .from(TABLE)
-    .update(update)
+    .update({ ...update, ...metadataUpdate })
     .eq("merchant_id", input.merchantId)
     .eq("id", input.id)
     .select("*")
     .single()
+
+  if (isMissingOptionalMetadataColumn(error)) {
+    const retry = await db
+      .from(TABLE)
+      .update(update)
+      .eq("merchant_id", input.merchantId)
+      .eq("id", input.id)
+      .select(BASE_COLUMNS)
+      .single()
+    data = retry.data
+    error = retry.error
+  }
 
   if (error || !data) {
     throw new Error(`Failed to update settlement destination: ${error?.message || "Not found"}`)

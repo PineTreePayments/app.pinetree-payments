@@ -111,7 +111,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         address:      String(body.address      || "").trim(),
         memoOrTag:    body.memo_or_tag != null ? String(body.memo_or_tag).trim() : null,
         isDefault:    Boolean(body.is_default),
-        accountType:  String(body.account_type || "other").trim() as SettlementDestinationAccountType,
+        accountType:  String(body.account_type || "external_wallet").trim() as SettlementDestinationAccountType,
         source:       String(body.source || "manual").trim() as SettlementDestinationSource,
         connectedProvider: body.connected_provider != null
           ? String(body.connected_provider).trim() as SettlementDestinationConnectedProvider

@@ -260,8 +260,6 @@ type DestinationForm = {
   memoOrTag: string
   isDefault: boolean
   confirmed: boolean
-  accountType: SettlementDestinationAccountType
-  personalExchangeAcknowledged: boolean
 }
 
 const SETTLEMENT_ASSET_NETWORK_OPTIONS = [
@@ -289,27 +287,11 @@ function emptyDestinationForm(): DestinationForm {
     address: "",
     memoOrTag: "",
     isDefault: false,
-    confirmed: false,
-    accountType: "business_exchange",
-    personalExchangeAcknowledged: false
+    confirmed: false
   }
 }
 
-const DESTINATION_ACCOUNT_TYPE_OPTIONS: Array<{ value: SettlementDestinationAccountType; label: string }> = [
-  { value: "business_exchange", label: "Business exchange account, recommended" },
-  { value: "personal_exchange", label: "Personal exchange account" },
-  { value: "external_wallet", label: "External wallet" },
-  { value: "other", label: "Other" }
-]
-
 const MESH_CONNECT_ENABLED = process.env.NEXT_PUBLIC_MESH_CONNECT_ENABLED === "true"
-
-function getDestinationAccountTypeLabel(type?: string | null) {
-  if (type === "business_exchange") return "Business Exchange"
-  if (type === "personal_exchange") return "Personal Exchange"
-  if (type === "external_wallet") return "External Wallet"
-  return "Other"
-}
 
 function getDestinationSourceLabel(dest: Pick<SettlementDestination, "source" | "connected_provider">) {
   if (dest.source === "mesh" || dest.connected_provider === "mesh") return "Mesh Connected"
@@ -1417,11 +1399,7 @@ export default function WalletsPage() {
             wallet_network: selectedWallet?.rail || null,
             address: destForm.address,
             memo_or_tag: destForm.memoOrTag || null,
-            is_default: false,
-            account_type: destForm.accountType,
-            source: "manual",
-            connected_provider: "manual",
-            personal_exchange_acknowledged: destForm.personalExchangeAcknowledged
+            is_default: false
           }
         : {
             action: "create",
@@ -1432,11 +1410,7 @@ export default function WalletsPage() {
             wallet_network: selectedWallet?.rail || null,
             address: destForm.address,
             memo_or_tag: destForm.memoOrTag || null,
-            is_default: false,
-            account_type: destForm.accountType,
-            source: "manual",
-            connected_provider: "manual",
-            personal_exchange_acknowledged: destForm.personalExchangeAcknowledged
+            is_default: false
           }
 
       const res = await fetch("/api/wallets/settlement/destinations", {
@@ -1459,7 +1433,10 @@ export default function WalletsPage() {
   }
 
   function openAddSavedAddress(assetNetwork?: string) {
-    const firstOption = destinationAssetOptions[0]
+    const options = addressBookOpen
+      ? SETTLEMENT_ASSET_NETWORK_OPTIONS
+      : destinationAssetOptions
+    const firstOption = options[0]
     setDestForm({
       ...emptyDestinationForm(),
       assetNetwork: assetNetwork || firstOption?.value || ""
@@ -2391,7 +2368,7 @@ export default function WalletsPage() {
     return dest.network === addressBookFilter
   })
   // When the global address book is open without a selected wallet, allow all networks in the Add Address form
-  const activeAddressFormOptions = (addressBookOpen && !selectedWallet)
+  const activeAddressFormOptions = addressBookOpen
     ? SETTLEMENT_ASSET_NETWORK_OPTIONS
     : destinationAssetOptions
   const firstAddressBookWallet = wallets[0] ? buildConnectedWallet(wallets[0]) : null
@@ -2913,14 +2890,11 @@ export default function WalletsPage() {
               ) : (
                 <div className="space-y-3">
                   {addressBookFilteredDestinations.map((dest) => (
-                    <div key={dest.id} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm transition hover:border-[#0052FF]/20">
+                    <div key={dest.id} className="rounded-xl border border-gray-100 bg-white p-3 shadow-sm transition hover:border-[#0052FF]/20">
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-semibold text-gray-950">{dest.label}</p>
                           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                            <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
-                              {getDestinationAccountTypeLabel(dest.account_type)}
-                            </span>
                             <span className={cx(
                               "rounded-full border px-2 py-0.5 text-[10px] font-semibold",
                               dest.source === "mesh" || dest.connected_provider === "mesh"
@@ -2935,7 +2909,7 @@ export default function WalletsPage() {
                               </span>
                             )}
                           </div>
-                          <p className="mt-0.5 text-[11px] text-gray-400">{dest.exchange_name}</p>
+                          <p className="mt-0.5 truncate text-[11px] text-gray-400">{dest.exchange_name}</p>
                         </div>
                         <span className="shrink-0 rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 px-2.5 py-1 text-[11px] font-semibold text-[#0052FF]">
                           {assetNetworkDisplayLabel(dest.asset, dest.network)}
@@ -2959,7 +2933,7 @@ export default function WalletsPage() {
                           </button>
                         </div>
                       ) : (
-                        <div className="mt-3 flex flex-wrap gap-2">
+                        <div className="mt-2 flex flex-wrap gap-2">
                           <button
                             type="button"
                             onClick={() => {
@@ -2971,18 +2945,16 @@ export default function WalletsPage() {
                                 address: dest.address,
                                 memoOrTag: dest.memo_or_tag || "",
                                 isDefault: false,
-                                confirmed: true,
-                                accountType: dest.account_type || "other",
-                                personalExchangeAcknowledged: dest.account_type === "personal_exchange"
+                                confirmed: true
                               })
                               setDestSaveError(null)
                               setDestModalOpen(true)
                             }}
-                            className={pineTreeSecondaryActionButton}
+                            className={cx(pineTreeSecondaryActionButton, "px-2.5 py-1 text-xs")}
                           >
                             Edit
                           </button>
-                          <button type="button" onClick={() => setDestDeleteConfirmId(dest.id)} className={pineTreeDangerActionButton}>
+                          <button type="button" onClick={() => setDestDeleteConfirmId(dest.id)} className={cx(pineTreeDangerActionButton, "px-2.5 py-1 text-xs")}>
                             Delete
                           </button>
                         </div>
@@ -3078,65 +3050,6 @@ export default function WalletsPage() {
                   ))}
                 </select>
               </label>
-
-              <div>
-                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Address type</span>
-                <div className="mt-2 grid gap-2">
-                  {DESTINATION_ACCOUNT_TYPE_OPTIONS.map((option) => (
-                    <label
-                      key={option.value}
-                      className={cx(
-                        "flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 transition",
-                        destForm.accountType === option.value
-                          ? "border-[#0052FF]/30 bg-[#0052FF]/5"
-                          : "border-gray-200 bg-white hover:bg-gray-50"
-                      )}
-                    >
-                      <input
-                        type="radio"
-                        name="destination-account-type"
-                        value={option.value}
-                        checked={destForm.accountType === option.value}
-                        onChange={() => setDestForm((f) => ({
-                          ...f,
-                          accountType: option.value,
-                          personalExchangeAcknowledged: option.value === "personal_exchange" ? f.personalExchangeAcknowledged : false
-                        }))}
-                        className="h-4 w-4 border-gray-300 text-[#0052FF] focus:ring-[#0052FF]"
-                      />
-                      <span className="text-sm font-semibold text-gray-800">{option.label}</span>
-                    </label>
-                  ))}
-                </div>
-                {destForm.accountType === "business_exchange" && (
-                  <p className="mt-2 rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-3 text-xs leading-5 text-gray-700">
-                    Recommended for business funds, accounting, and bank withdrawal records.
-                  </p>
-                )}
-                {destForm.accountType === "personal_exchange" && (
-                  <div className="mt-2 rounded-xl border border-amber-100 bg-amber-50/70 p-3">
-                    <p className="text-xs leading-5 text-amber-900">
-                      For business payments, PineTree recommends using an exchange account and bank account registered to the business. Personal exchange accounts may create accounting, tax, or compliance issues.
-                    </p>
-                    <label className="mt-2 flex cursor-pointer items-start gap-2">
-                      <input
-                        type="checkbox"
-                        checked={destForm.personalExchangeAcknowledged}
-                        onChange={(e) => setDestForm((f) => ({ ...f, personalExchangeAcknowledged: e.target.checked }))}
-                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-[#0052FF] focus:ring-[#0052FF]"
-                      />
-                      <span className="text-xs font-semibold leading-5 text-amber-900">
-                        I understand this destination may not be registered to the business.
-                      </span>
-                    </label>
-                  </div>
-                )}
-                {destForm.accountType === "external_wallet" && (
-                  <p className="mt-2 rounded-xl border border-gray-100 bg-gray-50/70 p-3 text-xs leading-5 text-gray-600">
-                    Use this for a self-custody wallet or cold wallet you control.
-                  </p>
-                )}
-              </div>
 
               {/* Label */}
               <label className="block">
@@ -3247,8 +3160,7 @@ export default function WalletsPage() {
                     !destForm.exchangeName ||
                     !destForm.assetNetwork ||
                     !destForm.address.trim() ||
-                    !destForm.confirmed ||
-                    (destForm.accountType === "personal_exchange" && !destForm.personalExchangeAcknowledged)
+                    !destForm.confirmed
                   }
                   className={cx(pineTreePrimaryButton, "disabled:cursor-not-allowed disabled:opacity-55")}
                 >
@@ -3467,20 +3379,18 @@ export default function WalletsPage() {
                               </option>
                               {sendSavedDestinations.map((dest) => (
                                 <option key={dest.id} value={dest.id}>
-                                  {dest.label} - {getDestinationAccountTypeLabel(dest.account_type)} - {formatSettlementAddress(dest.address)}
+                                  {dest.label} - {formatSettlementAddress(dest.address)}
                                 </option>
                               ))}
                             </select>
                             {selectedSendDestination && (
                               <div className="mt-2 flex flex-wrap items-center gap-2">
                                 <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-700">
-                                  {getDestinationAccountTypeLabel(selectedSendDestination.account_type)}
+                                  {assetNetworkDisplayLabel(selectedSendDestination.asset, selectedSendDestination.network)}
                                 </span>
-                                {selectedSendDestination.account_type === "personal_exchange" && (
-                                  <span className="text-xs font-semibold text-amber-700">
-                                    Personal account selected. Business exchange accounts are recommended for business funds.
-                                  </span>
-                                )}
+                                <span className="font-mono text-xs text-gray-500">
+                                  {formatSettlementAddress(selectedSendDestination.address)}
+                                </span>
                               </div>
                             )}
                             {!selectedSendDestination && sendSavedDestinations.length === 0 && sendAsset && (
@@ -3845,14 +3755,11 @@ export default function WalletsPage() {
                         ) : (
                           <div className="space-y-2">
                             {savedDestinationsForWallet.map((dest) => (
-                              <div key={dest.id} className="rounded-2xl border border-gray-100 bg-white p-3.5 shadow-sm transition hover:border-[#0052FF]/20">
+                              <div key={dest.id} className="rounded-xl border border-gray-100 bg-white p-3 shadow-sm transition hover:border-[#0052FF]/20">
                                 <div className="flex flex-wrap items-start justify-between gap-2">
                                   <div className="min-w-0 flex-1">
                                     <p className="min-w-0 truncate text-sm font-semibold text-gray-950">{dest.label}</p>
                                     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                                      <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
-                                        {getDestinationAccountTypeLabel(dest.account_type)}
-                                      </span>
                                       <span className={cx(
                                         "rounded-full border px-2 py-0.5 text-[10px] font-semibold",
                                         dest.source === "mesh" || dest.connected_provider === "mesh"
@@ -3890,7 +3797,7 @@ export default function WalletsPage() {
                                     </button>
                                   </div>
                                 ) : (
-                                  <div className="mt-3 flex flex-wrap gap-2">
+                                  <div className="mt-2 flex flex-wrap gap-2">
                                     <button
                                       type="button"
                                       onClick={() => {
@@ -3902,18 +3809,16 @@ export default function WalletsPage() {
                                           address: dest.address,
                                           memoOrTag: dest.memo_or_tag || "",
                                           isDefault: false,
-                                          confirmed: true,
-                                          accountType: dest.account_type || "other",
-                                          personalExchangeAcknowledged: dest.account_type === "personal_exchange"
+                                          confirmed: true
                                         })
                                         setDestSaveError(null)
                                         setDestModalOpen(true)
                                       }}
-                                      className={pineTreeSecondaryActionButton}
+                                      className={cx(pineTreeSecondaryActionButton, "px-2.5 py-1 text-xs")}
                                     >
                                       Edit
                                     </button>
-                                    <button type="button" onClick={() => setDestDeleteConfirmId(dest.id)} className={pineTreeDangerActionButton}>
+                                    <button type="button" onClick={() => setDestDeleteConfirmId(dest.id)} className={cx(pineTreeDangerActionButton, "px-2.5 py-1 text-xs")}>
                                       Delete
                                     </button>
                                   </div>
@@ -4743,15 +4648,12 @@ export default function WalletsPage() {
                                 return (
                                   <div
                                     key={dest.id}
-                                    className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm transition hover:border-[#0052FF]/20"
+                                    className="rounded-xl border border-gray-100 bg-white p-3 shadow-sm transition hover:border-[#0052FF]/20"
                                   >
                                     <div className="flex flex-wrap items-start justify-between gap-2">
                                       <div className="min-w-0 flex-1">
                                         <p className="text-sm font-semibold text-gray-950">{dest.label}</p>
                                         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                                          <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
-                                            {getDestinationAccountTypeLabel(dest.account_type)}
-                                          </span>
                                           <span className={cx(
                                             "rounded-full border px-2 py-0.5 text-[10px] font-semibold",
                                             dest.source === "mesh" || dest.connected_provider === "mesh"
@@ -4771,7 +4673,7 @@ export default function WalletsPage() {
                                             </span>
                                           )}
                                         </div>
-                                        <p className="mt-0.5 text-[11px] text-gray-400">{dest.exchange_name}</p>
+                                        <p className="mt-0.5 truncate text-[11px] text-gray-400">{dest.exchange_name}</p>
                                       </div>
                                       <span className="shrink-0 rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 px-2.5 py-1 text-[11px] font-semibold text-[#0052FF]">
                                         {assetNetworkDisplayLabel(dest.asset, dest.network)}
@@ -4805,7 +4707,7 @@ export default function WalletsPage() {
                                         </button>
                                       </div>
                                     ) : (
-                                      <div className="mt-3 flex flex-wrap gap-2">
+                                      <div className="mt-2 flex flex-wrap gap-2">
                                         <button
                                           type="button"
                                           onClick={() => {
@@ -4817,14 +4719,12 @@ export default function WalletsPage() {
                                               address: dest.address,
                                               memoOrTag: dest.memo_or_tag || "",
                                               isDefault: false,
-                                              confirmed: true,
-                                              accountType: dest.account_type || "other",
-                                              personalExchangeAcknowledged: dest.account_type === "personal_exchange"
+                                              confirmed: true
                                             })
                                             setDestSaveError(null)
                                             setDestModalOpen(true)
                                           }}
-                                          className={pineTreeSecondaryActionButton}
+                                          className={cx(pineTreeSecondaryActionButton, "px-2.5 py-1 text-xs")}
                                         >
                                           Edit
                                         </button>
@@ -4833,7 +4733,7 @@ export default function WalletsPage() {
                                             type="button"
                                             onClick={() => setPreferredDestination(dest.id)}
                                             disabled={destSettingDefault === dest.id}
-                                            className={pineTreeSecondaryActionButton}
+                                            className={cx(pineTreeSecondaryActionButton, "px-2.5 py-1 text-xs")}
                                           >
                                             {destSettingDefault === dest.id ? "Saving…" : "Set Preferred"}
                                           </button>
@@ -4841,7 +4741,7 @@ export default function WalletsPage() {
                                         <button
                                           type="button"
                                           onClick={() => setDestDeleteConfirmId(dest.id)}
-                                          className={pineTreeDangerActionButton}
+                                          className={cx(pineTreeDangerActionButton, "px-2.5 py-1 text-xs")}
                                         >
                                           Delete
                                         </button>

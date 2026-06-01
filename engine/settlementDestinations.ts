@@ -132,7 +132,6 @@ function validateDestinationFields(
   const asset = fields.asset.trim().toUpperCase()
   const network = fields.network.trim().toLowerCase()
   const walletNetwork = fields.walletNetwork?.trim().toLowerCase()
-  const accountType = normalizeAccountTypeInput(fields.accountType)
   const source = normalizeSourceInput(fields.source)
   const connectedProvider = normalizeConnectedProviderInput(fields.connectedProvider)
 
@@ -158,13 +157,9 @@ function validateDestinationFields(
     }
   }
 
-  if (!accountType) return { valid: false, error: "Invalid destination type." }
   if (!source) return { valid: false, error: "Invalid destination source." }
   if (fields.connectedProvider !== undefined && fields.connectedProvider !== null && !connectedProvider) {
     return { valid: false, error: "Invalid connected provider." }
-  }
-  if (accountType === "personal_exchange" && !fields.personalExchangeAcknowledged) {
-    return { valid: false, error: "Confirm the personal exchange account warning before saving." }
   }
 
   const addrResult = validateAddress(fields.address, network)
@@ -178,7 +173,7 @@ function validateDestinationFields(
 }
 
 function normalizeAccountTypeInput(value?: string): SettlementDestinationAccountType | null {
-  const normalized = String(value || "other").trim()
+  const normalized = String(value || "external_wallet").trim()
   return SETTLEMENT_ACCOUNT_TYPES.includes(normalized as SettlementDestinationAccountType)
     ? normalized as SettlementDestinationAccountType
     : null
@@ -248,6 +243,9 @@ export async function createSettlementDestinationEngine(
   }
 
   const { walletNetwork: _walletNetwork, personalExchangeAcknowledged: _acknowledged, ...dbInput } = input
+  dbInput.accountType = normalizeAccountTypeInput(dbInput.accountType) || "external_wallet"
+  dbInput.source = normalizeSourceInput(dbInput.source) || "manual"
+  dbInput.connectedProvider = normalizeConnectedProviderInput(dbInput.connectedProvider) || "manual"
   const dest = await createSettlementDestination({ merchantId, ...dbInput })
 
   // If this is the first destination or isDefault is requested, it's already set.
@@ -309,7 +307,7 @@ export async function updateSettlementDestinationEngine(
     accountType: input.accountType ?? existing.account_type,
     source: input.source ?? existing.source,
     connectedProvider: input.connectedProvider !== undefined ? input.connectedProvider : existing.connected_provider,
-    personalExchangeAcknowledged: input.personalExchangeAcknowledged || (input.accountType === undefined && existing.account_type === "personal_exchange"),
+    personalExchangeAcknowledged: input.personalExchangeAcknowledged,
     walletNetwork: input.walletNetwork
   }
 
@@ -319,6 +317,9 @@ export async function updateSettlementDestinationEngine(
   }
 
   const { walletNetwork: _walletNetwork, personalExchangeAcknowledged: _acknowledged, ...dbInput } = input
+  if (dbInput.accountType !== undefined) dbInput.accountType = normalizeAccountTypeInput(dbInput.accountType) || "external_wallet"
+  if (dbInput.source !== undefined) dbInput.source = normalizeSourceInput(dbInput.source) || "manual"
+  if (dbInput.connectedProvider !== undefined) dbInput.connectedProvider = normalizeConnectedProviderInput(dbInput.connectedProvider)
   const updated = await updateSettlementDestination({ merchantId, id, ...dbInput })
 
   if (updated.is_default) {
