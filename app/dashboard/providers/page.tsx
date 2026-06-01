@@ -209,6 +209,14 @@ export default function ProvidersPage() {
   const [speedAccountId, setSpeedAccountId] = useState("")
   const [lightningSetupTab, setLightningSetupTab] = useState<"speed" | "nwc">("speed")
   const [speedAdminLinksOpen, setSpeedAdminLinksOpen] = useState(false)
+  const [speedTestResult, setSpeedTestResult] = useState<{
+    success: boolean
+    connected?: boolean
+    mode?: string
+    notes?: string[]
+    error?: string
+  } | null>(null)
+  const [speedTesting, setSpeedTesting] = useState(false)
 
   const [smartRouting, setSmartRouting] = useState(false)
   const [autoConversion, setAutoConversion] = useState(false)
@@ -240,6 +248,8 @@ export default function ProvidersPage() {
     setSpeedAccountId("")
     setLightningSetupTab("speed")
     setSpeedAdminLinksOpen(false)
+    setSpeedTestResult(null)
+    setSpeedTesting(false)
 
     if (pollerRef.current) {
       clearInterval(pollerRef.current)
@@ -779,6 +789,45 @@ export default function ProvidersPage() {
     }
   }
 
+  async function testPineTreeSpeedPlatform() {
+    setSpeedTesting(true)
+    setSpeedTestResult(null)
+
+    try {
+      const { data: { session: authSession } } = await supabase.auth.getSession()
+      const authToken = authSession?.access_token
+      if (!authToken) { toast.error("Please sign in again"); return }
+
+      const res = await fetch("/api/wallets/lightning/speed/test", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" }
+      })
+
+      const data = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        setSpeedTestResult({ success: false, connected: false, error: data?.error || "Test request failed" })
+        return
+      }
+
+      setSpeedTestResult({
+        success: Boolean(data?.success),
+        connected: Boolean(data?.connected),
+        mode: data?.mode || "unknown",
+        notes: Array.isArray(data?.notes) ? data.notes : [],
+        error: data?.error || undefined
+      })
+    } catch (err) {
+      setSpeedTestResult({
+        success: false,
+        connected: false,
+        error: err instanceof Error ? err.message : "Test failed"
+      })
+    } finally {
+      setSpeedTesting(false)
+    }
+  }
+
   async function saveSpeedSetup() {
     setLoading(true)
 
@@ -1054,7 +1103,7 @@ export default function ProvidersPage() {
 
   function statusTone(status: string) {
     if (status === "Connected" || status === "Ready") return "blue"
-    if (status === "Needs verification" || status === "Needs permissions" || status === "Setup only") return "amber"
+    if (status === "Setup needed" || status === "Needs verification" || status === "Needs permissions" || status === "Setup only") return "amber"
     if (status === "Provider unavailable" || status === "Missing env") return "red"
     return "default"
   }
@@ -1068,41 +1117,79 @@ export default function ProvidersPage() {
   function getLightningCardState() {
     const speedProvider = getProvider("lightning_speed")
     const speedCredentials = speedProvider?.credentials || {}
+    const speedStatus = getStatus("lightning_speed")
     const nwcStatus = getStatus("lightning")
     const hasMerchantSpeedAccount = Boolean(String(speedCredentials.account_id || "").trim())
-    const speedReady = Boolean(speedProvider?.readiness?.ready)
+    const platformConfigured = Boolean(speedCredentials.platform_configured)
+    const settlementPathStatus = String(speedCredentials.settlement_path_status || "")
+    const speedReady = speedProvider?.readiness?.ready || speedStatus === "Ready"
     const nwcConnected = nwcStatus === "Connected"
+    const speedConfigured = hasMerchantSpeedAccount || platformConfigured
+    const needsPlatformAttention =
+      speedStatus === "Missing env" ||
+      settlementPathStatus === "environment_key_mismatch" ||
+      (!platformConfigured && speedConfigured)
 
     if (speedReady) {
       return {
         status: "Ready",
+        summary: "Ready for Speed Lightning.",
         detail: hasMerchantSpeedAccount
           ? `Speed account • ${formatCredentialPart(String(speedCredentials.account_id), 10, 4)}`
           : "",
-        actionLabel: "Manage"
+        actionLabel: "Manage",
+        showClearSpeed: true
+      }
+    }
+
+    if (needsPlatformAttention) {
+      return {
+        status: "Setup needed",
+        summary: "Speed platform settings need attention.",
+        detail: hasMerchantSpeedAccount
+          ? `Merchant Speed Account ID saved: ${formatCredentialPart(String(speedCredentials.account_id), 10, 4)}`
+          : "Add the merchant Speed Account ID after PineTree Speed settings are ready.",
+        actionLabel: speedConfigured || nwcConnected ? "Manage" : "Connect",
+        showClearSpeed: hasMerchantSpeedAccount
+      }
+    }
+
+    if (platformConfigured && !hasMerchantSpeedAccount) {
+      return {
+        status: "Setup needed",
+        summary: "Setup needed: add merchant Speed Account ID.",
+        detail: "Add the merchant Speed Account ID to finish setup.",
+        actionLabel: "Connect",
+        showClearSpeed: false
       }
     }
 
     if (hasMerchantSpeedAccount) {
       return {
         status: "Connected",
+        summary: "Speed account configured.",
         detail: `Speed account • ${formatCredentialPart(String(speedCredentials.account_id), 10, 4)}`,
-        actionLabel: "Manage"
+        actionLabel: "Manage",
+        showClearSpeed: true
       }
     }
 
     if (nwcConnected) {
       return {
         status: "Connected",
+        summary: "Advanced wallet connected.",
         detail: String(getProvider("lightning")?.credentials?.wallet_label || "Lightning Wallet"),
-        actionLabel: "Manage"
+        actionLabel: "Manage",
+        showClearSpeed: false
       }
     }
 
     return {
-      status: "Not Connected",
-      detail: "",
-      actionLabel: "Connect"
+      status: "Not configured",
+      summary: "Accept Bitcoin Lightning payments through PineTree's Speed setup.",
+      detail: "Add the merchant Speed Account ID to finish setup.",
+      actionLabel: "Connect",
+      showClearSpeed: false
     }
   }
 
@@ -1352,47 +1439,47 @@ export default function ProvidersPage() {
                 </div>
 
                 <p className="pt-1 text-sm leading-5 text-gray-600">
-                  Use Speed for Lightning invoices, auto-swap, and settlement settings.
-                </p>
-                <p className="text-xs leading-5 text-gray-500">
-                  Auto-swap and payout controls are managed in your TrySpeed account. PineTree uses your Speed setup to create invoices and track Lightning payments.
+                  Accept Bitcoin Lightning payments through PineTree&apos;s Speed setup.
                 </p>
               </div>
 
               <div className="mt-4 min-h-[50px]">
-                {(lightningCard.status === "Connected" || lightningCard.status === "Ready") && lightningCard.detail && (
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
-                    <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Connected</span>
-                    <span className="mt-1 block min-w-0 truncate text-sm font-medium leading-snug text-gray-950">
+                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+                  <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                    Setup
+                  </span>
+                  <span className="mt-1 block min-w-0 text-sm font-medium leading-snug text-gray-950">
+                    {lightningCard.summary}
+                  </span>
+                  {lightningCard.detail ? (
+                    <span className="mt-0.5 block min-w-0 truncate text-xs text-gray-500">
                       {lightningCard.detail}
                     </span>
-                  </div>
-                )}
+                  ) : null}
+                </div>
               </div>
 
-              {providerSpeedSetupLinks.length > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {providerSpeedSetupLinks.map((link) => (
-                    <a key={link.key} href={link.url} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                      {link.label}
-                    </a>
-                  ))}
+              <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => openProvider("lightning")}
+                    className={`h-9 rounded-md px-3.5 text-sm font-semibold shadow-sm transition ${
+                      lightningCard.status === "Connected" || lightningCard.status === "Ready"
+                        ? "border border-gray-300 bg-white text-gray-700 hover:border-gray-400 hover:bg-gray-50"
+                        : "border border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
+                    }`}
+                  >
+                    {lightningCard.actionLabel}
+                  </button>
+                  {lightningCard.showClearSpeed ? (
+                    <button
+                      onClick={disconnectSpeed}
+                      className="h-9 rounded-md border border-red-200 bg-white px-3.5 text-sm font-semibold text-red-600 shadow-sm transition hover:bg-red-50"
+                    >
+                      Clear Setup
+                    </button>
+                  ) : null}
                 </div>
-              ) : (
-                <p className="mt-3 text-xs text-gray-500">Speed dashboard links are not configured yet.</p>
-              )}
-
-              <div className="mt-auto flex items-center justify-between gap-3 border-t border-gray-100 pt-4">
-                <button
-                  onClick={() => openProvider("lightning")}
-                  className={`h-9 rounded-md px-3.5 text-sm font-semibold shadow-sm transition ${
-                    lightningCard.status === "Connected" || lightningCard.status === "Ready"
-                      ? "border border-gray-300 bg-white text-gray-700 hover:border-gray-400 hover:bg-gray-50"
-                      : "border border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
-                  }`}
-                >
-                  {lightningCard.actionLabel}
-                </button>
                 <div className="flex shrink-0 items-center gap-2">
                   <span className="text-sm font-medium text-gray-700">Enabled</span>
                   <ToggleSwitch
@@ -1624,9 +1711,12 @@ export default function ProvidersPage() {
 
                 {lightningSetupTab === "speed" ? (
                   <div className="space-y-4">
-                    <p className="text-sm leading-5 text-gray-600">
-                      Use the merchant&apos;s Speed Account ID for Lightning payment setup. Auto-swap and payout controls are managed in TrySpeed.
-                    </p>
+                    <div className="rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3">
+                      <p className="text-sm font-semibold text-gray-900">Speed Lightning Setup</p>
+                      <p className="mt-1 text-sm leading-5 text-gray-600">
+                        Use the merchant&apos;s Speed Account ID as the destination account for Lightning settlement. PineTree&apos;s Speed API key and webhook secret stay server-side.
+                      </p>
+                    </div>
 
                     <label className="block">
                       <span className="text-sm font-semibold text-gray-900">Merchant Speed Account ID</span>
@@ -1642,17 +1732,20 @@ export default function ProvidersPage() {
                       />
                     </label>
 
-                    {providerSpeedSetupLinks.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {providerSpeedSetupLinks.map((link) => (
-                          <a key={link.key} href={link.url} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                            {link.label}
-                          </a>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-gray-500">Speed dashboard links are not configured yet.</p>
-                    )}
+                    {(() => {
+                      const merchantLinks = providerSpeedSetupLinks.filter(
+                        (link) => link.key !== "apiKeys" && link.key !== "webhooks"
+                      )
+                      return merchantLinks.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {merchantLinks.map((link) => (
+                            <a key={link.key} href={link.url} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                              {link.label}
+                            </a>
+                          ))}
+                        </div>
+                      ) : null
+                    })()}
 
                     <div className="rounded-xl border border-gray-200 bg-white">
                       <button
@@ -1667,19 +1760,62 @@ export default function ProvidersPage() {
                       {speedAdminLinksOpen ? (
                         <div className="border-t border-gray-100 px-4 py-3">
                           <p className="mb-3 text-xs leading-5 text-gray-500">
-                            These are PineTree admin setup links. Merchants should not need API keys or webhooks.
+                            These are PineTree admin setup links. Merchants should not need API keys or webhooks directly.
                           </p>
                           <div className="flex flex-wrap gap-2">
-                            <a href={speedApiKeysUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                              Open Speed API Keys
-                            </a>
-                            <a href={speedWebhooksUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                              Open Speed Webhooks
-                            </a>
+                            {speedApiKeysUrl && (
+                              <a href={speedApiKeysUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                                Open Speed API Keys
+                              </a>
+                            )}
+                            {speedWebhooksUrl && (
+                              <a href={speedWebhooksUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                                Open Speed Webhooks
+                              </a>
+                            )}
                           </div>
                         </div>
                       ) : null}
                     </div>
+
+                    <div className="rounded-xl border border-gray-200 bg-gray-50/60 px-4 py-3">
+                      <p className="text-sm font-semibold text-gray-900">Current setup status</p>
+                      <p className="mt-1 text-sm leading-5 text-gray-600">{getLightningCardState().summary}</p>
+                      <p className="mt-1 text-xs leading-5 text-gray-500">
+                        Speed payments turn on only when PineTree&apos;s platform settings are ready and a merchant Speed Account ID is saved.
+                      </p>
+                    </div>
+
+                    {speedTestResult && (
+                      <div className={`rounded-xl border px-4 py-3 ${
+                        speedTestResult.connected
+                          ? "border-green-200 bg-green-50"
+                          : "border-amber-200 bg-amber-50"
+                      }`}>
+                        <p className={`text-sm font-semibold ${
+                          speedTestResult.connected ? "text-green-800" : "text-amber-900"
+                        }`}>
+                          {speedTestResult.connected
+                            ? `PineTree Speed platform reachable${speedTestResult.mode && speedTestResult.mode !== "unknown" ? ` — ${speedTestResult.mode} mode` : ""}`
+                            : "Could not connect to Speed platform"}
+                        </p>
+                        {speedTestResult.connected && speedTestResult.notes && speedTestResult.notes.length > 0 && (
+                          <ul className="mt-1 space-y-0.5">
+                            {speedTestResult.notes.map((note) => (
+                              <li key={note} className="text-xs text-green-700">{note}</li>
+                            ))}
+                          </ul>
+                        )}
+                        {!speedTestResult.connected && speedTestResult.error && (
+                          <p className="mt-1 text-xs text-amber-800">{speedTestResult.error}</p>
+                        )}
+                        {speedTestResult.connected && (
+                          <p className="mt-1 text-xs text-green-700">
+                            Platform is reachable. Save the Merchant Speed Account ID to enable Lightning payments.
+                          </p>
+                        )}
+                      </div>
+                    )}
 
                     <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
                       <button
@@ -1689,14 +1825,24 @@ export default function ProvidersPage() {
                       >
                         Cancel
                       </button>
-                      <button
-                        type="button"
-                        onClick={saveSpeedSetup}
-                        disabled={loading || !speedAccountId.trim()}
-                        className={`${primaryButtonClass()} w-full sm:w-auto`}
-                      >
-                        {loading ? "Saving..." : "Save Setup"}
-                      </button>
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <button
+                          type="button"
+                          onClick={testPineTreeSpeedPlatform}
+                          disabled={speedTesting || loading}
+                          className={`${secondaryButtonClass()} w-full sm:w-auto`}
+                        >
+                          {speedTesting ? "Testing..." : "Test Connection"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={saveSpeedSetup}
+                          disabled={loading || !speedAccountId.trim()}
+                          className={`${primaryButtonClass()} w-full sm:w-auto`}
+                        >
+                          {loading ? "Saving..." : "Save Setup"}
+                        </button>
+                      </div>
                     </div>
 
                     {getLightningCardState().status === "Connected" && (

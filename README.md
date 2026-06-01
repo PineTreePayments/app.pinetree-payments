@@ -126,6 +126,44 @@ PINETREE_TREASURY_NWC_URI=nostr+walletconnect://...
 
 ---
 
+## Mesh Connect — Exchange Address Import
+
+Mesh Connect lets merchants connect their exchange account and import deposit addresses into PineTree's saved destination address book. Mesh is **not** involved in Speed/Lightning setup, Speed dashboard links, payment routing, or invoice creation.
+
+Server-side secrets (never exposed to the browser):
+
+```bash
+MESH_CLIENT_ID=<from Mesh dashboard>
+MESH_CLIENT_SECRET=<from Mesh dashboard>
+MESH_API_BASE_URL=https://integration-api.meshconnect.com
+```
+
+Client-side (safe to expose):
+
+```bash
+NEXT_PUBLIC_MESH_CLIENT_ID=<same value as MESH_CLIENT_ID>
+NEXT_PUBLIC_MESH_CONNECT_ENABLED=true
+```
+
+Set `NEXT_PUBLIC_MESH_CONNECT_ENABLED=true` to enable the Connect Exchange button on the Wallets page. The button is disabled/hidden when this is `false` or unset.
+
+**Important separation:**
+
+- TrySpeed shortcut buttons (Open Speed Dashboard, Find Account ID, Auto-Swap Settings, etc.) are shown when the matching `NEXT_PUBLIC_SPEED_*` URL variables are configured. They have no dependency on Mesh.
+- Mesh exchange connection is controlled only by `NEXT_PUBLIC_MESH_CONNECT_ENABLED` and requires `MESH_CLIENT_ID` / `MESH_CLIENT_SECRET` on the server. It has no dependency on Speed vars.
+
+What Mesh does:
+- Connects a merchant's exchange account (Coinbase, Kraken, etc.) via OAuth through the Mesh Link UI
+- Imports deposit addresses into PineTree's saved destination address book (`merchant_settlement_destinations`)
+- Marks imported destinations with `source=mesh` and `connected_provider=mesh`
+
+What Mesh does **not** do:
+- Does **not** move funds (PineTree Send / wallet approval still required)
+- Does **not** affect Speed credentials, Speed invoice creation, or Speed webhooks
+- Mesh managed transfers are not enabled
+
+---
+
 ## Base V7 and Solana Pay
 
-Base V7 (EIP-3009 / delegated USDC) and Solana Pay are separate payment rails with their own configuration. See `.env.local` for their respective env vars. These are not affected by Speed or NWC setup.
+Base V7 (EIP-3009 / delegated USDC) and Solana Pay are separate payment rails with their own configuration. See `.env.local` for their respective env vars. These are not affected by Speed, NWC, or Mesh setup.
