@@ -84,6 +84,9 @@ type PageStatus =
   | "failed"
   | "expired"
   | "not_found"
+  // Wallet connected — waiting for user tap to open transaction signing deeplink
+  | "phantom_connected"
+  | "solflare_connected"
 
 type Eip1193Provider = {
   isCoinbaseWallet?: boolean
@@ -238,6 +241,10 @@ export default function WalletApprovalPage({
   const [pageStatus, setPageStatus] = useState<PageStatus>("loading")
   const [statusMessage, setStatusMessage] = useState<string>("")
   const [expiryDisplay, setExpiryDisplay] = useState<string>("")
+  // Pending sign URLs stored after connect so the user taps a button to open
+  // the transaction deeplink — iOS Universal Links require a real user gesture.
+  const [pendingPhantomSignUrl, setPendingPhantomSignUrl] = useState<string>("")
+  const [pendingSolflareSignUrl, setPendingSolflareSignUrl] = useState<string>("")
   const expiryRef = useRef<NodeJS.Timeout | null>(null)
   const signingRef = useRef(false)
 
@@ -283,13 +290,34 @@ export default function WalletApprovalPage({
       sessionId: sid,
     })
 
-    // Check for user rejection before any decrypt attempt
+    // Phantom returns errorCode + errorMessage on any failure (user rejection,
+    // technical errors, or expired blockhash).  Distinguish user rejection
+    // (4001 / cancel / decline) from technical failures (4200 "method not
+    // supported", simulation failures, etc.) so the UI message is accurate.
     const errCode = searchParams.get("errorCode")
     const errMsg = searchParams.get("errorMessage") || ""
-    if (errCode || errMsg.toLowerCase().includes("reject") || errMsg.toLowerCase().includes("cancel")) {
-      setStatusMessage(`Transaction rejected in Phantom.${errMsg ? ` (${errMsg})` : ""}`)
-      setPageStatus("rejected")
-      await patchSessionStatus(sid, "rejected", `Phantom rejected: ${errMsg || errCode}`)
+    if (errCode || errMsg) {
+      const isUserRejection =
+        String(errCode) === "4001" ||
+        errMsg.toLowerCase().includes("reject") ||
+        errMsg.toLowerCase().includes("cancel") ||
+        errMsg.toLowerCase().includes("declined") ||
+        errMsg.toLowerCase().includes("denied")
+      if (isUserRejection) {
+        setStatusMessage(`Transaction rejected in Phantom.${errMsg ? ` (${errMsg})` : ""}`)
+        setPageStatus("rejected")
+        await patchSessionStatus(sid, "rejected", `Phantom rejected: ${errMsg || errCode}`)
+      } else {
+        // 4200 "This method is not supported" is returned when the Universal Link
+        // deeplink opens Phantom's web server instead of the app (no user gesture),
+        // or when Phantom cannot process the transaction.
+        const detail = errMsg || `error code ${errCode || "unknown"}`
+        setStatusMessage(
+          `Phantom returned an error: ${detail}. Tap "Try Again" to restart the approval.`
+        )
+        setPageStatus("failed")
+        await patchSessionStatus(sid, "failed", `Phantom error: ${detail}`)
+      }
       clearPhantomSession(sid)
       return true
     }
@@ -338,7 +366,9 @@ export default function WalletApprovalPage({
       }
 
       storePhantomSession(sid, phantomSession)
-      await patchSessionStatus(sid, "wallet_connected")
+      // Fire and forget — status patches must not be awaited before the redirect
+      // because awaiting breaks the iOS user-gesture context.
+      patchSessionStatus(sid, "wallet_connected").catch(() => {})
 
       const txBase64 = loadedSession.prepared_payload.unsigned_tx_base64
       if (!txBase64) {
@@ -348,14 +378,27 @@ export default function WalletApprovalPage({
         return true
       }
 
-      await patchSessionStatus(sid, "approval_requested")
+      console.debug("[Phantom connect] building signAndSend URL", {
+        sessionId: sid,
+        hasTx: Boolean(txBase64),
+        txLength: txBase64.length,
+        redirectBase: baseRedirect,
+      })
+
+      // Build the signing deeplink synchronously, then show a button.
+      // iOS Universal Links are only intercepted by Phantom when navigation is
+      // triggered by a real user gesture (tap).  A programmatic window.location.href
+      // set after async operations loses the gesture context and Phantom's web
+      // server returns 4200 "This method is not supported" instead of opening the app.
       const signUrl = buildPhantomSignAndSendUrl(
         sid,
         txBase64,
         phantomSession,
         `${baseRedirect}?phantom_action=sign`
       )
-      window.location.href = signUrl
+      patchSessionStatus(sid, "approval_requested").catch(() => {})
+      setPendingPhantomSignUrl(signUrl)
+      setPageStatus("phantom_connected")
       return true
     }
 
@@ -421,13 +464,28 @@ export default function WalletApprovalPage({
       sessionId: sid,
     })
 
-    // Check for user rejection before any decrypt attempt
+    // Same distinction as Phantom: 4001 = user rejection, anything else = technical error
     const errCode = searchParams.get("errorCode")
     const errMsg = searchParams.get("errorMessage") || ""
-    if (errCode || errMsg.toLowerCase().includes("reject") || errMsg.toLowerCase().includes("cancel")) {
-      setStatusMessage(`Transaction rejected in Solflare.${errMsg ? ` (${errMsg})` : ""}`)
-      setPageStatus("rejected")
-      await patchSessionStatus(sid, "rejected", `Solflare rejected: ${errMsg || errCode}`)
+    if (errCode || errMsg) {
+      const isUserRejection =
+        String(errCode) === "4001" ||
+        errMsg.toLowerCase().includes("reject") ||
+        errMsg.toLowerCase().includes("cancel") ||
+        errMsg.toLowerCase().includes("declined") ||
+        errMsg.toLowerCase().includes("denied")
+      if (isUserRejection) {
+        setStatusMessage(`Transaction rejected in Solflare.${errMsg ? ` (${errMsg})` : ""}`)
+        setPageStatus("rejected")
+        await patchSessionStatus(sid, "rejected", `Solflare rejected: ${errMsg || errCode}`)
+      } else {
+        const detail = errMsg || `error code ${errCode || "unknown"}`
+        setStatusMessage(
+          `Solflare returned an error: ${detail}. Tap "Try Again" to restart the approval.`
+        )
+        setPageStatus("failed")
+        await patchSessionStatus(sid, "failed", `Solflare error: ${detail}`)
+      }
       clearSolflareSession(sid)
       return true
     }
@@ -474,7 +532,8 @@ export default function WalletApprovalPage({
       }
 
       storeSolflareSession(solflareSession, sid)
-      await patchSessionStatus(sid, "wallet_connected")
+      // Fire and forget — do not await before showing button (iOS gesture context)
+      patchSessionStatus(sid, "wallet_connected").catch(() => {})
 
       const txBase64 = loadedSession.prepared_payload.unsigned_tx_base64
       if (!txBase64) {
@@ -484,14 +543,23 @@ export default function WalletApprovalPage({
         return true
       }
 
-      await patchSessionStatus(sid, "approval_requested")
+      console.debug("[Solflare connect] building signAndSend URL", {
+        sessionId: sid,
+        hasTx: Boolean(txBase64),
+        txLength: txBase64.length,
+        redirectBase: baseRedirect,
+      })
+
+      // Same gesture-context pattern as Phantom: store URL, show tap button
       const signUrl = buildSolflareSignAndSendUrl(
         txBase64,
         solflareSession,
         `${baseRedirect}?solflare_action=sign`,
         sid
       )
-      window.location.href = signUrl
+      patchSessionStatus(sid, "approval_requested").catch(() => {})
+      setPendingSolflareSignUrl(signUrl)
+      setPageStatus("solflare_connected")
       return true
     }
 
@@ -668,7 +736,17 @@ export default function WalletApprovalPage({
 
       const chainId = await provider.request({ method: "eth_chainId" }).catch(() => "")
       if (String(chainId).toLowerCase() !== "0x2105" && String(chainId) !== "8453") {
-        throw new Error("Wallet is not on Base network. Switch to Base in your wallet settings.")
+        // Try to switch to Base before failing hard
+        try {
+          await provider.request({
+            method: "wallet_switchEthereumChain",
+            params: [{ chainId: "0x2105" }],
+          })
+        } catch {
+          throw new Error(
+            "Wallet is not on Base network. Switch to Base in your wallet settings and try again."
+          )
+        }
       }
 
       const accountsResponse = await provider.request({ method: "eth_requestAccounts" })
@@ -977,7 +1055,7 @@ export default function WalletApprovalPage({
         )}
 
         {/* Session info + action */}
-        {session && !["loading", "not_found", "expired"].includes(pageStatus) && (
+        {session && !["loading", "not_found", "expired"].includes(pageStatus as string) && (
           <>
             {/* Transaction summary */}
             <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
@@ -1042,6 +1120,44 @@ export default function WalletApprovalPage({
                 </div>
               )}
 
+              {/* Phantom connected — wallet approved PineTree; user must tap to open signing deeplink */}
+              {pageStatus === "phantom_connected" && (
+                <div>
+                  <p className="text-sm font-semibold text-green-700">Phantom connected</p>
+                  <p className="mt-1 text-xs leading-5 text-gray-500">
+                    Tap below to open Phantom and approve the transaction.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (pendingPhantomSignUrl) window.location.href = pendingPhantomSignUrl
+                    }}
+                    className="mt-3 w-full rounded-xl bg-[#0052FF] py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 active:scale-[0.98]"
+                  >
+                    Approve Transaction in Phantom
+                  </button>
+                </div>
+              )}
+
+              {/* Solflare connected — wallet approved PineTree; user must tap to open signing deeplink */}
+              {pageStatus === "solflare_connected" && (
+                <div>
+                  <p className="text-sm font-semibold text-green-700">Solflare connected</p>
+                  <p className="mt-1 text-xs leading-5 text-gray-500">
+                    Tap below to open Solflare and approve the transaction.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (pendingSolflareSignUrl) window.location.href = pendingSolflareSignUrl
+                    }}
+                    className="mt-3 w-full rounded-xl bg-[#0052FF] py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 active:scale-[0.98]"
+                  >
+                    Approve Transaction in Solflare
+                  </button>
+                </div>
+              )}
+
               {pageStatus === "connecting" && (
                 <div className="flex items-center gap-3">
                   <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-blue-500" />
@@ -1097,6 +1213,8 @@ export default function WalletApprovalPage({
                       if (session?.wallet_type === "phantom")  clearPhantomSession(session.id)
                       else if (session?.wallet_type === "solflare") clearSolflareSession(session.id)
                       signingRef.current = false
+                      setPendingPhantomSignUrl("")
+                      setPendingSolflareSignUrl("")
                       setPageStatus("ready")
                       setStatusMessage("")
                     }}
@@ -1119,6 +1237,8 @@ export default function WalletApprovalPage({
                       if (session?.wallet_type === "phantom")  clearPhantomSession(session.id)
                       else if (session?.wallet_type === "solflare") clearSolflareSession(session.id)
                       signingRef.current = false
+                      setPendingPhantomSignUrl("")
+                      setPendingSolflareSignUrl("")
                       setPageStatus("ready")
                       setStatusMessage("")
                     }}
