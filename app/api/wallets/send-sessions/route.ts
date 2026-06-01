@@ -63,6 +63,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return errorResponse(`Unsupported wallet_type: ${walletType}`, 400)
   }
 
+  console.log("[send-session POST] creating", { merchantId, walletId, rail, walletType, asset, network })
+
   try {
     const session = await createSendSession({
       merchantId,
@@ -78,9 +80,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       preparedPayload,
     })
 
+    console.log("[send-session POST] created", { id: session.id, rail: session.rail, wallet_type: session.wallet_type, status: session.status, expires_at: session.expires_at })
+
     return NextResponse.json({ success: true, session })
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to create send session"
+    console.error("[send-session POST] error", { merchantId, rail, walletType, message })
     return errorResponse(message, getRouteErrorStatus(err, 500))
   }
 }

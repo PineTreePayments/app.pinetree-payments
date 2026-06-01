@@ -536,25 +536,47 @@ export default function WalletApprovalPage({
     if (!sessionId) return
 
     async function init() {
+      console.debug("[wallet-approval] fetching session", { sessionId })
+
       const res = await fetch(`/api/wallets/send-sessions/${sessionId}`).catch(() => null)
+
       if (!res) {
+        setStatusMessage("Could not connect to PineTree. Check your network connection and try reloading.")
         setPageStatus("not_found")
         return
       }
-      if (res.status === 404 || res.status === 410) {
-        setPageStatus(res.status === 410 ? "expired" : "not_found")
+
+      if (res.status === 410) {
+        setPageStatus("expired")
         return
       }
+
+      if (res.status === 404) {
+        // Try to read the server error message for a better hint
+        const errBody = await res.json().catch(() => null) as { error?: string } | null
+        setStatusMessage(errBody?.error || "Approval session not found. It may have expired or the link may be invalid. Create a new QR from PineTree.")
+        setPageStatus("not_found")
+        return
+      }
+
       if (!res.ok) {
+        // 500 or other server error — surface the real error from the API
+        const errBody = await res.json().catch(() => null) as { error?: string } | null
+        const serverMsg = errBody?.error || ""
+        console.error("[wallet-approval] session load error", { status: res.status, serverMsg })
+        setStatusMessage(serverMsg || "Could not load the approval session. Try creating a new QR from PineTree.")
         setPageStatus("not_found")
         return
       }
 
       const data = await res.json().catch(() => null) as { success?: boolean; session?: SessionData } | null
       if (!data?.success || !data.session) {
+        setStatusMessage("Approval session response was unexpected. Try creating a new QR from PineTree.")
         setPageStatus("not_found")
         return
       }
+
+      console.debug("[wallet-approval] session loaded", { id: data.session.id, status: data.session.status, rail: data.session.rail, wallet_type: data.session.wallet_type })
 
       const s = data.session
       setSession(s)
@@ -922,11 +944,13 @@ export default function WalletApprovalPage({
           </div>
         )}
 
-        {/* Not found */}
+        {/* Not found / load error */}
         {pageStatus === "not_found" && (
           <div className="rounded-2xl border border-red-100 bg-red-50 p-6 text-center">
             <p className="text-sm font-semibold text-red-700">Session not found</p>
-            <p className="mt-1 text-xs text-red-600">This approval link is invalid or has been removed.</p>
+            <p className="mt-1 text-xs text-red-600">
+              {statusMessage || "This approval link is invalid or has been removed."}
+            </p>
           </div>
         )}
 
@@ -935,7 +959,7 @@ export default function WalletApprovalPage({
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center">
             <p className="text-sm font-semibold text-amber-700">Session Expired</p>
             <p className="mt-1 text-xs text-amber-600">
-              This approval link has expired. Go back to the POS and start a new send.
+              Approval session expired. Return to PineTree and create a new QR.
             </p>
           </div>
         )}

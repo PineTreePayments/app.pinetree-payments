@@ -2,7 +2,8 @@
  * GET  /api/wallets/send-sessions/[id]
  *   Returns public-safe session details for the mobile approval page.
  *   No merchant auth required — session ID is an unguessable UUID.
- *   Sensitive merchant data (other than what the approver needs) is not exposed.
+ *   Reads use the service role key to bypass RLS; no sensitive merchant
+ *   data beyond what the approver needs is returned.
  *
  * PATCH /api/wallets/send-sessions/[id]
  *   Updates session status from the mobile approval page.
@@ -43,15 +44,23 @@ export async function GET(
   const { id } = await context.params
   if (!id) return errorResponse("Session ID is required", 400)
 
+  console.log("[send-session GET]", { id })
+
   try {
     const session = await getSendSession(id)
-    if (!session) return errorResponse("Session not found", 404)
+
+    if (!session) {
+      console.warn("[send-session GET] no session found", { id })
+      return errorResponse("Approval session not found. It may have expired or the link may be invalid.", 404)
+    }
+
+    console.log("[send-session GET] found", { id, status: session.status, rail: session.rail, wallet_type: session.wallet_type, expires_at: session.expires_at })
 
     // Check expiry (belt-and-suspenders; DB index handles cleanup)
     if (session.status === "created" || session.status === "opened") {
       if (new Date(session.expires_at) < new Date()) {
         await updateSendSessionStatus(id, "expired").catch(() => {})
-        return errorResponse("Session has expired", 410)
+        return errorResponse("Approval session has expired. Return to PineTree and create a new QR.", 410)
       }
     }
 
@@ -78,7 +87,8 @@ export async function GET(
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to load session"
-    return errorResponse(message, 500)
+    console.error("[send-session GET] error", { id, message })
+    return errorResponse(`Could not load approval session: ${message}`, 500)
   }
 }
 
@@ -118,6 +128,7 @@ export async function PATCH(
     return NextResponse.json({ success: true, session: updated })
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to update session"
+    console.error("[send-session PATCH] error", { id, status, message })
     return errorResponse(message, 500)
   }
 }

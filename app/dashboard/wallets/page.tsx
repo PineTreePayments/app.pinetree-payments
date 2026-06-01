@@ -1302,6 +1302,14 @@ export default function WalletsPage() {
       setApprovalSessionId(sessionId)
       setApprovalStep("qr_ready")
 
+      const approvalUrl = `${process.env.NEXT_PUBLIC_APP_URL || (typeof window !== "undefined" ? window.location.origin : "")}/wallet-approval/${sessionId}`
+      console.debug("[approval-session] QR ready", {
+        approvalUrl,
+        sessionId,
+        rail:       selectedWallet.rail,
+        walletType: selectedWallet.approvalWalletType,
+      })
+
       // Poll session status
       approvalPollRef.current = setInterval(async () => {
         try {

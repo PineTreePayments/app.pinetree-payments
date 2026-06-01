@@ -1,7 +1,26 @@
-import { supabase, supabaseAdmin } from "./supabase"
+import { createClient } from "@supabase/supabase-js"
 
-const db = supabaseAdmin || supabase
 const TABLE = "merchant_wallet_send_sessions"
+
+/**
+ * Creates a Supabase client that uses the service role key when available
+ * so it bypasses RLS for server-side reads/writes. Falls back to the anon
+ * key only if SUPABASE_SERVICE_ROLE_KEY is not configured (dev/test).
+ *
+ * Called inside each function (not at module level) so env vars are read
+ * at request time, not at cold-start, avoiding any module-init ordering issues.
+ */
+function getDb() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!url) throw new Error("NEXT_PUBLIC_SUPABASE_URL is not configured")
+  if (!anonKey) throw new Error("NEXT_PUBLIC_SUPABASE_ANON_KEY is not configured")
+  if (!serviceKey) {
+    console.warn("[merchantWalletSendSessions] SUPABASE_SERVICE_ROLE_KEY is not set — falling back to anon key. RLS-protected tables may not be readable.")
+  }
+  return createClient(url, serviceKey ?? anonKey)
+}
 
 export type SendSessionStatus =
   | "created"
@@ -88,7 +107,7 @@ export async function createSendSession(
   const expiresAt = input.expiresAt ?? new Date(Date.now() + 15 * 60 * 1000) // 15 min
   const now = new Date().toISOString()
 
-  const { data, error } = await db
+  const { data, error } = await getDb()
     .from(TABLE)
     .insert({
       merchant_id:         input.merchantId,
@@ -110,21 +129,36 @@ export async function createSendSession(
     .single()
 
   if (error || !data) {
-    throw new Error(`Failed to create send session: ${error?.message || "No data"}`)
+    throw new Error(`Failed to create send session: ${error?.message || "No data returned"}`)
   }
 
-  return normalize(data as Record<string, unknown>)
+  const session = normalize(data as Record<string, unknown>)
+
+  console.log("[send-session] created", {
+    id:         session.id,
+    merchant_id: session.merchant_id,
+    wallet_id:  session.wallet_id,
+    rail:       session.rail,
+    wallet_type: session.wallet_type,
+    status:     session.status,
+    expires_at: session.expires_at,
+  })
+
+  return session
 }
 
-/** Public lookup — usable without merchant auth (session ID is unguessable). */
+/** Public lookup — usable without merchant auth (session ID is an unguessable UUID). */
 export async function getSendSession(id: string): Promise<MerchantWalletSendSession | null> {
-  const { data, error } = await db
+  const { data, error } = await getDb()
     .from(TABLE)
     .select("*")
     .eq("id", id)
     .maybeSingle()
 
-  if (error) throw new Error(`Failed to get send session: ${error.message}`)
+  if (error) {
+    console.error("[send-session] getSendSession error", { id, message: error.message, code: error.code })
+    throw new Error(`Failed to get send session: ${error.message}`)
+  }
   return data ? normalize(data as Record<string, unknown>) : null
 }
 
@@ -133,7 +167,7 @@ export async function getSendSessionForMerchant(
   merchantId: string,
   id: string
 ): Promise<MerchantWalletSendSession | null> {
-  const { data, error } = await db
+  const { data, error } = await getDb()
     .from(TABLE)
     .select("*")
     .eq("merchant_id", merchantId)
@@ -161,7 +195,7 @@ export async function updateSendSessionStatus(
   if (opts?.signature !== undefined) update.signature = opts.signature
   if (opts?.error     !== undefined) update.error     = opts.error
 
-  const { data, error } = await db
+  const { data, error } = await getDb()
     .from(TABLE)
     .update(update)
     .eq("id", id)
