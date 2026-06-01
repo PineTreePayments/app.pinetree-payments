@@ -22,6 +22,39 @@ function isProtectedApi(pathname: string): boolean {
   )
 }
 
+/**
+ * Returns true for the three wallet approval routes that the mobile phone
+ * must reach without being logged into PineTree:
+ *   GET  /api/wallets/send-sessions/{id}          — read session for approval page
+ *   PATCH /api/wallets/send-sessions/{id}         — update status (opened, wallet_connected, …)
+ *   POST /api/wallets/send-sessions/{id}/complete — submit tx_hash / signature
+ *
+ * POST /api/wallets/send-sessions (no id segment) remains protected — only
+ * logged-in merchants on desktop/POS create sessions.
+ */
+function isPublicWalletApprovalApi(req: NextRequest): boolean {
+  const { pathname } = req.nextUrl
+  const method = req.method
+
+  // /api/wallets/send-sessions/{id}  — GET (load) and PATCH (status update)
+  if (
+    /^\/api\/wallets\/send-sessions\/[^/]+$/.test(pathname) &&
+    (method === "GET" || method === "PATCH")
+  ) {
+    return true
+  }
+
+  // /api/wallets/send-sessions/{id}/complete  — POST (record tx_hash/signature)
+  if (
+    /^\/api\/wallets\/send-sessions\/[^/]+\/complete$/.test(pathname) &&
+    method === "POST"
+  ) {
+    return true
+  }
+
+  return false
+}
+
 function getAuthCookieNames(req: NextRequest): string[] {
   return req.cookies
     .getAll()
@@ -34,6 +67,13 @@ export async function middleware(req: NextRequest) {
 
   // CRITICAL: bypass Solana Pay requests — wallets do not send cookies
   if (pathname.startsWith("/api/solana-pay")) {
+    return NextResponse.next()
+  }
+
+  // CRITICAL: bypass public wallet approval routes — the merchant's phone browser
+  // scans a QR and opens these endpoints without a PineTree session cookie.
+  // Session UUID possession is the access token for these routes.
+  if (isPublicWalletApprovalApi(req)) {
     return NextResponse.next()
   }
 

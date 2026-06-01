@@ -559,6 +559,18 @@ export default function WalletApprovalPage({
         return
       }
 
+      if (res.status === 401) {
+        // Diagnostic: the mobile approval endpoint still requires login.
+        // After the middleware bypass is deployed this should never happen.
+        console.error("[wallet-approval] session load returned 401 — mobile approval endpoint still requires login", { sessionId })
+        setStatusMessage(
+          "Approval session could not be loaded because the mobile approval endpoint still requires login. " +
+          "This approval page must be public-safe by session link."
+        )
+        setPageStatus("not_found")
+        return
+      }
+
       if (!res.ok) {
         // 500 or other server error — surface the real error from the API
         const errBody = await res.json().catch(() => null) as { error?: string } | null
