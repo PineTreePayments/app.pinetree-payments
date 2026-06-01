@@ -4,11 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { Transaction } from "@solana/web3.js"
 import { QRCodeSVG } from "qrcode.react"
 import { getDetectedSolanaWallets, getSolanaTransactionSignature } from "@/lib/wallets/solana"
-import {
-  initMerchantBaseWalletConnect,
-  waitForMerchantWalletConnect,
-  type MerchantWcProvider
-} from "@/lib/wallets/merchantBaseWalletConnect"
 import { supabase } from "@/lib/supabaseClient"
 import { getSpeedDashboardLinks } from "@/lib/speedDashboardLinks"
 import {
@@ -468,7 +463,6 @@ const lightningSpeedLinks = getSpeedDashboardLinks([
   "payouts",
   "docs"
 ])
-const walletConnectConfigured = Boolean(process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID)
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ")
@@ -968,12 +962,16 @@ export default function WalletsPage() {
   const [meshImportError, setMeshImportError] = useState<string | null>(null)
   const [meshImportResult, setMeshImportResult] = useState<{ imported: number; updated: number } | null>(null)
 
-  // Merchant WalletConnect send state
-  type MerchantWcStep = "idle" | "initializing" | "pairing" | "connected" | "requesting" | "signing" | "approved" | "recording" | "submitted" | "rejected" | "expired" | "error"
-  const [merchantWcStep, setMerchantWcStep] = useState<MerchantWcStep>("idle")
-  const [merchantWcPairingUri, setMerchantWcPairingUri] = useState<string | null>(null)
-  const [merchantWcError, setMerchantWcError] = useState<string | null>(null)
-  const merchantWcProviderRef = useRef<MerchantWcProvider | null>(null)
+  // Approval session send state (replaces raw WalletConnect QR)
+  type ApprovalStep =
+    | "idle" | "creating" | "qr_ready" | "opened"
+    | "wallet_connecting" | "wallet_connected" | "approval_requested"
+    | "submitted" | "rejected" | "expired" | "failed"
+  const [approvalStep, setApprovalStep] = useState<ApprovalStep>("idle")
+  const [approvalSessionId, setApprovalSessionId] = useState<string | null>(null)
+  const [approvalError, setApprovalError] = useState<string | null>(null)
+  const [approvalTxHash, setApprovalTxHash] = useState<string | null>(null)
+  const approvalPollRef = useRef<NodeJS.Timeout | null>(null)
   const directSendSubmittingRef = useRef(false)
 
   useEffect(() => {
@@ -1067,15 +1065,16 @@ export default function WalletsPage() {
     setNwcAdvancedOpen(false)
     // Address book notice clears on wallet change (the modal itself stays open if already open)
     setAddressBookNotice(null)
-    // WalletConnect send state reset
-    if (merchantWcProviderRef.current) {
-      merchantWcProviderRef.current.disconnect().catch(() => {})
-      merchantWcProviderRef.current = null
+    // Approval session send state reset
+    if (approvalPollRef.current) {
+      clearInterval(approvalPollRef.current)
+      approvalPollRef.current = null
     }
     directSendSubmittingRef.current = false
-    setMerchantWcStep("idle")
-    setMerchantWcPairingUri(null)
-    setMerchantWcError(null)
+    setApprovalStep("idle")
+    setApprovalSessionId(null)
+    setApprovalError(null)
+    setApprovalTxHash(null)
     // Mesh state reset
     setMeshLinking(false)
     setMeshLinkError(null)
@@ -1205,14 +1204,7 @@ export default function WalletsPage() {
     return token
   }
 
-  // ── Base WalletConnect merchant send ─────────────────────────────────────────
-
-  function getMerchantApprovalFailureStep(message: string): MerchantWcStep {
-    const normalized = message.toLowerCase()
-    if (normalized.includes("reject") || normalized.includes("denied") || normalized.includes("declined")) return "rejected"
-    if (normalized.includes("timed out") || normalized.includes("timeout") || normalized.includes("expired")) return "expired"
-    return "error"
-  }
+  // ── Approval session send (Base + Solana) ────────────────────────────────────
 
   async function recordSubmittedDirectSend(txHash: string) {
     if (!sendRecord || !selectedWallet) throw new Error("Missing prepared send. Please review the send again.")
@@ -1249,92 +1241,128 @@ export default function WalletsPage() {
     }
   }
 
-  async function startWalletConnectSend() {
-    if (!sendRecord?.tx_params || !selectedWallet) return
-    if (selectedWallet.rail !== "base" || !selectedWallet.approvalWalletType) {
-      setMerchantWcError("This connected wallet does not currently support PineTree mobile send approval.")
-      setMerchantWcStep("error")
-      return
-    }
-    if (!walletConnectConfigured) {
-      setMerchantWcError("WalletConnect is not configured.")
-      setMerchantWcStep("error")
-      return
-    }
-    if (directSendSubmittingRef.current || sendStep === "signing") return
+  async function startApprovalSession() {
+    if (!sendRecord || !selectedWallet || !selectedWallet.approvalWalletType) return
+    if (directSendSubmittingRef.current) return
     directSendSubmittingRef.current = true
 
-    setMerchantWcStep("initializing")
-    setMerchantWcError(null)
-    setMerchantWcPairingUri(null)
+    setApprovalStep("creating")
+    setApprovalError(null)
+    setApprovalSessionId(null)
+    setApprovalTxHash(null)
 
-    // Tear down any previous session
-    if (merchantWcProviderRef.current) {
-      merchantWcProviderRef.current.disconnect().catch(() => {})
-      merchantWcProviderRef.current = null
+    // Stop any previous poll
+    if (approvalPollRef.current) {
+      clearInterval(approvalPollRef.current)
+      approvalPollRef.current = null
     }
+
     try {
-      const result = await initMerchantBaseWalletConnect()
-      if (!result.ok) throw new Error(result.error)
-
-      merchantWcProviderRef.current = result.provider
-      setMerchantWcPairingUri(result.pairingUri)
-      setMerchantWcStep("pairing")
-
-      const address = await waitForMerchantWalletConnect(result.provider)
-      setMerchantWcStep("connected")
-
-      if (normalizeAddressForCompare(address) !== normalizeAddressForCompare(selectedWallet.referenceTitle)) {
-        await result.provider.disconnect().catch(() => {})
-        throw new Error("Connected wallet does not match the merchant wallet saved for Base Pay.")
+      const token = await getMerchantToken()
+      const preparedPayload: Record<string, unknown> = {
+        destination_kind: selectedSendDestination ? "saved_destination" : "manual_address",
+      }
+      if (sendRecord.tx_params) {
+        preparedPayload.tx_params = sendRecord.tx_params
+      }
+      if (sendRecord.unsigned_tx_base64) {
+        preparedPayload.unsigned_tx_base64 = sendRecord.unsigned_tx_base64
       }
 
-      const chainId = await result.provider.request<string>("eth_chainId").catch(() => "")
-      if (String(chainId).toLowerCase() !== "0x2105" && String(chainId) !== "8453") {
-        await result.provider.disconnect().catch(() => {})
-        throw new Error("Connected wallet is not on Base.")
+      const res = await fetch("/api/wallets/send-sessions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({
+          wallet_id:           selectedWallet.id,
+          rail:                selectedWallet.rail,
+          wallet_type:         selectedWallet.approvalWalletType,
+          wallet_address:      selectedWallet.referenceTitle,
+          asset:               sendRecord.transfer.asset,
+          network:             sendRecord.transfer.network,
+          destination_address: sendRecord.transfer.destination_address,
+          destination_label:   selectedSendDestination?.label || null,
+          amount:              String(sendRecord.transfer.amount),
+          prepared_payload:    preparedPayload,
+        }),
+      })
+
+      const payload = await res.json().catch(() => null) as {
+        success?: boolean
+        session?: { id: string }
+        error?: string
+      } | null
+
+      if (!res.ok || !payload?.success || !payload.session?.id) {
+        throw new Error(payload?.error || "Failed to create approval session")
       }
 
-      // Short pause so the user sees "Wallet connected" before signing prompt
-      await new Promise<void>((r) => setTimeout(r, 600))
+      const sessionId = payload.session.id
+      setApprovalSessionId(sessionId)
+      setApprovalStep("qr_ready")
 
-      setMerchantWcStep("requesting")
-      await new Promise<void>((r) => setTimeout(r, 200))
-      setMerchantWcStep("signing")
-      setSendStep("signing")
+      // Poll session status
+      approvalPollRef.current = setInterval(async () => {
+        try {
+          const pollRes = await fetch(`/api/wallets/send-sessions/${sessionId}`, { cache: "no-store" })
+          if (!pollRes.ok) return
+          const pollData = await pollRes.json().catch(() => null) as {
+            success?: boolean
+            session?: {
+              status: string
+              tx_hash?: string | null
+              signature?: string | null
+              error?: string | null
+            }
+          } | null
+          if (!pollData?.success || !pollData.session) return
 
-      const params = sendRecord.tx_params
-      const txHash = await result.provider.request<string>("eth_sendTransaction", [{
-        from: address || params.from,
-        to: params.to,
-        value: params.value,
-        data: params.data,
-        gas: params.gas
-      }])
+          const s = pollData.session
 
-      if (!txHash) throw new Error("Wallet connected, but transaction approval was not completed.")
+          const stepMap: Record<string, ApprovalStep> = {
+            opened:             "opened",
+            wallet_connecting:  "wallet_connecting",
+            wallet_connected:   "wallet_connected",
+            approval_requested: "approval_requested",
+            submitted:          "submitted",
+            rejected:           "rejected",
+            expired:            "expired",
+            failed:             "failed",
+          }
+          const nextStep = stepMap[s.status] as ApprovalStep | undefined
+          if (nextStep) setApprovalStep(nextStep)
 
-      setMerchantWcStep("approved")
-      setSendTxHash(txHash)
-      setMerchantWcStep("recording")
-      await recordSubmittedDirectSend(txHash)
+          if (s.status === "submitted") {
+            if (approvalPollRef.current) {
+              clearInterval(approvalPollRef.current)
+              approvalPollRef.current = null
+            }
+            const proof = s.tx_hash || s.signature || ""
+            setApprovalTxHash(proof)
+            setSendTxHash(proof)
+            setSendStep("submitted")
+            directSendSubmittingRef.current = false
+            await refreshSettlementBalances()
+            await loadSettlementHistory()
+          }
 
-      setSendStep("submitted")
-      setMerchantWcStep("submitted")
-      setMerchantWcPairingUri(null)
-      await result.provider.disconnect().catch(() => {})
-      merchantWcProviderRef.current = null
-      await refreshSettlementBalances()
-      await loadSettlementHistory()
+          if (["rejected", "expired", "failed"].includes(s.status)) {
+            if (approvalPollRef.current) {
+              clearInterval(approvalPollRef.current)
+              approvalPollRef.current = null
+            }
+            setApprovalError(s.error || `Approval ${s.status}.`)
+            directSendSubmittingRef.current = false
+          }
+        } catch {
+          // Non-critical poll failure — keep trying
+        }
+      }, 3000)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "WalletConnect approval failed"
-      setMerchantWcError(msg)
-      setMerchantWcStep(getMerchantApprovalFailureStep(msg))
-      setSendError(msg)
-      setSendStep("failed")
-      await merchantWcProviderRef.current?.disconnect().catch(() => {})
-      merchantWcProviderRef.current = null
-    } finally {
+      const msg = err instanceof Error ? err.message : "Failed to start approval"
+      setApprovalError(msg)
+      setApprovalStep("failed")
       directSendSubmittingRef.current = false
     }
   }
@@ -2360,8 +2388,6 @@ export default function WalletsPage() {
   const approvalWalletName = selectedWallet
     ? approvalWalletLabel(selectedWallet.approvalWalletType, selectedWallet.rail)
     : "wallet"
-  const canUseBaseWalletConnect =
-    Boolean(walletConnectConfigured && selectedWallet?.rail === "base" && selectedWallet.approvalWalletType)
   const cashOutUnavailable = selectedWallet?.isLightning || cashOutAssetOptions.length === 0
   const nwcStatus = selectedWallet?.nwcConnectionStatus || null
   const lightningActivity = recentOperations
@@ -3489,7 +3515,7 @@ export default function WalletsPage() {
                       {/* Transaction summary */}
                       <p className="text-sm font-semibold text-gray-950">Approve from your wallet</p>
                       <p className="mt-1 text-xs leading-5 text-gray-500">
-                        Use the phone or device that holds this wallet to approve the transfer.
+                        Scan the QR with your phone to approve, or approve on this device.
                       </p>
                       <div className="mt-3 grid gap-2">
                         <CompactStatusRow label="Asset" value={sendRecord.transfer.asset} />
@@ -3500,109 +3526,72 @@ export default function WalletsPage() {
                         <CompactStatusRow label="Fee" value={sendRecord.transfer.estimated_fee_label} />
                       </div>
 
-                      {/* Approval options */}
-                      <div className="mt-4 space-y-2">
-                        {/* Option 1: wallet-specific scan */}
-                        {sendRecord.transfer.network === "base" ? (
-                          <div className="rounded-xl border border-gray-200 bg-white p-3">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="text-sm font-semibold text-gray-950">Scan with {approvalWalletName}</p>
-                                <p className="mt-0.5 text-xs leading-5 text-gray-600">
-                                  Use {approvalWalletName} on your phone to approve this Base transfer.
-                                </p>
-                              </div>
-                            </div>
-
-                            {/* WalletConnect QR states */}
-                            {merchantWcStep === "idle" || merchantWcStep === "error" ? (
-                              <button
-                                type="button"
-                                onClick={startWalletConnectSend}
-                                disabled={!canUseBaseWalletConnect || directSendSubmittingRef.current}
-                                className={cx(pineTreeSecondaryActionButton, "mt-2")}
-                              >
-                                {walletConnectConfigured ? `Show ${approvalWalletName} QR Code` : "WalletConnect is not configured."}
-                              </button>
-                            ) : merchantWcStep === "initializing" ? (
-                              <p className="mt-2 text-xs text-gray-500">Generating QR code...</p>
-                            ) : merchantWcStep === "pairing" && merchantWcPairingUri ? (
-                              <div className="mt-2 space-y-2">
-                                <div className="flex justify-center rounded-xl border border-gray-200 bg-white p-3">
-                                  <QRCodeSVG value={merchantWcPairingUri} size={180} />
-                                </div>
-                                <p className="text-center text-xs text-gray-500">
-                                  Waiting for phone scan...
-                                </p>
-                              </div>
-                            ) : merchantWcStep === "connected" ? (
-                              <p className="mt-2 text-xs font-semibold text-[#0052FF]">Wallet connected.</p>
-                            ) : merchantWcStep === "requesting" ? (
-                              <p className="mt-2 text-xs font-semibold text-[#0052FF]">Sending transaction approval request...</p>
-                            ) : merchantWcStep === "signing" ? (
-                              <p className="mt-2 text-xs font-semibold text-[#0052FF]">Waiting for transaction approval...</p>
-                            ) : merchantWcStep === "approved" ? (
-                              <p className="mt-2 text-xs font-semibold text-[#0052FF]">Transaction approved, tx hash received.</p>
-                            ) : merchantWcStep === "recording" ? (
-                              <p className="mt-2 text-xs font-semibold text-[#0052FF]">Recording activity...</p>
-                            ) : merchantWcStep === "submitted" ? (
-                              <p className="mt-2 text-xs font-semibold text-[#0052FF]">Transaction submitted.</p>
-                            ) : merchantWcStep === "rejected" ? (
-                              <p className="mt-2 text-xs font-semibold text-red-600">Rejected.</p>
-                            ) : merchantWcStep === "expired" ? (
-                              <p className="mt-2 text-xs font-semibold text-amber-700">Expired.</p>
-                            ) : null}
-
-                            {merchantWcError && ["error", "rejected", "expired"].includes(merchantWcStep) && (
-                              <p className="mt-2 text-xs text-red-600">{merchantWcError}</p>
+                      {/* Option 1: Mobile approval QR (PineTree approval page) */}
+                      {selectedWallet?.approvalWalletType && (
+                        <div className="mt-4 rounded-xl border border-gray-200 bg-white p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-semibold text-gray-950">
+                              {approvalWalletName} Approval QR
+                            </p>
+                            {approvalStep === "qr_ready" && (
+                              <span className="rounded-full border border-[#0052FF]/20 bg-[#0052FF]/5 px-2 py-0.5 text-[10px] font-semibold text-[#0052FF]">
+                                Active
+                              </span>
                             )}
                           </div>
-                        ) : (
-                          <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="text-sm font-semibold text-gray-700">Mobile approval unavailable for {approvalWalletName}</p>
-                                <p className="mt-0.5 text-xs leading-5 text-gray-600">
-                                  {approvalWalletName} mobile approval requires wallet-specific signing callback support. Use same-device approval for now.
-                                </p>
-                              </div>
-                              <span className="shrink-0 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-400">
-                                Unavailable
-                              </span>
-                            </div>
-                            <button
-                              type="button"
-                              disabled
-                              className={cx(pineTreeSecondaryActionButton, "mt-2 cursor-not-allowed opacity-55")}
-                            >
-                              Scan with {approvalWalletName} unavailable
-                            </button>
-                          </div>
-                        )}
-
-                        {sendRecord.transfer.network === "base" && (
-                          <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-3">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="text-sm font-semibold text-gray-600">Open {approvalWalletName}</p>
-                                <p className="mt-0.5 text-xs leading-5 text-gray-400">
-                                  {approvalWalletName} mobile deeplink signing is not configured with a returned tx hash. Use Scan with {approvalWalletName} instead.
-                                </p>
-                              </div>
-                              <span className="shrink-0 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-400">
-                                Coming soon
-                              </span>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Option 3: Approve on this device — working fallback */}
-                        <div className="rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-3">
-                          <p className="text-sm font-semibold text-gray-950">Approve on this device</p>
-                          <p className="mt-0.5 text-xs leading-5 text-gray-600">
-                            If {approvalWalletName} is installed, unlocked, and using the saved merchant address, approve here.
+                          <p className="mt-0.5 text-xs leading-5 text-gray-500">
+                            Scan with your phone to open the PineTree approval page for {approvalWalletName}.
                           </p>
+
+                          {/* QR states */}
+                          {approvalStep === "idle" || approvalStep === "failed" || approvalStep === "rejected" || approvalStep === "expired" ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={startApprovalSession}
+                                disabled={directSendSubmittingRef.current}
+                                className={cx(pineTreeSecondaryActionButton, "mt-2")}
+                              >
+                                Show {approvalWalletName} Approval QR
+                              </button>
+                              {approvalError && (approvalStep === "failed" || approvalStep === "rejected" || approvalStep === "expired") && (
+                                <p className="mt-1.5 text-xs text-red-600">{approvalError}</p>
+                              )}
+                            </>
+                          ) : approvalStep === "creating" ? (
+                            <p className="mt-2 text-xs text-gray-500">Generating approval session...</p>
+                          ) : approvalStep === "qr_ready" && approvalSessionId ? (
+                            <div className="mt-2 space-y-2">
+                              <div className="flex justify-center rounded-xl border border-gray-200 bg-white p-3">
+                                <QRCodeSVG
+                                  value={`${process.env.NEXT_PUBLIC_APP_URL || (typeof window !== "undefined" ? window.location.origin : "")}/wallet-approval/${approvalSessionId}`}
+                                  size={180}
+                                />
+                              </div>
+                              <p className="text-center text-xs text-gray-500">
+                                Waiting for phone scan...
+                              </p>
+                            </div>
+                          ) : approvalStep === "opened" ? (
+                            <p className="mt-2 text-xs font-semibold text-[#0052FF]">Approval page opened on phone.</p>
+                          ) : approvalStep === "wallet_connecting" ? (
+                            <p className="mt-2 text-xs font-semibold text-[#0052FF]">Wallet connecting on phone...</p>
+                          ) : approvalStep === "wallet_connected" ? (
+                            <p className="mt-2 text-xs font-semibold text-[#0052FF]">Wallet connected. Requesting approval...</p>
+                          ) : approvalStep === "approval_requested" ? (
+                            <p className="mt-2 text-xs font-semibold text-[#0052FF]">Waiting for wallet approval...</p>
+                          ) : approvalStep === "submitted" ? (
+                            <p className="mt-2 text-xs font-semibold text-[#0052FF]">Approved and submitted.</p>
+                          ) : null}
                         </div>
+                      )}
+
+                      {/* Option 2: Approve on this device */}
+                      <div className="mt-2 rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-3">
+                        <p className="text-sm font-semibold text-gray-950">Approve on this device</p>
+                        <p className="mt-0.5 text-xs leading-5 text-gray-600">
+                          If {approvalWalletName} is installed, unlocked, and using the saved merchant address on this device, approve here.
+                        </p>
                       </div>
 
                       {sendError && (
@@ -3615,12 +3604,13 @@ export default function WalletsPage() {
                           type="button"
                           onClick={() => {
                             setSendStep("review")
-                            setMerchantWcStep("idle")
-                            setMerchantWcPairingUri(null)
-                            setMerchantWcError(null)
-                            if (merchantWcProviderRef.current) {
-                              merchantWcProviderRef.current.disconnect().catch(() => {})
-                              merchantWcProviderRef.current = null
+                            setApprovalStep("idle")
+                            setApprovalSessionId(null)
+                            setApprovalError(null)
+                            setApprovalTxHash(null)
+                            if (approvalPollRef.current) {
+                              clearInterval(approvalPollRef.current)
+                              approvalPollRef.current = null
                             }
                             directSendSubmittingRef.current = false
                           }}

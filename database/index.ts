@@ -72,3 +72,6 @@ export * from "./settlementWithdrawals"
 
 // Settlement Preferences
 export * from "./settlementPreferences"
+
+// Merchant Wallet Send Sessions
+export * from "./merchantWalletSendSessions"
