@@ -9,6 +9,7 @@ export function formatDashboardProvider(provider: string | null | undefined) {
     lightning: "Bitcoin Lightning",
     cash: "Cash",
     speed: "Speed",
+    nwc: "NWC",
     phantom: "Phantom",
     solflare: "Solflare",
     metamask: "MetaMask",

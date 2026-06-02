@@ -1129,7 +1129,7 @@ export default function ProvidersPage() {
         status: "Connected" as const,
         connectionType: "speed" as const,
         summary: "Bitcoin Lightning payments route through the merchant Speed Account ID.",
-        detail: `Speed account • ${formatCredentialPart(String(speedCredentials.account_id), 10, 4)}`,
+        detail: formatCredentialPart(String(speedCredentials.account_id), 10, 4),
         actionLabel: "Manage",
         showClearSpeed: true
       }
@@ -1415,23 +1415,25 @@ export default function ProvidersPage() {
 
               <div className="mt-4 min-h-[50px]">
                 {lightningCard.connectionType === "speed" && (
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
-                    <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Connected</span>
-                    <div className="mt-1.5 flex flex-wrap gap-1.5">
-                      <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700">Speed</span>
-                      <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-semibold text-orange-700">Bitcoin Lightning</span>
-                    </div>
-                    <p className="mt-1.5 text-sm leading-5 text-gray-600">{lightningCard.summary}</p>
+                  <div className="rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2.5">
+                    <span className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Connected</span>
+                    <p className="mt-1 truncate text-sm font-semibold text-gray-950" title="Speed - Bitcoin Lightning">
+                      Speed &bull; Bitcoin Lightning
+                    </p>
+                    <p className="mt-0.5 text-xs leading-5 text-gray-500">
+                      Merchant Speed Account ID connected{lightningCard.detail ? ` - ${lightningCard.detail}` : ""}
+                    </p>
                   </div>
                 )}
                 {lightningCard.connectionType === "nwc" && (
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
-                    <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Connected</span>
-                    <div className="mt-1.5 flex flex-wrap gap-1.5">
-                      <span className="rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-semibold text-purple-700">NWC</span>
-                      <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-semibold text-orange-700">Bitcoin Lightning</span>
-                    </div>
-                    <p className="mt-1.5 text-sm leading-5 text-gray-600">{lightningCard.summary}</p>
+                  <div className="rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2.5">
+                    <span className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Connected</span>
+                    <p className="mt-1 truncate text-sm font-semibold text-gray-950" title="NWC - Bitcoin Lightning">
+                      NWC &bull; Bitcoin Lightning
+                    </p>
+                    <p className="mt-0.5 truncate text-xs leading-5 text-gray-500" title={lightningCard.detail}>
+                      {lightningCard.detail}
+                    </p>
                   </div>
                 )}
                 {!lightningCard.connectionType && (
@@ -1445,7 +1447,7 @@ export default function ProvidersPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => openProvider("lightning")}
-                    className={`h-9 rounded-md px-3.5 text-sm font-semibold shadow-sm transition ${
+                    className={`h-8 rounded-md px-3 text-xs font-semibold shadow-sm transition ${
                       lightningCard.status === "Connected"
                         ? "border border-gray-300 bg-white text-gray-700 hover:border-gray-400 hover:bg-gray-50"
                         : "border border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
@@ -1456,7 +1458,7 @@ export default function ProvidersPage() {
                   {lightningCard.showClearSpeed ? (
                     <button
                       onClick={disconnectSpeed}
-                      className="h-9 rounded-md border border-red-200 bg-white px-3.5 text-sm font-semibold text-red-600 shadow-sm transition hover:bg-red-50"
+                      className="h-8 rounded-md border border-red-200 bg-white px-3 text-xs font-semibold text-red-600 shadow-sm transition hover:border-red-300 hover:bg-red-50"
                     >
                       Clear Setup
                     </button>
@@ -1674,7 +1676,7 @@ export default function ProvidersPage() {
                                   aria-label="Open Speed Associated Accounts"
                                   title="Open Speed Associated Accounts"
                                 >
-                                  Associated Accounts
+                                  Open Speed Associated Accounts
                                 </a>
                               ) : (
                                 <div className="flex flex-col gap-0.5">
@@ -1685,7 +1687,7 @@ export default function ProvidersPage() {
                                     aria-label="Open Speed Associated Accounts"
                                     title="Open Speed Associated Accounts"
                                   >
-                                    Associated Accounts
+                                    Open Speed Associated Accounts
                                   </button>
                                   <p className="text-xs text-gray-400">Speed account ID link is not configured yet.</p>
                                 </div>
@@ -1712,7 +1714,7 @@ export default function ProvidersPage() {
                                 aria-label="Open Speed Associated Accounts"
                                 title="Open Speed Associated Accounts"
                               >
-                                Associated Accounts
+                                Open Speed Associated Accounts
                               </a>
                             ) : (
                               <div className="flex flex-col gap-0.5">
@@ -1723,7 +1725,7 @@ export default function ProvidersPage() {
                                   aria-label="Open Speed Associated Accounts"
                                   title="Open Speed Associated Accounts"
                                 >
-                                  Associated Accounts
+                                  Open Speed Associated Accounts
                                 </button>
                                 <p className="text-center text-xs text-gray-400">Speed account ID link is not configured yet.</p>
                               </div>

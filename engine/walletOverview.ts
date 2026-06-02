@@ -7,7 +7,11 @@ import {
   getSystemLastRun,
 } from "@/database"
 import { getMarketPricesUSD } from "./marketPrices"
-import { getMerchantNwcStatus, type MerchantNwcStatus } from "@/database/merchantProviders"
+import {
+  getMerchantNwcStatus,
+  getMerchantSpeedProvider,
+  type MerchantNwcStatus
+} from "@/database/merchantProviders"
 import {
   listRecentWalletOperationsForMerchant,
   type WalletOperationRecord
@@ -53,9 +57,11 @@ export type WalletOverviewItem = {
 export type WalletOverviewPaymentRail = {
   id: string
   type: "bitcoin_lightning"
-  provider: "Direct Lightning Wallet"
+  provider: "Speed" | "NWC"
+  wallet_type: "speed" | "nwc"
   status: "Connected" | "Not Connected" | "Error"
   walletLabel: string
+  wallet_address: string
   assetSymbol: "BTC"
   nativeBalance: number
   usdValue: number
@@ -152,20 +158,43 @@ async function getLightningPaymentRails(
   merchantId: string,
   prices: { BTC: number }
 ): Promise<WalletOverviewPaymentRail[]> {
-  const nwcStatus = await getMerchantNwcStatus(merchantId)
+  const [speedStatus, nwcStatus] = await Promise.all([
+    getMerchantSpeedProvider(merchantId),
+    getMerchantNwcStatus(merchantId)
+  ])
+  const speedAccountId = String(speedStatus?.accountId || "").trim()
 
   console.info("[lightning/walletOverview] Lightning rails loaded", {
     merchantId,
+    speedConnected: Boolean(speedAccountId),
     nwcConnected: Boolean(nwcStatus)
   })
+
+  if (speedAccountId) {
+    return [{
+      id: speedStatus?.providerRowId || "lightning-speed",
+      type: "bitcoin_lightning",
+      provider: "Speed",
+      wallet_type: "speed",
+      status: "Connected",
+      walletLabel: "Bitcoin Lightning",
+      wallet_address: speedAccountId,
+      assetSymbol: "BTC",
+      nativeBalance: 0,
+      usdValue: 0,
+      nwcConnectionStatus: null
+    }]
+  }
 
   if (nwcStatus) {
     return [{
       id: nwcStatus.providerRowId,
       type: "bitcoin_lightning",
-      provider: "Direct Lightning Wallet",
+      provider: "NWC",
+      wallet_type: "nwc",
       status: "Connected",
-      walletLabel: nwcStatus.walletLabel,
+      walletLabel: "Bitcoin Lightning",
+      wallet_address: nwcStatus.walletLabel,
       assetSymbol: "BTC",
       nativeBalance: 0,
       usdValue: 0,
@@ -173,18 +202,7 @@ async function getLightningPaymentRails(
     }]
   }
 
-  // Return a "Not Connected" placeholder so merchants can see and start setup from the Wallets page.
-  return [{
-    id: "lightning_nwc_setup",
-    type: "bitcoin_lightning",
-    provider: "Direct Lightning Wallet",
-    status: "Not Connected",
-    walletLabel: "Bitcoin Lightning",
-    assetSymbol: "BTC",
-    nativeBalance: 0,
-    usdValue: 0,
-    nwcConnectionStatus: buildNwcConnectionStatus(null)
-  }]
+  return []
 }
 
 async function getSolanaBalance(address: string): Promise<number> {

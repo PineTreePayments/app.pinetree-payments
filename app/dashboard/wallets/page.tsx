@@ -47,9 +47,11 @@ type NwcConnectionStatus = {
 type PaymentRailItem = {
   id: string
   type: "bitcoin_lightning"
-  provider: "Direct Lightning Wallet"
+  provider: "Speed" | "NWC"
+  wallet_type: "speed" | "nwc"
   status: "Connected" | "Not Connected" | "Error"
   walletLabel: string
+  wallet_address: string
   assetSymbol: "BTC"
   nativeBalance: number
   usdValue: number
@@ -2282,18 +2284,19 @@ export default function WalletsPage() {
   }
 
   function buildLightningWallet(rail: PaymentRailItem): SelectedWallet {
-    const label = rail.walletLabel || "Lightning Wallet"
+    const label = rail.walletLabel || "Bitcoin Lightning"
+    const reference = rail.wallet_address || label
     return {
       id: rail.id,
-      displayName: label,
+      displayName: "Bitcoin Lightning",
       rail: "bitcoin_lightning",
       provider: rail.provider,
-      walletType: null,
+      walletType: rail.wallet_type,
       approvalWalletType: null,
       networkLabel: "Bitcoin Lightning",
-      reference: label,
-      referenceTitle: label,
-      referenceLabel: "Wallet",
+      reference: formatWalletAddress(reference),
+      referenceTitle: reference,
+      referenceLabel: rail.wallet_type === "speed" ? "Merchant Speed Account ID" : "Lightning account",
       assetSymbol: "BTC",
       nativeBalance: rail.nativeBalance,
       usdValue: rail.usdValue,
@@ -2329,10 +2332,10 @@ export default function WalletsPage() {
 
   const balancedRails = paymentRails.filter(
     (rail) =>
-      Boolean(rail.nwcConnectionStatus?.connected) &&
+      rail.status === "Connected" &&
       (Number(rail.nativeBalance ?? 0) > 0 || Number(rail.usdValue ?? 0) > 0)
   )
-  const connectedPaymentRails = paymentRails.filter((r) => Boolean(r.nwcConnectionStatus?.connected))
+  const connectedPaymentRails = paymentRails.filter((r) => r.status === "Connected")
   const totalConnections = wallets.length + connectedPaymentRails.length
   const walletInsights = [
     totalConnections > 0
@@ -2346,11 +2349,11 @@ export default function WalletsPage() {
   const connectionRows = useMemo(() => [
     ...connectedPaymentRails.map((rail) => ({
       id: rail.id,
-      name: rail.walletLabel || "Direct Lightning Wallet",
+      name: rail.walletLabel || "Bitcoin Lightning",
       provider: formatDashboardProvider(rail.provider),
       network: "Bitcoin Lightning",
-      reference: rail.walletLabel || "—",
-      referenceTitle: rail.walletLabel || "",
+      reference: rail.wallet_address ? formatWalletAddress(rail.wallet_address) : "-",
+      referenceTitle: rail.wallet_address || "",
       status: "Connected",
       balance: `${Number(rail.nativeBalance ?? 0).toFixed(8)} ${rail.assetSymbol}`,
       usdValue: `$${Number(rail.usdValue ?? 0).toFixed(2)} USD`
@@ -2398,6 +2401,7 @@ export default function WalletsPage() {
     : "wallet"
   const cashOutUnavailable = selectedWallet?.isLightning || cashOutAssetOptions.length === 0
   const nwcStatus = selectedWallet?.nwcConnectionStatus || null
+  const selectedLightningIsSpeed = selectedWallet?.isLightning && selectedWallet.walletType === "speed"
   const lightningActivity = recentOperations
   const filteredLightningActivity = lightningActivity.filter((operation) => {
     if (activityFilter === "completed") return operation.status === "COMPLETED"
@@ -2583,11 +2587,10 @@ export default function WalletsPage() {
             </div>
           )}
 
-          {/* Only render the Lightning card when NWC is actually connected */}
+          {/* Only render the Lightning card when a Lightning account is connected */}
           {connectedPaymentRails.map((rail) => {
             const wallet = buildLightningWallet(rail)
-            const canReceive = Boolean(rail.nwcConnectionStatus?.canMakeInvoice)
-            const isReady = Boolean(rail.nwcConnectionStatus?.ready)
+            const providerLabel = rail.wallet_type === "speed" ? "Speed" : "NWC"
 
             return (
               <button
@@ -2599,10 +2602,10 @@ export default function WalletsPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-base font-semibold text-gray-950">
-                      {rail.walletLabel || "Direct Lightning Wallet"}
+                      Bitcoin Lightning
                     </p>
                     <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
-                      <NetworkStatusPill label="NWC" tone="slate" className="min-h-6 px-2 text-[10px]" />
+                      <NetworkStatusPill label={providerLabel} tone="slate" className="min-h-6 px-2 text-[10px]" />
                       <NetworkStatusPill label="Bitcoin Lightning" tone="slate" className="min-h-6 px-2 text-[10px]" />
                     </div>
                   </div>
@@ -2614,18 +2617,9 @@ export default function WalletsPage() {
                 </div>
 
                 <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-                  <div className="flex flex-wrap gap-1.5">
-                    {canReceive && (
-                      <span className="rounded-full border border-[#0052FF]/15 bg-[#0052FF]/5 px-2 py-0.5 text-[10px] font-semibold text-[#0052FF]">
-                        Receive
-                      </span>
-                    )}
-                    {isReady && (
-                      <span className="rounded-full border border-[#0052FF]/15 bg-[#0052FF]/5 px-2 py-0.5 text-[10px] font-semibold text-[#0052FF]">
-                        Ready
-                      </span>
-                    )}
-                  </div>
+                  <p className="min-w-0 truncate font-mono text-xs text-gray-500" title={rail.wallet_address}>
+                    {rail.wallet_address ? formatWalletAddress(rail.wallet_address) : "-"}
+                  </p>
                   <div className="text-left sm:text-right">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-500">Balance</p>
                     <p className="mt-1 text-lg font-semibold text-gray-950">
@@ -3247,6 +3241,29 @@ export default function WalletsPage() {
                   {selectedWallet.isLightning ? (
                     <>
                       <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                        {selectedLightningIsSpeed ? (
+                          <>
+                            <StatTile
+                              label="Payment account"
+                              value="Speed"
+                              helper="Lightning payments route through the merchant Speed Account ID."
+                              tone="blue"
+                            />
+                            <StatTile
+                              label="Account ID"
+                              value={selectedWallet.reference}
+                              helper="Configured in Speed Associated Accounts."
+                              tone="slate"
+                            />
+                            <StatTile
+                              label="Settlement"
+                              value="Speed managed"
+                              helper="Speed handles settlement and autoswap according to merchant settings."
+                              tone="blue"
+                            />
+                          </>
+                        ) : (
+                          <>
                         <StatTile
                           label="Wallet"
                           value={nwcStatus?.walletLabel || "Not Connected"}
@@ -3265,6 +3282,8 @@ export default function WalletsPage() {
                           helper={nwcStatus?.ready ? "PineTree can collect the $0.15 service-fee invoice" : `Missing NWC permissions: ${(nwcStatus?.missingPermissions || ["make_invoice", "lookup_invoice", "pay_invoice"]).join(", ")}`}
                           tone={nwcStatus?.ready ? "blue" : "amber"}
                         />
+                          </>
+                        )}
                         <StatTile
                           label="Last Sync"
                           value={lastRefreshAt ? formatChicagoDateTime(lastRefreshAt) : "Not available"}
@@ -5043,17 +5062,27 @@ export default function WalletsPage() {
                   <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-gray-950">Speed Lightning</p>
+                        <p className="text-sm font-semibold text-gray-950">
+                          {selectedLightningIsSpeed ? "Speed Lightning" : "Direct Lightning Wallet"}
+                        </p>
                         <p className="mt-1 text-sm leading-6 text-gray-600">
-                          Use Speed for Lightning invoices, auto-swap, and settlement settings.
+                          {selectedLightningIsSpeed
+                            ? "Lightning payments route through the merchant Speed Account ID."
+                            : "Direct NWC wallets receive Lightning payments from customers."}
                         </p>
                       </div>
-                      <NetworkStatusPill label="Managed in TrySpeed" tone="blue" className="shrink-0" />
+                      <NetworkStatusPill
+                        label={selectedLightningIsSpeed ? "Managed in TrySpeed" : "NWC"}
+                        tone="blue"
+                        className="shrink-0"
+                      />
                     </div>
                     <p className="mt-3 text-xs leading-5 text-gray-600">
-                      Auto-swap and payout controls are managed in your TrySpeed account. PineTree uses your Speed setup to create invoices and track Lightning payments.
+                      {selectedLightningIsSpeed
+                        ? "Speed handles Lightning invoice settlement and autoswap according to the merchant's Speed settings. PineTree uses your Speed setup to create invoices and track Lightning payments."
+                        : "PineTree uses the connected NWC wallet to create invoices and check payment status."}
                     </p>
-                    {lightningSpeedLinks.length > 0 ? (
+                    {selectedLightningIsSpeed && lightningSpeedLinks.length > 0 ? (
                       <div className="mt-3 flex flex-wrap gap-2">
                         {lightningSpeedLinks.map((link) => (
                           <a key={link.key} href={link.url} target="_blank" rel="noopener noreferrer" className={pineTreeSecondaryActionButton}>
@@ -5061,11 +5090,12 @@ export default function WalletsPage() {
                           </a>
                         ))}
                       </div>
-                    ) : (
+                    ) : selectedLightningIsSpeed ? (
                       <p className="mt-3 text-xs text-gray-500">Speed dashboard links are not configured yet.</p>
-                    )}
+                    ) : null}
                   </div>
 
+                  {!selectedLightningIsSpeed && (
                   <div className="rounded-2xl border border-gray-100 bg-white p-3">
                     <button
                       type="button"
@@ -5079,8 +5109,9 @@ export default function WalletsPage() {
                       Connect a direct Lightning wallet only if you manage your own NWC connection.
                     </p>
                   </div>
+                  )}
 
-                  <div className={cx("space-y-4", !nwcAdvancedOpen && "hidden")}>
+                  <div className={cx("space-y-4", (selectedLightningIsSpeed || !nwcAdvancedOpen) && "hidden")}>
                   {nwcStatus?.connected ? (
                     <>
                       <div className="flex items-center gap-2">
