@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
-import { getSpeedDashboardLinks } from "@/lib/speedDashboardLinks"
+import { speedLoginUrl, speedSignupUrl, speedAccountSetupUrl } from "@/lib/speedDashboardLinks"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
 import { toast } from "sonner"
 import {
@@ -18,18 +18,6 @@ const providerZeusIosUrl = process.env.NEXT_PUBLIC_ZEUS_IOS_URL || "https://apps
 const providerZeusAndroidUrl = process.env.NEXT_PUBLIC_ZEUS_ANDROID_URL || "https://play.google.com/store/apps/details?id=app.zeusln"
 const providerZeusDocsUrl = process.env.NEXT_PUBLIC_ZEUS_DOCS_URL || "https://zeusln.app"
 
-const providerSpeedSetupLinks = getSpeedDashboardLinks([
-  "dashboard",
-  "accountId",
-  "autoSwap",
-  "payouts",
-  "docs"
-])
-const speedLoginUrl = providerSpeedSetupLinks.find((link) => link.key === "dashboard")?.url || ""
-const speedDocsUrl = providerSpeedSetupLinks.find((link) => link.key === "docs")?.url || ""
-const speedAssociatedAccountsUrl = providerSpeedSetupLinks.find((link) => link.key === "accountId")?.url || ""
-const speedAutoSwapUrl = providerSpeedSetupLinks.find((link) => link.key === "autoSwap")?.url || ""
-const speedAutoPayoutUrl = providerSpeedSetupLinks.find((link) => link.key === "payouts")?.url || ""
 
 type ProviderCredentials = {
   api_key?: string
@@ -200,6 +188,7 @@ export default function ProvidersPage() {
     error?: string
   } | null>(null)
   const [nwcTesting, setNwcTesting] = useState(false)
+  const [nwcWalletReadyOpen, setNwcWalletReadyOpen] = useState(false)
   const [loading, setLoading] = useState(false)
 
   // Speed Lightning setup state
@@ -247,6 +236,7 @@ export default function ProvidersPage() {
     setSpeedTestResult(null)
     setSpeedTesting(false)
     setSpeedSetupStep(1)
+    setNwcWalletReadyOpen(false)
 
     if (pollerRef.current) {
       clearInterval(pollerRef.current)
@@ -1473,153 +1463,6 @@ export default function ProvidersPage() {
           )
         })()}
 
-        {false ? (
-        <div className="hidden">
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <h2 className="text-base font-semibold leading-tight text-gray-950">Bitcoin Lightning</h2>
-            <ProviderStatusPill
-              label={getStatus("lightning")}
-              tone={statusTone(getStatus("lightning")) as "default" | "blue" | "amber" | "red"}
-              className="shrink-0"
-            />
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            {/* Recommended: Speed Lightning */}
-            {(() => {
-              const speedProvider = getProvider("lightning_speed")
-              const speedCredentials = speedProvider?.credentials || {}
-              const platformConfigured = Boolean(speedCredentials.platform_configured)
-              const dashboardUrl = String(speedCredentials.dashboard_url || "")
-              const speedMode = String(speedCredentials.mode || "")
-              const setupStatus = String(speedCredentials.setup_status || "pending_speed_connect_confirmation")
-              const platformMissing = Array.isArray(speedCredentials.platform_missing)
-                ? (speedCredentials.platform_missing as unknown[]).map(String).join(", ")
-                : ""
-              return (
-                <div className="flex flex-col rounded-xl border border-blue-100 bg-blue-50/40 p-4">
-                  <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <span className="rounded-full bg-blue-600 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
-                      Recommended
-                    </span>
-                    <ProviderStatusPill
-                      label={platformConfigured ? "Platform configured" : "Missing env"}
-                      tone={platformConfigured ? "blue" : "amber"}
-                      className="shrink-0"
-                    />
-                  </div>
-
-                  <p className="text-sm font-semibold text-gray-950">Recommended: Speed Lightning</p>
-                  <p className="mt-1.5 text-sm leading-5 text-gray-600">
-                    PineTree processes Lightning payments through Speed. PineTree keeps its $0.15 service fee and sends the remaining merchant amount to your configured Speed account.
-                  </p>
-
-                  <div className="mt-3 rounded-lg border border-blue-100 bg-white px-3 py-2.5">
-                      <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Platform status</span>
-                      <span className="mt-1 block text-sm font-medium text-gray-950">
-                        {platformConfigured ? "PineTree Speed env configured" : `PineTree Speed env missing${platformMissing ? `: ${platformMissing}` : ""}`}
-                      </span>
-                      <span className="mt-0.5 block text-xs text-gray-500">
-                        {speedMode === "test" ? "Test mode" : speedMode === "live" || speedMode === "production" ? "Production mode" : "Mode unknown"}
-                      </span>
-                      <span className="mt-1 block text-xs text-amber-600">
-                        {Boolean(speedCredentials.payment_processing_live) ? "Speed payments ready" : "Speed payments need setup"}
-                      </span>
-                      <span className="mt-0.5 block text-xs text-amber-600">
-                        {String(speedCredentials.account_id || "") ? "Merchant Speed Account ID configured" : "Merchant Speed Account ID missing"}
-                      </span>
-                      <span className="mt-0.5 block text-xs text-gray-500">
-                        Setup status: {setupStatus.replace(/_/g, " ")}
-                      </span>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <a href={speedAssociatedAccountsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                      Open Associated Accounts
-                    </a>
-                    <a href={speedAutoSwapUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                      Auto-Swap Settings
-                    </a>
-                    <a href={speedAutoPayoutUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                      Payout Settings
-                    </a>
-                    <a href={speedDocsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                      Learn about Speed
-                    </a>
-                    <a href={dashboardUrl || speedLoginUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                      Open Speed Dashboard
-                    </a>
-                  </div>
-
-                  <div className="mt-auto flex items-center gap-2 pt-4">
-                    <button
-                      onClick={() => openProvider("speed")}
-                      className="h-9 rounded-md border border-blue-600 bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-                    >
-                      View Setup
-                    </button>
-                    <button
-                      onClick={disconnectSpeed}
-                      className="h-9 rounded-md border border-red-200 bg-white px-3.5 text-sm font-semibold text-red-600 shadow-sm transition hover:bg-red-50"
-                    >
-                      Clear Setup
-                    </button>
-                  </div>
-                </div>
-              )
-            })()}
-
-            {/* Advanced/Beta: Direct Lightning Wallet (NWC) */}
-            <div className="flex flex-col rounded-xl border border-gray-200 bg-gray-50/60 p-4">
-              <div className="mb-2">
-                <span className="rounded-full border border-gray-300 bg-white px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-                  Advanced/Beta
-                </span>
-              </div>
-              <p className="text-sm font-semibold text-gray-950">Direct Lightning Wallet</p>
-              <p className="mt-1.5 text-sm leading-5 text-gray-600">
-                For technical merchants using Zeus, Alby Hub, or another NWC-compatible wallet. Requires a wallet connection string and the permissions make_invoice, lookup_invoice, and pay_invoice.
-              </p>
-
-              {getStatus("lightning") === "Connected" && (
-                <div className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5">
-                  <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Connected</span>
-                  <span className="mt-1 block min-w-0 truncate text-sm font-medium leading-snug text-gray-950">
-                    {String(getProvider("lightning")?.credentials?.wallet_label || "")
-                      ? `Lightning • ${String(getProvider("lightning")?.credentials?.wallet_label || "")}`
-                      : "Lightning Wallet"}
-                  </span>
-                </div>
-              )}
-
-              <div className="mt-auto flex items-center justify-between gap-3 pt-4">
-                <button
-                  onClick={() =>
-                    getStatus("lightning") === "Connected"
-                      ? disconnect("lightning")
-                      : openProvider("lightning")
-                  }
-                  className={`h-9 rounded-md px-3.5 text-sm font-semibold shadow-sm transition ${
-                    getStatus("lightning") === "Connected"
-                      ? "border border-red-200 bg-white text-red-600 hover:bg-red-50"
-                      : "border border-gray-300 bg-white text-gray-700 hover:border-gray-400 hover:bg-gray-50"
-                  }`}
-                >
-                  {getStatus("lightning") === "Connected" ? "Disconnect" : "Set up advanced wallet"}
-                </button>
-                <div className="flex shrink-0 items-center gap-2">
-                  <span className="text-sm font-medium text-gray-700">Enabled</span>
-                  <ToggleSwitch
-                    checked={isEnabled("lightning")}
-                    disabled={getStatus("lightning") !== "Connected"}
-                    onChange={(v) => toggleProvider("lightning", v)}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        ) : null}
       </div>
       </DashboardSection>
 
@@ -1716,48 +1559,54 @@ export default function ProvidersPage() {
                             </p>
                           </div>
 
-                          {(() => {
-                            const dashboardLink = providerSpeedSetupLinks.find((l) => l.key === "dashboard")
-                            if (dashboardLink) {
-                              return (
-                                <a
-                                  href={dashboardLink.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className={`${primaryButtonClass()} block text-center`}
-                                >
-                                  Open Speed Signup / Login
-                                </a>
-                              )
-                            }
-                            return (
-                              <div className="space-y-1.5">
+                          {/* Login + Signup buttons */}
+                          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                            {speedLoginUrl ? (
+                              <a
+                                href={speedLoginUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={`${primaryButtonClass()} w-full text-center sm:w-auto`}
+                              >
+                                Open Speed Login
+                              </a>
+                            ) : (
+                              <div className="flex flex-col gap-1">
                                 <button
                                   type="button"
                                   disabled
-                                  className={`${primaryButtonClass()} w-full cursor-not-allowed opacity-60`}
+                                  className={`${primaryButtonClass()} w-full cursor-not-allowed sm:w-auto`}
                                 >
-                                  Open Speed Signup / Login
+                                  Open Speed Login
                                 </button>
-                                <p className="text-center text-xs text-gray-500">
-                                  Speed dashboard URL is not configured.
-                                </p>
+                                <p className="text-xs text-gray-500">Speed login link is not configured yet.</p>
                               </div>
-                            )
-                          })()}
+                            )}
+                            {speedSignupUrl ? (
+                              <a
+                                href={speedSignupUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={`${secondaryButtonClass()} w-full text-center sm:w-auto`}
+                              >
+                                Create Speed Account
+                              </a>
+                            ) : null}
+                          </div>
 
-                          <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
+                          {/* Navigation */}
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                             <button
                               type="button"
                               onClick={closeProviderModal}
-                              className={`${secondaryButtonClass()} w-full sm:w-auto`}
+                              className="py-1.5 text-sm font-medium text-gray-400 transition hover:text-gray-600 sm:px-1"
                             >
                               Cancel
                             </button>
                             <button
                               type="button"
                               onClick={() => setSpeedSetupStep(2)}
-                              className={`${primaryButtonClass()} w-full sm:w-auto`}
+                              className={`${secondaryButtonClass()} w-full sm:w-auto`}
                             >
                               I have a Speed account →
                             </button>
@@ -1791,30 +1640,79 @@ export default function ProvidersPage() {
                             />
                           </label>
 
-                          {(() => {
-                            const accountIdLink = providerSpeedSetupLinks.find((l) => l.key === "accountId")
-                            return accountIdLink ? (
-                              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                                <p className="text-xs text-gray-500">Find this under Settings → Associated Accounts in your Speed dashboard.</p>
-                                <a
-                                  href={accountIdLink.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-sm font-semibold text-blue-600 hover:text-blue-700"
-                                >
-                                  Find Account ID →
-                                </a>
-                              </div>
-                            ) : (
-                              <p className="text-xs text-gray-500">Find this under Settings → Associated Accounts in your Speed dashboard.</p>
-                            )
-                          })()}
+                          <p className="text-xs text-gray-500">
+                            Find this under Settings → Associated Accounts in your Speed dashboard.
+                          </p>
 
-                          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+                          {/* Desktop footer: Back | [Open Speed Associated Accounts | Save Setup] */}
+                          <div className="hidden sm:flex sm:items-center sm:justify-between sm:gap-2">
                             <button
                               type="button"
                               onClick={() => setSpeedSetupStep(1)}
-                              className={`${secondaryButtonClass()} w-full sm:w-auto`}
+                              className={secondaryButtonClass()}
+                            >
+                              ← Back
+                            </button>
+                            <div className="flex items-center gap-2">
+                              {speedAccountSetupUrl ? (
+                                <a
+                                  href={speedAccountSetupUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className={secondaryButtonClass()}
+                                >
+                                  Open Speed Associated Accounts
+                                </a>
+                              ) : (
+                                <div className="flex flex-col gap-0.5">
+                                  <button
+                                    type="button"
+                                    disabled
+                                    className="cursor-not-allowed rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-400"
+                                  >
+                                    Open Speed Associated Accounts
+                                  </button>
+                                  <p className="text-xs text-gray-400">Speed account ID link is not configured yet.</p>
+                                </div>
+                              )}
+                              <button
+                                type="button"
+                                onClick={saveSpeedSetup}
+                                disabled={loading || !speedAccountId.trim()}
+                                className={primaryButtonClass()}
+                              >
+                                {loading ? "Saving..." : "Save Setup"}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Mobile footer: Open Speed Associated Accounts / Back / Save Setup */}
+                          <div className="flex flex-col gap-2 sm:hidden">
+                            {speedAccountSetupUrl ? (
+                              <a
+                                href={speedAccountSetupUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={`${secondaryButtonClass()} w-full text-center`}
+                              >
+                                Open Speed Associated Accounts
+                              </a>
+                            ) : (
+                              <div className="flex flex-col gap-0.5">
+                                <button
+                                  type="button"
+                                  disabled
+                                  className="w-full cursor-not-allowed rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-400"
+                                >
+                                  Open Speed Associated Accounts
+                                </button>
+                                <p className="text-center text-xs text-gray-400">Speed account ID link is not configured yet.</p>
+                              </div>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setSpeedSetupStep(1)}
+                              className={`${secondaryButtonClass()} w-full`}
                             >
                               ← Back
                             </button>
@@ -1822,7 +1720,7 @@ export default function ProvidersPage() {
                               type="button"
                               onClick={saveSpeedSetup}
                               disabled={loading || !speedAccountId.trim()}
-                              className={`${primaryButtonClass()} w-full sm:w-auto`}
+                              className={`${primaryButtonClass()} w-full`}
                             >
                               {loading ? "Saving..." : "Save Setup"}
                             </button>
@@ -1853,28 +1751,54 @@ export default function ProvidersPage() {
                   </p>
                 </div>
 
-                <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Get your wallet ready</p>
-                  <div className="flex flex-wrap gap-2">
-                    <a href={providerAlbyHubAppsUrl} target="_blank" rel="noopener noreferrer" className={actionButtonClass()}>
-                      Open Alby Hub Apps
-                    </a>
-                    <a href={providerZeusIosUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                      Zeus (iOS)
-                    </a>
-                    <a href={providerZeusAndroidUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                      Zeus (Android)
-                    </a>
-                    <a href={providerAlbyNwcDocsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                      Alby Setup Guide
-                    </a>
-                    <a href={providerZeusDocsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                      Zeus Guide
-                    </a>
-                  </div>
-                  <p className="mt-2 text-xs leading-5 text-gray-500">
-                    Enable three permissions: create invoices, check payment status, and pay out. For step-by-step instructions, open the <strong>Wallets</strong> page and use the Manage Wallet tab.
-                  </p>
+                {/* Get your wallet ready — collapsed accordion */}
+                <div className="rounded-xl border border-gray-200 bg-white">
+                  <button
+                    type="button"
+                    onClick={() => setNwcWalletReadyOpen((v) => !v)}
+                    className="flex w-full items-center justify-between px-4 py-3 text-left"
+                  >
+                    <div>
+                      <span className="block text-sm font-semibold text-gray-900">Get your wallet ready</span>
+                      {!nwcWalletReadyOpen && (
+                        <span className="block text-xs text-gray-500">Open setup links for Alby Hub and Zeus.</span>
+                      )}
+                    </div>
+                    <svg
+                      className={`ml-2 h-4 w-4 shrink-0 text-gray-400 transition-transform ${nwcWalletReadyOpen ? "rotate-180" : ""}`}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      aria-hidden="true"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {nwcWalletReadyOpen && (
+                    <div className="border-t border-gray-100 px-4 pb-4 pt-3">
+                      <div className="flex flex-wrap gap-2">
+                        <a href={providerAlbyHubAppsUrl} target="_blank" rel="noopener noreferrer" className={actionButtonClass()}>
+                          Open Alby Hub Apps
+                        </a>
+                        <a href={providerZeusIosUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                          Zeus iOS
+                        </a>
+                        <a href={providerZeusAndroidUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                          Zeus Android
+                        </a>
+                        <a href={providerAlbyNwcDocsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                          Alby Setup Guide
+                        </a>
+                        <a href={providerZeusDocsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
+                          Zeus Guide
+                        </a>
+                      </div>
+                      <p className="mt-2 text-xs leading-5 text-gray-500">
+                        Enable three permissions: create invoices, check payment status, and pay out. For step-by-step instructions, open the <strong>Wallets</strong> page and use the Manage Wallet tab.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <label className="block">

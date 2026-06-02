@@ -70,3 +70,32 @@ export function getSpeedDashboardLinks(keys: SpeedDashboardLinkKey[]): SpeedDash
     .map((key) => speedDashboardLinks[key])
     .filter((link) => Boolean(link.url))
 }
+
+// Named URL constants for merchant-facing setup UI (client-safe NEXT_PUBLIC_ vars only)
+export const speedLoginUrl =
+  publicEnv("NEXT_PUBLIC_SPEED_LOGIN_URL", "NEXT_PUBLIC_SPEED_DASHBOARD_URL") ||
+  "https://app.tryspeed.com"
+
+export const speedSignupUrl =
+  publicEnv("NEXT_PUBLIC_SPEED_SIGNUP_URL", "NEXT_PUBLIC_SPEED_LOGIN_URL") ||
+  "https://www.tryspeed.com"
+
+export const speedDashboardHref =
+  publicEnv("NEXT_PUBLIC_SPEED_DASHBOARD_URL", "NEXT_PUBLIC_SPEED_LOGIN_URL") ||
+  "https://app.tryspeed.com"
+
+export const speedAccountSetupUrl =
+  publicEnv(
+    "NEXT_PUBLIC_SPEED_ACCOUNT_ID_URL",
+    "NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL",
+    "NEXT_PUBLIC_SPEED_DASHBOARD_URL",
+    "NEXT_PUBLIC_SPEED_LOGIN_URL"
+  ) || "https://app.tryspeed.com"
+
+export const speedAssociatedAccountsHref =
+  publicEnv(
+    "NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL",
+    "NEXT_PUBLIC_SPEED_ACCOUNT_ID_URL",
+    "NEXT_PUBLIC_SPEED_DASHBOARD_URL",
+    "NEXT_PUBLIC_SPEED_LOGIN_URL"
+  ) || "https://app.tryspeed.com"
