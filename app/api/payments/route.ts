@@ -14,6 +14,7 @@ import { buildCreatePaymentRequest, createPayment } from "@/engine/createPayment
 import { runPaymentWatcher } from "@/engine/checkPaymentOnce"
 import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
 import { verifyTerminalSession } from "@/lib/api/terminalAuth"
+import { getSafeSpeedCustomerErrorMessage } from "@/providers/lightning/speedClient"
 
 type CreatePaymentBody = {
   amount: number
@@ -82,6 +83,7 @@ export async function POST(req: NextRequest) {
     })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Payment creation failed"
+    const safeSpeedMessage = getSafeSpeedCustomerErrorMessage(error)
     const status =
       getRouteErrorStatus(error) !== 500
         ? getRouteErrorStatus(error)
@@ -92,7 +94,7 @@ export async function POST(req: NextRequest) {
           : 500
 
     return NextResponse.json(
-      { error: "Payment creation failed", details: message },
+      { error: "Payment creation failed", details: safeSpeedMessage || message },
       { status }
     )
   }

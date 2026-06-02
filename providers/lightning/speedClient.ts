@@ -108,6 +108,9 @@ export type CreateSpeedLightningPaymentResult = {
   raw: SpeedPaymentObject
 }
 
+const SPEED_TRANSFER_SPLIT_ERROR =
+  "Lightning invoice could not be created because the transfer split was invalid. Please retry or choose another payment method."
+
 function getSpeedApiBaseUrl(): string {
   return (process.env.SPEED_API_BASE_URL || DEFAULT_SPEED_API_BASE_URL).replace(/\/$/, "")
 }
@@ -226,6 +229,16 @@ async function speedRequest<T>(
 
   if (!response.ok) {
     const body = await response.text().catch(() => "")
+    console.error("[speed] API request failed", {
+      path,
+      status: response.status,
+      body: body.slice(0, 1000)
+    })
+
+    if (isSpeedTransferPercentageValidationMessage(body)) {
+      throw new Error(SPEED_TRANSFER_SPLIT_ERROR)
+    }
+
     throw new Error(`Speed API returned ${response.status}${body ? `: ${body.slice(0, 300)}` : ""}`)
   }
 
@@ -262,27 +275,54 @@ export async function testPineTreeSpeedConnection(): Promise<SpeedConnectionResu
   }
 }
 
-function roundPercentage(value: number): number {
-  return Math.floor(value * 1_000_000) / 1_000_000
+function isSpeedTransferPercentageValidationMessage(message: string): boolean {
+  const normalized = String(message || "").toLowerCase()
+  return (
+    normalized.includes("transfers[0].percentage") ||
+    (normalized.includes("invalid percentage") && normalized.includes("percentage"))
+  )
+}
+
+export function getSafeSpeedCustomerErrorMessage(error: unknown): string | null {
+  const message = error instanceof Error ? error.message : String(error || "")
+  if (message === SPEED_TRANSFER_SPLIT_ERROR || isSpeedTransferPercentageValidationMessage(message)) {
+    return SPEED_TRANSFER_SPLIT_ERROR
+  }
+  if (message.startsWith("Speed API returned")) {
+    return "Lightning invoice could not be created. Please retry or choose another payment method."
+  }
+  return null
+}
+
+export function formatSpeedPercentage(value: number): number {
+  if (!Number.isFinite(value)) throw new Error("Invalid Speed percentage")
+  if (value < 0) throw new Error("Invalid Speed percentage")
+  if (value > 100) throw new Error("Invalid Speed percentage")
+  return Number(value.toFixed(2))
 }
 
 export function calculateSpeedMerchantTransferPercentage(
-  merchantAmount: number,
-  grossAmount: number
+  grossAmount: number,
+  pineTreeFeeAmount: number
 ): number {
-  const merchant = Number(merchantAmount)
   const gross = Number(grossAmount)
-  if (!Number.isFinite(merchant) || merchant <= 0) {
-    throw new Error("Speed merchant amount must be greater than zero")
+  const pineTreeFee = Number(pineTreeFeeAmount)
+  if (!Number.isFinite(gross) || gross <= 0) {
+    throw new Error("Speed payment amount must be greater than zero")
   }
-  if (!Number.isFinite(gross) || gross <= 0 || merchant > gross) {
-    throw new Error("Speed gross amount must be greater than or equal to merchant amount")
+  if (!Number.isFinite(pineTreeFee) || pineTreeFee < 0) {
+    throw new Error("Invalid PineTree service fee")
+  }
+  if (gross <= pineTreeFee) {
+    throw new Error("Lightning amount must be greater than the PineTree service fee.")
   }
 
-  // Speed splits are percentage based. Truncating to six decimals avoids
-  // accidentally over-routing the merchant leg above the intended gross split;
-  // the retained dust remains with PineTree alongside the service fee.
-  return roundPercentage((merchant / gross) * 100)
+  const merchantPercentage = ((gross - pineTreeFee) / gross) * 100
+  const formattedPercentage = formatSpeedPercentage(merchantPercentage)
+  if (formattedPercentage <= 0) {
+    throw new Error("Lightning amount must be greater than the PineTree service fee.")
+  }
+  return formattedPercentage
 }
 
 function getLightningPaymentRequest(payment: SpeedPaymentObject): string {
@@ -307,11 +347,29 @@ export async function createSpeedLightningPayment(
   if (!Number.isFinite(grossAmount) || grossAmount <= 0) {
     throw new Error("Speed payment amount must be greater than zero")
   }
+  if (!Number.isFinite(pineTreeFeeAmount) || pineTreeFeeAmount < 0) {
+    throw new Error("Invalid PineTree service fee")
+  }
+  if (grossAmount <= pineTreeFeeAmount) {
+    throw new Error("Lightning amount must be greater than the PineTree service fee.")
+  }
 
+  const merchantTransferPercentageRaw = ((grossAmount - pineTreeFeeAmount) / grossAmount) * 100
   const merchantTransferPercentage = calculateSpeedMerchantTransferPercentage(
-    merchantAmount,
-    grossAmount
+    grossAmount,
+    pineTreeFeeAmount
   )
+  if (process.env.NODE_ENV === "development") {
+    console.info("[speed] Lightning split prepared", {
+      grossAmount,
+      pineTreeFeeAmount,
+      merchantTransferPercentageRaw,
+      merchantTransferPercentage,
+      transferCount: 1,
+      destinationAccountPresent: Boolean(merchantSpeedAccountId)
+    })
+  }
+
   const paymentIntentId = String(params.pineTreePaymentIntentId || "").trim()
   const metadata: Record<string, unknown> = {
     ...(params.metadata || {}),
