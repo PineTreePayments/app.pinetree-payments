@@ -107,7 +107,7 @@ function buildBaseUsdcTxParams(
 
 // ─── Solana tx builder ────────────────────────────────────────────────────────
 
-async function buildSolanaWithdrawalUnsignedTx(
+export async function buildSolanaWithdrawalUnsignedTx(
   senderAddress: string,
   recipientAddress: string,
   asset: string,

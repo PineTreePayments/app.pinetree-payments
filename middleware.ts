@@ -52,6 +52,14 @@ function isPublicWalletApprovalApi(req: NextRequest): boolean {
     return true
   }
 
+  // /api/wallets/send-sessions/{id}/refresh-tx  — POST (refresh Solana blockhash before signing)
+  if (
+    /^\/api\/wallets\/send-sessions\/[^/]+\/refresh-tx$/.test(pathname) &&
+    method === "POST"
+  ) {
+    return true
+  }
+
   return false
 }
 

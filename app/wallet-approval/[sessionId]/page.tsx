@@ -15,6 +15,8 @@
  *   Solflare                 — Solflare Universal Link v1 (connect → signAndSendTransaction)
  *
  * Activity is only recorded AFTER a real tx_hash (Base) or signature (Solana).
+ *
+ * ?debug=1  — shows a compact developer debug panel (never shown by default).
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -140,7 +142,6 @@ function buildEvmWalletBrowserDeepLink(walletType: WalletType, targetUrl: string
     return `https://go.cb-w.com/dapp?cb_url=${encoded}`
   }
   if (walletType === "metamask") {
-    // MetaMask deep link: replace scheme with metamask.app.link/dapp/
     const urlObj = new URL(targetUrl)
     const path = urlObj.hostname + urlObj.pathname + urlObj.search
     return `https://metamask.app.link/dapp/${path}`
@@ -170,6 +171,25 @@ function getMatchingEvmProvider(walletType: WalletType): Eip1193Provider | null 
   }
   if (walletType === "trust") {
     return providers.find((p) => p.isTrust || p.isTrustWallet) || null
+  }
+  return null
+}
+
+/**
+ * Wait up to `timeoutMs` for the EVM provider to be injected.
+ * Mobile wallet in-app browsers may inject window.ethereum several hundred
+ * milliseconds after DOMContentLoaded; failing immediately produces false-negatives.
+ */
+async function waitForEvmProvider(
+  walletType: WalletType,
+  timeoutMs = 5000
+): Promise<Eip1193Provider | null> {
+  const step = 150
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const p = getMatchingEvmProvider(walletType)
+    if (p) return p
+    await new Promise((r) => setTimeout(r, step))
   }
   return null
 }
@@ -229,6 +249,61 @@ async function completeSession(
   }
 }
 
+// ── Refresh Solana unsigned tx helper ─────────────────────────────────────────
+
+/**
+ * Rebuilds the unsigned Solana transaction with a fresh blockhash.
+ * Must be called before building the Phantom/Solflare sign URL because
+ * blockhashes expire after ~75 seconds and the connect→sign round trip
+ * can easily take longer.
+ */
+async function refreshUnsignedTx(sessionId: string): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/wallets/send-sessions/${sessionId}/refresh-tx`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    })
+    const data = await res.json().catch(() => null) as { success?: boolean; unsigned_tx_base64?: string; error?: string } | null
+    if (!res.ok || !data?.success || !data.unsigned_tx_base64) {
+      console.debug("[refresh-tx] failed", { sessionId, error: data?.error, status: res.status })
+      return null
+    }
+    return data.unsigned_tx_base64
+  } catch (err) {
+    console.debug("[refresh-tx] network error", { sessionId, err })
+    return null
+  }
+}
+
+// ── Debug panel helpers ────────────────────────────────────────────────────────
+
+function getDebugProviderFlags(): Record<string, unknown> {
+  if (typeof window === "undefined") return {}
+  const eth = (window as Window & { ethereum?: Eip1193Provider }).ethereum
+  if (!eth) return { hasEthereum: false }
+  const providers: Eip1193Provider[] =
+    Array.isArray(eth.providers) && eth.providers.length > 0 ? eth.providers : [eth]
+  return {
+    hasEthereum: true,
+    providerCount: providers.length,
+    isCoinbaseWallet: providers.some((p) => p.isCoinbaseWallet),
+    isBaseWallet: providers.some((p) => p.isBaseWallet),
+    isMetaMask: providers.some((p) => p.isMetaMask),
+    isTrust: providers.some((p) => p.isTrust || p.isTrustWallet),
+  }
+}
+
+async function getDebugChainId(walletType: WalletType): Promise<string> {
+  try {
+    const p = getMatchingEvmProvider(walletType)
+    if (!p) return "provider not found"
+    const id = await p.request({ method: "eth_chainId" })
+    return String(id)
+  } catch {
+    return "error"
+  }
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function WalletApprovalPage({
@@ -248,10 +323,26 @@ export default function WalletApprovalPage({
   const expiryRef = useRef<NodeJS.Timeout | null>(null)
   const signingRef = useRef(false)
 
+  // Debug panel (activated by ?debug=1)
+  const [debugMode, setDebugMode] = useState(false)
+  const [debugInfo, setDebugInfo] = useState<Record<string, unknown>>({})
+  const [debugChainId, setDebugChainId] = useState<string>("")
+  const [lastStep, setLastStep] = useState<string>("")
+
   // Resolve params
   useEffect(() => {
     params.then(({ sessionId: sid }) => setSessionId(sid))
   }, [params])
+
+  // Check debug mode from URL
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const isDebug = new URLSearchParams(window.location.search).get("debug") === "1"
+    setDebugMode(isDebug)
+    if (isDebug) {
+      setDebugInfo(getDebugProviderFlags())
+    }
+  }, [])
 
   // Expiry countdown
   useEffect(() => {
@@ -262,6 +353,14 @@ export default function WalletApprovalPage({
     setExpiryDisplay(formatExpiry(session.expires_at))
     return () => { if (expiryRef.current) clearInterval(expiryRef.current) }
   }, [session?.expires_at])
+
+  // Track last step for debug panel
+  useEffect(() => {
+    setLastStep(pageStatus)
+    if (debugMode) {
+      setDebugInfo(getDebugProviderFlags())
+    }
+  }, [pageStatus, debugMode])
 
   // ── Load session + handle deeplink callbacks ─────────────────────────────────
 
@@ -276,7 +375,6 @@ export default function WalletApprovalPage({
     const appUrl = getAppUrl()
     const baseRedirect = `${appUrl}/wallet-approval/${sid}`
 
-    // Safe debug logging — no private keys, secrets, or decrypted payloads
     console.debug("[Phantom callback]", {
       action,
       paramNames: Array.from(searchParams.keys()),
@@ -290,10 +388,6 @@ export default function WalletApprovalPage({
       sessionId: sid,
     })
 
-    // Phantom returns errorCode + errorMessage on any failure (user rejection,
-    // technical errors, or expired blockhash).  Distinguish user rejection
-    // (4001 / cancel / decline) from technical failures (4200 "method not
-    // supported", simulation failures, etc.) so the UI message is accurate.
     const errCode = searchParams.get("errorCode")
     const errMsg = searchParams.get("errorMessage") || ""
     if (errCode || errMsg) {
@@ -308,9 +402,6 @@ export default function WalletApprovalPage({
         setPageStatus("rejected")
         await patchSessionStatus(sid, "rejected", `Phantom rejected: ${errMsg || errCode}`)
       } else {
-        // 4200 "This method is not supported" is returned when the Universal Link
-        // deeplink opens Phantom's web server instead of the app (no user gesture),
-        // or when Phantom cannot process the transaction.
         const detail = errMsg || `error code ${errCode || "unknown"}`
         setStatusMessage(
           `Phantom returned an error: ${detail}. Tap "Try Again" to restart the approval.`
@@ -339,7 +430,6 @@ export default function WalletApprovalPage({
           `(Missing: ${missing.join(", ")})`
         )
         setPageStatus("failed")
-        // Recoverable — do not mark session as permanently failed on server
         return true
       }
 
@@ -352,7 +442,6 @@ export default function WalletApprovalPage({
           "This usually means the browser lost the approval keypair or Phantom returned an unexpected payload."
         )
         setPageStatus("failed")
-        // Recoverable — do not mark session as permanently failed on server
         return true
       }
 
@@ -366,30 +455,38 @@ export default function WalletApprovalPage({
       }
 
       storePhantomSession(sid, phantomSession)
-      // Fire and forget — status patches must not be awaited before the redirect
-      // because awaiting breaks the iOS user-gesture context.
       patchSessionStatus(sid, "wallet_connected").catch(() => {})
 
-      const txBase64 = loadedSession.prepared_payload.unsigned_tx_base64
+      // ── Refresh the unsigned tx with a fresh blockhash before signing ──────────
+      // Solana blockhashes expire after ~75 seconds. The tx was built at
+      // prepare_direct time; the connect round-trip easily takes 60-90+ seconds.
+      setStatusMessage("Refreshing transaction...")
+      const freshTxBase64 = await refreshUnsignedTx(sid)
+      // Use the fresh tx if available; fall back to the one stored in the session.
+      const txBase64 = freshTxBase64 || loadedSession.prepared_payload.unsigned_tx_base64
+
       if (!txBase64) {
-        setStatusMessage("Missing prepared transaction data.")
+        setStatusMessage("Missing prepared transaction data. Please start a new send from the desktop.")
         setPageStatus("failed")
-        await patchSessionStatus(sid, "failed", "Missing unsigned_tx_base64")
+        await patchSessionStatus(sid, "failed", "Missing unsigned_tx_base64 after refresh")
         return true
+      }
+
+      if (!freshTxBase64) {
+        console.debug("[Phantom connect] refresh-tx failed — using original tx (may have expired blockhash)", { sessionId: sid })
       }
 
       console.debug("[Phantom connect] building signAndSend URL", {
         sessionId: sid,
         hasTx: Boolean(txBase64),
         txLength: txBase64.length,
+        usedFreshTx: Boolean(freshTxBase64),
         redirectBase: baseRedirect,
       })
 
-      // Build the signing deeplink synchronously, then show a button.
+      // Build the signing deeplink synchronously then show a button.
       // iOS Universal Links are only intercepted by Phantom when navigation is
-      // triggered by a real user gesture (tap).  A programmatic window.location.href
-      // set after async operations loses the gesture context and Phantom's web
-      // server returns 4200 "This method is not supported" instead of opening the app.
+      // triggered by a real user gesture (tap).
       const signUrl = buildPhantomSignAndSendUrl(
         sid,
         txBase64,
@@ -398,6 +495,7 @@ export default function WalletApprovalPage({
       )
       patchSessionStatus(sid, "approval_requested").catch(() => {})
       setPendingPhantomSignUrl(signUrl)
+      setStatusMessage("")
       setPageStatus("phantom_connected")
       return true
     }
@@ -450,7 +548,6 @@ export default function WalletApprovalPage({
     const appUrl = getAppUrl()
     const baseRedirect = `${appUrl}/wallet-approval/${sid}`
 
-    // Safe debug logging — no private keys, secrets, or decrypted payloads
     console.debug("[Solflare callback]", {
       action,
       paramNames: Array.from(searchParams.keys()),
@@ -464,7 +561,6 @@ export default function WalletApprovalPage({
       sessionId: sid,
     })
 
-    // Same distinction as Phantom: 4001 = user rejection, anything else = technical error
     const errCode = searchParams.get("errorCode")
     const errMsg = searchParams.get("errorMessage") || ""
     if (errCode || errMsg) {
@@ -507,7 +603,6 @@ export default function WalletApprovalPage({
           `(Missing: ${missing.join(", ")})`
         )
         setPageStatus("failed")
-        // Recoverable — do not mark session as permanently failed on server
         return true
       }
 
@@ -519,7 +614,6 @@ export default function WalletApprovalPage({
           "This usually means the browser lost the approval keypair or Solflare returned an unexpected payload."
         )
         setPageStatus("failed")
-        // Recoverable — do not mark session as permanently failed on server
         return true
       }
 
@@ -532,25 +626,32 @@ export default function WalletApprovalPage({
       }
 
       storeSolflareSession(solflareSession, sid)
-      // Fire and forget — do not await before showing button (iOS gesture context)
       patchSessionStatus(sid, "wallet_connected").catch(() => {})
 
-      const txBase64 = loadedSession.prepared_payload.unsigned_tx_base64
+      // ── Refresh the unsigned tx with a fresh blockhash before signing ──────────
+      setStatusMessage("Refreshing transaction...")
+      const freshTxBase64 = await refreshUnsignedTx(sid)
+      const txBase64 = freshTxBase64 || loadedSession.prepared_payload.unsigned_tx_base64
+
       if (!txBase64) {
-        setStatusMessage("Missing prepared transaction data.")
+        setStatusMessage("Missing prepared transaction data. Please start a new send from the desktop.")
         setPageStatus("failed")
-        await patchSessionStatus(sid, "failed", "Missing unsigned_tx_base64")
+        await patchSessionStatus(sid, "failed", "Missing unsigned_tx_base64 after refresh")
         return true
+      }
+
+      if (!freshTxBase64) {
+        console.debug("[Solflare connect] refresh-tx failed — using original tx (may have expired blockhash)", { sessionId: sid })
       }
 
       console.debug("[Solflare connect] building signAndSend URL", {
         sessionId: sid,
         hasTx: Boolean(txBase64),
         txLength: txBase64.length,
+        usedFreshTx: Boolean(freshTxBase64),
         redirectBase: baseRedirect,
       })
 
-      // Same gesture-context pattern as Phantom: store URL, show tap button
       const signUrl = buildSolflareSignAndSendUrl(
         txBase64,
         solflareSession,
@@ -559,6 +660,7 @@ export default function WalletApprovalPage({
       )
       patchSessionStatus(sid, "approval_requested").catch(() => {})
       setPendingSolflareSignUrl(signUrl)
+      setStatusMessage("")
       setPageStatus("solflare_connected")
       return true
     }
@@ -620,7 +722,6 @@ export default function WalletApprovalPage({
       }
 
       if (res.status === 404) {
-        // Try to read the server error message for a better hint
         const errBody = await res.json().catch(() => null) as { error?: string } | null
         setStatusMessage(errBody?.error || "Approval session not found. It may have expired or the link may be invalid. Create a new QR from PineTree.")
         setPageStatus("not_found")
@@ -628,8 +729,6 @@ export default function WalletApprovalPage({
       }
 
       if (res.status === 401) {
-        // Diagnostic: the mobile approval endpoint still requires login.
-        // After the middleware bypass is deployed this should never happen.
         console.error("[wallet-approval] session load returned 401 — mobile approval endpoint still requires login", { sessionId })
         setStatusMessage(
           "Approval session could not be loaded because the mobile approval endpoint still requires login. " +
@@ -640,7 +739,6 @@ export default function WalletApprovalPage({
       }
 
       if (!res.ok) {
-        // 500 or other server error — surface the real error from the API
         const errBody = await res.json().catch(() => null) as { error?: string } | null
         const serverMsg = errBody?.error || ""
         console.error("[wallet-approval] session load error", { status: res.status, serverMsg })
@@ -724,19 +822,32 @@ export default function WalletApprovalPage({
 
   async function signWithEvmWallet(walletType: WalletType, s: SessionData) {
     setPageStatus("connecting")
-    setStatusMessage("Connecting wallet...")
+    setStatusMessage(`Connecting ${walletDisplayName(walletType)}...`)
 
     try {
       await patchSessionStatus(s.id, "wallet_connecting")
 
-      const provider = getMatchingEvmProvider(walletType)
+      // Wait up to 5 seconds for the provider to inject.
+      // Mobile wallet browsers inject window.ethereum asynchronously —
+      // failing immediately produces false-negatives.
+      const provider = await waitForEvmProvider(walletType, 5000)
       if (!provider) {
-        throw new Error(`${walletDisplayName(walletType)} was not detected. Are you opening this page inside ${walletDisplayName(walletType)}?`)
+        throw new Error(
+          `${walletDisplayName(walletType)} did not expose a signing provider. ` +
+          `Open this approval link inside ${walletDisplayName(walletType)}'s browser or tap the approval button again.`
+        )
       }
 
-      const chainId = await provider.request({ method: "eth_chainId" }).catch(() => "")
-      if (String(chainId).toLowerCase() !== "0x2105" && String(chainId) !== "8453") {
-        // Try to switch to Base before failing hard
+      // Refresh provider flags in debug panel
+      if (debugMode) setDebugInfo(getDebugProviderFlags())
+
+      const chainIdRaw = await provider.request({ method: "eth_chainId" }).catch(() => "")
+      const chainId = String(chainIdRaw)
+      if (debugMode) {
+        getDebugChainId(walletType).then(setDebugChainId)
+      }
+
+      if (chainId.toLowerCase() !== "0x2105" && chainId !== "8453") {
         try {
           await provider.request({
             method: "wallet_switchEthereumChain",
@@ -744,7 +855,7 @@ export default function WalletApprovalPage({
           })
         } catch {
           throw new Error(
-            "Wallet is not on Base network. Switch to Base in your wallet settings and try again."
+            `Wallet is not on Base network (chain ${chainId}). Switch to Base in your wallet settings and try again.`
           )
         }
       }
@@ -757,29 +868,36 @@ export default function WalletApprovalPage({
       setStatusMessage("Validating wallet address...")
 
       if (normalizeAddress(account) !== normalizeAddress(s.wallet_address)) {
-        throw new Error("Connected wallet does not match the merchant wallet saved for this rail.")
+        throw new Error(
+          "Connected wallet does not match the merchant wallet saved for this rail. " +
+          `Expected: ${formatShortAddress(s.wallet_address)} — Got: ${formatShortAddress(account)}`
+        )
       }
 
       const txParams = s.prepared_payload.tx_params
-      if (!txParams) throw new Error("Missing transaction parameters. Please start a new send from the desktop.")
+      if (!txParams) throw new Error("Prepared Base transaction is missing transaction parameters. Please start a new send from the desktop.")
+
+      // Validate required fields
+      if (!txParams.to) throw new Error("Prepared Base transaction is missing the destination address.")
+      if (!txParams.from) throw new Error("Prepared Base transaction is missing the from address.")
 
       await patchSessionStatus(s.id, "approval_requested")
       setPageStatus("signing")
-      setStatusMessage("Waiting for transaction approval in wallet...")
+      setStatusMessage(`Waiting for transaction approval in ${walletDisplayName(walletType)}...`)
 
       const rawResult = await provider.request({
         method: "eth_sendTransaction",
         params: [{
           from:  account || txParams.from,
           to:    txParams.to,
-          value: txParams.value,
-          data:  txParams.data,
+          value: txParams.value || "0x0",
+          data:  txParams.data || "0x",
           gas:   txParams.gas,
         }]
       })
 
       const txHash = String(rawResult || "").trim()
-      if (!txHash) throw new Error("Wallet connected, but transaction approval was not completed.")
+      if (!txHash) throw new Error(`${walletDisplayName(walletType)} connected, but no transaction hash was returned after approval.`)
 
       setPageStatus("recording")
       setStatusMessage("Recording transaction...")
@@ -845,7 +963,7 @@ export default function WalletApprovalPage({
         ? signResult
         : String((signResult as { signature?: string })?.signature || "").trim()
 
-      if (!signature) throw new Error("Wallet connected, but transaction approval was not completed.")
+      if (!signature) throw new Error("Phantom connected, but no signature was returned after transaction approval.")
 
       setPageStatus("recording")
       setStatusMessage("Recording transaction...")
@@ -911,7 +1029,7 @@ export default function WalletApprovalPage({
         ? signResult
         : String((signResult as { signature?: string })?.signature || "").trim()
 
-      if (!signature) throw new Error("Wallet connected, but transaction approval was not completed.")
+      if (!signature) throw new Error("Solflare connected, but no signature was returned after transaction approval.")
 
       setPageStatus("recording")
       setStatusMessage("Recording transaction...")
@@ -948,6 +1066,7 @@ export default function WalletApprovalPage({
     // If injected provider present, sign in-browser instead of deep link
     if (isInsidePhantomBrowser()) {
       setPageStatus("in_wallet_browser")
+      signingRef.current = false
       return
     }
 
@@ -971,6 +1090,7 @@ export default function WalletApprovalPage({
 
     if (isInsideSolflareBrowser()) {
       setPageStatus("in_wallet_browser")
+      signingRef.current = false
       return
     }
 
@@ -991,15 +1111,15 @@ export default function WalletApprovalPage({
       return
     }
 
-    // Otherwise open the wallet's in-app browser pointing at this page with
-    // a param that triggers auto-connect when the wallet's provider is injected.
+    // Otherwise open the wallet's in-app browser pointing at this page.
+    // ?in_wallet=1 triggers auto-connect once the provider is detected.
     const appUrl = getAppUrl()
     const targetUrl = `${appUrl}/wallet-approval/${session.id}?in_wallet=1`
     const deepLink = buildEvmWalletBrowserDeepLink(walletType, targetUrl)
     window.location.href = deepLink
   }
 
-  // Re-detect wallet browser if we came from a deep link
+  // Re-detect wallet browser if we came back from a deep link
   useEffect(() => {
     if (!session || pageStatus !== "ready") return
     const searchParams = new URLSearchParams(window.location.search)
@@ -1013,32 +1133,49 @@ export default function WalletApprovalPage({
   const walletType = session?.wallet_type as WalletType | undefined
   const walletName = walletType ? walletDisplayName(walletType) : "Wallet"
 
+  const isTerminal = ["submitted", "rejected", "failed", "expired", "not_found"].includes(pageStatus)
+  const isActive   = !["loading", "submitted", "rejected", "failed", "expired", "not_found"].includes(pageStatus)
+
+  function resetForRetry() {
+    if (session?.wallet_type === "phantom")  clearPhantomSession(session.id)
+    if (session?.wallet_type === "solflare") clearSolflareSession(session.id)
+    signingRef.current = false
+    setPendingPhantomSignUrl("")
+    setPendingSolflareSignUrl("")
+    setPageStatus("ready")
+    setStatusMessage("")
+  }
+
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-gray-50 px-4 py-8">
-      <div className="w-full max-w-sm space-y-4">
+    <div className="flex min-h-screen flex-col items-center justify-start bg-gray-50 px-4 py-10">
+      <div className="w-full max-w-sm space-y-3">
 
         {/* Header */}
         <div className="text-center">
-          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#0052FF]">
+          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#0052FF]">
             PineTree Payments
           </p>
-          <h1 className="mt-1 text-xl font-semibold text-gray-950">
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-gray-950">
             Wallet Approval
           </h1>
+          {walletType && isActive && (
+            <p className="mt-0.5 text-sm text-gray-500">{walletName}</p>
+          )}
         </div>
 
         {/* Loading */}
         {pageStatus === "loading" && (
-          <div className="rounded-2xl border border-gray-100 bg-white p-6 text-center text-sm text-gray-500">
-            Loading session...
+          <div className="rounded-2xl border border-gray-100 bg-white p-6 text-center">
+            <div className="mx-auto mb-3 h-5 w-5 animate-spin rounded-full border-2 border-gray-200 border-t-[#0052FF]" />
+            <p className="text-sm text-gray-500">Loading session...</p>
           </div>
         )}
 
         {/* Not found / load error */}
         {pageStatus === "not_found" && (
-          <div className="rounded-2xl border border-red-100 bg-red-50 p-6 text-center">
+          <div className="rounded-2xl border border-red-100 bg-red-50 p-5 text-center">
             <p className="text-sm font-semibold text-red-700">Session not found</p>
-            <p className="mt-1 text-xs text-red-600">
+            <p className="mt-1 text-xs leading-5 text-red-600">
               {statusMessage || "This approval link is invalid or has been removed."}
             </p>
           </div>
@@ -1046,34 +1183,32 @@ export default function WalletApprovalPage({
 
         {/* Expired */}
         {pageStatus === "expired" && (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-center">
             <p className="text-sm font-semibold text-amber-700">Session Expired</p>
-            <p className="mt-1 text-xs text-amber-600">
+            <p className="mt-1 text-xs leading-5 text-amber-600">
               Approval session expired. Return to PineTree and create a new QR.
             </p>
           </div>
         )}
 
         {/* Session info + action */}
-        {session && !["loading", "not_found", "expired"].includes(pageStatus as string) && (
+        {session && !["loading", "not_found", "expired"].includes(pageStatus) && (
           <>
-            {/* Transaction summary */}
+            {/* Transaction summary card */}
             <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+              <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-gray-400">
                 Transaction
               </p>
               <div className="mt-3 space-y-2">
                 {[
+                  { label: "Asset",       value: `${session.amount} ${session.asset}` },
+                  { label: "To",          value: session.destination_label || formatShortAddress(session.destination_address) },
+                  { label: "Address",     value: formatShortAddress(session.destination_address) },
                   { label: "Wallet",      value: walletName },
-                  { label: "Asset",       value: session.asset },
-                  { label: "Amount",      value: `${session.amount} ${session.asset}` },
-                  { label: "Destination", value: session.destination_label || formatShortAddress(session.destination_address) },
-                  { label: "To address",  value: formatShortAddress(session.destination_address) },
-                  { label: "Fee",         value: "Wallet will estimate" },
                   { label: "Expires in",  value: expiryDisplay || "—" },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-[0.1em] text-gray-400">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">
                       {label}
                     </span>
                     <span className="min-w-0 truncate text-right text-sm font-semibold text-gray-800">
@@ -1103,28 +1238,31 @@ export default function WalletApprovalPage({
                       else if (walletType === "solflare") startSolflareApproval()
                       else startEvmWalletApproval(walletType)
                     }}
-                    className="mt-3 w-full rounded-xl bg-[#0052FF] py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 active:scale-[0.98]"
+                    className="mt-3 w-full rounded-xl bg-[#0052FF] py-3.5 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 active:scale-[0.98]"
                   >
                     Approve with {walletName}
                   </button>
                 </>
               )}
 
-              {/* In-wallet browser — show "auto-connecting" message, signing starts automatically */}
+              {/* In-wallet browser — provider loaded; signing starts automatically */}
               {pageStatus === "in_wallet_browser" && (
                 <div className="flex items-center gap-3">
                   <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-blue-500" />
                   <p className="text-sm font-semibold text-[#0052FF]">
-                    Opening {walletName}...
+                    Connecting {walletName}...
                   </p>
                 </div>
               )}
 
-              {/* Phantom connected — wallet approved PineTree; user must tap to open signing deeplink */}
+              {/* Phantom connected — must tap to open signing deeplink (iOS gesture) */}
               {pageStatus === "phantom_connected" && (
-                <div>
-                  <p className="text-sm font-semibold text-green-700">Phantom connected</p>
-                  <p className="mt-1 text-xs leading-5 text-gray-500">
+                <>
+                  <div className="mb-3 flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-green-500" />
+                    <p className="text-sm font-semibold text-green-700">Phantom connected</p>
+                  </div>
+                  <p className="text-xs leading-5 text-gray-500">
                     Tap below to open Phantom and approve the transaction.
                   </p>
                   <button
@@ -1132,18 +1270,21 @@ export default function WalletApprovalPage({
                     onClick={() => {
                       if (pendingPhantomSignUrl) window.location.href = pendingPhantomSignUrl
                     }}
-                    className="mt-3 w-full rounded-xl bg-[#0052FF] py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 active:scale-[0.98]"
+                    className="mt-3 w-full rounded-xl bg-[#0052FF] py-3.5 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 active:scale-[0.98]"
                   >
                     Approve Transaction in Phantom
                   </button>
-                </div>
+                </>
               )}
 
-              {/* Solflare connected — wallet approved PineTree; user must tap to open signing deeplink */}
+              {/* Solflare connected — must tap to open signing deeplink (iOS gesture) */}
               {pageStatus === "solflare_connected" && (
-                <div>
-                  <p className="text-sm font-semibold text-green-700">Solflare connected</p>
-                  <p className="mt-1 text-xs leading-5 text-gray-500">
+                <>
+                  <div className="mb-3 flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-green-500" />
+                    <p className="text-sm font-semibold text-green-700">Solflare connected</p>
+                  </div>
+                  <p className="text-xs leading-5 text-gray-500">
                     Tap below to open Solflare and approve the transaction.
                   </p>
                   <button
@@ -1151,11 +1292,11 @@ export default function WalletApprovalPage({
                     onClick={() => {
                       if (pendingSolflareSignUrl) window.location.href = pendingSolflareSignUrl
                     }}
-                    className="mt-3 w-full rounded-xl bg-[#0052FF] py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 active:scale-[0.98]"
+                    className="mt-3 w-full rounded-xl bg-[#0052FF] py-3.5 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 active:scale-[0.98]"
                   >
                     Approve Transaction in Solflare
                   </button>
-                </div>
+                </>
               )}
 
               {pageStatus === "connecting" && (
@@ -1180,7 +1321,7 @@ export default function WalletApprovalPage({
                 <div className="flex items-center gap-3">
                   <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-blue-500" />
                   <p className="text-sm font-semibold text-[#0052FF]">
-                    Waiting for approval in {walletName}...
+                    {statusMessage || `Waiting for approval in ${walletName}...`}
                   </p>
                 </div>
               )}
@@ -1192,9 +1333,20 @@ export default function WalletApprovalPage({
                 </div>
               )}
 
+              {/* Refreshing blockhash — shown briefly during connect→sign transition */}
+              {pageStatus === "phantom_connected" && statusMessage === "Refreshing transaction..." && (
+                <div className="mt-3 flex items-center gap-2 text-xs text-gray-400">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gray-400" />
+                  {statusMessage}
+                </div>
+              )}
+
               {pageStatus === "submitted" && (
                 <div>
-                  <p className="text-sm font-semibold text-green-700">Submitted</p>
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-green-500" />
+                    <p className="text-sm font-semibold text-green-700">Submitted</p>
+                  </div>
                   <p className="mt-1 text-xs leading-5 text-gray-500">
                     Transaction approved and submitted. You can close this page.
                   </p>
@@ -1209,15 +1361,7 @@ export default function WalletApprovalPage({
                   </p>
                   <button
                     type="button"
-                    onClick={() => {
-                      if (session?.wallet_type === "phantom")  clearPhantomSession(session.id)
-                      else if (session?.wallet_type === "solflare") clearSolflareSession(session.id)
-                      signingRef.current = false
-                      setPendingPhantomSignUrl("")
-                      setPendingSolflareSignUrl("")
-                      setPageStatus("ready")
-                      setStatusMessage("")
-                    }}
+                    onClick={resetForRetry}
                     className="mt-3 w-full rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-semibold text-gray-700 shadow-sm"
                   >
                     Try Again
@@ -1233,15 +1377,7 @@ export default function WalletApprovalPage({
                   </p>
                   <button
                     type="button"
-                    onClick={() => {
-                      if (session?.wallet_type === "phantom")  clearPhantomSession(session.id)
-                      else if (session?.wallet_type === "solflare") clearSolflareSession(session.id)
-                      signingRef.current = false
-                      setPendingPhantomSignUrl("")
-                      setPendingSolflareSignUrl("")
-                      setPageStatus("ready")
-                      setStatusMessage("")
-                    }}
+                    onClick={resetForRetry}
                     className="mt-3 w-full rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-semibold text-gray-700 shadow-sm"
                   >
                     Try Again
@@ -1251,6 +1387,43 @@ export default function WalletApprovalPage({
             </div>
           </>
         )}
+
+        {/* ── Debug panel (?debug=1) ─────────────────────────────────────────── */}
+        {debugMode && (
+          <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-3 font-mono text-[10px] text-gray-600">
+            <p className="mb-2 font-bold text-gray-800">Debug panel</p>
+            {[
+              ["session_id",          sessionId || "—"],
+              ["rail",                session?.rail || "—"],
+              ["wallet_type",         session?.wallet_type || "—"],
+              ["asset",               session?.asset || "—"],
+              ["network",             session?.network || "—"],
+              ["status",              session?.status || "—"],
+              ["has_payload",         session ? String(Boolean(session.prepared_payload)) : "—"],
+              ["payload_keys",        session ? Object.keys(session.prepared_payload || {}).join(", ") || "none" : "—"],
+              ["has_unsigned_tx",     session ? String(Boolean(session.prepared_payload?.unsigned_tx_base64)) : "—"],
+              ["has_tx_params",       session ? String(Boolean(session.prepared_payload?.tx_params)) : "—"],
+              ["has_ethereum",        String(debugInfo.hasEthereum ?? false)],
+              ["provider_count",      String(debugInfo.providerCount ?? "—")],
+              ["isCoinbaseWallet",    String(debugInfo.isCoinbaseWallet ?? false)],
+              ["isBaseWallet",        String(debugInfo.isBaseWallet ?? false)],
+              ["isMetaMask",          String(debugInfo.isMetaMask ?? false)],
+              ["isTrust",             String(debugInfo.isTrust ?? false)],
+              ["chain_id",            debugChainId || "—"],
+              ["page_status",         pageStatus],
+              ["last_step",           lastStep],
+              ["status_message",      statusMessage || "—"],
+              ["pending_phantom_url", pendingPhantomSignUrl ? "set" : "none"],
+              ["pending_sf_url",      pendingSolflareSignUrl ? "set" : "none"],
+            ].map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-2 border-b border-gray-200 py-0.5 last:border-0">
+                <span className="text-gray-400">{k}</span>
+                <span className="max-w-[55%] truncate text-right text-gray-700">{v}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
       </div>
     </div>
   )

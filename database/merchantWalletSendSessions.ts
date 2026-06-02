@@ -162,6 +162,25 @@ export async function getSendSession(id: string): Promise<MerchantWalletSendSess
   return data ? normalize(data as Record<string, unknown>) : null
 }
 
+/** Update prepared_payload (e.g. to refresh a Solana blockhash). */
+export async function updateSendSessionPreparedPayload(
+  id: string,
+  preparedPayload: Record<string, unknown>
+): Promise<MerchantWalletSendSession> {
+  const now = new Date().toISOString()
+  const { data, error } = await getDb()
+    .from(TABLE)
+    .update({ prepared_payload: preparedPayload, updated_at: now })
+    .eq("id", id)
+    .select("*")
+    .single()
+
+  if (error || !data) {
+    throw new Error(`Failed to update send session prepared payload: ${error?.message || "Not found"}`)
+  }
+  return normalize(data as Record<string, unknown>)
+}
+
 /** Merchant-scoped lookup (requires matching merchant_id). */
 export async function getSendSessionForMerchant(
   merchantId: string,
