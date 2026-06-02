@@ -473,6 +473,8 @@ export default function ProvidersPage() {
 
   function isEnabled(provider: string) {
     if (provider === "lightning") {
+      const speedProv = getProvider("lightning_speed")
+      if (speedProv?.enabled) return true
       const p = getProvider(provider)
       const status = getStatus(provider)
       return Boolean(p?.enabled && status === "Connected")
@@ -1057,7 +1059,7 @@ export default function ProvidersPage() {
       return
     }
 
-    if (value && provider === "lightning" && getStatus(provider) !== "Connected") {
+    if (value && provider === "lightning" && getLightningCardState().status !== "Connected") {
       toast.error("Connect a Lightning wallet first.")
       return
     }
@@ -1116,57 +1118,15 @@ export default function ProvidersPage() {
   function getLightningCardState() {
     const speedProvider = getProvider("lightning_speed")
     const speedCredentials = speedProvider?.credentials || {}
-    const speedStatus = getStatus("lightning_speed")
-    const nwcStatus = getStatus("lightning")
     const hasMerchantSpeedAccount = Boolean(String(speedCredentials.account_id || "").trim())
-    const platformConfigured = Boolean(speedCredentials.platform_configured)
-    const settlementPathStatus = String(speedCredentials.settlement_path_status || "")
-    const speedReady = speedProvider?.readiness?.ready || speedStatus === "Ready"
+    const nwcStatus = getStatus("lightning")
     const nwcConnected = nwcStatus === "Connected"
-    const speedConfigured = hasMerchantSpeedAccount || platformConfigured
-    const needsPlatformAttention =
-      speedStatus === "Missing env" ||
-      settlementPathStatus === "environment_key_mismatch" ||
-      (!platformConfigured && speedConfigured)
-
-    if (speedReady) {
-      return {
-        status: "Ready",
-        summary: "Ready for Speed Lightning.",
-        detail: hasMerchantSpeedAccount
-          ? `Speed account • ${formatCredentialPart(String(speedCredentials.account_id), 10, 4)}`
-          : "",
-        actionLabel: "Manage",
-        showClearSpeed: true
-      }
-    }
-
-    if (needsPlatformAttention) {
-      return {
-        status: "Setup needed",
-        summary: "Speed platform settings need attention.",
-        detail: hasMerchantSpeedAccount
-          ? `Merchant Speed Account ID saved: ${formatCredentialPart(String(speedCredentials.account_id), 10, 4)}`
-          : "Add the merchant Speed Account ID after PineTree Speed settings are ready.",
-        actionLabel: speedConfigured || nwcConnected ? "Manage" : "Connect",
-        showClearSpeed: hasMerchantSpeedAccount
-      }
-    }
-
-    if (platformConfigured && !hasMerchantSpeedAccount) {
-      return {
-        status: "Setup needed",
-        summary: "Setup needed: add merchant Speed Account ID.",
-        detail: "Add the merchant Speed Account ID to finish setup.",
-        actionLabel: "Connect",
-        showClearSpeed: false
-      }
-    }
 
     if (hasMerchantSpeedAccount) {
       return {
-        status: "Connected",
-        summary: "Speed account configured.",
+        status: "Connected" as const,
+        connectionType: "speed" as const,
+        summary: "Bitcoin Lightning payments route through the merchant Speed Account ID.",
         detail: `Speed account • ${formatCredentialPart(String(speedCredentials.account_id), 10, 4)}`,
         actionLabel: "Manage",
         showClearSpeed: true
@@ -1174,19 +1134,22 @@ export default function ProvidersPage() {
     }
 
     if (nwcConnected) {
+      const walletLabel = String(getProvider("lightning")?.credentials?.wallet_label || "Lightning Wallet")
       return {
-        status: "Connected",
-        summary: "Advanced wallet connected.",
-        detail: String(getProvider("lightning")?.credentials?.wallet_label || "Lightning Wallet"),
+        status: "Connected" as const,
+        connectionType: "nwc" as const,
+        summary: "Bitcoin Lightning payments route through the connected NWC wallet.",
+        detail: walletLabel,
         actionLabel: "Manage",
         showClearSpeed: false
       }
     }
 
     return {
-      status: "Not configured",
-      summary: "Accept Bitcoin Lightning payments through PineTree's Speed setup.",
-      detail: "Add the merchant Speed Account ID to finish setup.",
+      status: "Not Connected" as const,
+      connectionType: null,
+      summary: "Setup needed: connect Speed Lightning or Advanced NWC.",
+      detail: "",
       actionLabel: "Connect",
       showClearSpeed: false
     }
@@ -1434,7 +1397,13 @@ export default function ProvidersPage() {
 
                 <div className="grid grid-cols-[92px_1fr] items-center gap-3">
                   <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Settlement</span>
-                  <span className="min-w-0 text-sm leading-snug text-gray-900">Speed account / PineTree Speed platform</span>
+                  <span className="min-w-0 text-sm leading-snug text-gray-900">
+                    {lightningCard.connectionType === "speed"
+                      ? "Speed account"
+                      : lightningCard.connectionType === "nwc"
+                        ? "NWC wallet"
+                        : "Speed account (recommended)"}
+                  </span>
                 </div>
 
                 <p className="pt-1 text-sm leading-5 text-gray-600">
@@ -1443,19 +1412,31 @@ export default function ProvidersPage() {
               </div>
 
               <div className="mt-4 min-h-[50px]">
-                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
-                  <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                    Setup
-                  </span>
-                  <span className="mt-1 block min-w-0 text-sm font-medium leading-snug text-gray-950">
-                    {lightningCard.summary}
-                  </span>
-                  {lightningCard.detail ? (
-                    <span className="mt-0.5 block min-w-0 truncate text-xs text-gray-500">
-                      {lightningCard.detail}
-                    </span>
-                  ) : null}
-                </div>
+                {lightningCard.connectionType === "speed" && (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+                    <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Connected</span>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700">Speed</span>
+                      <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-semibold text-orange-700">Bitcoin Lightning</span>
+                    </div>
+                    <p className="mt-1.5 text-sm leading-5 text-gray-600">{lightningCard.summary}</p>
+                  </div>
+                )}
+                {lightningCard.connectionType === "nwc" && (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+                    <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Connected</span>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      <span className="rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-semibold text-purple-700">NWC</span>
+                      <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-semibold text-orange-700">Bitcoin Lightning</span>
+                    </div>
+                    <p className="mt-1.5 text-sm leading-5 text-gray-600">{lightningCard.summary}</p>
+                  </div>
+                )}
+                {!lightningCard.connectionType && (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+                    <p className="text-sm leading-5 text-gray-600">{lightningCard.summary}</p>
+                  </div>
+                )}
               </div>
 
               <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4">
@@ -1463,7 +1444,7 @@ export default function ProvidersPage() {
                   <button
                     onClick={() => openProvider("lightning")}
                     className={`h-9 rounded-md px-3.5 text-sm font-semibold shadow-sm transition ${
-                      lightningCard.status === "Connected" || lightningCard.status === "Ready"
+                      lightningCard.status === "Connected"
                         ? "border border-gray-300 bg-white text-gray-700 hover:border-gray-400 hover:bg-gray-50"
                         : "border border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
                     }`}
@@ -1483,7 +1464,7 @@ export default function ProvidersPage() {
                   <span className="text-sm font-medium text-gray-700">Enabled</span>
                   <ToggleSwitch
                     checked={isEnabled("lightning")}
-                    disabled={getStatus("lightning") !== "Connected"}
+                    disabled={lightningCard.status !== "Connected"}
                     onChange={(v) => toggleProvider("lightning", v)}
                   />
                 </div>
@@ -1737,29 +1718,30 @@ export default function ProvidersPage() {
 
                           {(() => {
                             const dashboardLink = providerSpeedSetupLinks.find((l) => l.key === "dashboard")
-                            const docsLink = providerSpeedSetupLinks.find((l) => l.key === "docs")
+                            if (dashboardLink) {
+                              return (
+                                <a
+                                  href={dashboardLink.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className={`${primaryButtonClass()} block text-center`}
+                                >
+                                  Open Speed Signup / Login
+                                </a>
+                              )
+                            }
                             return (
-                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                                {dashboardLink && (
-                                  <a
-                                    href={dashboardLink.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className={actionButtonClass()}
-                                  >
-                                    Open Speed Dashboard
-                                  </a>
-                                )}
-                                {docsLink && (
-                                  <a
-                                    href={docsLink.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className={secondaryButtonClass()}
-                                  >
-                                    Speed Docs
-                                  </a>
-                                )}
+                              <div className="space-y-1.5">
+                                <button
+                                  type="button"
+                                  disabled
+                                  className={`${primaryButtonClass()} w-full cursor-not-allowed opacity-60`}
+                                >
+                                  Open Speed Signup / Login
+                                </button>
+                                <p className="text-center text-xs text-gray-500">
+                                  Speed dashboard URL is not configured.
+                                </p>
                               </div>
                             )
                           })()}
@@ -1803,7 +1785,7 @@ export default function ProvidersPage() {
                             <input
                               value={speedAccountId}
                               onChange={(e) => setSpeedAccountId(e.target.value)}
-                              placeholder="Speed Account ID"
+                              placeholder="Merchant Speed Account ID"
                               className={lightningInputClass()}
                               autoComplete="off"
                             />
@@ -1828,65 +1810,6 @@ export default function ProvidersPage() {
                             )
                           })()}
 
-                          {/* Additional merchant shortcut links */}
-                          {(() => {
-                            const extraLinks = providerSpeedSetupLinks.filter(
-                              (l) => !["accountId", "docs"].includes(l.key)
-                            )
-                            return extraLinks.length > 0 ? (
-                              <div className="flex flex-wrap gap-2">
-                                {extraLinks.map((link) => (
-                                  <a key={link.key} href={link.url} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                                    {link.label}
-                                  </a>
-                                ))}
-                              </div>
-                            ) : null
-                          })()}
-
-
-                          {/* Current setup status */}
-                          <div className="rounded-xl border border-gray-200 bg-white/70 px-4 py-3">
-                            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Current status</p>
-                            <p className="mt-1 text-sm leading-5 text-gray-700">{getLightningCardState().summary}</p>
-                            <p className="mt-0.5 text-xs text-gray-400">
-                              Speed payments activate when platform settings are ready and a Merchant Account ID is saved.
-                            </p>
-                          </div>
-
-                          {/* Test result */}
-                          {speedTestResult && (
-                            <div className={`rounded-xl border px-4 py-3 ${
-                              speedTestResult.connected
-                                ? "border-green-200 bg-green-50"
-                                : "border-amber-200 bg-amber-50"
-                            }`}>
-                              <p className={`text-sm font-semibold ${
-                                speedTestResult.connected ? "text-green-800" : "text-amber-900"
-                              }`}>
-                                {speedTestResult.connected
-                                  ? `PineTree Speed platform reachable${speedTestResult.mode && speedTestResult.mode !== "unknown" ? ` — ${speedTestResult.mode} mode` : ""}`
-                                  : "Could not connect to Speed platform"}
-                              </p>
-                              {speedTestResult.connected && speedTestResult.notes && speedTestResult.notes.length > 0 && (
-                                <ul className="mt-1 space-y-0.5">
-                                  {speedTestResult.notes.map((note) => (
-                                    <li key={note} className="text-xs text-green-700">{note}</li>
-                                  ))}
-                                </ul>
-                              )}
-                              {!speedTestResult.connected && speedTestResult.error && (
-                                <p className="mt-1 text-xs text-amber-800">{speedTestResult.error}</p>
-                              )}
-                              {speedTestResult.connected && (
-                                <p className="mt-1 text-xs text-green-700">
-                                  Platform reachable. Save the Merchant Account ID to enable Lightning payments.
-                                </p>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Navigation */}
                           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
                             <button
                               type="button"
@@ -1895,24 +1818,14 @@ export default function ProvidersPage() {
                             >
                               ← Back
                             </button>
-                            <div className="flex flex-col gap-2 sm:flex-row">
-                              <button
-                                type="button"
-                                onClick={testPineTreeSpeedPlatform}
-                                disabled={speedTesting || loading}
-                                className={`${secondaryButtonClass()} w-full sm:w-auto`}
-                              >
-                                {speedTesting ? "Testing..." : "Test Connection"}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={saveSpeedSetup}
-                                disabled={loading || !speedAccountId.trim()}
-                                className={`${primaryButtonClass()} w-full sm:w-auto`}
-                              >
-                                {loading ? "Saving..." : "Save Setup"}
-                              </button>
-                            </div>
+                            <button
+                              type="button"
+                              onClick={saveSpeedSetup}
+                              disabled={loading || !speedAccountId.trim()}
+                              className={`${primaryButtonClass()} w-full sm:w-auto`}
+                            >
+                              {loading ? "Saving..." : "Save Setup"}
+                            </button>
                           </div>
 
                           {getLightningCardState().status === "Connected" && (
