@@ -1088,6 +1088,18 @@ export default function ProvidersPage() {
     return "rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
   }
 
+  function compactPrimaryButtonClass() {
+    return "inline-flex h-10 items-center justify-center rounded-lg bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+  }
+
+  function compactSecondaryButtonClass() {
+    return "inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-3.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-300 hover:bg-gray-50"
+  }
+
+  function quietButtonClass() {
+    return "inline-flex h-10 items-center justify-center rounded-lg px-2.5 text-sm font-semibold text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
+  }
+
   function lightningInputClass() {
     return "mt-2 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-3 text-sm text-gray-950 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
   }
@@ -1641,17 +1653,16 @@ export default function ProvidersPage() {
                           </label>
 
                           <p className="text-xs text-gray-500">
-                            Find this under Settings → Associated Accounts in your Speed dashboard.
+                            Find this under Settings &rarr; Associated Accounts in your Speed dashboard.
                           </p>
 
-                          {/* Desktop footer: Back | [Open Speed Associated Accounts | Save Setup] */}
-                          <div className="hidden sm:flex sm:items-center sm:justify-between sm:gap-2">
+                          <div className="hidden sm:flex sm:items-center sm:justify-between sm:gap-3">
                             <button
                               type="button"
                               onClick={() => setSpeedSetupStep(1)}
-                              className={secondaryButtonClass()}
+                              className={quietButtonClass()}
                             >
-                              ← Back
+                              Back
                             </button>
                             <div className="flex items-center gap-2">
                               {speedAccountSetupUrl ? (
@@ -1659,18 +1670,22 @@ export default function ProvidersPage() {
                                   href={speedAccountSetupUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className={secondaryButtonClass()}
+                                  className={compactSecondaryButtonClass()}
+                                  aria-label="Open Speed Associated Accounts"
+                                  title="Open Speed Associated Accounts"
                                 >
-                                  Open Speed Associated Accounts
+                                  Associated Accounts
                                 </a>
                               ) : (
                                 <div className="flex flex-col gap-0.5">
                                   <button
                                     type="button"
                                     disabled
-                                    className="cursor-not-allowed rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-400"
+                                    className="inline-flex h-10 cursor-not-allowed items-center justify-center rounded-lg border border-gray-200 bg-white px-3.5 text-sm font-semibold text-gray-400"
+                                    aria-label="Open Speed Associated Accounts"
+                                    title="Open Speed Associated Accounts"
                                   >
-                                    Open Speed Associated Accounts
+                                    Associated Accounts
                                   </button>
                                   <p className="text-xs text-gray-400">Speed account ID link is not configured yet.</p>
                                 </div>
@@ -1679,50 +1694,54 @@ export default function ProvidersPage() {
                                 type="button"
                                 onClick={saveSpeedSetup}
                                 disabled={loading || !speedAccountId.trim()}
-                                className={primaryButtonClass()}
+                                className={compactPrimaryButtonClass()}
                               >
                                 {loading ? "Saving..." : "Save Setup"}
                               </button>
                             </div>
                           </div>
 
-                          {/* Mobile footer: Open Speed Associated Accounts / Back / Save Setup */}
+                          {/* Mobile footer: Associated Accounts / Save Setup / Back */}
                           <div className="flex flex-col gap-2 sm:hidden">
                             {speedAccountSetupUrl ? (
                               <a
                                 href={speedAccountSetupUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className={`${secondaryButtonClass()} w-full text-center`}
+                                className={`${compactSecondaryButtonClass()} w-full text-center`}
+                                aria-label="Open Speed Associated Accounts"
+                                title="Open Speed Associated Accounts"
                               >
-                                Open Speed Associated Accounts
+                                Associated Accounts
                               </a>
                             ) : (
                               <div className="flex flex-col gap-0.5">
                                 <button
                                   type="button"
                                   disabled
-                                  className="w-full cursor-not-allowed rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-400"
+                                  className="inline-flex h-10 w-full cursor-not-allowed items-center justify-center rounded-lg border border-gray-200 bg-white px-3.5 text-sm font-semibold text-gray-400"
+                                  aria-label="Open Speed Associated Accounts"
+                                  title="Open Speed Associated Accounts"
                                 >
-                                  Open Speed Associated Accounts
+                                  Associated Accounts
                                 </button>
                                 <p className="text-center text-xs text-gray-400">Speed account ID link is not configured yet.</p>
                               </div>
                             )}
                             <button
                               type="button"
-                              onClick={() => setSpeedSetupStep(1)}
-                              className={`${secondaryButtonClass()} w-full`}
+                              onClick={saveSpeedSetup}
+                              disabled={loading || !speedAccountId.trim()}
+                              className={`${compactPrimaryButtonClass()} w-full`}
                             >
-                              ← Back
+                              {loading ? "Saving..." : "Save Setup"}
                             </button>
                             <button
                               type="button"
-                              onClick={saveSpeedSetup}
-                              disabled={loading || !speedAccountId.trim()}
-                              className={`${primaryButtonClass()} w-full`}
+                              onClick={() => setSpeedSetupStep(1)}
+                              className={`${quietButtonClass()} w-full`}
                             >
-                              {loading ? "Saving..." : "Save Setup"}
+                              Back
                             </button>
                           </div>
 

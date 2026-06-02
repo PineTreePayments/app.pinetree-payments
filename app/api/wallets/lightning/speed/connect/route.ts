@@ -32,6 +32,23 @@ function sanitizeOptionalString(value: unknown): string | undefined {
   return trimmed || undefined
 }
 
+function speedConnectErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : "Failed to save Speed setup"
+  const normalized = message.toLowerCase()
+
+  if (
+    normalized.includes("merchant_providers") &&
+    normalized.includes("updated_at") &&
+    (normalized.includes("schema cache") ||
+      normalized.includes("could not find") ||
+      normalized.includes("column"))
+  ) {
+    return "merchant_providers.updated_at is missing. Run the migration to add updated_at and reload the Supabase schema cache."
+  }
+
+  return message
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   let merchantId: string
   try {
@@ -114,7 +131,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       message: "Speed Lightning setup saved. PineTree can create Speed Lightning payments for this merchant."
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to save Speed setup"
+    const message = speedConnectErrorMessage(err)
     console.error("[api/speed/connect] Save failed", { merchantId, error: message })
     return NextResponse.json({ error: message }, { status: 500 })
   }

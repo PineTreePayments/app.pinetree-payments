@@ -4,6 +4,27 @@ import type { SpeedMode } from "@/providers/lightning/speedClient"
 
 const db = supabaseAdmin || supabase
 
+const MERCHANT_PROVIDERS_UPDATED_AT_MISSING_MESSAGE =
+  "merchant_providers.updated_at is missing. Run the migration to add updated_at and reload the Supabase schema cache."
+
+function isMerchantProvidersUpdatedAtSchemaError(message?: string | null): boolean {
+  const normalized = String(message || "").toLowerCase()
+  return (
+    normalized.includes("merchant_providers") &&
+    normalized.includes("updated_at") &&
+    (normalized.includes("schema cache") ||
+      normalized.includes("could not find") ||
+      normalized.includes("column"))
+  )
+}
+
+function merchantProviderErrorMessage(error: { message?: string | null } | null | undefined): string {
+  if (isMerchantProvidersUpdatedAtSchemaError(error?.message)) {
+    return MERCHANT_PROVIDERS_UPDATED_AT_MISSING_MESSAGE
+  }
+  return error?.message || "unknown error"
+}
+
 // ─── Speed Provider ───────────────────────────────────────────────────────────
 
 export const SPEED_PROVIDER_NAME = "lightning_speed"
@@ -123,7 +144,7 @@ export async function saveMerchantSpeedConnection(
     .maybeSingle()
 
   if (existing?.id) {
-    await db
+    const { error } = await db
       .from("merchant_providers")
       .update({
         credentials,
@@ -132,6 +153,10 @@ export async function saveMerchantSpeedConnection(
         updated_at: now
       })
       .eq("id", existing.id)
+
+    if (error) {
+      throw new Error(`Failed to save Speed connection: ${merchantProviderErrorMessage(error)}`)
+    }
 
     return { providerRowId: String(existing.id) }
   }
@@ -151,7 +176,7 @@ export async function saveMerchantSpeedConnection(
     .single()
 
   if (error || !inserted?.id) {
-    throw new Error(`Failed to save Speed connection: ${error?.message || "unknown error"}`)
+    throw new Error(`Failed to save Speed connection: ${merchantProviderErrorMessage(error)}`)
   }
 
   return { providerRowId: String(inserted.id) }
@@ -159,7 +184,7 @@ export async function saveMerchantSpeedConnection(
 
 /** Disconnect a merchant's Speed connection. Preserves row history. */
 export async function disconnectMerchantSpeedConnection(merchantId: string): Promise<void> {
-  await db
+  const { error } = await db
     .from("merchant_providers")
     .update({
       status: "disconnected",
@@ -170,6 +195,10 @@ export async function disconnectMerchantSpeedConnection(merchantId: string): Pro
     .eq("merchant_id", merchantId)
     .eq("provider", SPEED_PROVIDER_NAME)
     .in("status", ["connected", "active"])
+
+  if (error) {
+    throw new Error(`Failed to disconnect Speed connection: ${merchantProviderErrorMessage(error)}`)
+  }
 }
 
 export const REQUIRED_NWC_PAYMENT_METHODS = [
