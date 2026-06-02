@@ -1,4 +1,6 @@
-import { supabase } from './supabase'
+import { supabase, supabaseAdmin } from './supabase'
+
+const db = supabaseAdmin || supabase
 
 export interface Terminal {
   id: string
@@ -11,7 +13,7 @@ export interface Terminal {
 }
 
 export async function getTerminalById(id: string): Promise<Terminal | null> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('terminals')
     .select()
     .eq('id', id)
@@ -22,7 +24,7 @@ export async function getTerminalById(id: string): Promise<Terminal | null> {
 }
 
 export async function getTerminalsByMerchantId(merchantId: string): Promise<Terminal[]> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('terminals')
     .select()
     .eq('merchant_id', merchantId)
@@ -33,7 +35,7 @@ export async function getTerminalsByMerchantId(merchantId: string): Promise<Term
 }
 
 export async function createTerminal(input: Omit<Terminal, 'id' | 'created_at'>): Promise<Terminal> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('terminals')
     .insert(input)
     .select()
@@ -44,7 +46,7 @@ export async function createTerminal(input: Omit<Terminal, 'id' | 'created_at'>)
 }
 
 export async function updateTerminal(id: string, input: Partial<Terminal>): Promise<Terminal> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('terminals')
     .update(input)
     .eq('id', id)
@@ -56,7 +58,7 @@ export async function updateTerminal(id: string, input: Partial<Terminal>): Prom
 }
 
 export async function verifyTerminalPin(id: string, pin: string): Promise<boolean> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('terminals')
     .select('pin')
     .eq('id', id)
@@ -67,7 +69,7 @@ export async function verifyTerminalPin(id: string, pin: string): Promise<boolea
 }
 
 export async function deleteTerminal(id: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await db
     .from('terminals')
     .delete()
     .eq('id', id)

@@ -1,4 +1,6 @@
-import { supabase } from './supabase'
+import { supabase, supabaseAdmin } from './supabase'
+
+const db = supabaseAdmin || supabase
 
 export interface Location {
   id: string
@@ -11,7 +13,7 @@ export interface Location {
 }
 
 export async function getLocationById(id: string): Promise<Location | null> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('locations')
     .select()
     .eq('id', id)
@@ -22,7 +24,7 @@ export async function getLocationById(id: string): Promise<Location | null> {
 }
 
 export async function getLocationsByMerchantId(merchantId: string): Promise<Location[]> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('locations')
     .select()
     .eq('merchant_id', merchantId)
@@ -33,7 +35,7 @@ export async function getLocationsByMerchantId(merchantId: string): Promise<Loca
 }
 
 export async function createLocation(input: Omit<Location, 'id' | 'created_at'>): Promise<Location> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('locations')
     .insert(input)
     .select()
@@ -44,7 +46,7 @@ export async function createLocation(input: Omit<Location, 'id' | 'created_at'>)
 }
 
 export async function updateLocation(id: string, input: Partial<Location>): Promise<Location> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('locations')
     .update(input)
     .eq('id', id)
@@ -56,7 +58,7 @@ export async function updateLocation(id: string, input: Partial<Location>): Prom
 }
 
 export async function deleteLocation(id: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await db
     .from('locations')
     .delete()
     .eq('id', id)

@@ -1,4 +1,6 @@
-import { supabase } from './supabase'
+import { supabase, supabaseAdmin } from './supabase'
+
+const db = supabaseAdmin || supabase
 
 export interface RoutingRule {
   id: string
@@ -11,7 +13,7 @@ export interface RoutingRule {
 }
 
 export async function getRoutingRulesForMerchant(merchantId: string): Promise<RoutingRule[]> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('routing_rules')
     .select()
     .eq('merchant_id', merchantId)
@@ -23,7 +25,7 @@ export async function getRoutingRulesForMerchant(merchantId: string): Promise<Ro
 }
 
 export async function createRoutingRule(input: Omit<RoutingRule, 'id' | 'created_at'>): Promise<RoutingRule> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('routing_rules')
     .insert(input)
     .select()
@@ -34,7 +36,7 @@ export async function createRoutingRule(input: Omit<RoutingRule, 'id' | 'created
 }
 
 export async function updateRoutingRule(id: string, input: Partial<RoutingRule>): Promise<RoutingRule> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('routing_rules')
     .update(input)
     .eq('id', id)
@@ -46,7 +48,7 @@ export async function updateRoutingRule(id: string, input: Partial<RoutingRule>)
 }
 
 export async function deleteRoutingRule(id: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await db
     .from('routing_rules')
     .delete()
     .eq('id', id)

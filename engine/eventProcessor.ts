@@ -189,6 +189,25 @@ async function advancePaymentToTargetStatus(
     }
   }
 
+  if (targetStatus === "FAILED") {
+    const transitions: PaymentStatus[] = []
+
+    if (currentStatus === "CREATED") {
+      transitions.push("PENDING", "PROCESSING", "FAILED")
+    } else if (currentStatus === "PENDING") {
+      transitions.push("PROCESSING", "FAILED")
+    } else if (currentStatus === "PROCESSING") {
+      transitions.push("FAILED")
+    }
+
+    if (transitions.length) {
+      for (const next of transitions) {
+        await updatePaymentStatus(paymentId, next, resolvedMetadata)
+      }
+      return
+    }
+  }
+
   await updatePaymentStatus(paymentId, targetStatus, resolvedMetadata)
 }
 

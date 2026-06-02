@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { processWebhook } from "@/engine/eventProcessor"
+import { loadProviders } from "@/engine/loadProviders"
+import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
+
+export async function GET() {
+  return NextResponse.json({ ok: true, provider: "speed", endpoint: "lightning" })
+}
 
 export async function POST(req: NextRequest) {
   let rawBody = ""
@@ -14,14 +20,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid webhook payload" }, { status: 400 })
     }
 
+    await loadProviders()
     await processWebhook({
-      provider: "lightning",
+      provider: SPEED_PROVIDER_NAME,
       payload,
       headers: Object.fromEntries(req.headers),
       rawBody
     })
 
-    return NextResponse.json({ received: true })
+    return NextResponse.json({ received: true, provider: "speed" })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Webhook failed"
 
@@ -29,11 +36,16 @@ export async function POST(req: NextRequest) {
       console.warn("[webhooks/lightning] signature verification failed", {
         bodyLength: rawBody.length,
         hasSignatureHeader: Boolean(req.headers.get("webhook-signature")),
+        hasTimestampHeader: Boolean(req.headers.get("webhook-timestamp")),
+        hasWebhookIdHeader: Boolean(req.headers.get("webhook-id"))
       })
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return NextResponse.json({ error: "Invalid webhook signature" }, { status: 400 })
     }
 
-    console.error("[webhooks/lightning] processing error", { error: message })
-    return NextResponse.json({ error: "Webhook failed" }, { status: 500 })
+    console.error("[webhooks/lightning] non-critical processing error acknowledged", {
+      error: message,
+      bodyLength: rawBody.length
+    })
+    return NextResponse.json({ received: true, processed: false, provider: "speed" })
   }
 }

@@ -600,7 +600,7 @@ function serializeTypedDataForWallet(typedData: Eip712TypedData): string {
 function normalizeHexTransactionHash(value: unknown): string {
   const txHash = String(value || "").trim()
   if (!/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
-    throw new Error("Wallet did not return a transaction hash")
+    throw new Error("Transaction hash was not returned by the wallet. Please retry.")
   }
   return txHash
 }
@@ -744,7 +744,7 @@ async function sendWalletConnectTransaction(input: {
       reason: "no-tx-hash-returned",
       elapsedMs: Date.now() - startedAt,
     })
-    throw new Error("Wallet did not return a transaction hash.")
+    throw new Error("Transaction hash was not returned by the wallet. Please retry.")
   }
   logBasePay("tx_hash_captured", { actionKind, hasTxHash: true })
   logBaseV6(actionKind === "eth_payment" ? "eth_tx_hash_captured" : actionKind === "usdc_approve" ? "usdc_approval_tx_hash_captured" : "usdc_final_payment_tx_hash_captured", {
@@ -1048,6 +1048,15 @@ export default function BaseWalletPayment({
       sessionStorage.setItem(`pinetree_base_exec_${intentId ?? "direct"}_${selectedAsset}`, stage)
     } catch {}
   }
+
+  useEffect(() => {
+    if (execStage !== "detecting") return
+    setBasePayStatus("Payment submitted. Confirming on Base.")
+    const timer = window.setTimeout(() => {
+      setBasePayStatus("Still confirming on Base. This can take a little longer. Do not resubmit unless your wallet shows the transaction failed.")
+    }, 45_000)
+    return () => window.clearTimeout(timer)
+  }, [execStage])
   const setIsResolvingAccountRef = useRef<(v: boolean) => void>(() => {})
   setIsResolvingAccountRef.current = setIsResolvingAccount
   const getProviderRequestDebugTimings = useCallback((actionKind: WalletRequestKind, source?: string) => {
@@ -3362,7 +3371,7 @@ export default function BaseWalletPayment({
   } else if (execStage === "submitting_payment") {
     contextMessage = "Submitting payment..."
   } else if (execStage === "payment_submitted" || execStage === "detecting") {
-    contextMessage = "Waiting for network confirmation…"
+    contextMessage = basePayStatus || "Payment submitted. Confirming on Base."
   }
   if (baseMobileStep === "wallet_connecting") {
     contextMessage = "Approve wallet connection in your wallet"
@@ -3387,9 +3396,9 @@ export default function BaseWalletPayment({
       ? selectedAsset === "USDC" ? `Final payment request sent to ${connectedPeerName}` : `Payment request sent to ${connectedPeerName}`
       : selectedAsset === "USDC" ? "Approve final payment in your wallet." : "Payment request sent — check your wallet"
   } else if (baseMobileStep === "payment_submitted") {
-    contextMessage = "Payment submitted"
+    contextMessage = "Payment submitted. Confirming on Base."
   } else if (baseMobileStep === "network_confirmation") {
-    contextMessage = "Waiting for network confirmation..."
+    contextMessage = basePayStatus || "Payment submitted. Confirming on Base."
   } else if (baseMobileStep === "fallback_required") {
     contextMessage = pendingWalletActionKind === "usdc_approve"
       ? "USDC authorization needs one more wallet action"

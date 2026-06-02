@@ -1,4 +1,6 @@
-import { supabase } from './supabase'
+import { supabase, supabaseAdmin } from './supabase'
+
+const db = supabaseAdmin || supabase
 
 export interface Device {
   id: string
@@ -10,7 +12,7 @@ export interface Device {
 }
 
 export async function getDeviceById(id: string): Promise<Device | null> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('devices')
     .select()
     .eq('id', id)
@@ -21,7 +23,7 @@ export async function getDeviceById(id: string): Promise<Device | null> {
 }
 
 export async function getDevicesByMerchantId(merchantId: string): Promise<Device[]> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('devices')
     .select()
     .eq('merchant_id', merchantId)
@@ -32,7 +34,7 @@ export async function getDevicesByMerchantId(merchantId: string): Promise<Device
 }
 
 export async function getDevicesByLocationId(locationId: string): Promise<Device[]> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('devices')
     .select()
     .eq('location_id', locationId)
@@ -43,7 +45,7 @@ export async function getDevicesByLocationId(locationId: string): Promise<Device
 }
 
 export async function createDevice(input: Omit<Device, 'id' | 'created_at'>): Promise<Device> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('devices')
     .insert(input)
     .select()
@@ -54,7 +56,7 @@ export async function createDevice(input: Omit<Device, 'id' | 'created_at'>): Pr
 }
 
 export async function updateDevice(id: string, input: Partial<Device>): Promise<Device> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('devices')
     .update(input)
     .eq('id', id)
@@ -66,7 +68,7 @@ export async function updateDevice(id: string, input: Partial<Device>): Promise<
 }
 
 export async function deleteDevice(id: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await db
     .from('devices')
     .delete()
     .eq('id', id)

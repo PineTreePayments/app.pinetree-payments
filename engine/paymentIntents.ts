@@ -7,6 +7,7 @@ import {
   getConnectedHostedCheckoutNetworks,
   getPaymentById
 } from "@/database"
+import { getTransactionByPaymentId } from "@/database/transactions"
 import QRCode from "qrcode"
 import { createPayment, buildCreatePaymentRequest } from "./createPayment"
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
@@ -294,6 +295,9 @@ export async function getPaymentIntentEngine(intentId: string) {
   if (!intent) return null
 
   const selectedPayment = intent.payment_id ? await getPaymentById(intent.payment_id) : null
+  const selectedTransaction = selectedPayment?.id
+    ? await getTransactionByPaymentId(selectedPayment.id)
+    : null
   const selectedPaymentMetadata = (selectedPayment?.metadata || null) as {
     selectedAsset?: string | null
   } | null
@@ -314,6 +318,7 @@ export async function getPaymentIntentEngine(intentId: string) {
     status: intent.status,
     paymentStatus: selectedPayment?.status || null,
     paymentProviderReference: selectedPayment?.provider_reference || null,
+    paymentTxHash: selectedTransaction?.provider_transaction_id || null,
     expiresAt: intent.expires_at,
     metadata: (intent.metadata || undefined) as Record<string, unknown> | undefined,
     checkoutUrl: `${(() => { const u = process.env.NEXT_PUBLIC_APP_URL || ""; return u && !u.includes("localhost") && !u.includes("127.0.0.1") ? u : "https://app.pinetree-payments.com" })()}/pay?intent=${encodeURIComponent(intent.id)}`

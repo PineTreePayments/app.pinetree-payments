@@ -78,7 +78,7 @@ type EvmReceiptLog = {
 
 type EvmTransactionReceipt = {
   logs: EvmReceiptLog[]
-  status?: string
+  status?: string | number
 }
 
 type SolanaRpcSignatureRow = {
@@ -413,6 +413,32 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
         })
       }
 
+      if (isEvmReceiptFailed(receipt.status)) {
+        console.warn("[watcher:evm] txHash receipt failed", {
+          paymentId: input.paymentId,
+          txHash: input.txHash,
+          receiptStatus: String(receipt.status ?? "unknown")
+        })
+        if (isBaseNetwork) {
+          console.info("[PineTreeBaseTrace] watcher:evm receipt failed", {
+            step: "watcher-evm-receipt-failed",
+            paymentId: input.paymentId,
+            txHash: input.txHash,
+            receiptFound: true,
+            receiptStatus: String(receipt.status ?? "unknown"),
+            contractVerificationResult: "failed_receipt",
+            finalPaymentStatus: "FAILED"
+          })
+        }
+        await processPaymentEvent({
+          type: "payment.failed",
+          paymentId: input.paymentId,
+          txHash: input.txHash,
+          feeCaptureValidated: false
+        })
+        return true
+      }
+
       const matchingLog = receipt.logs.find(
         (log) =>
           log.address.toLowerCase() === splitContractEvm &&
@@ -693,6 +719,12 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
   }
 
   return false
+}
+
+function isEvmReceiptFailed(status: unknown): boolean {
+  if (status === 0) return true
+  const normalized = String(status ?? "").trim().toLowerCase()
+  return normalized === "0" || normalized === "0x0" || normalized === "failed"
 }
 
 // ─── Engine handoff ───────────────────────────────────────────────────────────

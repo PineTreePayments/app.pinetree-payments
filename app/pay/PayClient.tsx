@@ -71,6 +71,7 @@ type IntentPayload = {
   paymentId?: string | null
   paymentUrl?: string | null
   paymentStatus?: string | null
+  paymentTxHash?: string | null
   status?: string | null
   checkoutUrl?: string
   checkoutToken?: string
@@ -266,6 +267,7 @@ export default function PayClient() {
   // ── Base execution: once Base payment starts, collapse asset selector ──────
   const [baseExecutionActive, setBaseExecutionActive] = useState(false)
   const [solanaExecutionActive, setSolanaExecutionActive] = useState(false)
+  const baseStoredDetectInFlightRef = useRef(false)
 
   const resetBaseRailSelectionOnly = useCallback(() => {
     clearStaleBaseExecutionSessionStorage()
@@ -422,6 +424,96 @@ export default function PayClient() {
       setShift4Loading(false)
     }
   }, [intentId, loadIntentCallback])
+
+  const detectBasePaymentWithRetry = useCallback(async (paymentId: string, txHash: string) => {
+    const normalizedTxHash = String(txHash || "").trim()
+    if (!/^0x[a-fA-F0-9]{64}$/.test(normalizedTxHash)) {
+      throw new Error("Transaction hash was not returned by the wallet. Please retry.")
+    }
+
+    const maxAttempts = 18
+    const retryDelayMs = 5_000
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const detectRes = await fetch(
+        `/api/payments/${encodeURIComponent(paymentId)}/detect`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ txHash: normalizedTxHash }),
+        }
+      ).catch(() => null)
+
+      const detectData = detectRes
+        ? await detectRes.json().catch(() => null) as { detected?: boolean; status?: string; error?: string } | null
+        : null
+      const status = String(detectData?.status || "").toUpperCase()
+
+      console.log("[PineTreeBaseTrace] detect POST done", {
+        paymentId,
+        status: detectRes?.status ?? "error",
+        detected: Boolean(detectData?.detected),
+        paymentStatus: status || null,
+        attempt,
+        txHashPresent: true,
+        v7RouteUsed: true
+      })
+
+      await loadIntentCallback()
+
+      if (status === "CONFIRMED" || detectData?.detected) return true
+      if (status === "FAILED") {
+        throw new Error("Base transaction failed. Please retry or choose another payment method.")
+      }
+
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => window.setTimeout(resolve, retryDelayMs))
+      }
+    }
+
+    console.log("[PineTreeBaseTrace] detect retry window elapsed", {
+      paymentId,
+      txHashPresent: true,
+      v7RouteUsed: true
+    })
+    await loadIntentCallback()
+    return false
+  }, [loadIntentCallback])
+
+  useEffect(() => {
+    if (!intentId) return
+    if (baseExecutionActive) return
+    if (baseStoredDetectInFlightRef.current) return
+    const paymentId = String(intentPayload?.paymentId || "").trim()
+    const txHash = String(intentPayload?.paymentTxHash || "").trim()
+    const selectedNetwork = String(intentPayload?.selectedNetwork || "").toLowerCase()
+    const activeStatus = String(intentPayload?.paymentStatus || paymentStatus || "").toUpperCase()
+    if (selectedNetwork !== "base") return
+    if (!paymentId || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) return
+    if (!["CREATED", "PENDING", "PROCESSING"].includes(activeStatus)) return
+
+    baseStoredDetectInFlightRef.current = true
+    void detectBasePaymentWithRetry(paymentId, txHash)
+      .catch((error) => {
+        console.error("[PineTreeBaseTrace] stored tx detect failed", {
+          paymentId,
+          txHashPresent: true,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      })
+      .finally(() => {
+        baseStoredDetectInFlightRef.current = false
+      })
+  }, [
+    baseExecutionActive,
+    detectBasePaymentWithRetry,
+    intentId,
+    intentPayload?.paymentId,
+    intentPayload?.paymentStatus,
+    intentPayload?.paymentTxHash,
+    intentPayload?.selectedNetwork,
+    paymentStatus
+  ])
 
   // ── Load intent on mount ───────────────────────────────────────────────────
 
@@ -1303,19 +1395,7 @@ export default function PayClient() {
                                 void loadIntentCallback()
                               }}
                               onSuccess={async (txHash, paymentId) => {
-                                const detectRes = await fetch(
-                                  `/api/payments/${encodeURIComponent(paymentId)}/detect`,
-                                  {
-                                    method: "POST",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({ txHash }),
-                                  }
-                                ).catch(() => null)
-                                console.log("[PineTreeBaseTrace] detect POST done", {
-                                  paymentId,
-                                  status: detectRes?.status ?? "error"
-                                })
-                                await loadIntentCallback()
+                                await detectBasePaymentWithRetry(paymentId, txHash)
                               }}
                             />
                           )
