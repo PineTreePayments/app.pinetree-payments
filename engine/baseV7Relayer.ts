@@ -559,32 +559,14 @@ export async function relayBaseV7Payment(input: {
     await updateTransactionProviderReference(existingTransaction.id, txHash)
   }
 
-  try {
-    const receipt = await provider.waitForTransaction(txHash, 1, 90_000)
-    if (receipt) {
-      console.info("[BASE V7] relay receipt mined", {
-        paymentId: input.paymentId,
-        txHash,
-        receiptStatus: receipt.status !== undefined ? String(receipt.status) : "unknown"
-      })
-      const { runPaymentWatcher } = await import("./checkPaymentOnce")
-      try {
-        await runPaymentWatcher(input.paymentId, { txHash })
-      } catch (watcherErr) {
-        console.error("[BASE V7] relay watcher error", {
-          paymentId: input.paymentId,
-          txHash,
-          error: watcherErr instanceof Error ? watcherErr.message : String(watcherErr)
-        })
-      }
-    }
-  } catch (waitErr) {
-    console.warn("[BASE V7] relay wait-for-receipt timeout — cron will detect", {
-      paymentId: input.paymentId,
-      txHash,
-      error: waitErr instanceof Error ? waitErr.message : String(waitErr)
-    })
-  }
+  // Return immediately — the txHash is stored in the DB and the frontend /detect
+  // call + scheduled payment watcher will confirm the receipt asynchronously.
+  // Blocking here for a receipt (up to 90s) causes serverless function timeouts
+  // which prevent the frontend from ever receiving the txHash.
+  console.info("[BASE V7] relay tx hash stored — returning to frontend for detection", {
+    paymentId: input.paymentId,
+    txHash
+  })
 
   return { ok: true, status: "submitted", txHash }
 }

@@ -59,8 +59,12 @@ SPEED_PUBLISHABLE_KEY=<PineTree Speed live publishable key if future client/Spee
 Public dashboard links:
 
 ```bash
-NEXT_PUBLIC_SPEED_DASHBOARD_URL=<TrySpeed dashboard URL>
-NEXT_PUBLIC_SPEED_ACCOUNT_ID_URL=<TrySpeed account ID / associated accounts URL>
+NEXT_PUBLIC_SPEED_LOGIN_URL=https://app.tryspeed.com
+NEXT_PUBLIC_SPEED_SIGNUP_URL=https://www.tryspeed.com
+NEXT_PUBLIC_SPEED_DASHBOARD_URL=https://app.tryspeed.com/dashboard
+NEXT_PUBLIC_SPEED_ACCOUNT_ID_URL=https://app.tryspeed.com/settings/associated-accounts
+NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL=https://app.tryspeed.com/settings/associated-accounts
+NEXT_PUBLIC_SPEED_AUTO_PAYOUT_URL=https://app.tryspeed.com/auto-payout
 NEXT_PUBLIC_SPEED_API_KEYS_URL=<TrySpeed API keys URL>
 NEXT_PUBLIC_SPEED_WEBHOOKS_URL=<TrySpeed webhooks URL>
 NEXT_PUBLIC_SPEED_AUTOSWAP_URL=<TrySpeed auto-swap settings URL>
@@ -118,6 +122,18 @@ Speed dashboard may warn about unrestricted API keys. Do not configure IP restri
 
 Advanced/Beta option for technical merchants. Requires a Nostr Wallet Connect URI with `make_invoice`, `lookup_invoice`, and `pay_invoice` permissions. The NWC URI is stored server-side in `merchant_providers.credentials` and never returned to the browser.
 
+Optional public NWC setup/help links:
+
+```bash
+NEXT_PUBLIC_ALBY_HUB_URL=https://getalby.com/hub/apps
+NEXT_PUBLIC_ZEUS_IOS_URL=https://apps.apple.com/us/app/zeus-ln/id1456038895
+NEXT_PUBLIC_ZEUS_ANDROID_URL=https://play.google.com/store/apps/details?id=app.zeusln
+NEXT_PUBLIC_ALBY_NWC_GUIDE_URL=https://guides.getalby.com/user-guide/alby-account-and-browser-extension/alby-hub/nwc
+NEXT_PUBLIC_ZEUS_NWC_GUIDE_URL=https://zeusln.app
+```
+
+Do not add secret or private NWC connection values as `NEXT_PUBLIC_` variables.
+
 The optional PineTree treasury NWC URI used for post-payment fee collection is set as a server env var (not stored in the DB):
 
 ```bash
@@ -149,7 +165,7 @@ Set `NEXT_PUBLIC_MESH_CONNECT_ENABLED=true` to enable the Connect Exchange butto
 
 **Important separation:**
 
-- TrySpeed shortcut buttons (Open Speed Dashboard, Find Account ID, Auto-Swap Settings, etc.) are shown when the matching `NEXT_PUBLIC_SPEED_*` URL variables are configured. They have no dependency on Mesh.
+- TrySpeed shortcut buttons (Open Speed Dashboard, Open Associated Accounts, Open Auto Payout, Open Speed Login) are shown in the Lightning wallet drawer from client-safe `NEXT_PUBLIC_SPEED_*` URL variables. They have no dependency on Mesh.
 - Mesh exchange connection is controlled only by `NEXT_PUBLIC_MESH_CONNECT_ENABLED` and requires `MESH_CLIENT_ID` / `MESH_CLIENT_SECRET` on the server. It has no dependency on Speed vars.
 
 What Mesh does:

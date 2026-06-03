@@ -5,6 +5,14 @@ import { Transaction } from "@solana/web3.js"
 import { QRCodeSVG } from "qrcode.react"
 import { getDetectedSolanaWallets, getSolanaTransactionSignature } from "@/lib/wallets/solana"
 import { supabase } from "@/lib/supabaseClient"
+import {
+  albyGuideUrl,
+  albyHubUrl,
+  nwcGuideUrl,
+  zeusAndroidUrl,
+  zeusGuideUrl,
+  zeusIosUrl
+} from "@/lib/lightningDashboardLinks"
 import { getSpeedDashboardLinks } from "@/lib/speedDashboardLinks"
 import {
   CompactMetricTile,
@@ -454,17 +462,17 @@ const walletDetailPanelClass = "min-h-[430px] space-y-4"
 const BASE_ETH_GAS_RESERVE    = 0.00015   // ETH reserved for gas on Base
 const SOLANA_SOL_FEE_RESERVE  = 0.01      // SOL reserved for fees and rent on Solana
 
-const albyHubAppsUrl = process.env.NEXT_PUBLIC_ALBY_HUB_APPS_URL || "https://getalby.com/hub/apps"
-const albyNwcDocsUrl = process.env.NEXT_PUBLIC_ALBY_NWC_DOCS_URL || "https://guides.getalby.com/user-guide/alby-account-and-browser-extension/alby-hub/nwc"
-const zeusIosUrl = process.env.NEXT_PUBLIC_ZEUS_IOS_URL || "https://apps.apple.com/us/app/zeus-ln/id1456038895"
-const zeusAndroidUrl = process.env.NEXT_PUBLIC_ZEUS_ANDROID_URL || "https://play.google.com/store/apps/details?id=app.zeusln"
-const zeusNwcDocsUrl = process.env.NEXT_PUBLIC_ZEUS_DOCS_URL || "https://zeusln.app"
 const lightningSpeedLinks = getSpeedDashboardLinks([
   "dashboard",
-  "autoSwap",
-  "payouts",
-  "docs"
+  "associatedAccounts",
+  "autoPayout",
+  "login"
 ])
+const lightningNwcLinks = [
+  { key: "albyHub", label: "Open Alby Hub", url: albyHubUrl },
+  { key: "zeus", label: "Open Zeus", url: zeusIosUrl || zeusAndroidUrl || zeusGuideUrl },
+  { key: "nwcGuide", label: "NWC Setup Guide", url: nwcGuideUrl }
+].filter((link) => Boolean(link.url))
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ")
@@ -5059,41 +5067,115 @@ export default function WalletsPage() {
 
               {activeTab === "lightning_wallet" && selectedWallet.isLightning && (
                 <div className={walletDetailPanelClass}>
-                  <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-gray-950">
-                          {selectedLightningIsSpeed ? "Speed Lightning" : "Direct Lightning Wallet"}
-                        </p>
-                        <p className="mt-1 text-sm leading-6 text-gray-600">
-                          {selectedLightningIsSpeed
-                            ? "Lightning payments route through the merchant Speed Account ID."
-                            : "Direct NWC wallets receive Lightning payments from customers."}
-                        </p>
+                  {selectedLightningIsSpeed ? (
+                    <>
+                      <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-gray-950">Bitcoin Lightning</p>
+                            <p className="mt-1 text-sm leading-6 text-gray-600">
+                              Lightning payments route through the merchant Speed Account ID. Speed manages Lightning invoice settlement, auto-swap, and payout behavior inside the merchant's Speed account.
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                            <NetworkStatusPill label="Speed" tone="blue" className="min-h-5 px-2 text-[10px]" />
+                            <NetworkStatusPill label="Bitcoin Lightning" tone="slate" className="min-h-5 px-2 text-[10px]" />
+                          </div>
+                        </div>
+                        <div className="mt-4 rounded-xl border border-[#0052FF]/10 bg-white/70 px-3 py-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-400">Merchant Speed Account ID</p>
+                          <p className="mt-1 truncate font-mono text-sm font-semibold text-gray-950" title={selectedWallet.referenceTitle}>
+                            {selectedWallet.reference}
+                          </p>
+                        </div>
                       </div>
-                      <NetworkStatusPill
-                        label={selectedLightningIsSpeed ? "Managed in TrySpeed" : "NWC"}
-                        tone="blue"
-                        className="shrink-0"
-                      />
-                    </div>
-                    <p className="mt-3 text-xs leading-5 text-gray-600">
-                      {selectedLightningIsSpeed
-                        ? "Speed handles Lightning invoice settlement and autoswap according to the merchant's Speed settings. PineTree uses your Speed setup to create invoices and track Lightning payments."
-                        : "PineTree uses the connected NWC wallet to create invoices and check payment status."}
-                    </p>
-                    {selectedLightningIsSpeed && lightningSpeedLinks.length > 0 ? (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {lightningSpeedLinks.map((link) => (
-                          <a key={link.key} href={link.url} target="_blank" rel="noopener noreferrer" className={pineTreeSecondaryActionButton}>
-                            {link.label}
-                          </a>
-                        ))}
+
+                      <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-gray-950">Speed dashboard links</p>
+                            <p className="mt-1 text-xs leading-5 text-gray-500">
+                              Use these to verify account routing, auto payout, and merchant-side Speed settings.
+                            </p>
+                          </div>
+                          <NetworkStatusPill label="Guided setup" tone="slate" className="min-h-5 px-2 text-[10px]" />
+                        </div>
+                        {lightningSpeedLinks.length > 0 ? (
+                          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                            {lightningSpeedLinks.map((link) => (
+                              <a
+                                key={link.key}
+                                href={link.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={cx(pineTreeSecondaryActionButton, "w-full justify-center")}
+                              >
+                                {link.label}
+                              </a>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-3 text-xs text-gray-500">Speed dashboard link is not configured yet.</p>
+                        )}
                       </div>
-                    ) : selectedLightningIsSpeed ? (
-                      <p className="mt-3 text-xs text-gray-500">Speed dashboard links are not configured yet.</p>
-                    ) : null}
-                  </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-gray-950">Bitcoin Lightning</p>
+                            <p className="mt-1 text-sm leading-6 text-gray-600">
+                              Lightning payments route through the connected NWC wallet. Manage permissions and wallet settings inside the wallet that created the NWC connection.
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                            <NetworkStatusPill label="NWC" tone="blue" className="min-h-5 px-2 text-[10px]" />
+                            <NetworkStatusPill label="Bitcoin Lightning" tone="slate" className="min-h-5 px-2 text-[10px]" />
+                          </div>
+                        </div>
+                        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                          <div className="rounded-xl border border-[#0052FF]/10 bg-white/70 px-3 py-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-400">Connected NWC Wallet</p>
+                            <p className="mt-1 truncate text-sm font-semibold text-gray-950" title={nwcStatus?.walletLabel || selectedWallet.referenceTitle}>
+                              {nwcStatus?.walletLabel || selectedWallet.reference || "Lightning Wallet"}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-[#0052FF]/10 bg-white/70 px-3 py-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-400">Permissions</p>
+                            <p className="mt-1 text-sm font-semibold text-gray-950">
+                              {nwcStatus?.ready ? "Ready" : nwcStatus?.connected ? "Needs review" : "Not connected"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-gray-950">NWC wallet links</p>
+                            <p className="mt-1 text-xs leading-5 text-gray-500">
+                              Open your wallet tools or setup guide to review the PineTree NWC connection.
+                            </p>
+                          </div>
+                          <NetworkStatusPill label="Help links" tone="slate" className="min-h-5 px-2 text-[10px]" />
+                        </div>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                          {lightningNwcLinks.map((link) => (
+                            <a
+                              key={link.key}
+                              href={link.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={cx(pineTreeSecondaryActionButton, "w-full justify-center")}
+                            >
+                              {link.label}
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                   {!selectedLightningIsSpeed && (
                   <div className="rounded-2xl border border-gray-100 bg-white p-3">
@@ -5358,15 +5440,15 @@ export default function WalletsPage() {
 
                         {nwcSetupWallet === "alby" && (
                           <div className="flex flex-wrap gap-2">
-                            <a href={albyHubAppsUrl} target="_blank" rel="noopener noreferrer" className={pineTreeSecondaryActionButton}>Open Alby Hub Apps</a>
-                            <a href={albyNwcDocsUrl} target="_blank" rel="noopener noreferrer" className={pineTreeSecondaryActionButton}>Alby NWC Setup Guide</a>
+                            <a href={albyHubUrl} target="_blank" rel="noopener noreferrer" className={pineTreeSecondaryActionButton}>Open Alby Hub Apps</a>
+                            <a href={albyGuideUrl} target="_blank" rel="noopener noreferrer" className={pineTreeSecondaryActionButton}>Alby NWC Setup Guide</a>
                           </div>
                         )}
                         {nwcSetupWallet === "zeus" && (
                           <div className="flex flex-wrap gap-2">
                             <a href={zeusIosUrl} target="_blank" rel="noopener noreferrer" className={pineTreeSecondaryActionButton}>Zeus (iOS)</a>
                             <a href={zeusAndroidUrl} target="_blank" rel="noopener noreferrer" className={pineTreeSecondaryActionButton}>Zeus (Android)</a>
-                            <a href={zeusNwcDocsUrl} target="_blank" rel="noopener noreferrer" className={pineTreeSecondaryActionButton}>Zeus Guide</a>
+                            <a href={zeusGuideUrl} target="_blank" rel="noopener noreferrer" className={pineTreeSecondaryActionButton}>Zeus Guide</a>
                           </div>
                         )}
 

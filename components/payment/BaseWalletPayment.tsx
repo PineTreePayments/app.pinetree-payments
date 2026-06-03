@@ -1356,7 +1356,7 @@ export default function BaseWalletPayment({
     }
 
     setExecStageRef.current("usdc_authorized")
-    setBasePayStatus("Sending final payment approval.")
+    setBasePayStatus("Permission approved. Submit final Base payment.")
     pendingUsdcApproveTxRef.current = null
     queuePendingWalletAction({ kind: "usdc_payment", paymentId: input.paymentId, ready: true })
     setExecStageRef.current("confirm_payment")
@@ -1419,9 +1419,9 @@ export default function BaseWalletPayment({
     setExecStageRef.current(stage, kind === "usdc_approve" ? { allowance: true } : undefined)
     setBasePayStatus(
       kind === "usdc_approve"
-        ? "Approve USDC authorization in your wallet."
+        ? "Approve USDC permission in your wallet."
         : kind === "usdc_payment"
-          ? "Approve final payment in your wallet."
+          ? "Confirm Base payment in your wallet."
           : "Approve in your wallet..."
     )
 
@@ -1896,6 +1896,7 @@ export default function BaseWalletPayment({
       }
       // ── Strategy: usdc_eip3009_relayer ────────────────────────────────────────
       if (confirmedStrategy === "usdc_eip3009_relayer") {
+        let permitSignatureObtained = false
         try {
           logBaseV6("usdc_eip3009_prepare_start", { paymentId, strategy: confirmedStrategy })
         const prepareRes = await fetch(
@@ -1997,7 +1998,8 @@ export default function BaseWalletPayment({
             throw new Error("USDC authorization signature failed. Please try again.")
           }
         }
-        setBasePayStatus("Processing payment...")
+        permitSignatureObtained = true
+        setBasePayStatus("USDC authorized. Submitting payment...")
         console.info("[BASE V6] relay-start", { paymentId })
         logBaseV6("usdc_relay_start", {
           paymentId,
@@ -2020,6 +2022,9 @@ export default function BaseWalletPayment({
         const relay = (await relayRes.json()) as BaseV6UsdcRelayResponse
         if (!relayRes.ok) throw new Error(relay.error || "Failed to relay Base USDC payment")
         if (relay.unavailable) throw new Error(relay.message || BASE_USDC_TEMPORARILY_UNAVAILABLE_MESSAGE)
+        if (!/^0x[a-fA-F0-9]{64}$/.test(String(relay.txHash || "").trim())) {
+          throw new Error("Final Base payment transaction hash was not returned. Please retry.")
+        }
         const relayTxHash = normalizeHexTransactionHash(relay.txHash)
         console.info("[BASE V6] relay-success", { paymentId, txHashPrefix: relayTxHash.slice(0, 10) })
         logBaseV6("usdc_relay_resolved", {
@@ -2034,7 +2039,7 @@ export default function BaseWalletPayment({
           strategy: confirmedStrategy,
           hasTxHash: true,
         })
-        setBasePayStatus("Processing payment...")
+        setBasePayStatus("Payment submitted. Confirming on Base.")
         return relayTxHash
         } catch (eip3009Err) {
           const eip3009Msg = extractErrorMessage(eip3009Err)
@@ -2044,12 +2049,17 @@ export default function BaseWalletPayment({
           activeWalletRequestRef.current = null
           logBaseV6("fallback_required", {
             paymentId,
-            actionKind: "usdc_signature",
+            actionKind: permitSignatureObtained ? "usdc_relay" : "usdc_signature",
             strategy: confirmedStrategy,
             reason: eip3009Msg || "eip3009-failed",
             fallbackStrategy: "usdc_allowance_two_step",
+            permitSignatureObtained,
           })
-          setBasePayStatus("USDC signature failed. Falling back to wallet transaction approval...")
+          setBasePayStatus(
+            permitSignatureObtained
+              ? "Payment relay encountered an issue. Trying direct approval..."
+              : "USDC signature failed. Falling back to wallet transaction approval..."
+          )
         }
       }
       // ── Strategy: usdc_allowance_direct / usdc_allowance_two_step ───���─────────
@@ -2089,7 +2099,7 @@ export default function BaseWalletPayment({
         // Two-step: approve first
         console.info("[BASE V6] allowance-two-step-approve", { paymentId })
         setExecStageRef.current("authorizing_usdc", { allowance: true })
-        setBasePayStatus("Approve USDC authorization in your wallet.")
+        setBasePayStatus("Approve USDC permission in your wallet.")
         void logBase("v6-approve-requested", { paymentId })
         pendingUsdcApproveTxRef.current = approveTx
         queuePendingWalletAction({ kind: "usdc_approve", paymentId, ready: true })

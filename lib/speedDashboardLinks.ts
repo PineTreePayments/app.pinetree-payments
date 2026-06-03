@@ -1,6 +1,9 @@
 export type SpeedDashboardLinkKey =
   | "dashboard"
+  | "associatedAccounts"
   | "accountId"
+  | "autoPayout"
+  | "login"
   | "apiKeys"
   | "webhooks"
   | "autoSwap"
@@ -26,12 +29,44 @@ export const speedDashboardLinks: Record<SpeedDashboardLinkKey, SpeedDashboardLi
   dashboard: {
     key: "dashboard",
     label: "Open Speed Dashboard",
-    url: publicEnv("NEXT_PUBLIC_SPEED_DASHBOARD_URL", "NEXT_PUBLIC_SPEED_LOGIN_URL")
+    url: publicEnv("NEXT_PUBLIC_SPEED_DASHBOARD_URL", "NEXT_PUBLIC_SPEED_LOGIN_URL") || "https://app.tryspeed.com"
+  },
+  associatedAccounts: {
+    key: "associatedAccounts",
+    label: "Open Associated Accounts",
+    url:
+      publicEnv(
+        "NEXT_PUBLIC_SPEED_ACCOUNT_ID_URL",
+        "NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL",
+        "NEXT_PUBLIC_SPEED_DASHBOARD_URL",
+        "NEXT_PUBLIC_SPEED_LOGIN_URL"
+      ) || "https://app.tryspeed.com"
   },
   accountId: {
     key: "accountId",
     label: "Find Account ID",
-    url: publicEnv("NEXT_PUBLIC_SPEED_ACCOUNT_ID_URL", "NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL")
+    url:
+      publicEnv(
+        "NEXT_PUBLIC_SPEED_ACCOUNT_ID_URL",
+        "NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL",
+        "NEXT_PUBLIC_SPEED_DASHBOARD_URL",
+        "NEXT_PUBLIC_SPEED_LOGIN_URL"
+      ) || "https://app.tryspeed.com"
+  },
+  autoPayout: {
+    key: "autoPayout",
+    label: "Open Auto Payout",
+    url:
+      publicEnv(
+        "NEXT_PUBLIC_SPEED_AUTO_PAYOUT_URL",
+        "NEXT_PUBLIC_SPEED_DASHBOARD_URL",
+        "NEXT_PUBLIC_SPEED_LOGIN_URL"
+      ) || "https://app.tryspeed.com"
+  },
+  login: {
+    key: "login",
+    label: "Open Speed Login",
+    url: publicEnv("NEXT_PUBLIC_SPEED_LOGIN_URL", "NEXT_PUBLIC_SPEED_DASHBOARD_URL") || "https://app.tryspeed.com"
   },
   apiKeys: {
     key: "apiKeys",
