@@ -550,6 +550,37 @@ export async function checkSettlementWithdrawalStatus(
   return { withdrawal, chainStatus: "pending" }
 }
 
+// ─── Submit a Phantom/Solflare-signed transaction to Solana RPC ──────────────
+
+/**
+ * Takes a base58-encoded signed Solana transaction returned by Phantom or
+ * Solflare's `signTransaction` Universal Link, broadcasts it to the Solana
+ * RPC, and returns the transaction signature (= the first signer's signature,
+ * which is the canonical Solana transaction ID).
+ *
+ * Called by the /complete route when the mobile approval page used the
+ * signTransaction deeplink path instead of signAndSendTransaction.
+ */
+export async function submitSignedSolanaTransaction(
+  signedTxBase58: string
+): Promise<string> {
+  const bs58Mod = await import("bs58")
+  const bs58Impl: { decode: (s: string) => Uint8Array } =
+    (bs58Mod as unknown as { default?: typeof bs58Mod }).default ?? bs58Mod
+
+  const rpcUrl = getRpcUrl("solana")
+  const conn = new Connection(rpcUrl, "confirmed")
+  const rawTx = bs58Impl.decode(signedTxBase58.trim())
+
+  const signature = await conn.sendRawTransaction(rawTx, {
+    skipPreflight: false,
+    maxRetries: 3,
+  })
+
+  if (!signature) throw new Error("Solana RPC did not return a transaction signature.")
+  return signature
+}
+
 // ─── History ──────────────────────────────────────────────────────────────────
 
 export async function getSettlementWithdrawalHistory(

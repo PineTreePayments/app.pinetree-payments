@@ -22,9 +22,10 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   buildPhantomConnectUrl,
-  buildPhantomSignAndSendUrl,
+  buildPhantomSignTransactionUrl,
   decryptPhantomConnectResponse,
   decryptPhantomSignResponse,
+  decryptPhantomSignedTransaction,
   getStoredPhantomSession,
   storePhantomSession,
   clearPhantomSession,
@@ -155,7 +156,9 @@ function buildEvmWalletBrowserDeepLink(walletType: WalletType, targetUrl: string
   return targetUrl
 }
 
-/** Pick the injected EVM provider that matches the expected wallet type. */
+/** Pick the injected EVM provider that matches the expected wallet type.
+ *  Falls back to the only available provider when wallet-specific flags are
+ *  absent — address validation in signWithEvmWallet catches wrong accounts. */
 function getMatchingEvmProvider(walletType: WalletType): Eip1193Provider | null {
   if (typeof window === "undefined") return null
   const eth = (window as Window & { ethereum?: Eip1193Provider }).ethereum
@@ -167,13 +170,25 @@ function getMatchingEvmProvider(walletType: WalletType): Eip1193Provider | null 
       : [eth]
 
   if (walletType === "base_wallet" || walletType === "base") {
-    return providers.find((p) => p.isCoinbaseWallet || p.isBaseWallet) || null
+    const specific = providers.find((p) => p.isCoinbaseWallet || p.isBaseWallet)
+    if (specific) return specific
+    // Newer Base Wallet builds may not expose specific flags — fall back to the
+    // sole provider so `waitForEvmProvider` succeeds; address check below
+    // will reject any account that doesn't match the saved merchant wallet.
+    if (providers.length === 1) return providers[0]
+    return null
   }
   if (walletType === "metamask") {
-    return providers.find((p) => p.isMetaMask && !p.isCoinbaseWallet) || null
+    const specific = providers.find((p) => p.isMetaMask && !p.isCoinbaseWallet)
+    if (specific) return specific
+    if (providers.length === 1) return providers[0]
+    return null
   }
   if (walletType === "trust_wallet" || walletType === "trust") {
-    return providers.find((p) => p.isTrust || p.isTrustWallet) || null
+    const specific = providers.find((p) => p.isTrust || p.isTrustWallet)
+    if (specific) return specific
+    if (providers.length === 1) return providers[0]
+    return null
   }
   return null
 }
@@ -234,7 +249,7 @@ async function patchSessionStatus(sessionId: string, status: string, error?: str
 
 async function completeSession(
   sessionId: string,
-  params: { tx_hash?: string; signature?: string }
+  params: { tx_hash?: string; signature?: string; signed_tx?: string }
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch(`/api/wallets/send-sessions/${sessionId}/complete`, {
@@ -487,10 +502,11 @@ export default function WalletApprovalPage({
         redirectBase: baseRedirect,
       })
 
-      // Build the signing deeplink synchronously then show a button.
-      // iOS Universal Links are only intercepted by Phantom when navigation is
-      // triggered by a real user gesture (tap).
-      const signUrl = buildPhantomSignAndSendUrl(
+      // Use signTransaction (not signAndSendTransaction) — Phantom returns the
+      // signed transaction bytes and PineTree submits to RPC server-side.
+      // This avoids the "This method is not supported" error seen with
+      // signAndSendTransaction on older Phantom mobile builds.
+      const signUrl = buildPhantomSignTransactionUrl(
         sid,
         txBase64,
         phantomSession,
@@ -513,10 +529,24 @@ export default function WalletApprovalPage({
         return true
       }
 
-      const signature = decryptPhantomSignResponse(sid, searchParams, phantomSession.phPublicKey)
-      if (!signature) {
-        console.debug("[Phantom sign decrypt failed]", { sessionId: sid, hasData: searchParams.has("data"), hasNonce: searchParams.has("nonce") })
-        setStatusMessage("Failed to extract signature from Phantom response.")
+      // signTransaction path: Phantom returns the signed transaction bytes.
+      // PineTree submits them to Solana RPC server-side via the /complete endpoint.
+      const signedTx = decryptPhantomSignedTransaction(sid, searchParams, phantomSession.phPublicKey)
+
+      // signAndSendTransaction fallback path (kept for backward compatibility
+      // with any existing sessions or future Phantom update that re-enables it).
+      const signature = !signedTx
+        ? decryptPhantomSignResponse(sid, searchParams, phantomSession.phPublicKey)
+        : null
+
+      if (!signedTx && !signature) {
+        console.debug("[Phantom sign decrypt failed]", {
+          sessionId: sid,
+          hasData: searchParams.has("data"),
+          hasNonce: searchParams.has("nonce"),
+          hasSignature: searchParams.has("signature"),
+        })
+        setStatusMessage("Failed to extract signed transaction from Phantom response.")
         setPageStatus("failed")
         await patchSessionStatus(sid, "failed", "Phantom sign decrypt failed")
         return true
@@ -524,9 +554,10 @@ export default function WalletApprovalPage({
 
       clearPhantomSession(sid)
       setPageStatus("recording")
-      setStatusMessage("Recording transaction...")
+      setStatusMessage(signedTx ? "Submitting transaction to Solana..." : "Recording transaction...")
 
-      const result = await completeSession(sid, { signature })
+      const completeParams = signedTx ? { signed_tx: signedTx } : { signature: signature! }
+      const result = await completeSession(sid, completeParams)
       if (result.ok) {
         setPageStatus("submitted")
         setStatusMessage("Transaction submitted.")

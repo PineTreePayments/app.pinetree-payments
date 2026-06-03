@@ -196,6 +196,71 @@ export function decryptPhantomConnectResponse(
 }
 
 /**
+ * Builds a Phantom UL v1 signTransaction URL.
+ * Phantom signs the transaction locally and returns the signed bytes —
+ * PineTree must submit the signed transaction to Solana RPC.
+ *
+ * Use this instead of signAndSendTransaction to avoid "method not supported"
+ * errors on older Phantom mobile versions that do not implement the combined
+ * sign-and-send endpoint.
+ *
+ * @param sessionId          - Approval session UUID.
+ * @param transactionBase64  - Base64-encoded serialized Solana transaction.
+ * @param session            - Active Phantom session from a prior connect.
+ * @param redirectLink       - Full URL Phantom will redirect to after signing.
+ */
+export function buildPhantomSignTransactionUrl(
+  sessionId: string,
+  transactionBase64: string,
+  session: PhantomSession,
+  redirectLink: string,
+): string {
+  const kp = getDappKeypair(sessionId)
+  const nonce = nacl.randomBytes(24)
+  const secret = sharedSecret(sessionId, session.phPublicKey)
+
+  const txBase58 = bs58.encode(Buffer.from(transactionBase64, "base64"))
+  const payload = JSON.stringify({ session: session.session, transaction: txBase58 })
+  const encrypted = nacl.box.after(new TextEncoder().encode(payload), nonce, secret)
+
+  const params = new URLSearchParams({
+    dapp_encryption_public_key: bs58.encode(kp.publicKey),
+    nonce: bs58.encode(nonce),
+    redirect_link: redirectLink,
+    payload: bs58.encode(encrypted),
+  })
+  return `https://phantom.app/ul/v1/signTransaction?${params.toString()}`
+}
+
+/**
+ * Decrypts the Phantom signTransaction response params.
+ * Returns the base58-encoded SIGNED serialized transaction on success, or null.
+ *
+ * Expected params on success: nonce, data
+ * Decrypted data contains: { transaction: <base58_signed_tx> }
+ */
+export function decryptPhantomSignedTransaction(
+  sessionId: string,
+  params: URLSearchParams,
+  phPublicKey: string,
+): string | null {
+  try {
+    const data = params.get("data")
+    const nonce = params.get("nonce")
+    if (!data || !nonce) return null
+    const secret = sharedSecret(sessionId, phPublicKey)
+    const decrypted = nacl.box.open.after(bs58.decode(data), bs58.decode(nonce), secret)
+    if (!decrypted) return null
+    const parsed = JSON.parse(new TextDecoder().decode(decrypted)) as {
+      transaction?: string
+    }
+    return parsed.transaction || null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Decrypts the Phantom signAndSendTransaction response params.
  * Returns the base58-encoded transaction signature, or null on failure.
  *

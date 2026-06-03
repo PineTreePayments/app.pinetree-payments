@@ -19,7 +19,10 @@ import {
   getSendSession,
   updateSendSessionStatus
 } from "@/database/merchantWalletSendSessions"
-import { recordDirectSendSubmission } from "@/engine/settlementWithdrawals"
+import {
+  recordDirectSendSubmission,
+  submitSignedSolanaTransaction,
+} from "@/engine/settlementWithdrawals"
 
 function errorResponse(message: string, status: number) {
   return NextResponse.json({ error: message }, { status })
@@ -41,8 +44,11 @@ export async function POST(
     return errorResponse("Invalid request body", 400)
   }
 
-  const txHashRaw   = body.tx_hash   != null ? String(body.tx_hash).trim()   : ""
+  const txHashRaw    = body.tx_hash   != null ? String(body.tx_hash).trim()   : ""
   const signatureRaw = body.signature != null ? String(body.signature).trim() : ""
+  // signed_tx: base58-encoded signed Solana transaction returned by Phantom/Solflare
+  // signTransaction deeplink — must be submitted to Solana RPC to get the signature.
+  const signedTxRaw  = body.signed_tx  != null ? String(body.signed_tx).trim()  : ""
 
   try {
     const session = await getSendSession(id)
@@ -67,11 +73,25 @@ export async function POST(
 
     // Determine on-chain proof by rail
     const isSolana = session.rail === "solana"
-    const txHash   = isSolana ? (signatureRaw || txHashRaw) : txHashRaw
-    const sig      = isSolana ? (signatureRaw || txHashRaw) : ""
+
+    // For Solana with a signed_tx (signTransaction deeplink): submit to RPC first
+    let resolvedSignature = isSolana ? (signatureRaw || txHashRaw) : ""
+    if (isSolana && signedTxRaw && !resolvedSignature) {
+      try {
+        resolvedSignature = await submitSignedSolanaTransaction(signedTxRaw)
+        console.log("[complete] signed_tx submitted to Solana RPC", { id, signaturePrefix: resolvedSignature.slice(0, 10) })
+      } catch (rpcErr) {
+        const rpcMsg = rpcErr instanceof Error ? rpcErr.message : "Solana RPC submission failed"
+        console.error("[complete] signed_tx RPC error", { id, error: rpcMsg })
+        return errorResponse(`Failed to submit transaction to Solana: ${rpcMsg}`, 500)
+      }
+    }
+
+    const txHash = isSolana ? resolvedSignature : txHashRaw
+    const sig    = isSolana ? resolvedSignature : ""
 
     if (!txHash) {
-      const required = isSolana ? "signature" : "tx_hash"
+      const required = isSolana ? "signature or signed_tx" : "tx_hash"
       return errorResponse(`${required} is required to complete the session`, 400)
     }
 

@@ -558,13 +558,22 @@ function getInjectedBaseApprovalProvider(type: ApprovalWalletType | null): Eip11
   const providers = Array.isArray(eth.providers) && eth.providers.length > 0 ? eth.providers : [eth]
 
   if (type === "base_wallet") {
-    return providers.find((p) => p?.isCoinbaseWallet || p?.isBaseWallet) || null
+    const specific = providers.find((p) => p?.isCoinbaseWallet || p?.isBaseWallet)
+    if (specific) return specific
+    if (providers.length === 1) return providers[0]
+    return null
   }
   if (type === "metamask") {
-    return providers.find((p) => p?.isMetaMask && !p?.isCoinbaseWallet) || null
+    const specific = providers.find((p) => p?.isMetaMask && !p?.isCoinbaseWallet)
+    if (specific) return specific
+    if (providers.length === 1) return providers[0]
+    return null
   }
   if (type === "trust_wallet") {
-    return providers.find((p) => p?.isTrust || p?.isTrustWallet) || null
+    const specific = providers.find((p) => p?.isTrust || p?.isTrustWallet)
+    if (specific) return specific
+    if (providers.length === 1) return providers[0]
+    return null
   }
   return null
 }
