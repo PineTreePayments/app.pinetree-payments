@@ -998,9 +998,43 @@ export default function WalletApprovalPage({
         await patchSessionStatus(s.id, "opened")
       }
 
-      // Detect if we're already inside the target wallet's browser
+      if (isEvmWalletType(walletType)) {
+        if (searchParams.get("in_wallet") === "1") {
+          const normalizedWalletType = normalizeWalletType(walletType)
+          devLog("in-wallet-detect-start", {
+            session_id: s.id,
+            wallet_type: walletType,
+            approval_url: `${getAppUrl()}/wallet-approval/${s.id}?in_wallet=1`,
+            in_wallet_param: true,
+            window_ethereum_exists: typeof window !== "undefined" ? Boolean((window as Window & { ethereum?: Eip1193Provider }).ethereum) : false,
+          })
+          const provider = await waitForEvmProvider(normalizedWalletType, 8000)
+          if (provider) {
+            devLog("in-wallet-detect-provider", {
+              session_id: s.id,
+              provider_selected: describeEvmProvider(provider),
+            })
+            setPageStatus("in_wallet_browser")
+          } else {
+            devLog("in-wallet-detect-missing-provider", {
+              session_id: s.id,
+              wallet_type: normalizedWalletType,
+              window_ethereum_exists: typeof window !== "undefined" ? Boolean((window as Window & { ethereum?: Eip1193Provider }).ethereum) : false,
+            })
+            setStatusMessage(
+              `Wallet browser did not expose a provider. Tap Open ${walletDisplayName(normalizedWalletType)} again or copy this approval link into the wallet browser.`
+            )
+            setPageStatus("failed")
+          }
+          return
+        }
+
+        setPageStatus("ready")
+        return
+      }
+
+      // Detect if we're already inside the target Solana wallet browser.
       const inWalletBrowser =
-        (["base_wallet", "base", "metamask", "trust_wallet", "trust"].includes(walletType) && isInsideEvmWalletBrowser(walletType)) ||
         (walletType === "phantom"  && isInsidePhantomBrowser()) ||
         (walletType === "solflare" && isInsideSolflareBrowser())
 
@@ -1018,13 +1052,13 @@ export default function WalletApprovalPage({
 
   useEffect(() => {
     if (pageStatus !== "in_wallet_browser" || !session || signingRef.current) return
-    signingRef.current = true
 
     const walletType = session.wallet_type as WalletType
 
-    if (["base_wallet", "base", "metamask", "trust_wallet", "trust"].includes(walletType)) {
-      signWithEvmWallet(walletType, session)
-    } else if (walletType === "phantom") {
+    if (isEvmWalletType(walletType)) return
+
+    signingRef.current = true
+    if (walletType === "phantom") {
       signWithPhantomBrowser(session)
     } else if (walletType === "solflare") {
       signWithSolflareBrowser(session)
@@ -1351,6 +1385,7 @@ export default function WalletApprovalPage({
       wallet_type_raw: walletType,
       wallet_type_normalized: normalizedWalletType,
       approval_url: targetUrl,
+      wallet_open_url: deepLink,
       deep_link_url_type_used: fallbackDeepLink ? "coinbase_https_primary" : "wallet_primary",
     })
     window.location.href = deepLink
@@ -1361,6 +1396,7 @@ export default function WalletApprovalPage({
         devLog("open-wallet-fallback", {
           session_id: session.id,
           wallet_type_normalized: normalizedWalletType,
+          wallet_open_url: fallbackDeepLink,
           deep_link_url_type_used: "coinbase_cbwallet_fallback",
         })
         window.location.href = fallbackDeepLink
@@ -1371,6 +1407,7 @@ export default function WalletApprovalPage({
   // Re-detect wallet browser if we came back from a deep link
   useEffect(() => {
     if (!session || pageStatus !== "ready") return
+    if (isEvmWalletType(session.wallet_type)) return
     const searchParams = new URLSearchParams(window.location.search)
     if (searchParams.get("in_wallet") === "1") {
       setPageStatus("in_wallet_browser")
@@ -1511,7 +1548,22 @@ export default function WalletApprovalPage({
               )}
 
               {/* In-wallet browser — provider loaded; signing starts automatically */}
-              {pageStatus === "in_wallet_browser" && (
+              {pageStatus === "in_wallet_browser" && canOpenEvmWallet && normalizedWalletType ? (
+                <>
+                  <p className="text-lg font-bold text-gray-950">Approve with {walletName}</p>
+                  <p className="mt-1 text-sm leading-6 text-gray-500">
+                    Review and approve this withdrawal in your connected wallet.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => signWithEvmWallet(normalizedWalletType, session)}
+                    disabled={signingRef.current}
+                    className="mt-4 w-full rounded-2xl bg-[#0052FF] px-5 py-3.5 text-sm font-bold text-white shadow-sm shadow-[#0052FF]/25 transition hover:bg-[#003FCC] active:scale-[0.98] disabled:opacity-50"
+                  >
+                    Confirm Withdrawal
+                  </button>
+                </>
+              ) : pageStatus === "in_wallet_browser" ? (
                 <PaymentStatusVisual
                   status="PROCESSING"
                   size="compact"
@@ -1519,7 +1571,7 @@ export default function WalletApprovalPage({
                   messageOverride={activeStatusCopy.in_wallet_browser}
                   labelClassName="text-lg font-bold text-gray-950"
                 />
-              )}
+              ) : null}
 
               {/* Phantom connected — must tap to open signing deeplink (iOS gesture) */}
               {pageStatus === "phantom_connected" && (
