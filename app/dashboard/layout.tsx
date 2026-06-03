@@ -192,40 +192,8 @@ export default function DashboardLayout({
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="lg:hidden inline-flex h-11 w-11 items-center justify-center rounded-xl bg-white/95 text-gray-800 shadow-sm"
-                aria-label="Open menu"
-              >
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <path
-                    d="M4 7H20"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                  <path
-                    d="M4 12H20"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                  <path
-                    d="M4 17H20"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
-              <Link
-                href="/dashboard"
-                aria-label="PineTree Payments"
                 className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-white/95 shadow-sm ring-1 ring-white/40 transition hover:bg-white focus:outline-none focus-visible:ring-4 focus-visible:ring-white/30 lg:hidden"
+                aria-label="PineTree Payments"
               >
                 <img
                   src="/favicon.ico"
@@ -235,7 +203,7 @@ export default function DashboardLayout({
                   width={28}
                   height={28}
                 />
-              </Link>
+              </button>
             </div>
 
             <div ref={accountMenuRef} className="relative">

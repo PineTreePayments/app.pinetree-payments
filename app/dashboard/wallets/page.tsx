@@ -342,6 +342,7 @@ type BaseTxParams = {
   value: string
   data: string
   gas: string
+  chainId?: string
 }
 
 type WithdrawPrepareResult = {

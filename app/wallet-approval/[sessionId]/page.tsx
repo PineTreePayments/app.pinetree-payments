@@ -66,6 +66,7 @@ type SessionData = {
       value: string
       data: string
       gas: string
+      chainId?: string
     }
     unsigned_tx_base64?: string
     destination_kind?: string
@@ -105,6 +106,13 @@ type Eip1193Provider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>
 }
 
+const BASE_CHAIN_ID_HEX = "0x2105"
+const BASE_CHAIN_ID_DEC = "8453"
+const BASE_RPC_URL =
+  process.env.NEXT_PUBLIC_BASE_RPC_URL ||
+  process.env.NEXT_PUBLIC_BASE_MAINNET_RPC_URL ||
+  "https://mainnet.base.org"
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function walletDisplayName(type: WalletType | string): string {
@@ -114,6 +122,16 @@ function walletDisplayName(type: WalletType | string): string {
   if (type === "phantom")  return "Phantom"
   if (type === "solflare") return "Solflare"
   return "Wallet"
+}
+
+function normalizeWalletType(type: WalletType | string): WalletType {
+  if (type === "base") return "base_wallet"
+  if (type === "trust") return "trust_wallet"
+  return type as WalletType
+}
+
+function isEvmWalletType(type: WalletType | string): boolean {
+  return ["base_wallet", "base", "metamask", "trust_wallet", "trust"].includes(type)
 }
 
 function getAppUrl(): string {
@@ -258,35 +276,55 @@ function buildEvmWalletBrowserDeepLink(walletType: WalletType, targetUrl: string
   return targetUrl
 }
 
+function buildEvmWalletBrowserFallbackDeepLink(walletType: WalletType, targetUrl: string): string | null {
+  const encoded = encodeURIComponent(targetUrl)
+  if (walletType === "base_wallet" || walletType === "base") {
+    return `cbwallet://dapp?url=${encoded}`
+  }
+  return null
+}
+
+function getEvmProviders(): Eip1193Provider[] {
+  if (typeof window === "undefined") return []
+  const eth = (window as Window & { ethereum?: Eip1193Provider }).ethereum
+  if (!eth) return []
+  return Array.isArray(eth.providers) && eth.providers.length > 0 ? eth.providers : [eth]
+}
+
+function describeEvmProvider(provider: Eip1193Provider | null): string {
+  if (!provider) return "none"
+  if (provider.isCoinbaseWallet || provider.isBaseWallet) return "base_wallet"
+  if (provider.isMetaMask) return "metamask"
+  if (provider.isTrust || provider.isTrustWallet) return "trust_wallet"
+  return "unknown"
+}
+
+function devLog(label: string, data: Record<string, unknown>) {
+  if (process.env.NODE_ENV !== "development") return
+  console.debug(`[wallet-approval:evm] ${label}`, data)
+}
+
 /** Pick the injected EVM provider that matches the expected wallet type.
  *  Falls back to the only available provider when wallet-specific flags are
  *  absent — address validation in signWithEvmWallet catches wrong accounts. */
 function getMatchingEvmProvider(walletType: WalletType): Eip1193Provider | null {
-  if (typeof window === "undefined") return null
-  const eth = (window as Window & { ethereum?: Eip1193Provider }).ethereum
-  if (!eth) return null
+  const normalized = normalizeWalletType(walletType)
+  const providers = getEvmProviders()
+  if (providers.length === 0) return null
 
-  const providers: Eip1193Provider[] =
-    Array.isArray(eth.providers) && eth.providers.length > 0
-      ? eth.providers
-      : [eth]
-
-  if (walletType === "base_wallet" || walletType === "base") {
+  if (normalized === "base_wallet") {
     const specific = providers.find((p) => p.isCoinbaseWallet || p.isBaseWallet)
     if (specific) return specific
-    // Newer Base Wallet builds may not expose specific flags — fall back to the
-    // sole provider so `waitForEvmProvider` succeeds; address check below
-    // will reject any account that doesn't match the saved merchant wallet.
     if (providers.length === 1) return providers[0]
     return null
   }
-  if (walletType === "metamask") {
+  if (normalized === "metamask") {
     const specific = providers.find((p) => p.isMetaMask && !p.isCoinbaseWallet)
     if (specific) return specific
     if (providers.length === 1) return providers[0]
     return null
   }
-  if (walletType === "trust_wallet" || walletType === "trust") {
+  if (normalized === "trust_wallet") {
     const specific = providers.find((p) => p.isTrust || p.isTrustWallet)
     if (specific) return specific
     if (providers.length === 1) return providers[0]
@@ -302,7 +340,7 @@ function getMatchingEvmProvider(walletType: WalletType): Eip1193Provider | null 
  */
 async function waitForEvmProvider(
   walletType: WalletType,
-  timeoutMs = 5000
+  timeoutMs = 8000
 ): Promise<Eip1193Provider | null> {
   const step = 150
   const deadline = Date.now() + timeoutMs
@@ -312,6 +350,44 @@ async function waitForEvmProvider(
     await new Promise((r) => setTimeout(r, step))
   }
   return null
+}
+
+async function ensureBaseChain(provider: Eip1193Provider): Promise<{ before: string; after: string }> {
+  const before = String(await provider.request({ method: "eth_chainId" }).catch(() => ""))
+  if (before.toLowerCase() === BASE_CHAIN_ID_HEX || before === BASE_CHAIN_ID_DEC) {
+    return { before, after: before }
+  }
+
+  try {
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: BASE_CHAIN_ID_HEX }],
+    })
+  } catch (switchErr) {
+    const code = Number((switchErr as { code?: number })?.code)
+    if (code !== 4902) throw switchErr
+
+    await provider.request({
+      method: "wallet_addEthereumChain",
+      params: [{
+        chainId: BASE_CHAIN_ID_HEX,
+        chainName: "Base",
+        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+        rpcUrls: [BASE_RPC_URL],
+        blockExplorerUrls: ["https://basescan.org"],
+      }],
+    })
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: BASE_CHAIN_ID_HEX }],
+    })
+  }
+
+  const after = String(await provider.request({ method: "eth_chainId" }).catch(() => ""))
+  if (after.toLowerCase() !== BASE_CHAIN_ID_HEX && after !== BASE_CHAIN_ID_DEC) {
+    throw new Error("Wallet is not on Base network. Switch to Base in your wallet settings and try again.")
+  }
+  return { before, after }
 }
 
 /** Check if we're running inside the target EVM wallet's in-app browser. */
@@ -959,83 +1035,94 @@ export default function WalletApprovalPage({
   // ── EVM signing (in-wallet browser) ──────────────────────────────────────────
 
   async function signWithEvmWallet(walletType: WalletType, s: SessionData) {
+    const normalizedWalletType = normalizeWalletType(walletType)
     setPageStatus("connecting")
-    setStatusMessage(`Connecting ${walletDisplayName(walletType)}...`)
+    setStatusMessage(`Connecting ${walletDisplayName(normalizedWalletType)}...`)
 
     try {
       await patchSessionStatus(s.id, "wallet_connecting")
+      devLog("sign-start", {
+        session_id: s.id,
+        wallet_type_raw: s.wallet_type,
+        wallet_type_normalized: normalizedWalletType,
+        in_wallet_param_present: typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("in_wallet") === "1" : false,
+        window_ethereum_present: typeof window !== "undefined" ? Boolean((window as Window & { ethereum?: Eip1193Provider }).ethereum) : false,
+        providers_count: getEvmProviders().length,
+        asset: s.asset,
+      })
 
-      // Wait up to 5 seconds for the provider to inject.
-      // Mobile wallet browsers inject window.ethereum asynchronously —
-      // failing immediately produces false-negatives.
-      const provider = await waitForEvmProvider(walletType, 5000)
+      const provider = await waitForEvmProvider(normalizedWalletType, 8000)
       if (!provider) {
-        throw new Error(
-          `${walletDisplayName(walletType)} did not expose a signing provider. ` +
-          `Open this approval link inside ${walletDisplayName(walletType)}'s browser or tap the approval button again.`
-        )
+        throw new Error(`Open this approval inside ${walletDisplayName(normalizedWalletType)} to continue.`)
       }
 
-      // Refresh provider flags in debug panel
       if (debugMode) setDebugInfo(getDebugProviderFlags())
-
-      const chainIdRaw = await provider.request({ method: "eth_chainId" }).catch(() => "")
-      const chainId = String(chainIdRaw)
-      if (debugMode) {
-        getDebugChainId(walletType).then(setDebugChainId)
-      }
-
-      if (chainId.toLowerCase() !== "0x2105" && chainId !== "8453") {
-        try {
-          await provider.request({
-            method: "wallet_switchEthereumChain",
-            params: [{ chainId: "0x2105" }],
-          })
-        } catch {
-          throw new Error(
-            `Wallet is not on Base network (chain ${chainId}). Switch to Base in your wallet settings and try again.`
-          )
-        }
-      }
+      devLog("provider-selected", {
+        session_id: s.id,
+        providers_count: getEvmProviders().length,
+        selected_provider_type: describeEvmProvider(provider),
+      })
 
       const accountsResponse = await provider.request({ method: "eth_requestAccounts" })
       const account = Array.isArray(accountsResponse) ? String(accountsResponse[0] || "") : ""
+      const accountMatched = normalizeAddress(account) === normalizeAddress(s.wallet_address)
+      devLog("account-requested", {
+        session_id: s.id,
+        requested_account: formatShortAddress(account),
+        saved_wallet_address: formatShortAddress(s.wallet_address),
+        account_matched: accountMatched,
+      })
 
       await patchSessionStatus(s.id, "wallet_connected")
       setPageStatus("validating")
       setStatusMessage("Validating wallet address...")
 
-      if (normalizeAddress(account) !== normalizeAddress(s.wallet_address)) {
-        throw new Error(
-          "Connected wallet does not match the merchant wallet saved for this rail. " +
-          `Expected: ${formatShortAddress(s.wallet_address)} — Got: ${formatShortAddress(account)}`
-        )
+      if (!accountMatched) {
+        throw new Error("This is not the connected PineTree wallet for this Base Pay rail.")
       }
+
+      const chainResult = await ensureBaseChain(provider)
+      if (debugMode) getDebugChainId(normalizedWalletType).then(setDebugChainId)
+      devLog("chain-checked", {
+        session_id: s.id,
+        chain_id_before_switch: chainResult.before,
+        chain_id_after_switch: chainResult.after,
+      })
 
       const txParams = s.prepared_payload.tx_params
       if (!txParams) throw new Error("Prepared Base transaction is missing transaction parameters. Please start a new send from the desktop.")
-
-      // Validate required fields
       if (!txParams.to) throw new Error("Prepared Base transaction is missing the destination address.")
       if (!txParams.from) throw new Error("Prepared Base transaction is missing the from address.")
 
       await patchSessionStatus(s.id, "approval_requested")
       setPageStatus("signing")
-      setStatusMessage(`Waiting for transaction approval in ${walletDisplayName(walletType)}...`)
+      setStatusMessage(`Waiting for withdrawal approval in ${walletDisplayName(normalizedWalletType)}...`)
+
+      const txRequest = {
+        from: account || txParams.from,
+        to: txParams.to,
+        value: txParams.value || "0x0",
+        data: txParams.data || "0x",
+        ...(txParams.gas ? { gas: txParams.gas } : {}),
+        chainId: txParams.chainId || BASE_CHAIN_ID_HEX,
+      }
+      devLog("tx-built", {
+        session_id: s.id,
+        asset: s.asset,
+        tx_request_built: true,
+      })
 
       const rawResult = await provider.request({
         method: "eth_sendTransaction",
-        params: [{
-          from:  account || txParams.from,
-          to:    txParams.to,
-          value: txParams.value || "0x0",
-          data:  txParams.data || "0x",
-          gas:   txParams.gas,
-        }]
+        params: [txRequest],
       })
 
       const txHash = String(rawResult || "").trim()
-      if (!txHash) throw new Error(`${walletDisplayName(walletType)} connected, but no transaction hash was returned after approval.`)
+      devLog("tx-returned", {
+        session_id: s.id,
+        tx_hash_returned: Boolean(txHash),
+      })
+      if (!txHash) throw new Error(`${walletDisplayName(normalizedWalletType)} connected, but no transaction hash was returned after approval.`)
 
       setPageStatus("recording")
       setStatusMessage("Recording transaction...")
@@ -1240,11 +1327,12 @@ export default function WalletApprovalPage({
     window.location.href = connectUrl
   }
 
-  function startEvmWalletApproval(walletType: WalletType) {
+  async function startEvmWalletApproval(walletType: WalletType) {
     if (!session) return
+    const normalizedWalletType = normalizeWalletType(walletType)
 
     // If already inside the wallet's browser, sign directly
-    if (isInsideEvmWalletBrowser(walletType)) {
+    if (isInsideEvmWalletBrowser(normalizedWalletType)) {
       setPageStatus("in_wallet_browser")
       return
     }
@@ -1253,8 +1341,31 @@ export default function WalletApprovalPage({
     // ?in_wallet=1 triggers auto-connect once the provider is detected.
     const appUrl = getAppUrl()
     const targetUrl = `${appUrl}/wallet-approval/${session.id}?in_wallet=1`
-    const deepLink = buildEvmWalletBrowserDeepLink(walletType, targetUrl)
+    const deepLink = buildEvmWalletBrowserDeepLink(normalizedWalletType, targetUrl)
+    const fallbackDeepLink = buildEvmWalletBrowserFallbackDeepLink(normalizedWalletType, targetUrl)
+
+    await patchSessionStatus(session.id, "wallet_connecting")
+    setStatusMessage(`Opening ${walletDisplayName(normalizedWalletType)}...`)
+    devLog("open-wallet", {
+      session_id: session.id,
+      wallet_type_raw: walletType,
+      wallet_type_normalized: normalizedWalletType,
+      approval_url: targetUrl,
+      deep_link_url_type_used: fallbackDeepLink ? "coinbase_https_primary" : "wallet_primary",
+    })
     window.location.href = deepLink
+
+    if (fallbackDeepLink) {
+      window.setTimeout(() => {
+        if (document.visibilityState !== "visible") return
+        devLog("open-wallet-fallback", {
+          session_id: session.id,
+          wallet_type_normalized: normalizedWalletType,
+          deep_link_url_type_used: "coinbase_cbwallet_fallback",
+        })
+        window.location.href = fallbackDeepLink
+      }, 1200)
+    }
   }
 
   // Re-detect wallet browser if we came back from a deep link
@@ -1269,7 +1380,9 @@ export default function WalletApprovalPage({
   // ── Render ────────────────────────────────────────────────────────────────────
 
   const walletType = session?.wallet_type as WalletType | undefined
-  const walletName = walletType ? walletDisplayName(walletType) : "Wallet"
+  const normalizedWalletType = walletType ? normalizeWalletType(walletType) : undefined
+  const walletName = normalizedWalletType ? walletDisplayName(normalizedWalletType) : "Wallet"
+  const canOpenEvmWallet = Boolean(normalizedWalletType && isEvmWalletType(normalizedWalletType))
 
   const activeStatusCopy: Record<string, string> = {
     in_wallet_browser: `Connecting ${walletName}...`,
@@ -1563,10 +1676,19 @@ export default function WalletApprovalPage({
                     messageOverride={statusMessage || "This withdrawal could not be approved."}
                     labelClassName="text-lg font-bold text-gray-950"
                   />
+                  {canOpenEvmWallet && normalizedWalletType && (
+                    <button
+                      type="button"
+                      onClick={() => startEvmWalletApproval(normalizedWalletType)}
+                      className="mt-4 w-full rounded-2xl bg-[#0052FF] px-5 py-3 text-sm font-bold text-white shadow-sm shadow-[#0052FF]/25 transition hover:bg-[#003FCC] active:scale-[0.98]"
+                    >
+                      Open {walletName}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={resetForRetry}
-                    className="mt-4 w-full rounded-2xl border border-[#0052FF]/15 bg-white px-5 py-3 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-[#0052FF]/30 hover:text-[#0052FF]"
+                    className={`${canOpenEvmWallet ? "mt-2" : "mt-4"} w-full rounded-2xl border border-[#0052FF]/15 bg-white px-5 py-3 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-[#0052FF]/30 hover:text-[#0052FF]`}
                   >
                     Try Again
                   </button>
@@ -1594,6 +1716,7 @@ export default function WalletApprovalPage({
               ["session_id",          sessionId || "—"],
               ["rail",                session?.rail || "—"],
               ["wallet_type",         session?.wallet_type || "—"],
+              ["wallet_type_normalized", normalizedWalletType || "—"],
               ["asset",               session?.asset || "—"],
               ["network",             session?.network || "—"],
               ["status",              session?.status || "—"],

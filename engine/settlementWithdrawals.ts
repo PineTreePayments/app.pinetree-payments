@@ -68,6 +68,7 @@ export type BaseTxParams = {
   value: string   // hex wei string "0x..."
   data: string    // "0x" for ETH, ABI-encoded ERC20 transfer for USDC
   gas: string     // hex gas limit
+  chainId: string  // Base mainnet "0x2105"
 }
 
 function buildBaseEthTxParams(
@@ -81,7 +82,8 @@ function buildBaseEthTxParams(
     to: toAddress,
     value: "0x" + weiAmount.toString(16),
     data: "0x",
-    gas: "0x5208"   // 21000 — standard native ETH transfer
+    gas: "0x5208",  // 21000 — standard native ETH transfer
+    chainId: "0x2105"
   }
 }
 
@@ -101,7 +103,8 @@ function buildBaseUsdcTxParams(
     to: BASE_USDC_ADDRESS,
     value: "0x0",
     data,
-    gas: "0x186A0"   // 100000 — generous for ERC20 transfer
+    gas: "0x186A0",  // 100000 — generous for ERC20 transfer
+    chainId: "0x2105"
   }
 }
 
