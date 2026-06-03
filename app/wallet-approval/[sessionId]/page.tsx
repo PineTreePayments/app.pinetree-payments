@@ -44,7 +44,9 @@ import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type WalletType = "base" | "metamask" | "trust" | "phantom" | "solflare"
+// Canonical names: base_wallet, trust_wallet.  Legacy aliases (base, trust) are
+// accepted when reading sessions created before the rename so old QR links still work.
+type WalletType = "base_wallet" | "base" | "metamask" | "trust_wallet" | "trust" | "phantom" | "solflare"
 
 type SessionData = {
   id: string
@@ -104,9 +106,9 @@ type Eip1193Provider = {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function walletDisplayName(type: WalletType | string): string {
-  if (type === "base")     return "Base Wallet"
-  if (type === "metamask") return "MetaMask"
-  if (type === "trust")    return "Trust Wallet"
+  if (type === "base_wallet" || type === "base") return "Base Wallet"
+  if (type === "metamask")                       return "MetaMask"
+  if (type === "trust_wallet" || type === "trust") return "Trust Wallet"
   if (type === "phantom")  return "Phantom"
   if (type === "solflare") return "Solflare"
   return "Wallet"
@@ -139,7 +141,7 @@ function formatExpiry(expiresAt: string): string {
 /** Resolve the wallet-specific in-app browser deep link for Base-family wallets. */
 function buildEvmWalletBrowserDeepLink(walletType: WalletType, targetUrl: string): string {
   const encoded = encodeURIComponent(targetUrl)
-  if (walletType === "base") {
+  if (walletType === "base_wallet" || walletType === "base") {
     return `https://go.cb-w.com/dapp?cb_url=${encoded}`
   }
   if (walletType === "metamask") {
@@ -147,7 +149,7 @@ function buildEvmWalletBrowserDeepLink(walletType: WalletType, targetUrl: string
     const path = urlObj.hostname + urlObj.pathname + urlObj.search
     return `https://metamask.app.link/dapp/${path}`
   }
-  if (walletType === "trust") {
+  if (walletType === "trust_wallet" || walletType === "trust") {
     return `https://link.trustwallet.com/open_url?coin_id=60&url=${encoded}`
   }
   return targetUrl
@@ -164,13 +166,13 @@ function getMatchingEvmProvider(walletType: WalletType): Eip1193Provider | null 
       ? eth.providers
       : [eth]
 
-  if (walletType === "base") {
+  if (walletType === "base_wallet" || walletType === "base") {
     return providers.find((p) => p.isCoinbaseWallet || p.isBaseWallet) || null
   }
   if (walletType === "metamask") {
     return providers.find((p) => p.isMetaMask && !p.isCoinbaseWallet) || null
   }
-  if (walletType === "trust") {
+  if (walletType === "trust_wallet" || walletType === "trust") {
     return providers.find((p) => p.isTrust || p.isTrustWallet) || null
   }
   return null
@@ -787,7 +789,7 @@ export default function WalletApprovalPage({
 
       // Detect if we're already inside the target wallet's browser
       const inWalletBrowser =
-        (["base", "metamask", "trust"].includes(walletType) && isInsideEvmWalletBrowser(walletType)) ||
+        (["base_wallet", "base", "metamask", "trust_wallet", "trust"].includes(walletType) && isInsideEvmWalletBrowser(walletType)) ||
         (walletType === "phantom"  && isInsidePhantomBrowser()) ||
         (walletType === "solflare" && isInsideSolflareBrowser())
 
@@ -809,7 +811,7 @@ export default function WalletApprovalPage({
 
     const walletType = session.wallet_type as WalletType
 
-    if (["base", "metamask", "trust"].includes(walletType)) {
+    if (["base_wallet", "base", "metamask", "trust_wallet", "trust"].includes(walletType)) {
       signWithEvmWallet(walletType, session)
     } else if (walletType === "phantom") {
       signWithPhantomBrowser(session)

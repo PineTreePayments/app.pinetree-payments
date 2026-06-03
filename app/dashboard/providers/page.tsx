@@ -1129,9 +1129,7 @@ export default function ProvidersPage() {
         status: "Connected" as const,
         connectionType: "speed" as const,
         summary: "Bitcoin Lightning payments route through the merchant Speed Account ID.",
-        detail: formatCredentialPart(String(speedCredentials.account_id), 10, 4),
-        actionLabel: "Manage",
-        showClearSpeed: true
+        detail: formatCredentialPart(String(speedCredentials.account_id), 10, 4)
       }
     }
 
@@ -1141,9 +1139,7 @@ export default function ProvidersPage() {
         status: "Connected" as const,
         connectionType: "nwc" as const,
         summary: "Bitcoin Lightning payments route through the connected NWC wallet.",
-        detail: walletLabel,
-        actionLabel: "Manage",
-        showClearSpeed: false
+        detail: walletLabel
       }
     }
 
@@ -1151,9 +1147,7 @@ export default function ProvidersPage() {
       status: "Not Connected" as const,
       connectionType: null,
       summary: "Setup needed: connect Speed Lightning or Advanced NWC.",
-      detail: "",
-      actionLabel: "Connect",
-      showClearSpeed: false
+      detail: ""
     }
   }
 
@@ -1446,23 +1440,25 @@ export default function ProvidersPage() {
               <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <button
-                    onClick={() => openProvider("lightning")}
+                    onClick={() => {
+                      if (lightningCard.status === "Connected") {
+                        if (lightningCard.connectionType === "speed") {
+                          void disconnectSpeed()
+                        } else {
+                          void disconnect("lightning")
+                        }
+                      } else {
+                        openProvider("lightning")
+                      }
+                    }}
                     className={`h-8 rounded-md px-3 text-xs font-semibold shadow-sm transition ${
                       lightningCard.status === "Connected"
-                        ? "border border-gray-300 bg-white text-gray-700 hover:border-gray-400 hover:bg-gray-50"
+                        ? "border border-red-200 bg-white text-red-600 hover:border-red-300 hover:bg-red-50"
                         : "border border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
                     }`}
                   >
-                    {lightningCard.actionLabel}
+                    {lightningCard.status === "Connected" ? "Disconnect" : "Connect"}
                   </button>
-                  {lightningCard.showClearSpeed ? (
-                    <button
-                      onClick={disconnectSpeed}
-                      className="h-8 rounded-md border border-red-200 bg-white px-3 text-xs font-semibold text-red-600 shadow-sm transition hover:border-red-300 hover:bg-red-50"
-                    >
-                      Clear Setup
-                    </button>
-                  ) : null}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <span className="text-sm font-medium text-gray-700">Enabled</span>

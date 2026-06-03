@@ -58,7 +58,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const allowedRails = ["base", "solana"]
   if (!allowedRails.includes(rail)) return errorResponse(`Unsupported rail: ${rail}`, 400)
 
-  const allowedWalletTypes = ["base", "metamask", "trust", "phantom", "solflare"]
+  // Accept both canonical names (base_wallet, trust_wallet) and legacy names
+  // (base, trust) so sessions created before the rename still resolve correctly.
+  const allowedWalletTypes = ["base_wallet", "metamask", "trust_wallet", "phantom", "solflare", "base", "trust"]
   if (!allowedWalletTypes.includes(walletType)) {
     return errorResponse(`Unsupported wallet_type: ${walletType}`, 400)
   }

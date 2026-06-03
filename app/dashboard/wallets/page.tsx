@@ -126,7 +126,7 @@ type SelectedWallet = {
   nwcConnectionStatus?: NwcConnectionStatus | null
 }
 
-type ApprovalWalletType = "phantom" | "solflare" | "base" | "metamask" | "trust"
+type ApprovalWalletType = "phantom" | "solflare" | "base_wallet" | "metamask" | "trust_wallet"
 
 type CashOutAssetOption = {
   label: string
@@ -466,6 +466,7 @@ const lightningSpeedLinks = getSpeedDashboardLinks([
   "dashboard",
   "associatedAccounts",
   "autoPayout",
+  "autoSwap",
   "login"
 ])
 const lightningNwcLinks = [
@@ -519,8 +520,8 @@ function normalizeApprovalWalletType(
 
   if (rail === "base") {
     if (value.includes("metamask")) return "metamask"
-    if (value.includes("trust")) return "trust"
-    if (value.includes("baseapp") || value.includes("base") || value.includes("coinbase")) return "base"
+    if (value.includes("trust")) return "trust_wallet"
+    if (value.includes("baseapp") || value.includes("base") || value.includes("coinbase")) return "base_wallet"
     return null
   }
 
@@ -528,11 +529,11 @@ function normalizeApprovalWalletType(
 }
 
 function approvalWalletLabel(type: ApprovalWalletType | null, rail: SelectedWallet["rail"]): string {
-  if (type === "phantom") return "Phantom"
-  if (type === "solflare") return "Solflare"
-  if (type === "metamask") return "MetaMask"
-  if (type === "trust") return "Trust Wallet"
-  if (type === "base") return "Base Wallet"
+  if (type === "phantom")     return "Phantom"
+  if (type === "solflare")    return "Solflare"
+  if (type === "metamask")    return "MetaMask"
+  if (type === "trust_wallet") return "Trust Wallet"
+  if (type === "base_wallet") return "Base Wallet"
   return rail === "solana" ? "Solana wallet" : rail === "base" ? "Base wallet" : "wallet"
 }
 
@@ -556,13 +557,13 @@ function getInjectedBaseApprovalProvider(type: ApprovalWalletType | null): Eip11
   if (!eth) return null
   const providers = Array.isArray(eth.providers) && eth.providers.length > 0 ? eth.providers : [eth]
 
-  if (type === "base") {
+  if (type === "base_wallet") {
     return providers.find((p) => p?.isCoinbaseWallet || p?.isBaseWallet) || null
   }
   if (type === "metamask") {
     return providers.find((p) => p?.isMetaMask && !p?.isCoinbaseWallet) || null
   }
-  if (type === "trust") {
+  if (type === "trust_wallet") {
     return providers.find((p) => p?.isTrust || p?.isTrustWallet) || null
   }
   return null

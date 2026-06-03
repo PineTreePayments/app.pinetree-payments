@@ -29,7 +29,7 @@ export const speedDashboardLinks: Record<SpeedDashboardLinkKey, SpeedDashboardLi
   dashboard: {
     key: "dashboard",
     label: "Open Speed Dashboard",
-    url: publicEnv("NEXT_PUBLIC_SPEED_DASHBOARD_URL", "NEXT_PUBLIC_SPEED_LOGIN_URL") || "https://app.tryspeed.com"
+    url: publicEnv("NEXT_PUBLIC_SPEED_DASHBOARD_URL", "NEXT_PUBLIC_SPEED_LOGIN_URL") || "https://app.tryspeed.com/dashboard"
   },
   associatedAccounts: {
     key: "associatedAccounts",
@@ -37,10 +37,8 @@ export const speedDashboardLinks: Record<SpeedDashboardLinkKey, SpeedDashboardLi
     url:
       publicEnv(
         "NEXT_PUBLIC_SPEED_ACCOUNT_ID_URL",
-        "NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL",
-        "NEXT_PUBLIC_SPEED_DASHBOARD_URL",
-        "NEXT_PUBLIC_SPEED_LOGIN_URL"
-      ) || "https://app.tryspeed.com"
+        "NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL"
+      ) || "https://app.tryspeed.com/settings/associated-accounts"
   },
   accountId: {
     key: "accountId",
@@ -48,25 +46,19 @@ export const speedDashboardLinks: Record<SpeedDashboardLinkKey, SpeedDashboardLi
     url:
       publicEnv(
         "NEXT_PUBLIC_SPEED_ACCOUNT_ID_URL",
-        "NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL",
-        "NEXT_PUBLIC_SPEED_DASHBOARD_URL",
-        "NEXT_PUBLIC_SPEED_LOGIN_URL"
-      ) || "https://app.tryspeed.com"
+        "NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL"
+      ) || "https://app.tryspeed.com/settings/associated-accounts"
   },
   autoPayout: {
     key: "autoPayout",
     label: "Open Auto Payout",
     url:
-      publicEnv(
-        "NEXT_PUBLIC_SPEED_AUTO_PAYOUT_URL",
-        "NEXT_PUBLIC_SPEED_DASHBOARD_URL",
-        "NEXT_PUBLIC_SPEED_LOGIN_URL"
-      ) || "https://app.tryspeed.com"
+      publicEnv("NEXT_PUBLIC_SPEED_AUTO_PAYOUT_URL") || "https://app.tryspeed.com/auto-payout"
   },
   login: {
     key: "login",
     label: "Open Speed Login",
-    url: publicEnv("NEXT_PUBLIC_SPEED_LOGIN_URL", "NEXT_PUBLIC_SPEED_DASHBOARD_URL") || "https://app.tryspeed.com"
+    url: publicEnv("NEXT_PUBLIC_SPEED_LOGIN_URL") || "https://app.tryspeed.com"
   },
   apiKeys: {
     key: "apiKeys",
@@ -80,8 +72,8 @@ export const speedDashboardLinks: Record<SpeedDashboardLinkKey, SpeedDashboardLi
   },
   autoSwap: {
     key: "autoSwap",
-    label: "Auto-Swap Settings",
-    url: publicEnv("NEXT_PUBLIC_SPEED_AUTOSWAP_URL", "NEXT_PUBLIC_SPEED_AUTO_SWAP_URL")
+    label: "Open Auto Swap",
+    url: publicEnv("NEXT_PUBLIC_SPEED_AUTO_SWAP_URL", "NEXT_PUBLIC_SPEED_AUTOSWAP_URL") || "https://app.tryspeed.com/auto-swap"
   },
   payouts: {
     key: "payouts",
@@ -107,30 +99,41 @@ export function getSpeedDashboardLinks(keys: SpeedDashboardLinkKey[]): SpeedDash
 }
 
 // Named URL constants for merchant-facing setup UI (client-safe NEXT_PUBLIC_ vars only)
+
 export const speedLoginUrl =
-  publicEnv("NEXT_PUBLIC_SPEED_LOGIN_URL", "NEXT_PUBLIC_SPEED_DASHBOARD_URL") ||
+  publicEnv("NEXT_PUBLIC_SPEED_LOGIN_URL") ||
   "https://app.tryspeed.com"
 
 export const speedSignupUrl =
-  publicEnv("NEXT_PUBLIC_SPEED_SIGNUP_URL", "NEXT_PUBLIC_SPEED_LOGIN_URL") ||
+  publicEnv("NEXT_PUBLIC_SPEED_SIGNUP_URL") ||
   "https://www.tryspeed.com"
 
-export const speedDashboardHref =
+export const speedDashboardUrl =
   publicEnv("NEXT_PUBLIC_SPEED_DASHBOARD_URL", "NEXT_PUBLIC_SPEED_LOGIN_URL") ||
-  "https://app.tryspeed.com"
+  "https://app.tryspeed.com/dashboard"
+
+// Legacy alias preserved for existing imports
+export const speedDashboardHref = speedDashboardUrl
+
+export const speedAssociatedAccountsUrl =
+  publicEnv(
+    "NEXT_PUBLIC_SPEED_ACCOUNT_ID_URL",
+    "NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL"
+  ) || "https://app.tryspeed.com/settings/associated-accounts"
+
+// Legacy alias preserved for existing imports
+export const speedAssociatedAccountsHref = speedAssociatedAccountsUrl
 
 export const speedAccountSetupUrl =
   publicEnv(
     "NEXT_PUBLIC_SPEED_ACCOUNT_ID_URL",
-    "NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL",
-    "NEXT_PUBLIC_SPEED_DASHBOARD_URL",
-    "NEXT_PUBLIC_SPEED_LOGIN_URL"
-  ) || "https://app.tryspeed.com"
+    "NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL"
+  ) || "https://app.tryspeed.com/settings/associated-accounts"
 
-export const speedAssociatedAccountsHref =
-  publicEnv(
-    "NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL",
-    "NEXT_PUBLIC_SPEED_ACCOUNT_ID_URL",
-    "NEXT_PUBLIC_SPEED_DASHBOARD_URL",
-    "NEXT_PUBLIC_SPEED_LOGIN_URL"
-  ) || "https://app.tryspeed.com"
+export const speedAutoPayoutUrl =
+  publicEnv("NEXT_PUBLIC_SPEED_AUTO_PAYOUT_URL") ||
+  "https://app.tryspeed.com/auto-payout"
+
+export const speedAutoSwapUrl =
+  publicEnv("NEXT_PUBLIC_SPEED_AUTO_SWAP_URL", "NEXT_PUBLIC_SPEED_AUTOSWAP_URL") ||
+  "https://app.tryspeed.com/auto-swap"
