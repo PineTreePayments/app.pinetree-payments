@@ -5,6 +5,14 @@ import {
   getRouteErrorStatus,
   requireMerchantIdFromRequest
 } from "@/lib/api/merchantAuth"
+import { makeRateLimiter } from "@/lib/api/rateLimit"
+
+// 20 AI questions per merchant per minute.  AI calls have non-trivial cost;
+// this prevents runaway loops or abuse without affecting normal usage.
+const assistantLimiter = makeRateLimiter({ windowMs: 60_000, maxRequests: 20 })
+
+// Max message length to prevent oversized context injection
+const MAX_MESSAGE_LENGTH = 2000
 
 type AssistantRequestBody = {
   message?: string
@@ -18,8 +26,17 @@ function getErrorMessage(error: unknown, fallback: string) {
 export async function POST(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
+
+    const limit = assistantLimiter.check(merchantId)
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { error: "Too many requests. Please wait a moment before asking another question." },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(limit.retryAfterMs / 1000)) } }
+      )
+    }
+
     const body = (await req.json().catch(() => ({}))) as AssistantRequestBody
-    const message = String(body.message || "").trim()
+    const message = String(body.message || "").trim().slice(0, MAX_MESSAGE_LENGTH)
     const debugMode = body.debug === true && process.env.NODE_ENV !== "production"
 
     if (!message && !debugMode) {

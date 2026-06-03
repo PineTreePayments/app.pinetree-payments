@@ -1,10 +1,24 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getPaymentIntentEngine } from "@/engine/paymentIntents"
 import { signCheckoutSession } from "@/lib/api/checkoutAuth"
+import { makeRateLimiter, getRequestIp } from "@/lib/api/rateLimit"
+
+// 60 lookups per IP per minute.  Protects against enumeration and token
+// harvesting without affecting legitimate checkout page loads.
+const intentLimiter = makeRateLimiter({ windowMs: 60_000, maxRequests: 60 })
 
 type Params = { params: Promise<{ intentId: string }> }
 
-export async function GET(_req: NextRequest, { params }: Params) {
+export async function GET(req: NextRequest, { params }: Params) {
+  const ip = getRequestIp(req)
+  const limit = intentLimiter.check(ip)
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests" },
+      { status: 429, headers: { "Retry-After": String(Math.ceil(limit.retryAfterMs / 1000)) } }
+    )
+  }
+
   try {
     const { intentId } = await params
     const id = String(intentId || "").trim()

@@ -13,8 +13,15 @@ function statusError(message: string, status: number): StatusError {
 }
 
 function getSecret(): string {
-  const s = process.env.TERMINAL_SESSION_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!s) throw new Error("No terminal session secret configured")
+  // SUPABASE_SERVICE_ROLE_KEY is intentionally NOT in the fallback chain.
+  // That key grants full database access; using it as an HMAC signing secret
+  // would violate key separation and allow a stolen DB key to forge terminal tokens.
+  const s = process.env.TERMINAL_SESSION_SECRET
+  if (!s) {
+    throw new Error(
+      "No terminal session secret configured. Set TERMINAL_SESSION_SECRET in your environment."
+    )
+  }
   return s
 }
 

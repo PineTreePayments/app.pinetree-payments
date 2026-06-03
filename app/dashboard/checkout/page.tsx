@@ -353,6 +353,13 @@ export default function OnlineCheckoutPage() {
   const [apiKeys, setApiKeys] = useState<ApiKeyListItem[]>([])
   const [apiKeysLoading, setApiKeysLoading] = useState(false)
   const apiKeysLoadedRef = useRef(false)
+
+  // Per-section fetch errors — set on any !res.ok or network failure; cleared on retry
+  const [linksError,     setLinksError]     = useState(false)
+  const [statsError,     setStatsError]     = useState(false)
+  const [webhookError,   setWebhookError]   = useState(false)
+  const [deliveriesError,setDeliveriesError]= useState(false)
+  const [apiKeysError,   setApiKeysError]   = useState(false)
   const [newKeyName, setNewKeyName] = useState("")
   const [creatingKey, setCreatingKey] = useState(false)
   const [revealedKey, setRevealedKey] = useState<CreatedApiKey | null>(null)
@@ -388,6 +395,7 @@ export default function OnlineCheckoutPage() {
   }, [merchantId])
 
   const fetchLinks = useCallback(async () => {
+    setLinksError(false)
     try {
       const token = await getToken()
       if (!token) return
@@ -395,17 +403,18 @@ export default function OnlineCheckoutPage() {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
       })
-      if (!res.ok) return
+      if (!res.ok) { setLinksError(true); return }
       const data = (await res.json()) as { links: CheckoutLink[] }
       setLinks(data.links ?? [])
     } catch {
-      // silent
+      setLinksError(true)
     } finally {
       setLoading(false)
     }
   }, [getToken])
 
   const fetchStats = useCallback(async () => {
+    setStatsError(false)
     try {
       const token = await getToken()
       if (!token) return
@@ -413,17 +422,18 @@ export default function OnlineCheckoutPage() {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
       })
-      if (!res.ok) return
+      if (!res.ok) { setStatsError(true); return }
       const data = (await res.json()) as OnlineStats
       setStats(data)
     } catch {
-      // silent
+      setStatsError(true)
     } finally {
       setStatsLoading(false)
     }
   }, [getToken])
 
   const fetchWebhookConfig = useCallback(async () => {
+    setWebhookError(false)
     try {
       const token = await getToken()
       if (!token) return
@@ -431,7 +441,7 @@ export default function OnlineCheckoutPage() {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
       })
-      if (!res.ok) return
+      if (!res.ok) { setWebhookError(true); return }
       const data = (await res.json()) as { webhook: WebhookConfig }
       const wh = data.webhook
       if (wh) {
@@ -440,7 +450,7 @@ export default function OnlineCheckoutPage() {
         setWebhookEvents(wh.events)
       }
     } catch {
-      // silent
+      setWebhookError(true)
     } finally {
       setWebhookLoading(false)
     }
@@ -448,6 +458,7 @@ export default function OnlineCheckoutPage() {
 
   const fetchDeliveries = useCallback(async () => {
     setDeliveriesLoading(true)
+    setDeliveriesError(false)
     try {
       const token = await getToken()
       if (!token) return
@@ -455,11 +466,11 @@ export default function OnlineCheckoutPage() {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
       })
-      if (!res.ok) return
+      if (!res.ok) { setDeliveriesError(true); return }
       const data = (await res.json()) as { deliveries: WebhookDelivery[] }
       setDeliveries(data.deliveries ?? [])
     } catch {
-      // silent
+      setDeliveriesError(true)
     } finally {
       setDeliveriesLoading(false)
     }
@@ -467,6 +478,7 @@ export default function OnlineCheckoutPage() {
 
   const fetchApiKeys = useCallback(async () => {
     setApiKeysLoading(true)
+    setApiKeysError(false)
     try {
       const token = await getToken()
       if (!token) return
@@ -474,11 +486,11 @@ export default function OnlineCheckoutPage() {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
       })
-      if (!res.ok) return
+      if (!res.ok) { setApiKeysError(true); return }
       const data = (await res.json()) as { keys: ApiKeyListItem[] }
       setApiKeys(data.keys ?? [])
     } catch {
-      // silent
+      setApiKeysError(true)
     } finally {
       setApiKeysLoading(false)
     }
@@ -947,6 +959,12 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           detail="Confirmed vs total"
         />
       </MetricGrid>
+      {statsError && (
+        <p className="text-xs text-red-500">
+          Could not load checkout stats.{" "}
+          <button type="button" onClick={() => void fetchStats()} className="underline">Retry</button>
+        </p>
+      )}
 
       {/* ── Tab bar ──────────────────────────────────────────────────────── */}
       <div className="w-full max-w-full overflow-hidden">
@@ -1038,6 +1056,12 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
             {loading ? (
               <div className="rounded-2xl border border-gray-200/80 bg-white p-8 shadow-[0_10px_30px_rgba(15,23,42,0.05)] text-center">
                 <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
+              </div>
+            ) : linksError ? (
+              <div className="rounded-2xl border border-red-100 bg-white p-8 shadow-[0_10px_30px_rgba(15,23,42,0.05)] text-center">
+                <p className="text-sm text-red-500">Could not load payment links.{" "}
+                  <button type="button" onClick={() => void fetchLinks()} className="underline">Retry</button>
+                </p>
               </div>
             ) : links.length === 0 ? (
               <div className="rounded-2xl border border-gray-200/80 bg-white p-8 shadow-[0_10px_30px_rgba(15,23,42,0.05)] text-center">
@@ -1196,6 +1220,11 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
               <div className="flex items-center justify-center py-8">
                 <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
               </div>
+            ) : webhookError ? (
+              <p className="py-6 text-center text-sm text-red-500">
+                Could not load webhook configuration.{" "}
+                <button type="button" onClick={() => void fetchWebhookConfig()} className="underline">Retry</button>
+              </p>
             ) : (
               <form onSubmit={(e) => void handleSaveWebhook(e)} className="space-y-5">
                 <div className="space-y-1.5">
@@ -1309,6 +1338,12 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
               {deliveriesLoading ? (
                 <div className="flex items-center justify-center py-10">
                   <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
+                </div>
+              ) : deliveriesError ? (
+                <div className="px-5 py-10 text-center">
+                  <p className="text-sm text-red-500">Could not load webhook deliveries.{" "}
+                    <button type="button" onClick={() => void fetchDeliveries()} className="underline">Retry</button>
+                  </p>
                 </div>
               ) : deliveries.length === 0 ? (
                 <div className="px-5 py-10 text-center">
@@ -1425,6 +1460,11 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                   <div className="flex items-center justify-center py-6">
                     <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
                   </div>
+                ) : apiKeysError ? (
+                  <p className="py-4 text-center text-xs text-red-500">
+                    Could not load API keys.{" "}
+                    <button type="button" onClick={() => void fetchApiKeys()} className="underline">Retry</button>
+                  </p>
                 ) : apiKeys.length === 0 ? (
                   <p className="py-4 text-center text-xs text-gray-400">No API keys yet. Create one above.</p>
                 ) : (

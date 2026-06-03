@@ -34,10 +34,25 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ received: true })
   } catch (err) {
-    console.error("Webhook error:", err)
-    return NextResponse.json(
-      { error: "Webhook failed" },
-      { status: 500 }
-    )
+    const message = err instanceof Error ? err.message : "Webhook processing failed"
+
+    // Return semantically correct status codes so callers know why delivery failed.
+    // The engine throws with known messages for auth/registry failures.
+    if (
+      message === "Webhook verification failed" ||
+      message.startsWith("Invalid") ||
+      message.startsWith("Signature")
+    ) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+    if (
+      message.startsWith("Unknown provider") ||
+      message.startsWith("Provider not registered")
+    ) {
+      return NextResponse.json({ error: "Unknown provider" }, { status: 400 })
+    }
+
+    console.error("[webhook:provider] processing error", { provider: "unknown", message })
+    return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 })
   }
 }

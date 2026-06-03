@@ -29,14 +29,6 @@ export default function LoginPage() {
   useEffect(() => {
     async function checkSession() {
       const { data } = await supabase.auth.getSession()
-      console.info("[auth:login] initial session check", {
-        hasSession: Boolean(data.session),
-        userId: data.session?.user?.id || null,
-        cookieNames: document.cookie
-          .split(";")
-          .map((cookie) => cookie.trim().split("=")[0])
-          .filter((name) => name.startsWith("sb-") || name.includes("auth"))
-      })
       if (data.session) {
         window.location.href = "/dashboard"
       }
@@ -46,12 +38,7 @@ export default function LoginPage() {
 
     const {
       data: { subscription }
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      console.info("[auth:login] auth state change", {
-        event,
-        hasSession: Boolean(session),
-        userId: session?.user?.id || null
-      })
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session) {
         window.location.href = "/dashboard"
       }
@@ -69,12 +56,10 @@ export default function LoginPage() {
     setErrorMsg("")
     setInfoMsg("")
 
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
       password
     })
-
-    console.log("LOGIN RESULT:", { data, error })
 
     if (error) {
       setErrorMsg("Invalid email or password")
@@ -82,17 +67,6 @@ export default function LoginPage() {
       setLoading(false)
       return
     }
-
-    const { data: sessionCheck } = await supabase.auth.getSession()
-    console.info("[auth:login] session after login", {
-      hasSession: Boolean(sessionCheck.session),
-      userId: sessionCheck.session?.user?.id || null,
-      expiresAt: sessionCheck.session?.expires_at || null,
-      cookieNames: document.cookie
-        .split(";")
-        .map((cookie) => cookie.trim().split("=")[0])
-        .filter((name) => name.startsWith("sb-") || name.includes("auth"))
-    })
 
     toast.success("Welcome back")
     window.location.href = "/dashboard"
@@ -123,8 +97,6 @@ export default function LoginPage() {
         }
       }
     })
-
-    console.log("SIGNUP RESULT:", { data, error })
 
     if (error) {
       setErrorMsg(error.message)

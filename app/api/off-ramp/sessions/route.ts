@@ -55,6 +55,10 @@ export async function GET(req: NextRequest) {
   }
 }
 
+const VALID_PROVIDERS: OffRampProvider[] = ["moonpay", "ramp", "banxa", "transak"]
+const VALID_NETWORKS:  OffRampNetwork[]  = ["base", "solana", "lightning"]
+const VALID_ASSETS:    OffRampAsset[]    = ["ETH", "USDC", "SOL", "BTC"]
+
 export async function POST(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
@@ -64,12 +68,42 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
     }
 
+    const provider = (body.provider || "moonpay") as OffRampProvider
+    const network  = body.network  as OffRampNetwork | undefined
+    const asset    = body.asset    as OffRampAsset   | undefined
+    const amount   = Number(body.amount)
+
+    if (!VALID_PROVIDERS.includes(provider)) {
+      return NextResponse.json(
+        { error: `Invalid provider. Allowed: ${VALID_PROVIDERS.join(", ")}` },
+        { status: 400 }
+      )
+    }
+    if (!network || !VALID_NETWORKS.includes(network)) {
+      return NextResponse.json(
+        { error: `Invalid or missing network. Allowed: ${VALID_NETWORKS.join(", ")}` },
+        { status: 400 }
+      )
+    }
+    if (!asset || !VALID_ASSETS.includes(asset)) {
+      return NextResponse.json(
+        { error: `Invalid or missing asset. Allowed: ${VALID_ASSETS.join(", ")}` },
+        { status: 400 }
+      )
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return NextResponse.json(
+        { error: "amount must be a positive number" },
+        { status: 400 }
+      )
+    }
+
     const result = await createOffRampSessionDraftForMerchant({
       merchantId,
-      provider: body.provider || "moonpay",
-      network: body.network as OffRampNetwork,
-      asset: body.asset as OffRampAsset,
-      amount: Number(body.amount),
+      provider,
+      network,
+      asset,
+      amount,
       sourceWalletAddress: body.sourceWalletAddress || null,
       refundWalletAddress: body.refundWalletAddress || null,
       payoutMethod: body.payoutMethod || null,

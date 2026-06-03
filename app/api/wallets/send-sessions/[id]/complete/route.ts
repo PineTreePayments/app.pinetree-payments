@@ -110,6 +110,17 @@ export async function POST(
     const destinationKind: "manual_address" | "saved_destination" =
       destinationKindRaw === "saved_destination" ? "saved_destination" : "manual_address"
 
+    // ── Concurrent-completion guard ───────────────────────────────────────────
+    // Re-read the session immediately before writing to catch the most common
+    // race: two concurrent requests both passed the status check above but only
+    // one should record the activity.  This is a best-effort code-level guard;
+    // the authoritative fix is a DB UNIQUE constraint on session_id in the
+    // activity table (migration proposed in docs — not yet applied).
+    const sessionBeforeWrite = await getSendSession(id)
+    if (sessionBeforeWrite?.status === "submitted") {
+      return NextResponse.json({ success: true, already_submitted: true })
+    }
+
     // Record the direct send activity (server-side, uses admin client)
     await recordDirectSendSubmission(session.merchant_id, {
       walletId:         session.wallet_id,

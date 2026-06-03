@@ -654,29 +654,27 @@ export default function WalletApprovalPage({
       patchSessionStatus(sid, "wallet_connected").catch(() => {})
 
       // ── Refresh the unsigned tx with a fresh blockhash before signing ──────────
-      // Solana blockhashes expire after ~75 seconds. The tx was built at
-      // prepare_direct time; the connect round-trip easily takes 60-90+ seconds.
+      // Solana blockhashes expire after ~75 seconds. The connect round-trip
+      // takes 60-90s+, so the tx built at prepare_direct time is almost always
+      // stale by the time the wallet connects.  Signing a stale tx produces a
+      // cryptic on-chain rejection; we surface a clear error instead.
       setStatusMessage("Refreshing transaction...")
       const freshTxBase64 = await refreshUnsignedTx(sid)
-      // Use the fresh tx if available; fall back to the one stored in the session.
-      const txBase64 = freshTxBase64 || loadedSession.prepared_payload.unsigned_tx_base64
 
-      if (!txBase64) {
-        setStatusMessage("Missing prepared transaction data. Please start a new send from the desktop.")
+      if (!freshTxBase64) {
+        setStatusMessage("Transaction expired. Please return to the desktop and start a new send.")
         setPageStatus("failed")
-        await patchSessionStatus(sid, "failed", "Missing unsigned_tx_base64 after refresh")
+        await patchSessionStatus(sid, "failed", "refresh-tx failed — cannot sign stale blockhash")
         return true
       }
 
-      if (!freshTxBase64) {
-        console.debug("[Phantom connect] refresh-tx failed — using original tx (may have expired blockhash)", { sessionId: sid })
-      }
+      const txBase64 = freshTxBase64
 
       console.debug("[Phantom connect] building signAndSend URL", {
         sessionId: sid,
-        hasTx: Boolean(txBase64),
+        hasTx: true,
         txLength: txBase64.length,
-        usedFreshTx: Boolean(freshTxBase64),
+        usedFreshTx: true,
         redirectBase: baseRedirect,
       })
 
@@ -841,26 +839,25 @@ export default function WalletApprovalPage({
       patchSessionStatus(sid, "wallet_connected").catch(() => {})
 
       // ── Refresh the unsigned tx with a fresh blockhash before signing ──────────
+      // Same rationale as Phantom: blockhashes expire ~75s and the connect
+      // round-trip takes 60-90s+.  Do not fall back to a stale tx.
       setStatusMessage("Refreshing transaction...")
       const freshTxBase64 = await refreshUnsignedTx(sid)
-      const txBase64 = freshTxBase64 || loadedSession.prepared_payload.unsigned_tx_base64
 
-      if (!txBase64) {
-        setStatusMessage("Missing prepared transaction data. Please start a new send from the desktop.")
+      if (!freshTxBase64) {
+        setStatusMessage("Transaction expired. Please return to the desktop and start a new send.")
         setPageStatus("failed")
-        await patchSessionStatus(sid, "failed", "Missing unsigned_tx_base64 after refresh")
+        await patchSessionStatus(sid, "failed", "refresh-tx failed — cannot sign stale blockhash")
         return true
       }
 
-      if (!freshTxBase64) {
-        console.debug("[Solflare connect] refresh-tx failed — using original tx (may have expired blockhash)", { sessionId: sid })
-      }
+      const txBase64 = freshTxBase64
 
       console.debug("[Solflare connect] building signAndSend URL", {
         sessionId: sid,
-        hasTx: Boolean(txBase64),
+        hasTx: true,
         txLength: txBase64.length,
-        usedFreshTx: Boolean(freshTxBase64),
+        usedFreshTx: true,
         redirectBase: baseRedirect,
       })
 

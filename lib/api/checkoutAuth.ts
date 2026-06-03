@@ -8,11 +8,21 @@ export type CheckoutSessionClaims = {
 }
 
 function getSecret(): string {
+  // CHECKOUT_SESSION_SECRET is the canonical secret for checkout tokens.
+  // TERMINAL_SESSION_SECRET is accepted as a fallback so operators only need
+  // one secret if they share it across both token types.
+  //
+  // SUPABASE_SERVICE_ROLE_KEY is intentionally NOT in the fallback chain.
+  // That key grants full database access; using it as an HMAC signing secret
+  // would violate key separation and allow a stolen DB key to forge session tokens.
   const s =
     process.env.CHECKOUT_SESSION_SECRET ||
-    process.env.TERMINAL_SESSION_SECRET ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!s) throw new Error("No checkout session secret configured")
+    process.env.TERMINAL_SESSION_SECRET
+  if (!s) {
+    throw new Error(
+      "No checkout session secret configured. Set CHECKOUT_SESSION_SECRET in your environment."
+    )
+  }
   return s
 }
 

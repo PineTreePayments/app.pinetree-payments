@@ -7,7 +7,10 @@ import { refreshAllWalletBalancesEngine } from "@/engine/walletOverview"
 // request would cause N × RPC calls across all merchant wallets.
 function isAuthorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET
-  if (!secret) return true // open in dev when no secret is configured
+  if (!secret) {
+    console.error("[cron:update-balances] CRON_SECRET is not set — rejecting request")
+    return false
+  }
   const auth = req.headers.get("authorization") || ""
   return auth === `Bearer ${secret}`
 }

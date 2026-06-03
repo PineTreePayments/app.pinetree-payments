@@ -169,7 +169,7 @@ export default function SettingsPage() {
         },
         tax: {
           tax_enabled: taxEnabled,
-          tax_rate: taxRate === "" ? 0 : Number(taxRate),
+          tax_rate: sanitizeTaxRate(taxRate),
           tax_name: taxName || "Sales Tax"
         }
       })
@@ -182,6 +182,14 @@ export default function SettingsPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  function sanitizeTaxRate(raw: string): number {
+    if (raw === "") return 0
+    const parsed = Number(raw)
+    if (!Number.isFinite(parsed)) return 0
+    // Clamp to [0, 100] — a rate outside this range is almost certainly a typo
+    return Math.min(100, Math.max(0, parsed))
   }
 
   if (loading) {

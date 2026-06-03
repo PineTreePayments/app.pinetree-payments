@@ -11,7 +11,7 @@ const MIN_PENDING_AGE_MINUTES = 60
 
 export async function POST(req: NextRequest) {
   try {
-    await requireAdminFromRequest(req)
+    const adminId = await requireAdminFromRequest(req)
 
     const body = (await req.json()) as { paymentIds?: unknown; confirm?: unknown }
 
@@ -77,7 +77,12 @@ export async function POST(req: NextRequest) {
       try {
         await updatePaymentStatus(row.id, "INCOMPLETE", {
           providerEvent: "admin.stale-cleanup",
-          rawPayload: { adminAction: true, reason: "pending_no_activity_timeout" },
+          rawPayload: {
+            adminAction: true,
+            reason: "pending_no_activity_timeout",
+            adminId,
+            requestIp: req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? "unknown",
+          },
         })
         changed.push({ paymentId: row.id, previousStatus: row.status })
       } catch (updateErr) {
