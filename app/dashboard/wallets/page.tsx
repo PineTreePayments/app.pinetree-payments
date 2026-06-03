@@ -745,6 +745,58 @@ function CompactStatusRow({
   )
 }
 
+function CompactStatusNotice({
+  tone = "blue",
+  title,
+  detail,
+  reference
+}: {
+  tone?: "blue" | "green" | "amber" | "red"
+  title: string
+  detail: string
+  reference?: string | null
+}) {
+  const toneClass =
+    tone === "green"
+      ? "border-emerald-100 bg-emerald-50/70 text-emerald-700"
+      : tone === "amber"
+        ? "border-amber-100 bg-amber-50/70 text-amber-700"
+        : tone === "red"
+          ? "border-red-100 bg-red-50/70 text-red-700"
+          : "border-[#0052FF]/15 bg-[#0052FF]/5 text-[#0052FF]"
+  const iconClass =
+    tone === "green"
+      ? "bg-emerald-500 text-white"
+      : tone === "amber"
+        ? "bg-amber-500 text-white"
+        : tone === "red"
+          ? "bg-red-500 text-white"
+          : "bg-[#0052FF] text-white"
+
+  return (
+    <div className={cx("flex items-start gap-3 rounded-2xl border px-3.5 py-3", toneClass)}>
+      <span className={cx("mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full", iconClass)}>
+        {tone === "green" ? (
+          <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+        ) : (
+          <span className="h-2 w-2 rounded-full bg-current" />
+        )}
+      </span>
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-gray-950">{title}</p>
+        <p className="mt-0.5 text-xs leading-5 text-gray-600">{detail}</p>
+        {reference && (
+          <p className="mt-1 truncate font-mono text-[11px] text-gray-500" title={reference}>
+            {formatSettlementAddress(reference)}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function CapabilityCard({
   title,
   status,
@@ -3604,7 +3656,9 @@ export default function WalletsPage() {
                               )}
                             </>
                           ) : approvalStep === "creating" ? (
-                            <p className="mt-2 text-xs text-gray-500">Generating approval session...</p>
+                            <div className="mt-3">
+                              <CompactStatusNotice tone="blue" title="Preparing approval" detail="Generating approval session..." />
+                            </div>
                           ) : approvalStep === "qr_ready" && approvalSessionId ? (
                             <div className="mt-2 space-y-2">
                               <div className="flex justify-center rounded-xl border border-gray-200 bg-white p-3">
@@ -3613,20 +3667,33 @@ export default function WalletsPage() {
                                   size={180}
                                 />
                               </div>
-                              <p className="text-center text-xs text-gray-500">
-                                Waiting for phone scan...
-                              </p>
+                              <CompactStatusNotice tone="blue" title="Waiting for phone scan" detail="Scan this QR with your connected wallet phone." />
                             </div>
                           ) : approvalStep === "opened" ? (
-                            <p className="mt-2 text-xs font-semibold text-[#0052FF]">Approval page opened on phone.</p>
+                            <div className="mt-3">
+                              <CompactStatusNotice tone="blue" title="Opening wallet" detail="Approval page opened on phone." />
+                            </div>
                           ) : approvalStep === "wallet_connecting" ? (
-                            <p className="mt-2 text-xs font-semibold text-[#0052FF]">Wallet connecting on phone...</p>
+                            <div className="mt-3">
+                              <CompactStatusNotice tone="blue" title="Opening wallet" detail="Wallet connecting on phone..." />
+                            </div>
                           ) : approvalStep === "wallet_connected" ? (
-                            <p className="mt-2 text-xs font-semibold text-[#0052FF]">Wallet connected. Requesting approval...</p>
+                            <div className="mt-3">
+                              <CompactStatusNotice tone="blue" title="Waiting for approval" detail="Wallet connected. Requesting approval..." />
+                            </div>
                           ) : approvalStep === "approval_requested" ? (
-                            <p className="mt-2 text-xs font-semibold text-[#0052FF]">Waiting for wallet approval...</p>
+                            <div className="mt-3">
+                              <CompactStatusNotice tone="blue" title="Waiting for approval" detail="Approve the withdrawal in your connected wallet." />
+                            </div>
                           ) : approvalStep === "submitted" ? (
-                            <p className="mt-2 text-xs font-semibold text-[#0052FF]">Approved and submitted.</p>
+                            <div className="mt-3">
+                              <CompactStatusNotice
+                                tone="green"
+                                title="Submitted"
+                                detail="Withdrawal submitted from your connected wallet."
+                                reference={approvalTxHash}
+                              />
+                            </div>
                           ) : null}
                         </div>
                       )}
@@ -3676,14 +3743,19 @@ export default function WalletsPage() {
                   )}
 
                   {sendStep === "signing" && (
-                    <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4 text-sm font-semibold text-[#0052FF]">
-                      Waiting for wallet approval...
+                    <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                      <CompactStatusNotice tone="blue" title="Waiting for approval" detail="Approve the withdrawal in your connected wallet." />
                     </div>
                   )}
 
                   {sendStep === "submitted" && sendRecord && (
-                    <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
-                      <p className="text-sm font-semibold text-gray-950">Send Submitted</p>
+                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
+                      <CompactStatusNotice
+                        tone="green"
+                        title="Submitted"
+                        detail="Withdrawal submitted from your connected wallet."
+                        reference={sendTxHash}
+                      />
                       <div className="mt-3 grid gap-2">
                         <CompactStatusRow label="Amount" value={`${sendRecord.transfer.amount} ${sendRecord.transfer.asset}`} />
                         <CompactStatusRow label="Destination" value={formatSettlementAddress(sendRecord.transfer.destination_address)} />
@@ -4206,21 +4278,20 @@ export default function WalletsPage() {
                       {/* ── Step: signing (waiting for wallet) ── */}
                       {withdrawStep === "signing" && (
                         <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 px-4 py-8 text-center">
-                          <p className="text-sm font-semibold text-gray-950">Waiting for wallet approval…</p>
-                          <p className="mt-1 text-xs text-gray-600">
-                            Your wallet extension should have opened. Approve the transaction to proceed.
-                          </p>
+                          <CompactStatusNotice tone="blue" title="Waiting for approval" detail="Your wallet extension should have opened. Approve the withdrawal to proceed." />
                         </div>
                       )}
 
                       {/* ── Step: submitted ── */}
                       {withdrawStep === "submitted" && withdrawRecord && (
                         <>
-                          <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
-                            <p className="text-base font-semibold text-gray-950">Withdrawal Submitted</p>
-                            <p className="mt-1 text-sm leading-6 text-gray-700">
-                              Your transaction was signed and broadcast. It may take a few moments to appear on-chain.
-                            </p>
+                          <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
+                            <CompactStatusNotice
+                              tone="green"
+                              title="Submitted"
+                              detail="Withdrawal submitted from your connected wallet."
+                              reference={withdrawTxHash}
+                            />
                           </div>
 
                           <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
@@ -5034,6 +5105,16 @@ export default function WalletsPage() {
                                         Submitted: {formatChicagoDateTime(w.submitted_at)}
                                       </p>
                                     )}
+                                    {w.status === "SUBMITTED" && (
+                                      <div className="mt-2">
+                                        <CompactStatusNotice
+                                          tone="green"
+                                          title="Submitted"
+                                          detail="Withdrawal submitted from your connected wallet."
+                                          reference={w.tx_hash}
+                                        />
+                                      </div>
+                                    )}
                                     {w.failure_reason && (
                                       <p className="mt-1 text-xs leading-5 text-red-600">{w.failure_reason}</p>
                                     )}
@@ -5689,16 +5770,28 @@ export default function WalletsPage() {
                                       </a>
                                     )}
                                     {w.status === "SUBMITTED" && (
-                                      <button
-                                        type="button"
-                                        onClick={() => checkWithdrawalStatus(w.id)}
-                                        disabled={checkingStatusId === w.id}
-                                        className="font-semibold text-blue-600 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-                                      >
-                                        {checkingStatusId === w.id ? "Checking..." : "Check Status"}
-                                      </button>
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => checkWithdrawalStatus(w.id)}
+                                          disabled={checkingStatusId === w.id}
+                                          className="font-semibold text-blue-600 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                          {checkingStatusId === w.id ? "Checking..." : "Check Status"}
+                                        </button>
+                                      </>
                                     )}
                                   </div>
+                                  {w.status === "SUBMITTED" && (
+                                    <div className="mt-2">
+                                      <CompactStatusNotice
+                                        tone="green"
+                                        title="Submitted"
+                                        detail="Withdrawal submitted from your connected wallet."
+                                        reference={w.tx_hash}
+                                      />
+                                    </div>
+                                  )}
                                 </div>
                               )
                             })}

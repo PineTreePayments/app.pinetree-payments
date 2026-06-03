@@ -86,6 +86,7 @@ type PageStatus =
   | "signing"
   | "recording"
   | "submitted"
+  | "confirmed"
   | "rejected"
   | "failed"
   | "expired"
@@ -131,12 +132,113 @@ function formatShortAddress(addr: string): string {
   return `${t.slice(0, 6)}...${t.slice(-4)}`
 }
 
+function formatNetworkName(network: string): string {
+  const value = String(network || "").toLowerCase()
+  if (value === "solana") return "Solana"
+  if (value === "base") return "Base"
+  if (value === "ethereum") return "Ethereum"
+  return network ? network.charAt(0).toUpperCase() + network.slice(1) : ""
+}
+
+function formatAssetSymbol(asset: string): string {
+  return String(asset || "").toUpperCase()
+}
+
 function formatExpiry(expiresAt: string): string {
   const ms = new Date(expiresAt).getTime() - Date.now()
   if (ms <= 0) return "Expired"
   const mins = Math.floor(ms / 60000)
   const secs = Math.floor((ms % 60000) / 1000)
   return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
+}
+
+function ApprovalStatusIcon({ tone }: { tone: "success" | "error" | "processing" }) {
+  const classes =
+    tone === "success"
+      ? "bg-emerald-50 text-emerald-600 ring-emerald-100"
+      : tone === "error"
+        ? "bg-red-50 text-red-600 ring-red-100"
+        : "bg-[#0052FF]/5 text-[#0052FF] ring-[#0052FF]/10"
+
+  return (
+    <div className={`mx-auto flex h-14 w-14 items-center justify-center rounded-full ring-8 ${classes}`}>
+      {tone === "success" ? (
+        <svg viewBox="0 0 24 24" aria-hidden="true" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+      ) : tone === "error" ? (
+        <svg viewBox="0 0 24 24" aria-hidden="true" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 8v5" />
+          <path d="M12 17h.01" />
+          <path d="M10.3 4.4 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.4a2 2 0 0 0-3.4 0Z" />
+        </svg>
+      ) : (
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent" />
+      )}
+    </div>
+  )
+}
+
+function ApprovalDetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-2xl border border-gray-100 bg-gray-50/70 px-3.5 py-3">
+      <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-400">{label}</span>
+      <span className={`min-w-0 truncate text-right text-sm font-semibold text-gray-900 ${mono ? "font-mono" : ""}`} title={value}>
+        {value}
+      </span>
+    </div>
+  )
+}
+
+function ApprovalOutcomeCard({
+  tone,
+  title,
+  message,
+  detail,
+  primaryAction,
+  secondaryAction
+}: {
+  tone: "success" | "error"
+  title: string
+  message: string
+  detail?: string
+  primaryAction?: { label: string; onClick: () => void }
+  secondaryAction?: { label: string; onClick: () => void }
+}) {
+  return (
+    <div className="text-center">
+      <ApprovalStatusIcon tone={tone} />
+      <p className="mt-5 text-xl font-bold tracking-tight text-gray-950">{title}</p>
+      <p className="mx-auto mt-2 max-w-xs text-sm leading-6 text-gray-600">{message}</p>
+      {detail && (
+        <p className={`mt-3 rounded-2xl border px-3.5 py-3 text-left text-xs leading-5 ${tone === "success" ? "border-emerald-100 bg-emerald-50/70 text-emerald-800" : "border-red-100 bg-red-50/70 text-red-700"}`}>
+          {detail}
+        </p>
+      )}
+      {(primaryAction || secondaryAction) && (
+        <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+          {primaryAction && (
+            <button
+              type="button"
+              onClick={primaryAction.onClick}
+              className="inline-flex min-h-12 flex-1 items-center justify-center rounded-2xl bg-[#0052FF] px-5 py-3 text-sm font-bold text-white shadow-sm shadow-[#0052FF]/25 transition hover:bg-[#003FCC] active:scale-[0.98]"
+            >
+              {primaryAction.label}
+            </button>
+          )}
+          {secondaryAction && (
+            <button
+              type="button"
+              onClick={secondaryAction.onClick}
+              className="inline-flex min-h-12 flex-1 items-center justify-center rounded-2xl border border-gray-200 bg-white px-5 py-3 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-300 hover:bg-gray-50"
+            >
+              {secondaryAction.label}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 /** Resolve the wallet-specific in-app browser deep link for Base-family wallets. */
@@ -792,12 +894,14 @@ export default function WalletApprovalPage({
 
       const s = data.session
       setSession(s)
+      const normalizedStatus = String(s.status || "").toLowerCase()
 
       // Already terminal?
-      if (s.status === "submitted") { setPageStatus("submitted"); return }
-      if (s.status === "rejected")  { setPageStatus("rejected");  return }
-      if (s.status === "failed")    { setPageStatus("failed");    setStatusMessage(s.error || ""); return }
-      if (s.status === "expired")   { setPageStatus("expired");   return }
+      if (normalizedStatus === "confirmed") { setPageStatus("confirmed"); return }
+      if (normalizedStatus === "submitted") { setPageStatus("submitted"); return }
+      if (normalizedStatus === "rejected")  { setPageStatus("rejected");  return }
+      if (normalizedStatus === "failed")    { setPageStatus("failed");    setStatusMessage(s.error || ""); return }
+      if (normalizedStatus === "expired")   { setPageStatus("expired");   return }
 
       // Handle deeplink callbacks first
       const searchParams = new URLSearchParams(window.location.search)
@@ -814,7 +918,7 @@ export default function WalletApprovalPage({
       }
 
       // Mark session as opened when the merchant's phone first views it
-      if (s.status === "created") {
+      if (normalizedStatus === "created") {
         await patchSessionStatus(s.id, "opened")
       }
 
@@ -1176,8 +1280,9 @@ export default function WalletApprovalPage({
   }
   const destinationLabel = session?.destination_label || "Destination"
   const destinationAddress = session ? formatShortAddress(session.destination_address) : "-"
-  const displayAmount = session ? `${session.amount} ${session.asset}` : ""
-  const networkWalletLine = session ? `${session.network} - ${walletName}` : ""
+  const displayAmount = session ? `${session.amount} ${formatAssetSymbol(session.asset)}` : ""
+  const networkWalletLine = session ? `${formatNetworkName(session.network)} - ${walletName}` : ""
+  const submittedReference = session ? session.tx_hash || session.signature || "" : ""
 
   function resetForRetry() {
     if (session?.wallet_type === "phantom")  clearPhantomSession(session.id)
@@ -1217,26 +1322,27 @@ export default function WalletApprovalPage({
 
         {/* Not found / load error */}
         {pageStatus === "not_found" && (
-          <PaymentStatusVisual
-            status="FAILED"
-            variant="card"
-            labelOverride="Approval unavailable"
-            messageOverride={statusMessage || "This approval link is invalid or has been removed."}
-          />
+          <div className="rounded-3xl border border-red-100 bg-white p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] ring-1 ring-white/80">
+            <ApprovalOutcomeCard
+              tone="error"
+              title="Approval unavailable"
+              message="This approval link is invalid or has been removed."
+              detail={statusMessage || undefined}
+              primaryAction={{ label: "Done", onClick: () => window.close() }}
+            />
+          </div>
         )}
 
         {/* Expired */}
         {pageStatus === "expired" && (
-          <div className="space-y-3">
-            <PaymentStatusVisual
-              status="EXPIRED"
-              variant="card"
-              labelOverride="Approval expired"
-              messageOverride="Create a new approval QR from PineTree."
+          <div className="rounded-3xl border border-red-100 bg-white p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] ring-1 ring-white/80">
+            <ApprovalOutcomeCard
+              tone="error"
+              title="Session expired"
+              message="This withdrawal approval link has expired."
+              detail="Create a new approval QR from PineTree."
+              primaryAction={{ label: "Done", onClick: () => window.close() }}
             />
-            <div className="rounded-2xl border border-gray-200 bg-white/85 px-4 py-3 text-center text-sm font-semibold text-gray-700 shadow-sm">
-              Create a new approval QR from PineTree.
-            </div>
           </div>
         )}
 
@@ -1244,7 +1350,7 @@ export default function WalletApprovalPage({
         {session && !["loading", "not_found", "expired"].includes(pageStatus) && (
           <>
             {/* Transaction summary card */}
-            <div className="overflow-hidden rounded-3xl border border-[#0052FF]/15 bg-gradient-to-br from-white via-[#f8fbff] to-[#eef6ff] p-5 shadow-[0_12px_30px_rgba(15,23,42,0.07)] ring-1 ring-white/80">
+            <div className="overflow-hidden rounded-3xl border border-[#0052FF]/15 bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.07)] ring-1 ring-white/80">
               <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">
                 Transfer summary
               </p>
@@ -1252,7 +1358,7 @@ export default function WalletApprovalPage({
                 <p className="text-4xl font-bold tracking-tight text-gray-950">{displayAmount}</p>
                 <p className="mt-1 text-sm font-medium text-gray-500">{networkWalletLine}</p>
               </div>
-              <div className="mt-4 space-y-3">
+              <div className="mt-4 space-y-2.5">
                 {[
                   { label: "Wallet",      value: formatShortAddress(session.wallet_address) },
                   { label: "Destination", value: destinationLabel },
@@ -1260,14 +1366,7 @@ export default function WalletApprovalPage({
                   { label: "Fee",         value: "Wallet will estimate" },
                   { label: "Expires",     value: expiryDisplay || "-" },
                 ].map(({ label, value }) => (
-                  <div key={label} className="flex items-center justify-between gap-4">
-                    <span className="text-xs font-medium text-gray-500">
-                      {label}
-                    </span>
-                    <span className="min-w-0 truncate text-right text-sm font-semibold text-gray-900">
-                      {value}
-                    </span>
-                  </div>
+                  <ApprovalDetailRow key={label} label={label} value={value} mono={label === "Wallet" || label === "To address"} />
                 ))}
               </div>
             </div>
@@ -1282,7 +1381,7 @@ export default function WalletApprovalPage({
                     Approve with {walletName}
                   </p>
                   <p className="mt-1 text-sm leading-6 text-gray-500">
-                    Review and approve this transfer in your wallet.
+                    Review and approve this withdrawal in your connected wallet.
                   </p>
                   <button
                     type="button"
@@ -1293,7 +1392,7 @@ export default function WalletApprovalPage({
                     }}
                     className="mt-4 w-full rounded-2xl bg-[#0052FF] px-5 py-3.5 text-sm font-bold text-white shadow-sm shadow-[#0052FF]/25 transition hover:bg-[#003FCC] active:scale-[0.98]"
                   >
-                    {walletType === "phantom" || walletType === "solflare" ? `Connect ${walletName}` : `Approve with ${walletName}`}
+                    Open {walletName}
                   </button>
                 </>
               )}
@@ -1312,9 +1411,9 @@ export default function WalletApprovalPage({
               {/* Phantom connected — must tap to open signing deeplink (iOS gesture) */}
               {pageStatus === "phantom_connected" && (
                 <>
-                  <p className="text-lg font-bold text-gray-950">Phantom connected</p>
+                  <p className="text-lg font-bold text-gray-950">Approve with Phantom</p>
                   <p className="mt-1 text-sm leading-6 text-gray-500">
-                    Review and approve this transfer in your wallet.
+                    Review and approve this withdrawal in your connected wallet.
                   </p>
                   <button
                     type="button"
@@ -1323,7 +1422,7 @@ export default function WalletApprovalPage({
                     }}
                     className="mt-4 w-full rounded-2xl bg-[#0052FF] px-5 py-3.5 text-sm font-bold text-white shadow-sm shadow-[#0052FF]/25 transition hover:bg-[#003FCC] active:scale-[0.98]"
                   >
-                    Approve Transaction in Phantom
+                    Confirm Withdrawal
                   </button>
                 </>
               )}
@@ -1331,9 +1430,9 @@ export default function WalletApprovalPage({
               {/* Solflare connected — must tap to open signing deeplink (iOS gesture) */}
               {pageStatus === "solflare_connected" && (
                 <>
-                  <p className="text-lg font-bold text-gray-950">Solflare connected</p>
+                  <p className="text-lg font-bold text-gray-950">Approve with Solflare</p>
                   <p className="mt-1 text-sm leading-6 text-gray-500">
-                    Review and approve this transfer in your wallet.
+                    Review and approve this withdrawal in your connected wallet.
                   </p>
                   <button
                     type="button"
@@ -1342,7 +1441,7 @@ export default function WalletApprovalPage({
                     }}
                     className="mt-4 w-full rounded-2xl bg-[#0052FF] px-5 py-3.5 text-sm font-bold text-white shadow-sm shadow-[#0052FF]/25 transition hover:bg-[#003FCC] active:scale-[0.98]"
                   >
-                    Approve Transaction in Solflare
+                    Confirm Withdrawal
                   </button>
                 </>
               )}
@@ -1396,13 +1495,37 @@ export default function WalletApprovalPage({
               )}
 
               {pageStatus === "submitted" && (
-                <PaymentStatusVisual
-                  status="CONFIRMED"
-                  size="compact"
-                  labelOverride="Transaction submitted"
-                  messageOverride="Transaction approved and submitted. You can close this page."
-                  labelClassName="text-lg font-bold text-gray-950"
-                />
+                <div>
+                  <ApprovalOutcomeCard
+                    tone="success"
+                    title="Withdrawal Submitted"
+                    message="Your withdrawal was submitted successfully."
+                    primaryAction={{ label: "Done", onClick: () => window.close() }}
+                  />
+                  <div className="mt-5 space-y-2.5">
+                    {submittedReference && (
+                      <ApprovalDetailRow label="Transaction" value={formatShortAddress(submittedReference)} mono />
+                    )}
+                    <ApprovalDetailRow label="Status" value="Submitted" />
+                  </div>
+                </div>
+              )}
+
+              {pageStatus === "confirmed" && (
+                <div>
+                  <ApprovalOutcomeCard
+                    tone="success"
+                    title="Withdrawal Confirmed"
+                    message="Your withdrawal has been confirmed on-chain."
+                    primaryAction={{ label: "Done", onClick: () => window.close() }}
+                  />
+                  <div className="mt-5 space-y-2.5">
+                    {submittedReference && (
+                      <ApprovalDetailRow label="Transaction" value={formatShortAddress(submittedReference)} mono />
+                    )}
+                    <ApprovalDetailRow label="Status" value="Confirmed" />
+                  </div>
+                </div>
               )}
 
               {pageStatus === "rejected" && (
@@ -1410,8 +1533,8 @@ export default function WalletApprovalPage({
                   <PaymentStatusVisual
                     status="FAILED"
                     size="compact"
-                    labelOverride="Transaction rejected"
-                    messageOverride={statusMessage || `Transaction rejected in ${walletName}.`}
+                    labelOverride="Withdrawal rejected"
+                    messageOverride={statusMessage || "The wallet rejected this withdrawal."}
                     labelClassName="text-lg font-bold text-gray-950"
                   />
                   <button
@@ -1420,6 +1543,13 @@ export default function WalletApprovalPage({
                     className="mt-4 w-full rounded-2xl border border-[#0052FF]/15 bg-white px-5 py-3 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-[#0052FF]/30 hover:text-[#0052FF]"
                   >
                     Try Again
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => window.close()}
+                    className="mt-2 w-full rounded-2xl border border-gray-200 bg-white px-5 py-3 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-300 hover:bg-gray-50"
+                  >
+                    Cancel
                   </button>
                 </div>
               )}
@@ -1430,7 +1560,7 @@ export default function WalletApprovalPage({
                     status="FAILED"
                     size="compact"
                     labelOverride="Approval failed"
-                    messageOverride={statusMessage || "This transfer could not be approved."}
+                    messageOverride={statusMessage || "This withdrawal could not be approved."}
                     labelClassName="text-lg font-bold text-gray-950"
                   />
                   <button
@@ -1439,6 +1569,13 @@ export default function WalletApprovalPage({
                     className="mt-4 w-full rounded-2xl border border-[#0052FF]/15 bg-white px-5 py-3 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-[#0052FF]/30 hover:text-[#0052FF]"
                   >
                     Try Again
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => window.close()}
+                    className="mt-2 w-full rounded-2xl border border-gray-200 bg-white px-5 py-3 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-300 hover:bg-gray-50"
+                  >
+                    Cancel
                   </button>
                 </div>
               )}

@@ -145,10 +145,22 @@ export default function DashboardLayout({
             min-h-screen pt-[env(safe-area-inset-top)]
           `}
         >
-          <div className="px-6 py-7 border-b border-gray-100">
-            <h1 className="text-2xl font-semibold text-gray-900">
-              PineTree
-            </h1>
+          <div className="border-b border-gray-100 px-6 py-5">
+            <Link
+              href="/dashboard"
+              aria-label="PineTree Payments"
+              onClick={() => setSidebarOpen(false)}
+              className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-gray-200/80 transition hover:bg-gray-50 focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"
+            >
+              <img
+                src="/favicon.ico"
+                alt=""
+                aria-hidden="true"
+                className="h-9 w-9 object-contain"
+                width={36}
+                height={36}
+              />
+            </Link>
           </div>
 
           <nav className="flex-1 space-y-1.5 overflow-y-auto px-3 py-4">
@@ -210,9 +222,20 @@ export default function DashboardLayout({
                   />
                 </svg>
               </button>
-              <span className="text-sm font-semibold text-white/95 lg:hidden">
-                PineTree
-              </span>
+              <Link
+                href="/dashboard"
+                aria-label="PineTree Payments"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-white/95 shadow-sm ring-1 ring-white/40 transition hover:bg-white focus:outline-none focus-visible:ring-4 focus-visible:ring-white/30 lg:hidden"
+              >
+                <img
+                  src="/favicon.ico"
+                  alt=""
+                  aria-hidden="true"
+                  className="h-7 w-7 object-contain"
+                  width={28}
+                  height={28}
+                />
+              </Link>
             </div>
 
             <div ref={accountMenuRef} className="relative">
