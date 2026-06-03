@@ -1199,10 +1199,10 @@ export default function HelpCenterPage() {
         </div>
       </DashboardSection>
 
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <DashboardSection title="Support" titleTone="blue" className="h-full">
+      <div className="grid items-stretch gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <DashboardSection title="Support" titleTone="blue" className="flex h-full flex-col">
             {/* Open a Ticket form */}
-            <div id="support-ticket" className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+            <div id="support-ticket" className="flex flex-1 flex-col rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-lg font-semibold text-gray-950">Open a Ticket</h2>
@@ -1277,7 +1277,7 @@ export default function HelpCenterPage() {
           </DashboardSection>
 
         <DashboardSection title="PineTree AI" titleTone="blue" className="flex h-full flex-col">
-          <div id="pinetree-ai" className="flex max-h-[34rem] min-h-[34rem] flex-1 flex-col overflow-hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-4 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
+          <div id="pinetree-ai" className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-4 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Bot className="h-5 w-5 text-[#0052FF]" />
