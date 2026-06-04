@@ -216,6 +216,7 @@ export default function ProvidersPage() {
   const [walletSessionId, setWalletSessionId] = useState<string | null>(null)
   const [walletSessionStatus, setWalletSessionStatus] = useState<string | null>(null)
   const [walletMobileDeeplink, setWalletMobileDeeplink] = useState<string | null>(null)
+  const [connectedWalletAddress, setConnectedWalletAddress] = useState<string | null>(null)
 
   const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const didToastSyncRef = useRef(false)
@@ -234,6 +235,7 @@ export default function ProvidersPage() {
     setWalletSessionId(null)
     setWalletSessionStatus(null)
     setWalletMobileDeeplink(null)
+    setConnectedWalletAddress(null)
     didToastSyncRef.current = false
     setSpeedAccountId("")
     setLightningSetupTab("speed")
@@ -360,6 +362,7 @@ export default function ProvidersPage() {
 
         if (session.status === "connected" && session.wallet_address) {
           setInputValue(session.wallet_address)
+          setConnectedWalletAddress(session.wallet_address)
 
           if (session.wallet_type) {
             setSelectedWalletType(session.wallet_type)
@@ -582,6 +585,7 @@ export default function ProvidersPage() {
 
     setWalletSessionId(sessionId)
     setWalletSessionStatus("pending")
+    setConnectedWalletAddress(null)
     didToastSyncRef.current = false
 
     return sessionId
@@ -729,6 +733,45 @@ export default function ProvidersPage() {
     }
   }
 
+  async function connectWalletOnThisDevice() {
+    if (activeProvider !== "solana" && activeProvider !== "base") return
+
+    if (!selectedWalletType) {
+      toast.error(
+        activeProvider === "solana"
+          ? "Select Phantom or Solflare first"
+          : "Select MetaMask, Trust Wallet, or Coinbase Wallet first"
+      )
+      return
+    }
+
+    setLoading(true)
+
+    try {
+      const result =
+        activeProvider === "solana"
+          ? await connectSolanaWallet(selectedWalletType)
+          : await connectBaseWallet(selectedWalletType)
+
+      if (!result?.walletAddress) {
+        toast.error(
+          activeProvider === "solana"
+            ? "No wallet detected - install Phantom or Solflare, or paste address"
+            : "No wallet detected - install the selected wallet or paste address"
+        )
+        return
+      }
+
+      setInputValue(result.walletAddress)
+      setConnectedWalletAddress(result.walletAddress)
+      setSelectedWalletType(result.walletType)
+      setWalletSessionStatus("connected")
+      toast.success("Wallet connected. Review and save.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
   function openProvider(provider: string) {
     const existingWallet = getWallet(provider)
     const p = getProvider(provider)
@@ -765,6 +808,7 @@ export default function ProvidersPage() {
     setWalletSessionId(null)
     setWalletSessionStatus(null)
     setWalletMobileDeeplink(null)
+    setConnectedWalletAddress(null)
     didToastSyncRef.current = false
 
     if (pollerRef.current) {
@@ -936,6 +980,47 @@ export default function ProvidersPage() {
 
       if (!walletAddress && walletSessionStatus === "connected") {
         toast.error("Wallet detected but not yet loaded. Try again.")
+        return
+      }
+
+      if (provider === "solana" || provider === "base") {
+        walletType = provider === "solana"
+          ? selectedWalletType || "MANUAL"
+          : selectedWalletType || "BASEAPP"
+
+        if (!walletAddress) {
+          toast.error(
+            provider === "solana"
+              ? "Connect a wallet or paste a Solana address"
+              : "Connect a wallet or paste a Base address"
+          )
+          return
+        }
+
+        const payload = await callProvidersApi("POST", {
+          action: "saveProvider",
+          provider,
+          walletAddress,
+          walletType,
+        })
+
+        applyProvidersPayload(payload)
+
+        if (walletSessionId) {
+          const { data: { session: wcsSession } } = await supabase.auth.getSession()
+          const wcsToken = wcsSession?.access_token
+          await fetch("/api/wallet-connect-session", {
+            method: "DELETE",
+            headers: {
+              "Content-Type": "application/json",
+              ...(wcsToken ? { Authorization: `Bearer ${wcsToken}` } : {}),
+            },
+            body: JSON.stringify({ session_id: walletSessionId }),
+          })
+        }
+
+        closeProviderModal()
+        toast.success(provider === "solana" ? "Solana wallet connected" : "Base wallet connected")
         return
       }
 
@@ -2165,31 +2250,42 @@ export default function ProvidersPage() {
                   </p>
                   <button
                     type="button"
-                    onClick={() => saveProvider(activeProvider)}
+                    onClick={connectWalletOnThisDevice}
                     className="mt-3 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={!selectedWalletType}
+                    disabled={loading || !selectedWalletType}
                   >
-                    Connect on This Device
+                    {loading ? "Connecting..." : "Connect on This Device"}
                   </button>
                 </div>
 
-                {/* Fallback — paste address */}
-                <details className="rounded-xl border border-gray-200 bg-white">
-                  <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-gray-600 hover:text-gray-800">
-                    Or paste wallet address manually
-                  </summary>
-                  <div className="border-t border-gray-100 px-4 py-3 space-y-2">
-                    <p className="text-xs leading-5 text-gray-500">
-                      Only use this if wallet connection is not available. Verify the address is on the correct network before saving.
-                    </p>
+                {/* Wallet address review */}
+                <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <label className="block">
+                    <span className="text-sm font-semibold text-gray-950">Wallet address</span>
+                    <span className="mt-1 block text-xs leading-5 text-gray-500">
+                      Review the connected wallet address, or paste an address manually before saving.
+                    </span>
                     <input
                       value={inputValue}
-                      onChange={(e) => setInputValue(e.target.value)}
-                      placeholder={activeProvider === "solana" ? "Solana wallet address" : "Base wallet address (0x…)"}
-                      className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-50"
+                      onChange={(e) => {
+                        const nextValue = e.target.value
+                        setInputValue(nextValue)
+                        if (connectedWalletAddress && nextValue.trim() !== connectedWalletAddress.trim()) {
+                          setConnectedWalletAddress(null)
+                          setWalletSessionStatus(null)
+                        }
+                      }}
+                      placeholder={activeProvider === "solana" ? "Solana wallet address" : "Base wallet address (0x...)"}
+                      className="mt-2 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-50"
                     />
-                  </div>
-                </details>
+                  </label>
+
+                  {connectedWalletAddress && (
+                    <p className="mt-2 text-xs font-semibold text-[#0052FF]">
+                      Wallet connected: {formatCredentialPart(connectedWalletAddress, 6, 4)}
+                    </p>
+                  )}
+                </div>
 
               </div>
             )}
