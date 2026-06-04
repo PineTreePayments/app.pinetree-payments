@@ -1,25 +1,31 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
+
+type SetupState = "connecting" | "success" | "failed"
 
 export default function SolanaReturnPage() {
+  const [setupState, setSetupState] = useState<SetupState>("connecting")
+  const [message, setMessage] = useState("Connecting wallet...")
+
   useEffect(() => {
     async function handleConnect() {
       try {
         const params = new URLSearchParams(window.location.search)
         const sessionId = params.get("session_id")
         const walletType = params.get("wallet_type")
-        const returnTo = params.get("return_to")
 
         if (!sessionId) {
-          alert("Wallet setup link is missing a session. Please return to PineTree and generate a new setup QR.")
+          setMessage("Wallet setup link is missing a session.")
+          setSetupState("failed")
           return
         }
 
         const provider = window.solana
 
         if (!provider) {
-          alert("No Solana wallet found. Please open this link from Phantom or Solflare.")
+          setMessage("No Solana wallet found. Open this link from Phantom or Solflare.")
+          setSetupState("failed")
           return
         }
 
@@ -41,13 +47,16 @@ export default function SolanaReturnPage() {
         })
 
         if (!res.ok) {
-          alert("Failed to update wallet session. Please return to PineTree and try again.")
+          setMessage("Failed to update wallet session.")
+          setSetupState("failed")
           return
         }
 
-        window.location.href = returnTo || "/dashboard/providers"
+        setMessage("Return to PineTree on your desktop to review and save this wallet.")
+        setSetupState("success")
       } catch (err) {
-        alert(err instanceof Error ? err.message : "Wallet connection failed. Please try again.")
+        setMessage(err instanceof Error ? err.message : "Wallet connection failed.")
+        setSetupState("failed")
       }
     }
 
@@ -55,18 +64,48 @@ export default function SolanaReturnPage() {
   }, [])
 
   return (
+    <WalletSetupStatus
+      state={setupState}
+      message={message}
+    />
+  )
+}
+
+function WalletSetupStatus(props: { state: SetupState; message: string }) {
+  const title =
+    props.state === "success"
+      ? "Wallet connected successfully"
+      : props.state === "failed"
+        ? "Wallet connection failed"
+        : "Connecting wallet..."
+
+  return (
     <div
       style={{
-        height: "100vh",
+        minHeight: "100vh",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         fontFamily: "sans-serif",
         background: "black",
         color: "white",
+        padding: 24,
       }}
     >
-      <p>Connecting to wallet...</p>
+      <main style={{ maxWidth: 380, textAlign: "center" }}>
+        <h1 style={{ margin: "0 0 12px", fontSize: 24, lineHeight: 1.2 }}>{title}</h1>
+        <p style={{ margin: "0 0 10px", lineHeight: 1.5 }}>{props.message}</p>
+        {props.state === "success" && (
+          <p style={{ margin: 0, color: "#cbd5e1", lineHeight: 1.5 }}>
+            Do not close the desktop setup window until the address appears.
+          </p>
+        )}
+        {props.state === "failed" && (
+          <p style={{ margin: 0, color: "#cbd5e1", lineHeight: 1.5 }}>
+            Return to PineTree and try again.
+          </p>
+        )}
+      </main>
     </div>
   )
 }
