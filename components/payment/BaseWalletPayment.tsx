@@ -951,6 +951,11 @@ export default function BaseWalletPayment({
   const [isOpeningWallet, setIsOpeningWallet] = useState(false)
   const [basePayStatus, setBasePayStatus] = useState<string>("")
   const [connectedPeerName, setConnectedPeerName] = useState<string | null>(null)
+  // checkoutToken arrives as a prop that starts empty and is set after the
+  // intent loads.  Write it to a ref at render time so memoized callbacks
+  // always read the current value without needing to be re-created.
+  const checkoutTokenRef = useRef<string>("")
+  checkoutTokenRef.current = checkoutToken ?? ""
   const isSendingBaseTxRef = useRef(false)
   const autoResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const autoResumeRetryRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -1095,6 +1100,12 @@ export default function BaseWalletPayment({
   const terminalStatus = propTerminalStatus || defensiveTerminalStatus
   const isOnBase = chain?.id === base.id
   const isConnecting = connectStatus === "pending" || switchStatus === "pending"
+  // isConnecting can toggle rapidly during wagmi's connect/switch lifecycle.
+  // Storing it in a ref lets the auto-resume callback read the current value
+  // without being added to its dep array (which would cause frequent callback
+  // re-creation and effect re-registration on every connect-status change).
+  const isConnectingRef = useRef(false)
+  isConnectingRef.current = isConnecting
   const pendingPaymentKey = `${intentId || "direct"}:${selectedAsset}`
   const walletConnectConnector = useMemo(
     () => connectors.find(isWalletConnectConnector) || null,
@@ -1567,7 +1578,7 @@ export default function BaseWalletPayment({
         if (kind === "eth_payment") {
           await fetch(`/api/payments/${encodeURIComponent(paymentId)}/fail`, {
             method: "POST",
-            headers: checkoutToken ? { Authorization: `Bearer ${checkoutToken}` } : {},
+            headers: checkoutTokenRef.current ? { Authorization: `Bearer ${checkoutTokenRef.current}` } : {},
           }).catch(() => null)
           if (intentId) window.location.href = `/pay?intent=${encodeURIComponent(intentId)}&status=cancelled`
         }
@@ -1678,7 +1689,7 @@ export default function BaseWalletPayment({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(checkoutToken ? { Authorization: `Bearer ${checkoutToken}` } : {}),
+            ...(checkoutTokenRef.current ? { Authorization: `Bearer ${checkoutTokenRef.current}` } : {}),
           },
           body: JSON.stringify({ network: "base", asset: selectedAsset }),
         }
@@ -2544,7 +2555,7 @@ export default function BaseWalletPayment({
         })
         await fetch(`/api/payments/${encodeURIComponent(createdPaymentId)}/fail`, {
           method: "POST",
-          headers: checkoutToken ? { Authorization: `Bearer ${checkoutToken}` } : {},
+          headers: checkoutTokenRef.current ? { Authorization: `Bearer ${checkoutTokenRef.current}` } : {},
         }).catch(() => null)
         // Keep checkout open — customer can still try another rail (Solana, Lightning).
       }
@@ -2601,7 +2612,12 @@ export default function BaseWalletPayment({
     } finally {
       isSendingBaseTxRef.current = false
     }
-  }, [beginWalletRequest, chain?.id, clearPendingWalletAction, connector?.id, connector?.name, enforceActivePaymentBeforeWalletConnect, executeBaseV6UsdcPayment, getProviderRequestDebugTimings, intentId, isOnBase, onError, onSuccess, resolvePaymentData, resolveWalletRequest, selectedAsset, switchChainAsync, waitForWalletConnectSettlement, walletClient, walletConnectConnector])
+  // preservePendingWalletRequestUi, queuePendingWalletAction, rejectWalletRequest,
+  // timeoutWalletRequest all have useCallback(fn, []) — referentially stable.
+  // chain?.id, connector?.id, connector?.name were in the original array and kept
+  // to maintain the existing re-creation semantics (re-run on chain/connector change).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [beginWalletRequest, chain?.id, clearPendingWalletAction, connector?.id, connector?.name, enforceActivePaymentBeforeWalletConnect, executeBaseV6UsdcPayment, getProviderRequestDebugTimings, intentId, isOnBase, onError, onSuccess, preservePendingWalletRequestUi, queuePendingWalletAction, rejectWalletRequest, resolvePaymentData, resolveWalletRequest, selectedAsset, switchChainAsync, timeoutWalletRequest, waitForWalletConnectSettlement, walletClient, walletConnectConnector])
   const resetBasePaymentAttemptForRetry = useCallback(() => {
     const hadStaleState = Boolean(
       activeBasePaymentAttemptRef.current ||
@@ -2831,7 +2847,11 @@ export default function BaseWalletPayment({
         onError?.(friendly)
       }
     })()
-  }, [address, connectAsync, continueBasePayment, enforceActivePaymentBeforeWalletConnect, intentId, isConnected, markWalletConnectionApproved, onError, onExecutionStarted, resetBasePaymentAttemptForRetry, resolvePaymentData, selectedAsset, waitForWalletConnectSettlement, walletConnectConnector])
+  // beginWalletRequest, preservePendingWalletRequestUi, rejectWalletRequest,
+  // resolveWalletRequest all have useCallback(fn, []) — stable, never cause re-renders.
+  // resolvePaymentData was in the original array; kept to maintain existing behavior.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address, beginWalletRequest, connectAsync, continueBasePayment, enforceActivePaymentBeforeWalletConnect, intentId, isConnected, markWalletConnectionApproved, onError, onExecutionStarted, preservePendingWalletRequestUi, rejectWalletRequest, resetBasePaymentAttemptForRetry, resolvePaymentData, resolveWalletRequest, selectedAsset, waitForWalletConnectSettlement, walletConnectConnector])
   const stopAutoResumeRetry = useCallback(() => {
     if (autoResumeRetryRef.current) {
       clearInterval(autoResumeRetryRef.current)
@@ -2941,7 +2961,7 @@ export default function BaseWalletPayment({
       !hasPending ? "no-pending"
       : selectedAsset !== "ETH" && selectedAsset !== "USDC" ? "not-base-asset"
       : activeBasePaymentAttemptRef.current !== null ? "active-attempt-lock"
-      : isConnecting ? "connecting"
+      : isConnectingRef.current ? "connecting"
       : !isConnected ? "not-connected"
       : !address ? "no-address"
       : !connector || !isWalletConnectConnector(connector) ? "active-connector-not-walletconnect"

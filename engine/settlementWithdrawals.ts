@@ -431,6 +431,8 @@ export async function recordDirectSendSubmission(
   const cleanHash = input.txHash.trim()
   if (!cleanHash) throw Object.assign(new Error("tx_hash is required."), { status: 400 })
 
+  // Application-level idempotency check: if a record already exists for this
+  // tx_hash + merchant, return it without creating a duplicate.
   const existing = await getSettlementWithdrawalByTxHash(merchantId, cleanHash)
   if (existing) return existing
 
@@ -445,21 +447,47 @@ export async function recordDirectSendSubmission(
   const label = String(input.destinationLabel || "").trim() ||
     (input.destinationKind === "saved_destination" ? "Saved destination" : "Manual address")
 
-  const record = await createSettlementWithdrawal({
-    merchantId,
-    walletId: input.walletId,
-    settlementDestinationId: null,
-    movementType: "direct_send",
-    destinationKind: input.destinationKind,
-    destinationLabel: label,
-    exchangeName: input.destinationKind === "saved_destination" ? "Saved destination" : "Manual address",
-    asset,
-    network,
-    amount: amountNum,
-    destinationAddress: address,
-    memoOrTag: null,
-    status: "SUBMITTED"
-  })
+  let record: SettlementWithdrawalRecord
+  try {
+    record = await createSettlementWithdrawal({
+      merchantId,
+      walletId: input.walletId,
+      settlementDestinationId: null,
+      movementType: "direct_send",
+      destinationKind: input.destinationKind,
+      destinationLabel: label,
+      exchangeName: input.destinationKind === "saved_destination" ? "Saved destination" : "Manual address",
+      asset,
+      network,
+      amount: amountNum,
+      destinationAddress: address,
+      memoOrTag: null,
+      status: "SUBMITTED"
+    })
+  } catch (err) {
+    // Postgres unique constraint violation (code 23505) means a concurrent
+    // request already inserted this tx_hash.  Re-query and return that record
+    // so the caller gets idempotent behaviour instead of a 500 error.
+    // This pairs with the proposed migration:
+    //   ALTER TABLE settlement_withdrawals
+    //     ADD CONSTRAINT uq_settlement_withdrawals_merchant_tx_hash
+    //     UNIQUE (merchant_id, tx_hash);
+    const pgCode =
+      typeof err === "object" && err !== null
+        ? (err as Record<string, unknown>).code
+        : undefined
+    if (pgCode === "23505") {
+      const concurrent = await getSettlementWithdrawalByTxHash(merchantId, cleanHash)
+      if (concurrent) {
+        console.info("[recordDirectSendSubmission] concurrent insert detected — returning existing record", {
+          merchantId: merchantId.slice(0, 8),
+          txHashPrefix: cleanHash.slice(0, 12),
+        })
+        return concurrent
+      }
+    }
+    throw err
+  }
 
   return updateSettlementWithdrawalStatus(merchantId, record.id, "SUBMITTED", {
     txHash: cleanHash,

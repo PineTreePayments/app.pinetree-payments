@@ -317,22 +317,20 @@ export const RPC_URLS: Record<string, string> = {
 }
 
 /**
- * Network to return path mapping
- * Determines which return page to use after payment
+ * Network to return path mapping.
+ * Solana Pay uses /solana-return for deeplink callbacks.
+ * Base V7 (WalletConnect) does not use a return redirect; the legacy
+ * /base-return page has been removed.
  */
 export const NETWORK_RETURN_PATHS: Record<string, string> = {
-  base: "/base-return",
-  base_pay: "/base-return",
-  ethereum: "/base-return",
   solana: "/solana-return",
-  coinbase: "/coinbase-return"
 }
 
 /**
  * Get return path for a network
  */
 export function getReturnPath(network: string): string {
-  return NETWORK_RETURN_PATHS[network] || "/base-return"
+  return NETWORK_RETURN_PATHS[network] || "/"
 }
 
 /**
@@ -383,26 +381,75 @@ export const HEALTH_CHECK_CONFIG = {
 export const PAYMENT_EXPIRATION_MINUTES = 30
 
 /**
- * Validate that required configuration is present
+ * Validate that required configuration is present.
+ *
+ * Always checked (dev + production):
+ *   NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY
+ *
+ * Production-only (NODE_ENV === "production"):
+ *   CHECKOUT_SESSION_SECRET — HMAC key for checkout session tokens
+ *   TERMINAL_SESSION_SECRET — HMAC key for POS terminal session tokens
+ *   SPEED_WEBHOOK_SECRET    — Lightning webhook signature verification
+ *
+ * Rationale for production-only: local dev commonly runs without these vars
+ * and fails gracefully when the code path is hit.  In production a missing
+ * secret is a silent security hole, so we fail closed at startup.
  */
 export function validateConfig(): void {
   const missing: string[] = []
-  
+
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
     missing.push("NEXT_PUBLIC_SUPABASE_URL")
   }
-  
+
   if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
     missing.push("NEXT_PUBLIC_SUPABASE_ANON_KEY")
   }
 
   // Treasury wallets are always resolved (env override -> shared env -> built-in defaults)
   // Format is verified separately by assertTreasuryWalletFormat in payment creation flow.
-  
+
   if (missing.length > 0) {
     throw new Error(
       `Missing required environment variables: ${missing.join(", ")}`
     )
+  }
+
+  // Production-only checks — fail closed so a misconfigured deploy is caught
+  // at first payment creation rather than silently falling back to no auth.
+  if (process.env.NODE_ENV === "production") {
+    const prodMissing: string[] = []
+
+    if (!String(process.env.CHECKOUT_SESSION_SECRET || "").trim()) {
+      prodMissing.push("CHECKOUT_SESSION_SECRET")
+    }
+    if (!String(process.env.TERMINAL_SESSION_SECRET || "").trim()) {
+      prodMissing.push("TERMINAL_SESSION_SECRET")
+    }
+    if (!String(process.env.SPEED_WEBHOOK_SECRET || "").trim()) {
+      prodMissing.push("SPEED_WEBHOOK_SECRET")
+    }
+
+    if (prodMissing.length > 0) {
+      throw new Error(
+        `Missing required production environment variables: ${prodMissing.join(", ")}. ` +
+        "These must be set before processing payments."
+      )
+    }
+  } else {
+    // In dev/test: warn (do not throw) so local development still works
+    // without a full secrets setup.
+    const devWarn: string[] = []
+    if (!String(process.env.CHECKOUT_SESSION_SECRET || "").trim()) devWarn.push("CHECKOUT_SESSION_SECRET")
+    if (!String(process.env.TERMINAL_SESSION_SECRET || "").trim()) devWarn.push("TERMINAL_SESSION_SECRET")
+    if (!String(process.env.SPEED_WEBHOOK_SECRET    || "").trim()) devWarn.push("SPEED_WEBHOOK_SECRET")
+
+    if (devWarn.length > 0) {
+      console.warn(
+        `[config] WARNING: Missing environment variables in dev: ${devWarn.join(", ")}. ` +
+        "These are required in production. Token signing or webhook verification will fail if these code paths are exercised."
+      )
+    }
   }
 }
 

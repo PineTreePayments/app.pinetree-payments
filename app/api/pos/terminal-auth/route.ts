@@ -51,11 +51,10 @@ export async function POST(req: NextRequest) {
 
     const sessionToken = await verifyPosTerminalPinEngine(terminalId, pin)
 
-    // Successful auth — clear the attempt counter so a legitimate user
-    // who previously mistyped doesn't hit the limit mid-shift.
-    // We achieve this by exhausting the window: simply not counting successes
-    // means the window slides naturally.  No explicit reset needed with a
-    // sliding-window implementation.
+    // Successful auth — reset the failure counter so a cashier who mistyped
+    // 3 times and then entered the correct PIN doesn't get locked out on their
+    // next shift login within the same 15-minute window.
+    pinLimiter.reset(terminalId)
 
     return NextResponse.json({ sessionToken })
   } catch (error: unknown) {

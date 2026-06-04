@@ -231,6 +231,11 @@ export default function SolanaWalletPayment({
   const [pendingWalletId, setPendingWalletId] = useState("")
   const [execStage, setExecStage] = useState<SolanaExecutionStage>("idle")
   const [error, setError] = useState(initialError)
+  // checkoutToken arrives as a prop that starts empty and is set after the
+  // intent loads.  Write it to a ref at render time so memoized callbacks
+  // always read the current value without needing to be re-created.
+  const checkoutTokenRef = useRef<string>("")
+  checkoutTokenRef.current = checkoutToken ?? ""
   // Wallet bounce tracking — set on any launch attempt, detected on visibility return
   const walletLaunchedRef = useRef(false)
   const [walletLaunched, setWalletLaunched] = useState(false)
@@ -368,7 +373,7 @@ export default function SolanaWalletPayment({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(checkoutToken ? { Authorization: `Bearer ${checkoutToken}` } : {}),
+          ...(checkoutTokenRef.current ? { Authorization: `Bearer ${checkoutTokenRef.current}` } : {}),
         },
         body: JSON.stringify({ network: "solana", asset: selectedAsset }),
       }

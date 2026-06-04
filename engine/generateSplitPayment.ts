@@ -117,14 +117,14 @@ export async function generateSplitPayment(
   }
 
   /* --------------------------------
-  🔥 FIX: DYNAMIC RETURN BASED ON NETWORK
+  RETURN PATH BY NETWORK
   -------------------------------- */
 
-  let returnPath = "/solana-return"
-
-  if (network === "base") {
-    returnPath = "/base-return"
-  }
+  // Solana Pay uses a return page for deeplink callbacks.
+  // Base V7 (WalletConnect) does not use a return redirect — the
+  // payload.redirect field is only embedded in legacy pinetree://pay paths
+  // (invoice_split / collection_then_settle), not in the active V7 flow.
+  const returnPath = network === "solana" ? "/solana-return" : "/"
 
   const returnUrl = `${BASE_URL}${returnPath}`
 

@@ -495,10 +495,15 @@ export default function ProvidersPage() {
   walletType: string,
   sessionId: string
 ) {
+  // Each callback page handles its own wallet protocol:
+  //   /solana-return       — Solana (window.solana.connect())
+  //   /base-wallet-setup   — EVM / Base (window.ethereum eth_requestAccounts)
+  // Both pages POST the resolved wallet address back to /api/wallet-connect-session
+  // and redirect to return_to so the Providers dashboard polling picks it up.
   const path =
     provider === "solana"
       ? "/solana-return"
-      : "/base-return"
+      : "/base-wallet-setup"
 
   const url = new URL(`${getOrigin()}${path}`)
 
@@ -616,69 +621,61 @@ export default function ProvidersPage() {
 
   async function openSolanaMobileWallet(walletType?: string | null) {
     try {
-      console.log("SOLANA MOBILE START", walletType)
-
       if (!walletType) {
         toast.error("Select Phantom or Solflare first")
         return
       }
 
       const sessionId = await createWalletConnectSession("solana", walletType)
-      console.log("SESSION CREATED:", sessionId)
-
       const returnUrl = buildMobileBridgeUrl("solana", walletType, sessionId)
 
       let deeplink = ""
-
       if (walletType === "PHANTOM") {
         deeplink = `https://phantom.app/ul/browse/${encodeURIComponent(returnUrl)}`
       } else {
         deeplink = `https://solflare.com/ul/v1/browse/${encodeURIComponent(returnUrl)}`
       }
 
-      console.log("DEEPLINK:", deeplink)
-
       setWalletMobileDeeplink(deeplink)
       setShowMobileConnect(true)
       window.location.href = deeplink
     } catch (err) {
-      console.error("🔥 SOLANA MOBILE ERROR:", err)
+      console.error("Solana mobile wallet error:", err)
       toast.error("Failed to open Solana wallet")
     }
   }
 
   async function openBaseMobileWallet() {
     try {
-      console.log("BASE MOBILE START", selectedWalletType)
-
       if (!selectedWalletType) {
-        toast.error("Select wallet first")
+        toast.error("Select a wallet first")
         return
       }
 
       const sessionId = await createWalletConnectSession("base", selectedWalletType)
-      console.log("SESSION CREATED:", sessionId)
-
       const returnUrl = buildMobileBridgeUrl("base", selectedWalletType, sessionId)
 
+      // Each wallet app uses its own deep-link scheme to open its in-app browser.
+      // The in-app browser loads /base-wallet-setup which calls eth_requestAccounts,
+      // posts the address back, and redirects here.
       let deeplink = ""
-
       if (selectedWalletType === "METAMASK") {
         deeplink = `metamask://dapp?url=${encodeURIComponent(returnUrl)}`
       } else if (selectedWalletType === "TRUST") {
         deeplink = `trust://dapp?url=${encodeURIComponent(returnUrl)}`
       } else if (selectedWalletType === "BASEAPP") {
         deeplink = `cbwallet://dapp?url=${encodeURIComponent(returnUrl)}`
+      } else {
+        toast.error("Select MetaMask, Trust Wallet, or Coinbase Wallet for mobile setup")
+        return
       }
-
-      console.log("DEEPLINK:", deeplink)
 
       setWalletMobileDeeplink(deeplink)
       setShowMobileConnect(true)
       window.location.href = deeplink
     } catch (err) {
-      console.error("🔥 BASE MOBILE ERROR:", err)
-      toast.error("Failed to open Base wallet")
+      console.error("Base mobile wallet error:", err)
+      toast.error("Failed to open wallet. Make sure the wallet app is installed.")
     }
   }
 

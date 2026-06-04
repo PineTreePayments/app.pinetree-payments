@@ -389,7 +389,10 @@ export default function PayClient() {
   // Shift4: create payment + redirect to hosted checkout on button click
   const handleShift4Pay = useCallback(async () => {
     if (!intentId) return
-    if (!checkoutToken) {
+    // Use the ref rather than the state so this memoized callback always reads
+    // the current token even if the state was empty when the callback was created.
+    const token = checkoutTokenRef.current
+    if (!token) {
       setShift4Error("Checkout session unavailable. Please refresh and try again.")
       return
     }
@@ -402,7 +405,7 @@ export default function PayClient() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${checkoutToken}`,
+            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ network: "shift4" }),
         }

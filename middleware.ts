@@ -63,13 +63,6 @@ function isPublicWalletApprovalApi(req: NextRequest): boolean {
   return false
 }
 
-function getAuthCookieNames(req: NextRequest): string[] {
-  return req.cookies
-    .getAll()
-    .map((cookie) => cookie.name)
-    .filter((name) => name.startsWith("sb-") || name.includes("auth"))
-}
-
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
@@ -122,16 +115,6 @@ export async function middleware(req: NextRequest) {
 
   const protectedPage = isProtectedPage(pathname)
   const protectedApi = isProtectedApi(pathname)
-
-  if (protectedPage || protectedApi) {
-    console.info("[auth:middleware] protected request", {
-      pathname,
-      hasUser: Boolean(user),
-      userId: user?.id || null,
-      authCookieNames: getAuthCookieNames(req),
-      userAgent: req.headers.get("user-agent") || ""
-    })
-  }
 
   if (!user && (protectedPage || protectedApi)) {
     if (protectedApi) {
