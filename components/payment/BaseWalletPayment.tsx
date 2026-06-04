@@ -608,6 +608,40 @@ function maybeHexTransactionHash(value: unknown): string | null {
   const txHash = String(value || "").trim()
   return /^0x[a-fA-F0-9]{64}$/.test(txHash) ? txHash : null
 }
+function getReceiptStatusSucceeded(result: unknown): boolean | null {
+  if (!result || typeof result !== "object") return null
+  const status = (result as { status?: unknown }).status
+  if (typeof status === "string") {
+    const normalized = status.toLowerCase()
+    if (normalized === "0x1" || normalized === "1") return true
+    if (normalized === "0x0" || normalized === "0") return false
+  }
+  if (typeof status === "number") {
+    if (status === 1) return true
+    if (status === 0) return false
+  }
+  return null
+}
+async function waitForWalletConnectTransactionReceipt(input: {
+  provider: WalletConnectProvider
+  txHash: string
+  timeoutMs: number
+  pollIntervalMs?: number
+}): Promise<"confirmed" | "failed" | "pending"> {
+  const pollIntervalMs = input.pollIntervalMs ?? 2_000
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < input.timeoutMs) {
+    const receipt = await input.provider.request({
+      method: "eth_getTransactionReceipt",
+      params: [input.txHash],
+    })
+    const succeeded = getReceiptStatusSucceeded(receipt)
+    if (succeeded === true) return "confirmed"
+    if (succeeded === false) return "failed"
+    await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs))
+  }
+  return "pending"
+}
 function extractDirectFinalTxHashFromSendCallsResult(result: unknown): string | null {
   // Some wallets return the txHash as a plain string from wallet_sendCalls
   if (typeof result === "string") return maybeHexTransactionHash(result)
@@ -1511,15 +1545,36 @@ export default function BaseWalletPayment({
         usdcApprovalTxHashAtRef.current = Date.now()
         pendingUsdcApproveTxRef.current = null
         setBaseMobileStepRef.current("usdc_authorization_submitted")
-        setBasePayStatus("Sending final payment approval.")
+        setBasePayStatus("Confirming USDC permission on Base.")
+        const approvalReceiptStatus = await waitForWalletConnectTransactionReceipt({
+          provider,
+          txHash,
+          timeoutMs: 60_000,
+        })
+        logBaseV6("usdc_approval_receipt_result", {
+          paymentId,
+          selectedAsset,
+          actionKind: "usdc_approve",
+          hasTxHash: true,
+          reason: approvalReceiptStatus,
+        })
+        if (approvalReceiptStatus === "failed") {
+          throw new Error("USDC authorization failed on Base. Tap Try Again to restart.")
+        }
+        setBasePayStatus(
+          approvalReceiptStatus === "confirmed"
+            ? "USDC permission confirmed. Preparing final payment."
+            : "USDC permission is still confirming. Checking permission before final payment."
+        )
         void logBase("usdc-allowance-wait-started", { paymentId, via: "pending-wallet-action" })
         const allowanceSufficient = await recheckUsdcAllowanceAndQueueFinalPayment({
           paymentId,
           fromAddress,
           source: "approval-resolved",
+          maxWaitMs: approvalReceiptStatus === "confirmed" ? 30_000 : 90_000,
         })
         if (!allowanceSufficient) {
-          throw new Error("USDC allowance was not confirmed in time. Retry USDC authorization or tap Try Again to restart.")
+          throw new Error("USDC authorization is not confirmed yet. Wait a moment, then tap Try Again to continue.")
         }
         await logBase("usdc-allowance-confirmed", { paymentId, via: "pending-wallet-action" })
         window.setTimeout(() => {

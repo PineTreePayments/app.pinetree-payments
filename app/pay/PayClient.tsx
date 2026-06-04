@@ -650,9 +650,13 @@ export default function PayClient() {
 
           const data = (await res.json()) as SolanaPayTransactionResponse
 
-          if (!data?.transaction) {
-            console.error("[Phantom] no transaction returned", data?.error)
-            return
+          // Throw on any failure so the catch block can navigate back with an
+          // error rather than silently returning and leaving the user stuck in
+          // Phantom's in-app browser with no feedback.
+          // Common cause for USDC: payer has no USDC token account (no USDC ATA),
+          // or insufficient USDC balance — the server returns a 4xx with a message.
+          if (!res.ok || !data?.transaction) {
+            throw new Error(data?.error || "Failed to build Solana transaction. Please try again.")
           }
 
           const { Transaction } = await import("@solana/web3.js")
@@ -698,6 +702,10 @@ export default function PayClient() {
             window.location.href = isRejected
               ? `/pay?intent=${encodeURIComponent(intentIdParam)}&status=cancelled`
               : `/pay?intent=${encodeURIComponent(intentIdParam)}&status=failed`
+          } else {
+            // No intent param — navigate back to the payment page so the user
+            // is not permanently stuck in Phantom's in-app browser.
+            window.location.href = `/pay?pinetree_payment_id=${encodeURIComponent(paymentId)}&status=${isRejected ? "cancelled" : "failed"}`
           }
         }
       }
