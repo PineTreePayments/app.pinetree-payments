@@ -1,10 +1,12 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import Image from "next/image"
 import { supabase } from "@/lib/supabaseClient"
 import { speedLoginUrl, speedSignupUrl, speedAccountSetupUrl } from "@/lib/speedDashboardLinks"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
 import { toast } from "sonner"
+import QRCode from "qrcode"
 import {
   CompactMetricTile,
   DashboardSection,
@@ -209,6 +211,7 @@ export default function ProvidersPage() {
 
   const [selectedWalletType, setSelectedWalletType] = useState<string | null>(null)
   const [showMobileConnect, setShowMobileConnect] = useState(false)
+  const [walletQrCode, setWalletQrCode] = useState<string | null>(null)
 
   const [walletSessionId, setWalletSessionId] = useState<string | null>(null)
   const [walletSessionStatus, setWalletSessionStatus] = useState<string | null>(null)
@@ -226,6 +229,7 @@ export default function ProvidersPage() {
     setNwcTestResult(null)
     setNwcTesting(false)
     setShowMobileConnect(false)
+    setWalletQrCode(null)
     setSelectedWalletType(null)
     setWalletSessionId(null)
     setWalletSessionStatus(null)
@@ -375,6 +379,7 @@ export default function ProvidersPage() {
           }
 
           setShowMobileConnect(false)
+          setWalletQrCode(null)
           pollStopAtRef.current = null
           await loadAll()
           return
@@ -515,6 +520,38 @@ export default function ProvidersPage() {
   return url.toString()
 }
 
+  function buildWalletDeepLink(
+    provider: "solana" | "base",
+    walletType: string,
+    returnUrl: string
+  ) {
+    if (provider === "solana") {
+      if (walletType === "PHANTOM") {
+        return `https://phantom.app/ul/browse/${encodeURIComponent(returnUrl)}`
+      }
+
+      if (walletType === "SOLFLARE") {
+        return `https://solflare.com/ul/v1/browse/${encodeURIComponent(returnUrl)}`
+      }
+
+      throw new Error("Select Phantom or Solflare first")
+    }
+
+    if (walletType === "METAMASK") {
+      return `metamask://dapp?url=${encodeURIComponent(returnUrl)}`
+    }
+
+    if (walletType === "TRUST") {
+      return `trust://dapp?url=${encodeURIComponent(returnUrl)}`
+    }
+
+    if (walletType === "BASEAPP") {
+      return `cbwallet://dapp?url=${encodeURIComponent(returnUrl)}`
+    }
+
+    throw new Error("Select MetaMask, Trust Wallet, or Coinbase Wallet first")
+  }
+
   async function createWalletConnectSession(
     provider: "solana" | "base",
     walletType?: string | null
@@ -628,15 +665,10 @@ export default function ProvidersPage() {
 
       const sessionId = await createWalletConnectSession("solana", walletType)
       const returnUrl = buildMobileBridgeUrl("solana", walletType, sessionId)
-
-      let deeplink = ""
-      if (walletType === "PHANTOM") {
-        deeplink = `https://phantom.app/ul/browse/${encodeURIComponent(returnUrl)}`
-      } else {
-        deeplink = `https://solflare.com/ul/v1/browse/${encodeURIComponent(returnUrl)}`
-      }
+      const deeplink = buildWalletDeepLink("solana", walletType, returnUrl)
 
       setWalletMobileDeeplink(deeplink)
+      setWalletQrCode(null)
       setShowMobileConnect(true)
       window.location.href = deeplink
     } catch (err) {
@@ -654,28 +686,46 @@ export default function ProvidersPage() {
 
       const sessionId = await createWalletConnectSession("base", selectedWalletType)
       const returnUrl = buildMobileBridgeUrl("base", selectedWalletType, sessionId)
-
-      // Each wallet app uses its own deep-link scheme to open its in-app browser.
-      // The in-app browser loads /base-wallet-setup which calls eth_requestAccounts,
-      // posts the address back, and redirects here.
-      let deeplink = ""
-      if (selectedWalletType === "METAMASK") {
-        deeplink = `metamask://dapp?url=${encodeURIComponent(returnUrl)}`
-      } else if (selectedWalletType === "TRUST") {
-        deeplink = `trust://dapp?url=${encodeURIComponent(returnUrl)}`
-      } else if (selectedWalletType === "BASEAPP") {
-        deeplink = `cbwallet://dapp?url=${encodeURIComponent(returnUrl)}`
-      } else {
-        toast.error("Select MetaMask, Trust Wallet, or Coinbase Wallet for mobile setup")
-        return
-      }
+      const deeplink = buildWalletDeepLink("base", selectedWalletType, returnUrl)
 
       setWalletMobileDeeplink(deeplink)
+      setWalletQrCode(null)
       setShowMobileConnect(true)
       window.location.href = deeplink
     } catch (err) {
       console.error("Base mobile wallet error:", err)
       toast.error("Failed to open wallet. Make sure the wallet app is installed.")
+    }
+  }
+
+  async function generateWalletSetupQr() {
+    try {
+      if (activeProvider !== "solana" && activeProvider !== "base") return
+
+      if (!selectedWalletType) {
+        toast.error(
+          activeProvider === "solana"
+            ? "Select Phantom or Solflare first"
+            : "Select MetaMask, Trust Wallet, or Coinbase Wallet first"
+        )
+        return
+      }
+
+      const sessionId = await createWalletConnectSession(activeProvider, selectedWalletType)
+      const returnUrl = buildMobileBridgeUrl(activeProvider, selectedWalletType, sessionId)
+      const deeplink = buildWalletDeepLink(activeProvider, selectedWalletType, returnUrl)
+      const qr = await QRCode.toDataURL(deeplink, {
+        errorCorrectionLevel: "M",
+        margin: 2,
+        width: 320,
+      })
+
+      setWalletMobileDeeplink(deeplink)
+      setWalletQrCode(qr)
+      setShowMobileConnect(true)
+      toast.success("Scan the QR code with your selected wallet")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to generate wallet QR")
     }
   }
 
@@ -710,6 +760,7 @@ export default function ProvidersPage() {
     }
 
     setShowMobileConnect(false)
+    setWalletQrCode(null)
     setSelectedWalletType(null)
     setWalletSessionId(null)
     setWalletSessionStatus(null)
@@ -998,6 +1049,7 @@ export default function ProvidersPage() {
       setNwcTestResult(null)
       setNwcTesting(false)
       setShowMobileConnect(false)
+      setWalletQrCode(null)
       setSelectedWalletType(null)
       setWalletSessionId(null)
       setWalletSessionStatus(null)
@@ -1967,7 +2019,7 @@ export default function ProvidersPage() {
                         <button
                           key={wt}
                           type="button"
-                          onClick={() => { setSelectedWalletType(wt); setShowMobileConnect(false) }}
+                          onClick={() => { setSelectedWalletType(wt); setShowMobileConnect(false); setWalletQrCode(null) }}
                           className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
                             selectedWalletType === wt
                               ? "border-[#0052FF] bg-[#0052FF]/5 text-[#0052FF]"
@@ -1985,7 +2037,7 @@ export default function ProvidersPage() {
                         <button
                           key={wt}
                           type="button"
-                          onClick={() => { setSelectedWalletType(wt); setShowMobileConnect(false) }}
+                          onClick={() => { setSelectedWalletType(wt); setShowMobileConnect(false); setWalletQrCode(null) }}
                           className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
                             selectedWalletType === wt
                               ? "border-[#0052FF] bg-[#0052FF]/5 text-[#0052FF]"
@@ -2008,12 +2060,57 @@ export default function ProvidersPage() {
                         Open your wallet app and scan the QR code to connect and approve.
                       </p>
                     </div>
-                    <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-500 shadow-sm ring-1 ring-gray-200/80">
-                      Coming soon
-                    </span>
+                    {walletSessionStatus === "pending" && walletQrCode && (
+                      <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-[#0052FF] shadow-sm ring-1 ring-blue-100">
+                        Waiting
+                      </span>
+                    )}
                   </div>
-                  <div className="mt-3 flex h-24 items-center justify-center rounded-lg border border-dashed border-[#0052FF]/20 bg-white/70">
-                    <p className="text-xs text-gray-400">QR code will appear here</p>
+                  <button
+                    type="button"
+                    onClick={generateWalletSetupQr}
+                    className="mt-3 rounded-lg border border-[#0052FF] bg-white px-4 py-2 text-sm font-semibold text-[#0052FF] shadow-sm transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!selectedWalletType}
+                  >
+                    Generate QR
+                  </button>
+                  <div className="mt-3 flex min-h-40 items-center justify-center rounded-lg border border-dashed border-[#0052FF]/20 bg-white/70 p-3">
+                    {walletQrCode ? (
+                      <div className="flex flex-col items-center gap-3">
+                        <Image
+                          src={walletQrCode}
+                          alt="Wallet setup QR code"
+                          width={208}
+                          height={208}
+                          className="h-52 w-52 rounded-lg bg-white p-2 shadow-sm"
+                          unoptimized
+                        />
+                        {walletSessionStatus === "pending" && (
+                          <p className="text-center text-xs text-gray-600">
+                            Waiting for mobile wallet approval...
+                          </p>
+                        )}
+                        {walletSessionStatus === "connected" && (
+                          <p className="text-center text-xs font-semibold text-[#0052FF]">
+                            Mobile wallet connected. Review and save below.
+                          </p>
+                        )}
+                        {walletMobileDeeplink && (
+                          <a
+                            href={walletMobileDeeplink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs font-semibold text-blue-600 underline"
+                          >
+                            Open wallet manually
+                          </a>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-center text-xs text-gray-400">
+                        Select a wallet, then generate a QR code for setup.
+                      </p>
+                    )}
                   </div>
                 </div>
 

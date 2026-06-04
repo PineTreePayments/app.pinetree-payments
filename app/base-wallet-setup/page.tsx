@@ -37,7 +37,7 @@ export default function BaseWalletSetupPage() {
         const return_to = params.get("return_to")
 
         if (!session_id) {
-          console.error("[base-wallet-setup] Missing session_id")
+          alert("Wallet setup link is missing a session. Please return to PineTree and generate a new setup QR.")
           return
         }
 
@@ -78,8 +78,6 @@ export default function BaseWalletSetupPage() {
         })
 
         if (!res.ok) {
-          const text = await res.text().catch(() => "")
-          console.error("[base-wallet-setup] Session update failed:", text)
           alert("Failed to update wallet session. Please return to the app and try again.")
           return
         }
@@ -87,8 +85,7 @@ export default function BaseWalletSetupPage() {
         // Redirect back to the Providers page (or wherever return_to points).
         window.location.href = return_to || "/dashboard/providers"
       } catch (err) {
-        console.error("[base-wallet-setup] EVM wallet setup error:", err)
-        alert("Wallet connection failed. Please try again.")
+        alert(err instanceof Error ? err.message : "Wallet connection failed. Please try again.")
       }
     }
 

@@ -3,74 +3,51 @@
 import { useEffect } from "react"
 
 export default function SolanaReturnPage() {
-
   useEffect(() => {
     async function handleConnect() {
       try {
         const params = new URLSearchParams(window.location.search)
+        const sessionId = params.get("session_id")
+        const walletType = params.get("wallet_type")
+        const returnTo = params.get("return_to")
 
-        const session_id = params.get("session_id")
-        const wallet_type = params.get("wallet_type")
-        const return_to = params.get("return_to")
-
-        if (!session_id) {
-          console.error("❌ Missing session_id")
+        if (!sessionId) {
+          alert("Wallet setup link is missing a session. Please return to PineTree and generate a new setup QR.")
           return
         }
 
         const provider = window.solana
 
         if (!provider) {
-          alert("No Solana wallet found (Phantom / Solflare)")
+          alert("No Solana wallet found. Please open this link from Phantom or Solflare.")
           return
         }
 
-        /* =========================
-           CONNECT WALLET
-        ========================= */
+        const response = await provider.connect()
+        const walletAddress = response.publicKey.toString()
 
-        const resp = await provider.connect()
-        const wallet_address = resp.publicKey.toString()
-
-        console.log("✅ Wallet connected:", wallet_address)
-
-        /* =========================
-           UPDATE SESSION (FIXED)
-        ========================= */
-
-        const origin = window.location.origin
-
-        const res = await fetch(`${origin}/api/wallet-connect-session`, {
+        const res = await fetch(`${window.location.origin}/api/wallet-connect-session`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            session_id,
+            session_id: sessionId,
             provider: "solana",
-            wallet_type: wallet_type || "PHANTOM",
-            wallet_address,
+            wallet_type: walletType || "PHANTOM",
+            wallet_address: walletAddress,
             status: "connected",
           }),
         })
 
         if (!res.ok) {
-          const text = await res.text().catch(() => "")
-          console.error("❌ Session update failed:", text)
-          throw new Error("Failed to update session")
+          alert("Failed to update wallet session. Please return to PineTree and try again.")
+          return
         }
 
-        console.log("✅ Session updated successfully")
-
-        /* =========================
-           REDIRECT BACK
-        ========================= */
-
-        window.location.href = return_to || "/dashboard/providers"
-
+        window.location.href = returnTo || "/dashboard/providers"
       } catch (err) {
-        console.error("❌ Solana connect error:", err)
-        alert("Wallet connection failed")
+        alert(err instanceof Error ? err.message : "Wallet connection failed. Please try again.")
       }
     }
 
@@ -86,7 +63,7 @@ export default function SolanaReturnPage() {
         justifyContent: "center",
         fontFamily: "sans-serif",
         background: "black",
-        color: "white"
+        color: "white",
       }}
     >
       <p>Connecting to wallet...</p>

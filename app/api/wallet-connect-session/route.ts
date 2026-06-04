@@ -24,14 +24,29 @@ export async function GET(req: NextRequest) {
 
     const sessionId = req.nextUrl.searchParams.get("session_id")
     const mode = req.nextUrl.searchParams.get("mode")
+    const provider = req.nextUrl.searchParams.get("provider")
+    const walletType = req.nextUrl.searchParams.get("wallet_type")
 
     if (!isValidSessionId(sessionId)) {
       return NextResponse.json({ error: "Missing or invalid session_id" }, { status: 400 })
     }
 
     if (mode === "generate") {
+      if (!provider || !walletType) {
+        return NextResponse.json(
+          { error: "provider and wallet_type are required" },
+          { status: 400 }
+        )
+      }
+
       return NextResponse.json(
-        generateWalletConnectSessionQrEngine({ sessionId })
+        generateWalletConnectSessionQrEngine({
+          sessionId,
+          provider,
+          walletType,
+          origin: req.nextUrl.origin,
+          returnTo: req.nextUrl.searchParams.get("return_to")
+        })
       )
     }
 
