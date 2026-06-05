@@ -127,12 +127,19 @@ function buildDetailRows(input: {
     ]
   }
 
-  if (provider === "lightning") {
+  if (
+    provider === "lightning" ||
+    provider === "lightning_speed" ||
+    provider === "speed" ||
+    provider === "tryspeed" ||
+    provider === "lightning_nwc" ||
+    provider === "nwc"
+  ) {
     const lightningInvoice = payment?.metadata?.split?.lightningInvoice || null
     return [
       ...commonRows.slice(0, 5),
-      { label: "Network", value: "Bitcoin Lightning" },
-      { label: "Provider", value: "Bitcoin Lightning" },
+      { label: "Network", value: "Lightning" },
+      { label: "Provider", value: providerName(tx.provider) },
       ...commonRows.slice(5),
       { label: "Provider Reference", value: references.providerReference, mono: true },
       { label: "Lightning Invoice", value: lightningInvoice, mono: true }

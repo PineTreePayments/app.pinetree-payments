@@ -34,7 +34,7 @@ export async function createPaymentIntent(input: {
 }) {
   const expiresAt =
     input.expires_at ||
-    new Date(Date.now() + 15 * 60 * 1000).toISOString()
+    new Date(Date.now() + 5 * 60 * 1000).toISOString()
 
   const { data, error } = await db
     .from("payment_intents")

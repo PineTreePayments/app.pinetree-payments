@@ -12,7 +12,7 @@ import QRCode from "qrcode"
 import { createPayment, buildCreatePaymentRequest } from "./createPayment"
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 import { PINETREE_FEE } from "./config"
-import { markPaymentIncomplete } from "./paymentStateActions"
+import { markPaymentIncomplete, markPaymentIncompleteIfAbandoned } from "./paymentStateActions"
 import { loadProviders } from "./loadProviders"
 import { getMerchantProviders } from "@/database/merchants"
 import { getLightningNwcReadiness, SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
@@ -291,8 +291,22 @@ export async function createPaymentIntentEngine(input: {
 }
 
 export async function getPaymentIntentEngine(intentId: string) {
-  const intent = await getPaymentIntentById(intentId)
+  let intent = await getPaymentIntentById(intentId)
   if (!intent) return null
+
+  const expiresAtMs = new Date(intent.expires_at).getTime()
+  const isExpired = Number.isFinite(expiresAtMs) && Date.now() >= expiresAtMs
+  if (intent.status !== "EXPIRED" && isExpired) {
+    let shouldExpireIntent = !intent.payment_id
+    if (intent.payment_id) {
+      shouldExpireIntent = await markPaymentIncompleteIfAbandoned(intent.payment_id)
+    }
+    if (shouldExpireIntent) {
+      await expirePaymentIntent(intent.id)
+      intent = await getPaymentIntentById(intentId)
+      if (!intent) return null
+    }
+  }
 
   const selectedPayment = intent.payment_id ? await getPaymentById(intent.payment_id) : null
   const selectedTransaction = selectedPayment?.id

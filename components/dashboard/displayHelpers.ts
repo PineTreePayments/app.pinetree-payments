@@ -6,7 +6,13 @@ export function formatDashboardProvider(provider: string | null | undefined) {
     solana: "Solana Pay",
     shift4: "Shift4",
     base: "Base Pay",
-    lightning: "Bitcoin Lightning",
+    lightning: "Lightning",
+    lightning_speed: "Speed",
+    tryspeed: "Speed",
+    try_speed: "Speed",
+    speed_lightning: "Speed",
+    lightning_nwc: "NWC",
+    nwc_lightning: "NWC",
     cash: "Cash",
     speed: "Speed",
     nwc: "NWC",
@@ -34,8 +40,11 @@ export function formatDashboardNetwork(network: string | null | undefined) {
     solana: "Solana",
     base: "Base",
     ethereum: "Ethereum",
-    bitcoin_lightning: "Bitcoin Lightning",
-    "bitcoin lightning": "Bitcoin Lightning"
+    bitcoin_lightning: "Lightning",
+    btc_lightning: "Lightning",
+    lightning_btc: "Lightning",
+    lightning: "Lightning",
+    "bitcoin lightning": "Lightning"
   }
 
   if (labels[normalized]) return labels[normalized]

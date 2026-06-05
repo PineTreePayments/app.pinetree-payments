@@ -41,7 +41,8 @@ export function normalizeToStrictPaymentStatus(status: unknown): PaymentStatus {
  */
 const validTransitions: Record<PaymentStatus, PaymentStatus[]> = {
   // Strict lifecycle: CREATED -> PENDING -> PROCESSING -> CONFIRMED
-  CREATED: ["PENDING"],
+  // Abandoned checkout sessions can also move CREATED -> INCOMPLETE before funding.
+  CREATED: ["PENDING", "INCOMPLETE"],
 
   // Allowed alternative path: PENDING -> INCOMPLETE
   PENDING: ["PROCESSING", "INCOMPLETE"],

@@ -933,10 +933,10 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
     {
       id: "rest-api",
       title: "REST API",
-      description: "Full server-side control: create sessions, list links, query payment status. Auth via API key.",
+      description: "Full server-side control: create sessions, list links, query checkout session status. Auth via API key.",
       useCase: "Custom integrations, marketplaces",
       difficulty: "Advanced",
-      status: "preview",
+      status: "live",
       action: "View API Docs",
     },
     {
@@ -1225,7 +1225,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                 </div>
               )}
               <CopyRow label="Checkout Session Endpoint" value={`POST  ${sessionEndpoint}`}
-                fieldId="session_endpoint" copiedField={copiedField} onCopy={handleCopyField} badge={<PreviewBadge />} />
+                fieldId="session_endpoint" copiedField={copiedField} onCopy={handleCopyField} badge={<LiveBadge />} />
               <CopyRow label="Hosted Checkout URL Pattern" value={checkoutUrlPattern}
                 fieldId="checkout_url" copiedField={copiedField} onCopy={handleCopyField} badge={<LiveBadge />} />
             </div>
@@ -1565,7 +1565,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                   <h3 className="text-sm font-semibold text-gray-950">Create a Test Session</h3>
                   <p className="mt-0.5 text-xs text-gray-500">Verify the session API works end-to-end before integrating externally.</p>
                 </div>
-                <PreviewBadge />
+                <LiveBadge />
               </div>
               <div className="space-y-4 p-5">
                 <form onSubmit={(e) => void handleCreateTestSession(e)} className="space-y-4">
@@ -1669,7 +1669,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                   <h3 className="text-sm font-semibold text-gray-950">Server-Side Session Creation</h3>
                   <p className="mt-0.5 text-xs text-gray-500">Create a PineTree session from your server and redirect the customer to the returned URL.</p>
                 </div>
-                <PreviewBadge />
+                <LiveBadge />
               </div>
               <div className="p-5">
                 <CodeBlock code={nodeSnippet} fieldId="node_snippet" copiedField={copiedField} onCopy={handleCopyField} lang="node.js" />
@@ -1685,7 +1685,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                   <h3 className="text-sm font-semibold text-gray-950">POST /api/checkout/session</h3>
                   <p className="mt-0.5 text-xs text-gray-500">Create a checkout session and redirect to <code className="rounded bg-gray-100 px-1 font-mono text-[10px]">session.checkoutUrl</code>.</p>
                 </div>
-                <PreviewBadge />
+                <LiveBadge />
               </div>
               <div className="space-y-3 p-5">
                 <CodeBlock code={curlSnippet} fieldId="curl_snippet" copiedField={copiedField} onCopy={handleCopyField} lang="curl" />
@@ -1748,8 +1748,8 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                 { method: "GET",    path: "/api/checkout-links",               desc: "List all payment links",       status: "Live" },
                 { method: "POST",   path: "/api/checkout-links",               desc: "Create a payment link",        status: "Live" },
                 { method: "PATCH",  path: "/api/checkout-links/:id",           desc: "Disable a payment link",       status: "Live" },
-                { method: "POST",   path: "/api/checkout/session",             desc: "Create a checkout session",    status: "Preview" },
-                { method: "GET",    path: "/api/checkout/session/:sessionId",  desc: "Get session status",           status: "Preview" },
+                { method: "POST",   path: "/api/checkout/session",             desc: "Create a checkout session",    status: "Live" },
+                { method: "GET",    path: "/api/checkout/session/:sessionId",  desc: "Get session status",           status: "Live" },
                 { method: "GET",    path: "/api/checkout/stats",               desc: "Online payment stats",         status: "Preview" },
                 { method: "GET",    path: "/api/merchant/webhooks",            desc: "Get webhook config",           status: "Preview" },
                 { method: "POST",   path: "/api/merchant/webhooks",            desc: "Save webhook config",          status: "Preview" },

@@ -13,6 +13,7 @@
 import { getPaymentById } from "@/database"
 import { watchPaymentOnce } from "./paymentWatcher"
 import { StoredPaymentSplitMetadata } from "@/types/payment"
+import { markPaymentIncompleteIfAbandoned } from "./paymentStateActions"
 
 /**
  * Load a payment by ID and run a single blockchain check via watchPaymentOnce.
@@ -145,6 +146,8 @@ export async function runPaymentWatcher(paymentId: string, options?: { txHash?: 
       attemptsUsed: maxAttempts
     })
   }
+
+  await markPaymentIncompleteIfAbandoned(payment.id)
 
   return false
 }
