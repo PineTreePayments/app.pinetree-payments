@@ -74,6 +74,8 @@ type WalletOperationSummary = {
   network: string
   amount: number
   destinationType: string
+  destinationValue: string | null
+  providerReference: string | null
   status: string
   errorCode: string | null
   errorMessage: string | null
@@ -928,6 +930,64 @@ function WalletOperationEmptyState({ compact = false }: { compact?: boolean }) {
           </p>
         </div>
       </div>
+    </div>
+  )
+}
+
+function WalletOperationList({ operations }: { operations: WalletOperationSummary[] }) {
+  return (
+    <div className="space-y-2">
+      {operations.map((operation) => {
+        const explorerUrl = operation.providerReference
+          ? getExplorerTxUrl(operation.network, operation.providerReference)
+          : null
+        const reference = operation.providerReference || operation.destinationValue
+        const statusTone =
+          operation.status === "FAILED" || operation.status === "VALIDATION_FAILED"
+            ? "amber"
+            : operation.status === "CANCELLED"
+              ? "slate"
+              : "blue"
+
+        return (
+          <div key={`${operation.provider}-${operation.id}`} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold text-gray-950">
+                    {operation.operationType.replace(/_/g, " ")}
+                  </p>
+                  <NetworkStatusPill label={networkDisplayLabel(operation.network)} tone="slate" className="min-h-6 px-2 text-[10px]" />
+                </div>
+                <p className="mt-1 text-sm text-gray-600">
+                  {operation.amount} {operation.asset}
+                </p>
+                {reference && (
+                  <p className="mt-1 truncate font-mono text-xs text-gray-500" title={reference}>
+                    {operation.providerReference ? "Tx " : "To "}
+                    {formatSettlementAddress(reference)}
+                  </p>
+                )}
+              </div>
+
+              <div className="shrink-0 text-left sm:text-right">
+                <NetworkStatusPill label={formatOperationStatusForMerchant(operation.status)} tone={statusTone} />
+                <p className="mt-2 text-xs text-gray-500">{formatChicagoDateTime(operation.createdAt)}</p>
+                {explorerUrl && (
+                  <a href={explorerUrl} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-xs font-semibold text-blue-600 hover:underline">
+                    Explorer
+                  </a>
+                )}
+              </div>
+            </div>
+            {operation.errorMessage && (
+              <p className="mt-3 rounded-xl border border-amber-100 bg-amber-50/80 p-3 text-xs leading-5 text-amber-800">
+                {operation.errorMessage}
+              </p>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -2761,7 +2821,11 @@ export default function WalletsPage() {
       </DashboardSection>
 
       <DashboardSection title="Recent Wallet Operations" titleTone="blue">
-        <WalletOperationEmptyState />
+        {recentOperations.length === 0 ? (
+          <WalletOperationEmptyState />
+        ) : (
+          <WalletOperationList operations={recentOperations} />
+        )}
       </DashboardSection>
 
       {connectionsOpen && (

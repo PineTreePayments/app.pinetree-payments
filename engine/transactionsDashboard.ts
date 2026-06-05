@@ -5,7 +5,7 @@ const db = supabaseAdmin || supabase
 type PaymentRow = {
   id?: string | null
   created_at: string
-  gross_amount: number
+  gross_amount?: number | string | null
   merchant_amount: number
   pinetree_fee: number
   currency: string
@@ -44,6 +44,15 @@ export type TransactionsDashboardData = {
   todayVolume: number
   todayTransactions: number
   confirmedRate: number
+}
+
+type TransactionsChartProviderKey = Exclude<keyof TransactionsChartRow, "time">
+
+type TransactionChartContext = {
+  channel: string | null
+  provider: string | null
+  network: string | null
+  totalAmount: number | string | null
 }
 
 function bucket(label: string): TransactionsChartRow {
@@ -123,6 +132,72 @@ function buildBuckets(range: string) {
   }
 
   return { buckets, start }
+}
+
+function normalizeChartProvider(
+  rawProvider?: string | null,
+  rawNetwork?: string | null
+): TransactionsChartProviderKey | null {
+  const provider = String(rawProvider || "").toLowerCase().trim()
+  const network = String(rawNetwork || "").toLowerCase().trim()
+
+  if (provider === "solana" || network === "solana") return "solana"
+  if (provider === "base" || network === "base") return "base"
+  if (provider === "coinbase") return "coinbase"
+  if (provider === "shift4" || network === "shift4") return "shift4"
+  if (provider === "cash" || network === "cash") return "cash"
+
+  if (
+    provider === "lightning" ||
+    provider === "lightning_speed" ||
+    provider === "lightning_nwc" ||
+    provider === "speed" ||
+    provider === "nwc" ||
+    provider === "btc_lightning" ||
+    provider === "bitcoin_lightning" ||
+    provider === "bitcoin lightning" ||
+    network === "bitcoin_lightning" ||
+    network === "btc_lightning" ||
+    network === "lightning_btc" ||
+    network === "lightning"
+  ) {
+    return "lightning"
+  }
+
+  return null
+}
+
+function metadataNumber(metadata: Record<string, unknown> | null | undefined, key: string) {
+  const value = metadata?.[key]
+  if (typeof value !== "number" && typeof value !== "string") return null
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : null
+}
+
+function centsToDollars(value: number | string | null | undefined) {
+  const numeric = Number(value || 0)
+  if (!Number.isFinite(numeric) || numeric <= 0) return null
+  return numeric > 999 ? numeric / 100 : numeric
+}
+
+function getChartAmountUsd(
+  payment: PaymentRow,
+  transactionContext?: TransactionChartContext
+) {
+  const grossAmount = Number(payment.gross_amount ?? 0)
+  if (Number.isFinite(grossAmount) && grossAmount > 0) return grossAmount
+
+  const metadata = payment.metadata
+  return (
+    metadataNumber(metadata, "grossAmount") ||
+    metadataNumber(metadata, "invoiceAmountUsd") ||
+    metadataNumber(metadata, "amountUsd") ||
+    metadataNumber(metadata, "usdAmount") ||
+    metadataNumber(metadata, "fiat_amount_usd") ||
+    metadataNumber(metadata, "normalized_amount_usd") ||
+    centsToDollars(transactionContext?.totalAmount) ||
+    0
+  )
 }
 
 export async function getTransactionsDashboardEngine(merchantId: string): Promise<TransactionsDashboardData> {
@@ -207,12 +282,12 @@ export async function getTransactionsChartEngine(
     .map((payment) => String(payment.id || "").trim())
     .filter(Boolean)
 
-  const channelByPaymentId = new Map<string, string | null>()
+  const transactionContextByPaymentId = new Map<string, TransactionChartContext>()
 
   if (paymentIds.length) {
     const { data: transactionData, error: transactionError } = await db
       .from("transactions")
-      .select("payment_id,channel")
+      .select("payment_id,channel,provider,network,total_amount")
       .eq("merchant_id", merchantId)
       .in("payment_id", paymentIds)
 
@@ -222,8 +297,13 @@ export async function getTransactionsChartEngine(
 
     ;(transactionData || []).forEach((tx) => {
       const paymentId = String(tx.payment_id || "").trim()
-      if (!paymentId || channelByPaymentId.has(paymentId)) return
-      channelByPaymentId.set(paymentId, tx.channel || null)
+      if (!paymentId || transactionContextByPaymentId.has(paymentId)) return
+      transactionContextByPaymentId.set(paymentId, {
+        channel: tx.channel || null,
+        provider: tx.provider || null,
+        network: tx.network || null,
+        totalAmount: tx.total_amount || null
+      })
     })
   }
 
@@ -233,12 +313,13 @@ export async function getTransactionsChartEngine(
       payment.metadata && typeof payment.metadata === "object"
         ? String(payment.metadata.channel || "").trim() || null
         : null
-    const channel = channelByPaymentId.get(paymentId) || metadataChannel
+    const transactionContext = transactionContextByPaymentId.get(paymentId)
+    const channel = transactionContext?.channel || metadataChannel
 
     if (mode === "pos" && channel !== "pos") return
     if (mode === "online" && channel !== "online") return
 
-    const amount = Number(payment.gross_amount ?? 0)
+    const amount = getChartAmountUsd(payment, transactionContext)
 
     const d = new Date(payment.created_at)
     let label = ""
@@ -253,12 +334,13 @@ export async function getTransactionsChartEngine(
 
     if (!buckets[label]) return
 
-    if (payment.provider === "solana") buckets[label].solana += amount
-    if (payment.provider === "base") buckets[label].base += amount
-    if (payment.provider === "lightning") buckets[label].lightning += amount
-    if (payment.provider === "coinbase") buckets[label].coinbase += amount
-    if (payment.provider === "shift4") buckets[label].shift4 += amount
-    if (payment.provider === "cash") buckets[label].cash += amount
+    const chartProvider = normalizeChartProvider(
+      payment.provider || transactionContext?.provider,
+      payment.network || transactionContext?.network
+    )
+
+    if (!chartProvider) return
+    buckets[label][chartProvider] += amount
   })
 
   return Object.values(buckets)

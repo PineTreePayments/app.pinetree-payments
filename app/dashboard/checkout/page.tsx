@@ -809,18 +809,64 @@ curl -X POST ${sessionEndpoint} \\
     "cancelUrl": "https://yourstore.com/cancel"
   }'`
 
-  const reactSnippet = `// Future React SDK — not yet available as an npm package
-import { PineTreeCheckoutButton } from '@pinetree/react'
+  const reactComponentSnippet = `// React component (your frontend) — calls YOUR backend, not PineTree directly.
+// Your pt_live_ API key must never appear in client-side code.
+import { useState } from 'react'
 
-export default function CheckoutPage() {
+export function CryptoCheckoutButton({ amount, orderId, onError }) {
+  const [loading, setLoading] = useState(false)
+
+  async function startCheckout() {
+    setLoading(true)
+    try {
+      // Step 1 — your backend creates a PineTree session and returns the URL
+      const res = await fetch('/api/your-checkout-handler', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount, orderId }),
+      })
+      if (!res.ok) throw new Error('Checkout unavailable')
+      const { checkoutUrl } = await res.json()
+
+      // Step 2 — redirect customer to the hosted PineTree checkout page
+      window.location.href = checkoutUrl
+    } catch (err) {
+      onError?.(err)
+      setLoading(false)
+    }
+  }
+
   return (
-    <PineTreeCheckoutButton
-      amount={49.99}
-      orderId="order_1042"
-      onSuccess={(session) => router.push('/success')}
-    />
+    <button onClick={startCheckout} disabled={loading}>
+      {loading ? 'Redirecting…' : 'Pay with Crypto'}
+    </button>
   )
 }`
+
+  const reactBackendSnippet = `// Node.js / Express — POST /api/your-checkout-handler
+// Creates a PineTree session server-side and returns checkoutUrl to the browser.
+// The pt_live_ key stays here — it is never sent to the browser.
+app.post('/api/your-checkout-handler', async (req, res) => {
+  const ptRes = await fetch('${sessionEndpoint}', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer pt_live_YOUR_API_KEY',
+      'Idempotency-Key': req.body.orderId,   // prevents duplicate sessions on retry
+    },
+    body: JSON.stringify({
+      amount: req.body.amount,
+      currency: 'USD',
+      orderId: req.body.orderId,
+      successUrl: 'https://yourstore.com/success',
+      cancelUrl: 'https://yourstore.com/cancel',
+    }),
+  })
+  const { session } = await ptRes.json()
+  // session.sessionId can be stored on your order for later status polling:
+  // GET ${sessionEndpoint}/:sessionId  →  { status: 'active'|'processing'|'paid'|'expired' }
+  res.json({ checkoutUrl: session.checkoutUrl })
+})`
 
   const webhookVerifySnippet = `const crypto = require('crypto')
 
@@ -896,7 +942,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
     {
       id: "shopify",
       title: "Shopify Plugin",
-      description: "Install PineTree as a payment method directly in your Shopify store checkout.",
+      description: "Shopify support is planned. Native Shopify payment apps require Shopify partner approval before they can be listed as a payment method.",
       useCase: "Shopify merchants",
       difficulty: "Easy",
       status: "soon",
@@ -912,16 +958,17 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
     {
       id: "react-sdk",
       title: "React SDK",
-      description: "Drop-in React component — mount a checkout button and PineTree handles the rest.",
+      description: "Build a checkout button in React that calls your backend, which creates a PineTree session. No npm package required — works today with a few lines of code.",
       useCase: "React / Next.js apps",
-      difficulty: "Easy",
-      status: "soon",
+      difficulty: "Medium",
+      status: "preview",
+      action: "View React Example",
     },
   ]
 
   function handleIntegrationAction(id: string) {
     if (id === "hosted-link") { setTab("links"); return }
-    if (id === "js-session" || id === "html-button" || id === "rest-api") { setTab("developer"); return }
+    if (id === "js-session" || id === "html-button" || id === "rest-api" || id === "react-sdk") { setTab("developer"); return }
   }
 
   return (
@@ -1667,16 +1714,28 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
             <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-950">@pinetree/react</h3>
-                  <p className="mt-0.5 text-xs text-gray-500">Drop-in React component — not yet published as a package.</p>
+                  <h3 className="text-sm font-semibold text-gray-950">React Integration Pattern</h3>
+                  <p className="mt-0.5 text-xs text-gray-500">Checkout button that calls your backend — works today, no npm package needed.</p>
                 </div>
-                <SoonBadge />
+                <PreviewBadge />
               </div>
-              <div className="p-5">
-                <div className="mb-3 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3 py-2.5 text-xs text-amber-700">
-                  <strong>Not yet available.</strong> The npm package <code className="font-mono">@pinetree/react</code> does not exist yet. This shows the intended future API.
+              <div className="space-y-4 p-5">
+                <div className="rounded-xl border border-amber-200/80 bg-amber-50/60 px-3 py-2.5 text-xs text-amber-700">
+                  <strong>Create checkout sessions from your backend so your API key stays private.</strong>{" "}
+                  The browser calls your server; your server calls PineTree. The{" "}
+                  <code className="font-mono">@pinetree/react</code> npm package is not yet published — this pattern works today using the existing session API.
                 </div>
-                <CodeBlock code={reactSnippet} fieldId="react_snippet" copiedField={copiedField} onCopy={handleCopyField} lang="react" />
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">React component (frontend)</p>
+                <CodeBlock code={reactComponentSnippet} fieldId="react_component_snippet" copiedField={copiedField} onCopy={handleCopyField} lang="react" />
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">Backend handler (Node.js / Express)</p>
+                <CodeBlock code={reactBackendSnippet} fieldId="react_backend_snippet" copiedField={copiedField} onCopy={handleCopyField} lang="node.js" />
+                <div className="rounded-xl border border-gray-100 bg-gray-50/60 px-3.5 py-2.5 text-[11px] leading-relaxed text-gray-500">
+                  <span className="font-semibold text-gray-700">Check payment status server-side:</span>{" "}
+                  <code className="font-mono text-[10px] text-gray-700">GET /api/checkout/session/:sessionId</code>{" "}
+                  returns{" "}
+                  <code className="font-mono text-[10px] text-gray-600">active | processing | paid | expired | canceled</code>.
+                  Use this as a fallback if your webhook delivery fails.
+                </div>
               </div>
             </div>
           </DashboardSection>
@@ -1690,6 +1749,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                 { method: "POST",   path: "/api/checkout-links",               desc: "Create a payment link",        status: "Live" },
                 { method: "PATCH",  path: "/api/checkout-links/:id",           desc: "Disable a payment link",       status: "Live" },
                 { method: "POST",   path: "/api/checkout/session",             desc: "Create a checkout session",    status: "Preview" },
+                { method: "GET",    path: "/api/checkout/session/:sessionId",  desc: "Get session status",           status: "Preview" },
                 { method: "GET",    path: "/api/checkout/stats",               desc: "Online payment stats",         status: "Preview" },
                 { method: "GET",    path: "/api/merchant/webhooks",            desc: "Get webhook config",           status: "Preview" },
                 { method: "POST",   path: "/api/merchant/webhooks",            desc: "Save webhook config",          status: "Preview" },

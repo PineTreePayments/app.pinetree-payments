@@ -36,7 +36,72 @@ export function normalizeReportStatus(rawStatus: string, createdAt: string): str
  */
 type AssetRow = { network: string; asset: string; gross: number; status: string }
 
+export function normalizeReportProvider(rawProvider: string | null | undefined): string {
+  const provider = String(rawProvider || "").toLowerCase().trim()
+
+  if (
+    provider === "lightning_speed" ||
+    provider === "speed" ||
+    provider === "tryspeed" ||
+    provider === "try_speed" ||
+    provider === "speed_lightning"
+  ) return "Speed"
+
+  if (
+    provider === "lightning_nwc" ||
+    provider === "nwc" ||
+    provider === "nwc_lightning"
+  ) return "NWC"
+
+  if (
+    provider === "lightning" ||
+    provider === "bitcoin_lightning" ||
+    provider === "btc_lightning" ||
+    provider === "lightning_btc"
+  ) return "Lightning"
+
+  if (provider === "solana") return "Solana Pay"
+  if (provider === "base") return "Base Pay"
+  if (provider === "coinbase") return "Coinbase Business"
+  if (provider === "shift4") return "Shift4"
+  if (provider === "cash") return "Cash"
+
+  return String(rawProvider || "Unknown")
+}
+
+export function normalizeReportAsset(
+  rawAsset: string | null | undefined,
+  rawNetwork?: string | null,
+  rawProvider?: string | null,
+  rawCurrency?: string | null
+): string {
+  const asset = String(rawAsset || "").trim().toUpperCase()
+  const network = String(rawNetwork || "").toLowerCase().trim()
+  const provider = String(rawProvider || "").toLowerCase().trim()
+
+  if (
+    network === "bitcoin_lightning" ||
+    network === "lightning" ||
+    network === "btc_lightning" ||
+    network === "lightning_btc" ||
+    provider === "lightning_speed" ||
+    provider === "speed" ||
+    provider === "tryspeed" ||
+    provider === "lightning_nwc" ||
+    provider === "nwc" ||
+    provider === "lightning"
+  ) return "BTC"
+
+  if (asset === "SOL" || asset === "USDC" || asset === "ETH" || asset === "BTC" || asset === "USD") {
+    return asset
+  }
+
+  const currency = String(rawCurrency || "").trim().toUpperCase()
+  return currency || asset || "USD"
+}
+
 export function buildNetworkAssetLabel(network: string, asset: string): string {
+  if (network === "Lightning" && asset === "BTC") return "Lightning BTC"
   if (!asset || asset === "USD") return network
   if (!network || network === "Unknown") return asset
   return `${network} ${asset}`
@@ -60,7 +125,18 @@ export function normalizeReportNetwork(
   if (provider === "cash") return "Cash"
 
   const network = String(rawNetwork || "").toLowerCase().trim()
-  if (network === "bitcoin_lightning" || network === "lightning") return "Bitcoin Lightning"
+  if (
+    network === "bitcoin_lightning" ||
+    network === "lightning" ||
+    network === "btc_lightning" ||
+    network === "lightning_btc" ||
+    provider === "lightning_speed" ||
+    provider === "speed" ||
+    provider === "tryspeed" ||
+    provider === "lightning_nwc" ||
+    provider === "nwc" ||
+    provider === "lightning"
+  ) return "Lightning"
   if (network === "solana") return "Solana"
   if (network === "base") return "Base"
   if (network === "ethereum") return "Ethereum"

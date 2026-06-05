@@ -104,3 +104,18 @@ export async function updateCheckoutLinkStatus(
   if (error) throw new Error(`Failed to update checkout link: ${error.message}`)
   return data as CheckoutLink
 }
+
+export async function getCheckoutLinkById(
+  id: string,
+  merchantId: string
+): Promise<CheckoutLink | null> {
+  const { data, error } = await supabase
+    .from("checkout_links")
+    .select("*")
+    .eq("id", id)
+    .eq("merchant_id", merchantId)
+    .single()
+
+  if (error) return null
+  return data as CheckoutLink
+}

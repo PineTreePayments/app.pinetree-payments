@@ -221,6 +221,10 @@ export default function ProvidersPage() {
   const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const didToastSyncRef = useRef(false)
   const pollStopAtRef = useRef<number | null>(null)
+  const walletSetupRequestRef = useRef<{
+    provider: "solana" | "base"
+    walletType: string
+  } | null>(null)
 
   const closeProviderModal = useCallback(() => {
     setActiveProvider(null)
@@ -305,6 +309,56 @@ export default function ProvidersPage() {
     }
   }, [])
 
+  async function startWalletSetupSession(
+    provider: "solana" | "base",
+    walletType: string
+  ) {
+    if (!walletType) return null
+
+    const existingRequest = walletSetupRequestRef.current
+    if (
+      existingRequest?.provider === provider &&
+      existingRequest.walletType === walletType &&
+      walletSessionId &&
+      walletMobileDeeplink &&
+      walletQrCode
+    ) {
+      return {
+        sessionId: walletSessionId,
+        deeplink: walletMobileDeeplink,
+      }
+    }
+
+    walletSetupRequestRef.current = { provider, walletType }
+    setWalletQrCode(null)
+    setShowMobileConnect(false)
+
+    const sessionId = await createWalletConnectSession(provider, walletType)
+    const returnUrl = buildMobileBridgeUrl(provider, walletType, sessionId)
+    const deeplink = buildWalletDeepLink(provider, walletType, returnUrl)
+    const qr = await QRCode.toDataURL(deeplink, {
+      errorCorrectionLevel: "M",
+      margin: 2,
+      width: 320,
+    })
+
+    const latestRequest = walletSetupRequestRef.current
+    if (
+      latestRequest?.provider !== provider ||
+      latestRequest.walletType !== walletType
+    ) {
+      return null
+    }
+
+    setWalletMobileDeeplink(deeplink)
+    setWalletQrCode(qr)
+
+    return {
+      sessionId,
+      deeplink,
+    }
+  }
+
   useEffect(() => {
     if (!activeProvider) return
 
@@ -317,7 +371,11 @@ export default function ProvidersPage() {
   }, [activeProvider, closeProviderModal])
 
   useEffect(() => {
-    if (!walletSessionId || !activeProvider || !showMobileConnect) return
+    if (
+      !walletSessionId ||
+      !activeProvider ||
+      (activeProvider !== "solana" && activeProvider !== "base")
+    ) return
 
     pollStopAtRef.current = Date.now() + 15 * 60 * 1000
     let lastPollAt = 0
@@ -412,7 +470,31 @@ export default function ProvidersPage() {
       if (animationFrameId !== null) cancelAnimationFrame(animationFrameId)
       pollStopAtRef.current = null
     }
-  }, [walletSessionId, activeProvider, showMobileConnect, loadAll])
+  }, [walletSessionId, activeProvider, loadAll])
+
+  useEffect(() => {
+    if (activeProvider !== "solana" && activeProvider !== "base") {
+      walletSetupRequestRef.current = null
+      return
+    }
+
+    if (!selectedWalletType) {
+      walletSetupRequestRef.current = null
+      setWalletQrCode(null)
+      setWalletSessionId(null)
+      setWalletSessionStatus(null)
+      setWalletMobileDeeplink(null)
+      return
+    }
+
+    startWalletSetupSession(activeProvider, selectedWalletType).catch((err) => {
+      console.error("Wallet setup QR error:", err)
+      toast.error(err instanceof Error ? err.message : "Failed to generate wallet QR")
+    })
+    // startWalletSetupSession reads the latest setup state and is intentionally
+    // keyed by modal provider plus selected wallet to avoid duplicate sessions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProvider, selectedWalletType])
 
   async function updateSettings(field: string, value: boolean) {
     try {
@@ -552,7 +634,7 @@ export default function ProvidersPage() {
       return `cbwallet://dapp?url=${encodeURIComponent(returnUrl)}`
     }
 
-    throw new Error("Select MetaMask, Trust Wallet, or Coinbase Wallet first")
+    throw new Error("Select Base Wallet, MetaMask, or Trust Wallet first")
   }
 
   async function createWalletConnectSession(
@@ -667,12 +749,13 @@ export default function ProvidersPage() {
         return
       }
 
-      const sessionId = await createWalletConnectSession("solana", walletType)
-      const returnUrl = buildMobileBridgeUrl("solana", walletType, sessionId)
-      const deeplink = buildWalletDeepLink("solana", walletType, returnUrl)
+      const setup = await startWalletSetupSession("solana", walletType)
+      const deeplink = setup?.deeplink || walletMobileDeeplink
 
-      setWalletMobileDeeplink(deeplink)
-      setWalletQrCode(null)
+      if (!deeplink) {
+        throw new Error("Failed to create Solana wallet link")
+      }
+
       setShowMobileConnect(true)
       window.location.href = deeplink
     } catch (err) {
@@ -688,48 +771,18 @@ export default function ProvidersPage() {
         return
       }
 
-      const sessionId = await createWalletConnectSession("base", selectedWalletType)
-      const returnUrl = buildMobileBridgeUrl("base", selectedWalletType, sessionId)
-      const deeplink = buildWalletDeepLink("base", selectedWalletType, returnUrl)
+      const setup = await startWalletSetupSession("base", selectedWalletType)
+      const deeplink = setup?.deeplink || walletMobileDeeplink
 
-      setWalletMobileDeeplink(deeplink)
-      setWalletQrCode(null)
+      if (!deeplink) {
+        throw new Error("Failed to create wallet link")
+      }
+
       setShowMobileConnect(true)
       window.location.href = deeplink
     } catch (err) {
       console.error("Base mobile wallet error:", err)
       toast.error("Failed to open wallet. Make sure the wallet app is installed.")
-    }
-  }
-
-  async function generateWalletSetupQr() {
-    try {
-      if (activeProvider !== "solana" && activeProvider !== "base") return
-
-      if (!selectedWalletType) {
-        toast.error(
-          activeProvider === "solana"
-            ? "Select Phantom or Solflare first"
-            : "Select MetaMask, Trust Wallet, or Coinbase Wallet first"
-        )
-        return
-      }
-
-      const sessionId = await createWalletConnectSession(activeProvider, selectedWalletType)
-      const returnUrl = buildMobileBridgeUrl(activeProvider, selectedWalletType, sessionId)
-      const deeplink = buildWalletDeepLink(activeProvider, selectedWalletType, returnUrl)
-      const qr = await QRCode.toDataURL(deeplink, {
-        errorCorrectionLevel: "M",
-        margin: 2,
-        width: 320,
-      })
-
-      setWalletMobileDeeplink(deeplink)
-      setWalletQrCode(qr)
-      setShowMobileConnect(true)
-      toast.success("Scan the QR code with your selected wallet")
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to generate wallet QR")
     }
   }
 
@@ -740,7 +793,7 @@ export default function ProvidersPage() {
       toast.error(
         activeProvider === "solana"
           ? "Select Phantom or Solflare first"
-          : "Select MetaMask, Trust Wallet, or Coinbase Wallet first"
+          : "Select Base Wallet, MetaMask, or Trust Wallet first"
       )
       return
     }
@@ -809,6 +862,7 @@ export default function ProvidersPage() {
     setWalletSessionStatus(null)
     setWalletMobileDeeplink(null)
     setConnectedWalletAddress(null)
+    walletSetupRequestRef.current = null
     didToastSyncRef.current = false
 
     if (pollerRef.current) {
@@ -817,6 +871,22 @@ export default function ProvidersPage() {
     }
 
     setActiveProvider(modalProvider)
+  }
+
+  function selectWalletType(walletType: string) {
+    if (selectedWalletType === walletType) return
+
+    walletSetupRequestRef.current = null
+    setSelectedWalletType(walletType)
+    setShowMobileConnect(false)
+    setWalletQrCode(null)
+    setWalletSessionId(null)
+    setWalletSessionStatus(null)
+    setWalletMobileDeeplink(null)
+
+    if (connectedWalletAddress) {
+      setConnectedWalletAddress(null)
+    }
   }
 
   async function testNwcConnection() {
@@ -2104,7 +2174,7 @@ export default function ProvidersPage() {
                         <button
                           key={wt}
                           type="button"
-                          onClick={() => { setSelectedWalletType(wt); setShowMobileConnect(false); setWalletQrCode(null) }}
+                          onClick={() => selectWalletType(wt)}
                           className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
                             selectedWalletType === wt
                               ? "border-[#0052FF] bg-[#0052FF]/5 text-[#0052FF]"
@@ -2122,7 +2192,7 @@ export default function ProvidersPage() {
                         <button
                           key={wt}
                           type="button"
-                          onClick={() => { setSelectedWalletType(wt); setShowMobileConnect(false); setWalletQrCode(null) }}
+                          onClick={() => selectWalletType(wt)}
                           className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
                             selectedWalletType === wt
                               ? "border-[#0052FF] bg-[#0052FF]/5 text-[#0052FF]"
@@ -2136,32 +2206,69 @@ export default function ProvidersPage() {
                   )}
                 </div>
 
-                {/* Primary — scan QR with mobile wallet (placeholder) */}
-                <div className="rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-gray-950">Scan with mobile wallet</p>
-                      <p className="mt-1 text-sm leading-5 text-gray-600">
-                        Open your wallet app and scan the QR code to connect and approve.
-                      </p>
+                {/* Wallet address review */}
+                <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <label className="block">
+                    <span className="text-sm font-semibold text-gray-950">Wallet address</span>
+                    <span className="mt-1 block text-xs leading-5 text-gray-500">
+                      Review the connected wallet address, or paste an address manually before saving.
+                    </span>
+                    <input
+                      value={inputValue}
+                      onChange={(e) => {
+                        const nextValue = e.target.value
+                        setInputValue(nextValue)
+                        if (connectedWalletAddress && nextValue.trim() !== connectedWalletAddress.trim()) {
+                          setConnectedWalletAddress(null)
+                          setWalletSessionStatus(null)
+                        }
+                      }}
+                      placeholder={activeProvider === "solana" ? "Solana wallet address" : "Base wallet address (0x...)"}
+                      className="mt-2 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-50"
+                    />
+                  </label>
+
+                  {connectedWalletAddress && (
+                    <p className="mt-2 text-xs font-semibold text-[#0052FF]">
+                      Wallet connected: {formatCredentialPart(connectedWalletAddress, 6, 4)}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Setup options
+                  </p>
+                  {!selectedWalletType && (
+                    <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
+                      Choose a wallet to generate the setup QR.
+                    </p>
+                  )}
+                  {selectedWalletType && (!walletSessionId || !walletQrCode) && (
+                    <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
+                      Preparing setup QR...
+                    </p>
+                  )}
+                </div>
+
+                {/* Primary — scan QR with mobile wallet */}
+                {selectedWalletType && walletSessionId && walletQrCode && (
+                  <div className="rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-950">Scan QR with mobile wallet</p>
+                        <p className="mt-1 text-sm leading-5 text-gray-600">
+                          Scan this QR from your selected wallet to connect and approve.
+                        </p>
+                      </div>
+                      {walletSessionStatus === "pending" && (
+                        <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-[#0052FF] shadow-sm ring-1 ring-blue-100">
+                          Waiting
+                        </span>
+                      )}
                     </div>
-                    {walletSessionStatus === "pending" && walletQrCode && (
-                      <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-[#0052FF] shadow-sm ring-1 ring-blue-100">
-                        Waiting
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={generateWalletSetupQr}
-                    className="mt-3 rounded-lg border border-[#0052FF] bg-white px-4 py-2 text-sm font-semibold text-[#0052FF] shadow-sm transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={!selectedWalletType}
-                  >
-                    Generate QR
-                  </button>
-                  <div className="mt-3 flex min-h-40 items-center justify-center rounded-lg border border-dashed border-[#0052FF]/20 bg-white/70 p-3">
-                    {walletQrCode ? (
-                      <div className="flex flex-col items-center gap-3">
+
+                    <div className="mt-3 flex flex-col items-center gap-3 rounded-lg bg-white/80 p-3">
                         <Image
                           src={walletQrCode}
                           alt="Wallet setup QR code"
@@ -2191,13 +2298,8 @@ export default function ProvidersPage() {
                           </a>
                         )}
                       </div>
-                    ) : (
-                      <p className="text-center text-xs text-gray-400">
-                        Select a wallet, then generate a QR code for setup.
-                      </p>
-                    )}
                   </div>
-                </div>
+                )}
 
                 {/* Secondary — open mobile wallet (works now via deep-link) */}
                 <div className="rounded-xl border border-gray-200 bg-white p-4">
@@ -2220,7 +2322,7 @@ export default function ProvidersPage() {
                     Open Mobile Wallet
                   </button>
 
-                  {showMobileConnect && (
+                  {(showMobileConnect || walletSessionStatus === "connected") && (
                     <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50/80 p-3 text-center">
                       {walletSessionStatus === "pending" && (
                         <p className="text-xs text-gray-600">Waiting for mobile wallet approval…</p>
@@ -2256,35 +2358,6 @@ export default function ProvidersPage() {
                   >
                     {loading ? "Connecting..." : "Connect on This Device"}
                   </button>
-                </div>
-
-                {/* Wallet address review */}
-                <div className="rounded-xl border border-gray-200 bg-white p-4">
-                  <label className="block">
-                    <span className="text-sm font-semibold text-gray-950">Wallet address</span>
-                    <span className="mt-1 block text-xs leading-5 text-gray-500">
-                      Review the connected wallet address, or paste an address manually before saving.
-                    </span>
-                    <input
-                      value={inputValue}
-                      onChange={(e) => {
-                        const nextValue = e.target.value
-                        setInputValue(nextValue)
-                        if (connectedWalletAddress && nextValue.trim() !== connectedWalletAddress.trim()) {
-                          setConnectedWalletAddress(null)
-                          setWalletSessionStatus(null)
-                        }
-                      }}
-                      placeholder={activeProvider === "solana" ? "Solana wallet address" : "Base wallet address (0x...)"}
-                      className="mt-2 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-50"
-                    />
-                  </label>
-
-                  {connectedWalletAddress && (
-                    <p className="mt-2 text-xs font-semibold text-[#0052FF]">
-                      Wallet connected: {formatCredentialPart(connectedWalletAddress, 6, 4)}
-                    </p>
-                  )}
                 </div>
 
               </div>

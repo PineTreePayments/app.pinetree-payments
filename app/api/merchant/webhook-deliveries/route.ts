@@ -6,7 +6,7 @@ const supabase = supabaseAdmin || supabaseAnon
 
 export async function GET(req: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(req)
+    const merchantId = await requireMerchantIdFromRequest(req, "webhooks:read")
 
     const { data, error } = await supabase
       .from("webhook_deliveries")

@@ -4,7 +4,12 @@ import {
   type MerchantReportContext,
   type MerchantReportPaymentRow
 } from "@/database/reports"
-import { normalizeReportNetwork, normalizeReportStatus } from "./reportDisplayNormalization"
+import {
+  normalizeReportAsset,
+  normalizeReportNetwork,
+  normalizeReportProvider,
+  normalizeReportStatus
+} from "./reportDisplayNormalization"
 
 export type ReportType =
   | "today"
@@ -131,18 +136,6 @@ function titleForReport(type: ReportType) {
   return `PineTree ${REPORT_LABELS[type]}`
 }
 
-function displayProviderName(provider: string) {
-  const normalized = String(provider || "").toLowerCase().trim()
-  if (normalized === "lightning" || normalized === "lightning_nwc") return "Bitcoin Lightning"
-  if (normalized === "solana") return "Solana Pay"
-  if (normalized === "base") return "Base Pay"
-  if (normalized === "coinbase") return "Coinbase Business"
-  if (normalized === "shift4") return "Shift4"
-  if (normalized === "cash") return "Cash"
-  return provider || "Unknown"
-}
-
-
 function displayChannelName(channel: string) {
   const normalized = String(channel || "").toLowerCase().trim()
   if (normalized === "pos") return "POS"
@@ -166,7 +159,7 @@ function getMetadataNumber(metadata: Record<string, unknown> | null | undefined,
   return typeof value === "number" || typeof value === "string" ? Number(value || 0) : 0
 }
 
-function getAsset(payment: MerchantReportPaymentRow) {
+function getRawAsset(payment: MerchantReportPaymentRow) {
   const metadata = payment.metadata || {}
   const selectedAsset = String(metadata.selectedAsset || metadata.asset || "").trim().toUpperCase()
   if (selectedAsset) return selectedAsset
@@ -199,8 +192,10 @@ function buildLedgerRow(payment: MerchantReportPaymentRow): ReportLedgerRow {
   const metadataTax = getMetadataNumber(metadata, "taxAmount")
   const tax = metadataTax || Math.max(0, money(payment.merchant_amount) - subtotal)
   const rawProvider = String(tx?.provider || payment.provider || "")
-  const provider = displayProviderName(rawProvider || "unknown")
-  const network = normalizeReportNetwork(tx?.network || payment.network, rawProvider)
+  const rawNetwork = tx?.network || payment.network
+  const provider = normalizeReportProvider(rawProvider || "unknown")
+  const network = normalizeReportNetwork(rawNetwork, rawProvider)
+  const asset = normalizeReportAsset(getRawAsset(payment), rawNetwork, rawProvider, payment.currency)
   const channel = displayChannelName(String(tx?.channel || metadata.channel || "online"))
   const reference = String(tx?.provider_transaction_id || payment.provider_reference || payment.id)
 
@@ -210,7 +205,7 @@ function buildLedgerRow(payment: MerchantReportPaymentRow): ReportLedgerRow {
     reference,
     provider,
     network,
-    asset: getAsset(payment),
+    asset,
     channel,
     subtotal,
     tax,

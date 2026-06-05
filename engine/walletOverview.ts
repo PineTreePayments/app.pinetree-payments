@@ -16,6 +16,10 @@ import {
   listRecentWalletOperationsForMerchant,
   type WalletOperationRecord
 } from "@/database/walletOperations"
+import {
+  listSettlementWithdrawalsForMerchant,
+  type SettlementWithdrawalRecord
+} from "@/database/settlementWithdrawals"
 
 // ─── NWC Types ────────────────────────────────────────────────────────────────
 
@@ -76,6 +80,8 @@ export type WalletOverviewOperation = {
   network: string
   amount: number
   destinationType: string
+  destinationValue: string | null
+  providerReference: string | null
   status: string
   errorCode: string | null
   errorMessage: string | null
@@ -147,11 +153,52 @@ function summarizeWalletOperation(row: WalletOperationRecord): WalletOverviewOpe
     network: row.network,
     amount: Number(row.amount),
     destinationType: row.destination_type,
+    destinationValue: row.destination_value,
+    providerReference: row.provider_operation_id,
     status: row.status,
     errorCode: row.error_code,
     errorMessage: row.error_message,
     createdAt: row.created_at
   }
+}
+
+function summarizeSettlementWithdrawal(row: SettlementWithdrawalRecord): WalletOverviewOperation {
+  return {
+    id: row.id,
+    provider: "settlement",
+    operationType: row.movement_type === "direct_send" ? "SEND_CRYPTO" : "CASH_OUT",
+    asset: row.asset,
+    network: row.network,
+    amount: Number(row.amount),
+    destinationType: row.destination_kind || "saved_destination",
+    destinationValue: row.destination_address,
+    providerReference: row.tx_hash,
+    status: row.status,
+    errorCode: row.status === "FAILED" ? "WITHDRAWAL_FAILED" : null,
+    errorMessage: row.failure_reason,
+    createdAt: row.created_at
+  }
+}
+
+async function listRecentWalletActivity(merchantId: string): Promise<WalletOverviewOperation[]> {
+  const [walletOperations, settlementWithdrawals] = await Promise.all([
+    listRecentWalletOperationsForMerchant(merchantId, { limit: 25 }),
+    listSettlementWithdrawalsForMerchant(merchantId, { limit: 25 })
+  ])
+
+  const operationRows = walletOperations
+    .filter((row) => {
+      const type = String(row.operation_type || "").toUpperCase()
+      return type === "SEND_CRYPTO" || type === "CASH_OUT" || type === "PROVIDER_ACTION"
+    })
+    .map(summarizeWalletOperation)
+
+  return [
+    ...operationRows,
+    ...settlementWithdrawals.map(summarizeSettlementWithdrawal)
+  ]
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+    .slice(0, 8)
 }
 
 async function getLightningPaymentRails(
@@ -396,9 +443,7 @@ export async function getWalletOverviewEngine(
     getMerchantWalletRows(merchantId),
     getLightningPaymentRails(merchantId, prices)
   ])
-  const recentOperations = (
-    await listRecentWalletOperationsForMerchant(merchantId, { provider: "lightning_nwc", limit: 8 })
-  ).map(summarizeWalletOperation)
+  const recentOperations = await listRecentWalletActivity(merchantId)
   let activePaymentRails = paymentRails
 
   const walletBalancesById: Record<string, number> = {}

@@ -18,7 +18,7 @@ type UpsertBody = {
 
 export async function GET(req: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(req)
+    const merchantId = await requireMerchantIdFromRequest(req, "webhooks:read")
     const config = await getMerchantWebhook(merchantId)
     return NextResponse.json({ webhook: config })
   } catch (error: unknown) {
@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(req)
+    const merchantId = await requireMerchantIdFromRequest(req, "webhooks:write")
     const body = (await req.json()) as UpsertBody
 
     const url = String(body.url || "").trim()
