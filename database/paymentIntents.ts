@@ -83,6 +83,27 @@ export async function expirePaymentIntent(intentId: string): Promise<void> {
   }
 }
 
+/**
+ * Find the most recent non-expired payment intent linked to a specific payment.
+ * Used by the stale payment sweep to expire the intent when a payment is swept
+ * to INCOMPLETE, keeping payment_intents consistent with payment state.
+ */
+export async function getPaymentIntentByPaymentId(
+  paymentId: string
+): Promise<PaymentIntent | null> {
+  const { data, error } = await db
+    .from("payment_intents")
+    .select("*")
+    .eq("payment_id", paymentId)
+    .neq("status", "EXPIRED")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) return null
+  return data as PaymentIntent | null
+}
+
 export async function markPaymentIntentSelected(input: {
   id: string
   selected_network: string

@@ -8,6 +8,7 @@ const db = supabaseAdmin || supabase
 const CONFIRM_TOKEN = "MARK_STALE_INCOMPLETE"
 const MAX_IDS = 50
 const MIN_PENDING_AGE_MINUTES = 60
+const MIN_CREATED_AGE_MINUTES = 30
 
 export async function POST(req: NextRequest) {
   try {
@@ -55,31 +56,37 @@ export async function POST(req: NextRequest) {
     }
 
     for (const row of (data || []) as Array<{ id: string; status: string; created_at: string }>) {
-      // Only PENDING → INCOMPLETE is a valid state machine transition.
-      // CREATED → INCOMPLETE and PROCESSING → INCOMPLETE are both invalid.
-      if (row.status !== "PENDING") {
-        const reason =
-          row.status === "CREATED"
-            ? "state_machine_prevents_created_incomplete"
-            : row.status === "PROCESSING"
-            ? "processing_requires_manual_review"
-            : "terminal_status_not_eligible"
-        skipped.push({ paymentId: row.id, status: row.status, reason })
+      const ageMinutes = (now - new Date(row.created_at).getTime()) / 60_000
+
+      // PROCESSING → INCOMPLETE is never allowed (processing payments may still confirm).
+      // Terminal statuses are also excluded.
+      if (row.status === "PROCESSING") {
+        skipped.push({ paymentId: row.id, status: row.status, reason: "processing_requires_manual_review" })
+        continue
+      }
+      if (!["CREATED", "PENDING"].includes(row.status)) {
+        skipped.push({ paymentId: row.id, status: row.status, reason: "terminal_status_not_eligible" })
         continue
       }
 
-      const ageMinutes = (now - new Date(row.created_at).getTime()) / 60_000
-      if (ageMinutes < MIN_PENDING_AGE_MINUTES) {
+      // Conservative age thresholds for the admin manual action.
+      // The automated cron sweep uses the tighter 5-minute threshold.
+      // CREATED → INCOMPLETE is a valid state machine transition (validTransitions.CREATED includes INCOMPLETE).
+      const minAge = row.status === "CREATED" ? MIN_CREATED_AGE_MINUTES : MIN_PENDING_AGE_MINUTES
+      if (ageMinutes < minAge) {
         skipped.push({ paymentId: row.id, status: row.status, reason: "recent_payment_not_eligible" })
         continue
       }
+
+      const staleReason =
+        row.status === "CREATED" ? "created_no_activity_timeout" : "pending_no_activity_timeout"
 
       try {
         await updatePaymentStatus(row.id, "INCOMPLETE", {
           providerEvent: "admin.stale-cleanup",
           rawPayload: {
             adminAction: true,
-            reason: "pending_no_activity_timeout",
+            reason: staleReason,
             adminId,
             requestIp: req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? "unknown",
           },

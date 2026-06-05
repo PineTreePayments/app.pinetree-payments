@@ -1,5 +1,6 @@
-import { getPaymentById } from "@/database"
+import { getPaymentById, getStalePaymentsForSweep } from "@/database"
 import { getTransactionByPaymentId } from "@/database/transactions"
+import { getPaymentIntentByPaymentId, expirePaymentIntent } from "@/database/paymentIntents"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 
 const ABANDONED_PAYMENT_TIMEOUT_MS = 5 * 60 * 1000
@@ -83,4 +84,95 @@ export async function markPaymentIncompleteIfAbandoned(paymentId: string): Promi
     rawPayload: { timeoutMinutes: 5 },
     requireAbandonedTimeout: true
   })
+}
+
+// ── Network-wide stale payment sweep ──────────────────────────────────────────
+
+export type StaleSweepResult = {
+  checked: number
+  swept: number
+  skipped: number
+  errors: number
+}
+
+/**
+ * Network-wide stale payment sweep.
+ *
+ * Fetches CREATED and PENDING payments older than 5 minutes, oldest first,
+ * and marks each INCOMPLETE when there is no transaction evidence on-chain,
+ * in the transactions table, or in payment metadata.
+ *
+ * Also expires the linked payment_intent (if any) for state consistency.
+ *
+ * Writes a payment_event and fires the payment.incomplete webhook for every
+ * payment swept (via updatePaymentStatus → createPaymentEvent + deliverWebhook).
+ *
+ * Safe to call repeatedly — all per-payment guards in markPaymentIncomplete
+ * still apply (provider_reference, metadata broadcast evidence, transaction
+ * table lookup, and the 5-minute abandonment window).
+ *
+ * Designed for the check-payments cron; also callable from admin routes.
+ */
+export async function sweepStalePayments(limit = 100): Promise<StaleSweepResult> {
+  let payments: Awaited<ReturnType<typeof getStalePaymentsForSweep>>
+
+  try {
+    payments = await getStalePaymentsForSweep(ABANDONED_PAYMENT_TIMEOUT_MS, limit)
+  } catch (err) {
+    console.error("[stale-sweep] failed to fetch stale payments", err)
+    return { checked: 0, swept: 0, skipped: 0, errors: 1 }
+  }
+
+  if (payments.length === 0) {
+    return { checked: 0, swept: 0, skipped: 0, errors: 0 }
+  }
+
+  let swept = 0
+  let skipped = 0
+  let errors = 0
+
+  for (const payment of payments) {
+    try {
+      const marked = await markPaymentIncomplete(payment.id, {
+        providerEvent: "cron.stale_payment_sweep",
+        rawPayload: {
+          sweepReason: "no_activity_timeout",
+          timeoutMinutes: 5,
+          previousStatus: payment.status,
+        },
+        requireAbandonedTimeout: true,
+      })
+
+      if (marked) {
+        swept++
+        // Best-effort intent expiry — must not block sweep progress on error
+        void expireLinkedPaymentIntent(payment.id)
+      } else {
+        skipped++
+      }
+    } catch (err) {
+      console.error("[stale-sweep] error sweeping payment", {
+        paymentId: payment.id,
+        error: err instanceof Error ? err.message : String(err),
+      })
+      errors++
+    }
+  }
+
+  console.info("[stale-sweep] sweep complete", { checked: payments.length, swept, skipped, errors })
+  return { checked: payments.length, swept, skipped, errors }
+}
+
+async function expireLinkedPaymentIntent(paymentId: string): Promise<void> {
+  try {
+    const intent = await getPaymentIntentByPaymentId(paymentId)
+    if (intent) {
+      await expirePaymentIntent(intent.id)
+    }
+  } catch (err) {
+    console.error("[stale-sweep] failed to expire linked intent", {
+      paymentId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
 }

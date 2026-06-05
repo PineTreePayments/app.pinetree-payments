@@ -48,13 +48,13 @@ export const PLATFORM_REPORT_DEFAULT: PlatformReportMetrics = {
 
 // Stale payment eligibility — whether and how a row can be cleaned up
 export type StaleEligibility =
-  | "eligible_for_incomplete"   // PENDING > 60 min — state machine allows PENDING → INCOMPLETE
-  | "review_required"           // CREATED > 30 min or PROCESSING > 24 h — cannot bulk-mutate safely
+  | "eligible_for_incomplete"     // CREATED > 30 min or PENDING > 60 min — state machine allows both → INCOMPLETE
+  | "review_required"             // PROCESSING > 24 h — needs manual investigation, never auto-mark
   | "recent_payment_not_eligible" // Under age threshold — still active
 
 export type StaleReasonCode =
   | "pending_no_activity_timeout"        // PENDING > 60 min, eligible for INCOMPLETE
-  | "created_no_activity_timeout"        // CREATED > 30 min but CREATED→INCOMPLETE is invalid per state machine
+  | "created_no_activity_timeout"        // CREATED > 30 min, eligible for INCOMPLETE (CREATED → INCOMPLETE is valid)
   | "processing_stuck_requires_review"   // PROCESSING > 24 h, needs manual investigation
   | "recent_payment_not_eligible"        // Under threshold, may still complete
 
@@ -126,8 +126,10 @@ function computeStaleEligibility(
     return { eligibility: "eligible_for_incomplete", staleReason: "pending_no_activity_timeout" }
   }
   if (status === "CREATED" && ageMinutes >= 30) {
-    // CREATED → INCOMPLETE is not a valid state machine transition; CREATED can only go to PENDING
-    return { eligibility: "review_required", staleReason: "created_no_activity_timeout" }
+    // CREATED → INCOMPLETE is a valid state machine transition (validTransitions.CREATED includes INCOMPLETE).
+    // The conservative 30-minute threshold here is intentional for the admin manual tool;
+    // the automated cron sweep uses the tighter 5-minute threshold.
+    return { eligibility: "eligible_for_incomplete", staleReason: "created_no_activity_timeout" }
   }
   if (status === "PROCESSING" && ageMinutes >= 1_440) {
     return { eligibility: "review_required", staleReason: "processing_stuck_requires_review" }
@@ -278,10 +280,10 @@ export async function getPlatformReport(
  * eligibility for safe cleanup, and latest event data.
  * Read-only — does NOT mutate any rows.
  *
- * Eligibility rules:
- *   PENDING > 60 min  → eligible_for_incomplete (PENDING → INCOMPLETE is valid per state machine)
- *   CREATED > 30 min  → review_required (CREATED → INCOMPLETE is invalid; requires manual handling)
- *   PROCESSING > 24 h → review_required (needs manual investigation; never auto-mark)
+ * Eligibility rules (admin manual tool — more conservative than the 5-min automated sweep):
+ *   PENDING > 60 min   → eligible_for_incomplete (PENDING → INCOMPLETE is valid per state machine)
+ *   CREATED > 30 min   → eligible_for_incomplete (CREATED → INCOMPLETE is valid per state machine)
+ *   PROCESSING > 24 h  → review_required (needs manual investigation; never auto-mark)
  */
 export async function getAdminStaleDiagnostic(): Promise<{
   rows: StaleDiagnosticRow[]

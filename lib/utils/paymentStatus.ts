@@ -17,9 +17,12 @@ export function getPaymentDisplayStatus(status: string, createdAt: string): Paym
   const now = new Date()
   const ageMinutes = (now.getTime() - txDate.getTime()) / (1000 * 60)
 
-  // Only expire PENDING status after 5 minutes. PROCESSING never expires.
+  // PENDING payments older than 5 minutes will be swept to INCOMPLETE by the
+  // stale payment sweep on the next cron run. Show them as INCOMPLETE now so
+  // the UI is consistent with what the DB will reflect after the sweep.
+  // PROCESSING is never overridden — it has real on-chain evidence.
   const effectiveStatus = status === "PENDING" && ageMinutes > 5
-    ? "EXPIRED"
+    ? "INCOMPLETE"
     : status
 
   const statusMappings: Record<string, PaymentDisplayStatus> = {

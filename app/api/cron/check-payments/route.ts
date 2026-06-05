@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getPaymentsByStatus } from "@/database"
 import { runPaymentWatcher } from "@/engine/checkPaymentOnce"
+import { sweepStalePayments } from "@/engine/paymentStateActions"
 
 // Vercel cron secret — set CRON_SECRET in your Vercel env vars to secure this endpoint
 function isAuthorized(req: NextRequest): boolean {
@@ -19,7 +20,19 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Check CREATED, PENDING, and PROCESSING payments — all are watchable states
+    // ── Phase 1: Stale payment sweep ──────────────────────────────────────────
+    // Mark CREATED/PENDING payments older than 5 minutes as INCOMPLETE when
+    // there is no transaction evidence. Runs before blockchain checks and uses
+    // oldest-first ordering so multi-day stale payments are always reached,
+    // regardless of how many total active payments exist.
+    //
+    // This is a DB-only pass — no RPC calls — so it is never blocked by
+    // the per-payment 8-second blockchain-check timeout below.
+    const sweepResult = await sweepStalePayments(100)
+
+    // ── Phase 2: Blockchain checks for recently active payments ───────────────
+    // After the sweep, remaining CREATED/PENDING/PROCESSING are recent enough
+    // to still need on-chain verification.
     const [created, pending, processing] = await Promise.all([
       getPaymentsByStatus("CREATED", 50),
       getPaymentsByStatus("PENDING", 50),
@@ -29,7 +42,7 @@ export async function GET(req: NextRequest) {
     const watchable = [...created, ...pending, ...processing]
 
     if (watchable.length === 0) {
-      return NextResponse.json({ checked: 0 })
+      return NextResponse.json({ checked: 0, sweepResult })
     }
 
     // Run watcher iterations in parallel — each does a single blockchain check.
@@ -51,7 +64,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       checked: watchable.length,
       succeeded,
-      failed
+      failed,
+      sweepResult,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error"

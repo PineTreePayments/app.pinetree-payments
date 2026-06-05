@@ -48,9 +48,9 @@ export async function POST(req: NextRequest) {
 
       if (row.status === "PENDING" && ageMinutes >= 60) {
         eligible.push({ paymentId: row.id, status: row.status, staleReason: "pending_no_activity_timeout" })
-      } else if (row.status === "CREATED") {
-        // CREATED → INCOMPLETE is not a valid state machine transition
-        ineligible.push({ paymentId: row.id, status: row.status, staleReason: "state_machine_prevents_created_incomplete" })
+      } else if (row.status === "CREATED" && ageMinutes >= 30) {
+        // CREATED → INCOMPLETE is valid per state machine (validTransitions.CREATED includes INCOMPLETE)
+        eligible.push({ paymentId: row.id, status: row.status, staleReason: "created_no_activity_timeout" })
       } else if (row.status === "PROCESSING") {
         ineligible.push({ paymentId: row.id, status: row.status, staleReason: "processing_requires_manual_review" })
       } else if (["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "REFUNDED"].includes(row.status)) {
