@@ -554,6 +554,10 @@ export default function HelpCenterPage() {
         error?: string
       } | null
 
+      if (res.status === 429) {
+        throw new Error("PineTree AI is temporarily limited. Please try again shortly.")
+      }
+
       if (!res.ok || !payload?.answer) {
         throw new Error(payload?.error || "PineTree AI could not answer that yet.")
       }

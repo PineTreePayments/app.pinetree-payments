@@ -5,11 +5,14 @@ import {
   getRouteErrorStatus,
   requireMerchantIdFromRequest
 } from "@/lib/api/merchantAuth"
-import { makeRateLimiter } from "@/lib/api/rateLimit"
+import { getRequestIp, makeRateLimiter } from "@/lib/api/rateLimit"
 
-// 20 AI questions per merchant per minute.  AI calls have non-trivial cost;
-// this prevents runaway loops or abuse without affecting normal usage.
-const assistantLimiter = makeRateLimiter({ windowMs: 60_000, maxRequests: 20 })
+const AI_LIMITED_MESSAGE = "PineTree AI is temporarily limited. Please try again shortly."
+
+// In-memory limits are isolated behind lib/api/rateLimit so they can later move
+// to shared storage without changing route behavior.
+const merchantAssistantLimiter = makeRateLimiter({ windowMs: 60 * 60 * 1000, maxRequests: 20 })
+const ipAssistantLimiter = makeRateLimiter({ windowMs: 15 * 60 * 1000, maxRequests: 10 })
 
 // Max message length to prevent oversized context injection
 const MAX_MESSAGE_LENGTH = 2000
@@ -25,27 +28,43 @@ function getErrorMessage(error: unknown, fallback: string) {
 
 export async function POST(req: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(req)
-
-    const limit = assistantLimiter.check(merchantId)
-    if (!limit.allowed) {
+    const ip = getRequestIp(req)
+    const ipLimit = ipAssistantLimiter.check(`ip:${ip}`)
+    if (!ipLimit.allowed) {
       return NextResponse.json(
-        { error: "Too many requests. Please wait a moment before asking another question." },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(limit.retryAfterMs / 1000)) } }
+        { error: AI_LIMITED_MESSAGE },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(ipLimit.retryAfterMs / 1000)) } }
       )
     }
 
     const body = (await req.json().catch(() => ({}))) as AssistantRequestBody
-    const message = String(body.message || "").trim().slice(0, MAX_MESSAGE_LENGTH)
+    const rawMessage = String(body.message || "").trim()
     const debugMode = body.debug === true && process.env.NODE_ENV !== "production"
 
-    if (!message && !debugMode) {
+    if (!rawMessage && !debugMode) {
       return NextResponse.json(
         { error: "message is required" },
         { status: 400 }
       )
     }
 
+    if (rawMessage.length > MAX_MESSAGE_LENGTH) {
+      return NextResponse.json(
+        { error: `Message is too long. Please keep PineTree AI questions under ${MAX_MESSAGE_LENGTH} characters.` },
+        { status: 400 }
+      )
+    }
+
+    const merchantId = await requireMerchantIdFromRequest(req)
+    const merchantLimit = merchantAssistantLimiter.check(`merchant:${merchantId}`)
+    if (!merchantLimit.allowed) {
+      return NextResponse.json(
+        { error: AI_LIMITED_MESSAGE },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(merchantLimit.retryAfterMs / 1000)) } }
+      )
+    }
+
+    const message = rawMessage
     const context = await getPineTreeAssistantContext(merchantId)
 
     if (debugMode) {

@@ -221,7 +221,7 @@ export async function generateReportPdfFromSummary(report: ReportSummary) {
 
   firstPage.drawText("PineTree Payments", { x: 50, y: 765, size: 16, font: bold, color: WHITE })
   firstPage.drawText("Financial Reporting", { x: 50, y: 748, size: 9, font, color: rgb(...PDF_RGB.headerSub) })
-  ctx.y = 682
+  ctx.y = 672
 
   // ── Report title block ─────────────────────────────────────────────────────
   draw(ctx, report.title, { size: 20, bold: true, lineHeight: 28 })

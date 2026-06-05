@@ -56,6 +56,7 @@ export function normalizeReportProvider(rawProvider: string | null | undefined):
   if (
     provider === "lightning" ||
     provider === "bitcoin_lightning" ||
+    provider === "bitcoin lightning" ||
     provider === "btc_lightning" ||
     provider === "lightning_btc"
   ) return "Lightning"
@@ -81,6 +82,7 @@ export function normalizeReportAsset(
 
   if (
     network === "bitcoin_lightning" ||
+    network === "bitcoin lightning" ||
     network === "lightning" ||
     network === "btc_lightning" ||
     network === "lightning_btc" ||
@@ -127,6 +129,7 @@ export function normalizeReportNetwork(
   const network = String(rawNetwork || "").toLowerCase().trim()
   if (
     network === "bitcoin_lightning" ||
+    network === "bitcoin lightning" ||
     network === "lightning" ||
     network === "btc_lightning" ||
     network === "lightning_btc" ||
