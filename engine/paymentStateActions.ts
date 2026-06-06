@@ -93,6 +93,8 @@ export type StaleSweepResult = {
   swept: number
   skipped: number
   errors: number
+  /** Counts of why individual payments were skipped, for operational diagnostics. */
+  skippedReasons: Record<string, number>
 }
 
 /**
@@ -120,16 +122,17 @@ export async function sweepStalePayments(limit = 100): Promise<StaleSweepResult>
     payments = await getStalePaymentsForSweep(ABANDONED_PAYMENT_TIMEOUT_MS, limit)
   } catch (err) {
     console.error("[stale-sweep] failed to fetch stale payments", err)
-    return { checked: 0, swept: 0, skipped: 0, errors: 1 }
+    return { checked: 0, swept: 0, skipped: 0, errors: 1, skippedReasons: {} }
   }
 
   if (payments.length === 0) {
-    return { checked: 0, swept: 0, skipped: 0, errors: 0 }
+    return { checked: 0, swept: 0, skipped: 0, errors: 0, skippedReasons: {} }
   }
 
   let swept = 0
   let skipped = 0
   let errors = 0
+  const skippedReasons: Record<string, number> = {}
 
   for (const payment of payments) {
     try {
@@ -148,6 +151,15 @@ export async function sweepStalePayments(limit = 100): Promise<StaleSweepResult>
         // Best-effort intent expiry — must not block sweep progress on error
         void expireLinkedPaymentIntent(payment.id)
       } else {
+        // Categorise skip reason using data already in memory (no extra DB query)
+        const hasProviderRef = Boolean(String(payment.provider_reference || "").trim())
+        const hasMetadataEvidence = metadataHasBroadcastEvidence(payment.metadata)
+        const reason = hasProviderRef
+          ? "has_provider_reference"
+          : hasMetadataEvidence
+          ? "has_metadata_evidence"
+          : "transaction_table_has_evidence_or_state_transition_invalid"
+        skippedReasons[reason] = (skippedReasons[reason] || 0) + 1
         skipped++
       }
     } catch (err) {
@@ -159,8 +171,8 @@ export async function sweepStalePayments(limit = 100): Promise<StaleSweepResult>
     }
   }
 
-  console.info("[stale-sweep] sweep complete", { checked: payments.length, swept, skipped, errors })
-  return { checked: payments.length, swept, skipped, errors }
+  console.info("[stale-sweep] sweep complete", { checked: payments.length, swept, skipped, errors, skippedReasons })
+  return { checked: payments.length, swept, skipped, errors, skippedReasons }
 }
 
 async function expireLinkedPaymentIntent(paymentId: string): Promise<void> {

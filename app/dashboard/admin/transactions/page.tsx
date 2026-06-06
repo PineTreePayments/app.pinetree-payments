@@ -12,6 +12,11 @@ import {
   InsightCard,
   MetricGrid,
 } from "@/components/dashboard/DashboardPrimitives"
+import {
+  formatDashboardProvider,
+  formatDashboardNetwork,
+} from "@/components/dashboard/displayHelpers"
+import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -236,20 +241,12 @@ function topKey(map: Record<string, number>): string | null {
 
 function labelProvider(p: string | null): string {
   if (!p) return "—"
-  const map: Record<string, string> = {
-    solana: "Solana Pay", coinbase: "Coinbase", shift4: "Shift4",
-    base: "Base Pay", lightning: "Lightning", cash: "Cash",
-  }
-  return map[p] ?? p
+  return formatDashboardProvider(p)
 }
 
 function labelNetwork(n: string | null): string {
   if (!n) return "—"
-  const map: Record<string, string> = {
-    solana: "Solana", base: "Base", ethereum: "Ethereum",
-    bitcoin_lightning: "Lightning",
-  }
-  return map[n] ?? n
+  return formatDashboardNetwork(n)
 }
 
 function dateRangeFromPreset(preset: string): { from?: string; to?: string } {
@@ -303,14 +300,15 @@ function Spinner() {
   )
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, createdAt }: { status: string; createdAt?: string }) {
+  // Apply the same PENDING > 5 min → INCOMPLETE override used on the merchant
+  // transactions page so admin and merchant views always agree.
+  const ds = createdAt
+    ? getPaymentDisplayStatus(status, createdAt)
+    : { classes: STATUS_STYLE[status] ?? "bg-gray-100 text-gray-600 border-gray-200", label: STATUS_LABELS[status] ?? status }
   return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
-        STATUS_STYLE[status] ?? "bg-gray-100 text-gray-600 border-gray-200"
-      }`}
-    >
-      {STATUS_LABELS[status] ?? status}
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${ds.classes}`}>
+      {ds.label}
     </span>
   )
 }
@@ -921,12 +919,12 @@ export default function AdminTransactionsPage() {
                       <span className="text-sm font-medium text-gray-900">
                         {fmtUSD(Number(tx.gross_amount ?? 0))}
                       </span>
-                      <StatusBadge status={tx.status} />
+                      <StatusBadge status={tx.status} createdAt={tx.created_at} />
                     </div>
 
                     {/* Status (desktop) */}
                     <div className="hidden sm:block">
-                      <StatusBadge status={tx.status} />
+                      <StatusBadge status={tx.status} createdAt={tx.created_at} />
                     </div>
                   </button>
                 ))}
@@ -1009,7 +1007,7 @@ export default function AdminTransactionsPage() {
                   return (
                     <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4 space-y-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <StatusBadge status={txDetail.payment.status} />
+                        <StatusBadge status={txDetail.payment.status} createdAt={txDetail.payment.created_at} />
                         <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${meta.paymentMode === "test" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
                           {meta.paymentMode === "test" ? "Test" : "Live"}
                         </span>

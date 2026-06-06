@@ -1,0 +1,60 @@
+import { supabaseAdmin, supabase as supabaseAnon } from "./supabase"
+
+const supabase = supabaseAdmin || supabaseAnon
+
+/**
+ * Merchant-scoped audit event types.
+ * Extend this union as new auditable actions are added.
+ */
+export type MerchantAuditEventType = "webhook.secret_regenerated"
+
+export type MerchantAuditEvent = {
+  id: string
+  merchant_id: string
+  event_type: MerchantAuditEventType
+  actor_id: string | null
+  metadata: Record<string, unknown> | null
+  created_at: string
+}
+
+/**
+ * Write a merchant-scoped audit record.
+ *
+ * Fails silently (warn only) so audit logging never breaks the primary
+ * request path. Secrets — old or new — must never appear in metadata.
+ *
+ * ── Required SQL migration ────────────────────────────────────────────────
+ *
+ *   CREATE TABLE IF NOT EXISTS merchant_audit_events (
+ *     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+ *     merchant_id UUID        NOT NULL,
+ *     event_type  TEXT        NOT NULL,
+ *     actor_id    UUID,
+ *     metadata    JSONB,
+ *     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+ *   );
+ *   CREATE INDEX ON merchant_audit_events (merchant_id, created_at DESC);
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+export async function insertMerchantAuditEvent(input: {
+  merchantId: string
+  eventType: MerchantAuditEventType
+  actorId?: string | null
+  metadata?: Record<string, unknown>
+}): Promise<void> {
+  try {
+    const { error } = await supabase.from("merchant_audit_events").insert({
+      id: crypto.randomUUID(),
+      merchant_id: input.merchantId,
+      event_type: input.eventType,
+      actor_id: input.actorId ?? null,
+      metadata: input.metadata ?? null,
+    })
+    if (error) {
+      console.warn("[audit] merchant_audit_events insert failed:", error.message)
+    }
+  } catch (err) {
+    console.warn("[audit] merchant_audit_events threw:", err instanceof Error ? err.message : err)
+  }
+}

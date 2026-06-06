@@ -39,6 +39,24 @@ type OnlineStats = {
   confirmedPayments: number
   volumeUsd: number
   successRate: number | null
+  avgOrderValueUsd: number       // 0 when no confirmed payments, never null/NaN
+  totalLinks: number
+  activeLinks: number
+  expiredLinks: number
+  disabledLinks: number
+  recentWebhookFailures: number  // excludes test events
+  webhookConfigured: boolean
+  webhookEnabled: boolean
+}
+
+type TestEventResult = {
+  success: boolean
+  statusCode: number | null
+  responseBody: string | null
+  deliveryId: string | null
+  sentAt: string
+  event: string
+  error?: string
 }
 
 type WebhookConfig = {
@@ -74,6 +92,7 @@ type WebhookDelivery = {
   response_status: number | null
   attempt_count: number
   created_at: string
+  is_test?: boolean
 }
 
 type TestSession = {
@@ -321,6 +340,56 @@ function IntegrationCard({
   )
 }
 
+// ── API reference — single source of truth ────────────────────────────────────
+// A route is "Live" only when: the route file exists, auth is enforced, real DB
+// data is used, and it is production-safe. Update here to change all badges.
+
+type RouteStatus = "Live" | "Preview"
+type ApiRoute = { method: string; path: string; desc: string; status: RouteStatus }
+type ApiCategory = { label: string; routes: ApiRoute[] }
+
+const API_ROUTE_CATEGORIES: ApiCategory[] = [
+  {
+    label: "Checkout Links",
+    routes: [
+      { method: "GET",   path: "/api/checkout-links",         desc: "List payment links",     status: "Live" },
+      { method: "POST",  path: "/api/checkout-links",         desc: "Create a payment link",  status: "Live" },
+      { method: "PATCH", path: "/api/checkout-links/:id",     desc: "Disable a payment link", status: "Live" },
+    ],
+  },
+  {
+    label: "Checkout Sessions",
+    routes: [
+      { method: "POST", path: "/api/checkout/session",             desc: "Create a checkout session", status: "Live" },
+      { method: "GET",  path: "/api/checkout/session/:sessionId",  desc: "Get session status",         status: "Live" },
+    ],
+  },
+  {
+    label: "Checkout Stats",
+    routes: [
+      { method: "GET", path: "/api/checkout/stats", desc: "Stats, link counts, webhook health", status: "Live" },
+    ],
+  },
+  {
+    label: "Webhooks",
+    routes: [
+      { method: "GET",    path: "/api/merchant/webhooks",           desc: "Get webhook config",        status: "Live" },
+      { method: "POST",   path: "/api/merchant/webhooks",           desc: "Save / update config",      status: "Live" },
+      { method: "DELETE", path: "/api/merchant/webhooks",           desc: "Delete webhook config",     status: "Live" },
+      { method: "POST",   path: "/api/merchant/webhooks/test",      desc: "Send test event",           status: "Live" },
+      { method: "GET",    path: "/api/merchant/webhook-deliveries", desc: "Delivery history",          status: "Live" },
+    ],
+  },
+  {
+    label: "API Keys",
+    routes: [
+      { method: "GET",    path: "/api/merchant/api-keys",     desc: "List API keys",    status: "Live" },
+      { method: "POST",   path: "/api/merchant/api-keys",     desc: "Create an API key", status: "Live" },
+      { method: "DELETE", path: "/api/merchant/api-keys/:id", desc: "Revoke an API key", status: "Live" },
+    ],
+  },
+]
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function OnlineCheckoutPage() {
@@ -364,6 +433,11 @@ export default function OnlineCheckoutPage() {
   const [creatingKey, setCreatingKey] = useState(false)
   const [revealedKey, setRevealedKey] = useState<CreatedApiKey | null>(null)
   const [revokingKeyId, setRevokingKeyId] = useState<string | null>(null)
+
+  // Webhook test event
+  const [testEventType, setTestEventType] = useState("payment.confirmed")
+  const [sendingTestEvent, setSendingTestEvent] = useState(false)
+  const [testEventResult, setTestEventResult] = useState<TestEventResult | null>(null)
 
   // Test checkout session
   const [testAmount, setTestAmount] = useState("")
@@ -636,6 +710,92 @@ export default function OnlineCheckoutPage() {
     }
   }
 
+  async function handleToggleWebhook() {
+    if (!webhookConfig) return
+    setWebhookSaving(true)
+    try {
+      const token = await getToken()
+      const res = await fetch("/api/merchant/webhooks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          url: webhookConfig.url,
+          events: webhookConfig.events,
+          enabled: !webhookConfig.enabled,
+        }),
+      })
+      const data = (await res.json()) as { webhook?: WebhookConfig; error?: string }
+      if (!res.ok) throw new Error(data.error || "Failed to update webhook")
+      if (data.webhook) {
+        setWebhookConfig(data.webhook)
+        toast.success(data.webhook.enabled ? "Webhook enabled" : "Webhook disabled")
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update webhook")
+    } finally {
+      setWebhookSaving(false)
+    }
+  }
+
+  async function handleDeleteWebhook() {
+    if (!webhookConfig) return
+    if (!window.confirm("Delete this webhook configuration? This cannot be undone.")) return
+    setWebhookSaving(true)
+    try {
+      const token = await getToken()
+      const res = await fetch("/api/merchant/webhooks", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string }
+        throw new Error(data.error || "Failed to delete webhook")
+      }
+      setWebhookConfig(null)
+      setWebhookUrl("")
+      setWebhookEvents(ALL_WEBHOOK_EVENTS.map((e) => e.id))
+      setShowSecret(false)
+      toast.success("Webhook configuration deleted")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete webhook")
+    } finally {
+      setWebhookSaving(false)
+    }
+  }
+
+  async function handleSendTestEvent() {
+    if (!webhookConfig) { toast.error("Save a webhook URL first"); return }
+    setSendingTestEvent(true)
+    setTestEventResult(null)
+    try {
+      const token = await getToken()
+      const res = await fetch("/api/merchant/webhooks/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ event: testEventType }),
+      })
+      const data = (await res.json()) as TestEventResult & { error?: string }
+      if (!res.ok) {
+        setTestEventResult({ success: false, statusCode: null, responseBody: null, deliveryId: null, sentAt: new Date().toISOString(), event: testEventType, error: data.error })
+        toast.error(data.error || "Test event failed")
+      } else {
+        setTestEventResult(data)
+        if (data.success) {
+          toast.success("Test event delivered successfully")
+        } else {
+          toast.error(data.error || `Non-2xx response: ${data.statusCode ?? "—"}`)
+        }
+        void fetchDeliveries()
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Network error"
+      setTestEventResult({ success: false, statusCode: null, responseBody: null, deliveryId: null, sentAt: new Date().toISOString(), event: testEventType, error: msg })
+      toast.error(msg)
+    } finally {
+      setSendingTestEvent(false)
+    }
+  }
+
   function toggleWebhookEvent(eventId: string) {
     setWebhookEvents((prev) =>
       prev.includes(eventId) ? prev.filter((e) => e !== eventId) : [...prev, eventId]
@@ -739,11 +899,47 @@ export default function OnlineCheckoutPage() {
   const isLoading = loading || statsLoading
 
   const insights: string[] = []
-  if (activeLinks > 0) insights.push(`${activeLinks} active payment link${activeLinks !== 1 ? "s" : ""} ready to accept payments.`)
-  if (links.length === 0 && !loading) insights.push("Create your first payment link to start accepting online payments.")
+
+  // ── Onboarding ─────────────────────────────────────────────────────────────
+  if (!loading && links.length === 0) {
+    insights.push("Create your first payment link to start accepting online payments.")
+  }
+
+  // ── Active links summary ──────────────────────────────────────────────────
+  if (activeLinks > 0) {
+    insights.push(`${activeLinks} active payment link${activeLinks !== 1 ? "s" : ""} ready to accept payments.`)
+  }
+
+  // ── Disabled / expired links ──────────────────────────────────────────────
   const disabledCount = links.filter((l) => l.resolvedStatus === "disabled").length
-  if (disabledCount > 0) insights.push(`${disabledCount} link${disabledCount !== 1 ? "s" : ""} currently disabled.`)
-  if (stats && stats.confirmedPayments > 0) insights.push(`${stats.confirmedPayments} confirmed online payment${stats.confirmedPayments !== 1 ? "s" : ""} via checkout links.`)
+  if (disabledCount > 0) {
+    insights.push(`${disabledCount} payment link${disabledCount !== 1 ? "s are" : " is"} disabled and not accepting payments.`)
+  }
+  if (stats && stats.expiredLinks > 0) {
+    insights.push(`${stats.expiredLinks} checkout link${stats.expiredLinks !== 1 ? "s have" : " has"} expired — they will no longer accept payments.`)
+  }
+
+  // ── Payment activity ──────────────────────────────────────────────────────
+  if (stats && stats.confirmedPayments > 0) {
+    const vol = fmtUsd(stats.volumeUsd)
+    insights.push(`${stats.confirmedPayments} confirmed online payment${stats.confirmedPayments !== 1 ? "s" : ""} — ${vol} total volume.`)
+  } else if (!statsLoading && stats && stats.totalPayments === 0 && links.length > 0) {
+    insights.push("No successful online payments yet — share your payment links to get started.")
+  }
+
+  // ── Average order value (only when meaningful) ────────────────────────────
+  if (stats && stats.avgOrderValueUsd > 0 && stats.confirmedPayments >= 3) {
+    insights.push(`Average order value: ${fmtUsd(stats.avgOrderValueUsd)}.`)
+  }
+
+  // ── Webhook health ────────────────────────────────────────────────────────
+  if (!statsLoading && stats && !stats.webhookConfigured) {
+    insights.push("No webhook configured — set one up in the Webhooks tab to receive payment notifications.")
+  } else if (!statsLoading && stats && stats.webhookConfigured && !stats.webhookEnabled) {
+    insights.push("Your webhook endpoint is disabled — re-enable it in the Webhooks tab to resume event delivery.")
+  } else if (stats && stats.recentWebhookFailures > 0) {
+    insights.push(`${stats.recentWebhookFailures} webhook delivery failure${stats.recentWebhookFailures !== 1 ? "s" : ""} in the last 24 hours — check the Webhooks tab.`)
+  }
 
   // ── Snippet content ──────────────────────────────────────────────────────────
   const sessionEndpoint = `${APP_BASE}/api/checkout/session`
@@ -918,7 +1114,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       description: "Create a checkout session from your backend and redirect customers to a hosted crypto payment page.",
       useCase: "E-commerce checkout flows",
       difficulty: "Medium",
-      status: "preview",
+      status: "live",
       action: "View Code Example",
     },
     {
@@ -1255,13 +1451,44 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       {tab === "webhooks" && (
         <div className="space-y-6">
           <div className="rounded-2xl border border-gray-200/80 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-6">
-            <div className="mb-5 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Webhook Endpoint</h2>
+            <div className="mb-5 flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Webhook Endpoint</h2>
+                  <LiveBadge />
+                </div>
                 <p className="mt-0.5 text-xs text-gray-500">PineTree will POST signed event payloads to this URL.</p>
               </div>
-              <PreviewBadge />
+              {webhookConfig && (
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleToggleWebhook()}
+                    disabled={webhookSaving}
+                    className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors disabled:opacity-50 ${
+                      webhookConfig.enabled
+                        ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                        : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                    }`}
+                  >
+                    {webhookConfig.enabled ? "Disable" : "Enable"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteWebhook()}
+                    disabled={webhookSaving}
+                    className="rounded-lg border border-red-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
             </div>
+            {webhookConfig && !webhookConfig.enabled && (
+              <div className="mb-4 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3.5 py-2.5 text-[11px] text-amber-700">
+                Webhook is currently <strong>disabled</strong> — PineTree will not send events to this endpoint until you re-enable it.
+              </div>
+            )}
 
             {webhookLoading ? (
               <div className="flex items-center justify-center py-8">
@@ -1411,7 +1638,14 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                       {deliveries.map((d) => (
                         <tr key={d.id} className="transition-colors hover:bg-gray-50/60">
                           <td className="px-5 py-3.5">
-                            <code className="font-mono text-[11px] text-gray-800">{d.event}</code>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <code className="font-mono text-[11px] text-gray-800">{d.event}</code>
+                              {d.is_test && (
+                                <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[9px] font-semibold text-violet-600">
+                                  test
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-5 py-3.5">
                             <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
@@ -1437,6 +1671,83 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                   </table>
                 </div>
               )}
+            </div>
+          </DashboardSection>
+
+          {/* ── Send Test Event ──────────────────────────────────────────── */}
+          <DashboardSection title="Send Test Event" titleTone="blue">
+            <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+              <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-950">Test Webhook Delivery</h3>
+                  <p className="mt-0.5 text-xs text-gray-500">Send a signed sample event to your endpoint and see the result immediately.</p>
+                </div>
+                <LiveBadge />
+              </div>
+              <div className="space-y-4 p-5">
+                {!webhookConfig ? (
+                  <p className="text-sm text-gray-400">Save a webhook URL above to send a test event.</p>
+                ) : !webhookConfig.enabled ? (
+                  <p className="text-sm text-amber-600">Enable your webhook above before sending a test event.</p>
+                ) : (
+                  <>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                      <div className="flex-1 space-y-1.5">
+                        <label className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-500">Event Type</label>
+                        <select
+                          value={testEventType}
+                          onChange={(e) => { setTestEventType(e.target.value); setTestEventResult(null) }}
+                          className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 outline-none focus:border-[#0052FF] focus:ring-2 focus:ring-[#0052FF]/10"
+                        >
+                          {ALL_WEBHOOK_EVENTS.map((evt) => (
+                            <option key={evt.id} value={evt.id}>{evt.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <Button
+                        type="button"
+                        onClick={() => void handleSendTestEvent()}
+                        disabled={sendingTestEvent}
+                      >
+                        {sendingTestEvent ? (
+                          <><span className="mr-2 inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin" />Sending…</>
+                        ) : "Send Test Event"}
+                      </Button>
+                    </div>
+
+                    {testEventResult && (
+                      <div className={`rounded-xl border px-4 py-3 ${testEventResult.success ? "border-emerald-200 bg-emerald-50/60" : "border-red-200 bg-red-50/60"}`}>
+                        <div className="mb-2 flex items-center gap-2">
+                          <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                            testEventResult.success
+                              ? "border-emerald-200 bg-emerald-100 text-emerald-700"
+                              : "border-red-200 bg-red-100 text-red-700"
+                          }`}>
+                            {testEventResult.success ? "Delivered" : "Failed"}
+                          </span>
+                          {testEventResult.statusCode !== null && (
+                            <code className="font-mono text-[11px] text-gray-600">HTTP {testEventResult.statusCode}</code>
+                          )}
+                          <span className="ml-auto text-[11px] text-gray-400">{testEventResult.sentAt ? fmtDateTime(testEventResult.sentAt) : ""}</span>
+                        </div>
+                        {testEventResult.error && (
+                          <p className="text-xs text-red-700">{testEventResult.error}</p>
+                        )}
+                        {testEventResult.responseBody && (
+                          <div className="mt-2">
+                            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">Response body</p>
+                            <pre className="overflow-x-auto rounded-lg bg-white/80 p-2 text-[11px] leading-relaxed text-gray-700">{testEventResult.responseBody}</pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <p className="text-[11px] text-gray-400">
+                      Test events are logged in the Delivery Log above.
+                      The payload includes <code className="font-mono">&quot;_test&quot;: true</code> so your handler can identify them.
+                    </p>
+                  </>
+                )}
+              </div>
             </div>
           </DashboardSection>
         </div>
@@ -1743,35 +2054,32 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           {/* ── API Reference ─────────────────────────────────────────────── */}
           <div className="rounded-2xl border border-gray-100 bg-gray-50/60 px-4 py-3.5">
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">API Reference</p>
-            <div className="mt-2 space-y-1.5 text-xs text-gray-600">
-              {[
-                { method: "GET",    path: "/api/checkout-links",               desc: "List all payment links",       status: "Live" },
-                { method: "POST",   path: "/api/checkout-links",               desc: "Create a payment link",        status: "Live" },
-                { method: "PATCH",  path: "/api/checkout-links/:id",           desc: "Disable a payment link",       status: "Live" },
-                { method: "POST",   path: "/api/checkout/session",             desc: "Create a checkout session",    status: "Live" },
-                { method: "GET",    path: "/api/checkout/session/:sessionId",  desc: "Get session status",           status: "Live" },
-                { method: "GET",    path: "/api/checkout/stats",               desc: "Online payment stats",         status: "Preview" },
-                { method: "GET",    path: "/api/merchant/webhooks",            desc: "Get webhook config",           status: "Preview" },
-                { method: "POST",   path: "/api/merchant/webhooks",            desc: "Save webhook config",          status: "Preview" },
-                { method: "GET",    path: "/api/merchant/api-keys",            desc: "List API keys",                status: "Live" },
-                { method: "POST",   path: "/api/merchant/api-keys",            desc: "Create an API key",            status: "Live" },
-                { method: "DELETE", path: "/api/merchant/api-keys/:id",        desc: "Revoke an API key",            status: "Live" },
-                { method: "GET",    path: "/api/merchant/webhook-deliveries",  desc: "List webhook deliveries",      status: "Live" },
-              ].map((r) => (
-                <div key={r.path} className="flex items-center gap-3">
-                  <span className={`w-12 shrink-0 rounded px-1 py-0.5 text-center text-[10px] font-bold ${
-                    r.method === "GET"    ? "bg-emerald-100 text-emerald-700" :
-                    r.method === "POST"   ? "bg-blue-100 text-blue-700" :
-                    r.method === "DELETE" ? "bg-red-100 text-red-700" :
-                    "bg-amber-100 text-amber-700"
-                  }`}>{r.method}</span>
-                  <code className="flex-1 font-mono text-[11px] text-gray-800">{r.path}</code>
-                  <span className="hidden text-[11px] text-gray-400 sm:inline">{r.desc}</span>
-                  <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${
-                    r.status === "Live"
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                      : "border-blue-200 bg-blue-50 text-blue-700"
-                  }`}>{r.status}</span>
+            <div className="mt-2 space-y-4">
+              {API_ROUTE_CATEGORIES.map((cat) => (
+                <div key={cat.label}>
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">{cat.label}</p>
+                  <div className="space-y-1">
+                    {cat.routes.map((r) => (
+                      <div
+                        key={`${r.method}-${r.path}`}
+                        className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-0 py-0.5 sm:flex-nowrap sm:gap-3"
+                      >
+                        <span className={`w-12 shrink-0 rounded px-1 py-0.5 text-center text-[10px] font-bold ${
+                          r.method === "GET"    ? "bg-emerald-100 text-emerald-700" :
+                          r.method === "POST"   ? "bg-blue-100 text-blue-700" :
+                          r.method === "DELETE" ? "bg-red-100 text-red-700" :
+                          "bg-amber-100 text-amber-700"
+                        }`}>{r.method}</span>
+                        <code className="min-w-0 flex-1 break-all font-mono text-[11px] text-gray-800 sm:break-normal">{r.path}</code>
+                        <span className="w-full pl-14 text-[11px] text-gray-400 sm:w-auto sm:pl-0">{r.desc}</span>
+                        <span className={`ml-auto shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold sm:ml-0 ${
+                          r.status === "Live"
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-blue-200 bg-blue-50 text-blue-700"
+                        }`}>{r.status}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>

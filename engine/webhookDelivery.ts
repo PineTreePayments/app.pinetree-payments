@@ -2,6 +2,7 @@ import {
   getMerchantWebhook,
   insertWebhookDelivery,
   type WebhookEvent,
+  type MerchantWebhook,
 } from "@/database/merchantWebhooks"
 
 const WEBHOOK_TIMEOUT_MS = 10_000
@@ -139,4 +140,131 @@ export function generateWebhookSecret(): string {
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("")
+}
+
+// ── Test webhook delivery ──────────────────────────────────────────────────────
+
+export type WebhookTestResult = {
+  success: boolean
+  statusCode: number | null
+  responseBody: string | null
+  deliveryId: string | null
+  sentAt: string
+  event: WebhookEvent
+  error?: string
+}
+
+/**
+ * Send a signed test event to the merchant's configured webhook URL.
+ *
+ * Reuses the same payload structure, HMAC signing, and logging as live
+ * deliveries. The payload includes `"_test": true` so recipients can
+ * distinguish test events. Results are logged to webhook_deliveries so they
+ * appear in the delivery log.
+ *
+ * Returns an error (not throws) when the webhook is unconfigured, disabled,
+ * or not subscribed to the requested event.
+ */
+export async function testWebhookDelivery(
+  merchantId: string,
+  event: WebhookEvent,
+): Promise<WebhookTestResult> {
+  const sentAt = new Date().toISOString()
+
+  let config: MerchantWebhook | null = null
+  try {
+    config = await getMerchantWebhook(merchantId)
+  } catch {
+    return { success: false, statusCode: null, responseBody: null, deliveryId: null, sentAt, event, error: "Failed to load webhook configuration" }
+  }
+
+  if (!config) {
+    return { success: false, statusCode: null, responseBody: null, deliveryId: null, sentAt, event, error: "No webhook endpoint configured" }
+  }
+  if (!config.enabled) {
+    return { success: false, statusCode: null, responseBody: null, deliveryId: null, sentAt, event, error: "Webhook is disabled — enable it first" }
+  }
+  if (!config.events.includes(event)) {
+    return { success: false, statusCode: null, responseBody: null, deliveryId: null, sentAt, event, error: `Webhook is not subscribed to ${event}` }
+  }
+
+  const testData: WebhookPaymentData = {
+    paymentId: `test_${generateEventId().slice(4)}`,
+    merchantId,
+    amount: 4999,
+    currency: "USD",
+    status: event === "payment.confirmed" ? "CONFIRMED"
+      : event === "payment.failed" ? "FAILED"
+      : "INCOMPLETE",
+    reference: "test_event",
+    metadata: { test: true, triggeredFrom: "dashboard" },
+  }
+
+  const { payload, timestamp } = buildEventPayload(event, testData)
+  const payloadWithTestFlag = { ...payload, _test: true }
+  const payloadJson = JSON.stringify(payloadWithTestFlag)
+
+  let signature = ""
+  try {
+    signature = await signPayload(payloadJson, config.secret)
+  } catch {
+    return { success: false, statusCode: null, responseBody: null, deliveryId: null, sentAt, event, error: "Failed to sign payload" }
+  }
+
+  let statusCode: number | null = null
+  let responseBody: string | null = null
+  let deliveryStatus: "delivered" | "failed" = "failed"
+  let errorMsg: string | undefined
+
+  try {
+    const controller = new AbortController()
+    const timeoutHandle = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS)
+
+    const res = await fetch(config.url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-PineTree-Event": event,
+        "X-PineTree-Signature": `sha256=${signature}`,
+        "X-PineTree-Timestamp": timestamp,
+        "X-PineTree-Test": "1",
+      },
+      body: payloadJson,
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutHandle)
+    statusCode = res.status
+    responseBody = (await res.text()).slice(0, 1000)
+    deliveryStatus = res.ok ? "delivered" : "failed"
+    if (!res.ok) errorMsg = `Non-2xx response: ${res.status}`
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Delivery failed"
+    errorMsg = msg.includes("abort") || msg.includes("AbortError")
+      ? `Timed out after ${WEBHOOK_TIMEOUT_MS / 1000}s`
+      : msg
+  }
+
+  const deliveryId = crypto.randomUUID()
+
+  await insertWebhookDelivery({
+    merchantId,
+    webhookId: config.id,
+    event,
+    payload: payloadWithTestFlag,
+    status: deliveryStatus,
+    responseStatus: statusCode,
+    responseBody,
+    attemptCount: 1,
+  })
+
+  return {
+    success: deliveryStatus === "delivered",
+    statusCode,
+    responseBody,
+    deliveryId,
+    sentAt,
+    event,
+    ...(errorMsg ? { error: errorMsg } : {}),
+  }
 }

@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
-import { getMerchantWebhook, upsertMerchantWebhook, type WebhookEvent } from "@/database/merchantWebhooks"
+import {
+  getMerchantWebhook,
+  upsertMerchantWebhook,
+  deleteMerchantWebhook,
+  type WebhookEvent,
+} from "@/database/merchantWebhooks"
 import { generateWebhookSecret } from "@/engine/webhookDelivery"
+import { insertMerchantAuditEvent } from "@/database/merchantAuditEvents"
 
 const VALID_EVENTS: WebhookEvent[] = [
   "payment.confirmed",
@@ -14,6 +20,7 @@ type UpsertBody = {
   url: string
   events?: WebhookEvent[]
   regenerateSecret?: boolean
+  enabled?: boolean
 }
 
 export async function GET(req: NextRequest) {
@@ -52,16 +59,48 @@ export async function POST(req: NextRequest) {
     ) as WebhookEvent[]
 
     const existing = await getMerchantWebhook(merchantId)
-    const secret =
-      body.regenerateSecret || !existing?.secret
-        ? generateWebhookSecret()
-        : existing.secret
+    const isRegeneratingSecret = Boolean(body.regenerateSecret) && Boolean(existing?.secret)
+    const secret = isRegeneratingSecret || !existing?.secret
+      ? generateWebhookSecret()
+      : existing.secret
 
-    const webhook = await upsertMerchantWebhook({ merchantId, url, secret, events })
+    // Preserve existing enabled state when not explicitly provided
+    const enabled = typeof body.enabled === "boolean" ? body.enabled : (existing?.enabled ?? true)
+
+    const webhook = await upsertMerchantWebhook({ merchantId, url, secret, events, enabled })
+
+    // ── Audit: secret regeneration ─────────────────────────────────────────────
+    // Write an audit record when the signing secret is intentionally rotated.
+    // The old and new secrets are never stored here.
+    if (isRegeneratingSecret) {
+      void insertMerchantAuditEvent({
+        merchantId,
+        eventType: "webhook.secret_regenerated",
+        actorId: merchantId,
+        metadata: {
+          webhookId: webhook.id,
+          regeneratedAt: new Date().toISOString(),
+        },
+      })
+    }
+
     return NextResponse.json({ webhook }, { status: 201 })
   } catch (error: unknown) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to save webhook config" },
+      { status: getRouteErrorStatus(error) }
+    )
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const merchantId = await requireMerchantIdFromRequest(req, "webhooks:write")
+    await deleteMerchantWebhook(merchantId)
+    return NextResponse.json({ success: true })
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to delete webhook config" },
       { status: getRouteErrorStatus(error) }
     )
   }

@@ -93,6 +93,29 @@ export async function upsertMerchantWebhook(input: {
   return data as MerchantWebhook
 }
 
+export async function deleteMerchantWebhook(merchantId: string): Promise<void> {
+  // Remove delivery records first to satisfy the FK constraint
+  // (webhook_deliveries.webhook_id references merchant_webhooks.id).
+  // Delivery history is scoped to the endpoint being removed and is no
+  // longer actionable once the webhook config is gone.
+  const { error: deliveryError } = await supabase
+    .from("webhook_deliveries")
+    .delete()
+    .eq("merchant_id", merchantId)
+
+  if (deliveryError) {
+    console.warn("[webhook] failed to delete delivery logs before config delete:", deliveryError.message)
+    // Log but do not abort — attempt the config delete anyway
+  }
+
+  const { error } = await supabase
+    .from("merchant_webhooks")
+    .delete()
+    .eq("merchant_id", merchantId)
+
+  if (error) throw new Error(`Failed to delete webhook config: ${error.message}`)
+}
+
 export async function insertWebhookDelivery(input: {
   merchantId: string
   webhookId: string

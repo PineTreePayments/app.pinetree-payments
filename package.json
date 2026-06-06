@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "smoke:wallet-approval": "node scripts/smoke-wallet-approval.mjs"
+    "smoke:wallet-approval": "node scripts/smoke-wallet-approval.mjs",
+    "smoke:checkout-api": "node scripts/smoke-checkout-api.mjs"
   },
   "dependencies": {
     "@meshconnect/web-link-sdk": "^3.9.8",

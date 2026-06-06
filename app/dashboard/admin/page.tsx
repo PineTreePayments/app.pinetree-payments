@@ -20,6 +20,11 @@ import {
   GroupedMetricSurface,
   MetricGrid,
 } from "@/components/dashboard/DashboardPrimitives"
+import {
+  formatDashboardProvider,
+  formatDashboardNetwork,
+} from "@/components/dashboard/displayHelpers"
+import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 
 // ─── Overview types ────────────────────────────────────────────────────────────
 
@@ -190,16 +195,6 @@ const PRIORITY_STYLES: Record<string, string> = {
   Urgent: "bg-red-50 text-red-700 border-red-200",
 }
 
-const TX_STATUS_STYLE: Record<string, string> = {
-  CONFIRMED: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  PENDING: "bg-blue-50 text-blue-700 border-blue-200",
-  PROCESSING: "bg-blue-50 text-blue-600 border-blue-200",
-  CREATED: "bg-gray-100 text-gray-500 border-gray-200",
-  FAILED: "bg-red-50 text-red-700 border-red-200",
-  INCOMPLETE: "bg-orange-50 text-orange-700 border-orange-200",
-  EXPIRED: "bg-gray-100 text-gray-500 border-gray-200",
-  REFUNDED: "bg-purple-50 text-purple-700 border-purple-200",
-}
 
 const SUPPORT_STAT_CONFIG = [
   { key: "open" as const, label: "Open", color: "text-[#0052FF]", dot: "bg-[#0052FF]" },
@@ -263,13 +258,6 @@ function paymentModeFromMetadata(metadata: unknown): "live" | "test" {
   return m === "test" ? "test" : "live"
 }
 
-const NETWORK_LABELS: Record<string, string> = {
-  solana:            "Solana",
-  base:              "Base",
-  bitcoin_lightning: "Lightning",
-  ethereum:          "Ethereum",
-}
-
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
 function Spinner() {
@@ -316,26 +304,6 @@ function StarRating({ rating }: { rating: number | null }) {
         />
       ))}
     </div>
-  )
-}
-
-function StatusPill({
-  value,
-  styleMap,
-  labelMap,
-}: {
-  value: string
-  styleMap: Record<string, string>
-  labelMap?: Record<string, string>
-}) {
-  const cls = styleMap[value] ?? "bg-gray-100 text-gray-600 border-gray-200"
-  const label = labelMap?.[value] ?? value
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${cls}`}
-    >
-      {label}
-    </span>
   )
 }
 
@@ -952,16 +920,23 @@ export default function AdminPage() {
                             </p>
                           </div>
                           <div className="hidden text-sm text-gray-600 sm:block">
-                            {tx.provider ?? <span className="text-gray-300">—</span>}
+                            {tx.provider ? formatDashboardProvider(tx.provider) : <span className="text-gray-300">—</span>}
                           </div>
                           <div className="hidden text-sm text-gray-600 sm:block">
-                            {tx.network ?? <span className="text-gray-300">—</span>}
+                            {tx.network ? formatDashboardNetwork(tx.network) : <span className="text-gray-300">—</span>}
                           </div>
                           <div className="hidden text-sm font-medium text-gray-900 sm:block">
                             {fmtUSD(Number(tx.gross_amount ?? 0))}
                           </div>
                           <div>
-                            <StatusPill value={tx.status} styleMap={TX_STATUS_STYLE} />
+                            {(() => {
+                              const ds = getPaymentDisplayStatus(tx.status, tx.created_at)
+                              return (
+                                <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${ds.classes}`}>
+                                  {ds.label}
+                                </span>
+                              )
+                            })()}
                           </div>
                         </button>
                       ))}
@@ -1310,7 +1285,14 @@ export default function AdminPage() {
                 {/* Status + amounts */}
                 <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
                   <div className="flex items-center justify-between gap-3 mb-4">
-                    <StatusPill value={txDetail.payment.status} styleMap={TX_STATUS_STYLE} />
+                    {(() => {
+                      const ds = getPaymentDisplayStatus(txDetail.payment.status, txDetail.payment.created_at)
+                      return (
+                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${ds.classes}`}>
+                          {ds.label}
+                        </span>
+                      )
+                    })()}
                     <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${paymentModeFromMetadata(txDetail.payment.metadata) === "test" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
                       {paymentModeFromMetadata(txDetail.payment.metadata) === "test" ? "Test" : "Live"}
                     </span>
@@ -1351,13 +1333,17 @@ export default function AdminPage() {
                     <p className="text-gray-400">Network</p>
                     <p className="mt-0.5 text-gray-700">
                       {txDetail.payment.network
-                        ? (NETWORK_LABELS[txDetail.payment.network] ?? txDetail.payment.network)
+                        ? formatDashboardNetwork(txDetail.payment.network)
                         : "—"}
                     </p>
                   </div>
                   <div>
                     <p className="text-gray-400">Provider</p>
-                    <p className="mt-0.5 text-gray-700">{txDetail.payment.provider || "—"}</p>
+                    <p className="mt-0.5 text-gray-700">
+                      {txDetail.payment.provider
+                        ? formatDashboardProvider(txDetail.payment.provider)
+                        : "—"}
+                    </p>
                   </div>
                   <div>
                     <p className="text-gray-400">Created</p>

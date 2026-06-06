@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
       markedIncomplete: result.swept,
       skipped: result.skipped,
       errors: result.errors,
+      skippedReasons: result.skippedReasons,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error"
