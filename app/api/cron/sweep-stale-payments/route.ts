@@ -1,5 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
-import { sweepStalePayments } from "@/engine/paymentStateActions"
+import { supabaseAdmin, supabase as supabaseAnon } from "@/database"
+
+const db = supabaseAdmin ?? supabaseAnon
+
+type SweepSummary = {
+  locked: boolean
+  scanned: number
+  markedIncomplete: number
+  expiredIntents: number
+  skipped: number
+  cutoff: string | null
+}
 
 // Same CRON_SECRET guard used by /api/cron/check-payments and /api/cron/update-balances.
 // Set CRON_SECRET in your environment (Vercel env vars or equivalent).
@@ -17,15 +28,13 @@ function isAuthorized(req: NextRequest): boolean {
 /**
  * POST /api/cron/sweep-stale-payments
  *
- * Marks CREATED/PENDING payments older than 5 minutes as INCOMPLETE when
- * there is no transaction evidence (provider_reference, metadata txhash/
- * signature, or transactions table entry).
+ * Delegates to public.sweep_stale_payments() — a bounded Postgres function
+ * that selects stale CREATED/PENDING payments, bulk-updates them to INCOMPLETE,
+ * writes payment_events, and expires linked payment_intents in a single
+ * transaction.
  *
- * Each swept payment receives:
- *   - a DB status update to INCOMPLETE
- *   - a payment_events row (event_type: "payment.cancelled")
- *   - a payment.incomplete webhook delivery (fire-and-forget)
- *   - the linked payment_intent expired for state consistency
+ * The database function holds pg_try_advisory_xact_lock so overlapping calls
+ * are safe — the second caller returns immediately with locked:true.
  *
  * Called by Supabase Cron via pg_cron + pg_net every 5 minutes.
  * Requires Authorization: Bearer <CRON_SECRET>.
@@ -35,19 +44,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  try {
-    const result = await sweepStalePayments(100)
+  const { data, error } = await db
+    .rpc("sweep_stale_payments", { max_rows: 250, stale_after: "5 minutes" })
 
-    return NextResponse.json({
-      scanned: result.checked,
-      markedIncomplete: result.swept,
-      skipped: result.skipped,
-      errors: result.errors,
-      skippedReasons: result.skippedReasons,
-    })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error"
-    console.error("[cron:sweep-stale-payments] fatal error:", message)
-    return NextResponse.json({ error: message }, { status: 500 })
+  if (error) {
+    console.error("[cron:sweep-stale-payments] RPC failed:", error.message)
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
+
+  const summary = data as SweepSummary
+  console.info("[cron:sweep-stale-payments]", summary)
+
+  return NextResponse.json(summary)
 }

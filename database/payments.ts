@@ -216,32 +216,6 @@ export async function getPaymentsByStatus(
 }
 
 /**
- * Fetch CREATED and PENDING payments older than olderThanMs, ordered oldest-first.
- * Used exclusively by the stale payment sweep (engine/paymentStateActions.ts).
- * Fetches oldest first so long-stale payments are always reached even when
- * there are more active payments than the batch limit.
- */
-export async function getStalePaymentsForSweep(
-  olderThanMs: number = 5 * 60 * 1000,
-  limit: number = 100
-): Promise<Payment[]> {
-  const cutoff = new Date(Date.now() - olderThanMs).toISOString()
-  const { data, error } = await supabase
-    .from("payments")
-    .select("*")
-    .in("status", ["CREATED", "PENDING"])
-    .lt("created_at", cutoff)
-    .order("created_at", { ascending: true })
-    .limit(limit)
-
-  if (error) {
-    throw new Error(`Failed to fetch stale payments for sweep: ${error.message}`)
-  }
-
-  return (data ?? []) as Payment[]
-}
-
-/**
  * Get active (watchable) payments for a specific network.
  *
  * Fetches only CREATED, PENDING, and PROCESSING payments whose network column
