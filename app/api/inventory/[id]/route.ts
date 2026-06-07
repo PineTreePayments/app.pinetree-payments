@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import {
   archiveInventoryItemEngine,
+  restoreInventoryItemEngine,
   updateInventoryItemEngine
 } from "@/engine/inventory"
 import {
@@ -19,11 +20,15 @@ export async function PATCH(
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
     const { id } = await context.params
-    const item = await updateInventoryItemEngine(merchantId, id, await req.json())
+    const body = await req.json() as Record<string, unknown>
+    const item = body.action === "RESTORE"
+      ? await restoreInventoryItemEngine(merchantId, id)
+      : await updateInventoryItemEngine(merchantId, id, body)
     return NextResponse.json({ item })
   } catch (error) {
     const errorMessage = message(error)
-    const status = errorMessage.includes("required") ||
+    const status = errorMessage.includes("not found") ? 404 :
+      errorMessage.includes("required") ||
       errorMessage.includes("must be") ||
       errorMessage.includes("too long") ? 400 : getRouteErrorStatus(error)
     return NextResponse.json({ error: errorMessage }, { status })
@@ -40,6 +45,10 @@ export async function DELETE(
     const item = await archiveInventoryItemEngine(merchantId, id)
     return NextResponse.json({ item })
   } catch (error) {
-    return NextResponse.json({ error: message(error) }, { status: getRouteErrorStatus(error) })
+    const errorMessage = message(error)
+    return NextResponse.json(
+      { error: errorMessage },
+      { status: errorMessage.includes("not found") ? 404 : getRouteErrorStatus(error) }
+    )
   }
 }

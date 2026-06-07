@@ -1,10 +1,30 @@
 import {
+  createInventoryMovement,
   createInventoryItem,
+  listInventoryIntegrations,
   listInventoryItems,
+  listInventoryMovements,
   updateInventoryItem,
   type InventoryItem,
-  type InventoryItemInput
+  type InventoryItemInput,
+  type InventoryIntegration,
+  type InventoryIntegrationStatus
 } from "@/database"
+import {
+  deriveInventoryStatus,
+  summarizeInventory,
+  type InventoryEffectiveStatus
+} from "./inventoryLogic"
+
+export type InventoryItemView = InventoryItem & { effective_status: InventoryEffectiveStatus }
+
+const INVENTORY_PROVIDERS = [
+  { provider: "SHIFT4_SKYTAB", label: "Shift4 / SkyTab" },
+  { provider: "CLOVER", label: "Clover" },
+  { provider: "SQUARE", label: "Square" },
+  { provider: "SHOPIFY", label: "Shopify" },
+  { provider: "MANUAL_CSV", label: "Manual CSV Import" }
+] as const
 
 function requiredText(value: unknown, label: string, maxLength = 160) {
   const normalized = String(value || "").trim()
@@ -34,7 +54,7 @@ function nonNegativeInteger(value: unknown, label: string) {
   return number
 }
 
-function normalizeInput(body: Record<string, unknown>): InventoryItemInput {
+export function normalizeInventoryInput(body: Record<string, unknown>): InventoryItemInput {
   const costValue = body.cost === "" || body.cost === null || body.cost === undefined
     ? null
     : nonNegativeNumber(body.cost, "Cost")
@@ -50,31 +70,38 @@ function normalizeInput(body: Record<string, unknown>): InventoryItemInput {
   }
 }
 
-function summarize(items: InventoryItem[]) {
-  const activeItems = items.filter((item) => item.status === "ACTIVE")
-  const lowStock = activeItems.filter(
-    (item) => item.quantity > 0 && item.quantity <= item.low_stock_threshold
-  )
-  const outOfStock = activeItems.filter((item) => item.quantity === 0)
-
-  return {
-    totalItems: activeItems.length,
-    lowStock: lowStock.length,
-    outOfStock: outOfStock.length,
-    inventoryValue: activeItems.reduce(
-      (sum, item) => sum + Number(item.cost ?? item.price) * item.quantity,
-      0
-    ),
-    lastUpdatedAt: items[0]?.updated_at || null
-  }
+function integrationViews(records: InventoryIntegration[]) {
+  const byProvider = new Map(records.map((record) => [record.provider, record]))
+  return INVENTORY_PROVIDERS.map(({ provider, label }) => {
+    const record = byProvider.get(provider)
+    const status: InventoryIntegrationStatus = record?.status || "PLANNED"
+    return {
+      provider,
+      label,
+      status,
+      lastSyncAt: record?.last_sync_at || null
+    }
+  })
 }
 
 export async function getInventoryEngine(merchantId: string) {
-  const result = await listInventoryItems(merchantId)
+  const [result, movementResult, integrationResult] = await Promise.all([
+    listInventoryItems(merchantId),
+    listInventoryMovements(merchantId),
+    listInventoryIntegrations(merchantId)
+  ])
+
   return {
-    available: result.available,
-    items: result.items,
-    summary: summarize(result.items)
+    available: result.available && movementResult.available && integrationResult.available,
+    movementsAvailable: movementResult.available,
+    integrationsAvailable: integrationResult.available,
+    items: result.items.map((item): InventoryItemView => ({
+      ...item,
+      effective_status: deriveInventoryStatus(item)
+    })),
+    summary: summarizeInventory(result.items),
+    movements: movementResult.movements,
+    integrations: integrationViews(integrationResult.integrations)
   }
 }
 
@@ -82,7 +109,16 @@ export async function createInventoryItemEngine(
   merchantId: string,
   body: Record<string, unknown>
 ) {
-  return createInventoryItem(merchantId, normalizeInput(body))
+  const input = normalizeInventoryInput(body)
+  const item = await createInventoryItem(merchantId, input)
+  await createInventoryMovement(
+    merchantId,
+    item.id,
+    "CREATE",
+    item.quantity,
+    "Inventory item created"
+  )
+  return { ...item, effective_status: deriveInventoryStatus(item) }
 }
 
 export async function updateInventoryItemEngine(
@@ -91,10 +127,43 @@ export async function updateInventoryItemEngine(
   body: Record<string, unknown>
 ) {
   requiredText(itemId, "Item ID")
-  return updateInventoryItem(merchantId, itemId, normalizeInput(body))
+  const current = (await listInventoryItems(merchantId)).items.find((item) => item.id === itemId)
+  if (!current) throw new Error("Inventory item not found")
+
+  const input = normalizeInventoryInput(body)
+  const item = await updateInventoryItem(merchantId, itemId, input)
+  const quantityDelta = item.quantity - current.quantity
+  if (quantityDelta !== 0) {
+    await createInventoryMovement(
+      merchantId,
+      item.id,
+      "ADJUST",
+      quantityDelta,
+      optionalText(body.adjustmentReason, 240) || "Quantity updated from inventory editor"
+    )
+  }
+  return { ...item, effective_status: deriveInventoryStatus(item) }
 }
 
 export async function archiveInventoryItemEngine(merchantId: string, itemId: string) {
   requiredText(itemId, "Item ID")
-  return updateInventoryItem(merchantId, itemId, { status: "ARCHIVED" })
+  const current = (await listInventoryItems(merchantId)).items.find((item) => item.id === itemId)
+  if (!current) throw new Error("Inventory item not found")
+  if (current.status === "ARCHIVED") return { ...current, effective_status: "ARCHIVED" as const }
+
+  const item = await updateInventoryItem(merchantId, itemId, { status: "ARCHIVED" })
+  await createInventoryMovement(merchantId, item.id, "ARCHIVE", 0, "Inventory item archived")
+  return { ...item, effective_status: "ARCHIVED" as const }
+}
+
+export async function restoreInventoryItemEngine(merchantId: string, itemId: string) {
+  requiredText(itemId, "Item ID")
+  const current = (await listInventoryItems(merchantId)).items.find((item) => item.id === itemId)
+  if (!current) throw new Error("Inventory item not found")
+
+  const item = await updateInventoryItem(merchantId, itemId, { status: "ACTIVE" })
+  if (current.status === "ARCHIVED") {
+    await createInventoryMovement(merchantId, item.id, "RESTORE", 0, "Inventory item restored")
+  }
+  return { ...item, effective_status: deriveInventoryStatus(item) }
 }

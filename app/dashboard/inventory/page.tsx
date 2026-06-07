@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Archive, Boxes, PackagePlus, Search, X } from "lucide-react"
+import { Archive, Boxes, PackagePlus, RotateCcw, Search, X } from "lucide-react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import {
@@ -21,10 +21,13 @@ type InventoryItem = {
   quantity: number
   low_stock_threshold: number
   status: "ACTIVE" | "ARCHIVED"
+  effective_status: "ACTIVE" | "LOW_STOCK" | "OUT_OF_STOCK" | "ARCHIVED"
   updated_at: string
 }
 
 type InventorySummary = {
+  catalogItems: number
+  activeItems: number
   totalItems: number
   lowStock: number
   outOfStock: number
@@ -32,10 +35,28 @@ type InventorySummary = {
   lastUpdatedAt: string | null
 }
 
+type InventoryMovement = {
+  id: string
+  item_id: string
+  type: "CREATE" | "ADJUST" | "SALE" | "RETURN" | "ARCHIVE" | "RESTORE" | "IMPORT" | "SYNC"
+  quantity_delta: number
+  reason: string | null
+  created_at: string
+}
+
+type InventoryIntegration = {
+  provider: string
+  label: string
+  status: "PLANNED" | "AVAILABLE" | "CONNECTED" | "ERROR" | "DISABLED"
+  lastSyncAt: string | null
+}
+
 type InventoryResponse = {
   available: boolean
   items: InventoryItem[]
   summary: InventorySummary
+  movements: InventoryMovement[]
+  integrations: InventoryIntegration[]
   error?: string
 }
 
@@ -69,21 +90,25 @@ function formatUsd(value: number) {
 }
 
 function itemState(item: InventoryItem) {
-  if (item.status === "ARCHIVED") return { label: "Archived", tone: "slate" as const }
-  if (item.quantity === 0) return { label: "Out of stock", tone: "red" as const }
-  if (item.quantity <= item.low_stock_threshold) return { label: "Low stock", tone: "amber" as const }
+  if (item.effective_status === "ARCHIVED") return { label: "Archived", tone: "slate" as const }
+  if (item.effective_status === "OUT_OF_STOCK") return { label: "Out of stock", tone: "red" as const }
+  if (item.effective_status === "LOW_STOCK") return { label: "Low stock", tone: "amber" as const }
   return { label: "Active", tone: "green" as const }
 }
 
 export default function InventoryPage() {
   const [items, setItems] = useState<InventoryItem[]>([])
   const [summary, setSummary] = useState<InventorySummary>({
+    catalogItems: 0,
+    activeItems: 0,
     totalItems: 0,
     lowStock: 0,
     outOfStock: 0,
     inventoryValue: 0,
     lastUpdatedAt: null
   })
+  const [movements, setMovements] = useState<InventoryMovement[]>([])
+  const [integrations, setIntegrations] = useState<InventoryIntegration[]>([])
   const [available, setAvailable] = useState(true)
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState("")
@@ -117,6 +142,8 @@ export default function InventoryPage() {
       setAvailable(payload.available)
       setItems(payload.items || [])
       setSummary(payload.summary)
+      setMovements(payload.movements || [])
+      setIntegrations(payload.integrations || [])
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load inventory")
     } finally {
@@ -131,10 +158,10 @@ export default function InventoryPage() {
   const visibleItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
     return items.filter((item) => {
-      if (filter === "ACTIVE" && item.status !== "ACTIVE") return false
-      if (filter === "ARCHIVED" && item.status !== "ARCHIVED") return false
-      if (filter === "LOW" && !(item.status === "ACTIVE" && item.quantity > 0 && item.quantity <= item.low_stock_threshold)) return false
-      if (filter === "OUT" && !(item.status === "ACTIVE" && item.quantity === 0)) return false
+      if (filter === "ACTIVE" && item.effective_status !== "ACTIVE") return false
+      if (filter === "ARCHIVED" && item.effective_status !== "ARCHIVED") return false
+      if (filter === "LOW" && item.effective_status !== "LOW_STOCK") return false
+      if (filter === "OUT" && item.effective_status !== "OUT_OF_STOCK") return false
       if (!normalizedQuery) return true
       return [item.name, item.sku, item.category]
         .filter(Boolean)
@@ -199,6 +226,19 @@ export default function InventoryPage() {
     }
   }
 
+  async function restoreItem(item: InventoryItem) {
+    try {
+      await request(`/api/inventory/${item.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action: "RESTORE" })
+      })
+      toast.success("Inventory item restored")
+      await loadInventory()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to restore inventory item")
+    }
+  }
+
   return (
     <div className="space-y-5 md:space-y-7">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -218,7 +258,7 @@ export default function InventoryPage() {
       </div>
 
       <MetricGrid>
-        <CompactMetricTile label="Total Items" value={summary.totalItems} tone="blue" />
+        <CompactMetricTile label="Catalog Items" value={summary.catalogItems} tone="blue" detail={`${summary.activeItems} active`} />
         <CompactMetricTile label="Low Stock" value={summary.lowStock} tone={summary.lowStock ? "amber" : "default"} />
         <CompactMetricTile label="Out of Stock" value={summary.outOfStock} tone={summary.outOfStock ? "red" : "default"} />
         <CompactMetricTile label="Inventory Value" value={formatUsd(summary.inventoryValue)} detail="Cost when available, otherwise retail price" />
@@ -228,7 +268,7 @@ export default function InventoryPage() {
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
           <p className="font-semibold">Inventory database setup required</p>
           <p className="mt-1 leading-6">
-            Apply <code className="rounded bg-white/70 px-1.5 py-0.5 font-mono text-xs">20260607_add_inventory_items.sql</code> before adding merchant inventory.
+            Apply the inventory migrations dated June 7, 2026 before adding merchant inventory.
           </p>
         </div>
       )}
@@ -313,11 +353,18 @@ export default function InventoryPage() {
                         <div><p className="text-[10px] uppercase text-gray-400">Stock</p><p className="font-semibold">{item.quantity}</p></div>
                         <div><p className="text-[10px] uppercase text-gray-400">Alert at</p><p className="font-semibold">{item.low_stock_threshold}</p></div>
                       </div>
-                      {item.status !== "ARCHIVED" && (
+                      <p className="mt-2 text-[11px] text-gray-500">
+                        Updated {new Date(item.updated_at).toLocaleDateString()}
+                      </p>
+                      {item.effective_status !== "ARCHIVED" ? (
                         <div className="mt-3 flex gap-2">
                           <button onClick={() => openEdit(item)} className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700">Edit</button>
                           <button onClick={() => void archiveItem(item)} className="rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Archive</button>
                         </div>
+                      ) : (
+                        <button onClick={() => void restoreItem(item)} className="mt-3 inline-flex items-center gap-1.5 rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700">
+                          <RotateCcw size={13} /> Restore
+                        </button>
                       )}
                     </article>
                   )
@@ -342,11 +389,13 @@ export default function InventoryPage() {
                           <td className="px-4 py-3"><ProviderStatusPill label={state.label} tone={state.tone} /></td>
                           <td className="px-4 py-3 text-xs text-gray-500">{new Date(item.updated_at).toLocaleDateString()}</td>
                           <td className="px-4 py-3">
-                            {item.status !== "ARCHIVED" && (
+                            {item.effective_status !== "ARCHIVED" ? (
                               <div className="flex justify-end gap-2">
                                 <button onClick={() => openEdit(item)} className="text-xs font-semibold text-blue-600 hover:text-blue-700">Edit</button>
                                 <button onClick={() => void archiveItem(item)} aria-label={`Archive ${item.name}`} className="text-gray-400 hover:text-red-600"><Archive size={15} /></button>
                               </div>
+                            ) : (
+                              <button onClick={() => void restoreItem(item)} className="text-xs font-semibold text-blue-600 hover:text-blue-700">Restore</button>
                             )}
                           </td>
                         </tr>
@@ -362,13 +411,49 @@ export default function InventoryPage() {
 
       <DashboardSection title="Connect Existing POS Inventory" titleTone="blue">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          {["Shift4 / SkyTab", "Clover", "Square", "Shopify", "Manual CSV Import"].map((provider) => (
-            <div key={provider} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-              <p className="text-sm font-semibold text-gray-950">{provider}</p>
-              <p className="mt-1 text-xs leading-5 text-gray-500">Inventory connection is planned and is not currently syncing.</p>
-              <ProviderStatusPill label="Coming soon" tone="slate" className="mt-3" />
+          {integrations.map((integration) => (
+            <div key={integration.provider} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+              <p className="text-sm font-semibold text-gray-950">{integration.label}</p>
+              <p className="mt-1 text-xs leading-5 text-gray-500">
+                {integration.status === "CONNECTED"
+                  ? `Last synced ${integration.lastSyncAt ? new Date(integration.lastSyncAt).toLocaleString() : "not yet"}`
+                  : "Inventory sync is not currently active."}
+              </p>
+              <ProviderStatusPill
+                label={integration.status.replace("_", " ")}
+                tone={integration.status === "CONNECTED" ? "green" : integration.status === "ERROR" ? "red" : "slate"}
+                className="mt-3"
+              />
             </div>
           ))}
+        </div>
+      </DashboardSection>
+
+      <DashboardSection title="Recent Inventory Activity" titleTone="blue">
+        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          {movements.length ? (
+            <div className="divide-y divide-gray-100">
+              {movements.slice(0, 20).map((movement) => {
+                const item = items.find((candidate) => candidate.id === movement.item_id)
+                return (
+                  <div key={movement.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-gray-950">{item?.name || "Inventory item"}</p>
+                      <p className="mt-0.5 text-xs text-gray-500">{movement.type} · {movement.reason || "Inventory updated"}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-sm font-semibold tabular-nums text-gray-900">
+                        {movement.quantity_delta > 0 ? "+" : ""}{movement.quantity_delta}
+                      </p>
+                      <p className="text-[11px] text-gray-500">{new Date(movement.created_at).toLocaleString()}</p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="px-5 py-10 text-center text-sm text-gray-500">Inventory activity will appear after items are created or adjusted.</p>
+          )}
         </div>
       </DashboardSection>
 
