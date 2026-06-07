@@ -3,6 +3,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
+import {
+  BarChart3,
+  Boxes,
+  ChevronRight,
+  Link2,
+  ReceiptText,
+  ShoppingCart,
+  WalletCards
+} from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { AUTO_POLLING_ENABLED } from "@/lib/utils/polling"
 import TransactionActivityTable, {
@@ -311,6 +320,14 @@ export default function DashboardPage() {
   })
   const railRows = Object.entries(railBreakdown)
     .sort((left, right) => right[1].volume - left[1].volume)
+  const quickActions = [
+    { label: "Open POS", href: "/dashboard/pos", icon: ShoppingCart },
+    { label: "Create Checkout Link", href: "/dashboard/checkout", icon: Link2 },
+    { label: "View Transactions", href: "/dashboard/transactions", icon: ReceiptText },
+    { label: "Manage Wallets", href: "/dashboard/wallets", icon: WalletCards },
+    { label: "Open Reports", href: "/dashboard/reports", icon: BarChart3 },
+    { label: "Manage Inventory", href: "/dashboard/inventory", icon: Boxes }
+  ]
   const visibleChartData = useMemo(
     () => getChartWindow(chartData, chartRange),
     [chartData, chartRange]
@@ -435,7 +452,7 @@ export default function DashboardPage() {
         value={formatUsd(today.volume)}
         detail={
           <>
-            {today.confirmed} confirmed payment{today.confirmed === 1 ? "" : "s"} · {formatUsd(today.pinetreeFees)} PineTree fees
+            {today.confirmed} confirmed payment{today.confirmed === 1 ? "" : "s"}
           </>
         }
         action={
@@ -456,23 +473,24 @@ export default function DashboardPage() {
       </MetricGrid>
 
       <DashboardSection title="Quick Actions" titleTone="blue">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-          {[
-            ["Open POS", "/dashboard/pos"],
-            ["Create Checkout Link", "/dashboard/checkout"],
-            ["View Transactions", "/dashboard/transactions"],
-            ["Manage Wallets", "/dashboard/wallets"],
-            ["Open Reports", "/dashboard/reports"],
-            ["Manage Inventory", "/dashboard/inventory"]
-          ].map(([label, href]) => (
-            <Link
-              key={href}
-              href={href}
-              className="flex min-h-20 items-center rounded-2xl border border-gray-200/80 bg-white p-3 text-sm font-semibold text-gray-900 shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50/40 hover:text-blue-700"
-            >
-              {label}
-            </Link>
-          ))}
+        <div className="rounded-2xl border border-white/80 bg-white/80 p-2 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {quickActions.map(({ label, href, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                className="group flex min-h-14 min-w-0 items-center gap-2.5 rounded-xl border border-gray-100 bg-gradient-to-br from-white to-gray-50/80 px-3 py-2.5 text-gray-900 transition hover:-translate-y-0.5 hover:border-blue-200 hover:from-blue-50/70 hover:to-white hover:text-blue-700 hover:shadow-sm"
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 ring-1 ring-blue-100 transition group-hover:bg-blue-600 group-hover:text-white">
+                  <Icon className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <span className="min-w-0 flex-1 text-xs font-semibold leading-4 sm:text-sm">
+                  {label}
+                </span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 transition group-hover:translate-x-0.5 group-hover:text-blue-500" aria-hidden="true" />
+              </Link>
+            ))}
+          </div>
         </div>
       </DashboardSection>
 
@@ -504,12 +522,12 @@ export default function DashboardPage() {
         </DashboardSection>
 
         <DashboardSection title="Operations Snapshot" titleTone="blue">
-          <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-            <div className="grid grid-cols-2 gap-3">
-              <CompactMetricTile label="Wallet Value" value={formatUsd(walletValue)} tone="blue" className="shadow-none" />
-              <CompactMetricTile label="Active Providers" value={providers} className="shadow-none" />
-              <CompactMetricTile label="Inventory Items" value={inventory.available ? inventory.totalItems : "Setup"} className="shadow-none" />
-              <CompactMetricTile label="Low / Out of Stock" value={inventory.available ? `${inventory.lowStock} / ${inventory.outOfStock}` : "-"} tone={inventory.lowStock || inventory.outOfStock ? "amber" : "default"} className="shadow-none" />
+          <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-4">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3">
+              <CompactMetricTile label="Wallet Value" value={formatUsd(walletValue)} tone="blue" className="min-w-0 p-3 shadow-none" />
+              <CompactMetricTile label="Active Providers" value={providers} className="min-w-0 p-3 shadow-none" />
+              <CompactMetricTile label="Inventory Items" value={inventory.available ? inventory.totalItems : "Setup"} className="min-w-0 p-3 shadow-none" />
+              <CompactMetricTile label="Low / Out of Stock" value={inventory.available ? `${inventory.lowStock} / ${inventory.outOfStock}` : "-"} tone={inventory.lowStock || inventory.outOfStock ? "amber" : "default"} className="min-w-0 p-3 shadow-none" />
             </div>
             <p className="mt-3 text-xs text-gray-500">Wallet update: {formatChicagoDateTime(lastRun)}</p>
           </div>
@@ -517,13 +535,17 @@ export default function DashboardPage() {
       </div>
 
       <DashboardSection title="Today's Payment Rail Mix" titleTone="blue">
-        <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+        <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-4">
           {railRows.length ? (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:gap-3">
               {railRows.map(([rail, metrics]) => (
-                <div key={rail} className="rounded-xl bg-gray-50/70 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{formatDashboardNetwork(rail)}</p>
-                  <p className="mt-1 text-xl font-semibold text-gray-950">{formatUsd(metrics.volume)}</p>
+                <div key={rail} className="min-w-0 rounded-xl border border-gray-100 bg-gray-50/70 p-2.5 sm:w-40 sm:p-3">
+                  <p className="truncate text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:text-xs" title={formatDashboardNetwork(rail)}>
+                    {formatDashboardNetwork(rail)}
+                  </p>
+                  <p className="mt-1 truncate text-base font-semibold text-gray-950 sm:text-lg" title={formatUsd(metrics.volume)}>
+                    {formatUsd(metrics.volume)}
+                  </p>
                   <p className="mt-0.5 text-xs text-gray-500">{metrics.count} payment{metrics.count === 1 ? "" : "s"}</p>
                 </div>
               ))}

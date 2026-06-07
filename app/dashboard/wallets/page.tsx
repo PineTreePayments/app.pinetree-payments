@@ -899,58 +899,77 @@ function WalletOperationEmptyState({ compact = false }: { compact?: boolean }) {
 
 function WalletOperationList({ operations }: { operations: WalletOperationSummary[] }) {
   return (
-    <div className="space-y-2">
+    <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+      <div className="divide-y divide-gray-100">
       {operations.map((operation) => {
         const explorerUrl = operation.providerReference
           ? getExplorerTxUrl(operation.network, operation.providerReference)
           : null
         const reference = operation.providerReference || operation.destinationValue
         const statusTone =
-          operation.status === "FAILED" || operation.status === "VALIDATION_FAILED"
-            ? "amber"
+          operation.status === "FAILED"
+            ? "red"
+            : operation.status === "VALIDATION_FAILED"
+              ? "amber"
+              : ["COMPLETED", "CONFIRMED", "SUCCEEDED"].includes(operation.status)
+                ? "green"
             : operation.status === "CANCELLED"
               ? "slate"
               : "blue"
 
         return (
-          <div key={`${operation.provider}-${operation.id}`} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <p className="text-sm font-semibold text-gray-950">
-                    {operation.operationType.replace(/_/g, " ")}
-                  </p>
-                  <NetworkStatusPill label={networkDisplayLabel(operation.network)} tone="slate" className="min-h-6 px-2 text-[10px]" />
+          <article key={`${operation.provider}-${operation.id}`} className="p-3 sm:px-4 sm:py-3.5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="flex min-w-0 flex-1 items-start gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-xs font-bold uppercase text-blue-700 ring-1 ring-blue-100">
+                  {operation.operationType.slice(0, 2)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                    <p className="text-sm font-semibold capitalize text-gray-950">
+                      {operation.operationType.replace(/_/g, " ").toLowerCase()}
+                    </p>
+                    <NetworkStatusPill
+                      label={`${operation.asset} · ${networkDisplayLabel(operation.network)}`}
+                      tone="slate"
+                      className="min-h-6 max-w-full px-2 text-[10px]"
+                    />
+                  </div>
+                  {reference && (
+                    <p className="mt-1 truncate font-mono text-[11px] text-gray-500" title={reference}>
+                      {operation.providerReference ? "Tx " : "Ref "}
+                      {formatSettlementAddress(reference)}
+                    </p>
+                  )}
                 </div>
-                <p className="mt-1 text-sm text-gray-600">
-                  {operation.amount} {operation.asset}
-                </p>
-                {reference && (
-                  <p className="mt-1 truncate font-mono text-xs text-gray-500" title={reference}>
-                    {operation.providerReference ? "Tx " : "To "}
-                    {formatSettlementAddress(reference)}
-                  </p>
-                )}
               </div>
 
-              <div className="shrink-0 text-left sm:text-right">
-                <NetworkStatusPill label={formatOperationStatusForMerchant(operation.status)} tone={statusTone} />
-                <p className="mt-2 text-xs text-gray-500">{formatChicagoDateTime(operation.createdAt)}</p>
-                {explorerUrl && (
-                  <a href={explorerUrl} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-xs font-semibold text-blue-600 hover:underline">
-                    Explorer
-                  </a>
-                )}
+              <div className="flex items-end justify-between gap-3 pl-12 sm:min-w-[250px] sm:items-center sm:justify-end sm:pl-0">
+                <p className="shrink-0 text-sm font-semibold tabular-nums text-gray-950">
+                  {operation.amount} <span className="text-xs text-gray-500">{operation.asset}</span>
+                </p>
+                <div className="min-w-0 text-right">
+                  <NetworkStatusPill label={formatOperationStatusForMerchant(operation.status)} tone={statusTone} />
+                  <div className="mt-1 flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-[11px] text-gray-500">
+                    <span>{formatChicagoDateTime(operation.createdAt)}</span>
+                    {explorerUrl && (
+                      <a href={explorerUrl} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-600 hover:underline">
+                        Explorer
+                      </a>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
             {operation.errorMessage && (
-              <p className="mt-3 rounded-xl border border-amber-100 bg-amber-50/80 p-3 text-xs leading-5 text-amber-800">
+              <p className="mt-2 rounded-xl border border-amber-100 bg-amber-50/80 px-3 py-2 text-xs leading-5 text-amber-800 sm:ml-12">
                 {operation.errorMessage}
               </p>
             )}
-          </div>
+          </article>
         )
       })}
+      </div>
     </div>
   )
 }
@@ -3218,7 +3237,7 @@ export default function WalletsPage() {
               {/* Label */}
               <label className="block">
                 <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Nickname</span>
-                <span className="ml-1.5 text-[10px] text-gray-400">(e.g. "Coinbase USDC")</span>
+                <span className="ml-1.5 text-[10px] text-gray-400">(e.g. &quot;Coinbase USDC&quot;)</span>
                 <input
                   type="text"
                   value={destForm.label}
@@ -5278,7 +5297,7 @@ export default function WalletsPage() {
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-gray-950">Bitcoin Lightning</p>
                             <p className="mt-1 text-sm leading-6 text-gray-600">
-                              Lightning payments route through the merchant Speed Account ID. Speed manages Lightning invoice settlement, auto-swap, and payout behavior inside the merchant's Speed account.
+                              Lightning payments route through the merchant Speed Account ID. Speed manages Lightning invoice settlement, auto-swap, and payout behavior inside the merchant&apos;s Speed account.
                             </p>
                           </div>
                           <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
