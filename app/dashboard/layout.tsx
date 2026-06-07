@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import Image from "next/image"
 import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
@@ -118,6 +119,7 @@ export default function DashboardLayout({
     { name: "Transactions", href: "/dashboard/transactions" },
     { name: "Reports", href: "/dashboard/reports" },
     { name: "Wallets", href: "/dashboard/wallets" },
+    { name: "Inventory", href: "/dashboard/inventory" },
     { name: "Providers", href: "/dashboard/providers" },
     { name: "Help Center", href: "/dashboard/help" },
     { name: "Settings", href: "/dashboard/settings" },
@@ -152,7 +154,7 @@ export default function DashboardLayout({
               onClick={() => setSidebarOpen(false)}
               className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-gray-200/80 transition hover:bg-gray-50 focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"
             >
-              <img
+              <Image
                 src="/favicon.ico"
                 alt=""
                 aria-hidden="true"
@@ -195,7 +197,7 @@ export default function DashboardLayout({
                 className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-white/95 shadow-sm ring-1 ring-white/40 transition hover:bg-white focus:outline-none focus-visible:ring-4 focus-visible:ring-white/30 lg:hidden"
                 aria-label="PineTree Payments"
               >
-                <img
+                <Image
                   src="/favicon.ico"
                   alt=""
                   aria-hidden="true"

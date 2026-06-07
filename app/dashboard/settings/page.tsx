@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import { DashboardSection } from "@/components/dashboard/DashboardPrimitives"
+import Link from "next/link"
+import ToggleSwitch from "@/components/ui/ToggleSwitch"
 
 type MerchantSettingsPayload = {
   business_name: string | null
@@ -29,6 +31,12 @@ type SettingsApiResponse = {
   settings?: MerchantSettingsPayload
   tax?: MerchantTaxSettingsPayload
   error?: string
+}
+
+type ProviderSummary = {
+  provider: string
+  status: string
+  enabled: boolean
 }
 
 function parseCloseoutTime(value: string) {
@@ -64,6 +72,7 @@ export default function SettingsPage() {
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [providerSummary, setProviderSummary] = useState<ProviderSummary[]>([])
 
   const callSettingsApi = useCallback(async (method: "GET" | "POST", body?: unknown) => {
     const {
@@ -138,6 +147,18 @@ export default function SettingsPage() {
 
       const payload = await callSettingsApi("GET")
       applyPayload(payload)
+
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.access_token) {
+        const providerResponse = await fetch("/api/providers", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          cache: "no-store"
+        })
+        if (providerResponse.ok) {
+          const providerPayload = await providerResponse.json() as { providers?: ProviderSummary[] }
+          setProviderSummary(providerPayload.providers || [])
+        }
+      }
     } catch (error) {
       console.error(error)
       toast.error(error instanceof Error ? error.message : "Failed to load settings")
@@ -203,94 +224,106 @@ export default function SettingsPage() {
     )
   }
 
+  async function signOut() {
+    await supabase.auth.signOut()
+    window.location.href = "/login"
+  }
+
+  const enabledRails = providerSummary.filter((provider) =>
+    provider.enabled && ["connected", "active"].includes(String(provider.status).toLowerCase())
+  )
+  const fieldClass = "form-field mt-1.5"
+  const labelClass = "text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500"
+
   return (
     <div className="space-y-5 md:space-y-7">
       <div>
         <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Settings</h1>
+        <p className="mt-1 text-sm text-gray-600">Business, payment, POS, tax, notification, and integration preferences.</p>
       </div>
 
-      <DashboardSection title="Account" titleTone="blue">
+      <DashboardSection title="Business Profile" titleTone="blue">
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
-            <label className="text-sm text-gray-700">Business Name</label>
+            <label className={labelClass}>Business Name</label>
             <input
               value={businessName}
               onChange={(e) => setBusinessName(e.target.value)}
-              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
+              className={fieldClass}
             />
           </div>
 
           <div>
-            <label className="text-sm text-gray-700">Account Email</label>
+            <label className={labelClass}>Contact Email</label>
             <input
               value={email}
               disabled
-              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-100 text-gray-900"
+              className={`${fieldClass} bg-gray-100`}
             />
           </div>
 
           <div>
-            <label className="text-sm text-gray-700">Business Address</label>
+            <label className={labelClass}>Business Address</label>
             <input
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
+              className={fieldClass}
             />
           </div>
 
           <div>
-            <label className="text-sm text-gray-700">City</label>
+            <label className={labelClass}>City</label>
             <input
               value={city}
               onChange={(e) => setCity(e.target.value)}
-              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
+              className={fieldClass}
             />
           </div>
 
           <div>
-            <label className="text-sm text-gray-700">State</label>
+            <label className={labelClass}>State</label>
             <input
               value={state}
               onChange={(e) => setState(e.target.value)}
-              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
+              className={fieldClass}
             />
           </div>
 
           <div>
-            <label className="text-sm text-gray-700">ZIP</label>
+            <label className={labelClass}>ZIP</label>
             <input
               value={zip}
               onChange={(e) => setZip(e.target.value)}
-              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
+              className={fieldClass}
             />
           </div>
 
           <div>
-            <label className="text-sm text-gray-700">Country</label>
+            <label className={labelClass}>Country</label>
             <input
               value={country}
               onChange={(e) => setCountry(e.target.value)}
-              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
+              className={fieldClass}
             />
           </div>
 
           <div>
-            <label className="text-sm text-gray-700">Business Phone</label>
+            <label className={labelClass}>Business Phone</label>
             <input
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
+              className={fieldClass}
             />
           </div>
 
           <div>
-            <label className="text-sm text-gray-700">Business Type</label>
+            <label className={labelClass}>Business Type</label>
             <select
               value={businessType}
               onChange={(e) => setBusinessType(e.target.value)}
-              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
+              className={fieldClass}
             >
               <option value="">Select</option>
               <option value="retail">Retail</option>
@@ -303,34 +336,70 @@ export default function SettingsPage() {
       </div>
       </DashboardSection>
 
-      <DashboardSection title="Tax Configuration" titleTone="blue">
+      <DashboardSection title="Payment Preferences" titleTone="blue">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-950">Enabled payment rails</h3>
+              <p className="mt-1 text-sm leading-6 text-gray-600">This summary reads from existing provider configuration.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {enabledRails.length ? enabledRails.map((provider) => (
+                  <span key={provider.provider} className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold capitalize text-emerald-700">
+                    {provider.provider.replaceAll("_", " ")}
+                  </span>
+                )) : (
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">No enabled rails</span>
+                )}
+              </div>
+            </div>
+            <Link href="/dashboard/providers" className="inline-flex min-h-10 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 hover:bg-blue-100">
+              Manage Providers
+            </Link>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <SettingPreview title="Default payment rail" detail="Routing remains controlled by existing provider and routing configuration." />
+            <SettingPreview title="PineTree fee display" detail="Fee amounts continue to come from the payment engine and checkout breakdown." />
+          </div>
+        </div>
+      </DashboardSection>
+
+      <DashboardSection title="POS Settings" titleTone="blue">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+          <div className="grid gap-3 md:grid-cols-3">
+            <IntegrationLink title="Terminals & Device Preferences" detail="Manage terminal names, PINs, auto-lock, and drawer setup." href="/dashboard/pos" />
+            <SettingPreview title="Receipt Behavior" detail="Configure later. Receipt delivery preferences are not persisted yet." />
+            <SettingPreview title="Cash Drawer Preferences" detail="Drawer balances and closeout remain managed per terminal." />
+          </div>
+        </div>
+      </DashboardSection>
+
+      <DashboardSection title="Tax & Fees" titleTone="blue">
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="flex items-center gap-3">
-            <input
-              type="checkbox"
+          <div className="flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50/70 p-4 md:col-span-2">
+            <div><p className="text-sm font-semibold text-gray-950">Tax collection</p><p className="mt-0.5 text-xs text-gray-500">Apply the configured tax rate to supported POS sales.</p></div>
+            <ToggleSwitch
               checked={taxEnabled}
-              onChange={(e) => setTaxEnabled(e.target.checked)}
+              onChange={setTaxEnabled}
             />
-            <span className="text-sm text-gray-900">Enable Tax Collection</span>
           </div>
 
           <div>
-            <label className="text-sm text-gray-700">Tax Name</label>
+            <label className={labelClass}>Tax Name</label>
             <input
               value={taxName}
               onChange={(e) => setTaxName(e.target.value)}
-              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
+              className={fieldClass}
             />
           </div>
 
           <div>
-            <label className="text-sm text-gray-700">Tax Rate (%)</label>
+            <label className={labelClass}>Tax Rate (%)</label>
             <input
               value={taxRate}
               onChange={(e) => setTaxRate(e.target.value)}
-              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
+              className={fieldClass}
               placeholder="8.25"
             />
           </div>
@@ -338,17 +407,17 @@ export default function SettingsPage() {
       </div>
       </DashboardSection>
 
-      <DashboardSection title="Reporting" titleTone="blue">
+      <DashboardSection title="Notifications & Reporting" titleTone="blue">
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
-            <label className="text-sm text-gray-700">Business Day Closeout Time</label>
+            <label className={labelClass}>Business Day Closeout Time</label>
             <div className="mt-2 flex flex-wrap items-center gap-3">
               <select
                 value={closeHour}
                 onChange={(e) => setCloseHour(e.target.value)}
-                className="border border-gray-300 rounded-md px-3 py-2 text-gray-900 bg-white w-24"
+                className="form-field w-24"
               >
                 {Array.from({ length: 24 }, (_, i) => {
                   const val = i < 10 ? `0${i}` : `${i}`
@@ -365,7 +434,7 @@ export default function SettingsPage() {
               <select
                 value={closeMinute}
                 onChange={(e) => setCloseMinute(e.target.value)}
-                className="border border-gray-300 rounded-md px-3 py-2 text-gray-900 bg-white w-24"
+                className="form-field w-24"
               >
                 {["00", "05", "10", "15", "20", "25", "30", "35", "40", "45", "50", "55"].map((val) => (
                   <option key={val} value={val}>
@@ -380,22 +449,39 @@ export default function SettingsPage() {
             </p>
           </div>
 
-          <div>
-            <label className="text-sm text-gray-700">End-of-Day Reminder</label>
-            <div className="mt-2 flex items-center gap-3">
-              <input
-                type="checkbox"
+          <div className="space-y-3">
+            <div className="flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50/70 p-4">
+              <div><p className="text-sm font-semibold text-gray-950">End-of-day reminder</p><p className="mt-0.5 text-xs text-gray-500">Show the existing report reminder.</p></div>
+              <ToggleSwitch
                 checked={reportToast}
-                onChange={(e) => setReportToast(e.target.checked)}
+                onChange={setReportToast}
               />
-              <span className="text-sm text-gray-900">Show reminder toast to print daily report</span>
             </div>
+            <SettingPreview title="Payment success alerts" detail="Configure later. Alert delivery preferences are not persisted yet." />
+            <SettingPreview title="Failed payment alerts" detail="Configure later. Existing transaction data remains available in the ledger." />
           </div>
         </div>
       </div>
       </DashboardSection>
 
-      <div>
+      <DashboardSection title="Security & Integrations" titleTone="blue">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="flex min-h-36 flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+            <p className="text-sm font-semibold text-gray-950">Account Security</p>
+            <p className="mt-1 flex-1 break-all text-xs leading-5 text-gray-500">
+              Signed in as {email || "merchant"}. Session security is managed by Supabase Auth.
+            </p>
+            <button type="button" onClick={() => void signOut()} className="mt-3 w-fit text-sm font-semibold text-red-600 hover:text-red-700">
+              Sign out
+            </button>
+          </div>
+          <IntegrationLink title="Wallets" detail="Settlement wallets, balances, send activity, and destinations." href="/dashboard/wallets" />
+          <IntegrationLink title="Checkout, Webhooks & API Keys" detail="Manage payment links, webhook delivery, and merchant API keys." href="/dashboard/checkout" />
+          <IntegrationLink title="Inventory" detail="Manage the merchant item catalog and stock thresholds." href="/dashboard/inventory" />
+        </div>
+      </DashboardSection>
+
+      <div className="sticky bottom-3 z-10 rounded-2xl border border-gray-200 bg-white/95 p-3 shadow-[0_16px_40px_rgba(15,23,42,0.12)] backdrop-blur sm:static sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none">
         <button
           onClick={saveSettings}
           disabled={saving}
@@ -404,6 +490,38 @@ export default function SettingsPage() {
           {saving ? "Saving..." : "Save Settings"}
         </button>
       </div>
+    </div>
+  )
+}
+
+function SettingPreview({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="rounded-xl border border-gray-100 bg-gray-50/70 p-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-gray-950">{title}</p>
+        <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-500">Configure later</span>
+      </div>
+      <p className="mt-1 text-xs leading-5 text-gray-500">{detail}</p>
+    </div>
+  )
+}
+
+function IntegrationLink({
+  title,
+  detail,
+  href,
+  label = "Open"
+}: {
+  title: string
+  detail: string
+  href: string
+  label?: string
+}) {
+  return (
+    <div className="flex min-h-36 flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+      <p className="text-sm font-semibold text-gray-950">{title}</p>
+      <p className="mt-1 flex-1 text-xs leading-5 text-gray-500">{detail}</p>
+      <Link href={href} className="mt-3 text-sm font-semibold text-blue-600 hover:text-blue-700">{label}</Link>
     </div>
   )
 }

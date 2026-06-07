@@ -75,3 +75,6 @@ export * from "./settlementPreferences"
 
 // Merchant Wallet Send Sessions
 export * from "./merchantWalletSendSessions"
+
+// Inventory
+export * from "./inventoryItems"

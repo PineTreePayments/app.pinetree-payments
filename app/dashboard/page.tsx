@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import { AUTO_POLLING_ENABLED } from "@/lib/utils/polling"
 import TransactionActivityTable, {
@@ -42,6 +43,28 @@ type DashboardOverviewResponse = {
   chartData?: ChartPoint[]
   walletValue?: number
   lastRun?: string | null
+  today?: {
+    volume: number
+    transactionCount: number
+    averageTransaction: number
+    pinetreeFees: number
+    confirmed: number
+    incomplete: number
+    failed: number
+  }
+  railBreakdown?: Record<string, { count: number; volume: number }>
+  railReadiness?: Array<{
+    id: "solana" | "base" | "lightning"
+    label: string
+    connected: boolean
+    detail: string
+  }>
+  inventory?: {
+    available: boolean
+    totalItems: number
+    lowStock: number
+    outOfStock: number
+  }
   error?: string
 }
 
@@ -115,6 +138,10 @@ function getOverviewInsights(input: {
   providers: number
   successRate: number
   volume: number
+  failed: number
+  incomplete: number
+  disconnectedRails: number
+  lowStock: number
 }) {
   const providerCounts = countBy(input.recentTx, (tx) => tx.provider)
   const networkCounts = countBy(
@@ -141,6 +168,19 @@ function getOverviewInsights(input: {
     insights.push(`Current success rate is ${input.successRate}% across tracked dashboard volume.`)
   }
 
+  if (input.failed > 0) {
+    insights.push(`${input.failed} payment${input.failed === 1 ? "" : "s"} failed today and may need review.`)
+  }
+  if (input.incomplete > 0) {
+    insights.push(`${input.incomplete} payment${input.incomplete === 1 ? "" : "s"} are incomplete today.`)
+  }
+  if (input.disconnectedRails > 0) {
+    insights.push(`${input.disconnectedRails} payment rail${input.disconnectedRails === 1 ? " is" : "s are"} not configured.`)
+  }
+  if (input.lowStock > 0) {
+    insights.push(`${input.lowStock} inventory item${input.lowStock === 1 ? " is" : "s are"} at or below the low-stock threshold.`)
+  }
+
   return insights
 }
 
@@ -156,6 +196,23 @@ export default function DashboardPage() {
   const [chartData,setChartData] = useState<ChartPoint[]>([])
   const [walletValue,setWalletValue] = useState(0)
   const [lastRun,setLastRun] = useState<string | null>(null)
+  const [today, setToday] = useState<NonNullable<DashboardOverviewResponse["today"]>>({
+    volume: 0,
+    transactionCount: 0,
+    averageTransaction: 0,
+    pinetreeFees: 0,
+    confirmed: 0,
+    incomplete: 0,
+    failed: 0
+  })
+  const [railBreakdown, setRailBreakdown] = useState<Record<string, { count: number; volume: number }>>({})
+  const [railReadiness, setRailReadiness] = useState<NonNullable<DashboardOverviewResponse["railReadiness"]>>([])
+  const [inventory, setInventory] = useState<NonNullable<DashboardOverviewResponse["inventory"]>>({
+    available: false,
+    totalItems: 0,
+    lowStock: 0,
+    outOfStock: 0
+  })
   const [isSyncing,setIsSyncing] = useState(false)
   const [syncError,setSyncError] = useState<string | null>(null)
   const [chartRange, setChartRange] = useState<ChartRange>("30D")
@@ -196,6 +253,10 @@ export default function DashboardPage() {
     setWalletValue(Number(payload.walletValue ?? 0))
     setLastRun(payload.lastRun || null)
     setRecentTx(payload.recentTx || [])
+    if (payload.today) setToday(payload.today)
+    setRailBreakdown(payload.railBreakdown || {})
+    setRailReadiness(payload.railReadiness || [])
+    if (payload.inventory) setInventory(payload.inventory)
   }, [])
 
   const loadOverview = useCallback(async () => {
@@ -238,7 +299,18 @@ export default function DashboardPage() {
 
 
 
-  const overviewInsights = getOverviewInsights({ recentTx, providers, successRate, volume })
+  const overviewInsights = getOverviewInsights({
+    recentTx,
+    providers,
+    successRate,
+    volume,
+    failed: today.failed,
+    incomplete: today.incomplete,
+    disconnectedRails: railReadiness.filter((rail) => !rail.connected).length,
+    lowStock: inventory.lowStock
+  })
+  const railRows = Object.entries(railBreakdown)
+    .sort((left, right) => right[1].volume - left[1].volume)
   const visibleChartData = useMemo(
     () => getChartWindow(chartData, chartRange),
     [chartData, chartRange]
@@ -358,30 +430,115 @@ export default function DashboardPage() {
       )}
 
       <DashboardHeroCard
-        eyebrow="Live Balance"
-        title="Combined balance across connected wallets"
-        value={formatUsd(walletValue)}
+        eyebrow="Today's Confirmed Sales"
+        title="Confirmed merchant payment volume since midnight"
+        value={formatUsd(today.volume)}
         detail={
           <>
-            Last system update: {formatChicagoDateTime(lastRun)}
-            <span className="text-gray-400"> (America/Chicago)</span>
+            {today.confirmed} confirmed payment{today.confirmed === 1 ? "" : "s"} · {formatUsd(today.pinetreeFees)} PineTree fees
           </>
         }
         action={
           <button
-            onClick={()=>router.push("/dashboard/wallets")}
+            onClick={()=>router.push("/dashboard/transactions")}
             className="inline-flex min-h-10 w-fit self-start items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 sm:self-auto md:px-5"
           >
-            View Wallets
+            View Transactions
           </button>
         }
       />
 
       <MetricGrid>
-        <CompactMetricTile label="Total Volume" value={formatUsd(volume)} tone="blue" />
-        <CompactMetricTile label="Transactions" value={txCount} />
+        <CompactMetricTile label="Transactions Today" value={today.transactionCount} tone="blue" />
+        <CompactMetricTile label="Average Transaction" value={formatUsd(today.averageTransaction)} />
+        <CompactMetricTile label="Incomplete Today" value={today.incomplete} tone={today.incomplete ? "amber" : "default"} />
+        <CompactMetricTile label="Failed Today" value={today.failed} tone={today.failed ? "red" : "default"} />
+      </MetricGrid>
+
+      <DashboardSection title="Quick Actions" titleTone="blue">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+          {[
+            ["Open POS", "/dashboard/pos"],
+            ["Create Checkout Link", "/dashboard/checkout"],
+            ["View Transactions", "/dashboard/transactions"],
+            ["Manage Wallets", "/dashboard/wallets"],
+            ["Open Reports", "/dashboard/reports"],
+            ["Manage Inventory", "/dashboard/inventory"]
+          ].map(([label, href]) => (
+            <Link
+              key={href}
+              href={href}
+              className="flex min-h-20 items-center rounded-2xl border border-gray-200/80 bg-white p-3 text-sm font-semibold text-gray-900 shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50/40 hover:text-blue-700"
+            >
+              {label}
+            </Link>
+          ))}
+        </div>
+      </DashboardSection>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <DashboardSection title="Payment Rail Readiness" titleTone="blue">
+          <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+            <div className="space-y-2">
+              {railReadiness.map((rail) => (
+                <div key={rail.id} className="flex items-center justify-between gap-3 rounded-xl bg-gray-50/70 p-3">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-950">{rail.label}</p>
+                    <p className="mt-0.5 text-xs text-gray-500">{rail.detail}</p>
+                  </div>
+                  <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                    rail.connected
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-amber-200 bg-amber-50 text-amber-700"
+                  }`}>
+                    {rail.connected ? "Connected" : "Not configured"}
+                  </span>
+                </div>
+              ))}
+              {!railReadiness.length && <p className="py-6 text-center text-sm text-gray-500">Payment rail readiness is loading.</p>}
+            </div>
+            <Link href="/dashboard/providers" className="mt-3 inline-flex text-sm font-semibold text-blue-600 hover:text-blue-700">
+              Manage payment rails
+            </Link>
+          </div>
+        </DashboardSection>
+
+        <DashboardSection title="Operations Snapshot" titleTone="blue">
+          <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+            <div className="grid grid-cols-2 gap-3">
+              <CompactMetricTile label="Wallet Value" value={formatUsd(walletValue)} tone="blue" className="shadow-none" />
+              <CompactMetricTile label="Active Providers" value={providers} className="shadow-none" />
+              <CompactMetricTile label="Inventory Items" value={inventory.available ? inventory.totalItems : "Setup"} className="shadow-none" />
+              <CompactMetricTile label="Low / Out of Stock" value={inventory.available ? `${inventory.lowStock} / ${inventory.outOfStock}` : "-"} tone={inventory.lowStock || inventory.outOfStock ? "amber" : "default"} className="shadow-none" />
+            </div>
+            <p className="mt-3 text-xs text-gray-500">Wallet update: {formatChicagoDateTime(lastRun)}</p>
+          </div>
+        </DashboardSection>
+      </div>
+
+      <DashboardSection title="Today's Payment Rail Mix" titleTone="blue">
+        <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          {railRows.length ? (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {railRows.map(([rail, metrics]) => (
+                <div key={rail} className="rounded-xl bg-gray-50/70 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{formatDashboardNetwork(rail)}</p>
+                  <p className="mt-1 text-xl font-semibold text-gray-950">{formatUsd(metrics.volume)}</p>
+                  <p className="mt-0.5 text-xs text-gray-500">{metrics.count} payment{metrics.count === 1 ? "" : "s"}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="py-7 text-center text-sm text-gray-500">No payment activity has been recorded today.</p>
+          )}
+        </div>
+      </DashboardSection>
+
+      <MetricGrid>
+        <CompactMetricTile label="All-Time Volume" value={formatUsd(volume)} tone="blue" />
+        <CompactMetricTile label="All Transactions" value={txCount} />
         <CompactMetricTile label="Success Rate" value={`${successRate}%`} tone="green" />
-        <CompactMetricTile label="Active Providers" value={providers} tone="slate" />
+        <CompactMetricTile label="Confirmed Today" value={today.confirmed} tone="green" />
       </MetricGrid>
 
       <ChartCard
