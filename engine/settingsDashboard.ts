@@ -1,4 +1,10 @@
-import { supabaseAdmin, supabase } from "@/database"
+import {
+  ensureDefaultReceiptDevices,
+  listReceiptDevices,
+  supabaseAdmin,
+  supabase,
+  type ReceiptDevice
+} from "@/database"
 
 const db = supabaseAdmin || supabase
 
@@ -51,6 +57,7 @@ export type SettingsDashboardData = {
   settings: MerchantSettingsPayload
   tax: MerchantTaxSettingsPayload
   operations: MerchantOperationsSettingsPayload
+  receiptDevices: ReceiptDevice[]
   schemaReady: boolean
 }
 
@@ -196,7 +203,7 @@ export async function getSettingsDashboardEngine(merchantId: string): Promise<Se
       .maybeSingle()
   }
 
-  const [taxResult, operationsResult] = await Promise.all([
+  const [taxResult, operationsResult, deviceResult] = await Promise.all([
     db
       .from("merchant_tax_settings")
       .select("tax_enabled,tax_rate,tax_name")
@@ -206,7 +213,8 @@ export async function getSettingsDashboardEngine(merchantId: string): Promise<Se
       .from("merchant_operations_settings")
       .select("*")
       .eq("merchant_id", merchantId)
-      .maybeSingle()
+      .maybeSingle(),
+    listReceiptDevices(merchantId)
   ])
 
   if (settingsResult.error) throw new Error(`Failed to load settings: ${settingsResult.error.message}`)
@@ -218,11 +226,18 @@ export async function getSettingsDashboardEngine(merchantId: string): Promise<Se
       throw new Error(`Failed to load operations settings: ${operationsResult.error.message}`)
     }
   }
+  if (!deviceResult.available) schemaReady = false
+  if (deviceResult.available && deviceResult.devices.length < 4) {
+    await ensureDefaultReceiptDevices(merchantId)
+    const refreshed = await listReceiptDevices(merchantId)
+    deviceResult.devices.splice(0, deviceResult.devices.length, ...refreshed.devices)
+  }
 
   return {
     settings: { ...DEFAULT_SETTINGS, ...(settingsResult.data || {}) },
     tax: { ...DEFAULT_TAX, ...(taxResult.data || {}) },
     operations: { ...DEFAULT_OPERATIONS, ...(operationsResult.data || {}) },
+    receiptDevices: deviceResult.devices,
     schemaReady
   }
 }

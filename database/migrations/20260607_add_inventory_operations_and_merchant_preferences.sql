@@ -22,14 +22,42 @@ CREATE TABLE IF NOT EXISTS public.inventory_integrations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   merchant_id uuid NOT NULL,
   provider text NOT NULL,
-  status text NOT NULL DEFAULT 'PLANNED'
-    CHECK (status IN ('PLANNED', 'AVAILABLE', 'CONNECTED', 'ERROR', 'DISABLED')),
+  status text NOT NULL DEFAULT 'REQUIRES_CONFIGURATION'
+    CHECK (status IN (
+      'AVAILABLE', 'REQUIRES_CONFIGURATION', 'CONNECTING', 'CONNECTED',
+      'SYNCING', 'ERROR', 'DISABLED', 'PLANNED'
+    )),
+  external_account_label text,
   last_sync_at timestamptz,
+  last_error text,
+  sync_direction text NOT NULL DEFAULT 'IMPORT'
+    CHECK (sync_direction IN ('IMPORT', 'EXPORT', 'BIDIRECTIONAL')),
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (merchant_id, provider)
 );
+
+ALTER TABLE public.inventory_integrations
+  ADD COLUMN IF NOT EXISTS external_account_label text,
+  ADD COLUMN IF NOT EXISTS last_error text,
+  ADD COLUMN IF NOT EXISTS sync_direction text NOT NULL DEFAULT 'IMPORT';
+
+ALTER TABLE public.inventory_integrations
+  DROP CONSTRAINT IF EXISTS inventory_integrations_status_check,
+  DROP CONSTRAINT IF EXISTS inventory_integrations_sync_direction_check;
+
+ALTER TABLE public.inventory_integrations
+  ALTER COLUMN status SET DEFAULT 'REQUIRES_CONFIGURATION';
+
+ALTER TABLE public.inventory_integrations
+  ADD CONSTRAINT inventory_integrations_status_check CHECK (status IN (
+    'AVAILABLE', 'REQUIRES_CONFIGURATION', 'CONNECTING', 'CONNECTED',
+    'SYNCING', 'ERROR', 'DISABLED', 'PLANNED'
+  )),
+  ADD CONSTRAINT inventory_integrations_sync_direction_check CHECK (
+    sync_direction IN ('IMPORT', 'EXPORT', 'BIDIRECTIONAL')
+  );
 
 CREATE INDEX IF NOT EXISTS inventory_integrations_merchant_idx
   ON public.inventory_integrations (merchant_id);
@@ -65,19 +93,42 @@ CREATE TABLE IF NOT EXISTS public.merchant_operations_settings (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS public.merchant_receipt_devices (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  merchant_id uuid NOT NULL,
+  label text NOT NULL,
+  type text NOT NULL CHECK (type IN (
+    'BROWSER_PRINT', 'TERMINAL_PRINT', 'NETWORK_PRINTER', 'PROVIDER_PRINTER'
+  )),
+  provider text,
+  status text NOT NULL DEFAULT 'REQUIRES_CONFIGURATION'
+    CHECK (status IN ('AVAILABLE', 'REQUIRES_CONFIGURATION', 'CONNECTED', 'ERROR', 'DISABLED')),
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (merchant_id, type, provider)
+);
+
+CREATE INDEX IF NOT EXISTS merchant_receipt_devices_merchant_idx
+  ON public.merchant_receipt_devices (merchant_id, updated_at DESC);
+
 ALTER TABLE public.inventory_movements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory_integrations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.merchant_operations_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.merchant_receipt_devices ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON TABLE public.inventory_movements FROM anon;
 REVOKE ALL ON TABLE public.inventory_integrations FROM anon;
 REVOKE ALL ON TABLE public.merchant_operations_settings FROM anon;
+REVOKE ALL ON TABLE public.merchant_receipt_devices FROM anon;
 REVOKE INSERT, UPDATE, DELETE ON TABLE public.inventory_movements FROM authenticated;
 REVOKE INSERT, UPDATE, DELETE ON TABLE public.inventory_integrations FROM authenticated;
 REVOKE INSERT, UPDATE, DELETE ON TABLE public.merchant_operations_settings FROM authenticated;
+REVOKE INSERT, UPDATE, DELETE ON TABLE public.merchant_receipt_devices FROM authenticated;
 GRANT SELECT ON TABLE public.inventory_movements TO authenticated;
 GRANT SELECT ON TABLE public.inventory_integrations TO authenticated;
 GRANT SELECT ON TABLE public.merchant_operations_settings TO authenticated;
+GRANT SELECT ON TABLE public.merchant_receipt_devices TO authenticated;
 
 DROP POLICY IF EXISTS "inventory_movements_select_own" ON public.inventory_movements;
 CREATE POLICY "inventory_movements_select_own"
@@ -92,6 +143,11 @@ CREATE POLICY "inventory_integrations_select_own"
 DROP POLICY IF EXISTS "merchant_operations_settings_select_own" ON public.merchant_operations_settings;
 CREATE POLICY "merchant_operations_settings_select_own"
   ON public.merchant_operations_settings FOR SELECT TO authenticated
+  USING (merchant_id = auth.uid());
+
+DROP POLICY IF EXISTS "merchant_receipt_devices_select_own" ON public.merchant_receipt_devices;
+CREATE POLICY "merchant_receipt_devices_select_own"
+  ON public.merchant_receipt_devices FOR SELECT TO authenticated
   USING (merchant_id = auth.uid());
 
 NOTIFY pgrst, 'reload schema';

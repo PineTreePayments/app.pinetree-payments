@@ -78,3 +78,6 @@ export * from "./merchantWalletSendSessions"
 
 // Inventory
 export * from "./inventoryItems"
+
+// Receipt Devices
+export * from "./receiptDevices"

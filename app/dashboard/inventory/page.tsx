@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Archive, Boxes, PackagePlus, RotateCcw, Search, X } from "lucide-react"
+import { Archive, Boxes, PackagePlus, RotateCcw, Search, Upload, X } from "lucide-react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import {
@@ -47,8 +47,18 @@ type InventoryMovement = {
 type InventoryIntegration = {
   provider: string
   label: string
-  status: "PLANNED" | "AVAILABLE" | "CONNECTED" | "ERROR" | "DISABLED"
-  lastSyncAt: string | null
+  status: "AVAILABLE" | "REQUIRES_CONFIGURATION" | "CONNECTING" | "CONNECTED" | "SYNCING" | "ERROR" | "DISABLED" | "PLANNED"
+  detail: string
+  canConnect: boolean
+  canSync: boolean
+  canDisconnect: boolean
+  lastSyncAt?: string | null
+}
+
+type ImportSummary = {
+  created: number
+  skipped: number
+  errors: Array<{ row: number; message: string }>
 }
 
 type InventoryResponse = {
@@ -117,15 +127,20 @@ export default function InventoryPage() {
   const [editing, setEditing] = useState<InventoryItem | null>(null)
   const [form, setForm] = useState<ItemForm>(emptyForm)
   const [saving, setSaving] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null)
+  const [integrationBusy, setIntegrationBusy] = useState<string | null>(null)
+  const [selectedIntegration, setSelectedIntegration] = useState<InventoryIntegration | null>(null)
 
   const request = useCallback(async (path: string, init?: RequestInit) => {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.access_token) throw new Error("Please sign in again")
+    const isFormData = init?.body instanceof FormData
     const response = await fetch(path, {
       ...init,
       headers: {
         Authorization: `Bearer ${session.access_token}`,
-        "Content-Type": "application/json",
+        ...(isFormData ? {} : { "Content-Type": "application/json" }),
         ...(init?.headers || {})
       },
       cache: "no-store"
@@ -236,6 +251,40 @@ export default function InventoryPage() {
       await loadInventory()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to restore inventory item")
+    }
+  }
+
+  async function uploadCsv(file: File | null) {
+    if (!file) return
+    setImporting(true)
+    setImportSummary(null)
+    try {
+      const data = new FormData()
+      data.append("file", file)
+      const payload = await request("/api/inventory/import", {
+        method: "POST",
+        body: data
+      }) as ImportSummary
+      setImportSummary(payload)
+      toast.success(`CSV import complete: ${payload.created} created, ${payload.skipped} skipped`)
+      await loadInventory()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "CSV import failed")
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  async function integrationAction(provider: string, action: "connect" | "sync" | "disconnect") {
+    setIntegrationBusy(`${provider}:${action}`)
+    try {
+      await request(`/api/inventory/integrations/${provider}/${action}`, { method: "POST" })
+      toast.success(`Inventory ${action} request completed`)
+      await loadInventory()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Inventory integration request failed")
+    } finally {
+      setIntegrationBusy(null)
     }
   }
 
@@ -410,23 +459,62 @@ export default function InventoryPage() {
       </DashboardSection>
 
       <DashboardSection title="Connect Existing POS Inventory" titleTone="blue">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {integrations.map((integration) => (
-            <div key={integration.provider} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-              <p className="text-sm font-semibold text-gray-950">{integration.label}</p>
-              <p className="mt-1 text-xs leading-5 text-gray-500">
-                {integration.status === "CONNECTED"
-                  ? `Last synced ${integration.lastSyncAt ? new Date(integration.lastSyncAt).toLocaleString() : "not yet"}`
-                  : "Inventory sync is not currently active."}
-              </p>
-              <ProviderStatusPill
-                label={integration.status.replace("_", " ")}
-                tone={integration.status === "CONNECTED" ? "green" : integration.status === "ERROR" ? "red" : "slate"}
-                className="mt-3"
-              />
+            <div key={integration.provider} className="flex min-h-40 flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-gray-950">{integration.label}</p>
+                  <p className="mt-1 text-xs leading-5 text-gray-500">{integration.detail}</p>
+                </div>
+                <ProviderStatusPill
+                  label={integration.status.replaceAll("_", " ")}
+                  tone={integration.status === "CONNECTED" || integration.status === "AVAILABLE" ? "green" : integration.status === "ERROR" ? "red" : "slate"}
+                />
+              </div>
+              <div className="mt-auto flex flex-wrap gap-2 pt-4">
+                {integration.provider === "MANUAL_CSV" ? (
+                  <label className="inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-xs font-semibold text-white">
+                    <Upload size={14} />
+                    {importing ? "Uploading..." : "Upload CSV"}
+                    <input
+                      type="file"
+                      accept=".csv,text/csv"
+                      className="hidden"
+                      disabled={importing}
+                      onChange={(event) => void uploadCsv(event.target.files?.[0] || null)}
+                    />
+                  </label>
+                ) : (
+                  <>
+                    <button type="button" onClick={() => setSelectedIntegration(integration)} disabled={integrationBusy !== null || !integration.canConnect} className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 disabled:opacity-50">
+                      Configure
+                    </button>
+                    <button type="button" onClick={() => void integrationAction(integration.provider, "sync")} disabled={integrationBusy !== null || !integration.canSync} className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 disabled:opacity-50">
+                      Sync now
+                    </button>
+                    <button type="button" onClick={() => void integrationAction(integration.provider, "disconnect")} disabled={integrationBusy !== null || !integration.canDisconnect} className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-500 disabled:opacity-50">
+                      Disconnect
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           ))}
         </div>
+        {importSummary && (
+          <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4 text-sm text-blue-950">
+            <p className="font-semibold">CSV import summary</p>
+            <p className="mt-1">{importSummary.created} created, {importSummary.skipped} skipped, {importSummary.errors.length} warning/error rows.</p>
+            {importSummary.errors.length > 0 && (
+              <ul className="mt-2 space-y-1 text-xs">
+                {importSummary.errors.slice(0, 5).map((error) => (
+                  <li key={`${error.row}-${error.message}`}>Row {error.row}: {error.message}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </DashboardSection>
 
       <DashboardSection title="Recent Inventory Activity" titleTone="blue">
@@ -456,6 +544,32 @@ export default function InventoryPage() {
           )}
         </div>
       </DashboardSection>
+
+      {selectedIntegration && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+          <div role="dialog" aria-modal="true" aria-label={`${selectedIntegration.label} inventory setup`} className="w-full rounded-t-3xl bg-white p-5 shadow-2xl sm:max-w-lg sm:rounded-3xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">Inventory Connector</p>
+                <h2 className="mt-1 text-xl font-semibold text-gray-950">{selectedIntegration.label}</h2>
+              </div>
+              <button type="button" onClick={() => setSelectedIntegration(null)} aria-label="Close connector details" className="rounded-xl p-2 text-gray-500 hover:bg-gray-100">
+                <X size={18} />
+              </button>
+            </div>
+            <p className="mt-4 text-sm leading-6 text-gray-600">{selectedIntegration.detail}</p>
+            <div className="mt-4 rounded-xl border border-amber-100 bg-amber-50/70 p-3 text-xs leading-5 text-amber-900">
+              PineTree will only show this connector as connected after merchant-scoped credentials are stored and a real catalog request succeeds.
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setSelectedIntegration(null)} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700">Close</button>
+              <button type="button" onClick={() => void integrationAction(selectedIntegration.provider, "connect")} disabled={integrationBusy !== null} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                Check Configuration
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {formOpen && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 backdrop-blur-sm sm:items-center sm:p-4">

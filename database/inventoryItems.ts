@@ -13,11 +13,14 @@ export type InventoryMovementType =
   | "IMPORT"
   | "SYNC"
 export type InventoryIntegrationStatus =
-  | "PLANNED"
   | "AVAILABLE"
+  | "REQUIRES_CONFIGURATION"
+  | "CONNECTING"
   | "CONNECTED"
+  | "SYNCING"
   | "ERROR"
   | "DISABLED"
+  | "PLANNED"
 
 export type InventoryItem = {
   id: string
@@ -62,7 +65,10 @@ export type InventoryIntegration = {
   merchant_id: string
   provider: string
   status: InventoryIntegrationStatus
+  external_account_label: string | null
   last_sync_at: string | null
+  last_error: string | null
+  sync_direction: "IMPORT" | "EXPORT" | "BIDIRECTIONAL"
   metadata: Record<string, unknown>
   created_at?: string
   updated_at?: string
@@ -203,4 +209,40 @@ export async function listInventoryIntegrations(
   }
 
   return { available: true, integrations: (data || []) as InventoryIntegration[] }
+}
+
+export async function getInventoryIntegration(merchantId: string, provider: string) {
+  const { data, error } = await db
+    .from("inventory_integrations")
+    .select("*")
+    .eq("merchant_id", merchantId)
+    .eq("provider", provider)
+    .maybeSingle()
+
+  if (error) {
+    const normalized = error.message.toLowerCase()
+    if (normalized.includes("schema cache") || normalized.includes("does not exist")) return null
+    throw new Error(`Failed to load inventory integration: ${error.message}`)
+  }
+  return data as InventoryIntegration | null
+}
+
+export async function upsertInventoryIntegration(
+  merchantId: string,
+  provider: string,
+  input: Partial<Omit<InventoryIntegration, "merchant_id" | "provider">>
+) {
+  const { data, error } = await db
+    .from("inventory_integrations")
+    .upsert({
+      merchant_id: merchantId,
+      provider,
+      ...input,
+      updated_at: new Date().toISOString()
+    }, { onConflict: "merchant_id,provider" })
+    .select()
+    .single()
+
+  if (error) throw new Error(`Failed to save inventory integration: ${error.message}`)
+  return data as InventoryIntegration
 }

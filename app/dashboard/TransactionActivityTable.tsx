@@ -1,6 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { toast } from "sonner"
+import { supabase } from "@/lib/supabaseClient"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 import StatusBadge from "@/components/ui/StatusBadge"
 import {
@@ -189,8 +191,46 @@ export default function TransactionActivityTable({
 }) {
   const [selectedTx, setSelectedTx] = useState<DashboardTransactionRow | null>(null)
   const [visibleMobileCount, setVisibleMobileCount] = useState(mobileInitialCount)
+  const [receiptLoading, setReceiptLoading] = useState<"view" | "download" | null>(null)
 
   const closeDetail = useCallback(() => setSelectedTx(null), [])
+
+  const fetchReceipt = useCallback(async (paymentId: string, download: boolean) => {
+    setReceiptLoading(download ? "download" : "view")
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) throw new Error("Please sign in again")
+      const path = `/api/receipts/${paymentId}${download ? "/download" : ""}`
+      const response = await fetch(path, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store"
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null)
+        throw new Error(payload?.error || "Receipt request failed")
+      }
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      if (download) {
+        const anchor = document.createElement("a")
+        anchor.href = url
+        anchor.download = `pinetree-receipt-${paymentId}.pdf`
+        anchor.click()
+        URL.revokeObjectURL(url)
+      } else {
+        const receiptWindow = window.open(url, "_blank", "noopener,noreferrer")
+        if (!receiptWindow) {
+          URL.revokeObjectURL(url)
+          throw new Error("Allow popups to view the receipt")
+        }
+        window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Receipt request failed")
+    } finally {
+      setReceiptLoading(null)
+    }
+  }, [])
 
   useEffect(() => {
     if (!selectedTx) return
@@ -409,6 +449,26 @@ export default function TransactionActivityTable({
                 />
               ))}
             </div>
+            {selectedPayment?.id && selectedPayment.status === "CONFIRMED" && (
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => void fetchReceipt(String(selectedPayment.id), false)}
+                  disabled={receiptLoading !== null}
+                  className="inline-flex min-h-10 flex-1 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {receiptLoading === "view" ? "Opening..." : "View Receipt"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void fetchReceipt(String(selectedPayment.id), true)}
+                  disabled={receiptLoading !== null}
+                  className="inline-flex min-h-10 flex-1 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 disabled:opacity-60"
+                >
+                  {receiptLoading === "download" ? "Downloading..." : "Download Receipt"}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

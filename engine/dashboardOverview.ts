@@ -78,6 +78,8 @@ export type DashboardOverviewResult = {
     totalItems: number
     lowStock: number
     outOfStock: number
+    connectedProviders: number
+    lastSyncAt: string | null
   }
 }
 
@@ -232,7 +234,13 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
       available: inventoryOverview.available,
       totalItems: inventoryOverview.summary.totalItems,
       lowStock: inventoryOverview.summary.lowStock,
-      outOfStock: inventoryOverview.summary.outOfStock
+      outOfStock: inventoryOverview.summary.outOfStock,
+      connectedProviders: inventoryOverview.integrations.filter((integration) => integration.status === "CONNECTED").length,
+      lastSyncAt: inventoryOverview.integrations
+        .map((integration) => integration.lastSyncAt || null)
+        .filter((value): value is string => Boolean(value))
+        .sort()
+        .at(-1) || null
     }
   }
 }

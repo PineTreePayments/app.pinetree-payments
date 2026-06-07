@@ -73,6 +73,8 @@ type DashboardOverviewResponse = {
     totalItems: number
     lowStock: number
     outOfStock: number
+    connectedProviders?: number
+    lastSyncAt?: string | null
   }
   error?: string
 }
@@ -526,10 +528,13 @@ export default function DashboardPage() {
             <div className="grid grid-cols-2 gap-2 sm:gap-3">
               <CompactMetricTile label="Wallet Value" value={formatUsd(walletValue)} tone="blue" className="min-w-0 p-3 shadow-none" />
               <CompactMetricTile label="Active Providers" value={providers} className="min-w-0 p-3 shadow-none" />
-              <CompactMetricTile label="Inventory Items" value={inventory.available ? inventory.totalItems : "Setup"} className="min-w-0 p-3 shadow-none" />
+              <CompactMetricTile label="Inventory Items" value={inventory.available ? inventory.totalItems : "Setup"} detail={inventory.available ? `${inventory.connectedProviders || 0} provider syncs` : undefined} className="min-w-0 p-3 shadow-none" />
               <CompactMetricTile label="Low / Out of Stock" value={inventory.available ? `${inventory.lowStock} / ${inventory.outOfStock}` : "-"} tone={inventory.lowStock || inventory.outOfStock ? "amber" : "default"} className="min-w-0 p-3 shadow-none" />
             </div>
             <p className="mt-3 text-xs text-gray-500">Wallet update: {formatChicagoDateTime(lastRun)}</p>
+            {inventory.lastSyncAt && (
+              <p className="mt-1 text-xs text-gray-500">Inventory sync: {formatChicagoDateTime(inventory.lastSyncAt)}</p>
+            )}
           </div>
         </DashboardSection>
       </div>

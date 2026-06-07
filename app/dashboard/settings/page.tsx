@@ -57,6 +57,7 @@ type SettingsApiResponse = {
   settings?: MerchantSettingsPayload
   tax?: MerchantTaxSettingsPayload
   operations?: MerchantOperationsSettingsPayload
+  receiptDevices?: ReceiptDevice[]
   schemaReady?: boolean
   error?: string
 }
@@ -73,6 +74,13 @@ type IntegrationSummary = {
   webhookConfigured: boolean
   inventoryAvailable: boolean
   inventoryItems: number
+}
+
+type ReceiptDevice = {
+  label: string
+  type: "BROWSER_PRINT" | "TERMINAL_PRINT" | "NETWORK_PRINTER" | "PROVIDER_PRINTER"
+  provider: string | null
+  status: "AVAILABLE" | "REQUIRES_CONFIGURATION" | "CONNECTED" | "ERROR" | "DISABLED"
 }
 
 const defaultOperationsSettings: MerchantOperationsSettingsPayload = {
@@ -132,6 +140,7 @@ export default function SettingsPage() {
   const [taxRate, setTaxRate] = useState("")
   const [taxName, setTaxName] = useState("Sales Tax")
   const [operations, setOperations] = useState<MerchantOperationsSettingsPayload>(defaultOperationsSettings)
+  const [receiptDevices, setReceiptDevices] = useState<ReceiptDevice[]>([])
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -205,6 +214,7 @@ export default function SettingsPage() {
       setTaxName(tax.tax_name || "Sales Tax")
     }
     if (payload.operations) setOperations({ ...defaultOperationsSettings, ...payload.operations })
+    setReceiptDevices(payload.receiptDevices || [])
   }, [])
 
   const loadSettings = useCallback(async () => {
@@ -492,7 +502,7 @@ export default function SettingsPage() {
         </div>
       </DashboardSection>
 
-      <DashboardSection title="POS Settings" titleTone="blue">
+      <DashboardSection title="POS Preferences" titleTone="blue">
         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
           <div className="grid gap-4 md:grid-cols-2">
             <div>
@@ -513,8 +523,35 @@ export default function SettingsPage() {
         </div>
       </DashboardSection>
 
-      <DashboardSection title="Receipt Settings" titleTone="blue">
+      <DashboardSection title="Receipts" titleTone="blue">
         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+          <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {receiptDevices.map((device) => (
+              <div key={`${device.type}-${device.provider}`} className="rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-gray-950">{device.label}</p>
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                    device.status === "AVAILABLE" || device.status === "CONNECTED"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-amber-200 bg-amber-50 text-amber-700"
+                  }`}>
+                    {device.status.replaceAll("_", " ")}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-gray-500">
+                  {device.type === "BROWSER_PRINT"
+                    ? "Printable HTML and PDF downloads are live."
+                    : "Provider or printer configuration is required."}
+                </p>
+              </div>
+            ))}
+            {!receiptDevices.length && (
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-2.5">
+                <p className="text-sm font-semibold text-emerald-900">Browser Print / PDF</p>
+                <p className="mt-1 text-xs text-emerald-700">Available after the receipt-device migration is applied.</p>
+              </div>
+            )}
+          </div>
           <div className="grid gap-3 md:grid-cols-2">
             <SettingToggle title="Show business name" detail="Include the stored business name on generated receipts." checked={operations.show_business_name} onChange={(value) => updateOperation("show_business_name", value)} />
             <SettingToggle title="Show business address" detail="Include address fields when present." checked={operations.show_business_address} onChange={(value) => updateOperation("show_business_address", value)} />
@@ -538,7 +575,7 @@ export default function SettingsPage() {
         </div>
       </DashboardSection>
 
-      <DashboardSection title="Tax & Fees" titleTone="blue">
+      <DashboardSection title="Tax" titleTone="blue">
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -547,16 +584,6 @@ export default function SettingsPage() {
             <ToggleSwitch
               checked={taxEnabled}
               onChange={setTaxEnabled}
-            />
-          </div>
-
-          <div>
-            <label className={labelClass}>Website</label>
-            <input
-              value={website}
-              onChange={(e) => setWebsite(e.target.value)}
-              className={fieldClass}
-              placeholder="https://example.com"
             />
           </div>
 
@@ -582,7 +609,7 @@ export default function SettingsPage() {
       </div>
       </DashboardSection>
 
-      <DashboardSection title="Notifications & Reporting" titleTone="blue">
+      <DashboardSection title="Notifications" titleTone="blue">
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

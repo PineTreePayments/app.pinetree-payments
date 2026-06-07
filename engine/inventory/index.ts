@@ -1,30 +1,20 @@
 import {
   createInventoryMovement,
   createInventoryItem,
-  listInventoryIntegrations,
   listInventoryItems,
   listInventoryMovements,
   updateInventoryItem,
   type InventoryItem,
-  type InventoryItemInput,
-  type InventoryIntegration,
-  type InventoryIntegrationStatus
+  type InventoryItemInput
 } from "@/database"
 import {
   deriveInventoryStatus,
   summarizeInventory,
   type InventoryEffectiveStatus
-} from "./inventoryLogic"
+} from "../inventoryLogic"
+import { listInventoryIntegrationStatuses } from "./integrations"
 
 export type InventoryItemView = InventoryItem & { effective_status: InventoryEffectiveStatus }
-
-const INVENTORY_PROVIDERS = [
-  { provider: "SHIFT4_SKYTAB", label: "Shift4 / SkyTab" },
-  { provider: "CLOVER", label: "Clover" },
-  { provider: "SQUARE", label: "Square" },
-  { provider: "SHOPIFY", label: "Shopify" },
-  { provider: "MANUAL_CSV", label: "Manual CSV Import" }
-] as const
 
 function requiredText(value: unknown, label: string, maxLength = 160) {
   const normalized = String(value || "").trim()
@@ -70,38 +60,24 @@ export function normalizeInventoryInput(body: Record<string, unknown>): Inventor
   }
 }
 
-function integrationViews(records: InventoryIntegration[]) {
-  const byProvider = new Map(records.map((record) => [record.provider, record]))
-  return INVENTORY_PROVIDERS.map(({ provider, label }) => {
-    const record = byProvider.get(provider)
-    const status: InventoryIntegrationStatus = record?.status || "PLANNED"
-    return {
-      provider,
-      label,
-      status,
-      lastSyncAt: record?.last_sync_at || null
-    }
-  })
-}
-
 export async function getInventoryEngine(merchantId: string) {
-  const [result, movementResult, integrationResult] = await Promise.all([
+  const [result, movementResult, integrations] = await Promise.all([
     listInventoryItems(merchantId),
     listInventoryMovements(merchantId),
-    listInventoryIntegrations(merchantId)
+    listInventoryIntegrationStatuses(merchantId)
   ])
 
   return {
-    available: result.available && movementResult.available && integrationResult.available,
+    available: result.available && movementResult.available,
     movementsAvailable: movementResult.available,
-    integrationsAvailable: integrationResult.available,
+    integrationsAvailable: true,
     items: result.items.map((item): InventoryItemView => ({
       ...item,
       effective_status: deriveInventoryStatus(item)
     })),
     summary: summarizeInventory(result.items),
     movements: movementResult.movements,
-    integrations: integrationViews(integrationResult.integrations)
+    integrations
   }
 }
 
