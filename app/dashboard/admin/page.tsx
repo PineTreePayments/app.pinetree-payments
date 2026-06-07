@@ -932,7 +932,7 @@ export default function AdminPage() {
                             {(() => {
                               const ds = getPaymentDisplayStatus(tx.status)
                               return (
-                                <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${ds.classes}`}>
+                                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${ds.classes}`}>
                                   {ds.status}
                                 </span>
                               )
@@ -1288,7 +1288,7 @@ export default function AdminPage() {
                     {(() => {
                       const ds = getPaymentDisplayStatus(txDetail.payment.status)
                       return (
-                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${ds.classes}`}>
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${ds.classes}`}>
                           {ds.status}
                         </span>
                       )
