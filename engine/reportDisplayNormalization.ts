@@ -1,38 +1,22 @@
 /**
  * Report display normalization helpers.
  *
- * These functions normalise raw database values into report-safe display values.
- * They never mutate the database; all changes are representation-only.
- *
- * Status threshold rationale:
- *   PENDING  > 5 min  → INCOMPLETE  (matches dashboard paymentStatus.ts stale threshold)
- *   CREATED  > 30 min → INCOMPLETE  (conservative: CREATED that never progressed)
+ * These functions normalize raw database values into report-safe display
+ * values. They never mutate or infer a different payment lifecycle status.
  */
-
-const PENDING_STALE_MINUTES = 5
-const CREATED_STALE_MINUTES = 30
 
 /**
- * Returns the display status to use in reports.
- * Stale PENDING and CREATED payments are shown as INCOMPLETE for accounting clarity.
- * No database value is mutated.
+ * Returns the persisted lifecycle status in a consistent display shape.
  */
 export function normalizeReportStatus(rawStatus: string, createdAt: string): string {
-  const status = String(rawStatus || "UNKNOWN").toUpperCase()
-
-  if (status === "PENDING" || status === "CREATED") {
-    const ageMinutes = (Date.now() - new Date(createdAt).getTime()) / 60000
-    const threshold = status === "PENDING" ? PENDING_STALE_MINUTES : CREATED_STALE_MINUTES
-    if (ageMinutes > threshold) return "INCOMPLETE"
-  }
-
-  return status
+  void createdAt
+  return String(rawStatus || "UNKNOWN").trim().toUpperCase()
 }
 
 /**
  * Returns the display network label for a payment.
- * Cash payments have no blockchain network; they are explicitly labelled "Cash"
- * using the provider field, mirroring TransactionActivityTable behaviour.
+ * Cash payments have no blockchain network; they are explicitly labelled
+ * "Cash" using the provider field.
  */
 type AssetRow = { network: string; asset: string; gross: number; status: string }
 

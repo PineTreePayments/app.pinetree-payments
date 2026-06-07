@@ -207,15 +207,15 @@ export default function TransactionActivityTable({
   const selectedStatusTime = selectedTx?.created_at || selectedPayment?.created_at || null
   const selectedStatus = selectedTx
     ? selectedPayment
-      ? getPaymentDisplayStatus(selectedPayment.status || selectedTx.status, selectedStatusTime || "")
-      : { status: selectedTx.status, classes: "bg-gray-100 text-gray-700" }
+      ? getPaymentDisplayStatus(selectedPayment.status || selectedTx.status)
+      : getPaymentDisplayStatus(selectedTx.status)
     : null
   const selectedReferences = selectedTx ? getTransactionReferenceParts(selectedTx) : null
   const selectedDetailRows = selectedTx && selectedStatus && selectedReferences
     ? buildDetailRows({
         tx: selectedTx,
         payment: selectedPayment || null,
-        statusLabel: selectedStatus.status,
+        statusLabel: selectedStatus.label,
         statusTime: selectedStatusTime,
         references: selectedReferences
       }).filter((row) => String(row.value || "").trim().length > 0)
@@ -236,8 +236,8 @@ export default function TransactionActivityTable({
           const payment = getPayment(tx)
           const statusTime = tx.created_at || payment?.created_at || null
           const displayStatus = payment
-            ? getPaymentDisplayStatus(payment.status || tx.status, statusTime || "")
-            : { status: tx.status, classes: "bg-gray-100 text-gray-700" }
+            ? getPaymentDisplayStatus(payment.status || tx.status)
+            : getPaymentDisplayStatus(tx.status)
           const reference = formatTransactionReference(tx)
 
           return (
@@ -254,7 +254,7 @@ export default function TransactionActivityTable({
                     <span className="text-gray-400 font-normal"> · {networkName(tx.network)}</span>
                   )}
                 </span>
-                <StatusBadge label={displayStatus.status} classes={displayStatus.classes} />
+                <StatusBadge label={displayStatus.label} classes={displayStatus.classes} />
               </div>
               <div className="flex items-center justify-between gap-2 mb-1">
                 <span className="text-sm font-semibold text-gray-900">
@@ -321,8 +321,8 @@ export default function TransactionActivityTable({
               const payment = getPayment(tx)
               const statusTime = tx.created_at || payment?.created_at || null
               const displayStatus = payment
-                ? getPaymentDisplayStatus(payment.status || tx.status, statusTime || "")
-                : { status: tx.status, classes: "bg-gray-100 text-gray-700" }
+                ? getPaymentDisplayStatus(payment.status || tx.status)
+                : getPaymentDisplayStatus(tx.status)
               const reference = formatTransactionReference(tx)
 
               return (
@@ -359,7 +359,7 @@ export default function TransactionActivityTable({
                   </td>
 
                   <td className="px-4 py-4 whitespace-nowrap">
-                    <StatusBadge label={displayStatus.status} classes={displayStatus.classes} />
+                    <StatusBadge label={displayStatus.label} classes={displayStatus.classes} />
                   </td>
 
                   <td className="px-4 py-4 text-gray-600 font-mono text-[11px]">

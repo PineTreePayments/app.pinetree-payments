@@ -120,17 +120,9 @@ const STATUSES = [
   { value: "FAILED",     label: "Failed" },
   { value: "INCOMPLETE", label: "Incomplete" },
   { value: "EXPIRED",    label: "Expired" },
+  { value: "CANCELLED",  label: "Cancelled" },
+  { value: "REFUNDED",   label: "Refunded" },
 ]
-
-const STATUS_LABELS: Record<string, string> = {
-  CREATED:    "Created",
-  PENDING:    "Awaiting Customer",
-  PROCESSING: "Processing",
-  CONFIRMED:  "Confirmed",
-  INCOMPLETE: "Incomplete",
-  FAILED:     "Failed",
-  EXPIRED:    "Expired",
-}
 
 const STATUS_DESCRIPTIONS: Record<string, string> = {
   CREATED:    "Created, not yet shown to customer",
@@ -140,9 +132,18 @@ const STATUS_DESCRIPTIONS: Record<string, string> = {
   INCOMPLETE: "Customer abandoned or did not finish",
   FAILED:     "Payment failed or could not be completed",
   EXPIRED:    "Timed out",
+  CANCELLED:  "Cancelled before completion",
+  REFUNDED:   "Funds returned after confirmation",
 }
 
-const TERMINAL_STATUSES = new Set(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED"])
+const TERMINAL_STATUSES = new Set([
+  "CONFIRMED",
+  "FAILED",
+  "INCOMPLETE",
+  "EXPIRED",
+  "CANCELLED",
+  "REFUNDED",
+])
 
 const EVENT_LABELS: Record<string, string> = {
   "payment.created":    "Created",
@@ -191,17 +192,6 @@ const DATE_PRESETS = [
 
 const EMPTY_FILTERS: AppliedFilters = {
   search: "", status: "", network: "", provider: "", merchantId: "", datePreset: "",
-}
-
-const STATUS_STYLE: Record<string, string> = {
-  CONFIRMED:  "bg-emerald-50 text-emerald-700 border-emerald-200",
-  PROCESSING: "bg-blue-50 text-blue-700 border-blue-200",
-  PENDING:    "bg-sky-50 text-sky-600 border-sky-200",
-  CREATED:    "bg-gray-100 text-gray-500 border-gray-200",
-  FAILED:     "bg-red-50 text-red-700 border-red-200",
-  INCOMPLETE: "bg-orange-50 text-orange-700 border-orange-200",
-  EXPIRED:    "bg-gray-100 text-gray-400 border-gray-200",
-  REFUNDED:   "bg-purple-50 text-purple-700 border-purple-200",
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -300,15 +290,11 @@ function Spinner() {
   )
 }
 
-function StatusBadge({ status, createdAt }: { status: string; createdAt?: string }) {
-  // Apply the same PENDING > 5 min → INCOMPLETE override used on the merchant
-  // transactions page so admin and merchant views always agree.
-  const ds = createdAt
-    ? getPaymentDisplayStatus(status, createdAt)
-    : { classes: STATUS_STYLE[status] ?? "bg-gray-100 text-gray-600 border-gray-200", label: STATUS_LABELS[status] ?? status }
+function StatusBadge({ status }: { status: string }) {
+  const ds = getPaymentDisplayStatus(status)
   return (
     <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${ds.classes}`}>
-      {ds.label}
+      {ds.status}
     </span>
   )
 }
@@ -919,12 +905,12 @@ export default function AdminTransactionsPage() {
                       <span className="text-sm font-medium text-gray-900">
                         {fmtUSD(Number(tx.gross_amount ?? 0))}
                       </span>
-                      <StatusBadge status={tx.status} createdAt={tx.created_at} />
+                      <StatusBadge status={tx.status} />
                     </div>
 
                     {/* Status (desktop) */}
                     <div className="hidden sm:block">
-                      <StatusBadge status={tx.status} createdAt={tx.created_at} />
+                      <StatusBadge status={tx.status} />
                     </div>
                   </button>
                 ))}
@@ -1007,7 +993,7 @@ export default function AdminTransactionsPage() {
                   return (
                     <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4 space-y-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <StatusBadge status={txDetail.payment.status} createdAt={txDetail.payment.created_at} />
+                        <StatusBadge status={txDetail.payment.status} />
                         <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${meta.paymentMode === "test" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
                           {meta.paymentMode === "test" ? "Test" : "Live"}
                         </span>

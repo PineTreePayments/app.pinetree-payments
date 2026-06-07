@@ -930,10 +930,10 @@ export default function AdminPage() {
                           </div>
                           <div>
                             {(() => {
-                              const ds = getPaymentDisplayStatus(tx.status, tx.created_at)
+                              const ds = getPaymentDisplayStatus(tx.status)
                               return (
                                 <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${ds.classes}`}>
-                                  {ds.label}
+                                  {ds.status}
                                 </span>
                               )
                             })()}
@@ -1286,10 +1286,10 @@ export default function AdminPage() {
                 <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
                   <div className="flex items-center justify-between gap-3 mb-4">
                     {(() => {
-                      const ds = getPaymentDisplayStatus(txDetail.payment.status, txDetail.payment.created_at)
+                      const ds = getPaymentDisplayStatus(txDetail.payment.status)
                       return (
                         <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${ds.classes}`}>
-                          {ds.label}
+                          {ds.status}
                         </span>
                       )
                     })()}
