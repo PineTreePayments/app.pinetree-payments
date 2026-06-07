@@ -465,38 +465,39 @@ export default function SettingsPage() {
       </div>
       </DashboardSection>
 
-      <DashboardSection title="Payment Preferences" titleTone="blue">
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
+      <div className="grid gap-5 lg:grid-cols-2">
+        <DashboardSection title="Payment Preferences" titleTone="blue">
+          <div className="flex h-full flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+            <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-gray-950">Enabled payment rails</p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
+              <div className="mt-3 flex flex-wrap gap-2">
                 {enabledRails.length ? enabledRails.map((provider) => (
-                  <span key={provider.provider} className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold capitalize text-emerald-700">
+                  <span key={provider.provider} className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/90 px-2.5 py-1.5 text-xs font-semibold capitalize text-emerald-700 shadow-[0_4px_14px_rgba(16,185,129,0.08)]">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                     {provider.provider.replaceAll("_", " ")}
                   </span>
                 )) : <span className="text-sm text-gray-500">No payment rails enabled.</span>}
               </div>
             </div>
-            <Link href="/dashboard/providers" className="inline-flex min-h-9 shrink-0 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-3.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
+            <Link href="/dashboard/providers" className="mt-4 inline-flex min-h-9 w-fit items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-3.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
               Manage Payment Rails
             </Link>
           </div>
-        </div>
-      </DashboardSection>
+        </DashboardSection>
 
-      <DashboardSection title="Online Checkout" titleTone="blue">
-        <CompactLinkPanel
-          title="Hosted Checkout"
-          detail={`${integrationSummary.checkoutLinks} checkout link${integrationSummary.checkoutLinks === 1 ? "" : "s"} available. Manage links and customer-facing payment options.`}
-          href="/dashboard/checkout"
-          label="Manage Checkout"
-        />
-      </DashboardSection>
+        <DashboardSection title="Online Checkout" titleTone="blue">
+          <CompactLinkPanel
+            title="Hosted Checkout"
+            detail={`${integrationSummary.checkoutLinks} checkout link${integrationSummary.checkoutLinks === 1 ? "" : "s"} available. Manage links and customer-facing payment options.`}
+            href="/dashboard/checkout"
+            label="Manage Checkout"
+          />
+        </DashboardSection>
+      </div>
 
       <DashboardSection title="POS Preferences" titleTone="blue">
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+        <div className="max-w-2xl rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
             <div>
               <label className={labelClass}>Default Terminal Label</label>
               <input
@@ -515,10 +516,10 @@ export default function SettingsPage() {
 
       <DashboardSection title="Receipts" titleTone="blue">
         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.65fr)]">
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.65fr)]">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Receipt Content</p>
-              <div className="mt-2 grid overflow-hidden rounded-xl border border-gray-100 sm:grid-cols-2">
+              <div className="mt-1.5 grid overflow-hidden rounded-xl border border-gray-100 sm:grid-cols-2">
                 <CompactSettingToggle title="Business name" checked={operations.show_business_name} onChange={(value) => updateOperation("show_business_name", value)} />
                 <CompactSettingToggle title="Business address" checked={operations.show_business_address} onChange={(value) => updateOperation("show_business_address", value)} />
                 <CompactSettingToggle title="Transaction ID" checked={operations.show_transaction_id} onChange={(value) => updateOperation("show_transaction_id", value)} />
@@ -532,7 +533,7 @@ export default function SettingsPage() {
               <textarea
                 value={operations.receipt_footer || ""}
                 onChange={(e) => updateOperation("receipt_footer", e.target.value || null)}
-                className={`${fieldClass} min-h-28`}
+                className={`${fieldClass} min-h-24`}
                 placeholder="Thank you for shopping with us."
               />
             </div>
@@ -681,12 +682,12 @@ function CompactLinkPanel({
   label: string
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0">
+    <div className="flex h-full flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+      <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-gray-950">{title}</p>
         <p className="mt-0.5 text-xs leading-5 text-gray-500">{detail}</p>
       </div>
-      <Link href={href} className="inline-flex min-h-9 shrink-0 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-3.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
+      <Link href={href} className="mt-4 inline-flex min-h-9 w-fit items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-3.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
         {label}
       </Link>
     </div>
