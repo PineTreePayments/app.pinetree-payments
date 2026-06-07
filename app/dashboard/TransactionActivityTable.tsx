@@ -206,9 +206,7 @@ export default function TransactionActivityTable({
   const selectedPayment = selectedTx ? getPayment(selectedTx) : null
   const selectedStatusTime = selectedTx?.created_at || selectedPayment?.created_at || null
   const selectedStatus = selectedTx
-    ? selectedPayment
-      ? getPaymentDisplayStatus(selectedPayment.status || selectedTx.status)
-      : getPaymentDisplayStatus(selectedTx.status)
+    ? getPaymentDisplayStatus(selectedTx.status)
     : null
   const selectedReferences = selectedTx ? getTransactionReferenceParts(selectedTx) : null
   const selectedDetailRows = selectedTx && selectedStatus && selectedReferences
@@ -235,9 +233,7 @@ export default function TransactionActivityTable({
         {visibleMobileTransactions.map((tx) => {
           const payment = getPayment(tx)
           const statusTime = tx.created_at || payment?.created_at || null
-          const displayStatus = payment
-            ? getPaymentDisplayStatus(payment.status || tx.status)
-            : getPaymentDisplayStatus(tx.status)
+          const displayStatus = getPaymentDisplayStatus(tx.status)
           const reference = formatTransactionReference(tx)
 
           return (
@@ -320,9 +316,7 @@ export default function TransactionActivityTable({
             {transactions.map((tx) => {
               const payment = getPayment(tx)
               const statusTime = tx.created_at || payment?.created_at || null
-              const displayStatus = payment
-                ? getPaymentDisplayStatus(payment.status || tx.status)
-                : getPaymentDisplayStatus(tx.status)
+              const displayStatus = getPaymentDisplayStatus(tx.status)
               const reference = formatTransactionReference(tx)
 
               return (

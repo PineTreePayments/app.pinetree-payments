@@ -3,6 +3,80 @@ import { describe, expect, it } from "vitest"
 import { normalizeReportStatus } from "@/engine/reportDisplayNormalization"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 
+// ─── 0. tx.status ownership — transaction ledger row status source-of-truth ────
+//
+// Transaction ledger rows (TransactionActivityTable) must display transactions.status,
+// the value stored on the transactions table row.
+//
+// The WRONG pattern: `getPaymentDisplayStatus(payment.status || tx.status)`
+//   When payment.status is truthy and differs from tx.status, this silently
+//   overrides the ledger row status with the payment status, causing e.g.:
+//     tx.status=PENDING, payment.status=CONFIRMED → badge shows CONFIRMED (wrong)
+//     tx.status=INCOMPLETE, payment.status=PENDING → badge shows PENDING (wrong)
+//
+// The CORRECT pattern: `getPaymentDisplayStatus(tx.status)` — always uses
+//   the stored transactions.status without substitution.
+
+describe("tx.status ownership — transaction ledger row must use transactions.status", () => {
+  it("tx.status=PENDING, payment.status=CONFIRMED: correct path shows PENDING, wrong path would show CONFIRMED", () => {
+    const txStatus = "PENDING"
+    const paymentStatus = "CONFIRMED"
+
+    // Wrong: payment.status || tx.status — silently overrides tx status
+    const wrongResult = getPaymentDisplayStatus(paymentStatus || txStatus)
+    expect(wrongResult.status).toBe("CONFIRMED")
+
+    // Correct: tx.status directly — ledger row truth
+    const correctResult = getPaymentDisplayStatus(txStatus)
+    expect(correctResult.status).toBe("PENDING")
+    expect(correctResult.status).not.toBe(wrongResult.status)
+  })
+
+  it("tx.status=INCOMPLETE, payment.status=PENDING: correct path shows INCOMPLETE, wrong path would show PENDING", () => {
+    const txStatus = "INCOMPLETE"
+    const paymentStatus = "PENDING"
+
+    const wrongResult = getPaymentDisplayStatus(paymentStatus || txStatus)
+    expect(wrongResult.status).toBe("PENDING")
+
+    const correctResult = getPaymentDisplayStatus(txStatus)
+    expect(correctResult.status).toBe("INCOMPLETE")
+    expect(correctResult.status).not.toBe(wrongResult.status)
+  })
+
+  it("tx.status=FAILED, payment.status=PROCESSING: correct path shows FAILED, wrong path would show PROCESSING", () => {
+    const txStatus = "FAILED"
+    const paymentStatus = "PROCESSING"
+
+    const wrongResult = getPaymentDisplayStatus(paymentStatus || txStatus)
+    expect(wrongResult.status).toBe("PROCESSING")
+
+    const correctResult = getPaymentDisplayStatus(txStatus)
+    expect(correctResult.status).toBe("FAILED")
+  })
+
+  it("using tx.status directly always returns the exact stored ledger status for all lifecycle states", () => {
+    const allStatuses = [
+      "CREATED", "PENDING", "PROCESSING", "CONFIRMED",
+      "FAILED", "INCOMPLETE", "EXPIRED", "CANCELLED", "REFUNDED",
+    ]
+    for (const txStatus of allStatuses) {
+      expect(getPaymentDisplayStatus(txStatus).status).toBe(txStatus)
+    }
+  })
+
+  it("payment.status || tx.status is identical to tx.status only when payment.status is falsy", () => {
+    // When payment.status is null/undefined/empty, both patterns agree — no bug
+    const txStatus = "CONFIRMED"
+    const noPaymentStatus = null as unknown as string
+
+    const withNullPayment = getPaymentDisplayStatus(noPaymentStatus || txStatus)
+    const withTxOnly = getPaymentDisplayStatus(txStatus)
+    expect(withNullPayment.status).toBe(withTxOnly.status)
+    expect(withNullPayment.status).toBe("CONFIRMED")
+  })
+})
+
 // ─── 1. One-to-one lifecycle label preservation ────────────────────────────────
 //
 // Every stored payment status must map to exactly one distinct display label.

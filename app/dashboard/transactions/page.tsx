@@ -94,7 +94,6 @@ export default function TransactionsPage() {
   const [walletFilter, setWalletFilter] = useState("all")
   const [networkFilter, setNetworkFilter] = useState("all")
   const [channelFilter, setChannelFilter] = useState("all")
-  const [statusFilter, setStatusFilter] = useState("all")
 
   const [showChart, setShowChart] = useState(false)
   const [chartRange, setChartRange] = useState("24h")
@@ -112,7 +111,7 @@ export default function TransactionsPage() {
   const [onlineTransactions, setOnlineTransactions] = useState(0)
   const [transactionInsight, setTransactionInsight] = useState("")
 
-  const callTransactionsApi = useCallback(async (method: "GET" | "POST", body?: unknown, queryParams?: Record<string, string>) => {
+  const callTransactionsApi = useCallback(async (method: "GET" | "POST", body?: unknown) => {
     const {
       data: { session }
     } = await supabase.auth.getSession()
@@ -122,11 +121,7 @@ export default function TransactionsPage() {
       throw new Error("Please sign in again")
     }
 
-    const qs = queryParams && Object.keys(queryParams).length > 0
-      ? `?${new URLSearchParams(queryParams).toString()}`
-      : ""
-
-    const authRes = await fetch(`/api/transactions${qs}`, {
+    const authRes = await fetch("/api/transactions", {
       method,
       headers: {
         Authorization: `Bearer ${token}`,
@@ -208,12 +203,9 @@ export default function TransactionsPage() {
     }
   }, [])
 
-  const loadDashboardData = useCallback(async (statusParam?: string) => {
+  const loadDashboardData = useCallback(async () => {
     try {
-      const params: Record<string, string> = {}
-      if (statusParam && statusParam !== "all") params.status = statusParam
-
-      const payload = (await callTransactionsApi("GET", undefined, params)) as TransactionsDashboardResponse
+      const payload = (await callTransactionsApi("GET")) as TransactionsDashboardResponse
 
       setTodayVolume(Number(payload.todayVolume || 0))
       setTodayTransactions(Number(payload.todayTransactions || 0))
@@ -359,7 +351,7 @@ export default function TransactionsPage() {
 
       <DashboardSection title="Transaction Ledger" titleTone="blue">
         <div className="rounded-2xl border border-gray-200/80 bg-white p-2 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-2.5">
-          <div className="grid min-w-0 grid-cols-2 gap-1.5 sm:grid-cols-4 sm:gap-3">
+          <div className="grid min-w-0 grid-cols-3 gap-1.5 sm:gap-3">
           <label className={filterRowClass}>
             <span className={filterLabelClass}>Wallet</span>
             <select
@@ -405,31 +397,6 @@ export default function TransactionsPage() {
               <option value="all">All Channels</option>
               <option value="pos">POS</option>
               <option value="online">Online</option>
-            </select>
-          </label>
-
-          <label className={filterRowClass}>
-            <span className={filterLabelClass}>Status</span>
-            <select
-              aria-label="Status filter"
-              className={filterSelectClass}
-              value={statusFilter}
-              onChange={(e) => {
-                const v = e.target.value
-                setStatusFilter(v)
-                void loadDashboardData(v)
-              }}
-            >
-              <option value="all">All Statuses</option>
-              <option value="CONFIRMED">Confirmed</option>
-              <option value="FAILED">Failed</option>
-              <option value="INCOMPLETE">Incomplete</option>
-              <option value="PROCESSING">Processing</option>
-              <option value="PENDING">Pending</option>
-              <option value="CREATED">Created</option>
-              <option value="EXPIRED">Expired</option>
-              <option value="CANCELLED">Cancelled</option>
-              <option value="REFUNDED">Refunded</option>
             </select>
           </label>
           </div>
