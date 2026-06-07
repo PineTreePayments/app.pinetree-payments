@@ -84,7 +84,41 @@ describe("normalizeReportStatus — ledger state preservation with old dates", (
   })
 })
 
-// ─── 5. Explicit cross-collapse checks ────────────────────────────────────────
+// ─── 5. Table-surface usage contract ──────────────────────────────────────────
+//
+// Ledger and audit tables must render `.status` (raw uppercase), never `.label`.
+// This section documents and enforces the distinction between the two fields
+// so a future caller cannot accidentally substitute `.label` in a table render.
+
+describe("getPaymentDisplayStatus — table-surface contract (.status vs .label)", () => {
+  it.each([
+    ["CREATED",    "CREATED",    "Created"],
+    ["PENDING",    "PENDING",    "Pending"],
+    ["PROCESSING", "PROCESSING", "Processing"],
+    ["CONFIRMED",  "CONFIRMED",  "Confirmed"],
+    ["FAILED",     "FAILED",     "Failed"],
+    ["INCOMPLETE", "INCOMPLETE", "Incomplete"],
+    ["EXPIRED",    "EXPIRED",    "Expired"],
+    ["CANCELLED",  "CANCELLED",  "Cancelled"],
+    ["REFUNDED",   "REFUNDED",   "Refunded"],
+  ])("%s: .status is raw uppercase, .label is friendly title-case, and they differ", (input, expectedStatus, expectedLabel) => {
+    const ds = getPaymentDisplayStatus(input)
+    // table/ledger surfaces must render ds.status
+    expect(ds.status).toBe(expectedStatus)
+    // friendly label is available for non-ledger use only
+    expect(ds.label).toBe(expectedLabel)
+    // they must be distinct so accidental .label usage is detectable
+    expect(ds.status).not.toBe(ds.label)
+  })
+
+  it("raw unknown status: .status equals the uppercased raw value (fallback)", () => {
+    const ds = getPaymentDisplayStatus("SOME_NEW_STATUS")
+    expect(ds.status).toBe("SOME_NEW_STATUS")
+    // fallback also sets label to the same raw value, but known statuses differ
+  })
+})
+
+// ─── 7. Explicit cross-collapse checks ────────────────────────────────────────
 //
 // Belt-and-suspenders: directly confirm the specific violations
 // that occurred historically. If any of these fail, a status mutation

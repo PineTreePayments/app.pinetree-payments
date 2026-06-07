@@ -59,7 +59,7 @@ export default function TestStatusesPage() {
             const ds = getPaymentDisplayStatus(s)
             return (
               <div key={s} className="flex flex-col items-center gap-1.5">
-                <StatusBadge label={ds.label} classes={ds.classes} />
+                <StatusBadge label={ds.status} classes={ds.classes} />
                 <span className="text-[10px] text-gray-400 font-mono">{s}</span>
               </div>
             )

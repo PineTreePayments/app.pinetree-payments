@@ -215,7 +215,7 @@ export default function TransactionActivityTable({
     ? buildDetailRows({
         tx: selectedTx,
         payment: selectedPayment || null,
-        statusLabel: selectedStatus.label,
+        statusLabel: selectedStatus.status,
         statusTime: selectedStatusTime,
         references: selectedReferences
       }).filter((row) => String(row.value || "").trim().length > 0)
@@ -254,7 +254,7 @@ export default function TransactionActivityTable({
                     <span className="text-gray-400 font-normal"> · {networkName(tx.network)}</span>
                   )}
                 </span>
-                <StatusBadge label={displayStatus.label} classes={displayStatus.classes} />
+                <StatusBadge label={displayStatus.status} classes={displayStatus.classes} />
               </div>
               <div className="flex items-center justify-between gap-2 mb-1">
                 <span className="text-sm font-semibold text-gray-900">
@@ -359,7 +359,7 @@ export default function TransactionActivityTable({
                   </td>
 
                   <td className="px-4 py-4 whitespace-nowrap">
-                    <StatusBadge label={displayStatus.label} classes={displayStatus.classes} />
+                    <StatusBadge label={displayStatus.status} classes={displayStatus.classes} />
                   </td>
 
                   <td className="px-4 py-4 text-gray-600 font-mono text-[11px]">
