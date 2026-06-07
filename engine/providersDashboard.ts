@@ -17,7 +17,7 @@ type LightningDashboardStatus =
   | "provider_unavailable"
   | "connected"
 
-type ProviderRow = {
+export type ProviderRow = {
   provider: string
   status: string
   enabled: boolean
@@ -36,7 +36,7 @@ type ProviderRow = {
   } | null
 }
 
-type WalletRow = {
+export type WalletRow = {
   id?: string
   merchant_id: string
   network: string
@@ -63,6 +63,98 @@ export type ProvidersDashboardData = {
     smart_routing_enabled: boolean
     auto_conversion_enabled: boolean
   }
+}
+
+export type OverviewRailReadiness = {
+  id: string
+  label: string
+  status: "Connected" | "Not Connected" | "Requires Configuration" | "Disabled"
+  detail: string
+}
+
+const OVERVIEW_RAILS = [
+  { id: "coinbase", label: "Coinbase Business" },
+  { id: "solana", label: "Solana Pay" },
+  { id: "shift4", label: "Shift4" },
+  { id: "base", label: "Base Pay" },
+  { id: "lightning", label: "Bitcoin Lightning" }
+] as const
+
+export function buildOverviewRailReadiness(
+  data: Pick<ProvidersDashboardData, "providers" | "wallets">
+): OverviewRailReadiness[] {
+  const provider = (id: string) => data.providers.find((row) => row.provider === id)
+  const wallet = (id: string) => data.wallets.find((row) => row.network === id)
+
+  return OVERVIEW_RAILS.map(({ id, label }) => {
+    if (id === "solana" || id === "base") {
+      const row = provider(id)
+      const connectedWallet = wallet(id)
+      if (!connectedWallet) {
+        return { id, label, status: "Not Connected", detail: `Connect a ${label} wallet` }
+      }
+      if (row?.enabled === false) {
+        return { id, label, status: "Disabled", detail: "Wallet connected; payment rail disabled" }
+      }
+      return { id, label, status: "Connected", detail: "Merchant wallet connected" }
+    }
+
+    if (id === "lightning") {
+      const speed = provider(SPEED_PROVIDER_NAME)
+      const nwc = provider("lightning")
+      const speedConnected = Boolean(speed?.enabled && speed?.readiness?.ready)
+      const nwcConnected = Boolean(
+        nwc?.enabled &&
+        nwc?.dashboard_status === "connected" &&
+        (!nwc.readiness || nwc.readiness.ready)
+      )
+      if (speedConnected || nwcConnected) {
+        return {
+          id,
+          label,
+          status: "Connected",
+          detail: speedConnected ? "Speed Lightning ready" : "NWC wallet ready"
+        }
+      }
+      if (speed?.enabled === false || nwc?.enabled === false) {
+        const hasConnection = speed?.dashboard_status === "connected" || nwc?.dashboard_status === "connected"
+        if (hasConnection) return { id, label, status: "Disabled", detail: "Lightning connection is disabled" }
+      }
+      const reason = speed?.readiness?.reason || nwc?.readiness?.reason
+      return {
+        id,
+        label,
+        status: reason ? "Requires Configuration" : "Not Connected",
+        detail: reason || "Connect Speed or an NWC wallet"
+      }
+    }
+
+    const row = provider(id)
+    if (!row) return { id, label, status: "Not Connected", detail: "Provider is not connected" }
+    const connected = row.status === "connected" || row.status === "active"
+    if (!connected) {
+      const requiresConfiguration =
+        row.dashboard_status === "provider_unavailable" ||
+        row.dashboard_status === "address_needs_verification" ||
+        Boolean(row.readiness?.reason)
+      return {
+        id,
+        label,
+        status: requiresConfiguration ? "Requires Configuration" : "Not Connected",
+        detail: row.readiness?.reason || "Provider is not connected"
+      }
+    }
+    if (!row.enabled) return { id, label, status: "Disabled", detail: "Provider connected; payments disabled" }
+    if (row.readiness && !row.readiness.ready) {
+      return {
+        id,
+        label,
+        status: "Requires Configuration",
+        detail: row.readiness.reason || "Provider permissions or configuration are incomplete"
+      }
+    }
+    return { id, label, status: "Connected", detail: "Provider connected and enabled" }
+  })
 }
 
 function hasNwcConnection(row?: ProviderRow | null): boolean {

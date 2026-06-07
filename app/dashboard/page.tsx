@@ -56,16 +56,15 @@ type DashboardOverviewResponse = {
     volume: number
     transactionCount: number
     averageTransaction: number
-    pinetreeFees: number
     confirmed: number
     incomplete: number
     failed: number
   }
   railBreakdown?: Record<string, { count: number; volume: number }>
   railReadiness?: Array<{
-    id: "solana" | "base" | "lightning"
+    id: string
     label: string
-    connected: boolean
+    status: "Connected" | "Not Connected" | "Requires Configuration" | "Disabled"
     detail: string
   }>
   inventory?: {
@@ -211,7 +210,6 @@ export default function DashboardPage() {
     volume: 0,
     transactionCount: 0,
     averageTransaction: 0,
-    pinetreeFees: 0,
     confirmed: 0,
     incomplete: 0,
     failed: 0
@@ -317,7 +315,7 @@ export default function DashboardPage() {
     volume,
     failed: today.failed,
     incomplete: today.incomplete,
-    disconnectedRails: railReadiness.filter((rail) => !rail.connected).length,
+    disconnectedRails: railReadiness.filter((rail) => rail.status !== "Connected").length,
     lowStock: inventory.lowStock
   })
   const railRows = Object.entries(railBreakdown)
@@ -474,6 +472,7 @@ export default function DashboardPage() {
         <CompactMetricTile label="Failed Today" value={today.failed} tone={today.failed ? "red" : "default"} />
       </MetricGrid>
 
+      <div className="lg:hidden">
       <DashboardSection title="Quick Actions" titleTone="blue">
         <div className="rounded-2xl border border-white/80 bg-white/80 p-2 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -495,40 +494,48 @@ export default function DashboardPage() {
           </div>
         </div>
       </DashboardSection>
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <DashboardSection title="Payment Rail Readiness" titleTone="blue">
-          <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-            <div className="space-y-2">
-              {railReadiness.map((rail) => (
-                <div key={rail.id} className="flex items-center justify-between gap-3 rounded-xl bg-gray-50/70 p-3">
-                  <div>
+          <div className="flex h-[310px] flex-col rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-4">
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+              {railReadiness.slice(0, 4).map((rail) => (
+                <div key={rail.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
+                  <div className="min-w-0">
                     <p className="text-sm font-semibold text-gray-950">{rail.label}</p>
-                    <p className="mt-0.5 text-xs text-gray-500">{rail.detail}</p>
+                    <p className="mt-0.5 truncate text-xs text-gray-500" title={rail.detail}>{rail.detail}</p>
                   </div>
-                  <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
-                    rail.connected
+                  <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${
+                    rail.status === "Connected"
                       ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                      : "border-amber-200 bg-amber-50 text-amber-700"
+                      : rail.status === "Disabled"
+                        ? "border-gray-200 bg-gray-100 text-gray-600"
+                        : "border-amber-200 bg-amber-50 text-amber-700"
                   }`}>
-                    {rail.connected ? "Connected" : "Not configured"}
+                    {rail.status}
                   </span>
                 </div>
               ))}
               {!railReadiness.length && <p className="py-6 text-center text-sm text-gray-500">Payment rail readiness is loading.</p>}
             </div>
-            <Link href="/dashboard/providers" className="mt-3 inline-flex text-sm font-semibold text-blue-600 hover:text-blue-700">
-              Manage payment rails
-            </Link>
+            <div className="mt-3 flex items-center justify-between gap-3 border-t border-gray-100 pt-3">
+              <span className="text-xs text-gray-500">
+                {railReadiness.length > 4 ? `+${railReadiness.length - 4} more rail${railReadiness.length - 4 === 1 ? "" : "s"}` : `${railReadiness.length} rails`}
+              </span>
+              <Link href="/dashboard/providers" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
+                Manage payment rails
+              </Link>
+            </div>
           </div>
         </DashboardSection>
 
         <DashboardSection title="Operations Snapshot" titleTone="blue">
-          <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-4">
+          <div className="flex h-[310px] flex-col rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-4">
             <div className="grid grid-cols-2 gap-2 sm:gap-3">
               <CompactMetricTile label="Wallet Value" value={formatUsd(walletValue)} tone="blue" className="min-w-0 p-3 shadow-none" />
               <CompactMetricTile label="Active Providers" value={providers} className="min-w-0 p-3 shadow-none" />
-              <CompactMetricTile label="Inventory Items" value={inventory.available ? inventory.totalItems : "Setup"} detail={inventory.available ? `${inventory.connectedProviders || 0} provider syncs` : undefined} className="min-w-0 p-3 shadow-none" />
+              <CompactMetricTile label="Inventory Items" value={inventory.available ? inventory.totalItems : "Setup"} detail={inventory.available ? (inventory.connectedProviders ? `${inventory.connectedProviders} provider sync${inventory.connectedProviders === 1 ? "" : "s"}` : "No inventory sync connected") : undefined} className="min-w-0 p-3 shadow-none" />
               <CompactMetricTile label="Low / Out of Stock" value={inventory.available ? `${inventory.lowStock} / ${inventory.outOfStock}` : "-"} tone={inventory.lowStock || inventory.outOfStock ? "amber" : "default"} className="min-w-0 p-3 shadow-none" />
             </div>
             <p className="mt-3 text-xs text-gray-500">Wallet update: {formatChicagoDateTime(lastRun)}</p>
@@ -542,9 +549,9 @@ export default function DashboardPage() {
       <DashboardSection title="Today's Payment Rail Mix" titleTone="blue">
         <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-4">
           {railRows.length ? (
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:gap-3">
+            <div className="grid grid-cols-1 justify-center gap-2 min-[380px]:grid-cols-2 sm:flex sm:flex-wrap sm:justify-center sm:gap-3">
               {railRows.map(([rail, metrics]) => (
-                <div key={rail} className="min-w-0 rounded-xl border border-gray-100 bg-gray-50/70 p-2.5 sm:w-40 sm:p-3">
+                <div key={rail} className="mx-auto w-full min-w-0 max-w-44 rounded-xl border border-gray-100 bg-gray-50/70 p-2.5 sm:mx-0 sm:w-40 sm:p-3">
                   <p className="truncate text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:text-xs" title={formatDashboardNetwork(rail)}>
                     {formatDashboardNetwork(rail)}
                   </p>

@@ -3,6 +3,16 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Transaction } from "@solana/web3.js"
 import { QRCodeSVG } from "qrcode.react"
+import {
+  AlertTriangle,
+  ArrowDownLeft,
+  ArrowUpRight,
+  CheckCircle2,
+  Clock3,
+  Landmark,
+  RefreshCcw,
+  X
+} from "lucide-react"
 import { getDetectedSolanaWallets, getSolanaTransactionSignature } from "@/lib/wallets/solana"
 import { supabase } from "@/lib/supabaseClient"
 import {
@@ -80,6 +90,7 @@ type WalletOperationSummary = {
   errorCode: string | null
   errorMessage: string | null
   createdAt: string
+  updatedAt: string | null
 }
 
 type WalletOverviewResponse = {
@@ -897,11 +908,41 @@ function WalletOperationEmptyState({ compact = false }: { compact?: boolean }) {
   )
 }
 
+function walletOperationAppearance(operation: WalletOperationSummary) {
+  const operationType = operation.operationType.toLowerCase()
+  const isFailed = ["failed", "validation_failed"].includes(operation.status.toLowerCase())
+
+  if (isFailed) {
+    return { Icon: AlertTriangle, label: "Operation", className: "border-red-200 bg-red-50 text-red-700" }
+  }
+  if (operationType.includes("receive") || operationType.includes("deposit")) {
+    return { Icon: ArrowDownLeft, label: operationType.includes("deposit") ? "Deposit" : "Receive", className: "border-emerald-200 bg-emerald-50 text-emerald-700" }
+  }
+  if (operationType.includes("withdraw") || operationType.includes("cashout")) {
+    return { Icon: Landmark, label: "Withdraw", className: "border-amber-200 bg-amber-50 text-amber-700" }
+  }
+  if (operationType.includes("sync")) {
+    return { Icon: RefreshCcw, label: "Sync", className: "border-blue-200 bg-blue-50 text-blue-700" }
+  }
+  if (["completed", "confirmed", "succeeded"].includes(operation.status.toLowerCase())) {
+    return { Icon: CheckCircle2, label: operationType.includes("send") ? "Send" : "Completed", className: "border-emerald-200 bg-emerald-50 text-emerald-700" }
+  }
+  if (["pending", "processing"].includes(operation.status.toLowerCase())) {
+    return { Icon: Clock3, label: operationType.includes("send") ? "Send" : "Processing", className: "border-blue-200 bg-blue-50 text-blue-700" }
+  }
+  return { Icon: ArrowUpRight, label: operationType.includes("send") ? "Send" : "Operation", className: "border-slate-200 bg-slate-50 text-slate-700" }
+}
+
 function WalletOperationList({ operations }: { operations: WalletOperationSummary[] }) {
+  const [selectedOperation, setSelectedOperation] = useState<WalletOperationSummary | null>(null)
+
   return (
+    <>
     <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
       <div className="divide-y divide-gray-100">
       {operations.map((operation) => {
+        const appearance = walletOperationAppearance(operation)
+        const OperationIcon = appearance.Icon
         const explorerUrl = operation.providerReference
           ? getExplorerTxUrl(operation.network, operation.providerReference)
           : null
@@ -918,17 +959,28 @@ function WalletOperationList({ operations }: { operations: WalletOperationSummar
               : "blue"
 
         return (
-          <article key={`${operation.provider}-${operation.id}`} className="p-3 sm:px-4 sm:py-3.5">
+          <article
+            key={`${operation.provider}-${operation.id}`}
+            role="button"
+            tabIndex={0}
+            aria-label={`View ${appearance.label.toLowerCase()} operation details`}
+            className="cursor-pointer p-3 transition hover:bg-slate-50/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 sm:px-4 sm:py-3.5"
+            onClick={() => setSelectedOperation(operation)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault()
+                setSelectedOperation(operation)
+              }
+            }}
+          >
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <div className="flex min-w-0 flex-1 items-start gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-xs font-bold uppercase text-blue-700 ring-1 ring-blue-100">
-                  {operation.operationType.slice(0, 2)}
+                <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border ${appearance.className}`}>
+                  <OperationIcon className="h-4 w-4" aria-hidden="true" />
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                    <p className="text-sm font-semibold capitalize text-gray-950">
-                      {operation.operationType.replace(/_/g, " ").toLowerCase()}
-                    </p>
+                    <p className="text-sm font-semibold text-gray-950">{appearance.label}</p>
                     <NetworkStatusPill
                       label={`${operation.asset} · ${networkDisplayLabel(operation.network)}`}
                       tone="slate"
@@ -953,7 +1005,13 @@ function WalletOperationList({ operations }: { operations: WalletOperationSummar
                   <div className="mt-1 flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-[11px] text-gray-500">
                     <span>{formatChicagoDateTime(operation.createdAt)}</span>
                     {explorerUrl && (
-                      <a href={explorerUrl} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-600 hover:underline">
+                      <a
+                        href={explorerUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-blue-600 hover:underline"
+                        onClick={(event) => event.stopPropagation()}
+                      >
                         Explorer
                       </a>
                     )}
@@ -971,6 +1029,112 @@ function WalletOperationList({ operations }: { operations: WalletOperationSummar
       })}
       </div>
     </div>
+    {selectedOperation && (() => {
+      const operation = selectedOperation
+      const appearance = walletOperationAppearance(operation)
+      const OperationIcon = appearance.Icon
+      const explorerUrl = operation.providerReference
+        ? getExplorerTxUrl(operation.network, operation.providerReference)
+        : null
+      const details = [
+        { label: "Provider / wallet", value: operation.provider },
+        { label: "Destination type", value: operation.destinationType },
+        { label: "Destination address", value: operation.destinationValue },
+        { label: "Transaction / reference", value: operation.providerReference },
+        { label: "Session / reference ID", value: operation.id },
+        { label: "Created", value: formatChicagoDateTime(operation.createdAt) },
+        { label: "Updated / completed", value: operation.updatedAt ? formatChicagoDateTime(operation.updatedAt) : null },
+        { label: "Error code", value: operation.errorCode },
+        { label: "Failure reason", value: operation.errorMessage },
+      ].filter((detail) => detail.value)
+
+      return (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-0 backdrop-blur-sm sm:items-center sm:p-6"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) setSelectedOperation(null)
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="wallet-operation-title"
+            className="max-h-[90vh] w-full overflow-y-auto rounded-t-3xl border border-white/80 bg-white shadow-2xl sm:max-w-2xl sm:rounded-3xl"
+          >
+            <header className="flex items-center justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-600">Wallet Operation</p>
+                <h2 id="wallet-operation-title" className="mt-1 text-xl font-semibold text-slate-950">
+                  {appearance.label}
+                </h2>
+              </div>
+              <div className="flex items-center gap-2">
+                <NetworkStatusPill
+                  label={formatOperationStatusForMerchant(operation.status)}
+                  tone={
+                    ["FAILED"].includes(operation.status)
+                      ? "red"
+                      : ["VALIDATION_FAILED"].includes(operation.status)
+                        ? "amber"
+                        : ["COMPLETED", "CONFIRMED", "SUCCEEDED"].includes(operation.status)
+                          ? "green"
+                          : "blue"
+                  }
+                />
+                <button
+                  type="button"
+                  aria-label="Close wallet operation details"
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-slate-600 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onClick={() => setSelectedOperation(null)}
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+            </header>
+
+            <div className="space-y-5 p-5 sm:p-6">
+              <div className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border ${appearance.className}`}>
+                  <OperationIcon className="h-5 w-5" aria-hidden="true" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold capitalize text-slate-950">
+                    {operation.operationType.replace(/_/g, " ").toLowerCase()}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {operation.asset} · {networkDisplayLabel(operation.network)}
+                  </p>
+                </div>
+                <p className="text-right text-lg font-semibold tabular-nums text-slate-950">
+                  {operation.amount} <span className="text-sm text-slate-500">{operation.asset}</span>
+                </p>
+              </div>
+
+              <dl className="grid gap-3 sm:grid-cols-2">
+                {details.map((detail) => (
+                  <div key={detail.label} className="min-w-0 rounded-2xl border border-slate-200 p-3.5">
+                    <dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{detail.label}</dt>
+                    <dd className="mt-1.5 break-all text-sm text-slate-800">{detail.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+
+            <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4 sm:px-6">
+              <button type="button" className="btn-secondary" onClick={() => setSelectedOperation(null)}>
+                Close
+              </button>
+              {explorerUrl && (
+                <a className="btn-primary" href={explorerUrl} target="_blank" rel="noopener noreferrer">
+                  Open Explorer
+                </a>
+              )}
+            </footer>
+          </section>
+        </div>
+      )
+    })()}
+    </>
   )
 }
 

@@ -86,6 +86,7 @@ export type WalletOverviewOperation = {
   errorCode: string | null
   errorMessage: string | null
   createdAt: string
+  updatedAt: string | null
 }
 
 export type WalletOverviewResult = {
@@ -158,7 +159,8 @@ function summarizeWalletOperation(row: WalletOperationRecord): WalletOverviewOpe
     status: row.status,
     errorCode: row.error_code,
     errorMessage: row.error_message,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
   }
 }
 
@@ -176,7 +178,8 @@ function summarizeSettlementWithdrawal(row: SettlementWithdrawalRecord): WalletO
     status: row.status,
     errorCode: row.status === "FAILED" ? "WITHDRAWAL_FAILED" : null,
     errorMessage: row.failure_reason,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
   }
 }
 

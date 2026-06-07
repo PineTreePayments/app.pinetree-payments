@@ -1,6 +1,11 @@
 import { supabaseAdmin, supabase } from "@/database"
 import { getWalletOverviewEngine } from "./walletOverview"
 import { getInventoryEngine } from "./inventory"
+import {
+  buildOverviewRailReadiness,
+  getProvidersDashboardEngine,
+  type OverviewRailReadiness
+} from "./providersDashboard"
 
 const db = supabaseAdmin || supabase
 
@@ -12,7 +17,6 @@ type PaymentSummary = {
   provider_reference?: string | null
   created_at?: string | null
   merchant_amount?: number | string | null
-  pinetree_fee?: number | string | null
   updated_at?: string | null
 }
 
@@ -31,7 +35,6 @@ type TransactionRow = {
 type OverviewPaymentRow = {
   created_at: string
   gross_amount?: number | string | null
-  pinetree_fee?: number | string | null
   status?: string | null
   provider?: string | null
   network?: string | null
@@ -61,18 +64,12 @@ export type DashboardOverviewResult = {
     volume: number
     transactionCount: number
     averageTransaction: number
-    pinetreeFees: number
     confirmed: number
     incomplete: number
     failed: number
   }
   railBreakdown: Record<string, { count: number; volume: number }>
-  railReadiness: Array<{
-    id: "solana" | "base" | "lightning"
-    label: string
-    connected: boolean
-    detail: string
-  }>
+  railReadiness: OverviewRailReadiness[]
   inventory: {
     available: boolean
     totalItems: number
@@ -84,9 +81,10 @@ export type DashboardOverviewResult = {
 }
 
 export async function getDashboardOverviewEngine(merchantId: string): Promise<DashboardOverviewResult> {
-  const [walletOverview, inventoryOverview] = await Promise.all([
+  const [walletOverview, inventoryOverview, providersOverview] = await Promise.all([
     getWalletOverviewEngine(merchantId, { refresh: false }),
-    getInventoryEngine(merchantId)
+    getInventoryEngine(merchantId),
+    getProvidersDashboardEngine(merchantId)
   ])
 
   const [{ data: tx }, { data: payments, error: paymentError }] = await Promise.all([
@@ -106,7 +104,6 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
         created_at,
         gross_amount,
         merchant_amount,
-        pinetree_fee,
         currency,
         status,
         provider_reference,
@@ -118,7 +115,7 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
     .order("created_at", { ascending: false }),
     db
       .from("payments")
-      .select("created_at,gross_amount,pinetree_fee,status,provider,network")
+      .select("created_at,gross_amount,status,provider,network")
       .eq("merchant_id", merchantId)
       .order("created_at", { ascending: false })
   ])
@@ -147,12 +144,6 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
     volume: byDate[date]
   })).reverse()
 
-  const { count } = await db
-    .from("merchant_providers")
-    .select("*", { count: "exact", head: true })
-    .eq("merchant_id", merchantId)
-    .eq("status", "connected")
-
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
   const todayPayments = paymentRows.filter((payment) => {
@@ -176,30 +167,7 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
     {}
   )
 
-  const walletNetworks = new Set(
-    walletOverview.wallets.map((wallet) => String(wallet.network || "").toLowerCase())
-  )
-  const lightningRail = walletOverview.paymentRails[0]
-  const railReadiness: DashboardOverviewResult["railReadiness"] = [
-    {
-      id: "solana",
-      label: "Solana Pay",
-      connected: walletNetworks.has("solana"),
-      detail: walletNetworks.has("solana") ? "Merchant wallet connected" : "Connect a Solana wallet"
-    },
-    {
-      id: "base",
-      label: "Base Pay",
-      connected: walletNetworks.has("base"),
-      detail: walletNetworks.has("base") ? "Merchant wallet connected" : "Connect a Base wallet"
-    },
-    {
-      id: "lightning",
-      label: "Bitcoin Lightning",
-      connected: Boolean(lightningRail),
-      detail: lightningRail ? `${lightningRail.provider} connected` : "Connect Speed or an NWC wallet"
-    }
-  ]
+  const railReadiness = buildOverviewRailReadiness(providersOverview)
 
   // Normalize network names with proper capitalization
   const normalizedRecentTx = rows.slice(0, 10).map(tx => ({
@@ -211,7 +179,7 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
     volume: totalVolume,
     txCount: totalTx,
     successRate: totalTx > 0 ? Math.round((successTx.length / totalTx) * 100) : 0,
-    providers: count ?? 0,
+    providers: railReadiness.filter((rail) => rail.status === "Connected").length,
     recentTx: normalizedRecentTx,
     chartData,
     walletValue: walletOverview.totalUsd,
@@ -220,10 +188,6 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
       volume: todayVolume,
       transactionCount: todayPayments.length,
       averageTransaction: confirmedToday.length > 0 ? todayVolume / confirmedToday.length : 0,
-      pinetreeFees: confirmedToday.reduce(
-        (sum, payment) => sum + Number(payment.pinetree_fee ?? 0),
-        0
-      ),
       confirmed: confirmedToday.length,
       incomplete: todayPayments.filter((payment) => payment.status === "INCOMPLETE").length,
       failed: todayPayments.filter((payment) => payment.status === "FAILED").length
