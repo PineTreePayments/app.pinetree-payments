@@ -5,7 +5,7 @@ type Props = {
 
 export default function PageContainer({ children, className = "" }: Props) {
   return (
-    <main className={`min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#e0ecff] via-[#f5f8ff] to-white ${className}`}>
+    <main className={`relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_15%_10%,rgba(139,92,246,0.14),transparent_28%),radial-gradient(circle_at_85%_20%,rgba(22,82,240,0.18),transparent_30%),linear-gradient(180deg,#edf4ff_0%,#f8faff_45%,#ffffff_100%)] p-3 sm:p-6 ${className}`}>
       {children}
     </main>
   )

@@ -5,6 +5,7 @@ import Image from "next/image"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import { Eye, EyeOff } from "lucide-react"
+import AuthFrame from "@/components/ui/AuthFrame"
 
 /* =============================
 TOGGLE GOOGLE LOGIN HERE
@@ -156,33 +157,19 @@ export default function LoginPage() {
   ----------------------------- */
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center overflow-hidden">
-      {/* Animated Background */}
-      <div className="absolute inset-0 bg-cover bg-center wave-bg"></div>
-
-      {/* Login Card */}
-      <div className="relative z-10 w-full max-w-md bg-white/90 backdrop-blur-xl shadow-xl rounded-xl p-6">
-        <div className="flex justify-center mb-4">
-          <Image
-            src="/pinetree-web-logo.png"
-            alt="PineTree"
-            width={95}
-            height={36}
-          />
-        </div>
-
-        <h2 className="text-lg font-semibold text-gray-900 mb-4 text-center">
-          {mode === "login"
-            ? "Sign in to PineTree"
-            : "Create your PineTree account"}
-        </h2>
+    <AuthFrame
+      title={mode === "login" ? "Welcome back" : "Create your account"}
+      subtitle={mode === "login"
+        ? "Sign in to manage payments, wallets, reports, and point-of-sale."
+        : "Set up a secure PineTree merchant workspace."}
+    >
 
         {/* GOOGLE BUTTON (TOGGLED) */}
         {ENABLE_GOOGLE && (
           <>
             <button
               onClick={googleLogin}
-              className="w-full border border-gray-300 rounded-md py-2.5 flex items-center justify-center gap-3 hover:bg-gray-50 transition"
+              className="flex min-h-11 w-full items-center justify-center gap-3 rounded-xl border border-gray-200 bg-white py-2.5 transition hover:bg-gray-50"
             >
               <Image
                 src="https://www.svgrepo.com/show/475656/google-color.svg"
@@ -204,11 +191,14 @@ export default function LoginPage() {
           </>
         )}
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} className="space-y-3">
           <input
             type="email"
             placeholder="Email"
-            className="border border-gray-300 p-2.5 rounded-md w-full mb-2 text-gray-900"
+            aria-label="Email"
+            autoComplete="email"
+            required
+            className="form-field"
             onChange={(e) => setEmail(e.target.value)}
           />
 
@@ -216,40 +206,45 @@ export default function LoginPage() {
             <input
               type="text"
               placeholder="Business name"
-              className="border border-gray-300 p-2.5 rounded-md w-full mb-2 text-gray-900"
+              aria-label="Business name"
+              autoComplete="organization"
+              className="form-field"
               onChange={(e) => setBusiness(e.target.value)}
             />
           )}
 
-          <div className="relative mb-3">
+          <div className="relative">
             <input
               type={showPassword ? "text" : "password"}
               placeholder="Password"
-              className="border border-gray-300 p-2.5 rounded-md w-full pr-10 text-gray-900"
+              aria-label="Password"
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              required
+              className="form-field pr-11"
               onChange={(e) => setPassword(e.target.value)}
             />
             <button
               type="button"
               onClick={() => setShowPassword((v) => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              tabIndex={-1}
+              className="absolute right-2 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              aria-label={showPassword ? "Hide password" : "Show password"}
             >
               {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
 
           {errorMsg && (
-            <p className="text-sm text-red-600 mb-3">{errorMsg}</p>
+            <p role="alert" className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{errorMsg}</p>
           )}
 
           {infoMsg && (
-            <p className="text-sm text-blue-600 mb-3">{infoMsg}</p>
+            <p className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-700">{infoMsg}</p>
           )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-md transition font-medium disabled:opacity-60 disabled:cursor-not-allowed"
+            className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-[#1652f0] px-4 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(22,82,240,0.22)] transition hover:-translate-y-0.5 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading
               ? mode === "login"
@@ -261,13 +256,13 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <p className="text-xs text-gray-600 mt-4 text-center">
+        <p className="mt-5 text-center text-sm text-gray-600">
           {mode === "login" ? (
             <>
               New to PineTree?{" "}
               <button
                 onClick={() => { setMode("signup"); setErrorMsg(""); setInfoMsg("") }}
-                className="text-blue-600 font-medium"
+                className="font-semibold text-blue-600 hover:text-blue-700"
               >
                 Create account
               </button>
@@ -277,36 +272,13 @@ export default function LoginPage() {
               Already have an account?{" "}
               <button
                 onClick={() => { setMode("login"); setErrorMsg(""); setInfoMsg("") }}
-                className="text-blue-600 font-medium"
+                className="font-semibold text-blue-600 hover:text-blue-700"
               >
                 Sign in
               </button>
             </>
           )}
         </p>
-      </div>
-
-      <style jsx>{`
-        .wave-bg {
-          background-image: url("/pinetree-app-bg.png");
-          background-size: cover;
-          background-position: center;
-          animation: waveMove 18s ease-in-out infinite alternate;
-          transform: scale(1.05);
-        }
-
-        @keyframes waveMove {
-          0% {
-            transform: scale(1.05) translateY(0px);
-          }
-          50% {
-            transform: scale(1.07) translateY(-15px);
-          }
-          100% {
-            transform: scale(1.05) translateY(10px);
-          }
-        }
-      `}</style>
-    </div>
+    </AuthFrame>
   )
 }

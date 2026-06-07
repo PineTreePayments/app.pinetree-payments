@@ -2,11 +2,16 @@
 
 import Link from "next/link"
 import { useState, useEffect, useRef, useCallback } from "react"
-import { Eye, EyeOff } from "lucide-react"
+import { Eye, EyeOff, MonitorSmartphone, Plus } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import Button from "@/components/ui/Button"
 import Card from "@/components/ui/Card"
+import {
+  EmptyState,
+  PageHeader,
+  Surface
+} from "@/components/ui/DesignSystem"
 
 type Terminal = {
   id: string
@@ -322,27 +327,26 @@ export default function POSPage() {
 
       {/* HEADER */}
 
-      <div className="flex items-center justify-between gap-3">
-
-        <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">
-          Point of Sale
-        </h1>
-
-        <button
-          onClick={() => setCreating(true)}
-          style={{ boxShadow: "0 10px 24px rgba(0,82,255,0.18)" }}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-[18px] bg-[#1652f0] px-[18px] py-2.5 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.98]"
-        >
-          + New Terminal
-        </button>
-
-      </div>
+      <PageHeader
+        title="Point of Sale"
+        description="Manage cashier terminals, launch registers, and reconcile drawer activity."
+        action={
+          <button
+            onClick={() => setCreating(true)}
+            className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl bg-[#1652f0] px-4 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(22,82,240,0.20)] transition hover:-translate-y-0.5 hover:bg-blue-700 active:scale-[0.98]"
+          >
+            <Plus size={16} />
+            New Terminal
+          </button>
+        }
+      />
 
       {/* CREATE TERMINAL */}
 
       {creating && (
 
-        <div ref={formRef} className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
+        <Surface as="div" padding="lg" className="scroll-mt-24" >
+          <div ref={formRef}>
 
           <h2 className="text-lg font-semibold text-gray-900 mb-6">
             Create Terminal
@@ -360,7 +364,7 @@ export default function POSPage() {
                 value={name}
                 onChange={(e)=>setName(e.target.value)}
                 placeholder="Front Register"
-                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-gray-900 focus:outline-none focus:border-blue-400"
+                className="form-field"
               />
 
             </div>
@@ -375,7 +379,7 @@ export default function POSPage() {
                 value={recoveryPhrase}
                 onChange={(e)=>setRecoveryPhrase(e.target.value)}
                 placeholder="Set a terminal recovery phrase"
-                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-gray-900 focus:outline-none focus:border-blue-400"
+                className="form-field"
               />
 
               <p className="text-xs text-gray-500 mt-1">
@@ -398,13 +402,14 @@ export default function POSPage() {
                   value={pin}
                   onChange={(e)=>setPin(e.target.value)}
                   placeholder="4 digit PIN"
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-center tracking-widest text-gray-900 focus:outline-none focus:border-blue-400"
+                  className="form-field text-center tracking-widest"
                 />
 
                 <button
                   type="button"
                   onClick={()=>setShowPin(!showPin)}
-                  className="absolute right-3 top-2.5 text-gray-400"
+                  aria-label={showPin ? "Hide terminal PIN" : "Show terminal PIN"}
+                  className="absolute right-2 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100"
                 >
                   {showPin ? <EyeOff size={18}/> : <Eye size={18}/>}
                 </button>
@@ -422,7 +427,7 @@ export default function POSPage() {
               <select
                 value={autoLock}
                 onChange={(e)=>setAutoLock(e.target.value)}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-gray-900 focus:outline-none focus:border-blue-400"
+                className="form-field"
               >
                 <option value="1">1 minute</option>
                 <option value="3">3 minutes</option>
@@ -446,7 +451,7 @@ export default function POSPage() {
                 value={drawerStartingAmount}
                 onChange={(e) => setDrawerStartingAmount(e.target.value)}
                 placeholder="e.g. 200.00"
-                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-gray-900 focus:outline-none focus:border-blue-400"
+                className="form-field"
               />
 
               <p className="text-xs text-gray-500 mt-1">
@@ -469,7 +474,8 @@ export default function POSPage() {
 
           </div>
 
-        </div>
+          </div>
+        </Surface>
 
       )}
 
@@ -481,12 +487,24 @@ export default function POSPage() {
           Active Terminals
         </p>
 
-        <div className="rounded-[1.35rem] border border-gray-200/80 bg-white p-3.5 shadow-[0_14px_44px_rgba(15,23,42,0.06)] sm:p-5">
+        <Surface>
 
           {terminals.length === 0 && (
-            <div className="text-sm text-gray-500">
-              No terminals created yet.
-            </div>
+            <EmptyState
+              compact
+              icon={<MonitorSmartphone size={20} />}
+              title="No terminals yet"
+              description="Create a terminal to launch a cashier-ready PineTree register."
+              action={
+                <button
+                  type="button"
+                  onClick={() => setCreating(true)}
+                  className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700"
+                >
+                  Create Terminal
+                </button>
+              }
+            />
           )}
 
           <div className="space-y-3">
@@ -561,7 +579,7 @@ export default function POSPage() {
 
           </div>
 
-        </div>
+        </Surface>
 
       </section>
 
@@ -575,7 +593,7 @@ export default function POSPage() {
             Drawer Balances
           </p>
 
-          <div className="rounded-[1.35rem] border border-gray-200/80 bg-white p-3.5 shadow-[0_14px_44px_rgba(15,23,42,0.06)] sm:p-5">
+          <Surface>
 
             <div className="space-y-3">
               {terminals.map((t) => {
@@ -620,7 +638,7 @@ export default function POSPage() {
               })}
             </div>
 
-          </div>
+          </Surface>
 
         </section>
 

@@ -6,7 +6,7 @@ type Props = {
 
 export default function Card({ children, className = "", padding = true }: Props) {
   return (
-    <div className={`bg-white rounded-2xl shadow-sm border border-gray-200 ${padding ? "p-6" : ""} ${className}`}>
+    <div className={`app-surface min-w-0 ${padding ? "p-4 sm:p-6" : ""} ${className}`}>
       {children}
     </div>
   )

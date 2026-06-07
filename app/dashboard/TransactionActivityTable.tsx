@@ -15,6 +15,7 @@ import {
 export type DashboardPaymentSummary = {
   id?: string | null
   created_at?: string | null
+  updated_at?: string | null
   gross_amount?: number | string | null
   merchant_amount?: number | string | null
   pinetree_fee?: number | string | null
@@ -111,18 +112,21 @@ function buildDetailRows(input: {
     { label: "Reference", value: formatTransactionReference(tx), mono: true },
     { label: "Payment ID", value: references.paymentId, mono: true },
     { label: "Transaction ID", value: references.transactionId, mono: true },
-    { label: "Amount", value: formatUsd(Number(payment?.gross_amount ?? 0)) },
+    { label: "Gross Amount", value: formatUsd(Number(payment?.gross_amount ?? 0)) },
+    { label: "Merchant Amount", value: formatUsd(Number(payment?.merchant_amount ?? 0)) },
+    { label: "PineTree Fee", value: formatUsd(Number(payment?.pinetree_fee ?? 0)) },
     { label: "Currency", value: payment?.currency || null },
     { label: "Status", value: statusLabel },
-    { label: "Date / Time", value: formatChicagoDateTime(statusTime) },
+    { label: "Created", value: formatChicagoDateTime(statusTime) },
+    { label: "Updated", value: formatChicagoDateTime(payment?.updated_at) },
     { label: "Channel", value: tx.channel || null }
   ]
 
   if (provider === "cash") {
     return [
-      ...commonRows.slice(0, 5),
+      ...commonRows.slice(0, 7),
       { label: "Payment Method", value: "Cash" },
-      ...commonRows.slice(5),
+      ...commonRows.slice(7),
       { label: "Cash Reference", value: formatTransactionReference(tx), mono: true }
     ]
   }
@@ -137,10 +141,10 @@ function buildDetailRows(input: {
   ) {
     const lightningInvoice = payment?.metadata?.split?.lightningInvoice || null
     return [
-      ...commonRows.slice(0, 5),
+      ...commonRows.slice(0, 7),
       { label: "Network", value: "Lightning" },
       { label: "Provider", value: providerName(tx.provider) },
-      ...commonRows.slice(5),
+      ...commonRows.slice(7),
       { label: "Provider Reference", value: references.providerReference, mono: true },
       { label: "Lightning Invoice", value: lightningInvoice, mono: true }
     ]
@@ -148,10 +152,10 @@ function buildDetailRows(input: {
 
   if (provider === "base") {
     return [
-      ...commonRows.slice(0, 5),
+      ...commonRows.slice(0, 7),
       { label: "Network", value: "Base" },
       { label: "Provider", value: "Base Pay" },
-      ...commonRows.slice(5),
+      ...commonRows.slice(7),
       { label: "Blockchain Transaction", value: references.blockchainReference, mono: true },
       { label: "Provider Reference", value: references.providerReference, mono: true }
     ]
@@ -159,20 +163,20 @@ function buildDetailRows(input: {
 
   if (provider === "solana") {
     return [
-      ...commonRows.slice(0, 5),
+      ...commonRows.slice(0, 7),
       { label: "Network", value: "Solana" },
       { label: "Provider", value: "Solana Pay" },
-      ...commonRows.slice(5),
+      ...commonRows.slice(7),
       { label: "Blockchain Transaction", value: references.blockchainReference, mono: true },
       { label: "Provider Reference", value: references.providerReference, mono: true }
     ]
   }
 
   return [
-    ...commonRows.slice(0, 5),
+    ...commonRows.slice(0, 7),
     { label: "Network", value: networkName(tx.network) },
     { label: "Provider", value: providerName(tx.provider) },
-    ...commonRows.slice(5),
+    ...commonRows.slice(7),
     { label: "Blockchain Transaction", value: references.blockchainReference, mono: true },
     { label: "Provider Reference", value: references.providerReference, mono: true }
   ]
@@ -377,7 +381,7 @@ export default function TransactionActivityTable({
             role="dialog"
             aria-modal="true"
             aria-label="Transaction details"
-            className="w-full max-w-xl max-h-[88vh] overflow-y-auto rounded-2xl border border-white/70 bg-white/95 shadow-[0_24px_80px_rgba(15,23,42,0.22)] p-5"
+            className="h-[100dvh] w-full overflow-y-auto rounded-none border border-white/70 bg-white/95 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.22)] sm:h-auto sm:max-h-[88vh] sm:max-w-xl sm:rounded-[1.5rem] sm:p-5"
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4 mb-4">
@@ -393,7 +397,8 @@ export default function TransactionActivityTable({
               <button
                 type="button"
                 onClick={closeDetail}
-                className="rounded-full border border-gray-200 px-3 py-1 text-sm text-gray-700 hover:bg-gray-50"
+                aria-label="Close transaction details"
+                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-gray-200 px-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
               >
                 Close
               </button>
