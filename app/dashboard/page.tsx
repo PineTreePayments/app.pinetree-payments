@@ -36,14 +36,8 @@ import {
   DashboardHeroCard,
   DashboardSection,
   MetricGrid,
-  PineTreeInsightsCard
 } from "@/components/dashboard/DashboardPrimitives"
-import {
-  countBy,
-  formatDashboardNetwork,
-  formatDashboardProvider,
-  mostFrequentKey
-} from "@/components/dashboard/displayHelpers"
+import { formatDashboardNetwork } from "@/components/dashboard/displayHelpers"
 
 type DashboardOverviewResponse = {
   success?: boolean
@@ -130,67 +124,15 @@ function getChartWindow(data: ChartPoint[], range: ChartRange) {
   return filtered.length ? filtered : data
 }
 
-function getOverviewInsights(input: {
-  recentTx: DashboardTransactionRow[]
-  providers: number
-  successRate: number
-  volume: number
-  failed: number
-  incomplete: number
-  disconnectedRails: number
-  lowStock: number
-}) {
-  const providerCounts = countBy(input.recentTx, (tx) => tx.provider)
-  const networkCounts = countBy(
-    input.recentTx,
-    (tx) => tx.provider === "cash" ? null : tx.network
-  )
-  const topProvider = mostFrequentKey(providerCounts)
-  const topNetwork = mostFrequentKey(networkCounts)
-  const insights: string[] = []
-
-  if (topProvider) {
-    insights.push(`${formatDashboardProvider(topProvider)} is your most used provider in recent activity.`)
-  }
-
-  if (topNetwork) {
-    insights.push(`${formatDashboardNetwork(topNetwork)} is leading recent network activity.`)
-  }
-
-  if (input.providers > 0) {
-    insights.push(`${input.providers} payment ${input.providers === 1 ? "provider is" : "providers are"} active for routing.`)
-  }
-
-  if (input.volume > 0 && input.successRate > 0) {
-    insights.push(`Current success rate is ${input.successRate}% across tracked dashboard volume.`)
-  }
-
-  if (input.failed > 0) {
-    insights.push(`${input.failed} payment${input.failed === 1 ? "" : "s"} failed today and may need review.`)
-  }
-  if (input.incomplete > 0) {
-    insights.push(`${input.incomplete} payment${input.incomplete === 1 ? "" : "s"} are incomplete today.`)
-  }
-  if (input.disconnectedRails > 0) {
-    insights.push(`${input.disconnectedRails} payment rail${input.disconnectedRails === 1 ? " is" : "s are"} not configured.`)
-  }
-  if (input.lowStock > 0) {
-    insights.push(`${input.lowStock} inventory item${input.lowStock === 1 ? " is" : "s are"} at or below the low-stock threshold.`)
-  }
-
-  return insights
-}
-
 export default function DashboardPage() {
 
   const router = useRouter()
 
-  const [volume,setVolume] = useState(0)
-  const [txCount,setTxCount] = useState(0)
-  const [successRate,setSuccessRate] = useState(0)
-  const [providers,setProviders] = useState(0)
-  const [recentTx,setRecentTx] = useState<DashboardTransactionRow[]>([])
-  const [chartData,setChartData] = useState<ChartPoint[]>([])
+  const [volume, setVolume] = useState(0)
+  const [txCount, setTxCount] = useState(0)
+  const [successRate, setSuccessRate] = useState(0)
+  const [recentTx, setRecentTx] = useState<DashboardTransactionRow[]>([])
+  const [chartData, setChartData] = useState<ChartPoint[]>([])
   const [today, setToday] = useState<NonNullable<DashboardOverviewResponse["today"]>>({
     volume: 0,
     transactionCount: 0,
@@ -201,14 +143,8 @@ export default function DashboardPage() {
   })
   const [railBreakdown, setRailBreakdown] = useState<Record<string, { count: number; volume: number }>>({})
   const [railReadiness, setRailReadiness] = useState<NonNullable<DashboardOverviewResponse["railReadiness"]>>([])
-  const [inventory, setInventory] = useState<NonNullable<DashboardOverviewResponse["inventory"]>>({
-    available: false,
-    totalItems: 0,
-    lowStock: 0,
-    outOfStock: 0
-  })
-  const [isSyncing,setIsSyncing] = useState(false)
-  const [syncError,setSyncError] = useState<string | null>(null)
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [syncError, setSyncError] = useState<string | null>(null)
   const [chartRange, setChartRange] = useState<ChartRange>("30D")
   const [chartExpanded, setChartExpanded] = useState(false)
 
@@ -242,18 +178,15 @@ export default function DashboardPage() {
     setVolume(Number(payload.volume ?? 0))
     setTxCount(Number(payload.txCount ?? 0))
     setSuccessRate(Number(payload.successRate ?? 0))
-    setProviders(Number(payload.providers ?? 0))
     setChartData(payload.chartData || [])
     setRecentTx(payload.recentTx || [])
     if (payload.today) setToday(payload.today)
     setRailBreakdown(payload.railBreakdown || {})
     setRailReadiness(payload.railReadiness || [])
-    if (payload.inventory) setInventory(payload.inventory)
   }, [])
 
   const loadOverview = useCallback(async () => {
     const payload = await callOverviewApi(false)
-
     applyOverviewPayload(payload)
   }, [applyOverviewPayload, callOverviewApi])
 
@@ -271,7 +204,7 @@ export default function DashboardPage() {
     }
   }
 
-  useEffect(()=>{
+  useEffect(() => {
     void loadOverview().catch((err) => {
       console.error("Dashboard load failed:", err)
     })
@@ -284,28 +217,17 @@ export default function DashboardPage() {
       void loadOverview().catch((err) => {
         console.error("Dashboard poll failed:", err)
       })
-    },15000)
+    }, 15000)
 
     return () => clearInterval(interval)
-  },[loadOverview])
+  }, [loadOverview])
 
-
-
-  const overviewInsights = getOverviewInsights({
-    recentTx,
-    providers,
-    successRate,
-    volume,
-    failed: today.failed,
-    incomplete: today.incomplete,
-    disconnectedRails: railReadiness.filter((rail) => rail.status !== "Connected").length,
-    lowStock: inventory.lowStock
-  })
   const railRows = Object.entries(railBreakdown)
     .sort((left, right) => right[1].volume - left[1].volume)
   const connectedRailRows = railReadiness.filter((rail) => rail.status === "Connected")
   const railActivityCount = railRows.reduce((sum, [, metrics]) => sum + metrics.count, 0)
   const railActivityVolume = railRows.reduce((sum, [, metrics]) => sum + metrics.volume, 0)
+
   const quickActions = [
     { label: "Open POS", href: "/dashboard/pos", icon: ShoppingCart },
     { label: "Create Checkout Link", href: "/dashboard/checkout", icon: Link2 },
@@ -314,6 +236,7 @@ export default function DashboardPage() {
     { label: "Open Reports", href: "/dashboard/reports", icon: BarChart3 },
     { label: "Manage Inventory", href: "/dashboard/inventory", icon: Boxes }
   ]
+
   const visibleChartData = useMemo(
     () => getChartWindow(chartData, chartRange),
     [chartData, chartRange]
@@ -321,8 +244,8 @@ export default function DashboardPage() {
   const chartDisplayData = visibleChartData.length > 0
     ? visibleChartData
     : [
-      { date:"", volume:0 },
-      { date:"", volume:0 }
+      { date: "", volume: 0 },
+      { date: "", volume: 0 }
     ]
 
   const renderChartControls = (showExpand = true) => (
@@ -412,12 +335,9 @@ export default function DashboardPage() {
     <div className="space-y-5 md:space-y-7">
 
       <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">
-            Overview
-          </h1>
-        </div>
-
+        <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">
+          Overview
+        </h1>
         <button
           onClick={syncNow}
           disabled={isSyncing}
@@ -432,6 +352,7 @@ export default function DashboardPage() {
         <p className="text-sm text-red-600 mb-4">Sync error: {syncError}</p>
       )}
 
+      {/* 1 — Today's Confirmed Sales */}
       <DashboardHeroCard
         eyebrow="Today's Confirmed Sales"
         title="Confirmed merchant payment volume since midnight"
@@ -443,7 +364,7 @@ export default function DashboardPage() {
         }
         action={
           <button
-            onClick={()=>router.push("/dashboard/transactions")}
+            onClick={() => router.push("/dashboard/transactions")}
             className="inline-flex min-h-10 w-fit self-start items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 sm:self-auto md:px-5"
           >
             View Transactions
@@ -451,6 +372,7 @@ export default function DashboardPage() {
         }
       />
 
+      {/* 2 — Today's Activity Metrics */}
       <MetricGrid>
         <CompactMetricTile label="Transactions Today" value={today.transactionCount} tone="blue" />
         <CompactMetricTile label="Average Transaction" value={formatUsd(today.averageTransaction)} />
@@ -458,6 +380,7 @@ export default function DashboardPage() {
         <CompactMetricTile label="Failed Today" value={today.failed} tone={today.failed ? "red" : "default"} />
       </MetricGrid>
 
+      {/* Quick Actions — mobile only */}
       <div className="lg:hidden">
         <DashboardSection title="Quick Actions" titleTone="blue">
           <div className="rounded-2xl border border-white/80 bg-white/80 p-2 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur">
@@ -482,69 +405,68 @@ export default function DashboardPage() {
         </DashboardSection>
       </div>
 
-      <DashboardSection
-        title="Payment Operations"
-        titleTone="blue"
-      >
+      {/* 3 — Recent Activity */}
+      <DashboardSection title="Recent Activity" titleTone="blue">
+        <TransactionActivityTable
+          transactions={recentTx}
+          emptyMessage="No transactions yet."
+        />
+      </DashboardSection>
+
+      {/* 4 — Payment Operations + Today by Rail */}
+      <DashboardSection title="Payment Operations" titleTone="blue">
         <div className="overflow-hidden rounded-[1.35rem] border border-blue-100/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.12),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f8fbff_52%,#eef6ff_100%)] shadow-[0_18px_60px_rgba(37,99,235,0.10)]">
           <div className="grid gap-0 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-            <div className="border-b border-blue-100/80 p-4 sm:p-5 lg:border-b-0 lg:border-r">
-              <div>
-                <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">Live rails</p>
-                  <div className="mt-2 flex items-end gap-2">
-                    <p className="text-4xl font-semibold tracking-tight text-gray-950">{connectedRailRows.length}</p>
-                    <p className="pb-1.5 text-sm font-medium text-gray-600">
-                      connected rail{connectedRailRows.length === 1 ? "" : "s"}
-                    </p>
-                  </div>
-                </div>
-              </div>
 
-              <div className="mt-5 space-y-2">
-                {connectedRailRows.map((rail) => (
-                  <div key={rail.id} className="flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-white/80 bg-white/75 px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.04)] backdrop-blur">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100">
-                        <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                      </span>
-                      <div className="min-w-0">
+            {/* Active Rails */}
+            <div className="border-b border-blue-100/80 p-4 sm:p-5 lg:border-b-0 lg:border-r">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">Active Rails</p>
+
+              {connectedRailRows.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  {connectedRailRows.map((rail) => (
+                    <div
+                      key={rail.id}
+                      className="flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-white/80 bg-white/75 px-3.5 py-2.5 shadow-[0_8px_24px_rgba(15,23,42,0.04)] backdrop-blur"
+                    >
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100">
+                          <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                        </span>
                         <p className="truncate text-sm font-semibold text-gray-950" title={rail.label}>{rail.label}</p>
-                        <p className="text-xs text-gray-500">Ready for merchant payments</p>
                       </div>
+                      <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">
+                        Live
+                      </span>
                     </div>
-                    <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">
-                      Connected
-                    </span>
-                  </div>
-                ))}
-                {!connectedRailRows.length && (
-                  <div className="rounded-2xl border border-dashed border-blue-200 bg-white/70 px-3.5 py-4 text-sm text-gray-600">
-                    No connected payment rails are active yet.
-                  </div>
-                )}
-              </div>
+                  ))}
+                </div>
+              )}
 
               <div className="mt-5 flex flex-wrap gap-2">
-                <Link href="/dashboard/providers" className="inline-flex min-h-9 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700">
+                <Link
+                  href="/dashboard/providers"
+                  className="inline-flex min-h-9 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
+                >
                   Manage Rails
                 </Link>
-                <Link href="/dashboard/transactions" className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-xl border border-blue-100 bg-white/85 px-3.5 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50">
+                <Link
+                  href="/dashboard/transactions"
+                  className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-xl border border-blue-100 bg-white/85 px-3.5 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
+                >
                   View Transactions
                   <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
                 </Link>
               </div>
             </div>
 
+            {/* Today by Rail */}
             <div className="p-4 sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">
-                    <Activity className="h-3.5 w-3.5" aria-hidden="true" />
-                    Today by rail
-                  </p>
-                  <p className="mt-1 text-sm text-gray-600">Real payment activity grouped by rail.</p>
-                </div>
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">
+                  <Activity className="h-3.5 w-3.5" aria-hidden="true" />
+                  Today by Rail
+                </p>
                 <div className="text-right">
                   <p className="text-2xl font-semibold tabular-nums text-gray-950">{formatUsd(railActivityVolume)}</p>
                   <p className="text-xs text-gray-500">
@@ -573,21 +495,16 @@ export default function DashboardPage() {
                 </div>
               )}
             </div>
+
           </div>
         </div>
       </DashboardSection>
 
-      <MetricGrid>
-        <CompactMetricTile label="All-Time Volume" value={formatUsd(volume)} tone="blue" />
-        <CompactMetricTile label="All Transactions" value={txCount} />
-        <CompactMetricTile label="Success Rate" value={`${successRate}%`} tone="green" />
-        <CompactMetricTile label="Confirmed Today" value={today.confirmed} tone="green" />
-      </MetricGrid>
-
+      {/* 5 — Transaction Volume */}
       <ChartCard
         title="Transaction Volume"
         titleTone="blue"
-        subtitle="Recent confirmed payment volume"
+        subtitle="Confirmed payment volume over time"
         action={renderChartControls()}
         className="overflow-hidden pb-5 sm:pb-5"
       >
@@ -604,7 +521,7 @@ export default function DashboardPage() {
           className="cursor-pointer rounded-xl outline-none transition focus:ring-4 focus:ring-blue-100"
           aria-label="Expand transaction volume chart"
         >
-          {renderVolumeChart("h-36 pb-3 sm:h-64 sm:pb-0", "overviewVolumeGradient")}
+          {renderVolumeChart("h-36 pb-3 sm:h-56 sm:pb-0", "overviewVolumeGradient")}
         </div>
       </ChartCard>
 
@@ -625,7 +542,7 @@ export default function DashboardPage() {
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
                   Transaction Volume
                 </p>
-                <p className="mt-1 text-sm text-gray-500">Recent confirmed payment volume</p>
+                <p className="mt-1 text-sm text-gray-500">Confirmed payment volume over time</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 {renderChartControls(false)}
@@ -643,14 +560,38 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <PineTreeInsightsCard insights={overviewInsights} />
+      {/* 6 — Historical Metrics */}
+      <MetricGrid>
+        <CompactMetricTile label="All-Time Volume" value={formatUsd(volume)} tone="blue" />
+        <CompactMetricTile label="All Transactions" value={txCount} />
+        <CompactMetricTile label="Success Rate" value={`${successRate}%`} tone="green" />
+        <CompactMetricTile label="Confirmed Today" value={today.confirmed} tone="green" />
+      </MetricGrid>
 
-      <DashboardSection title="Recent Activity" titleTone="blue">
-        <TransactionActivityTable
-          transactions={recentTx}
-          emptyMessage="No transactions yet."
-        />
-      </DashboardSection>
+      {/* 7 — Quick Actions (desktop only) */}
+      <div className="hidden lg:block">
+        <DashboardSection title="Quick Actions" titleTone="blue">
+          <div className="rounded-2xl border border-white/80 bg-white/80 p-2 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur">
+            <div className="grid grid-cols-3 gap-2 xl:grid-cols-6">
+              {quickActions.map(({ label, href, icon: Icon }) => (
+                <Link
+                  key={href}
+                  href={href}
+                  className="group flex min-h-14 min-w-0 items-center gap-2.5 rounded-xl border border-gray-100 bg-gradient-to-br from-white to-gray-50/80 px-3 py-2.5 text-gray-900 transition hover:-translate-y-0.5 hover:border-blue-200 hover:from-blue-50/70 hover:to-white hover:text-blue-700 hover:shadow-sm"
+                >
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 ring-1 ring-blue-100 transition group-hover:bg-blue-600 group-hover:text-white">
+                    <Icon className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0 flex-1 text-xs font-semibold leading-4">
+                    {label}
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 transition group-hover:translate-x-0.5 group-hover:text-blue-500" aria-hidden="true" />
+                </Link>
+              ))}
+            </div>
+          </div>
+        </DashboardSection>
+      </div>
 
     </div>
   )
