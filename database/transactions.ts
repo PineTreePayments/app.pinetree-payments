@@ -1,7 +1,7 @@
 import { supabaseAdmin, supabase as supabaseAnon } from "./supabase"
 const supabase = supabaseAdmin || supabaseAnon
 
-export type TransactionStatus = "PENDING" | "PROCESSING" | "CONFIRMED" | "FAILED" | "EXPIRED" | "REFUNDED"
+export type TransactionStatus = "PENDING" | "PROCESSING" | "CONFIRMED" | "FAILED" | "INCOMPLETE" | "EXPIRED" | "REFUNDED"
 
 export type Transaction = {
   id: string
@@ -123,7 +123,8 @@ export async function updateTransactionStatus(
   const { data, error } = await supabase
     .from("transactions")
     .update({
-      status
+      status,
+      updated_at: new Date().toISOString(),
     })
     .eq("id", transactionId)
     .select()

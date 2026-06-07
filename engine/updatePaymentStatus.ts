@@ -20,6 +20,7 @@ import {
 } from "@/database"
 import { deliverWebhook, type WebhookPaymentData } from "./webhookDelivery"
 import type { WebhookEvent } from "@/database/merchantWebhooks"
+import { reconcileTransactionForPayment } from "./reconcileTransaction"
 
 const STATUS_TO_WEBHOOK_EVENT: Partial<Record<PaymentStatus, WebhookEvent>> = {
   CONFIRMED: "payment.confirmed",
@@ -93,6 +94,33 @@ export async function updatePaymentStatus(
     provider_event: metadata?.providerEvent,
     raw_payload: metadata?.rawPayload
   })
+
+  // ── Transaction reconciliation ─────────────────────────────────────────────
+  // Whenever a payment reaches a terminal state, keep the linked transaction row
+  // in sync.  This is best-effort: a reconciliation failure must never block the
+  // authoritative payment status write.  The eventProcessor paths also call
+  // updateTransactionStatus directly after advancing the payment; the two writes
+  // converge on the same terminal status and are idempotent.
+  if (nextStatus === "CONFIRMED" || nextStatus === "FAILED" || nextStatus === "INCOMPLETE") {
+    try {
+      const reconcileResult = await reconcileTransactionForPayment(paymentId, nextStatus)
+      if (!reconcileResult.skipped) {
+        console.info("[reconcileTransaction] synced", {
+          paymentId,
+          paymentStatus: nextStatus,
+          previousTxStatus: reconcileResult.previousStatus,
+          newTxStatus: reconcileResult.newStatus,
+          transactionId: reconcileResult.transactionId,
+        })
+      }
+    } catch (reconcileErr) {
+      console.error("[reconcileTransaction] reconcile failed — payment status already committed", {
+        paymentId,
+        nextStatus,
+        error: reconcileErr instanceof Error ? reconcileErr.message : String(reconcileErr),
+      })
+    }
+  }
 
   // ── Webhook delivery ───────────────────────────────────────────────────────
   // Fire after the DB write succeeds. Use fire-and-forget so webhook delivery

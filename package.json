@@ -55,6 +55,7 @@
     "ethers": "^6.16.0",
     "solc": "^0.8.34",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.8"
   }
 }
