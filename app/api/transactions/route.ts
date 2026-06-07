@@ -15,8 +15,10 @@ function getErrorMessage(error: unknown, fallback: string) {
 export async function GET(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
+    const { searchParams } = req.nextUrl
+    const status = searchParams.get("status") || undefined
 
-    const data = await getTransactionsDashboardEngine(merchantId)
+    const data = await getTransactionsDashboardEngine(merchantId, status)
     return NextResponse.json({ success: true, ...data })
   } catch (error: unknown) {
     return NextResponse.json(

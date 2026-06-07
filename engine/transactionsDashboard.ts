@@ -200,9 +200,13 @@ function getChartAmountUsd(
   )
 }
 
-export async function getTransactionsDashboardEngine(merchantId: string): Promise<TransactionsDashboardData> {
+export async function getTransactionsDashboardEngine(merchantId: string, statusFilter?: string): Promise<TransactionsDashboardData> {
   // Use transactions table directly — includes cash, crypto, and all channels
-  const { data: txData, error: txError } = await db
+  const normalizedStatus = statusFilter && statusFilter.toUpperCase() !== "ALL"
+    ? statusFilter.toUpperCase()
+    : null
+
+  let txQuery = db
     .from("transactions")
     .select(`
       id,
@@ -228,7 +232,14 @@ export async function getTransactionsDashboardEngine(merchantId: string): Promis
     `)
     .eq("merchant_id", merchantId)
     .order("created_at", { ascending: false })
-    .limit(100)
+
+  if (normalizedStatus) {
+    txQuery = txQuery.eq("status", normalizedStatus)
+  } else {
+    txQuery = txQuery.limit(100)
+  }
+
+  const { data: txData, error: txError } = await txQuery
 
   if (txError) {
     throw new Error(`Failed to load transactions: ${txError.message}`)
