@@ -8,7 +8,6 @@ import {
   ArrowUpRight,
   BarChart3,
   Boxes,
-  CheckCircle2,
   ChevronRight,
   Link2,
   ReceiptText,
@@ -390,21 +389,28 @@ export default function DashboardPage() {
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">Active Rails</p>
 
               {connectedRailRows.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-3 grid gap-1.5 sm:flex sm:flex-wrap sm:gap-2">
                   {connectedRailRows.map((rail) => (
-                    <span
+                    <div
                       key={rail.id}
                       title={`${rail.label} connected`}
-                      className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/90 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 shadow-[0_4px_14px_rgba(16,185,129,0.08)]"
+                      className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-gray-200/80 bg-white/80 px-3 py-2 shadow-sm sm:inline-flex sm:w-auto sm:justify-start sm:rounded-full sm:border-emerald-200 sm:bg-emerald-50/80 sm:px-2.5 sm:py-1.5 sm:shadow-none"
                     >
-                      <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                      <span className="truncate">{rail.label}</span>
-                    </span>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 ring-2 ring-emerald-100" />
+                        <span className="truncate text-sm font-semibold text-gray-800 sm:text-xs sm:text-emerald-800">
+                          {rail.label}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-700 sm:hidden">
+                        Active
+                      </span>
+                    </div>
                   ))}
                 </div>
               )}
 
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                 <Link
                   href="/dashboard/providers"
                   className="inline-flex min-h-9 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
@@ -423,32 +429,37 @@ export default function DashboardPage() {
 
             {/* Today by Rail */}
             <div className="p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">
-                  <Activity className="h-3.5 w-3.5" aria-hidden="true" />
-                  Today by Rail
-                </p>
-                <div className="text-right">
-                  <p className="text-2xl font-semibold tabular-nums text-gray-950">{formatUsd(railActivityVolume)}</p>
-                  <p className="text-xs text-gray-500">
+              <div className="flex items-end justify-between gap-3">
+                <div>
+                  <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">
+                    <Activity className="h-3.5 w-3.5" aria-hidden="true" />
+                    Today by Rail
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">
                     {railActivityCount} payment{railActivityCount === 1 ? "" : "s"} today
                   </p>
                 </div>
+                <p className="shrink-0 text-xl font-semibold tabular-nums text-gray-950">{formatUsd(railActivityVolume)}</p>
               </div>
 
               {railRows.length ? (
-                <div className="mt-3 divide-y divide-blue-100/70 overflow-hidden rounded-xl border border-white/80 bg-white/75 backdrop-blur">
-                  {railRows.map(([rail, metrics]) => (
-                    <div key={rail} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-gray-950" title={formatDashboardNetwork(rail)}>
+                <div className="mt-3 overflow-hidden rounded-xl border border-white/80 bg-white/75 backdrop-blur">
+                  <div className="grid grid-cols-[minmax(0,1fr)_56px_84px] gap-2 border-b border-blue-100/70 bg-blue-50/45 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-500 sm:grid-cols-[minmax(0,1fr)_72px_96px]">
+                    <span>Rail</span>
+                    <span className="text-right">Payments</span>
+                    <span className="text-right">Volume</span>
+                  </div>
+                  <div className="max-h-40 divide-y divide-blue-100/70 overflow-y-auto overscroll-contain">
+                    {railRows.map(([rail, metrics]) => (
+                      <div key={rail} className="grid grid-cols-[minmax(0,1fr)_56px_84px] items-center gap-2 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_72px_96px]">
+                        <p className="truncate text-sm font-medium text-gray-950" title={formatDashboardNetwork(rail)}>
                           {formatDashboardNetwork(rail)}
                         </p>
-                        <p className="text-xs text-gray-500">{metrics.count} payment{metrics.count === 1 ? "" : "s"}</p>
+                        <p className="text-right text-xs tabular-nums text-gray-600">{metrics.count}</p>
+                        <p className="text-right text-sm font-semibold tabular-nums text-gray-950">{formatUsd(metrics.volume)}</p>
                       </div>
-                      <p className="text-sm font-semibold tabular-nums text-gray-950">{formatUsd(metrics.volume)}</p>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               ) : (
                 <div className="mt-3 rounded-xl border border-dashed border-blue-200 bg-white/70 px-3.5 py-4 text-sm text-gray-600">

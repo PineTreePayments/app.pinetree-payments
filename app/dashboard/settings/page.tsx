@@ -465,12 +465,12 @@ export default function SettingsPage() {
       </div>
       </DashboardSection>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid items-start gap-4 lg:grid-cols-2">
         <DashboardSection title="Payment Preferences" titleTone="blue">
-          <div className="flex h-full flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-            <div className="min-w-0 flex-1">
+          <div className="rounded-2xl border border-gray-200 bg-white p-3.5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+            <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-950">Enabled payment rails</p>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-2 flex flex-wrap gap-1.5">
                 {enabledRails.length ? enabledRails.map((provider) => (
                   <span key={provider.provider} className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/90 px-2.5 py-1.5 text-xs font-semibold capitalize text-emerald-700 shadow-[0_4px_14px_rgba(16,185,129,0.08)]">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
@@ -479,7 +479,7 @@ export default function SettingsPage() {
                 )) : <span className="text-sm text-gray-500">No payment rails enabled.</span>}
               </div>
             </div>
-            <Link href="/dashboard/providers" className="mt-4 inline-flex min-h-9 w-fit items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-3.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
+            <Link href="/dashboard/providers" className="mt-3 inline-flex min-h-8 w-fit items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-100">
               Manage Payment Rails
             </Link>
           </div>
@@ -496,18 +496,15 @@ export default function SettingsPage() {
       </div>
 
       <DashboardSection title="POS Preferences" titleTone="blue">
-        <div className="max-w-2xl rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+        <div className="max-w-2xl rounded-2xl border border-gray-200 bg-white p-3.5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <label className={labelClass}>Default Terminal Label</label>
-              <input
-                value={operations.default_terminal_label || ""}
-                onChange={(e) => updateOperation("default_terminal_label", e.target.value || null)}
-                className={fieldClass}
-                placeholder="Front Counter"
-              />
+              <p className="text-sm font-semibold text-gray-950">Terminal Management</p>
+              <p className="mt-0.5 text-xs leading-5 text-gray-500">
+                Manage terminals, device names, and terminal setup.
+              </p>
             </div>
-            <Link href="/dashboard/pos" className="inline-flex min-h-10 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 hover:bg-blue-100">
+            <Link href="/dashboard/pos" className="inline-flex min-h-9 shrink-0 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-3.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
               Manage Terminals
             </Link>
           </div>
@@ -515,7 +512,7 @@ export default function SettingsPage() {
       </DashboardSection>
 
       <DashboardSection title="Receipts" titleTone="blue">
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+        <div className="rounded-2xl border border-gray-200 bg-white p-3.5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.65fr)]">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Receipt Content</p>
@@ -623,20 +620,44 @@ export default function SettingsPage() {
       </DashboardSection>
 
       <DashboardSection title="Security & Integrations" titleTone="blue">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          <div className="flex min-h-28 flex-col rounded-2xl border border-gray-200 bg-white p-3.5 shadow-sm">
-            <p className="text-sm font-semibold text-gray-950">Account Security</p>
-            <p className="mt-1 flex-1 break-all text-xs leading-5 text-gray-500">
-              Signed in as {accountEmail || "merchant"}. Session security is managed by Supabase Auth.
-            </p>
-            <button type="button" onClick={() => void signOut()} className="mt-3 w-fit text-sm font-semibold text-red-600 hover:text-red-700">
+        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <div className="flex flex-col gap-3 border-b border-gray-100 px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-950">Account Security</p>
+              <p className="mt-0.5 break-all text-xs leading-5 text-gray-500">
+                Signed in as {accountEmail || "merchant"}. Session security is managed by Supabase Auth.
+              </p>
+            </div>
+            <button type="button" onClick={() => void signOut()} className="w-fit shrink-0 text-xs font-semibold text-red-600 hover:text-red-700">
               Sign out
             </button>
           </div>
-          <IntegrationLink title="Wallets" detail={`${integrationSummary.wallets} settlement wallet${integrationSummary.wallets === 1 ? "" : "s"} connected.`} href="/dashboard/wallets" label={integrationSummary.wallets ? "Connected" : "Set up"} />
-          <IntegrationLink title="Checkout & Webhooks" detail={`${integrationSummary.checkoutLinks} checkout link${integrationSummary.checkoutLinks === 1 ? "" : "s"}; webhook ${integrationSummary.webhookConfigured ? "configured" : "not configured"}.`} href="/dashboard/checkout" label={integrationSummary.webhookConfigured ? "Configured" : "Open"} />
-          <IntegrationLink title="Inventory" detail={integrationSummary.inventoryAvailable ? `${integrationSummary.inventoryItems} active inventory item${integrationSummary.inventoryItems === 1 ? "" : "s"}.` : "Database migration required."} href="/dashboard/inventory" label={integrationSummary.inventoryAvailable ? "Available" : "Set up"} />
-          <IntegrationLink title="POS Providers" detail={`${enabledRails.length} provider${enabledRails.length === 1 ? "" : "s"} currently enabled.`} href="/dashboard/providers" />
+          <div className="grid gap-2 p-2.5 sm:grid-cols-2 xl:grid-cols-4">
+            <IntegrationSummaryLink
+              title="Wallets"
+              value={`${integrationSummary.wallets} connected`}
+              detail="Settlement wallets"
+              href="/dashboard/wallets"
+            />
+            <IntegrationSummaryLink
+              title="Checkout & Webhooks"
+              value={`${integrationSummary.checkoutLinks} link${integrationSummary.checkoutLinks === 1 ? "" : "s"}`}
+              detail={`Webhook ${integrationSummary.webhookConfigured ? "configured" : "not configured"}`}
+              href="/dashboard/checkout"
+            />
+            <IntegrationSummaryLink
+              title="Inventory"
+              value={integrationSummary.inventoryAvailable ? `${integrationSummary.inventoryItems} item${integrationSummary.inventoryItems === 1 ? "" : "s"}` : "Not available"}
+              detail="Inventory integration"
+              href="/dashboard/inventory"
+            />
+            <IntegrationSummaryLink
+              title="Payment Rails"
+              value={`${enabledRails.length} enabled`}
+              detail="Provider connections"
+              href="/dashboard/providers"
+            />
+          </div>
         </div>
       </DashboardSection>
 
@@ -682,34 +703,40 @@ function CompactLinkPanel({
   label: string
 }) {
   return (
-    <div className="flex h-full flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-      <div className="min-w-0 flex-1">
+    <div className="rounded-2xl border border-gray-200 bg-white p-3.5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+      <div className="min-w-0">
         <p className="text-sm font-semibold text-gray-950">{title}</p>
         <p className="mt-0.5 text-xs leading-5 text-gray-500">{detail}</p>
       </div>
-      <Link href={href} className="mt-4 inline-flex min-h-9 w-fit items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-3.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
+      <Link href={href} className="mt-3 inline-flex min-h-8 w-fit items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-100">
         {label}
       </Link>
     </div>
   )
 }
 
-function IntegrationLink({
+function IntegrationSummaryLink({
   title,
+  value,
   detail,
-  href,
-  label = "Open"
+  href
 }: {
   title: string
+  value: string
   detail: string
   href: string
-  label?: string
 }) {
   return (
-    <div className="flex min-h-28 flex-col rounded-2xl border border-gray-200 bg-white p-3.5 shadow-sm">
-      <p className="text-sm font-semibold text-gray-950">{title}</p>
-      <p className="mt-1 flex-1 text-xs leading-5 text-gray-500">{detail}</p>
-      <Link href={href} className="mt-3 text-sm font-semibold text-blue-600 hover:text-blue-700">{label}</Link>
-    </div>
+    <Link
+      href={href}
+      className="group min-w-0 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5 transition hover:border-blue-200 hover:bg-blue-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <p className="truncate text-xs font-semibold text-gray-600">{title}</p>
+        <span className="shrink-0 text-[11px] font-semibold text-blue-600 group-hover:text-blue-700">Open</span>
+      </div>
+      <p className="mt-1 truncate text-sm font-semibold text-gray-950">{value}</p>
+      <p className="mt-0.5 truncate text-xs text-gray-500">{detail}</p>
+    </Link>
   )
 }
