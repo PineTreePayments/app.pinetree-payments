@@ -380,40 +380,7 @@ export default function DashboardPage() {
         <CompactMetricTile label="Failed Today" value={today.failed} tone={today.failed ? "red" : "default"} />
       </MetricGrid>
 
-      {/* Quick Actions — mobile only */}
-      <div className="lg:hidden">
-        <DashboardSection title="Quick Actions" titleTone="blue">
-          <div className="rounded-2xl border border-white/80 bg-white/80 p-2 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur">
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {quickActions.map(({ label, href, icon: Icon }) => (
-                <Link
-                  key={href}
-                  href={href}
-                  className="group flex min-h-14 min-w-0 items-center gap-2.5 rounded-xl border border-gray-100 bg-gradient-to-br from-white to-gray-50/80 px-3 py-2.5 text-gray-900 transition hover:-translate-y-0.5 hover:border-blue-200 hover:from-blue-50/70 hover:to-white hover:text-blue-700 hover:shadow-sm"
-                >
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 ring-1 ring-blue-100 transition group-hover:bg-blue-600 group-hover:text-white">
-                    <Icon className="h-4 w-4" aria-hidden="true" />
-                  </span>
-                  <span className="min-w-0 flex-1 text-xs font-semibold leading-4 sm:text-sm">
-                    {label}
-                  </span>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 transition group-hover:translate-x-0.5 group-hover:text-blue-500" aria-hidden="true" />
-                </Link>
-              ))}
-            </div>
-          </div>
-        </DashboardSection>
-      </div>
-
-      {/* 3 — Recent Activity */}
-      <DashboardSection title="Recent Activity" titleTone="blue">
-        <TransactionActivityTable
-          transactions={recentTx}
-          emptyMessage="No transactions yet."
-        />
-      </DashboardSection>
-
-      {/* 4 — Payment Operations + Today by Rail */}
+      {/* 3 — Payment Operations + Today by Rail */}
       <DashboardSection title="Payment Operations" titleTone="blue">
         <div className="overflow-hidden rounded-[1.35rem] border border-blue-100/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.12),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f8fbff_52%,#eef6ff_100%)] shadow-[0_18px_60px_rgba(37,99,235,0.10)]">
           <div className="grid gap-0 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
@@ -500,7 +467,7 @@ export default function DashboardPage() {
         </div>
       </DashboardSection>
 
-      {/* 5 — Transaction Volume */}
+      {/* 4 — Transaction Volume */}
       <ChartCard
         title="Transaction Volume"
         titleTone="blue"
@@ -560,7 +527,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* 6 — Historical Metrics */}
+      {/* 5 — Historical Metrics */}
       <MetricGrid>
         <CompactMetricTile label="All-Time Volume" value={formatUsd(volume)} tone="blue" />
         <CompactMetricTile label="All Transactions" value={txCount} />
@@ -568,30 +535,36 @@ export default function DashboardPage() {
         <CompactMetricTile label="Confirmed Today" value={today.confirmed} tone="green" />
       </MetricGrid>
 
-      {/* 7 — Quick Actions (desktop only) */}
-      <div className="hidden lg:block">
-        <DashboardSection title="Quick Actions" titleTone="blue">
-          <div className="rounded-2xl border border-white/80 bg-white/80 p-2 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur">
-            <div className="grid grid-cols-3 gap-2 xl:grid-cols-6">
-              {quickActions.map(({ label, href, icon: Icon }) => (
-                <Link
-                  key={href}
-                  href={href}
-                  className="group flex min-h-14 min-w-0 items-center gap-2.5 rounded-xl border border-gray-100 bg-gradient-to-br from-white to-gray-50/80 px-3 py-2.5 text-gray-900 transition hover:-translate-y-0.5 hover:border-blue-200 hover:from-blue-50/70 hover:to-white hover:text-blue-700 hover:shadow-sm"
-                >
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 ring-1 ring-blue-100 transition group-hover:bg-blue-600 group-hover:text-white">
-                    <Icon className="h-4 w-4" aria-hidden="true" />
-                  </span>
-                  <span className="min-w-0 flex-1 text-xs font-semibold leading-4">
-                    {label}
-                  </span>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 transition group-hover:translate-x-0.5 group-hover:text-blue-500" aria-hidden="true" />
-                </Link>
-              ))}
-            </div>
+      {/* 6 — Quick Actions */}
+      <DashboardSection title="Quick Actions" titleTone="blue">
+        <div className="rounded-2xl border border-white/80 bg-white/80 p-2 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+            {quickActions.map(({ label, href, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                className="group flex min-h-14 min-w-0 items-center gap-2.5 rounded-xl border border-gray-100 bg-gradient-to-br from-white to-gray-50/80 px-3 py-2.5 text-gray-900 transition hover:-translate-y-0.5 hover:border-blue-200 hover:from-blue-50/70 hover:to-white hover:text-blue-700 hover:shadow-sm"
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 ring-1 ring-blue-100 transition group-hover:bg-blue-600 group-hover:text-white">
+                  <Icon className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <span className="min-w-0 flex-1 text-xs font-semibold leading-4">
+                  {label}
+                </span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 transition group-hover:translate-x-0.5 group-hover:text-blue-500" aria-hidden="true" />
+              </Link>
+            ))}
           </div>
-        </DashboardSection>
-      </div>
+        </div>
+      </DashboardSection>
+
+      {/* 7 — Recent Activity */}
+      <DashboardSection title="Recent Activity" titleTone="blue">
+        <TransactionActivityTable
+          transactions={recentTx}
+          emptyMessage="No transactions yet."
+        />
+      </DashboardSection>
 
     </div>
   )

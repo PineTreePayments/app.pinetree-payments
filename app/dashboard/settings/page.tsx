@@ -57,7 +57,6 @@ type SettingsApiResponse = {
   settings?: MerchantSettingsPayload
   tax?: MerchantTaxSettingsPayload
   operations?: MerchantOperationsSettingsPayload
-  receiptDevices?: ReceiptDevice[]
   schemaReady?: boolean
   error?: string
 }
@@ -74,13 +73,6 @@ type IntegrationSummary = {
   webhookConfigured: boolean
   inventoryAvailable: boolean
   inventoryItems: number
-}
-
-type ReceiptDevice = {
-  label: string
-  type: "BROWSER_PRINT" | "TERMINAL_PRINT" | "NETWORK_PRINTER" | "PROVIDER_PRINTER"
-  provider: string | null
-  status: "AVAILABLE" | "REQUIRES_CONFIGURATION" | "CONNECTED" | "ERROR" | "DISABLED"
 }
 
 const defaultOperationsSettings: MerchantOperationsSettingsPayload = {
@@ -140,7 +132,6 @@ export default function SettingsPage() {
   const [taxRate, setTaxRate] = useState("")
   const [taxName, setTaxName] = useState("Sales Tax")
   const [operations, setOperations] = useState<MerchantOperationsSettingsPayload>(defaultOperationsSettings)
-  const [receiptDevices, setReceiptDevices] = useState<ReceiptDevice[]>([])
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -214,7 +205,6 @@ export default function SettingsPage() {
       setTaxName(tax.tax_name || "Sales Tax")
     }
     if (payload.operations) setOperations({ ...defaultOperationsSettings, ...payload.operations })
-    setReceiptDevices(payload.receiptDevices || [])
   }, [])
 
   const loadSettings = useCallback(async () => {
@@ -356,10 +346,10 @@ export default function SettingsPage() {
   ) => setOperations((current) => ({ ...current, [key]: value }))
 
   return (
-    <div className="space-y-5 md:space-y-7">
+    <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Settings</h1>
-        <p className="mt-1 text-sm text-gray-600">Business, payment, POS, tax, notification, and integration preferences.</p>
+        <p className="mt-1 text-sm text-gray-600">Business, payments, POS, receipts, tax, reporting, and integrations.</p>
       </div>
 
       {!schemaReady && (
@@ -372,9 +362,9 @@ export default function SettingsPage() {
       )}
 
       <DashboardSection title="Business Profile" titleTone="blue">
-      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <div>
             <label className={labelClass}>Business Name</label>
             <input
@@ -476,35 +466,37 @@ export default function SettingsPage() {
       </DashboardSection>
 
       <DashboardSection title="Payment Preferences" titleTone="blue">
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-gray-950">Enabled payment rails</h3>
-              <p className="mt-1 text-sm leading-6 text-gray-600">This summary reads from existing provider configuration.</p>
-              <div className="mt-3 flex flex-wrap gap-2">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-950">Enabled payment rails</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
                 {enabledRails.length ? enabledRails.map((provider) => (
                   <span key={provider.provider} className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold capitalize text-emerald-700">
                     {provider.provider.replaceAll("_", " ")}
                   </span>
-                )) : (
-                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">No enabled rails</span>
-                )}
+                )) : <span className="text-sm text-gray-500">No payment rails enabled.</span>}
               </div>
             </div>
-            <Link href="/dashboard/providers" className="inline-flex min-h-10 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 hover:bg-blue-100">
-              Manage Providers
+            <Link href="/dashboard/providers" className="inline-flex min-h-9 shrink-0 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-3.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
+              Manage Payment Rails
             </Link>
-          </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <SettingPreview title="Default payment rail" detail="Routing remains controlled by existing provider and routing configuration." />
-            <IntegrationLink title="Hosted Checkout" detail="Manage checkout links and customer-facing payment options." href="/dashboard/checkout" />
           </div>
         </div>
       </DashboardSection>
 
+      <DashboardSection title="Online Checkout" titleTone="blue">
+        <CompactLinkPanel
+          title="Hosted Checkout"
+          detail={`${integrationSummary.checkoutLinks} checkout link${integrationSummary.checkoutLinks === 1 ? "" : "s"} available. Manage links and customer-facing payment options.`}
+          href="/dashboard/checkout"
+          label="Manage Checkout"
+        />
+      </DashboardSection>
+
       <DashboardSection title="POS Preferences" titleTone="blue">
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
-          <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
             <div>
               <label className={labelClass}>Default Terminal Label</label>
               <input
@@ -514,60 +506,33 @@ export default function SettingsPage() {
                 placeholder="Front Counter"
               />
             </div>
-            <IntegrationLink title="Terminals & Device Preferences" detail="Manage terminal names, PINs, auto-lock, and drawer setup." href="/dashboard/pos" />
-            <SettingToggle title="Receipt prompt after payment" detail="Ask cashiers whether to show or send a receipt." checked={operations.receipt_prompt_after_payment} onChange={(value) => updateOperation("receipt_prompt_after_payment", value)} />
-            <SettingToggle title="Require cashier note" detail="Store preference only; enforcement is planned for supported POS workflows." checked={operations.require_cashier_note} onChange={(value) => updateOperation("require_cashier_note", value)} />
-            <SettingToggle title="Cash drawer enabled" detail="Stores the preference. Hardware drawer control is not live from Settings." checked={operations.cash_drawer_enabled} onChange={(value) => updateOperation("cash_drawer_enabled", value)} />
-            <SettingToggle title="Tipping enabled" detail="Preference is stored for future supported POS tipping." checked={operations.tipping_enabled} onChange={(value) => updateOperation("tipping_enabled", value)} />
+            <Link href="/dashboard/pos" className="inline-flex min-h-10 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 hover:bg-blue-100">
+              Manage Terminals
+            </Link>
           </div>
         </div>
       </DashboardSection>
 
       <DashboardSection title="Receipts" titleTone="blue">
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
-          <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {receiptDevices.map((device) => (
-              <div key={`${device.type}-${device.provider}`} className="rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-gray-950">{device.label}</p>
-                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                    device.status === "AVAILABLE" || device.status === "CONNECTED"
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                      : "border-amber-200 bg-amber-50 text-amber-700"
-                  }`}>
-                    {device.status.replaceAll("_", " ")}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-gray-500">
-                  {device.type === "BROWSER_PRINT"
-                    ? "Printable HTML and PDF downloads are live."
-                    : "Provider or printer configuration is required."}
-                </p>
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.65fr)]">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Receipt Content</p>
+              <div className="mt-2 grid overflow-hidden rounded-xl border border-gray-100 sm:grid-cols-2">
+                <CompactSettingToggle title="Business name" checked={operations.show_business_name} onChange={(value) => updateOperation("show_business_name", value)} />
+                <CompactSettingToggle title="Business address" checked={operations.show_business_address} onChange={(value) => updateOperation("show_business_address", value)} />
+                <CompactSettingToggle title="Transaction ID" checked={operations.show_transaction_id} onChange={(value) => updateOperation("show_transaction_id", value)} />
+                <CompactSettingToggle title="Provider" checked={operations.show_provider} onChange={(value) => updateOperation("show_provider", value)} />
+                <CompactSettingToggle title="Network" checked={operations.show_network} onChange={(value) => updateOperation("show_network", value)} />
+                <CompactSettingToggle title="Wallet reference" checked={operations.show_wallet_reference} onChange={(value) => updateOperation("show_wallet_reference", value)} />
               </div>
-            ))}
-            {!receiptDevices.length && (
-              <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-2.5">
-                <p className="text-sm font-semibold text-emerald-900">Browser Print / PDF</p>
-                <p className="mt-1 text-xs text-emerald-700">Available after the receipt-device migration is applied.</p>
-              </div>
-            )}
-          </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            <SettingToggle title="Show business name" detail="Include the stored business name on generated receipts." checked={operations.show_business_name} onChange={(value) => updateOperation("show_business_name", value)} />
-            <SettingToggle title="Show business address" detail="Include address fields when present." checked={operations.show_business_address} onChange={(value) => updateOperation("show_business_address", value)} />
-            <SettingToggle title="Show transaction ID" detail="Include the PineTree transaction reference." checked={operations.show_transaction_id} onChange={(value) => updateOperation("show_transaction_id", value)} />
-            <SettingToggle title="Show network" detail="Include the settlement network when available." checked={operations.show_network} onChange={(value) => updateOperation("show_network", value)} />
-            <SettingToggle title="Show provider" detail="Include the payment provider label." checked={operations.show_provider} onChange={(value) => updateOperation("show_provider", value)} />
-            <SettingToggle title="Show wallet reference" detail="Include wallet references on receipts when available." checked={operations.show_wallet_reference} onChange={(value) => updateOperation("show_wallet_reference", value)} />
-            <SettingToggle title="Auto-print receipts" detail="Preference is stored; printer hardware wiring is planned." checked={operations.auto_print} onChange={(value) => updateOperation("auto_print", value)} />
-            <SettingToggle title="Email receipts" detail="Preference is stored; automatic delivery is planned." checked={operations.email_receipt_enabled} onChange={(value) => updateOperation("email_receipt_enabled", value)} />
-            <SettingToggle title="SMS receipts" detail="Preference is stored; automatic SMS delivery is planned." checked={operations.sms_receipt_enabled} onChange={(value) => updateOperation("sms_receipt_enabled", value)} />
-            <div className="md:col-span-2">
+            </div>
+            <div>
               <label className={labelClass}>Receipt Footer</label>
               <textarea
                 value={operations.receipt_footer || ""}
                 onChange={(e) => updateOperation("receipt_footer", e.target.value || null)}
-                className={`${fieldClass} min-h-24`}
+                className={`${fieldClass} min-h-28`}
                 placeholder="Thank you for shopping with us."
               />
             </div>
@@ -576,17 +541,15 @@ export default function SettingsPage() {
       </DashboardSection>
 
       <DashboardSection title="Tax" titleTone="blue">
-      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
-
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50/70 p-4 md:col-span-2">
-            <div><p className="text-sm font-semibold text-gray-950">Tax collection</p><p className="mt-0.5 text-xs text-gray-500">Apply the configured tax rate to supported POS sales.</p></div>
-            <ToggleSwitch
-              checked={taxEnabled}
-              onChange={setTaxEnabled}
-            />
-          </div>
-
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <div className="grid gap-3 md:grid-cols-[minmax(180px,0.75fr)_minmax(0,1fr)_minmax(0,1fr)] md:items-end">
+            <div className="flex min-h-10 items-center justify-between rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2">
+              <div>
+                <p className="text-sm font-semibold text-gray-950">Tax enabled</p>
+                <p className="text-xs text-gray-500">Apply tax to POS sales.</p>
+              </div>
+              <ToggleSwitch checked={taxEnabled} onChange={setTaxEnabled} />
+            </div>
           <div>
             <label className={labelClass}>Tax Name</label>
             <input
@@ -606,16 +569,15 @@ export default function SettingsPage() {
             />
           </div>
         </div>
-      </div>
+        </div>
       </DashboardSection>
 
-      <DashboardSection title="Notifications" titleTone="blue">
-      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
-
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <DashboardSection title="Reporting & Reminders" titleTone="blue">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)] md:items-end">
           <div>
             <label className={labelClass}>Business Day Closeout Time</label>
-            <div className="mt-2 flex flex-wrap items-center gap-3">
+            <div className="mt-1.5 flex items-center gap-2">
               <select
                 value={closeHour}
                 onChange={(e) => setCloseHour(e.target.value)}
@@ -631,7 +593,7 @@ export default function SettingsPage() {
                 })}
               </select>
 
-              <span className="text-gray-900 font-medium">:</span>
+              <span className="font-medium text-gray-900">:</span>
 
               <select
                 value={closeMinute}
@@ -645,35 +607,23 @@ export default function SettingsPage() {
                 ))}
               </select>
             </div>
-
-            <p className="text-xs text-gray-500 mt-2">
-              Determines when daily reports and revenue totals reset.
-            </p>
+            <p className="mt-1.5 text-xs text-gray-500">Determines when merchant daily reporting resets.</p>
           </div>
 
-          <div className="space-y-3">
-            <div className="flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50/70 p-4">
-              <div><p className="text-sm font-semibold text-gray-950">End-of-day reminder</p><p className="mt-0.5 text-xs text-gray-500">Show the existing report reminder.</p></div>
-              <ToggleSwitch
-                checked={reportToast}
-                onChange={setReportToast}
-              />
+            <div className="flex min-h-16 items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
+              <div>
+                <p className="text-sm font-semibold text-gray-950">End-of-day reminder</p>
+                <p className="text-xs text-gray-500">Show the existing report reminder.</p>
+              </div>
+              <ToggleSwitch checked={reportToast} onChange={setReportToast} />
             </div>
           </div>
-          <div className="grid gap-3 md:col-span-2 md:grid-cols-2">
-            <SettingToggle title="Successful payment alerts" detail="Preference stored; notification delivery is planned." checked={operations.successful_payment_alerts} onChange={(value) => updateOperation("successful_payment_alerts", value)} />
-            <SettingToggle title="Failed payment alerts" detail="Preference stored; notification delivery is planned." checked={operations.failed_payment_alerts} onChange={(value) => updateOperation("failed_payment_alerts", value)} />
-            <SettingToggle title="Incomplete payment alerts" detail="Preference stored; notification delivery is planned." checked={operations.incomplete_payment_alerts} onChange={(value) => updateOperation("incomplete_payment_alerts", value)} />
-            <SettingToggle title="Daily summary" detail="Preference stored; scheduled summary delivery is planned." checked={operations.daily_summary} onChange={(value) => updateOperation("daily_summary", value)} />
-            <SettingToggle title="Low inventory alerts" detail="Preference stored; alert delivery is planned." checked={operations.low_inventory_alerts} onChange={(value) => updateOperation("low_inventory_alerts", value)} />
-          </div>
         </div>
-      </div>
       </DashboardSection>
 
       <DashboardSection title="Security & Integrations" titleTone="blue">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          <div className="flex min-h-36 flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="flex min-h-28 flex-col rounded-2xl border border-gray-200 bg-white p-3.5 shadow-sm">
             <p className="text-sm font-semibold text-gray-950">Account Security</p>
             <p className="mt-1 flex-1 break-all text-xs leading-5 text-gray-500">
               Signed in as {accountEmail || "merchant"}. Session security is managed by Supabase Auth.
@@ -702,36 +652,43 @@ export default function SettingsPage() {
   )
 }
 
-function SettingPreview({ title, detail }: { title: string; detail: string }) {
-  return (
-    <div className="rounded-xl border border-gray-100 bg-gray-50/70 p-4">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-gray-950">{title}</p>
-        <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-500">Configure later</span>
-      </div>
-      <p className="mt-1 text-xs leading-5 text-gray-500">{detail}</p>
-    </div>
-  )
-}
-
-function SettingToggle({
+function CompactSettingToggle({
   title,
-  detail,
   checked,
   onChange
 }: {
   title: string
-  detail: string
   checked: boolean
   onChange: (value: boolean) => void
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50/70 p-4">
-      <div>
+    <div className="flex min-h-12 items-center justify-between gap-3 border-b border-gray-100 px-3 py-2.5 last:border-b-0 sm:[&:nth-child(odd)]:border-r">
+      <p className="text-sm font-medium text-gray-900">{title}</p>
+      <ToggleSwitch checked={checked} onChange={onChange} />
+    </div>
+  )
+}
+
+function CompactLinkPanel({
+  title,
+  detail,
+  href,
+  label
+}: {
+  title: string
+  detail: string
+  href: string
+  label: string
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
         <p className="text-sm font-semibold text-gray-950">{title}</p>
         <p className="mt-0.5 text-xs leading-5 text-gray-500">{detail}</p>
       </div>
-      <ToggleSwitch checked={checked} onChange={onChange} />
+      <Link href={href} className="inline-flex min-h-9 shrink-0 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-3.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
+        {label}
+      </Link>
     </div>
   )
 }
@@ -748,7 +705,7 @@ function IntegrationLink({
   label?: string
 }) {
   return (
-    <div className="flex min-h-36 flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+    <div className="flex min-h-28 flex-col rounded-2xl border border-gray-200 bg-white p-3.5 shadow-sm">
       <p className="text-sm font-semibold text-gray-950">{title}</p>
       <p className="mt-1 flex-1 text-xs leading-5 text-gray-500">{detail}</p>
       <Link href={href} className="mt-3 text-sm font-semibold text-blue-600 hover:text-blue-700">{label}</Link>
