@@ -4,12 +4,6 @@ import { useCallback, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import { DashboardSection } from "@/components/dashboard/DashboardPrimitives"
-import ToggleSwitch from "@/components/ui/ToggleSwitch"
-import {
-  LoadingSkeleton,
-  PageHeader,
-  Surface
-} from "@/components/ui/DesignSystem"
 
 type MerchantSettingsPayload = {
   business_name: string | null
@@ -47,9 +41,6 @@ function parseCloseoutTime(value: string) {
     minute: minute.padStart(2, "0")
   }
 }
-
-const fieldClass = "form-field mt-1.5"
-const labelClass = "text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500"
 
 export default function SettingsPage() {
   const [businessName, setBusinessName] = useState("")
@@ -204,101 +195,102 @@ export default function SettingsPage() {
   if (loading) {
     return (
       <div className="space-y-5 md:space-y-7">
-        <PageHeader title="Settings" description="Manage merchant profile, tax, and reporting preferences." />
-        <LoadingSkeleton rows={5} />
+        <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Settings</h1>
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 text-gray-700 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+          Loading settings...
+        </div>
       </div>
     )
   }
 
   return (
     <div className="space-y-5 md:space-y-7">
-      <PageHeader
-        title="Settings"
-        description="Manage merchant profile, tax, and reporting preferences."
-      />
+      <div>
+        <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Settings</h1>
+      </div>
 
       <DashboardSection title="Account" titleTone="blue">
-      <Surface>
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
-            <label className={labelClass}>Business Name</label>
+            <label className="text-sm text-gray-700">Business Name</label>
             <input
               value={businessName}
               onChange={(e) => setBusinessName(e.target.value)}
-              className={fieldClass}
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
             />
           </div>
 
           <div>
-            <label className={labelClass}>Account Email</label>
+            <label className="text-sm text-gray-700">Account Email</label>
             <input
               value={email}
               disabled
-              className={`${fieldClass} cursor-not-allowed bg-slate-100 text-slate-500`}
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-100 text-gray-900"
             />
           </div>
 
           <div>
-            <label className={labelClass}>Business Address</label>
+            <label className="text-sm text-gray-700">Business Address</label>
             <input
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              className={fieldClass}
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
             />
           </div>
 
           <div>
-            <label className={labelClass}>City</label>
+            <label className="text-sm text-gray-700">City</label>
             <input
               value={city}
               onChange={(e) => setCity(e.target.value)}
-              className={fieldClass}
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
             />
           </div>
 
           <div>
-            <label className={labelClass}>State</label>
+            <label className="text-sm text-gray-700">State</label>
             <input
               value={state}
               onChange={(e) => setState(e.target.value)}
-              className={fieldClass}
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
             />
           </div>
 
           <div>
-            <label className={labelClass}>ZIP</label>
+            <label className="text-sm text-gray-700">ZIP</label>
             <input
               value={zip}
               onChange={(e) => setZip(e.target.value)}
-              className={fieldClass}
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
             />
           </div>
 
           <div>
-            <label className={labelClass}>Country</label>
+            <label className="text-sm text-gray-700">Country</label>
             <input
               value={country}
               onChange={(e) => setCountry(e.target.value)}
-              className={fieldClass}
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
             />
           </div>
 
           <div>
-            <label className={labelClass}>Business Phone</label>
+            <label className="text-sm text-gray-700">Business Phone</label>
             <input
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              className={fieldClass}
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
             />
           </div>
 
           <div>
-            <label className={labelClass}>Business Type</label>
+            <label className="text-sm text-gray-700">Business Type</label>
             <select
               value={businessType}
               onChange={(e) => setBusinessType(e.target.value)}
-              className={fieldClass}
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
             >
               <option value="">Select</option>
               <option value="retail">Retail</option>
@@ -308,57 +300,55 @@ export default function SettingsPage() {
             </select>
           </div>
         </div>
-      </Surface>
+      </div>
       </DashboardSection>
 
       <DashboardSection title="Tax Configuration" titleTone="blue">
-      <Surface>
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-100 bg-slate-50/70 p-4 md:col-span-2">
-            <div>
-              <p className="text-sm font-semibold text-slate-950">Enable Tax Collection</p>
-              <p className="mt-0.5 text-xs text-slate-500">Apply the configured tax rate to supported sales.</p>
-            </div>
-            <ToggleSwitch
+          <div className="flex items-center gap-3">
+            <input
+              type="checkbox"
               checked={taxEnabled}
-              onChange={setTaxEnabled}
+              onChange={(e) => setTaxEnabled(e.target.checked)}
             />
+            <span className="text-sm text-gray-900">Enable Tax Collection</span>
           </div>
 
           <div>
-            <label className={labelClass}>Tax Name</label>
+            <label className="text-sm text-gray-700">Tax Name</label>
             <input
               value={taxName}
               onChange={(e) => setTaxName(e.target.value)}
-              className={fieldClass}
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
             />
           </div>
 
           <div>
-            <label className={labelClass}>Tax Rate (%)</label>
+            <label className="text-sm text-gray-700">Tax Rate (%)</label>
             <input
               value={taxRate}
               onChange={(e) => setTaxRate(e.target.value)}
-              className={fieldClass}
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900"
               placeholder="8.25"
             />
           </div>
         </div>
-      </Surface>
+      </div>
       </DashboardSection>
 
       <DashboardSection title="Reporting" titleTone="blue">
-      <Surface>
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
-            <label className={labelClass}>Business Day Closeout Time</label>
+            <label className="text-sm text-gray-700">Business Day Closeout Time</label>
             <div className="mt-2 flex flex-wrap items-center gap-3">
               <select
                 value={closeHour}
                 onChange={(e) => setCloseHour(e.target.value)}
-                className="form-field w-24"
+                className="border border-gray-300 rounded-md px-3 py-2 text-gray-900 bg-white w-24"
               >
                 {Array.from({ length: 24 }, (_, i) => {
                   const val = i < 10 ? `0${i}` : `${i}`
@@ -375,7 +365,7 @@ export default function SettingsPage() {
               <select
                 value={closeMinute}
                 onChange={(e) => setCloseMinute(e.target.value)}
-                className="form-field w-24"
+                className="border border-gray-300 rounded-md px-3 py-2 text-gray-900 bg-white w-24"
               >
                 {["00", "05", "10", "15", "20", "25", "30", "35", "40", "45", "50", "55"].map((val) => (
                   <option key={val} value={val}>
@@ -390,18 +380,19 @@ export default function SettingsPage() {
             </p>
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
-            <div>
-              <p className="text-sm font-semibold text-slate-950">End-of-Day Reminder</p>
-              <p className="mt-0.5 text-xs leading-5 text-slate-500">Show a reminder to print the daily report.</p>
-            </div>
-              <ToggleSwitch
+          <div>
+            <label className="text-sm text-gray-700">End-of-Day Reminder</label>
+            <div className="mt-2 flex items-center gap-3">
+              <input
+                type="checkbox"
                 checked={reportToast}
-                onChange={setReportToast}
+                onChange={(e) => setReportToast(e.target.checked)}
               />
+              <span className="text-sm text-gray-900">Show reminder toast to print daily report</span>
+            </div>
           </div>
         </div>
-      </Surface>
+      </div>
       </DashboardSection>
 
       <div>

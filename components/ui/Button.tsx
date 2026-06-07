@@ -20,9 +20,11 @@ export default function Button({
   className = ""
 }: Props) {
   const base =
-    "inline-flex min-h-11 items-center justify-center rounded-xl px-4 text-sm font-semibold transition-all focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 disabled:cursor-not-allowed active:scale-[0.98] sm:min-h-10"
+    "inline-flex items-center justify-center font-semibold text-sm rounded-md h-10 px-4 transition-all focus:outline-none disabled:cursor-not-allowed active:scale-[0.98]"
 
   if (variant === "primary") {
+    // Use a solid professional blue for primary actions, matching the Coinbase style.
+    // The color #1652f0 is the suggested primary blue; fallback to #0052FF if needed.
     const primaryBlue = "#1652f0";
     return (
       <button
@@ -30,7 +32,7 @@ export default function Button({
         disabled={disabled}
         onClick={onClick}
         style={{ background: disabled ? undefined : primaryBlue }}
-        className={`${base} border border-transparent text-white shadow-[0_8px_20px_rgba(22,82,240,0.20)] hover:-translate-y-0.5 hover:brightness-105 hover:shadow-[0_12px_28px_rgba(22,82,240,0.24)] disabled:bg-[#1652f0] disabled:text-white disabled:opacity-60 disabled:shadow-none ${fullWidth ? "w-full" : ""} ${className}`}
+        className={`${base} border border-transparent text-white shadow-sm hover:brightness-110 hover:shadow-md disabled:bg-[#1652f0] disabled:text-white disabled:opacity-60 disabled:shadow-none ${fullWidth ? "w-full" : ""} ${className}`}
       >
         {children}
       </button>

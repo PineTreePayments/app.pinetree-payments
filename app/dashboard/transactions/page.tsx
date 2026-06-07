@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import TransactionActivityTable from "../TransactionActivityTable"
@@ -18,7 +18,6 @@ import {
   formatDashboardProvider,
   mostFrequentKey
 } from "@/components/dashboard/displayHelpers"
-import { PageHeader } from "@/components/ui/DesignSystem"
 
 import {
   ResponsiveContainer,
@@ -95,9 +94,6 @@ export default function TransactionsPage() {
   const [walletFilter, setWalletFilter] = useState("all")
   const [networkFilter, setNetworkFilter] = useState("all")
   const [channelFilter, setChannelFilter] = useState("all")
-  const [statusFilter, setStatusFilter] = useState("all")
-  const [dateFilter, setDateFilter] = useState("all")
-  const [searchQuery, setSearchQuery] = useState("")
 
   const [showChart, setShowChart] = useState(false)
   const [chartRange, setChartRange] = useState("24h")
@@ -253,47 +249,11 @@ export default function TransactionsPage() {
     }
   }, [loadDashboardData])
 
-  const providerOptions = useMemo(
-    () => Array.from(new Set(transactions.map((tx) => tx.provider).filter(Boolean))).sort(),
-    [transactions]
-  )
-  const networkOptions = useMemo(
-    () => Array.from(new Set(transactions.map((tx) => tx.network).filter(Boolean))).sort(),
-    [transactions]
-  )
-
   const filteredTransactions = transactions.filter((tx) => {
     if (walletFilter !== "all" && tx.provider !== walletFilter) return false
     if (networkFilter !== "all" && tx.network !== networkFilter) return false
     if (channelFilter === "pos" && tx.channel !== "pos" && tx.provider !== "cash") return false
     if (channelFilter === "online" && tx.channel !== "online") return false
-    if (statusFilter !== "all" && String(tx.status).toUpperCase() !== statusFilter) return false
-
-    if (dateFilter !== "all") {
-      const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
-      const timestamp = tx.created_at || payment?.created_at
-      if (!timestamp) return false
-      const createdAt = parseTimestamp(timestamp)
-      const days = Number(dateFilter)
-      const cutoff = new Date()
-      cutoff.setDate(cutoff.getDate() - days)
-      if (Number.isNaN(createdAt.getTime()) || createdAt < cutoff) return false
-    }
-
-    const query = searchQuery.trim().toLowerCase()
-    if (query) {
-      const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
-      const searchable = [
-        tx.id,
-        tx.payment_id,
-        tx.provider_transaction_id,
-        tx.provider,
-        tx.network,
-        payment?.id,
-        payment?.provider_reference
-      ].filter(Boolean).join(" ").toLowerCase()
-      if (!searchable.includes(query)) return false
-    }
     return true
   })
 
@@ -316,10 +276,11 @@ export default function TransactionsPage() {
 
   return (
     <div className="space-y-5 md:space-y-7">
-      <PageHeader
-        title="Transactions"
-        description="Review the complete recent ledger. All canonical payment states are visible by default."
-      />
+      <div>
+        <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">
+          Transactions
+        </h1>
+      </div>
 
       <div className="grid gap-3 md:gap-4 lg:grid-cols-[1.18fr_0.82fr]">
         <button
@@ -390,31 +351,22 @@ export default function TransactionsPage() {
 
       <DashboardSection title="Transaction Ledger" titleTone="blue">
         <div className="rounded-2xl border border-gray-200/80 bg-white p-2 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-2.5">
-          <div className="grid min-w-0 grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
-          <label className="col-span-2 md:col-span-3 xl:col-span-2">
-            <span className={filterLabelClass}>Search transactions</span>
-            <input
-              aria-label="Search transactions"
-              className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-900 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Payment ID, reference, provider..."
-            />
-          </label>
+          <div className="grid min-w-0 grid-cols-3 gap-1.5 sm:gap-3">
           <label className={filterRowClass}>
-            <span className={filterLabelClass}>Provider</span>
+            <span className={filterLabelClass}>Wallet</span>
             <select
-              aria-label="Provider filter"
-              className={`${filterSelectClass} h-10 rounded-xl`}
+              aria-label="Wallet filter"
+              className={filterSelectClass}
               value={walletFilter}
               onChange={(e) => setWalletFilter(e.target.value)}
             >
-              <option value="all">All Providers</option>
-              {providerOptions.map((provider) => (
-                <option key={provider} value={provider}>
-                  {formatDashboardProvider(provider)}
-                </option>
-              ))}
+              <option value="all">All Wallets</option>
+              <option value="solana">Solana Pay</option>
+              <option value="coinbase">Coinbase Business</option>
+              <option value="shift4">Shift4</option>
+              <option value="base">Base Pay</option>
+              <option value="lightning">Bitcoin Lightning</option>
+              <option value="cash">Cash</option>
             </select>
           </label>
 
@@ -422,46 +374,15 @@ export default function TransactionsPage() {
             <span className={filterLabelClass}>Network</span>
             <select
               aria-label="Network filter"
-              className={`${filterSelectClass} h-10 rounded-xl`}
+              className={filterSelectClass}
               value={networkFilter}
               onChange={(e) => setNetworkFilter(e.target.value)}
             >
               <option value="all">All Networks</option>
-              {networkOptions.map((network) => (
-                <option key={network} value={network || ""}>
-                  {formatDashboardNetwork(network)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className={filterRowClass}>
-            <span className={filterLabelClass}>Status</span>
-            <select
-              aria-label="Status filter"
-              className={`${filterSelectClass} h-10 rounded-xl`}
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option value="all">All Statuses</option>
-              {["CREATED", "PENDING", "PROCESSING", "CONFIRMED", "FAILED", "INCOMPLETE"].map((status) => (
-                <option key={status} value={status}>{status}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className={filterRowClass}>
-            <span className={filterLabelClass}>Date range</span>
-            <select
-              aria-label="Date range filter"
-              className={`${filterSelectClass} h-10 rounded-xl`}
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value)}
-            >
-              <option value="all">All Recent</option>
-              <option value="1">Last 24 Hours</option>
-              <option value="7">Last 7 Days</option>
-              <option value="30">Last 30 Days</option>
+              <option value="solana">Solana</option>
+              <option value="base">Base</option>
+              <option value="ethereum">Ethereum</option>
+              <option value="bitcoin_lightning">Bitcoin Lightning</option>
             </select>
           </label>
 
@@ -469,7 +390,7 @@ export default function TransactionsPage() {
             <span className={filterLabelClass}>Channel</span>
             <select
               aria-label="Channel filter"
-              className={`${filterSelectClass} h-10 rounded-xl`}
+              className={filterSelectClass}
               value={channelFilter}
               onChange={(e) => setChannelFilter(e.target.value)}
             >

@@ -3,8 +3,6 @@
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
-import Link from "next/link"
-import AuthFrame from "@/components/ui/AuthFrame"
 
 /* =============================
 TOGGLE GOOGLE SIGNUP HERE
@@ -101,17 +99,20 @@ export default function SignupPage() {
   }
 
   return (
-    <AuthFrame
-      title="Create your account"
-      subtitle="Open a PineTree merchant workspace and connect payment methods when you are ready."
-    >
+    <div className="flex min-h-screen items-center justify-center bg-gray-100 px-4">
+
+      <div className="bg-white p-6 sm:p-8 rounded-lg shadow w-full max-w-[380px]">
+
+        <h1 className="text-2xl font-semibold mb-6 text-center">
+          Create PineTree Account
+        </h1>
 
         {/* GOOGLE BUTTON (TOGGLED) */}
         {ENABLE_GOOGLE && (
           <>
             <button
               onClick={handleGoogle}
-              className="mb-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white py-2 hover:bg-gray-50"
+              className="w-full border py-2 rounded mb-4 flex items-center justify-center gap-2 hover:bg-gray-50"
             >
               Continue with Google
             </button>
@@ -124,47 +125,37 @@ export default function SignupPage() {
           </>
         )}
 
-        <div className="space-y-3">
-          <input
-            className="form-field"
-            type="email"
-            aria-label="Email"
-            autoComplete="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e)=>setEmail(e.target.value)}
-          />
+        <input
+          className="w-full border p-2 mb-4 rounded"
+          placeholder="Email"
+          value={email}
+          onChange={(e)=>setEmail(e.target.value)}
+        />
 
-          <input
-            type="password"
-            className="form-field"
-            aria-label="Password"
-            autoComplete="new-password"
-            placeholder="Password"
-            value={password}
-            onChange={(e)=>setPassword(e.target.value)}
-          />
+        <input
+          type="password"
+          className="w-full border p-2 mb-4 rounded"
+          placeholder="Password"
+          value={password}
+          onChange={(e)=>setPassword(e.target.value)}
+        />
 
-          <button
-            onClick={handleSignup}
-            disabled={loading}
-            className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-[#1652f0] px-4 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(22,82,240,0.22)] transition hover:-translate-y-0.5 hover:bg-blue-700 disabled:opacity-60"
-          >
-            {loading ? "Creating..." : "Create Account"}
-          </button>
-        </div>
+        <button
+          onClick={handleSignup}
+          disabled={loading}
+          className="w-full bg-black text-white py-2 rounded disabled:opacity-60"
+        >
+          {loading ? "Creating..." : "Create Account"}
+        </button>
 
         {message && (
-          <p role="status" className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-center text-sm text-blue-700">
+          <p className="mt-4 text-sm text-center text-gray-700">
             {message}
           </p>
         )}
-        <p className="mt-5 text-center text-sm text-gray-600">
-          Already have an account?{" "}
-          <Link href="/login" className="font-semibold text-blue-600 hover:text-blue-700">
-            Sign in
-          </Link>
-        </p>
-    </AuthFrame>
+
+      </div>
+
+    </div>
   )
 }

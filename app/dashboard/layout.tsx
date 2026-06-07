@@ -1,12 +1,10 @@
 "use client"
 
 import Link from "next/link"
-import Image from "next/image"
 import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { Toaster } from "sonner"
-import { Search, X } from "lucide-react"
 
 export default function DashboardLayout({
   children,
@@ -20,10 +18,7 @@ export default function DashboardLayout({
   const [isAdmin, setIsAdmin] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [commandOpen, setCommandOpen] = useState(false)
-  const [commandQuery, setCommandQuery] = useState("")
   const accountMenuRef = useRef<HTMLDivElement | null>(null)
-  const commandInputRef = useRef<HTMLInputElement | null>(null)
 
   /* -----------------------------
   SESSION CHECK
@@ -103,24 +98,6 @@ export default function DashboardLayout({
     }
   }, [menuOpen])
 
-  useEffect(() => {
-    function handleCommandShortcut(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault()
-        setCommandOpen((open) => !open)
-      }
-      if (event.key === "Escape") setCommandOpen(false)
-    }
-
-    window.addEventListener("keydown", handleCommandShortcut)
-    return () => window.removeEventListener("keydown", handleCommandShortcut)
-  }, [])
-
-  useEffect(() => {
-    if (!commandOpen) return
-    queueMicrotask(() => commandInputRef.current?.focus())
-  }, [commandOpen])
-
   /* -----------------------------
   LOGOUT
   ----------------------------- */
@@ -146,19 +123,9 @@ export default function DashboardLayout({
     { name: "Settings", href: "/dashboard/settings" },
     ...(isAdmin ? [{ name: "Admin", href: "/dashboard/admin" }] : []),
   ]
-  const normalizedQuery = commandQuery.trim().toLowerCase()
-  const commandItems = nav.filter((item) =>
-    normalizedQuery ? item.name.toLowerCase().includes(normalizedQuery) : true
-  )
-
-  function runCommand(href: string) {
-    setCommandOpen(false)
-    setCommandQuery("")
-    router.push(href)
-  }
 
   return (
-    <div className="relative min-h-screen bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.08),transparent_30%),#f5f7fb]">
+    <div className="relative min-h-screen bg-gray-100">
       {/* MOBILE OVERLAY */}
       {sidebarOpen && (
         <div
@@ -171,7 +138,7 @@ export default function DashboardLayout({
         {/* SIDEBAR */}
         <aside
           className={`
-            fixed inset-y-0 left-0 z-40 w-64 border-r border-slate-200/80 bg-white/92 backdrop-blur-xl
+            fixed inset-y-0 left-0 z-40 w-64 bg-white border-r border-gray-200
             transform transition-transform duration-300 ease-in-out
             ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
             lg:translate-x-0 lg:flex lg:flex-col
@@ -185,7 +152,7 @@ export default function DashboardLayout({
               onClick={() => setSidebarOpen(false)}
               className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-gray-200/80 transition hover:bg-gray-50 focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"
             >
-              <Image
+              <img
                 src="/favicon.ico"
                 alt=""
                 aria-hidden="true"
@@ -221,14 +188,14 @@ export default function DashboardLayout({
         {/* MAIN */}
         <div className="flex min-w-0 flex-1 flex-col lg:ml-64">
           {/* TOP BAR */}
-          <header className="sticky top-0 z-20 flex min-h-16 items-center justify-between border-b border-blue-500/30 bg-blue-600/95 px-3 pt-[env(safe-area-inset-top)] shadow-[0_8px_30px_rgba(15,23,42,0.10)] backdrop-blur-xl sm:px-4 lg:px-8">
+          <header className="sticky top-0 z-20 flex min-h-16 items-center justify-between bg-blue-600 px-3 pt-[env(safe-area-inset-top)] shadow-sm sm:px-4 lg:px-8">
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setSidebarOpen(true)}
                 className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-white/95 shadow-sm ring-1 ring-white/40 transition hover:bg-white focus:outline-none focus-visible:ring-4 focus-visible:ring-white/30 lg:hidden"
                 aria-label="PineTree Payments"
               >
-                <Image
+                <img
                   src="/favicon.ico"
                   alt=""
                   aria-hidden="true"
@@ -236,18 +203,6 @@ export default function DashboardLayout({
                   width={28}
                   height={28}
                 />
-              </button>
-              <button
-                type="button"
-                onClick={() => setCommandOpen(true)}
-                className="hidden min-h-10 items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-3 text-sm font-medium text-white/90 transition hover:bg-white/15 focus:outline-none focus-visible:ring-4 focus-visible:ring-white/20 sm:inline-flex"
-                aria-label="Open quick navigation"
-              >
-                <Search size={15} />
-                <span>Search</span>
-                <kbd className="ml-2 rounded-md border border-white/20 bg-white/10 px-1.5 py-0.5 text-[10px] text-white/70">
-                  Ctrl K
-                </kbd>
               </button>
             </div>
 
@@ -290,63 +245,6 @@ export default function DashboardLayout({
           <Toaster position="top-right" richColors closeButton />
         </div>
       </div>
-
-      {commandOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/45 p-3 pt-[12vh] backdrop-blur-sm sm:p-6 sm:pt-[14vh]"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setCommandOpen(false)
-          }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Quick navigation"
-            className="w-full max-w-xl overflow-hidden rounded-[1.5rem] border border-white/70 bg-white/95 shadow-[0_30px_100px_rgba(15,23,42,0.30)] backdrop-blur-xl"
-          >
-            <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-3">
-              <Search className="shrink-0 text-blue-600" size={18} />
-              <input
-                ref={commandInputRef}
-                value={commandQuery}
-                onChange={(event) => setCommandQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && commandItems[0]) runCommand(commandItems[0].href)
-                }}
-                placeholder="Jump to POS, transactions, reports, wallets..."
-                className="min-h-11 flex-1 bg-transparent text-sm text-slate-950 outline-none placeholder:text-slate-400"
-              />
-              <button
-                type="button"
-                onClick={() => setCommandOpen(false)}
-                aria-label="Close quick navigation"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="max-h-[min(55vh,28rem)] overflow-y-auto p-2">
-              {commandItems.length > 0 ? (
-                commandItems.map((item) => (
-                  <button
-                    key={item.href}
-                    type="button"
-                    onClick={() => runCommand(item.href)}
-                    className="flex min-h-12 w-full items-center justify-between rounded-xl px-3 text-left text-sm font-medium text-slate-700 transition hover:bg-blue-50 hover:text-blue-700 focus:outline-none focus-visible:bg-blue-50"
-                  >
-                    <span>{item.name}</span>
-                    <span className="text-xs font-normal text-slate-400">{item.href}</span>
-                  </button>
-                ))
-              ) : (
-                <p className="px-3 py-8 text-center text-sm text-slate-500">
-                  No matching destination.
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
