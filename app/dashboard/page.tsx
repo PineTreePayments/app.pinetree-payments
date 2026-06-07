@@ -320,6 +320,9 @@ export default function DashboardPage() {
   })
   const railRows = Object.entries(railBreakdown)
     .sort((left, right) => right[1].volume - left[1].volume)
+  const connectedRails = railReadiness.filter((rail) => rail.status === "Connected").length
+  const railsNeedingSetup = railReadiness.length - connectedRails
+  const visibleRails = railReadiness.slice(0, 4)
   const quickActions = [
     { label: "Open POS", href: "/dashboard/pos", icon: ShoppingCart },
     { label: "Create Checkout Link", href: "/dashboard/checkout", icon: Link2 },
@@ -473,98 +476,109 @@ export default function DashboardPage() {
       </MetricGrid>
 
       <div className="lg:hidden">
-      <DashboardSection title="Quick Actions" titleTone="blue">
-        <div className="rounded-2xl border border-white/80 bg-white/80 p-2 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {quickActions.map(({ label, href, icon: Icon }) => (
-              <Link
-                key={href}
-                href={href}
-                className="group flex min-h-14 min-w-0 items-center gap-2.5 rounded-xl border border-gray-100 bg-gradient-to-br from-white to-gray-50/80 px-3 py-2.5 text-gray-900 transition hover:-translate-y-0.5 hover:border-blue-200 hover:from-blue-50/70 hover:to-white hover:text-blue-700 hover:shadow-sm"
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 ring-1 ring-blue-100 transition group-hover:bg-blue-600 group-hover:text-white">
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                </span>
-                <span className="min-w-0 flex-1 text-xs font-semibold leading-4 sm:text-sm">
-                  {label}
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 transition group-hover:translate-x-0.5 group-hover:text-blue-500" aria-hidden="true" />
-              </Link>
-            ))}
-          </div>
-        </div>
-      </DashboardSection>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <DashboardSection title="Payment Rail Readiness" titleTone="blue">
-          <div className="flex h-[310px] flex-col rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-4">
-            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-              {railReadiness.slice(0, 4).map((rail) => (
-                <div key={rail.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-950">{rail.label}</p>
-                    <p className="mt-0.5 truncate text-xs text-gray-500" title={rail.detail}>{rail.detail}</p>
-                  </div>
-                  <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${
-                    rail.status === "Connected"
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                      : rail.status === "Disabled"
-                        ? "border-gray-200 bg-gray-100 text-gray-600"
-                        : "border-amber-200 bg-amber-50 text-amber-700"
-                  }`}>
-                    {rail.status}
+        <DashboardSection title="Quick Actions" titleTone="blue">
+          <div className="rounded-2xl border border-white/80 bg-white/80 p-2 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {quickActions.map(({ label, href, icon: Icon }) => (
+                <Link
+                  key={href}
+                  href={href}
+                  className="group flex min-h-14 min-w-0 items-center gap-2.5 rounded-xl border border-gray-100 bg-gradient-to-br from-white to-gray-50/80 px-3 py-2.5 text-gray-900 transition hover:-translate-y-0.5 hover:border-blue-200 hover:from-blue-50/70 hover:to-white hover:text-blue-700 hover:shadow-sm"
+                >
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 ring-1 ring-blue-100 transition group-hover:bg-blue-600 group-hover:text-white">
+                    <Icon className="h-4 w-4" aria-hidden="true" />
                   </span>
-                </div>
+                  <span className="min-w-0 flex-1 text-xs font-semibold leading-4 sm:text-sm">
+                    {label}
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 transition group-hover:translate-x-0.5 group-hover:text-blue-500" aria-hidden="true" />
+                </Link>
               ))}
-              {!railReadiness.length && <p className="py-6 text-center text-sm text-gray-500">Payment rail readiness is loading.</p>}
             </div>
-            <div className="mt-3 flex items-center justify-between gap-3 border-t border-gray-100 pt-3">
-              <span className="text-xs text-gray-500">
-                {railReadiness.length > 4 ? `+${railReadiness.length - 4} more rail${railReadiness.length - 4 === 1 ? "" : "s"}` : `${railReadiness.length} rails`}
-              </span>
-              <Link href="/dashboard/providers" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
-                Manage payment rails
-              </Link>
-            </div>
-          </div>
-        </DashboardSection>
-
-        <DashboardSection title="Operations Snapshot" titleTone="blue">
-          <div className="flex h-[310px] flex-col rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-4">
-            <div className="grid grid-cols-2 gap-2 sm:gap-3">
-              <CompactMetricTile label="Wallet Value" value={formatUsd(walletValue)} tone="blue" className="min-w-0 p-3 shadow-none" />
-              <CompactMetricTile label="Active Providers" value={providers} className="min-w-0 p-3 shadow-none" />
-              <CompactMetricTile label="Inventory Items" value={inventory.available ? inventory.totalItems : "Setup"} detail={inventory.available ? (inventory.connectedProviders ? `${inventory.connectedProviders} provider sync${inventory.connectedProviders === 1 ? "" : "s"}` : "No inventory sync connected") : undefined} className="min-w-0 p-3 shadow-none" />
-              <CompactMetricTile label="Low / Out of Stock" value={inventory.available ? `${inventory.lowStock} / ${inventory.outOfStock}` : "-"} tone={inventory.lowStock || inventory.outOfStock ? "amber" : "default"} className="min-w-0 p-3 shadow-none" />
-            </div>
-            <p className="mt-3 text-xs text-gray-500">Wallet update: {formatChicagoDateTime(lastRun)}</p>
-            {inventory.lastSyncAt && (
-              <p className="mt-1 text-xs text-gray-500">Inventory sync: {formatChicagoDateTime(inventory.lastSyncAt)}</p>
-            )}
           </div>
         </DashboardSection>
       </div>
 
-      <DashboardSection title="Today's Payment Rail Mix" titleTone="blue">
-        <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-4">
-          {railRows.length ? (
-            <div className="grid grid-cols-1 justify-center gap-2 min-[380px]:grid-cols-2 sm:flex sm:flex-wrap sm:justify-center sm:gap-3">
-              {railRows.map(([rail, metrics]) => (
-                <div key={rail} className="mx-auto w-full min-w-0 max-w-44 rounded-xl border border-gray-100 bg-gray-50/70 p-2.5 sm:mx-0 sm:w-40 sm:p-3">
-                  <p className="truncate text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:text-xs" title={formatDashboardNetwork(rail)}>
-                    {formatDashboardNetwork(rail)}
-                  </p>
-                  <p className="mt-1 truncate text-base font-semibold text-gray-950 sm:text-lg" title={formatUsd(metrics.volume)}>
-                    {formatUsd(metrics.volume)}
-                  </p>
-                  <p className="mt-0.5 text-xs text-gray-500">{metrics.count} payment{metrics.count === 1 ? "" : "s"}</p>
-                </div>
-              ))}
+      <DashboardSection
+        title="Payment Operations"
+        titleTone="blue"
+      >
+        <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+          <p className="mb-3 text-sm text-gray-500">Rail readiness, wallet activity, and inventory health.</p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+            <CompactMetricTile label="Connected Rails" value={connectedRails} tone="green" className="min-w-0 p-3 shadow-none" />
+            <CompactMetricTile label="Needs Setup" value={railsNeedingSetup} tone={railsNeedingSetup ? "amber" : "default"} className="min-w-0 p-3 shadow-none" />
+            <CompactMetricTile label="Active Providers" value={providers} className="min-w-0 p-3 shadow-none" />
+            <CompactMetricTile label="Wallet Value" value={formatUsd(walletValue)} tone="blue" className="min-w-0 p-3 shadow-none" />
+            <CompactMetricTile label="Inventory Items" value={inventory.available ? inventory.totalItems : "Setup"} className="min-w-0 p-3 shadow-none" />
+            <CompactMetricTile label="Low / Out" value={inventory.available ? `${inventory.lowStock} / ${inventory.outOfStock}` : "-"} tone={inventory.lowStock || inventory.outOfStock ? "amber" : "default"} className="min-w-0 p-3 shadow-none" />
+          </div>
+
+          <div className="mt-4 grid gap-4 border-t border-gray-100 pt-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
+            <div className="min-w-0">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">Payment rails</p>
+                <Link href="/dashboard/providers" className="shrink-0 text-xs font-semibold text-blue-600 hover:text-blue-700">
+                  Manage rails
+                </Link>
+              </div>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {visibleRails.map((rail) => (
+                  <div key={rail.id} className="flex min-w-0 items-center justify-between gap-2 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
+                    <span className="truncate text-sm font-medium text-gray-900" title={rail.label}>{rail.label}</span>
+                    <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                      rail.status === "Connected"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : rail.status === "Disabled"
+                          ? "border-gray-200 bg-gray-100 text-gray-600"
+                          : "border-amber-200 bg-amber-50 text-amber-700"
+                    }`}>
+                      {rail.status}
+                    </span>
+                  </div>
+                ))}
+                {!visibleRails.length && (
+                  <p className="py-2 text-sm text-gray-500">Rail readiness is loading.</p>
+                )}
+              </div>
+              {railReadiness.length > visibleRails.length && (
+                <p className="mt-2 text-xs text-gray-500">
+                  +{railReadiness.length - visibleRails.length} more rail{railReadiness.length - visibleRails.length === 1 ? "" : "s"}
+                </p>
+              )}
             </div>
-          ) : (
-            <p className="py-7 text-center text-sm text-gray-500">No payment activity has been recorded today.</p>
-          )}
+
+            <div className="min-w-0 rounded-xl border border-gray-100 bg-gray-50/70 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">Today by rail</p>
+              {railRows.length ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {railRows.map(([rail, metrics]) => (
+                    <span key={rail} className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-600">
+                      <span className="truncate font-medium text-gray-900">{formatDashboardNetwork(rail)}</span>
+                      <span className="shrink-0 font-semibold tabular-nums text-gray-950">{formatUsd(metrics.volume)}</span>
+                      <span className="shrink-0 text-gray-400">· {metrics.count}</span>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-sm text-gray-500">Rail mix appears after payments.</p>
+              )}
+              <div className="mt-3 space-y-1 text-xs text-gray-500">
+                <p>Wallet update: {formatChicagoDateTime(lastRun)}</p>
+                <p>
+                  Inventory: {inventory.available ? `${inventory.totalItems} items · ${inventory.lowStock} low stock` : "Setup required"}
+                </p>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 border-t border-gray-200/80 pt-3">
+                <Link href="/dashboard/transactions" className="text-xs font-semibold text-blue-600 hover:text-blue-700">
+                  View transactions
+                </Link>
+                <Link href="/dashboard/inventory" className="text-xs font-semibold text-blue-600 hover:text-blue-700">
+                  Manage inventory
+                </Link>
+              </div>
+            </div>
+          </div>
         </div>
       </DashboardSection>
 
