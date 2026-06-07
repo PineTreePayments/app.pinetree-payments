@@ -1,12 +1,20 @@
 /**
  * Report display normalization helpers.
  *
- * These functions normalize raw database values into report-safe display
- * values. They never mutate or infer a different payment lifecycle status.
+ * SOURCE-OF-TRUTH RULE:
+ * These functions format raw database values for display only.
+ * They must never infer or substitute a different payment lifecycle status.
+ * Age, timeout, and page context are not valid inputs for status decisions.
+ * Only PineTree Engine and sweep logic may change payment state.
  */
 
 /**
- * Returns the persisted lifecycle status in a consistent display shape.
+ * Returns the persisted lifecycle status uppercased for display.
+ *
+ * The `createdAt` parameter is accepted for backward compatibility but is
+ * intentionally ignored — age-based relabeling (e.g. PENDING → INCOMPLETE)
+ * is forbidden here. If a status must change, the sweep/engine must have
+ * already written the new value to the database before this is called.
  */
 export function normalizeReportStatus(rawStatus: string, createdAt: string): string {
   void createdAt
