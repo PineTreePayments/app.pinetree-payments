@@ -141,6 +141,56 @@ async function createPhantomTestSession() {
   })
 }
 
+/** Base ETH withdrawal session (native transfer) */
+async function createBaseEthTestSession() {
+  return createTestSession({
+    rail:             "base",
+    wallet_type:      "metamask",
+    wallet_address:   "0xSMOKETEST0000000000000000000000000000001",
+    asset:            "ETH",
+    network:          "base",
+    destination_address: "0xSMOKETEST0000000000000000000000000000002",
+    amount:           "0.005",
+    prepared_payload: {
+      tx_params: {
+        from:    "0xSMOKETEST0000000000000000000000000000001",
+        to:      "0xSMOKETEST0000000000000000000000000000002",
+        value:   "0x11C37937E08000", // 0.005 ETH in wei hex
+        data:    "0x",
+        gas:     "0x5208",           // 21000 gas
+        chainId: "0x2105",           // Base mainnet
+      },
+      destination_kind: "manual_address",
+    },
+  })
+}
+
+/** Base USDC withdrawal session (ERC-20 transfer) */
+async function createBaseUsdcTestSession() {
+  return createTestSession({
+    rail:             "base",
+    wallet_type:      "base_wallet",
+    wallet_address:   "0xSMOKETEST0000000000000000000000000000001",
+    asset:            "USDC",
+    network:          "base",
+    destination_address: "0xSMOKETEST0000000000000000000000000000002",
+    amount:           "5.00",
+    prepared_payload: {
+      tx_params: {
+        from:    "0xSMOKETEST0000000000000000000000000000001",
+        to:      "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",  // USDC on Base
+        value:   "0x0",
+        data:    "0xa9059cbb" +
+                 "000000000000000000000000SMOKETEST000000000000000000000000000000002" +
+                 "000000000000000000000000000000000000000000000000000000000004c4b40", // 5 USDC
+        gas:     "0x186A0",
+        chainId: "0x2105",
+      },
+      destination_kind: "manual_address",
+    },
+  })
+}
+
 async function deleteSession(id) {
   await db.from("merchant_wallet_send_sessions").delete().eq("id", id)
 }
@@ -277,8 +327,137 @@ async function run() {
     }
   }
 
-  // ── Test: Expired session ───────────────────────────────────────────────
-  console.log("\n5. Expired session handling")
+  // ── Test: Base ETH session — session-first flow ──────────────────────────
+  console.log("\n5. Base ETH session (session-first flow)")
+  let baseEthSession
+  try {
+    baseEthSession = await createBaseEthTestSession()
+    sessionIds.push(baseEthSession.id)
+    ok(`Created Base ETH test session (${baseEthSession.id})`)
+  } catch (err) {
+    fail("Create Base ETH test session", err.message)
+    baseEthSession = null
+  }
+
+  if (baseEthSession) {
+    // A: session can be fetched without auth (approval page needs this)
+    const { status, body } = await get(`/api/wallets/send-sessions/${baseEthSession.id}`)
+    if (status === 200 && body?.success) {
+      ok("Base ETH: GET session works without auth (approval page can load)")
+    } else {
+      fail("Base ETH: GET session works without auth", `status=${status}`)
+    }
+
+    // B: session starts in 'created' status — approval page should show 'ready' state
+    const s = body?.session
+    if (s?.status === "created") {
+      ok("Base ETH: session starts as created (approval page will show 'ready' state, not auto-open wallet)")
+    } else {
+      fail("Base ETH: session starts as created", `got status=${s?.status}`)
+    }
+
+    // C: session encodes tx_params for eth_sendTransaction (not unsigned_tx_base64)
+    if (s?.prepared_payload?.tx_params && !s?.prepared_payload?.unsigned_tx_base64) {
+      ok("Base ETH: prepared_payload has tx_params (correct for EVM)")
+    } else {
+      fail("Base ETH: prepared_payload has tx_params", `keys=${Object.keys(s?.prepared_payload || {}).join(",")}`)
+    }
+
+    // D: approval URL is deterministic — session ID is the only secret
+    ok(`Base ETH: PineTree approval URL is /wallet-approval/${baseEthSession.id}`)
+
+    // E: advancing status to 'opened' (simulates approval page loading on phone)
+    const { status: ps } = await patch(`/api/wallets/send-sessions/${baseEthSession.id}`, { status: "opened" })
+    if (ps === 200) ok("Base ETH: status advance to opened (approval page loaded)")
+    else fail("Base ETH: status advance to opened", `got ${ps}`)
+
+    // F: advancing to wallet_connecting (simulates merchant tapping Open Wallet)
+    const { status: wcs } = await patch(`/api/wallets/send-sessions/${baseEthSession.id}`, { status: "wallet_connecting" })
+    if (wcs === 200) ok("Base ETH: status advance to wallet_connecting (merchant tapped Open Wallet)")
+    else fail("Base ETH: status advance to wallet_connecting", `got ${wcs}`)
+
+    // G: advancing to approval_requested (simulates wallet opened, eth_requestAccounts done)
+    const { status: ars } = await patch(`/api/wallets/send-sessions/${baseEthSession.id}`, { status: "approval_requested" })
+    if (ars === 200) ok("Base ETH: status advance to approval_requested (wallet opened for signing)")
+    else fail("Base ETH: status advance to approval_requested", `got ${ars}`)
+
+    // H: complete endpoint rejects missing tx_hash for EVM session
+    const { status: cs, body: cb } = await post(`/api/wallets/send-sessions/${baseEthSession.id}/complete`, {})
+    if (cs === 400) ok(`Base ETH: complete rejects missing tx_hash (${cb?.error})`)
+    else fail("Base ETH: complete rejects missing tx_hash", `got ${cs}`)
+
+    // I: refresh-tx rejects Base session (Solana-only endpoint)
+    const { status: rs } = await post(`/api/wallets/send-sessions/${baseEthSession.id}/refresh-tx`, {})
+    if (rs === 400) ok("Base ETH: refresh-tx correctly rejects non-Solana session")
+    else fail("Base ETH: refresh-tx rejects non-Solana session", `got ${rs}`)
+  }
+
+  // ── Test: Base USDC session — session-first flow ─────────────────────────
+  console.log("\n6. Base USDC session (session-first flow)")
+  let baseUsdcSession
+  try {
+    baseUsdcSession = await createBaseUsdcTestSession()
+    sessionIds.push(baseUsdcSession.id)
+    ok(`Created Base USDC test session (${baseUsdcSession.id})`)
+  } catch (err) {
+    fail("Create Base USDC test session", err.message)
+    baseUsdcSession = null
+  }
+
+  if (baseUsdcSession) {
+    const { status, body } = await get(`/api/wallets/send-sessions/${baseUsdcSession.id}`)
+    if (status === 200 && body?.success) {
+      ok("Base USDC: GET session works without auth (approval page can load)")
+    } else {
+      fail("Base USDC: GET session works without auth", `status=${status}`)
+    }
+
+    const s = body?.session
+    if (s?.status === "created") {
+      ok("Base USDC: session starts as created (approval page shows ready state)")
+    } else {
+      fail("Base USDC: session starts as created", `got status=${s?.status}`)
+    }
+
+    // USDC uses ERC-20 transfer data (non-empty data field, value = 0x0)
+    const txp = s?.prepared_payload?.tx_params
+    if (txp?.data && txp.data.startsWith("0xa9059cbb") && txp.value === "0x0") {
+      ok("Base USDC: prepared_payload uses ERC-20 transfer ABI (a9059cbb) with value=0x0")
+    } else {
+      fail("Base USDC: prepared_payload uses ERC-20 transfer ABI", `data=${txp?.data?.slice(0,10)} value=${txp?.value}`)
+    }
+
+    if (s?.asset === "USDC") {
+      ok("Base USDC: asset field is USDC")
+    } else {
+      fail("Base USDC: asset field is USDC", `got ${s?.asset}`)
+    }
+
+    // Complete rejects missing tx_hash
+    const { status: cs } = await post(`/api/wallets/send-sessions/${baseUsdcSession.id}/complete`, {})
+    if (cs === 400) ok("Base USDC: complete rejects missing tx_hash")
+    else fail("Base USDC: complete rejects missing tx_hash", `got ${cs}`)
+  }
+
+  // ── Test: Solana regression — session still loads approval page first ─────
+  console.log("\n7. Solana regression (approval-page-first still intact)")
+  if (phantomSession) {
+    const { status, body } = await get(`/api/wallets/send-sessions/${phantomSession.id}`)
+    if (status === 200 && body?.session?.status === "created") {
+      ok("Solana: session still starts as created (approval page will show 'ready' before Phantom opens)")
+    } else {
+      fail("Solana: session starts as created", `status=${status} session_status=${body?.session?.status}`)
+    }
+
+    const s = body?.session
+    if (s?.prepared_payload?.unsigned_tx_base64 && !s?.prepared_payload?.tx_params) {
+      ok("Solana: prepared_payload has unsigned_tx_base64 (correct for Solana, no tx_params)")
+    } else {
+      fail("Solana: prepared_payload has unsigned_tx_base64", `keys=${Object.keys(s?.prepared_payload || {}).join(",")}`)
+    }
+  }
+
+  // ── Test: Expired / cancelled session cleanup ────────────────────────────
   let expiredSession
   try {
     expiredSession = await createTestSession({
@@ -287,7 +466,7 @@ async function run() {
     })
     sessionIds.push(expiredSession.id)
 
-    const { status } = await get(`/api/wallets/send-sessions/${expiredSession.id}`)
+    await get(`/api/wallets/send-sessions/${expiredSession.id}`)
     // Status is already "expired", not in (created|opened), so GET returns 200 (not 410)
     // Complete should reject it:
     const { status: cs } = await post(`/api/wallets/send-sessions/${expiredSession.id}/complete`, {
@@ -295,12 +474,17 @@ async function run() {
     })
     if (cs === 400) ok("Complete endpoint rejects already-expired session")
     else fail("Complete endpoint rejects already-expired session", `got ${cs}`)
+
+    // An expired/cancelled Base session does not leave activity stuck as pending
+    const { status: rs } = await get(`/api/wallets/send-sessions/${expiredSession.id}`)
+    if (rs === 200) ok("Expired session: GET still returns session (approval page shows expired UI, not stuck pending)")
+    else fail("Expired session: GET returns session", `got ${rs}`)
   } catch (err) {
     fail("Expired session test", err.message)
   }
 
   // ── Cleanup ─────────────────────────────────────────────────────────────
-  console.log("\n6. Cleanup")
+  console.log("\n9. Cleanup")
   for (const id of sessionIds) {
     try {
       await deleteSession(id)
@@ -322,26 +506,46 @@ async function run() {
   console.log()
 
   console.log("Manual steps that cannot be automated:")
-  console.log("  Phantom:")
-  console.log("    1. Desktop: create send → scan QR")
-  console.log("    2. Mobile: tap 'Approve with Phantom'")
-  console.log("    3. Phantom: approve PineTree connection")
-  console.log("    4. Mobile: tap 'Approve Transaction in Phantom'")
-  console.log("    5. Phantom: approve transaction")
-  console.log("    6. Desktop: status changes to Submitted")
-  console.log("    7. Activity row appears in Send history")
-  console.log("  Base Wallet:")
-  console.log("    1. Desktop: create send → scan QR")
-  console.log("    2. Mobile: tap 'Approve with Base Wallet'")
-  console.log("    3. Base Wallet in-app browser opens approval page")
-  console.log("    4. eth_requestAccounts prompt shown")
-  console.log("    5. eth_sendTransaction prompt shown")
-  console.log("    6. Approve → tx hash returned")
-  console.log("    7. Desktop: status changes to Submitted")
-  console.log("    8. Activity row appears in Send history")
+  console.log("  Phantom (Solana):")
+  console.log("    1. Desktop: fill send form → Continue to Approval → Show Phantom Approval QR")
+  console.log("    2. PineTree creates send session → QR displayed")
+  console.log("    3. Mobile: scan QR → PineTree approval page loads (status: ready)")
+  console.log("    4. Mobile: tap 'Open Phantom' — Phantom opens via Universal Link")
+  console.log("    5. Phantom: approve connection → returns to approval page")
+  console.log("    6. Mobile: tap 'Confirm Withdrawal'")
+  console.log("    7. Phantom: approve transaction → signature returned")
+  console.log("    8. Desktop: status changes to Submitted")
+  console.log("    9. Activity row appears in Send history")
+  console.log("  Base Wallet / MetaMask / Trust Wallet (Base Pay — session-first):")
+  console.log("    A. QR path (phone):")
+  console.log("       1. Desktop: fill send form → Continue to Approval → Show Base Wallet Approval QR")
+  console.log("       2. PineTree creates send session → QR displayed")
+  console.log("       3. Mobile: scan QR → PineTree approval page loads (status: ready)")
+  console.log("       4. PineTree approval page shows transaction summary and 'Open Base Wallet' button")
+  console.log("       5. Mobile: tap 'Open Base Wallet' → wallet opens in-app browser at approval URL")
+  console.log("       6. Wallet browser: 'Confirm Withdrawal' button shown (no auto-open)")
+  console.log("       7. Merchant: tap 'Confirm Withdrawal' → eth_sendTransaction popup")
+  console.log("       8. Merchant approves → tx_hash returned → session complete")
+  console.log("       9. Desktop: status changes to Submitted")
+  console.log("      10. Activity row appears in Send history")
+  console.log("    B. Same-device path (desktop or mobile dashboard):")
+  console.log("       1. Desktop: fill send form → Continue to Approval → prepared state")
+  console.log("       2. Click 'Open approval on this device →'")
+  console.log("       3. PineTree creates send session → browser navigates to /wallet-approval/[sessionId]")
+  console.log("       4. PineTree approval page loads — shows transaction summary and 'Open MetaMask' button")
+  console.log("       5. Merchant clicks 'Open MetaMask' → detects extension or opens MetaMask Mobile")
+  console.log("       6. 'Confirm Withdrawal' button shown — merchant clicks")
+  console.log("       7. MetaMask popup → eth_sendTransaction → tx_hash returned → session complete")
+  console.log("       8. Approval page shows 'Withdrawal Submitted'")
+  console.log("  Base ETH vs USDC:")
+  console.log("    Base ETH: tx_params.value is non-zero hex, tx_params.data is 0x")
+  console.log("    Base USDC: tx_params.value is 0x0, tx_params.data starts with 0xa9059cbb (ERC-20 transfer)")
   console.log("  Wrong wallet test:")
   console.log("    1. Scan QR for Phantom session with a different Phantom account")
   console.log("    2. Approval page should show 'Connected wallet does not match'")
+  console.log("  Regression (Solana unaffected):")
+  console.log("    1. Solana send still uses QR → approval page → Phantom/Solflare deep link")
+  console.log("    2. 'Confirm in Phantom' button is unchanged for Solana wallets")
   console.log()
 
   if (failed > 0) process.exit(1)

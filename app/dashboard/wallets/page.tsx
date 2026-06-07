@@ -544,43 +544,6 @@ function normalizeAddressForCompare(address: string | null | undefined) {
   return String(address || "").trim().toLowerCase()
 }
 
-type Eip1193ApprovalProvider = {
-  isCoinbaseWallet?: boolean
-  isBaseWallet?: boolean
-  isMetaMask?: boolean
-  isTrust?: boolean
-  isTrustWallet?: boolean
-  providers?: Eip1193ApprovalProvider[]
-  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>
-}
-
-function getInjectedBaseApprovalProvider(type: ApprovalWalletType | null): Eip1193ApprovalProvider | null {
-  if (typeof window === "undefined") return null
-  const eth = (window as Window & { ethereum?: Eip1193ApprovalProvider }).ethereum
-  if (!eth) return null
-  const providers = Array.isArray(eth.providers) && eth.providers.length > 0 ? eth.providers : [eth]
-
-  if (type === "base_wallet") {
-    const specific = providers.find((p) => p?.isCoinbaseWallet || p?.isBaseWallet)
-    if (specific) return specific
-    if (providers.length === 1) return providers[0]
-    return null
-  }
-  if (type === "metamask") {
-    const specific = providers.find((p) => p?.isMetaMask && !p?.isCoinbaseWallet)
-    if (specific) return specific
-    if (providers.length === 1) return providers[0]
-    return null
-  }
-  if (type === "trust_wallet") {
-    const specific = providers.find((p) => p?.isTrust || p?.isTrustWallet)
-    if (specific) return specific
-    if (providers.length === 1) return providers[0]
-    return null
-  }
-  return null
-}
-
 function formatWalletAddress(address: string) {
   const trimmed = address.trim()
   if (trimmed.length <= 14) return trimmed
@@ -1508,6 +1471,96 @@ export default function WalletsPage() {
     }
   }
 
+  /**
+   * Create a PineTree send session then navigate this browser window to the
+   * PineTree approval page.  Used by the "Open approval on this device →"
+   * button so that Base Pay always goes:
+   *   session created → PineTree approval page → merchant taps Open Wallet
+   *   → wallet in-app browser → eth_sendTransaction → recorded.
+   *
+   * If a session was already created (e.g. the merchant also clicked "Show QR"),
+   * reuses it instead of creating a duplicate.
+   */
+  async function openApprovalOnThisDevice() {
+    if (!sendRecord || !selectedWallet || !selectedWallet.approvalWalletType) return
+    if (directSendSubmittingRef.current) return
+
+    setSendError(null)
+
+    // Reuse an existing session if one was already created
+    if (approvalSessionId) {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || (typeof window !== "undefined" ? window.location.origin : "")
+      console.debug("[approval-session] navigating to existing session", { approvalSessionId, rail: selectedWallet.rail })
+      window.location.href = `${appUrl}/wallet-approval/${approvalSessionId}`
+      return
+    }
+
+    directSendSubmittingRef.current = true
+    setApprovalStep("creating")
+    setApprovalError(null)
+
+    if (approvalPollRef.current) {
+      clearInterval(approvalPollRef.current)
+      approvalPollRef.current = null
+    }
+
+    try {
+      const token = await getMerchantToken()
+      const preparedPayload: Record<string, unknown> = {
+        destination_kind: selectedSendDestination ? "saved_destination" : "manual_address",
+      }
+      if (sendRecord.tx_params)          preparedPayload.tx_params           = sendRecord.tx_params
+      if (sendRecord.unsigned_tx_base64) preparedPayload.unsigned_tx_base64  = sendRecord.unsigned_tx_base64
+
+      const res = await fetch("/api/wallets/send-sessions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({
+          wallet_id:           selectedWallet.id,
+          rail:                selectedWallet.rail,
+          wallet_type:         selectedWallet.approvalWalletType,
+          wallet_address:      selectedWallet.referenceTitle,
+          asset:               sendRecord.transfer.asset,
+          network:             sendRecord.transfer.network,
+          destination_address: sendRecord.transfer.destination_address,
+          destination_label:   selectedSendDestination?.label || null,
+          amount:              String(sendRecord.transfer.amount),
+          prepared_payload:    preparedPayload,
+        }),
+      })
+
+      const payload = await res.json().catch(() => null) as {
+        success?: boolean
+        session?: { id: string }
+        error?: string
+      } | null
+
+      if (!res.ok || !payload?.success || !payload.session?.id) {
+        throw new Error(payload?.error || "Failed to create approval session")
+      }
+
+      const sessionId = payload.session.id
+      setApprovalSessionId(sessionId)
+
+      console.debug("[approval-session] created for same-device navigation", {
+        sessionId,
+        rail:       selectedWallet.rail,
+        walletType: selectedWallet.approvalWalletType,
+      })
+
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || (typeof window !== "undefined" ? window.location.origin : "")
+      window.location.href = `${appUrl}/wallet-approval/${sessionId}`
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to start approval"
+      setSendError(msg)
+      setApprovalStep("failed")
+      setApprovalError(msg)
+      directSendSubmittingRef.current = false
+    }
+  }
+
   // ── Settlement destination API calls ────────────────────────────────────────
 
   async function loadSettlementDestinations() {
@@ -2105,38 +2158,6 @@ export default function WalletsPage() {
         const signResult = await walletEntry.provider.signAndSendTransaction(tx)
         txHash = getSolanaTransactionSignature(signResult)
         if (!txHash) throw new Error("No transaction signature returned from wallet.")
-      } else if (sendRecord.transfer.network === "base" && sendRecord.tx_params) {
-        const expectedType = selectedWallet.approvalWalletType
-        const eth = getInjectedBaseApprovalProvider(expectedType)
-
-        if (!eth) {
-          throw new Error(`No ${approvalWalletLabel(expectedType, "base")} wallet detected. Install it and ensure it is unlocked.`)
-        }
-
-        const chainId = await eth.request({ method: "eth_chainId" }).catch(() => "")
-        if (String(chainId).toLowerCase() !== "0x2105" && String(chainId) !== "8453") {
-          throw new Error("Connected wallet is not on Base.")
-        }
-
-        const accountsResponse = await eth.request({ method: "eth_requestAccounts" })
-        const account = Array.isArray(accountsResponse) ? String(accountsResponse[0] || "") : ""
-        if (normalizeAddressForCompare(account) !== normalizeAddressForCompare(selectedWallet.referenceTitle)) {
-          throw new Error("Connected wallet does not match the merchant wallet saved for Base Pay.")
-        }
-
-        const params = sendRecord.tx_params
-        const rawResult = await eth.request({
-          method: "eth_sendTransaction",
-          params: [{
-            from: params.from,
-            to: params.to,
-            value: params.value,
-            data: params.data,
-            gas: params.gas
-          }]
-        })
-        txHash = String(rawResult || "").trim()
-        if (!txHash) throw new Error("No transaction hash returned from wallet.")
       } else {
         throw new Error("Missing transaction data. Please review the send again.")
       }
@@ -3733,6 +3754,18 @@ export default function WalletsPage() {
                                 />
                               </div>
                               <CompactStatusNotice tone="blue" title="Waiting for phone scan" detail="Scan this QR with your connected wallet phone." />
+                              {selectedWallet?.rail === "base" && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const appUrl = process.env.NEXT_PUBLIC_APP_URL || (typeof window !== "undefined" ? window.location.origin : "")
+                                    window.location.href = `${appUrl}/wallet-approval/${approvalSessionId}`
+                                  }}
+                                  className="w-full text-center text-xs font-semibold text-[#0052FF] underline underline-offset-2 hover:text-[#003FCC]"
+                                >
+                                  Or open approval on this device →
+                                </button>
+                              )}
                             </div>
                           ) : approvalStep === "opened" ? (
                             <div className="mt-3">
@@ -3763,12 +3796,25 @@ export default function WalletsPage() {
                         </div>
                       )}
 
-                      {/* Option 2: Approve on this device */}
+                      {/* Option 2: Approve from this device */}
                       <div className="mt-2 rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-3">
-                        <p className="text-sm font-semibold text-gray-950">Approve on this device</p>
-                        <p className="mt-0.5 text-xs leading-5 text-gray-600">
-                          If {approvalWalletName} is installed, unlocked, and using the saved merchant address on this device, approve here.
-                        </p>
+                        {selectedWallet?.rail === "base" ? (
+                          <>
+                            <p className="text-sm font-semibold text-gray-950">Open approval on this device</p>
+                            <p className="mt-0.5 text-xs leading-5 text-gray-600">
+                              Opens the PineTree approval page on this device. Tap{" "}
+                              <strong>Open {approvalWalletName}</strong> on that page, then approve
+                              the withdrawal in your wallet.
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-sm font-semibold text-gray-950">Approve on this device</p>
+                            <p className="mt-0.5 text-xs leading-5 text-gray-600">
+                              If {approvalWalletName} is installed, unlocked, and using the saved merchant address on this device, approve here.
+                            </p>
+                          </>
+                        )}
                       </div>
 
                       {sendError && (
@@ -3797,11 +3843,13 @@ export default function WalletsPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={signAndSubmitDirectSend}
+                          onClick={selectedWallet?.rail === "base" ? openApprovalOnThisDevice : signAndSubmitDirectSend}
                           disabled={directSendSubmittingRef.current}
                           className={pineTreePrimaryButton}
                         >
-                          Confirm in {approvalWalletName}
+                          {selectedWallet?.rail === "base"
+                            ? "Open approval on this device →"
+                            : `Confirm in ${approvalWalletName}`}
                         </button>
                       </div>
                     </div>
