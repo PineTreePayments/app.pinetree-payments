@@ -4,8 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
+  Activity,
+  ArrowUpRight,
   BarChart3,
   Boxes,
+  CheckCircle2,
   ChevronRight,
   Link2,
   ReceiptText,
@@ -88,22 +91,6 @@ type ChartRange = "7D" | "30D" | "90D" | "ALL"
 function parseTimestamp(value: string) {
   const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(value)
   return new Date(hasTimezone ? value : `${value}Z`)
-}
-
-function formatChicagoDateTime(value: string | null) {
-  if (!value) return "—"
-  const date = parseTimestamp(value)
-  if (Number.isNaN(date.getTime())) return "—"
-
-  return date.toLocaleString("en-US", {
-    timeZone: "America/Chicago",
-    month: "numeric",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit"
-  })
 }
 
 function formatUsd(amount: number) {
@@ -204,8 +191,6 @@ export default function DashboardPage() {
   const [providers,setProviders] = useState(0)
   const [recentTx,setRecentTx] = useState<DashboardTransactionRow[]>([])
   const [chartData,setChartData] = useState<ChartPoint[]>([])
-  const [walletValue,setWalletValue] = useState(0)
-  const [lastRun,setLastRun] = useState<string | null>(null)
   const [today, setToday] = useState<NonNullable<DashboardOverviewResponse["today"]>>({
     volume: 0,
     transactionCount: 0,
@@ -259,8 +244,6 @@ export default function DashboardPage() {
     setSuccessRate(Number(payload.successRate ?? 0))
     setProviders(Number(payload.providers ?? 0))
     setChartData(payload.chartData || [])
-    setWalletValue(Number(payload.walletValue ?? 0))
-    setLastRun(payload.lastRun || null)
     setRecentTx(payload.recentTx || [])
     if (payload.today) setToday(payload.today)
     setRailBreakdown(payload.railBreakdown || {})
@@ -320,9 +303,9 @@ export default function DashboardPage() {
   })
   const railRows = Object.entries(railBreakdown)
     .sort((left, right) => right[1].volume - left[1].volume)
-  const connectedRails = railReadiness.filter((rail) => rail.status === "Connected").length
-  const railsNeedingSetup = railReadiness.length - connectedRails
-  const visibleRails = railReadiness.slice(0, 4)
+  const connectedRailRows = railReadiness.filter((rail) => rail.status === "Connected")
+  const railActivityCount = railRows.reduce((sum, [, metrics]) => sum + metrics.count, 0)
+  const railActivityVolume = railRows.reduce((sum, [, metrics]) => sum + metrics.volume, 0)
   const quickActions = [
     { label: "Open POS", href: "/dashboard/pos", icon: ShoppingCart },
     { label: "Create Checkout Link", href: "/dashboard/checkout", icon: Link2 },
@@ -503,80 +486,92 @@ export default function DashboardPage() {
         title="Payment Operations"
         titleTone="blue"
       >
-        <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
-          <p className="mb-3 text-sm text-gray-500">Rail readiness, wallet activity, and inventory health.</p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-            <CompactMetricTile label="Connected Rails" value={connectedRails} tone="green" className="min-w-0 p-3 shadow-none" />
-            <CompactMetricTile label="Needs Setup" value={railsNeedingSetup} tone={railsNeedingSetup ? "amber" : "default"} className="min-w-0 p-3 shadow-none" />
-            <CompactMetricTile label="Active Providers" value={providers} className="min-w-0 p-3 shadow-none" />
-            <CompactMetricTile label="Wallet Value" value={formatUsd(walletValue)} tone="blue" className="min-w-0 p-3 shadow-none" />
-            <CompactMetricTile label="Inventory Items" value={inventory.available ? inventory.totalItems : "Setup"} className="min-w-0 p-3 shadow-none" />
-            <CompactMetricTile label="Low / Out" value={inventory.available ? `${inventory.lowStock} / ${inventory.outOfStock}` : "-"} tone={inventory.lowStock || inventory.outOfStock ? "amber" : "default"} className="min-w-0 p-3 shadow-none" />
-          </div>
-
-          <div className="mt-4 grid gap-4 border-t border-gray-100 pt-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
-            <div className="min-w-0">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">Payment rails</p>
-                <Link href="/dashboard/providers" className="shrink-0 text-xs font-semibold text-blue-600 hover:text-blue-700">
-                  Manage rails
-                </Link>
+        <div className="overflow-hidden rounded-[1.35rem] border border-blue-100/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.12),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f8fbff_52%,#eef6ff_100%)] shadow-[0_18px_60px_rgba(37,99,235,0.10)]">
+          <div className="grid gap-0 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+            <div className="border-b border-blue-100/80 p-4 sm:p-5 lg:border-b-0 lg:border-r">
+              <div>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">Live rails</p>
+                  <div className="mt-2 flex items-end gap-2">
+                    <p className="text-4xl font-semibold tracking-tight text-gray-950">{connectedRailRows.length}</p>
+                    <p className="pb-1.5 text-sm font-medium text-gray-600">
+                      connected rail{connectedRailRows.length === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                </div>
               </div>
-              <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                {visibleRails.map((rail) => (
-                  <div key={rail.id} className="flex min-w-0 items-center justify-between gap-2 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
-                    <span className="truncate text-sm font-medium text-gray-900" title={rail.label}>{rail.label}</span>
-                    <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                      rail.status === "Connected"
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                        : rail.status === "Disabled"
-                          ? "border-gray-200 bg-gray-100 text-gray-600"
-                          : "border-amber-200 bg-amber-50 text-amber-700"
-                    }`}>
-                      {rail.status}
+
+              <div className="mt-5 space-y-2">
+                {connectedRailRows.map((rail) => (
+                  <div key={rail.id} className="flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-white/80 bg-white/75 px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.04)] backdrop-blur">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100">
+                        <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-gray-950" title={rail.label}>{rail.label}</p>
+                        <p className="text-xs text-gray-500">Ready for merchant payments</p>
+                      </div>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">
+                      Connected
                     </span>
                   </div>
                 ))}
-                {!visibleRails.length && (
-                  <p className="py-2 text-sm text-gray-500">Rail readiness is loading.</p>
+                {!connectedRailRows.length && (
+                  <div className="rounded-2xl border border-dashed border-blue-200 bg-white/70 px-3.5 py-4 text-sm text-gray-600">
+                    No connected payment rails are active yet.
+                  </div>
                 )}
               </div>
-              {railReadiness.length > visibleRails.length && (
-                <p className="mt-2 text-xs text-gray-500">
-                  +{railReadiness.length - visibleRails.length} more rail{railReadiness.length - visibleRails.length === 1 ? "" : "s"}
-                </p>
-              )}
+
+              <div className="mt-5 flex flex-wrap gap-2">
+                <Link href="/dashboard/providers" className="inline-flex min-h-9 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700">
+                  Manage Rails
+                </Link>
+                <Link href="/dashboard/transactions" className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-xl border border-blue-100 bg-white/85 px-3.5 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50">
+                  View Transactions
+                  <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </Link>
+              </div>
             </div>
 
-            <div className="min-w-0 rounded-xl border border-gray-100 bg-gray-50/70 p-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">Today by rail</p>
+            <div className="p-4 sm:p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">
+                    <Activity className="h-3.5 w-3.5" aria-hidden="true" />
+                    Today by rail
+                  </p>
+                  <p className="mt-1 text-sm text-gray-600">Real payment activity grouped by rail.</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-2xl font-semibold tabular-nums text-gray-950">{formatUsd(railActivityVolume)}</p>
+                  <p className="text-xs text-gray-500">
+                    {railActivityCount} payment{railActivityCount === 1 ? "" : "s"} today
+                  </p>
+                </div>
+              </div>
+
               {railRows.length ? (
-                <div className="mt-2 flex flex-wrap gap-2">
+                <div className="mt-5 divide-y divide-blue-100/70 overflow-hidden rounded-2xl border border-white/80 bg-white/75 shadow-[0_8px_24px_rgba(15,23,42,0.04)] backdrop-blur">
                   {railRows.map(([rail, metrics]) => (
-                    <span key={rail} className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-600">
-                      <span className="truncate font-medium text-gray-900">{formatDashboardNetwork(rail)}</span>
-                      <span className="shrink-0 font-semibold tabular-nums text-gray-950">{formatUsd(metrics.volume)}</span>
-                      <span className="shrink-0 text-gray-400">· {metrics.count}</span>
-                    </span>
+                    <div key={rail} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3.5 py-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-gray-950" title={formatDashboardNetwork(rail)}>
+                          {formatDashboardNetwork(rail)}
+                        </p>
+                        <p className="text-xs text-gray-500">{metrics.count} payment{metrics.count === 1 ? "" : "s"}</p>
+                      </div>
+                      <p className="text-sm font-semibold tabular-nums text-gray-950">{formatUsd(metrics.volume)}</p>
+                    </div>
                   ))}
                 </div>
               ) : (
-                <p className="mt-2 text-sm text-gray-500">Rail mix appears after payments.</p>
+                <div className="mt-5 rounded-2xl border border-dashed border-blue-200 bg-white/70 px-4 py-6 text-sm text-gray-600">
+                  Rail mix appears after payments.
+                </div>
               )}
-              <div className="mt-3 space-y-1 text-xs text-gray-500">
-                <p>Wallet update: {formatChicagoDateTime(lastRun)}</p>
-                <p>
-                  Inventory: {inventory.available ? `${inventory.totalItems} items · ${inventory.lowStock} low stock` : "Setup required"}
-                </p>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 border-t border-gray-200/80 pt-3">
-                <Link href="/dashboard/transactions" className="text-xs font-semibold text-blue-600 hover:text-blue-700">
-                  View transactions
-                </Link>
-                <Link href="/dashboard/inventory" className="text-xs font-semibold text-blue-600 hover:text-blue-700">
-                  Manage inventory
-                </Link>
-              </div>
             </div>
           </div>
         </div>
