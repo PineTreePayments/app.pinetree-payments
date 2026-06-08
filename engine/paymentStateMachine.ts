@@ -42,7 +42,7 @@ export function normalizeToStrictPaymentStatus(status: unknown): PaymentStatus {
 const validTransitions: Record<PaymentStatus, PaymentStatus[]> = {
   // Strict lifecycle: CREATED -> PENDING -> PROCESSING -> CONFIRMED
   // Abandoned checkout sessions can also move CREATED -> INCOMPLETE before funding.
-  CREATED: ["PENDING", "INCOMPLETE"],
+  CREATED: ["PENDING"],
 
   // Allowed alternative path: PENDING -> INCOMPLETE
   PENDING: ["PROCESSING", "INCOMPLETE"],
@@ -116,4 +116,8 @@ export function isTerminalStatus(status: PaymentStatus): boolean {
  */
 export function getInitialStatus(): PaymentStatus {
   return "CREATED"
+}
+
+export function canUserCancelAsIncomplete(status: PaymentStatus): boolean {
+  return status === "CREATED" || status === "PENDING"
 }

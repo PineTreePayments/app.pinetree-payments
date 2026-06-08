@@ -78,6 +78,7 @@ export type StandardPaymentEvent = {
     | "payment.processing"
     | "payment.confirmed"
     | "payment.failed"
+    | "payment.incomplete"
 }
 
 export interface ProviderAdapterMetadata {

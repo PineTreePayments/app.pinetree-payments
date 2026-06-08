@@ -8,8 +8,6 @@ export type PaymentStatus =
   | "CONFIRMED"
   | "FAILED"
   | "INCOMPLETE"
-  | "EXPIRED"
-  | "REFUNDED"
 
 export type Payment = {
   id: string

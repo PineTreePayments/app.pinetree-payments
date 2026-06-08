@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAdminFromRequest, getRouteErrorStatus } from "@/lib/api/adminAuth"
 import { supabase, supabaseAdmin } from "@/database/supabase"
+import { getPaymentIncompleteEligibility } from "@/engine/paymentStateActions"
 
 const db = supabaseAdmin || supabase
 
 const MAX_IDS = 100
+const MIN_PENDING_AGE_MS = 60 * 60_000
+const MIN_CREATED_AGE_MS = 30 * 60_000
 
 export async function POST(req: NextRequest) {
   try {
@@ -25,39 +28,34 @@ export async function POST(req: NextRequest) {
 
     const { data, error } = await db
       .from("payments")
-      .select("id, status, created_at")
+      .select("id, status")
       .in("id", paymentIds)
 
     if (error) {
       return NextResponse.json({ error: "Failed to fetch payments" }, { status: 500 })
     }
 
-    const now = Date.now()
     const eligible: Array<{ paymentId: string; status: string; staleReason: string }> = []
     const ineligible: Array<{ paymentId: string; status: string; staleReason: string }> = []
+    const found = new Set((data || []).map((row: { id: string }) => row.id))
 
-    const found = new Set((data || []).map((r: { id: string }) => r.id))
     for (const id of paymentIds) {
       if (!found.has(id)) {
         ineligible.push({ paymentId: id, status: "NOT_FOUND", staleReason: "payment_not_found" })
       }
     }
 
-    for (const row of (data || []) as Array<{ id: string; status: string; created_at: string }>) {
-      const ageMinutes = (now - new Date(row.created_at).getTime()) / 60_000
-
-      if (row.status === "PENDING" && ageMinutes >= 60) {
-        eligible.push({ paymentId: row.id, status: row.status, staleReason: "pending_no_activity_timeout" })
-      } else if (row.status === "CREATED" && ageMinutes >= 30) {
-        // CREATED → INCOMPLETE is valid per state machine (validTransitions.CREATED includes INCOMPLETE)
-        eligible.push({ paymentId: row.id, status: row.status, staleReason: "created_no_activity_timeout" })
-      } else if (row.status === "PROCESSING") {
-        ineligible.push({ paymentId: row.id, status: row.status, staleReason: "processing_requires_manual_review" })
-      } else if (["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "REFUNDED"].includes(row.status)) {
-        ineligible.push({ paymentId: row.id, status: row.status, staleReason: "terminal_status_not_eligible" })
-      } else {
-        ineligible.push({ paymentId: row.id, status: row.status, staleReason: "recent_payment_not_eligible" })
-      }
+    for (const row of (data || []) as Array<{ id: string; status: string }>) {
+      const minimumAgeMs = row.status === "CREATED"
+        ? MIN_CREATED_AGE_MS
+        : MIN_PENDING_AGE_MS
+      const result = await getPaymentIncompleteEligibility(row.id, { minimumAgeMs })
+      const target = result.eligible ? eligible : ineligible
+      target.push({
+        paymentId: row.id,
+        status: result.status,
+        staleReason: result.reason
+      })
     }
 
     return NextResponse.json({ eligible, ineligible, previewOnly: true })

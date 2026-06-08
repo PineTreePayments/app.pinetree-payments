@@ -1,5 +1,6 @@
 import { supabase, supabaseAdmin } from "./supabase"
 import { EXCLUDE_TEST_PAYMENTS_FILTER } from "@/lib/paymentMode"
+import { metadataHasPaymentEvidence } from "@/engine/paymentEvidence"
 
 const db = supabaseAdmin || supabase
 
@@ -56,6 +57,7 @@ export type StaleReasonCode =
   | "pending_no_activity_timeout"        // PENDING > 60 min, eligible for INCOMPLETE
   | "created_no_activity_timeout"        // CREATED > 30 min, eligible for INCOMPLETE (CREATED → INCOMPLETE is valid)
   | "processing_stuck_requires_review"   // PROCESSING > 24 h, needs manual investigation
+  | "payment_evidence_requires_review"   // Provider/chain evidence exists; never auto-mark
   | "recent_payment_not_eligible"        // Under threshold, may still complete
 
 export type StaleDiagnosticRow = {
@@ -120,8 +122,12 @@ function getAgeBucket(
 
 function computeStaleEligibility(
   status: string,
-  ageMinutes: number
+  ageMinutes: number,
+  hasProcessingEvidence: boolean
 ): { eligibility: StaleEligibility; staleReason: StaleReasonCode } {
+  if (hasProcessingEvidence) {
+    return { eligibility: "review_required", staleReason: "payment_evidence_requires_review" }
+  }
   if (status === "PENDING" && ageMinutes >= 60) {
     return { eligibility: "eligible_for_incomplete", staleReason: "pending_no_activity_timeout" }
   }
@@ -371,7 +377,18 @@ export async function getAdminStaleDiagnostic(): Promise<{
 
       const ageBucket = getAgeBucket(r.created_at)
       const ageMinutes = (Date.now() - new Date(r.created_at).getTime()) / 60_000
-      const { eligibility, staleReason } = computeStaleEligibility(r.status, ageMinutes)
+      const latestEvt = latestEventMap.get(r.id) ?? null
+      const hasProcessingEvidence =
+        Boolean(r.provider_reference) ||
+        metadataHasPaymentEvidence(r.metadata) ||
+        ["payment.processing", "payment.confirmed", "payment.failed"].includes(
+          String(latestEvt?.event_type || "")
+        )
+      const { eligibility, staleReason } = computeStaleEligibility(
+        r.status,
+        ageMinutes,
+        hasProcessingEvidence
+      )
 
       byStatus[r.status] = (byStatus[r.status] || 0) + 1
       byAgeBucket[ageBucket] = (byAgeBucket[ageBucket] || 0) + 1
@@ -381,8 +398,6 @@ export async function getAdminStaleDiagnostic(): Promise<{
 
       if (eligibility === "eligible_for_incomplete") eligibleCount++
       else if (eligibility === "review_required") reviewRequiredCount++
-
-      const latestEvt = latestEventMap.get(r.id) ?? null
 
       return {
         id: r.id,

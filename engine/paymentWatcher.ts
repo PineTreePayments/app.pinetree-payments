@@ -114,6 +114,7 @@ type SolanaParsedTransaction = {
     }
   }
   meta?: {
+    err?: unknown
     preTokenBalances?: SolanaTokenBalance[]
     postTokenBalances?: SolanaTokenBalance[]
   }
@@ -215,6 +216,21 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
         }
 
         if (tx) {
+          if (tx.meta?.err) {
+            console.warn("[watcher:solana] txHash transaction failed", {
+              paymentId: input.paymentId,
+              txHash: input.txHash,
+              err: tx.meta.err
+            })
+            await processPaymentEvent({
+              type: "payment.failed",
+              paymentId: input.paymentId,
+              txHash: input.txHash,
+              feeCaptureValidated: false
+            })
+            return true
+          }
+
           if (isUsdc) {
             const match = parseSolanaUsdcSplitTx(tx, {
               merchantWallet,
@@ -361,6 +377,31 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
   const lookback = getLookbackWindow(input.network)
   const startBlock = Math.max(0, currentBlock - lookback)
   const fromBlockHex = "0x" + startBlock.toString(16)
+
+  if (input.txHash && feeCaptureMethod !== "contract_split") {
+    const receipt = await getTransactionReceipt(rpcUrl, input.txHash)
+    if (!receipt) {
+      console.info("[watcher:evm] txHash receipt not yet available", {
+        paymentId: input.paymentId,
+        txHash: input.txHash
+      })
+      return false
+    }
+    if (isEvmReceiptFailed(receipt.status)) {
+      console.warn("[watcher:evm] txHash receipt failed", {
+        paymentId: input.paymentId,
+        txHash: input.txHash,
+        receiptStatus: String(receipt.status ?? "unknown")
+      })
+      await processPaymentEvent({
+        type: "payment.failed",
+        paymentId: input.paymentId,
+        txHash: input.txHash,
+        feeCaptureValidated: false
+      })
+      return true
+    }
+  }
 
   // ── contract_split: query PaymentSplit event logs ────────────────────────────
   if (feeCaptureMethod === "contract_split") {

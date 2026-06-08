@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "smoke:wallet-approval": "node scripts/smoke-wallet-approval.mjs",
     "smoke:checkout-api": "node scripts/smoke-checkout-api.mjs"
   },

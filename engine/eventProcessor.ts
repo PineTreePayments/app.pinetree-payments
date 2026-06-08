@@ -33,6 +33,7 @@ type TranslatedEvent = {
     | "payment.processing"
     | "payment.confirmed"
     | "payment.failed"
+    | "payment.incomplete"
 }
 
 const eventToStatus: Record<TranslatedEvent["event"], PaymentStatus> = {
@@ -40,7 +41,8 @@ const eventToStatus: Record<TranslatedEvent["event"], PaymentStatus> = {
   "payment.pending": "PENDING",
   "payment.processing": "PROCESSING",
   "payment.confirmed": "CONFIRMED",
-  "payment.failed": "FAILED"
+  "payment.failed": "FAILED",
+  "payment.incomplete": "INCOMPLETE"
 }
 
 function readPath(input: unknown, path: string[]): unknown {
@@ -119,7 +121,7 @@ async function resolvePaymentIdFromEvent(input: {
   return null
 }
 
-async function advancePaymentToTargetStatus(
+export async function advancePaymentToTargetStatus(
   paymentId: string,
   targetStatus: PaymentStatus,
   metadata: { providerEvent?: string; rawPayload?: unknown }
@@ -623,7 +625,13 @@ export async function processPaymentEvent(event: WatcherEvent): Promise<void> {
 
   const metadata = {
     providerEvent: "watcher.detected",
-    rawPayload: { txHash, value, from, feeCaptureValidated }
+    rawPayload: {
+      txHash,
+      value,
+      from,
+      feeCaptureValidated,
+      ...(targetStatus === "FAILED" ? { failureEvidence: true } : {})
+    }
   }
 
   try {

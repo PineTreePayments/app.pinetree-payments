@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getPaymentById } from "@/database"
 import { runPaymentWatcher } from "@/engine/checkPaymentOnce"
+import { processPaymentEvent } from "@/engine/eventProcessor"
 import type { StoredPaymentSplitMetadata } from "@/types/payment"
 import {
   getTransactionByPaymentId,
@@ -83,6 +84,14 @@ export async function POST(
           }
         }
       }
+    }
+
+    if (txHash) {
+      await processPaymentEvent({
+        type: "payment.processing",
+        paymentId,
+        txHash
+      })
     }
 
     console.info("[detect] triggered", { paymentId, txHash, network: payment.network })

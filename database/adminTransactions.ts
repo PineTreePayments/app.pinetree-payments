@@ -1,4 +1,5 @@
 import { supabase, supabaseAdmin } from "./supabase"
+import { canonicalAdminPaymentStatus } from "@/engine/adminLedgerStatus"
 
 const db = supabaseAdmin || supabase
 
@@ -107,7 +108,10 @@ export async function getAdminTransactions(
     }
 
     return {
-      rows: (data || []) as AdminTransactionRow[],
+      rows: ((data || []) as AdminTransactionRow[]).map((row) => ({
+        ...row,
+        status: canonicalAdminPaymentStatus(row.status)
+      })),
       totalCount: count ?? 0,
     }
   } catch (err) {

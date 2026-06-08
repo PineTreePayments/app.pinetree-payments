@@ -1,41 +1,66 @@
 import { getPaymentById } from "@/database"
+import { getPaymentEvents } from "@/database/paymentEvents"
 import { getTransactionByPaymentId } from "@/database/transactions"
+import { paymentHasProcessingEvidence } from "./paymentEvidence"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 
 const ABANDONED_PAYMENT_TIMEOUT_MS = 5 * 60 * 1000
 
-function metadataHasBroadcastEvidence(value: unknown): boolean {
-  if (!value || typeof value !== "object") return false
-
-  const stack: unknown[] = [value]
-  const evidenceKeys = new Set([
-    "txhash",
-    "transactionhash",
-    "transactionid",
-    "signature",
-    "providersignature",
-    "providertransactionid"
-  ])
-
-  while (stack.length > 0) {
-    const current = stack.pop()
-    if (!current || typeof current !== "object") continue
-
-    for (const [key, raw] of Object.entries(current as Record<string, unknown>)) {
-      const normalizedKey = key.replace(/[_-]+/g, "").toLowerCase()
-      if (evidenceKeys.has(normalizedKey) && String(raw || "").trim()) {
-        return true
-      }
-      if (raw && typeof raw === "object") stack.push(raw)
-    }
-  }
-
-  return false
+function isOlderThanTimeout(
+  value: string | null | undefined,
+  timeoutMs: number
+): boolean {
+  const timestamp = new Date(String(value || "")).getTime()
+  return Number.isFinite(timestamp) && Date.now() - timestamp >= timeoutMs
 }
 
-function isOlderThanAbandonedTimeout(createdAt: string | null | undefined): boolean {
-  const createdAtMs = new Date(String(createdAt || "")).getTime()
-  return Number.isFinite(createdAtMs) && Date.now() - createdAtMs >= ABANDONED_PAYMENT_TIMEOUT_MS
+export type PaymentIncompleteEligibility = {
+  eligible: boolean
+  status: string
+  reason: string
+}
+
+export async function getPaymentIncompleteEligibility(
+  paymentId: string,
+  options?: { minimumAgeMs?: number }
+): Promise<PaymentIncompleteEligibility> {
+  const payment = await getPaymentById(paymentId)
+  if (!payment) {
+    return { eligible: false, status: "NOT_FOUND", reason: "payment_not_found" }
+  }
+
+  const status = String(payment.status || "").toUpperCase()
+  if (["CONFIRMED", "FAILED", "INCOMPLETE"].includes(status)) {
+    return { eligible: false, status, reason: "terminal_status_not_eligible" }
+  }
+  if (status === "PROCESSING") {
+    return { eligible: false, status, reason: "processing_requires_reconciliation" }
+  }
+  if (status !== "CREATED" && status !== "PENDING") {
+    return { eligible: false, status, reason: "status_not_eligible" }
+  }
+
+  const minimumAgeMs = options?.minimumAgeMs ?? 0
+  const activityAt = payment.updated_at || payment.created_at
+  if (minimumAgeMs > 0 && !isOlderThanTimeout(activityAt, minimumAgeMs)) {
+    return { eligible: false, status, reason: "recent_payment_not_eligible" }
+  }
+
+  const [transaction, events] = await Promise.all([
+    getTransactionByPaymentId(paymentId),
+    getPaymentEvents(paymentId).catch(() => [])
+  ])
+  if (paymentHasProcessingEvidence({ payment, transaction, events })) {
+    return { eligible: false, status, reason: "payment_has_processing_evidence" }
+  }
+
+  return {
+    eligible: true,
+    status,
+    reason: status === "CREATED"
+      ? "created_no_activity_timeout"
+      : "pending_no_activity_timeout"
+  }
 }
 
 /**
@@ -50,24 +75,26 @@ export async function markPaymentIncomplete(
     providerEvent?: string
     rawPayload?: unknown
     requireAbandonedTimeout?: boolean
+    minimumAgeMs?: number
   }
 ): Promise<boolean> {
   try {
-    const payment = await getPaymentById(paymentId)
-    if (!payment) return false
+    const minimumAgeMs = metadata?.minimumAgeMs ??
+      (metadata?.requireAbandonedTimeout ? ABANDONED_PAYMENT_TIMEOUT_MS : 0)
+    const eligibility = await getPaymentIncompleteEligibility(paymentId, { minimumAgeMs })
+    if (!eligibility.eligible) return false
 
-    const status = String(payment.status || "").toUpperCase()
-    if (["CONFIRMED", "FAILED", "INCOMPLETE"].includes(status)) return false
-    if (status !== "CREATED" && status !== "PENDING") return false
-
-    if (metadata?.requireAbandonedTimeout && !isOlderThanAbandonedTimeout(payment.created_at)) return false
-
-    const transaction = await getTransactionByPaymentId(paymentId)
-    const hasProviderReference = Boolean(String(payment.provider_reference || "").trim())
-    const hasTransactionReference = Boolean(String(transaction?.provider_transaction_id || "").trim())
-    if (hasTransactionReference || metadataHasBroadcastEvidence(payment.metadata)) return false
-    if (metadata?.requireAbandonedTimeout && hasProviderReference) return false
-
+    if (eligibility.status === "CREATED") {
+      await updatePaymentStatus(paymentId, "PENDING", {
+        providerEvent: metadata?.providerEvent,
+        rawPayload: {
+          ...(metadata?.rawPayload && typeof metadata.rawPayload === "object"
+            ? metadata.rawPayload as Record<string, unknown>
+            : {}),
+          stateMachineStep: "created_to_pending_before_incomplete"
+        }
+      })
+    }
     await updatePaymentStatus(paymentId, "INCOMPLETE", metadata)
     return true
   } catch (error) {

@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getPaymentsByStatus, supabaseAdmin, supabase as supabaseAnon } from "@/database"
+import { getPaymentsByStatus } from "@/database"
 import { runPaymentWatcher } from "@/engine/checkPaymentOnce"
-
-const db = supabaseAdmin ?? supabaseAnon
+import { sweepStalePayments } from "@/engine/stalePaymentSweep"
 
 function isAuthorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET
   if (!secret) {
-    console.error("[cron:check-payments] Missing CRON_SECRET — rejecting request")
+    console.error("[cron:check-payments] Missing CRON_SECRET - rejecting request")
     return false
   }
   const auth = req.headers.get("authorization") || ""
@@ -20,20 +19,17 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // ── Phase 1: Stale payment sweep ──────────────────────────────────────────
-    // Delegates to public.sweep_stale_payments() — a bounded Postgres function
-    // that handles candidate selection, bulk status update, event insertion, and
-    // intent expiry in a single transaction with an advisory lock.
-    const { data: sweepResult, error: sweepError } = await db
-      .rpc("sweep_stale_payments", { max_rows: 250, stale_after: "5 minutes" })
+    const sweepResult = await sweepStalePayments({
+      maxRows: 250,
+      staleAfterMs: 5 * 60 * 1000
+    }).catch((error) => {
+      console.error(
+        "[cron:check-payments] sweep failed:",
+        error instanceof Error ? error.message : String(error)
+      )
+      return null
+    })
 
-    if (sweepError) {
-      console.error("[cron:check-payments] sweep RPC failed:", sweepError.message)
-    }
-
-    // ── Phase 2: Blockchain checks for recently active payments ───────────────
-    // After the sweep, remaining CREATED/PENDING/PROCESSING are recent enough
-    // to still need on-chain verification.
     const [created, pending, processing] = await Promise.all([
       getPaymentsByStatus("CREATED", 50),
       getPaymentsByStatus("PENDING", 50),
@@ -43,12 +39,9 @@ export async function GET(req: NextRequest) {
     const watchable = [...created, ...pending, ...processing]
 
     if (watchable.length === 0) {
-      return NextResponse.json({ checked: 0, sweepResult: sweepResult ?? null })
+      return NextResponse.json({ checked: 0, sweepResult })
     }
 
-    // Run watcher iterations in parallel — each does a single blockchain check.
-    // Each check is raced against an 8s timeout so the function always returns
-    // within Vercel's free-tier 10s limit regardless of RPC latency.
     const runWatcher = (payment: typeof watchable[number]) =>
       Promise.race([
         runPaymentWatcher(payment.id),
@@ -66,7 +59,7 @@ export async function GET(req: NextRequest) {
       checked: watchable.length,
       succeeded,
       failed,
-      sweepResult: sweepResult ?? null,
+      sweepResult
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error"

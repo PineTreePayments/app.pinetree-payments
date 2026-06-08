@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAdminFromRequest, getRouteErrorStatus } from "@/lib/api/adminAuth"
-import { updatePaymentStatus } from "@/engine/updatePaymentStatus"
+import {
+  getPaymentIncompleteEligibility,
+  markPaymentIncomplete
+} from "@/engine/paymentStateActions"
 import { supabase, supabaseAdmin } from "@/database/supabase"
 
 const db = supabaseAdmin || supabase
 
 const CONFIRM_TOKEN = "MARK_STALE_INCOMPLETE"
 const MAX_IDS = 50
-const MIN_PENDING_AGE_MINUTES = 60
-const MIN_CREATED_AGE_MINUTES = 30
+const MIN_PENDING_AGE_MS = 60 * 60_000
+const MIN_CREATED_AGE_MS = 30 * 60_000
 
 export async function POST(req: NextRequest) {
   try {
     const adminId = await requireAdminFromRequest(req)
-
     const body = (await req.json()) as { paymentIds?: unknown; confirm?: unknown }
 
     if (body.confirm !== CONFIRM_TOKEN) {
@@ -37,70 +39,64 @@ export async function POST(req: NextRequest) {
 
     const { data, error } = await db
       .from("payments")
-      .select("id, status, created_at")
+      .select("id, status")
       .in("id", paymentIds)
 
     if (error) {
       return NextResponse.json({ error: "Failed to fetch payments" }, { status: 500 })
     }
 
-    const now = Date.now()
     const changed: Array<{ paymentId: string; previousStatus: string }> = []
     const skipped: Array<{ paymentId: string; status: string; reason: string }> = []
+    const found = new Set((data || []).map((row: { id: string }) => row.id))
 
-    const found = new Set((data || []).map((r: { id: string }) => r.id))
     for (const id of paymentIds) {
       if (!found.has(id)) {
         skipped.push({ paymentId: id, status: "NOT_FOUND", reason: "payment_not_found" })
       }
     }
 
-    for (const row of (data || []) as Array<{ id: string; status: string; created_at: string }>) {
-      const ageMinutes = (now - new Date(row.created_at).getTime()) / 60_000
+    for (const row of (data || []) as Array<{ id: string; status: string }>) {
+      const minimumAgeMs = row.status === "CREATED"
+        ? MIN_CREATED_AGE_MS
+        : MIN_PENDING_AGE_MS
+      const eligibility = await getPaymentIncompleteEligibility(row.id, { minimumAgeMs })
 
-      // PROCESSING → INCOMPLETE is never allowed (processing payments may still confirm).
-      // Terminal statuses are also excluded.
-      if (row.status === "PROCESSING") {
-        skipped.push({ paymentId: row.id, status: row.status, reason: "processing_requires_manual_review" })
+      if (!eligibility.eligible) {
+        skipped.push({
+          paymentId: row.id,
+          status: eligibility.status,
+          reason: eligibility.reason
+        })
         continue
       }
-      if (!["CREATED", "PENDING"].includes(row.status)) {
-        skipped.push({ paymentId: row.id, status: row.status, reason: "terminal_status_not_eligible" })
-        continue
-      }
-
-      // Conservative age thresholds for the admin manual action.
-      // The automated cron sweep uses the tighter 5-minute threshold.
-      // CREATED → INCOMPLETE is a valid state machine transition (validTransitions.CREATED includes INCOMPLETE).
-      const minAge = row.status === "CREATED" ? MIN_CREATED_AGE_MINUTES : MIN_PENDING_AGE_MINUTES
-      if (ageMinutes < minAge) {
-        skipped.push({ paymentId: row.id, status: row.status, reason: "recent_payment_not_eligible" })
-        continue
-      }
-
-      const staleReason =
-        row.status === "CREATED" ? "created_no_activity_timeout" : "pending_no_activity_timeout"
 
       try {
-        await updatePaymentStatus(row.id, "INCOMPLETE", {
+        const didChange = await markPaymentIncomplete(row.id, {
           providerEvent: "admin.stale-cleanup",
           rawPayload: {
             adminAction: true,
-            reason: staleReason,
+            reason: eligibility.reason,
             adminId,
-            requestIp: req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? "unknown",
+            requestIp: req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? "unknown"
           },
+          minimumAgeMs
         })
-        changed.push({ paymentId: row.id, previousStatus: row.status })
+
+        if (didChange) {
+          changed.push({ paymentId: row.id, previousStatus: row.status })
+        } else {
+          skipped.push({ paymentId: row.id, status: row.status, reason: "eligibility_changed" })
+        }
       } catch (updateErr) {
-        const msg = updateErr instanceof Error ? updateErr.message : "unknown error"
-        skipped.push({ paymentId: row.id, status: row.status, reason: `update_failed: ${msg}` })
+        const message = updateErr instanceof Error ? updateErr.message : "unknown error"
+        skipped.push({ paymentId: row.id, status: row.status, reason: `update_failed: ${message}` })
       }
     }
 
     console.log("[admin/stale-payments/mark-incomplete] mutation complete", {
       changed: changed.length,
-      skipped: skipped.length,
+      skipped: skipped.length
     })
 
     return NextResponse.json({ changed, skipped })

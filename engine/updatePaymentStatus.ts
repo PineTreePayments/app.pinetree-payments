@@ -18,9 +18,16 @@ import {
   createPaymentEvent,
   PaymentEventType
 } from "@/database"
+import { getPaymentEvents } from "@/database/paymentEvents"
+import { getTransactionByPaymentId } from "@/database/transactions"
 import { deliverWebhook, type WebhookPaymentData } from "./webhookDelivery"
 import type { WebhookEvent } from "@/database/merchantWebhooks"
 import { reconcileTransactionForPayment } from "./reconcileTransaction"
+import {
+  hasFailureEvidence,
+  isExplicitUnpaidInvoiceExpiry,
+  paymentHasProcessingEvidence
+} from "./paymentEvidence"
 
 const STATUS_TO_WEBHOOK_EVENT: Partial<Record<PaymentStatus, WebhookEvent>> = {
   CONFIRMED: "payment.confirmed",
@@ -47,6 +54,23 @@ export async function updatePaymentStatus(
   }
 
   const currentStatus = normalizeToStrictPaymentStatus(payment.status)
+
+  if (nextStatus === "INCOMPLETE") {
+    const [transaction, events] = await Promise.all([
+      getTransactionByPaymentId(paymentId),
+      getPaymentEvents(paymentId).catch(() => [])
+    ])
+    if (
+      paymentHasProcessingEvidence({ payment, transaction, events }) &&
+      !isExplicitUnpaidInvoiceExpiry(metadata)
+    ) {
+      throw new Error("Cannot mark payment INCOMPLETE after provider or transaction evidence exists")
+    }
+  }
+
+  if (nextStatus === "FAILED" && !hasFailureEvidence(metadata)) {
+    throw new Error("Cannot mark payment FAILED without provider or network failure evidence")
+  }
 
   if (nextStatus === "CONFIRMED") {
     const split = (payment.metadata as { split?: Record<string, unknown> } | null)?.split
@@ -156,7 +180,7 @@ function statusToEventType(status: PaymentStatus): PaymentEventType {
     PROCESSING: "payment.processing",
     CONFIRMED: "payment.confirmed",
     FAILED: "payment.failed",
-    INCOMPLETE: "payment.cancelled"
+    INCOMPLETE: "payment.incomplete"
   }
 
   return mapping[status]

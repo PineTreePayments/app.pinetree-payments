@@ -1,7 +1,11 @@
 import { NextRequest } from "next/server"
 import { getPaymentById, getPaymentIntentById } from "@/database"
-import { failPayment, expirePayment, updatePaymentStatus } from "@/engine/updatePaymentStatus"
-import { normalizeToStrictPaymentStatus } from "@/engine/paymentStateMachine"
+import { updatePaymentStatus } from "@/engine/updatePaymentStatus"
+import {
+  canUserCancelAsIncomplete,
+  normalizeToStrictPaymentStatus
+} from "@/engine/paymentStateMachine"
+import { markPaymentIncomplete } from "@/engine/paymentStateActions"
 import { requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
 import { verifyTerminalSession } from "@/lib/api/terminalAuth"
 import { verifyCheckoutSession } from "@/lib/api/checkoutAuth"
@@ -95,14 +99,29 @@ export async function POST(
 
     // State machine: FAILED is only reachable from PROCESSING.
     // CREATED/PENDING → INCOMPLETE (the cancelled terminal state).
-    if (status === "PROCESSING") {
-      await failPayment(paymentId, { providerEvent: "payment.user_rejected" })
-    } else if (status === "PENDING") {
-      await expirePayment(paymentId, { providerEvent: "payment.user_rejected" })
-    } else {
-      // CREATED → PENDING → INCOMPLETE (two hops required by state machine)
+    if (!canUserCancelAsIncomplete(status)) {
+      return json({
+        ok: true,
+        skipped: true,
+        reason: "payment_has_processing_evidence_or_requires_reconciliation"
+      })
+    }
+
+    if (status === "CREATED") {
       await updatePaymentStatus(paymentId, "PENDING")
-      await expirePayment(paymentId, { providerEvent: "payment.user_rejected" })
+    }
+
+    const changed = await markPaymentIncomplete(paymentId, {
+      providerEvent: "payment.user_rejected",
+      rawPayload: { source: "ui_cancel" }
+    })
+
+    if (!changed) {
+      return json({
+        ok: true,
+        skipped: true,
+        reason: "payment_has_processing_evidence_or_requires_reconciliation"
+      })
     }
 
     return json({ ok: true })

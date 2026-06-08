@@ -70,6 +70,7 @@ function getMetadata(payload: unknown): Record<string, unknown> {
 function normalizeSpeedStatus(status: string) {
   const normalized = status.toLowerCase().trim()
   if (normalized === "paid" || normalized === "confirmed") return "CONFIRMED" as const
+  if (normalized === "processing" || normalized === "settling") return "PROCESSING" as const
   if (normalized === "expired" || normalized === "cancelled" || normalized === "canceled") return "EXPIRED" as const
   return "PENDING" as const
 }
@@ -181,7 +182,19 @@ export const speedAdapter: ProviderAdapter = {
     if (eventType === "payment.expired" || eventType === "payment.cancelled") {
       return {
         paymentId,
-        event: "payment.failed"
+        event: "payment.incomplete"
+      }
+    }
+
+    if (
+      eventType === "payment.processing" ||
+      eventType === "payment.settling" ||
+      status.toLowerCase() === "processing" ||
+      status.toLowerCase() === "settling"
+    ) {
+      return {
+        paymentId,
+        event: "payment.processing"
       }
     }
 

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getPaymentById, getPaymentIntentById } from "@/database"
 import { runPaymentWatcher } from "@/engine/checkPaymentOnce"
-import { processPaymentEvent } from "@/engine/eventProcessor"
+import {
+  advancePaymentToTargetStatus,
+  processPaymentEvent
+} from "@/engine/eventProcessor"
 import { verifyCheckoutSession } from "@/lib/api/checkoutAuth"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { isSpeedPaymentPaid, retrieveSpeedPayment } from "@/providers/lightning/speedClient"
@@ -65,12 +68,27 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const speedPayment = await retrieveSpeedPayment(speedPaymentId)
     const detected = isSpeedPaymentPaid(speedPayment)
+    const speedStatus = String(speedPayment.status || "").toLowerCase().trim()
 
     if (detected) {
       await processPaymentEvent({
         type: "payment.confirmed",
         paymentId,
         feeCaptureValidated: true
+      })
+    } else if (speedStatus === "processing" || speedStatus === "settling") {
+      await processPaymentEvent({
+        type: "payment.processing",
+        paymentId
+      })
+    } else if (
+      speedStatus === "expired" ||
+      speedStatus === "cancelled" ||
+      speedStatus === "canceled"
+    ) {
+      await advancePaymentToTargetStatus(paymentId, "INCOMPLETE", {
+        providerEvent: "payment.expired",
+        rawPayload: { speedPaymentId, speedStatus }
       })
     }
 
