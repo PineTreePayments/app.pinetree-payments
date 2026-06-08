@@ -4,8 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
-  Activity,
-  ArrowUpRight,
   BarChart3,
   Boxes,
   ChevronRight,
@@ -31,12 +29,11 @@ import {
 } from "recharts"
 import {
   ChartCard,
-  CompactMetricTile,
   DashboardHeroCard,
   DashboardSection,
-  MetricGrid,
+  GroupedMetricSurface,
+  InlineMetric,
 } from "@/components/dashboard/DashboardPrimitives"
-import { formatDashboardNetwork } from "@/components/dashboard/displayHelpers"
 
 type DashboardOverviewResponse = {
   success?: boolean
@@ -140,7 +137,6 @@ export default function DashboardPage() {
     incomplete: 0,
     failed: 0
   })
-  const [railBreakdown, setRailBreakdown] = useState<Record<string, { count: number; volume: number }>>({})
   const [railReadiness, setRailReadiness] = useState<NonNullable<DashboardOverviewResponse["railReadiness"]>>([])
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
@@ -180,7 +176,6 @@ export default function DashboardPage() {
     setChartData(payload.chartData || [])
     setRecentTx(payload.recentTx || [])
     if (payload.today) setToday(payload.today)
-    setRailBreakdown(payload.railBreakdown || {})
     setRailReadiness(payload.railReadiness || [])
   }, [])
 
@@ -221,11 +216,7 @@ export default function DashboardPage() {
     return () => clearInterval(interval)
   }, [loadOverview])
 
-  const railRows = Object.entries(railBreakdown)
-    .sort((left, right) => right[1].volume - left[1].volume)
   const connectedRailRows = railReadiness.filter((rail) => rail.status === "Connected")
-  const railActivityCount = railRows.reduce((sum, [, metrics]) => sum + metrics.count, 0)
-  const railActivityVolume = railRows.reduce((sum, [, metrics]) => sum + metrics.volume, 0)
 
   const quickActions = [
     { label: "Open POS", href: "/dashboard/pos", icon: ShoppingCart },
@@ -371,103 +362,49 @@ export default function DashboardPage() {
         }
       />
 
-      {/* 2 — Today's Activity Metrics */}
-      <MetricGrid>
-        <CompactMetricTile label="Transactions Today" value={today.transactionCount} tone="blue" />
-        <CompactMetricTile label="Average Transaction" value={formatUsd(today.averageTransaction)} />
-        <CompactMetricTile label="Incomplete Today" value={today.incomplete} tone={today.incomplete ? "amber" : "default"} />
-        <CompactMetricTile label="Failed Today" value={today.failed} tone={today.failed ? "red" : "default"} />
-      </MetricGrid>
+      {/* 2 — Performance and health */}
+      <div className="grid gap-3 lg:grid-cols-2 md:gap-4">
+        <GroupedMetricSurface title="Today's Performance" titleTone="blue">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3">
+            <InlineMetric label="Payments" value={today.transactionCount} />
+            <InlineMetric label="Average" value={formatUsd(today.averageTransaction)} />
+            <InlineMetric label="Confirmed" value={today.confirmed} />
+          </div>
+        </GroupedMetricSurface>
+        <GroupedMetricSurface title="Activity Health" titleTone="blue">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3">
+            <InlineMetric label="Success Rate" value={`${successRate}%`} />
+            <InlineMetric label="Incomplete" value={today.incomplete} />
+            <InlineMetric label="Failed" value={today.failed} />
+          </div>
+        </GroupedMetricSurface>
+      </div>
 
-      {/* 3 — Payment Operations + Today by Rail */}
+      {/* 3 — Compact payment operations */}
       <DashboardSection title="Payment Operations" titleTone="blue">
-        <div className="overflow-hidden rounded-2xl border border-blue-100/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.10),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f8fbff_52%,#eef6ff_100%)] shadow-[0_14px_45px_rgba(37,99,235,0.09)]">
-          <div className="grid gap-0 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-
-            {/* Active Rails */}
-            <div className="border-b border-blue-100/80 p-4 lg:border-b-0 lg:border-r">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">Active Rails</p>
-
-              {connectedRailRows.length > 0 && (
-                <div className="mt-3 grid gap-1.5 sm:flex sm:flex-wrap sm:gap-2">
-                  {connectedRailRows.map((rail) => (
-                    <div
-                      key={rail.id}
-                      title={`${rail.label} connected`}
-                      className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-gray-200/80 bg-white/80 px-3 py-2 shadow-sm sm:inline-flex sm:w-auto sm:justify-start sm:rounded-full sm:border-emerald-200 sm:bg-emerald-50/80 sm:px-2.5 sm:py-1.5 sm:shadow-none"
-                    >
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 ring-2 ring-emerald-100" />
-                        <span className="truncate text-sm font-semibold text-gray-800 sm:text-xs sm:text-emerald-800">
-                          {rail.label}
-                        </span>
-                      </span>
-                      <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-700 sm:hidden">
-                        Active
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-                <Link
-                  href="/dashboard/providers"
-                  className="inline-flex min-h-9 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
-                >
-                  Manage Rails
-                </Link>
-                <Link
-                  href="/dashboard/transactions"
-                  className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-xl border border-blue-100 bg-white/85 px-3.5 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
-                >
-                  View Transactions
-                  <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
-                </Link>
-              </div>
+        <div className="rounded-2xl border border-blue-100 bg-blue-50/55 px-4 py-3.5 shadow-[0_8px_24px_rgba(37,99,235,0.06)] sm:px-5">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-950">
+                Active rails:{" "}
+                <span className="font-medium text-gray-700">
+                  {connectedRailRows.length
+                    ? connectedRailRows.map((rail) => rail.label).join(", ")
+                    : "None connected"}
+                </span>
+              </p>
+              <p className="mt-1 text-xs text-gray-600">
+                Today: {formatUsd(today.volume)} across {today.transactionCount} payment{today.transactionCount === 1 ? "" : "s"}
+              </p>
             </div>
-
-            {/* Today by Rail */}
-            <div className="p-4">
-              <div className="flex items-end justify-between gap-3">
-                <div>
-                  <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">
-                    <Activity className="h-3.5 w-3.5" aria-hidden="true" />
-                    Today by Rail
-                  </p>
-                  <p className="mt-1 text-xs text-gray-500">
-                    {railActivityCount} payment{railActivityCount === 1 ? "" : "s"} today
-                  </p>
-                </div>
-                <p className="shrink-0 text-xl font-semibold tabular-nums text-gray-950">{formatUsd(railActivityVolume)}</p>
-              </div>
-
-              {railRows.length ? (
-                <div className="mt-3 overflow-hidden rounded-xl border border-white/80 bg-white/75 backdrop-blur">
-                  <div className="grid grid-cols-[minmax(0,1fr)_56px_84px] gap-2 border-b border-blue-100/70 bg-blue-50/45 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-500 sm:grid-cols-[minmax(0,1fr)_72px_96px]">
-                    <span>Rail</span>
-                    <span className="text-right">Payments</span>
-                    <span className="text-right">Volume</span>
-                  </div>
-                  <div className="max-h-40 divide-y divide-blue-100/70 overflow-y-auto overscroll-contain">
-                    {railRows.map(([rail, metrics]) => (
-                      <div key={rail} className="grid grid-cols-[minmax(0,1fr)_56px_84px] items-center gap-2 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_72px_96px]">
-                        <p className="truncate text-sm font-medium text-gray-950" title={formatDashboardNetwork(rail)}>
-                          {formatDashboardNetwork(rail)}
-                        </p>
-                        <p className="text-right text-xs tabular-nums text-gray-600">{metrics.count}</p>
-                        <p className="text-right text-sm font-semibold tabular-nums text-gray-950">{formatUsd(metrics.volume)}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-3 rounded-xl border border-dashed border-blue-200 bg-white/70 px-3.5 py-4 text-sm text-gray-600">
-                  Rail mix appears after payments.
-                </div>
-              )}
+            <div className="flex items-center gap-4">
+              <Link href="/dashboard/providers" className="text-xs font-semibold text-blue-700 hover:text-blue-800">
+                Manage Rails
+              </Link>
+              <Link href="/dashboard/transactions" className="text-xs font-semibold text-blue-700 hover:text-blue-800">
+                View Transactions
+              </Link>
             </div>
-
           </div>
         </div>
       </DashboardSection>
@@ -532,13 +469,13 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* 5 — Historical Metrics */}
-      <MetricGrid>
-        <CompactMetricTile label="All-Time Volume" value={formatUsd(volume)} tone="blue" />
-        <CompactMetricTile label="All Transactions" value={txCount} />
-        <CompactMetricTile label="Success Rate" value={`${successRate}%`} tone="green" />
-        <CompactMetricTile label="Confirmed Today" value={today.confirmed} tone="green" />
-      </MetricGrid>
+      {/* 5 — Historical summary */}
+      <GroupedMetricSurface title="Historical Summary" titleTone="blue">
+        <div className="grid grid-cols-2 gap-4">
+          <InlineMetric label="All-Time Volume" value={formatUsd(volume)} />
+          <InlineMetric label="All Transactions" value={txCount} />
+        </div>
+      </GroupedMetricSurface>
 
       {/* 6 — Quick Actions */}
       <DashboardSection title="Quick Actions" titleTone="blue">

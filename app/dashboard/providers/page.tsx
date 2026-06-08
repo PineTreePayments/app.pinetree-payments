@@ -1488,7 +1488,7 @@ export default function ProvidersPage() {
         <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Providers</h1>
       </div>
 
-      <MetricGrid columns="three">
+      <MetricGrid columns="four">
         <CompactMetricTile label="Connected" value={connectedAndEnabledProvidersCount} tone="blue" />
         <CompactMetricTile label="Payment Options" value="5" />
         <CompactMetricTile
@@ -1496,16 +1496,23 @@ export default function ProvidersPage() {
           value={smartRouting ? "On" : "Off"}
           tone={smartRouting ? "green" : "slate"}
         />
+        <CompactMetricTile
+          label="Auto Conversion"
+          value={autoConversion ? "On" : "Off"}
+          tone={autoConversion ? "green" : "slate"}
+        />
       </MetricGrid>
 
       <DashboardSection title="Engine Settings" titleTone="blue">
-      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
-
-        <div className="space-y-4">
-          <div className="flex flex-col gap-3 rounded-xl border border-gray-100 bg-gray-50/70 p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="font-medium text-gray-950">Smart Routing</p>
-              <p className="text-sm text-gray-600">Automatically select the best payment provider</p>
+      <div className="rounded-2xl border border-gray-200 bg-white p-2.5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+        <div className="grid gap-2 md:grid-cols-2">
+          <div className="flex min-h-16 items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-gray-950">Smart Routing</p>
+                <span className="text-[11px] font-semibold text-gray-500">{smartRouting ? "On" : "Off"}</span>
+              </div>
+              <p className="mt-0.5 text-xs text-gray-600">Select the best payment provider</p>
             </div>
 
             <ToggleSwitch
@@ -1522,10 +1529,13 @@ export default function ProvidersPage() {
             />
           </div>
 
-          <div className="flex flex-col gap-3 rounded-xl border border-gray-100 bg-gray-50/70 p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="font-medium text-gray-950">Auto Convert to Fiat</p>
-              <p className="text-sm text-gray-600">Convert payments routed through Shift4 to fiat</p>
+          <div className="flex min-h-16 items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-gray-950">Auto Convert to Fiat</p>
+                <span className="text-[11px] font-semibold text-gray-500">{autoConversion ? "On" : "Off"}</span>
+              </div>
+              <p className="mt-0.5 text-xs text-gray-600">Convert Shift4 payments to fiat</p>
             </div>
 
             <ToggleSwitch

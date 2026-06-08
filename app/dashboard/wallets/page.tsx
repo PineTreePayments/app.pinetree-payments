@@ -925,7 +925,7 @@ function walletOperationAppearance(operation: WalletOperationSummary) {
     return { Icon: RefreshCcw, label: "Sync", className: "border-blue-200 bg-blue-50 text-blue-700" }
   }
   if (["completed", "confirmed", "succeeded"].includes(operation.status.toLowerCase())) {
-    return { Icon: CheckCircle2, label: operationType.includes("send") ? "Send" : "Completed", className: "border-emerald-200 bg-emerald-50 text-emerald-700" }
+    return { Icon: CheckCircle2, label: operationType.includes("send") ? "Send" : "Completed", className: "border-blue-200 bg-blue-50 text-blue-700" }
   }
   if (["pending", "processing"].includes(operation.status.toLowerCase())) {
     return { Icon: Clock3, label: operationType.includes("send") ? "Send" : "Processing", className: "border-blue-200 bg-blue-50 text-blue-700" }

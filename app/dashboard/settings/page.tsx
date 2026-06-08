@@ -349,7 +349,7 @@ export default function SettingsPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Settings</h1>
-        <p className="mt-1 text-sm text-gray-600">Business, payments, POS, receipts, tax, reporting, and integrations.</p>
+        <p className="mt-1 text-sm text-gray-600">Business profile, receipts, tax, reporting, security, and integrations.</p>
       </div>
 
       {!schemaReady && (
@@ -465,54 +465,8 @@ export default function SettingsPage() {
       </div>
       </DashboardSection>
 
-      <div className="grid items-start gap-4 lg:grid-cols-2">
-        <DashboardSection title="Payment Preferences" titleTone="blue">
-          <div className="rounded-2xl border border-gray-200 bg-white p-3.5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-gray-950">Enabled payment rails</p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {enabledRails.length ? enabledRails.map((provider) => (
-                  <span key={provider.provider} className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/90 px-2.5 py-1.5 text-xs font-semibold capitalize text-emerald-700 shadow-[0_4px_14px_rgba(16,185,129,0.08)]">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                    {provider.provider.replaceAll("_", " ")}
-                  </span>
-                )) : <span className="text-sm text-gray-500">No payment rails enabled.</span>}
-              </div>
-            </div>
-            <Link href="/dashboard/providers" className="mt-3 inline-flex min-h-8 w-fit items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-100">
-              Manage Payment Rails
-            </Link>
-          </div>
-        </DashboardSection>
-
-        <DashboardSection title="Online Checkout" titleTone="blue">
-          <CompactLinkPanel
-            title="Hosted Checkout"
-            detail={`${integrationSummary.checkoutLinks} checkout link${integrationSummary.checkoutLinks === 1 ? "" : "s"} available. Manage links and customer-facing payment options.`}
-            href="/dashboard/checkout"
-            label="Manage Checkout"
-          />
-        </DashboardSection>
-      </div>
-
-      <DashboardSection title="POS Preferences" titleTone="blue">
-        <div className="max-w-2xl rounded-2xl border border-gray-200 bg-white p-3.5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-gray-950">Terminal Management</p>
-              <p className="mt-0.5 text-xs leading-5 text-gray-500">
-                Manage terminals, device names, and terminal setup.
-              </p>
-            </div>
-            <Link href="/dashboard/pos" className="inline-flex min-h-9 shrink-0 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-3.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
-              Manage Terminals
-            </Link>
-          </div>
-        </div>
-      </DashboardSection>
-
       <DashboardSection title="Receipts" titleTone="blue">
-        <div className="rounded-2xl border border-gray-200 bg-white p-3.5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+        <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-3.5">
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.65fr)]">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Receipt Content</p>
@@ -620,19 +574,20 @@ export default function SettingsPage() {
       </DashboardSection>
 
       <DashboardSection title="Security & Integrations" titleTone="blue">
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-          <div className="flex flex-col gap-3 border-b border-gray-100 px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-gray-950">Account Security</p>
-              <p className="mt-0.5 break-all text-xs leading-5 text-gray-500">
-                Signed in as {accountEmail || "merchant"}. Session security is managed by Supabase Auth.
+        <div className="rounded-2xl border border-gray-200 bg-white p-2.5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            <div className="min-w-0 rounded-xl border border-blue-100 bg-blue-50/60 px-3 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-semibold text-gray-600">Account Security</p>
+                <button type="button" onClick={() => void signOut()} className="shrink-0 text-[11px] font-semibold text-red-600 hover:text-red-700">
+                  Sign out
+                </button>
+              </div>
+              <p className="mt-1 truncate text-sm font-semibold text-gray-950" title={accountEmail || "merchant"}>
+                {accountEmail || "Merchant account"}
               </p>
+              <p className="mt-0.5 text-xs text-gray-500">Authenticated session</p>
             </div>
-            <button type="button" onClick={() => void signOut()} className="w-fit shrink-0 text-xs font-semibold text-red-600 hover:text-red-700">
-              Sign out
-            </button>
-          </div>
-          <div className="grid gap-2 p-2.5 sm:grid-cols-2 xl:grid-cols-4">
             <IntegrationSummaryLink
               title="Wallets"
               value={`${integrationSummary.wallets} connected`}
@@ -687,30 +642,6 @@ function CompactSettingToggle({
     <div className="flex min-h-12 items-center justify-between gap-3 border-b border-gray-100 px-3 py-2.5 last:border-b-0 sm:[&:nth-child(odd)]:border-r">
       <p className="text-sm font-medium text-gray-900">{title}</p>
       <ToggleSwitch checked={checked} onChange={onChange} />
-    </div>
-  )
-}
-
-function CompactLinkPanel({
-  title,
-  detail,
-  href,
-  label
-}: {
-  title: string
-  detail: string
-  href: string
-  label: string
-}) {
-  return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-3.5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-      <div className="min-w-0">
-        <p className="text-sm font-semibold text-gray-950">{title}</p>
-        <p className="mt-0.5 text-xs leading-5 text-gray-500">{detail}</p>
-      </div>
-      <Link href={href} className="mt-3 inline-flex min-h-8 w-fit items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-100">
-        {label}
-      </Link>
     </div>
   )
 }
