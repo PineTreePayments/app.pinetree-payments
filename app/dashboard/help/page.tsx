@@ -608,7 +608,7 @@ export default function HelpCenterPage() {
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
               PineTree Support Center
             </p>
-            <h2 className="mt-1 text-base font-semibold leading-snug text-gray-950 sm:text-lg">
+            <h2 className="mt-1 text-sm font-normal leading-relaxed text-gray-700">
               Set up rails, understand payment states, and know when to escalate.
             </h2>
           </div>

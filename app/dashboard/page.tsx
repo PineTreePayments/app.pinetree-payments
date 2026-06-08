@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
   BarChart3,
@@ -29,7 +28,6 @@ import {
 } from "recharts"
 import {
   ChartCard,
-  DashboardHeroCard,
   DashboardSection,
   GroupedMetricSurface,
   InlineMetric,
@@ -122,9 +120,6 @@ function getChartWindow(data: ChartPoint[], range: ChartRange) {
 }
 
 export default function DashboardPage() {
-
-  const router = useRouter()
-
   const [volume, setVolume] = useState(0)
   const [txCount, setTxCount] = useState(0)
   const [successRate, setSuccessRate] = useState(0)
@@ -357,24 +352,23 @@ export default function DashboardPage() {
       )}
 
       {/* 1 — Today's Confirmed Sales */}
-      <DashboardHeroCard
-        eyebrow="Today's Confirmed Sales"
-        title="Confirmed merchant payment volume since midnight"
-        value={formatUsd(today.volume)}
-        detail={
-          <>
+      <div className="relative overflow-hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] px-4 py-3 shadow-[0_10px_28px_rgba(37,99,235,0.09)] sm:px-5 sm:py-3.5">
+        <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/80 to-transparent" />
+        <div className="relative">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-700">
+            Today&apos;s Confirmed Sales
+          </p>
+          <h2 className="mt-1 text-sm font-medium text-gray-600">
+            Confirmed merchant payment volume since midnight
+          </h2>
+          <div className="mt-0.5 text-2xl font-semibold leading-tight text-gray-950 sm:text-3xl">
+            {formatUsd(today.volume)}
+          </div>
+          <div className="mt-1 text-xs leading-5 text-gray-600">
             {today.confirmed} confirmed payment{today.confirmed === 1 ? "" : "s"}
-          </>
-        }
-        action={
-          <button
-            onClick={() => router.push("/dashboard/transactions")}
-            className="inline-flex min-h-10 w-fit self-start items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 sm:self-auto md:px-5"
-          >
-            View Transactions
-          </button>
-        }
-      />
+          </div>
+        </div>
+      </div>
 
       {/* 2 — Performance and health */}
       <div className="grid gap-3 lg:grid-cols-2 md:gap-4">

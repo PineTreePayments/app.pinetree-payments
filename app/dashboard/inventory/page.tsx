@@ -446,6 +446,7 @@ export default function InventoryPage() {
                 <ProviderStatusPill
                   label={integration.status === "CONNECTED" ? "Connected" : "Not Connected"}
                   tone={integration.status === "CONNECTED" ? "blue" : "slate"}
+                  className="!min-h-6 shrink-0 !px-2 !text-[10px]"
                 />
               </div>
               <div className="mt-auto flex flex-wrap gap-2 pt-4">
