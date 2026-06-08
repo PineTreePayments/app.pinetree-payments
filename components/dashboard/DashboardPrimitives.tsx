@@ -9,8 +9,23 @@ function cx(...classes: Array<string | false | null | undefined>) {
 const surfaceClass =
   "border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
 
-const premiumBlueTitleClass =
+export const dashboardPageTitleClass =
+  "text-2xl font-semibold leading-tight tracking-tight text-gray-950 md:text-3xl"
+
+export const dashboardHeroValueClass =
+  "text-3xl font-semibold leading-tight tracking-tight text-gray-950 sm:text-4xl"
+
+export const dashboardMetricValueClass =
+  "text-xl font-semibold leading-tight text-gray-950 sm:text-2xl"
+
+export const dashboardSectionLabelClass =
   "text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]"
+
+export const dashboardCardTitleClass =
+  "text-base font-semibold leading-tight text-gray-950"
+
+export const dashboardSupportingTextClass =
+  "text-sm leading-5 text-gray-600"
 
 export function DashboardSection({
   title,
@@ -29,8 +44,8 @@ export function DashboardSection({
 }) {
   const titleClass =
     titleTone === "blue"
-      ? premiumBlueTitleClass
-      : "mt-0.5 text-base font-semibold text-gray-950 md:text-lg"
+      ? dashboardSectionLabelClass
+      : dashboardCardTitleClass
 
   return (
     <section className={cx("space-y-3 md:space-y-4", className)}>
@@ -38,7 +53,7 @@ export function DashboardSection({
         <div className="flex items-end justify-between gap-3">
           <div className="min-w-0">
             {eyebrow && (
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
+              <p className={dashboardSectionLabelClass}>
                 {eyebrow}
               </p>
             )}
@@ -87,7 +102,7 @@ export function CompactMetricTile({
       <p className="truncate text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">
         {label}
       </p>
-      <div className="mt-1.5 min-w-0 text-xl font-semibold leading-tight text-gray-950 sm:text-2xl">
+      <div className={cx("mt-1.5 min-w-0", dashboardMetricValueClass)}>
         {value}
       </div>
       {detail && (
@@ -153,8 +168,10 @@ export function GroupedMetricSurface({
       {title && (
         <p
           className={cx(
-            "mb-3 text-[11px] font-semibold uppercase tracking-[0.14em]",
-            titleTone === "blue" ? "text-blue-700" : "text-gray-500"
+            "mb-3",
+            titleTone === "blue"
+              ? dashboardSectionLabelClass
+              : "text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-500"
           )}
         >
           {title}
@@ -181,7 +198,7 @@ export function InlineMetric({
       <p className="truncate text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">
         {label}
       </p>
-      <div className="mt-1 min-w-0 text-lg font-semibold leading-tight text-gray-950 sm:text-xl">
+      <div className={cx("mt-1 min-w-0", dashboardMetricValueClass)}>
         {value}
       </div>
       {detail && <div className="mt-1 text-xs leading-5 text-gray-500">{detail}</div>}
@@ -209,14 +226,14 @@ export function DashboardHeroCard({
       <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/80 to-transparent" />
       <div className="relative flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">
+          <p className={dashboardSectionLabelClass}>
             {eyebrow}
           </p>
-          <h2 className="mt-2 text-sm font-medium text-gray-600">{title}</h2>
-          <div className="mt-1 text-4xl font-semibold tracking-normal text-gray-950 sm:text-5xl">
+          <h2 className={cx("mt-2 font-medium", dashboardSupportingTextClass)}>{title}</h2>
+          <div className={cx("mt-1", dashboardHeroValueClass)}>
             {value}
           </div>
-          {detail && <div className="mt-2 text-sm leading-6 text-gray-600">{detail}</div>}
+          {detail && <div className={cx("mt-2", dashboardSupportingTextClass)}>{detail}</div>}
         </div>
         <div className="flex flex-col gap-3 sm:items-end">
           {secondary}
@@ -248,7 +265,7 @@ export function InsightCard({
       )}
     >
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
+        <p className={dashboardSectionLabelClass}>
           {title}
         </p>
         <span className="h-2 w-2 rounded-full bg-blue-600 shadow-[0_0_18px_rgba(37,99,235,0.7)]" />
@@ -320,12 +337,12 @@ export function ChartCard({
         <div>
           <h2
             className={cx(
-              titleTone === "blue" ? premiumBlueTitleClass : "text-base font-semibold text-gray-950 md:text-lg"
+              titleTone === "blue" ? dashboardSectionLabelClass : dashboardCardTitleClass
             )}
           >
             {title}
           </h2>
-          {subtitle && <p className="mt-1 text-sm text-gray-500">{subtitle}</p>}
+          {subtitle && <p className={cx("mt-1", dashboardSupportingTextClass)}>{subtitle}</p>}
         </div>
         {action}
       </div>

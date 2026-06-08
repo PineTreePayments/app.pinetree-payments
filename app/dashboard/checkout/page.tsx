@@ -8,6 +8,7 @@ import {
   GroupedMetricSurface,
   InlineMetric,
   PineTreeInsightsCard,
+  dashboardPageTitleClass,
 } from "@/components/dashboard/DashboardPrimitives"
 import Button from "@/components/ui/Button"
 
@@ -1172,7 +1173,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
 
       {/* ── Page header ───────────────────────────────────────────────────── */}
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-gray-950 sm:text-2xl">Online Payments</h1>
+        <h1 className={dashboardPageTitleClass}>Online Payments</h1>
       </div>
 
       {/* ── Summary metrics ──────────────────────────────────────────────── */}

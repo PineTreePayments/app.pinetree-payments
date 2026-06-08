@@ -30,7 +30,8 @@ import {
   DashboardSection,
   MetricGrid,
   NetworkStatusPill,
-  PineTreeInsightsCard
+  PineTreeInsightsCard,
+  dashboardPageTitleClass
 } from "@/components/dashboard/DashboardPrimitives"
 import {
   formatDashboardNetwork,
@@ -2840,7 +2841,7 @@ export default function WalletsPage() {
     <div className="w-full space-y-5 md:space-y-7">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Wallets</h1>
+          <h1 className={dashboardPageTitleClass}>Wallets</h1>
         </div>
 
         <button

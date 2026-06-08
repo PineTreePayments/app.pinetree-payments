@@ -8,7 +8,9 @@ import {
   CompactMetricTile,
   DashboardSection,
   MetricGrid,
-  ProviderStatusPill
+  ProviderStatusPill,
+  dashboardPageTitleClass,
+  dashboardSupportingTextClass
 } from "@/components/dashboard/DashboardPrimitives"
 
 type InventoryItem = {
@@ -279,8 +281,8 @@ export default function InventoryPage() {
     <div className="space-y-5 md:space-y-7">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Inventory</h1>
-          <p className="mt-1 text-sm text-gray-600">Manage items, pricing, and stock alerts for PineTree POS.</p>
+          <h1 className={dashboardPageTitleClass}>Inventory</h1>
+          <p className={`mt-1 ${dashboardSupportingTextClass}`}>Manage items, pricing, and stock alerts for PineTree POS.</p>
         </div>
         <button
           type="button"

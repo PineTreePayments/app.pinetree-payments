@@ -12,7 +12,8 @@ import {
   CompactMetricTile,
   DashboardSection,
   MetricGrid,
-  ProviderStatusPill
+  ProviderStatusPill,
+  dashboardPageTitleClass
 } from "@/components/dashboard/DashboardPrimitives"
 
 const providerAlbyHubAppsUrl = process.env.NEXT_PUBLIC_ALBY_HUB_APPS_URL || "https://getalby.com/hub/apps"
@@ -1511,7 +1512,7 @@ function EngineSettingStatus({
   return (
     <div className="space-y-5 md:space-y-7">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Providers</h1>
+        <h1 className={dashboardPageTitleClass}>Providers</h1>
       </div>
 
       <MetricGrid columns="four">

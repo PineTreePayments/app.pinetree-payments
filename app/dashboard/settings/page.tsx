@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
-import { DashboardSection } from "@/components/dashboard/DashboardPrimitives"
+import {
+  DashboardSection,
+  dashboardPageTitleClass
+} from "@/components/dashboard/DashboardPrimitives"
 import Link from "next/link"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
 
@@ -322,7 +325,7 @@ export default function SettingsPage() {
   if (loading) {
     return (
       <div className="space-y-5 md:space-y-7">
-        <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Settings</h1>
+        <h1 className={dashboardPageTitleClass}>Settings</h1>
         <div className="rounded-2xl border border-gray-200 bg-white p-4 text-gray-700 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
           Loading settings...
         </div>
@@ -348,7 +351,7 @@ export default function SettingsPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Settings</h1>
+        <h1 className={dashboardPageTitleClass}>Settings</h1>
       </div>
 
       {!schemaReady && (

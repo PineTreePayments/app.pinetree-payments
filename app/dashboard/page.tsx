@@ -32,6 +32,10 @@ import {
   GroupedMetricSurface,
   InlineMetric,
   PineTreeInsightsCard,
+  dashboardHeroValueClass,
+  dashboardPageTitleClass,
+  dashboardSectionLabelClass,
+  dashboardSupportingTextClass,
 } from "@/components/dashboard/DashboardPrimitives"
 
 type DashboardOverviewResponse = {
@@ -334,7 +338,7 @@ export default function DashboardPage() {
     <div className="space-y-5 md:space-y-7">
 
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">
+        <h1 className={dashboardPageTitleClass}>
           Overview
         </h1>
         <button
@@ -355,13 +359,13 @@ export default function DashboardPage() {
       <div className="relative overflow-hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] px-4 py-3 shadow-[0_10px_28px_rgba(37,99,235,0.09)] sm:px-5 sm:py-3.5">
         <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/80 to-transparent" />
         <div className="relative">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-700">
+          <p className={dashboardSectionLabelClass}>
             Today&apos;s Confirmed Sales
           </p>
-          <h2 className="mt-1 text-sm font-medium text-gray-600">
+          <h2 className={`mt-1 font-medium ${dashboardSupportingTextClass}`}>
             Confirmed merchant payment volume since midnight
           </h2>
-          <div className="mt-0.5 text-2xl font-semibold leading-tight text-gray-950 sm:text-3xl">
+          <div className={`mt-0.5 ${dashboardHeroValueClass}`}>
             {formatUsd(today.volume)}
           </div>
           <div className="mt-1 text-xs leading-5 text-gray-600">
@@ -475,7 +479,7 @@ export default function DashboardPage() {
           >
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
+                <p className={dashboardSectionLabelClass}>
                   Transaction Volume
                 </p>
                 <p className="mt-1 text-sm text-gray-500">Confirmed payment volume over time</p>

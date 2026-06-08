@@ -10,7 +10,8 @@ import {
   GroupedMetricSurface,
   InlineMetric,
   MetricGrid,
-  PineTreeInsightsCard
+  PineTreeInsightsCard,
+  dashboardPageTitleClass
 } from "@/components/dashboard/DashboardPrimitives"
 import {
   formatDashboardNetwork,
@@ -225,7 +226,7 @@ export default function ReportsPage() {
   return (
     <div className="space-y-5 md:space-y-7">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Reports</h1>
+        <h1 className={dashboardPageTitleClass}>Reports</h1>
       </div>
 
       <DashboardHeroCard

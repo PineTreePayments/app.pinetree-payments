@@ -9,7 +9,10 @@ import {
   DashboardSection,
   GroupedMetricSurface,
   InlineMetric,
-  PineTreeInsightsCard
+  PineTreeInsightsCard,
+  dashboardHeroValueClass,
+  dashboardPageTitleClass,
+  dashboardSectionLabelClass
 } from "@/components/dashboard/DashboardPrimitives"
 import {
   buildNeutralInsight,
@@ -277,7 +280,7 @@ export default function TransactionsPage() {
   return (
     <div className="space-y-5 md:space-y-7">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">
+        <h1 className={dashboardPageTitleClass}>
           Transactions
         </h1>
       </div>
@@ -292,10 +295,10 @@ export default function TransactionsPage() {
           }}
           className="min-w-0 rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.14),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_54%,#eef5ff_100%)] p-4 text-left shadow-[0_14px_44px_rgba(37,99,235,0.11)] transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-[0_18px_54px_rgba(37,99,235,0.16)] focus:outline-none focus:ring-4 focus:ring-blue-100 sm:p-5"
         >
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">
+          <p className={dashboardSectionLabelClass}>
             Today&apos;s Volume
           </p>
-          <div className="mt-2 text-4xl font-semibold tracking-normal text-gray-950 sm:text-5xl">
+          <div className={`mt-2 ${dashboardHeroValueClass}`}>
             {formatUsd(todayVolume)}
           </div>
           <div className="mt-4 grid grid-cols-2 divide-x divide-blue-100 rounded-xl border border-blue-100/80 bg-white/72">
