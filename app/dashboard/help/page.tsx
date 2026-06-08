@@ -608,7 +608,7 @@ export default function HelpCenterPage() {
               Set up rails, understand payment states, and know when to escalate.
             </h2>
           </div>
-          <div className="grid w-full grid-cols-2 gap-2 md:w-auto md:min-w-[250px]">
+          <div className="grid w-full grid-cols-2 gap-2 md:w-auto md:min-w-[250px] md:self-center">
             <QuickAction label="Open a Ticket" icon={<Ticket size={16} />} href="#support-ticket" />
             <QuickAction label="Ask PineTree AI" icon={<Bot size={16} />} href="#pinetree-ai" />
           </div>

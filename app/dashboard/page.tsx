@@ -376,7 +376,7 @@ export default function DashboardPage() {
 
       {/* 2 — Performance and health */}
       <div className="grid gap-3 lg:grid-cols-2 md:gap-4">
-        <GroupedMetricSurface>
+        <GroupedMetricSurface title="Today" titleTone="blue">
           <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3">
             <InlineMetric label="Payments" value={today.transactionCount} />
             <InlineMetric label="Average" value={formatUsd(today.averageTransaction)} />
