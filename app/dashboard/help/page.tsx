@@ -598,8 +598,8 @@ export default function HelpCenterPage() {
       </div>
 
       {/* Desktop hero card */}
-      <div className="hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.12),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f8fbff_52%,#eef5ff_100%)] px-5 py-5 shadow-[0_10px_30px_rgba(0,82,255,0.09)] md:block sm:px-6 sm:py-6">
-        <div className="flex min-h-20 flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div className="hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.12),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f8fbff_52%,#eef5ff_100%)] px-4 pb-5 pt-4 shadow-[0_10px_30px_rgba(0,82,255,0.09)] md:block sm:px-5 sm:pb-6 sm:pt-5">
+        <div className="flex min-h-20 flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
             <p className={dashboardSectionLabelClass}>
               PineTree Support Center
