@@ -376,6 +376,14 @@ export const HEALTH_CHECK_CONFIG = {
 }
 
 /**
+ * Checkout abandonment timeout.
+ * A CREATED/PENDING payment with no provider evidence older than this threshold
+ * is eligible to be marked INCOMPLETE by the stale sweep or admin backfill.
+ * Must be kept in sync with the minimum timeout enforced by paymentStateActions.
+ */
+export const CHECKOUT_TIMEOUT_MS = 5 * 60 * 1_000 // 5 minutes
+
+/**
  * Default payment expiration time
  */
 export const PAYMENT_EXPIRATION_MINUTES = 30

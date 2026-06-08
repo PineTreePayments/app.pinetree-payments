@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getPaymentById, getPaymentIntentById } from "@/database"
+import { ensurePaymentFresh } from "@/engine/paymentMaintenance"
+import { schedulePaymentMaintenance } from "@/lib/api/paymentMaintenance"
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
@@ -16,9 +18,13 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    schedulePaymentMaintenance("payments.status")
+
     // Try as a direct payment first, then fall back to payment intent
-    const payment = await getPaymentById(id)
+    let payment = await getPaymentById(id)
     if (payment) {
+      await ensurePaymentFresh(payment.id)
+      payment = await getPaymentById(payment.id) || payment
       return NextResponse.json({
         status: payment.status,
         paymentId: payment.id,
@@ -28,6 +34,9 @@ export async function GET(req: NextRequest) {
 
     const intent = await getPaymentIntentById(id)
     if (intent) {
+      if (intent.payment_id) {
+        await ensurePaymentFresh(intent.payment_id)
+      }
       const selectedPayment = intent.payment_id ? await getPaymentById(intent.payment_id) : null
       return NextResponse.json({
         status: selectedPayment?.status ?? intent.status,

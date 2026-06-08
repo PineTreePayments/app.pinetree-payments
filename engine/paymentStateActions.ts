@@ -3,8 +3,7 @@ import { getPaymentEvents } from "@/database/paymentEvents"
 import { getTransactionByPaymentId } from "@/database/transactions"
 import { paymentHasProcessingEvidence } from "./paymentEvidence"
 import { updatePaymentStatus } from "./updatePaymentStatus"
-
-const ABANDONED_PAYMENT_TIMEOUT_MS = 5 * 60 * 1000
+import { CHECKOUT_TIMEOUT_MS } from "./config"
 
 function isOlderThanTimeout(
   value: string | null | undefined,
@@ -80,7 +79,7 @@ export async function markPaymentIncomplete(
 ): Promise<boolean> {
   try {
     const minimumAgeMs = metadata?.minimumAgeMs ??
-      (metadata?.requireAbandonedTimeout ? ABANDONED_PAYMENT_TIMEOUT_MS : 0)
+      (metadata?.requireAbandonedTimeout ? CHECKOUT_TIMEOUT_MS : 0)
     const eligibility = await getPaymentIncompleteEligibility(paymentId, { minimumAgeMs })
     if (!eligibility.eligible) return false
 
@@ -99,7 +98,12 @@ export async function markPaymentIncomplete(
     return true
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    if (!message.includes("Invalid payment transition")) throw error
+    if (
+      !message.includes("Invalid payment transition") &&
+      !message.includes("Concurrent payment transition skipped")
+    ) {
+      throw error
+    }
     return false
   }
 }

@@ -7,6 +7,7 @@ import {
   getRouteErrorStatus,
   requireMerchantIdFromRequest
 } from "@/lib/api/merchantAuth"
+import { schedulePaymentMaintenance } from "@/lib/api/paymentMaintenance"
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
@@ -15,6 +16,7 @@ function getErrorMessage(error: unknown, fallback: string) {
 export async function GET(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
+    schedulePaymentMaintenance("dashboard.overview")
     const sync = req.nextUrl.searchParams.get("sync") === "1"
     const data = sync
       ? await syncDashboardOverviewEngine(merchantId)

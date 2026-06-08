@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getPaymentById } from "@/database"
+import { ensurePaymentFresh } from "@/engine/paymentMaintenance"
+import { schedulePaymentMaintenance } from "@/lib/api/paymentMaintenance"
 
 export async function GET(
   _req: NextRequest,
@@ -12,6 +14,8 @@ export async function GET(
       return NextResponse.json({ error: "Missing paymentId" }, { status: 400 })
     }
 
+    schedulePaymentMaintenance("payments.detail")
+    await ensurePaymentFresh(paymentId)
     const payment = await getPaymentById(paymentId)
 
     if (!payment) {

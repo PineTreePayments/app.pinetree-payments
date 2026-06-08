@@ -7,16 +7,15 @@
 
 import { getProvider } from "./providerRegistry"
 import { updatePaymentStatus } from "./updatePaymentStatus"
-import { getPaymentById, getPaymentByProviderReference, createPaymentEvent, upsertLedgerEntry } from "@/database"
+import { getPaymentById, getPaymentByProviderReference, upsertLedgerEntry } from "@/database"
 import { PaymentStatus, normalizeToStrictPaymentStatus } from "./paymentStateMachine"
 import { StoredPaymentSplitMetadata } from "@/types/payment"
 import {
   getTransactionByPaymentId,
   getTransactionByProviderReference,
-  updateTransactionProviderReference,
-  updateTransactionStatus,
-  type TransactionStatus
+  updateTransactionProviderReference
 } from "@/database/transactions"
+import { syncTransactionProgressForPayment } from "./transactionProgress"
 
 export type WebhookInput = {
   provider: string
@@ -213,14 +212,6 @@ export async function advancePaymentToTargetStatus(
   await updatePaymentStatus(paymentId, targetStatus, resolvedMetadata)
 }
 
-function toTransactionStatus(status: PaymentStatus): TransactionStatus {
-  if (status === "CONFIRMED") return "CONFIRMED"
-  if (status === "PROCESSING") return "PROCESSING"
-  if (status === "FAILED") return "FAILED"
-  if (status === "INCOMPLETE") return "EXPIRED"
-  return "PENDING"
-}
-
 export async function processWebhook({
   provider,
   payload,
@@ -335,16 +326,6 @@ export async function processWebhook({
     }
   }
 
-  const eventId = crypto.randomUUID()
-
-  await createPaymentEvent({
-    id: eventId,
-    payment_id: paymentId,
-    event_type: event.event,
-    provider_event: getProviderEventType(payload),
-    raw_payload: payload
-  })
-
   try {
     await advancePaymentToTargetStatus(paymentId, status, {
       providerEvent: getProviderEventType(payload),
@@ -365,8 +346,8 @@ export async function processWebhook({
       })
     }
 
-    if (transaction) {
-      await updateTransactionStatus(transaction.id, toTransactionStatus(status))
+    if (status === "PROCESSING") {
+      await syncTransactionProgressForPayment(paymentId, "PROCESSING")
     }
 
     // Write ledger entry after the state machine succeeds — upsert is safe to call
@@ -411,7 +392,10 @@ export async function processWebhook({
       })
     }
 
-    if (message.includes("Invalid payment transition")) {
+    if (
+      message.includes("Invalid payment transition") ||
+      message.includes("Concurrent payment transition skipped")
+    ) {
       console.warn("Ignoring invalid transition:", {
         paymentId,
         message,
@@ -594,8 +578,7 @@ export async function processPaymentEvent(event: WatcherEvent): Promise<void> {
         }
         try {
           await advancePaymentToTargetStatus(paymentId, "PROCESSING", splitMetadata)
-          const splitTx = await getTransactionByPaymentId(paymentId)
-          if (splitTx) await updateTransactionStatus(splitTx.id, "PROCESSING")
+          await syncTransactionProgressForPayment(paymentId, "PROCESSING")
           console.info("[eventProcessor] processPaymentEvent: advanced split payment to PROCESSING", {
             paymentId,
             txHash
@@ -635,13 +618,10 @@ export async function processPaymentEvent(event: WatcherEvent): Promise<void> {
   }
 
   try {
-    // Payment advancement always precedes transaction update.
-    // If advancePaymentToTargetStatus throws, the catch block below prevents
-    // updateTransactionStatus from executing — keeping payment and transaction in sync.
     await advancePaymentToTargetStatus(paymentId, targetStatus, metadata)
 
-    if (transaction) {
-      await updateTransactionStatus(transaction.id, toTransactionStatus(targetStatus))
+    if (targetStatus === "PROCESSING") {
+      await syncTransactionProgressForPayment(paymentId, "PROCESSING")
     }
 
     // Ledger entry is written only on final confirmation — not on detection.
@@ -672,7 +652,10 @@ export async function processPaymentEvent(event: WatcherEvent): Promise<void> {
     })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error)
-    if (message.includes("Invalid payment transition")) {
+    if (
+      message.includes("Invalid payment transition") ||
+      message.includes("Concurrent payment transition skipped")
+    ) {
       console.warn("[eventProcessor] processPaymentEvent: invalid transition skipped", { paymentId, message })
     } else {
       throw error

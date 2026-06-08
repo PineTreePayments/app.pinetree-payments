@@ -13,6 +13,9 @@ export * from "./transactions"
 // Payment Events
 export * from "./paymentEvents"
 
+// Payment Maintenance
+export * from "./paymentMaintenance"
+
 // Idempotency
 export * from "./idempotency"
 

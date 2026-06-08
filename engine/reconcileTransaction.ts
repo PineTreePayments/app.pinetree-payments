@@ -34,8 +34,10 @@ export type ReconcileResult = {
   skipReason?: string
 }
 
-// Transaction statuses that are safe to overwrite (non-terminal)
-const NON_TERMINAL_TX_STATUSES = new Set<string>(["PENDING", "PROCESSING"])
+// Transaction statuses that are safe to overwrite (non-terminal).
+// Exported so callers that pre-check before calling reconcileTransactionForPayment
+// can use the same set rather than defining their own copy.
+export const NON_TERMINAL_TX_STATUSES = new Set<string>(["PENDING", "PROCESSING"])
 
 export type TerminalPaymentStatus = "CONFIRMED" | "FAILED" | "INCOMPLETE" | "EXPIRED" | "CANCELLED"
 
@@ -147,15 +149,28 @@ export async function reconcileTransactionForPayment(
     }
   }
 
-  // 3c: skip if real on-chain evidence exists
-  const hasProviderTxId = Boolean(String(transaction.provider_transaction_id || "").trim())
-  if (hasProviderTxId) {
-    return {
-      transactionId: transaction.id,
-      previousStatus: transaction.status,
-      newStatus: null,
-      skipped: true,
-      skipReason: "has_provider_transaction_id",
+  // 3c: skip INCOMPLETE / EXPIRED / CANCELLED when on-chain evidence exists.
+  //
+  // Rationale: these three statuses mean "abandoned with no confirmed payment."
+  // If the transaction has a provider_transaction_id the customer DID submit a
+  // transaction — marking it INCOMPLETE would be incorrect.
+  //
+  // FAILED is intentionally excluded from this guard.  A hard FAILED (reverted
+  // tx, wrong amount, rejected payment, expired session after payment attempt)
+  // is already validated by hasFailureEvidence() in updatePaymentStatus before
+  // we get here, so it is always authoritative and must propagate even when
+  // provider_transaction_id is set.
+  const isFailed = terminalPaymentStatus === "FAILED"
+  if (!isFailed) {
+    const hasProviderTxId = Boolean(String(transaction.provider_transaction_id || "").trim())
+    if (hasProviderTxId) {
+      return {
+        transactionId: transaction.id,
+        previousStatus: transaction.status,
+        newStatus: null,
+        skipped: true,
+        skipReason: "has_provider_transaction_id",
+      }
     }
   }
 

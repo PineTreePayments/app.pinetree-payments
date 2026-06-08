@@ -127,19 +127,29 @@ export async function getPaymentByProviderReference(providerReference: string) {
  */
 export async function updatePaymentStatus(
   paymentId: string,
-  status: PaymentStatus
+  status: PaymentStatus,
+  expectedCurrentStatus?: PaymentStatus
 ) {
-  const { data, error } = await supabase
+  let query = supabase
     .from("payments")
     .update({
       status,
       updated_at: new Date().toISOString()
     })
     .eq("id", paymentId)
+
+  if (expectedCurrentStatus) {
+    query = query.eq("status", expectedCurrentStatus)
+  }
+
+  const { data, error } = await query
     .select()
     .single()
 
   if (error) {
+    if (expectedCurrentStatus && error.code === "PGRST116") {
+      throw new Error("Concurrent payment transition skipped: payment status changed")
+    }
     throw new Error(`Failed to update payment status: ${error.message}`)
   }
 

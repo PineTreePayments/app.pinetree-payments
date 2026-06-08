@@ -4,6 +4,10 @@ import {
 } from "@/database/paymentIntents"
 import { supabaseAdmin, supabase as supabaseAnon } from "@/database/supabase"
 import { markPaymentIncomplete } from "./paymentStateActions"
+import { CHECKOUT_TIMEOUT_MS } from "./config"
+
+// Re-export so existing importers of stalePaymentSweep do not need updating.
+export { CHECKOUT_TIMEOUT_MS }
 
 const db = supabaseAdmin || supabaseAnon
 
@@ -20,7 +24,7 @@ export async function sweepStalePayments(options?: {
   staleAfterMs?: number
 }): Promise<StalePaymentSweepSummary> {
   const maxRows = Math.max(1, Math.min(options?.maxRows ?? 250, 250))
-  const staleAfterMs = Math.max(options?.staleAfterMs ?? 5 * 60 * 1000, 60_000)
+  const staleAfterMs = Math.max(options?.staleAfterMs ?? CHECKOUT_TIMEOUT_MS, 60_000)
   const cutoff = new Date(Date.now() - staleAfterMs).toISOString()
 
   const { data, error } = await db
@@ -40,7 +44,7 @@ export async function sweepStalePayments(options?: {
 
   for (const row of (data || []) as Array<{ id: string }>) {
     const changed = await markPaymentIncomplete(row.id, {
-      providerEvent: "cron.stale-cleanup",
+      providerEvent: "maintenance.stale-cleanup",
       rawPayload: { cutoff, staleAfterMs },
       minimumAgeMs: staleAfterMs
     })

@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireAdminFromRequest, getRouteErrorStatus } from "@/lib/api/adminAuth"
 import { getAdminTransactionsEngine } from "@/engine/adminTransactions"
 import type { AdminTransactionFilters } from "@/database/adminTransactions"
+import { schedulePaymentMaintenance } from "@/lib/api/paymentMaintenance"
 
 export async function GET(req: NextRequest) {
   try {
     await requireAdminFromRequest(req)
+    schedulePaymentMaintenance("admin.transactions")
 
     const { searchParams } = req.nextUrl
 

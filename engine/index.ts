@@ -69,6 +69,12 @@ export { runProviderHealthChecks } from "./providerHealth"
 // Payment Monitoring — single-execution checks only (no polling loops)
 export { watchPaymentOnce } from "./paymentWatcher"
 export { runPaymentWatcher } from "./checkPaymentOnce"
+export {
+  ensurePaymentFresh,
+  runPaymentMaintenanceTick
+} from "./paymentMaintenance"
+export { runPaymentDetectForPayment } from "./paymentDetect"
+export { syncTransactionProgressForPayment } from "./transactionProgress"
 
 // Split Payments
 export { generateSplitPayment } from "./generateSplitPayment"

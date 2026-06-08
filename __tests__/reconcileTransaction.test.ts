@@ -202,11 +202,26 @@ describe("reconcileTransactionForPayment", () => {
   })
 
   // ── Case F ────────────────────────────────────────────────────────────────
-  it("F: FAILED payment + transaction with provider_transaction_id → skipped", async () => {
+  // FAILED must always propagate even when the transaction has on-chain
+  // evidence (provider_transaction_id).  A hard FAILED (reverted tx, wrong
+  // amount, rejected payment) is authoritative — the provider_transaction_id
+  // guard only protects INCOMPLETE/EXPIRED/CANCELLED transitions.
+  it("F: FAILED payment + transaction with provider_transaction_id → FAILED (not skipped)", async () => {
     mockGetTransaction.mockResolvedValue(
-      makeTx({ status: "PROCESSING", provider_transaction_id: "sig_abc" })    )
+      makeTx({ status: "PROCESSING", provider_transaction_id: "sig_abc" }))
 
     const result = await reconcileTransactionForPayment("pay-001", "FAILED")
+
+    expect(result.skipped).toBe(false)
+    expect(result.newStatus).toBe("FAILED")
+    expect(mockUpdateTransaction).toHaveBeenCalledWith("tx-001", "FAILED")
+  })
+
+  it("F2: INCOMPLETE payment + transaction with provider_transaction_id → still skipped (evidence guard)", async () => {
+    mockGetTransaction.mockResolvedValue(
+      makeTx({ status: "PROCESSING", provider_transaction_id: "sig_abc" }))
+
+    const result = await reconcileTransactionForPayment("pay-001", "INCOMPLETE")
 
     expect(result.skipped).toBe(true)
     expect(result.skipReason).toBe("has_provider_transaction_id")

@@ -104,8 +104,10 @@ export async function updatePaymentStatus(
   // Validate the transition is allowed
   assertValidTransition(currentStatus, nextStatus)
 
-  // Update the payment status in database
-  const updatedPayment = await updatePaymentStatusInDb(paymentId, nextStatus)
+  // Update the payment status in database with a compare-and-set guard. If an
+  // overlapping watcher/webhook already moved this payment, this call fails
+  // before creating a duplicate lifecycle event.
+  const updatedPayment = await updatePaymentStatusInDb(paymentId, nextStatus, currentStatus)
 
   // Create a payment event for audit trail
   const eventType = statusToEventType(nextStatus)
@@ -121,10 +123,8 @@ export async function updatePaymentStatus(
 
   // ── Transaction reconciliation ─────────────────────────────────────────────
   // Whenever a payment reaches a terminal state, keep the linked transaction row
-  // in sync.  This is best-effort: a reconciliation failure must never block the
-  // authoritative payment status write.  The eventProcessor paths also call
-  // updateTransactionStatus directly after advancing the payment; the two writes
-  // converge on the same terminal status and are idempotent.
+  // in sync. This is best-effort: a reconciliation failure must never block the
+  // authoritative payment status write.
   if (nextStatus === "CONFIRMED" || nextStatus === "FAILED" || nextStatus === "INCOMPLETE") {
     try {
       const reconcileResult = await reconcileTransactionForPayment(paymentId, nextStatus)
