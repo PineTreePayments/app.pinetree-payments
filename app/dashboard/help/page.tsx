@@ -611,9 +611,6 @@ export default function HelpCenterPage() {
             <h2 className="mt-1 text-lg font-semibold leading-tight text-gray-950 sm:text-xl">
               Set up rails, understand payment states, and know when to escalate.
             </h2>
-            <p className="mt-1 max-w-xl text-sm leading-5 text-gray-500">
-              PineTree AI and the help library cover POS, checkout, providers, wallets, reports, and the payment state model.
-            </p>
           </div>
           <div className="grid w-full grid-cols-2 gap-2 md:w-auto md:min-w-[250px]">
             <QuickAction label="Open a Ticket" icon={<Ticket size={16} />} href="#support-ticket" />

@@ -33,6 +33,7 @@ import {
   DashboardSection,
   GroupedMetricSurface,
   InlineMetric,
+  PineTreeInsightsCard,
 } from "@/components/dashboard/DashboardPrimitives"
 
 type DashboardOverviewResponse = {
@@ -217,6 +218,19 @@ export default function DashboardPage() {
   }, [loadOverview])
 
   const connectedRailRows = railReadiness.filter((rail) => rail.status === "Connected")
+  const overviewInsights = [
+    today.transactionCount > 0
+      ? `Average transaction today is ${formatUsd(today.averageTransaction)}.`
+      : "",
+    today.transactionCount > 0 && today.failed === 0
+      ? "No failed payments today."
+      : today.failed > 0
+        ? `${today.failed} payment${today.failed === 1 ? "" : "s"} failed today and may need review.`
+        : "",
+    today.confirmed > 0
+      ? `${today.confirmed} confirmed payment${today.confirmed === 1 ? "" : "s"} generated ${formatUsd(today.volume)} today.`
+      : ""
+  ]
 
   const quickActions = [
     { label: "Open POS", href: "/dashboard/pos", icon: ShoppingCart },
@@ -406,6 +420,28 @@ export default function DashboardPage() {
         </div>
       </DashboardSection>
 
+      <DashboardSection title="Quick Actions" titleTone="blue" className="md:hidden">
+        <div className="rounded-2xl border border-white/80 bg-white/80 p-2 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+            {quickActions.map(({ label, href, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                className="group flex min-h-14 min-w-0 items-center gap-2.5 rounded-xl border border-gray-100 bg-gradient-to-br from-white to-gray-50/80 px-3 py-2.5 text-gray-900 transition hover:-translate-y-0.5 hover:border-blue-200 hover:from-blue-50/70 hover:to-white hover:text-blue-700 hover:shadow-sm"
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 ring-1 ring-blue-100 transition group-hover:bg-blue-600 group-hover:text-white">
+                  <Icon className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <span className="min-w-0 flex-1 text-xs font-semibold leading-4">
+                  {label}
+                </span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 transition group-hover:translate-x-0.5 group-hover:text-blue-500" aria-hidden="true" />
+              </Link>
+            ))}
+          </div>
+        </div>
+      </DashboardSection>
+
       {/* 4 — Transaction Volume */}
       <ChartCard
         title="Transaction Volume"
@@ -476,28 +512,10 @@ export default function DashboardPage() {
         </div>
       </GroupedMetricSurface>
 
-      {/* 6 — Quick Actions */}
-      <DashboardSection title="Quick Actions" titleTone="blue" className="md:hidden">
-        <div className="rounded-2xl border border-white/80 bg-white/80 p-2 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
-            {quickActions.map(({ label, href, icon: Icon }) => (
-              <Link
-                key={href}
-                href={href}
-                className="group flex min-h-14 min-w-0 items-center gap-2.5 rounded-xl border border-gray-100 bg-gradient-to-br from-white to-gray-50/80 px-3 py-2.5 text-gray-900 transition hover:-translate-y-0.5 hover:border-blue-200 hover:from-blue-50/70 hover:to-white hover:text-blue-700 hover:shadow-sm"
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 ring-1 ring-blue-100 transition group-hover:bg-blue-600 group-hover:text-white">
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                </span>
-                <span className="min-w-0 flex-1 text-xs font-semibold leading-4">
-                  {label}
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 transition group-hover:translate-x-0.5 group-hover:text-blue-500" aria-hidden="true" />
-              </Link>
-            ))}
-          </div>
-        </div>
-      </DashboardSection>
+      <PineTreeInsightsCard
+        insights={overviewInsights}
+        emptyText="Insights will appear as confirmed payment activity builds."
+      />
 
       {/* 7 — Recent Activity */}
       <DashboardSection title="Recent Activity" titleTone="blue">

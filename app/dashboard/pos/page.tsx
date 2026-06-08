@@ -575,21 +575,21 @@ export default function POSPage() {
             Drawer Balances
           </p>
 
-          <div className="overflow-hidden rounded-[1.35rem] border border-blue-200/80 bg-[linear-gradient(135deg,#f8fbff_0%,#eef5ff_100%)] shadow-[0_12px_36px_rgba(37,99,235,0.08)]">
+          <div className="space-y-2">
 
-            <div className="hidden grid-cols-[minmax(0,1fr)_150px_140px] border-b border-blue-100 bg-blue-50/80 px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-500 sm:grid">
+            <div className="hidden grid-cols-[minmax(0,1fr)_150px_140px] rounded-xl border border-blue-100 bg-blue-50/80 px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-500 sm:grid">
               <span>Terminal / drawer status</span>
               <span className="text-right">Expected balance</span>
               <span className="text-right">Action</span>
             </div>
 
-            <div className="divide-y divide-blue-100/80">
+            <div className="grid gap-2">
               {terminals.map((t) => {
                 const drawer = drawerBalances[t.id]
                 const balance = drawer?.balance ?? null
                 const lastEntry = drawer?.lastEntry
                 return (
-                  <div key={t.id} className="grid gap-3 bg-white/45 px-4 py-3.5 transition hover:bg-white/75 sm:grid-cols-[minmax(0,1fr)_150px_140px] sm:items-center sm:px-5">
+                  <div key={t.id} className="grid gap-3 rounded-xl border border-blue-100 bg-gradient-to-r from-blue-50/55 to-white px-4 py-3.5 shadow-[0_5px_18px_rgba(37,99,235,0.05)] transition hover:border-blue-200 sm:grid-cols-[minmax(0,1fr)_150px_140px] sm:items-center sm:px-5">
                     <div className="min-w-0">
                       <p className="font-semibold text-gray-950">{t.name}</p>
                       {lastEntry ? (

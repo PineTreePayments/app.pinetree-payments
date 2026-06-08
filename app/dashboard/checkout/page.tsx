@@ -1209,7 +1209,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
 
       {/* ── Tab bar ──────────────────────────────────────────────────────── */}
       <div className="w-full max-w-full">
-        <div className="grid max-w-full grid-cols-2 gap-1 rounded-2xl border border-gray-200 bg-gray-100/80 p-1 shadow-sm sm:inline-grid sm:w-auto sm:grid-cols-4">
+        <div className="grid max-w-full grid-cols-2 gap-1 rounded-2xl border border-gray-200/80 bg-white/90 p-1.5 shadow-[0_8px_24px_rgba(15,23,42,0.06)] backdrop-blur-sm sm:inline-grid sm:w-auto sm:grid-cols-4">
           {TABS.map((t) => (
             <button
               key={t.id}
@@ -1217,8 +1217,8 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
               onClick={() => setTab(t.id)}
               className={`min-w-0 rounded-xl px-3 py-2 text-center text-sm font-semibold transition-all duration-200 ease-out sm:px-3.5 sm:py-2 ${
                 tab === t.id
-                  ? "bg-white text-[#0052FF] shadow-[0_2px_8px_rgba(15,23,42,0.10)] ring-1 ring-gray-200/70"
-                  : "text-slate-600 hover:bg-white/60 hover:text-slate-900"
+                  ? "bg-blue-50 text-[#0052FF] shadow-sm ring-1 ring-blue-200/80"
+                  : "text-slate-600 hover:bg-gray-50 hover:text-slate-900"
               }`}
             >
               {t.label}
