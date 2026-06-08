@@ -349,7 +349,6 @@ export default function SettingsPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-semibold text-gray-950 md:text-3xl">Settings</h1>
-        <p className="mt-1 text-sm text-gray-600">Business profile, receipts, tax, reporting, security, and integrations.</p>
       </div>
 
       {!schemaReady && (
@@ -476,7 +475,7 @@ export default function SettingsPage() {
                 <CompactSettingToggle title="Transaction ID" checked={operations.show_transaction_id} onChange={(value) => updateOperation("show_transaction_id", value)} />
                 <CompactSettingToggle title="Provider" checked={operations.show_provider} onChange={(value) => updateOperation("show_provider", value)} />
                 <CompactSettingToggle title="Network" checked={operations.show_network} onChange={(value) => updateOperation("show_network", value)} />
-                <CompactSettingToggle title="Wallet reference" checked={operations.show_wallet_reference} onChange={(value) => updateOperation("show_wallet_reference", value)} />
+                <CompactSettingToggle title="Blockchain reference" checked={operations.show_wallet_reference} onChange={(value) => updateOperation("show_wallet_reference", value)} />
               </div>
             </div>
             <div>

@@ -383,8 +383,8 @@ export default function DashboardPage() {
       {/* 3 — Compact payment operations */}
       <DashboardSection title="Payment Operations" titleTone="blue">
         <div className="rounded-2xl border border-blue-100 bg-blue-50/55 px-4 py-3.5 shadow-[0_8px_24px_rgba(37,99,235,0.06)] sm:px-5">
-          <div className="flex flex-col items-center gap-3 text-center sm:flex-row sm:justify-center sm:gap-6">
-            <div className="min-w-0 sm:border-r sm:border-blue-200 sm:pr-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 text-left">
               <p className="text-sm font-semibold text-gray-950">
                 Active rails:{" "}
                 <span className="font-medium text-gray-700">
@@ -394,7 +394,7 @@ export default function DashboardPage() {
                 </span>
               </p>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex shrink-0 items-center gap-5 sm:pl-6">
               <Link href="/dashboard/providers" className="text-xs font-semibold text-blue-700 hover:text-blue-800">
                 Manage Rails
               </Link>

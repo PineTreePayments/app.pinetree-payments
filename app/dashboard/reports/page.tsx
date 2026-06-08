@@ -8,6 +8,7 @@ import {
   DashboardHeroCard,
   DashboardSection,
   GroupedMetricSurface,
+  InlineMetric,
   MetricGrid,
   PineTreeInsightsCard
 } from "@/components/dashboard/DashboardPrimitives"
@@ -233,17 +234,16 @@ export default function ReportsPage() {
         value={summary ? fmt(summary.grossVolume ?? summary.totalVolume) : "$0.00"}
         detail="Gross volume across the current report window."
         secondary={
-          <div className="grid w-full grid-cols-2 gap-2 sm:w-auto sm:min-w-[280px]">
-            <CompactMetricTile
+          <div className="grid w-full grid-cols-2 divide-x divide-blue-200/80 border-t border-blue-200/80 pt-3 sm:w-auto sm:min-w-[320px] sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
+            <InlineMetric
               label="Net Settlements"
               value={summary ? fmt(summary.netSettlements ?? summary.merchantNet) : "$0.00"}
-              className="p-3 shadow-none"
+              className="pr-4"
             />
-            <CompactMetricTile
+            <InlineMetric
               label="Est. Taxes"
               value={summary ? fmt(summary.taxesCollected ?? summary.estimatedTax) : "$0.00"}
-              tone="amber"
-              className="p-3 shadow-none"
+              className="pl-4"
             />
           </div>
         }

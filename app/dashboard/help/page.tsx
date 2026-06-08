@@ -15,6 +15,7 @@ import {
   Search,
   Send,
   Sparkles,
+  Ticket,
   WalletCards,
   X
 } from "lucide-react"
@@ -593,17 +594,11 @@ export default function HelpCenterPage() {
       {/* Mobile header — compact */}
       <div className="md:hidden">
         <h1 className="text-xl font-semibold text-gray-950">Help Center</h1>
-        <p className="mt-0.5 text-[12px] text-gray-500">
-          Account setup, payment status, support, and PineTree AI.
-        </p>
       </div>
 
       {/* Desktop header */}
       <div className="hidden md:block">
         <h1 className="text-3xl font-semibold text-gray-950">Help Center</h1>
-        <p className="mt-1 text-[12px] font-semibold leading-5 tracking-[0.01em] text-[#0052FF] sm:text-sm">
-          PineTree merchant onboarding, setup, payment status, and support guidance.
-        </p>
       </div>
 
       {/* Desktop hero card */}
@@ -621,7 +616,7 @@ export default function HelpCenterPage() {
             </p>
           </div>
           <div className="grid w-full grid-cols-2 gap-2 md:w-auto md:min-w-[250px]">
-            <QuickAction label="Open a Ticket" icon={<LifeBuoy size={16} />} href="#support-ticket" />
+            <QuickAction label="Open a Ticket" icon={<Ticket size={16} />} href="#support-ticket" />
             <QuickAction label="Ask PineTree AI" icon={<Bot size={16} />} href="#pinetree-ai" />
           </div>
         </div>
@@ -1753,8 +1748,8 @@ function TicketDetailModal({
           </div>
 
           {/* Message thread */}
-          <div className="mt-5">
-            <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
+          <div className="mt-5 rounded-2xl border border-gray-100 bg-gray-50/55 p-3 sm:p-4">
+            <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-500">
               Responses
             </p>
 
@@ -1778,7 +1773,7 @@ function TicketDetailModal({
             )}
 
             {!loading && messages.length > 0 && (
-              <div className="space-y-4">
+              <div className="space-y-5">
                 {messages.map((msg) => (
                   <TicketMessageBubble key={msg.id} message={msg} />
                 ))}
@@ -1858,9 +1853,9 @@ function TicketMessageBubble({ message }: { message: TicketMessage }) {
   const isMerchant = message.sender_type === "merchant"
 
   return (
-    <div className={`flex gap-3 ${isMerchant ? "flex-row-reverse" : ""}`}>
+    <div className={`flex gap-2.5 ${isMerchant ? "flex-row-reverse" : ""}`}>
       <div
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold ${
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border text-[10px] font-bold ${
           isPineTree
             ? "border-blue-200 bg-blue-50 text-[#0052FF]"
             : isSystem
@@ -1878,12 +1873,12 @@ function TicketMessageBubble({ message }: { message: TicketMessage }) {
           <span className="text-[10px] text-gray-400">{formatDate(message.created_at)}</span>
         </div>
         <div
-          className={`max-w-[85%] rounded-xl border px-3 py-2 text-sm leading-6 text-gray-700 whitespace-pre-wrap ${
+          className={`max-w-[90%] px-3.5 py-2.5 text-sm leading-6 text-gray-700 shadow-sm whitespace-pre-wrap ${
             isPineTree
-              ? "border-blue-100 bg-blue-50/60"
+              ? "rounded-2xl rounded-tl-md border border-blue-100 bg-white"
               : isSystem
-                ? "border-gray-200 bg-gray-50"
-                : "border-gray-200 bg-white"
+                ? "rounded-2xl border border-gray-200 bg-gray-100"
+                : "rounded-2xl rounded-tr-md bg-[#0052FF] text-white"
           }`}
         >
           {message.message}

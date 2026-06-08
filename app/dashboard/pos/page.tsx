@@ -481,7 +481,7 @@ export default function POSPage() {
           Active Terminals
         </p>
 
-        <div className="overflow-hidden rounded-[1.35rem] border border-gray-200/80 bg-white shadow-[0_14px_44px_rgba(15,23,42,0.06)]">
+        <div className="space-y-3">
 
           {terminals.length === 0 && (
             <div className="p-4 text-sm text-gray-500 sm:p-5">
@@ -489,14 +489,14 @@ export default function POSPage() {
             </div>
           )}
 
-          <div className="divide-y divide-gray-100">
+          <div className="grid gap-3">
 
             {terminals.map((t)=>(
 
               <div
                 key={t.id}
                 ref={expandedTerminalId === t.id ? detailsRef : null}
-                className="relative flex flex-col gap-4 border-l-4 border-l-blue-500 px-4 py-4 transition hover:bg-blue-50/35 sm:px-5 md:flex-row md:items-center md:justify-between"
+                className="relative flex flex-col gap-4 rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.045)] transition hover:border-blue-200 hover:shadow-[0_12px_30px_rgba(15,23,42,0.07)] sm:px-5 md:flex-row md:items-center md:justify-between"
               >
 
                 <div className="min-w-0">
@@ -575,7 +575,7 @@ export default function POSPage() {
             Drawer Balances
           </p>
 
-          <div className="overflow-hidden rounded-[1.35rem] border border-blue-100 bg-blue-50/35 shadow-[0_14px_44px_rgba(15,23,42,0.06)]">
+          <div className="overflow-hidden rounded-[1.35rem] border border-blue-200/80 bg-[linear-gradient(135deg,#f8fbff_0%,#eef5ff_100%)] shadow-[0_12px_36px_rgba(37,99,235,0.08)]">
 
             <div className="hidden grid-cols-[minmax(0,1fr)_150px_140px] border-b border-blue-100 bg-blue-50/80 px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-500 sm:grid">
               <span>Terminal / drawer status</span>
@@ -583,13 +583,13 @@ export default function POSPage() {
               <span className="text-right">Action</span>
             </div>
 
-            <div className="divide-y divide-blue-100">
+            <div className="divide-y divide-blue-100/80">
               {terminals.map((t) => {
                 const drawer = drawerBalances[t.id]
                 const balance = drawer?.balance ?? null
                 const lastEntry = drawer?.lastEntry
                 return (
-                  <div key={t.id} className="grid gap-3 bg-white/75 px-4 py-3.5 transition hover:bg-white sm:grid-cols-[minmax(0,1fr)_150px_140px] sm:items-center sm:px-5">
+                  <div key={t.id} className="grid gap-3 bg-white/45 px-4 py-3.5 transition hover:bg-white/75 sm:grid-cols-[minmax(0,1fr)_150px_140px] sm:items-center sm:px-5">
                     <div className="min-w-0">
                       <p className="font-semibold text-gray-950">{t.name}</p>
                       {lastEntry ? (

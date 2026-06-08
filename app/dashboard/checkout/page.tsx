@@ -4,9 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import {
-  CompactMetricTile,
   DashboardSection,
-  MetricGrid,
+  GroupedMetricSurface,
+  InlineMetric,
   PineTreeInsightsCard,
 } from "@/components/dashboard/DashboardPrimitives"
 import Button from "@/components/ui/Button"
@@ -1173,35 +1173,33 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       {/* ── Page header ───────────────────────────────────────────────────── */}
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-gray-950 sm:text-2xl">Online Payments</h1>
-        <p className="mt-1 text-[10px] font-semibold uppercase leading-[1.55] tracking-[0.11em] text-[#0052FF] sm:text-[11px] sm:leading-normal sm:tracking-[0.16em]">
-          Payment links, website integration, webhooks, and developer tools.
-        </p>
       </div>
 
       {/* ── Summary metrics ──────────────────────────────────────────────── */}
-      <MetricGrid columns="four">
-        <CompactMetricTile
-          label="Active Links"
-          value={isLoading ? "—" : String(activeLinks)}
-          tone="blue"
-        />
-        <CompactMetricTile
-          label="Online Payments"
-          value={isLoading ? "—" : String(stats?.confirmedPayments ?? 0)}
-          detail={!isLoading && !stats?.confirmedPayments ? "No online payments yet" : undefined}
-        />
-        <CompactMetricTile
-          label="Online Volume"
-          value={isLoading ? "—" : fmtUsd(stats?.volumeUsd ?? 0)}
-          tone="green"
-          detail={!isLoading && !stats?.volumeUsd ? "No online payments yet" : undefined}
-        />
-        <CompactMetricTile
-          label="Success Rate"
-          value={isLoading ? "—" : stats?.successRate !== null && stats?.successRate !== undefined ? `${String(stats.successRate)}%` : "—"}
-          detail="Confirmed vs total"
-        />
-      </MetricGrid>
+      <GroupedMetricSurface className="bg-gradient-to-br from-blue-50/70 via-white to-emerald-50/40">
+        <div className="grid grid-cols-2 gap-y-4 sm:grid-cols-4 sm:divide-x sm:divide-gray-200">
+          <InlineMetric
+            label="Active Links"
+            value={isLoading ? "—" : String(activeLinks)}
+            className="sm:px-4 sm:first:pl-0"
+          />
+          <InlineMetric
+            label="Online Payments"
+            value={isLoading ? "—" : String(stats?.confirmedPayments ?? 0)}
+            className="sm:px-4"
+          />
+          <InlineMetric
+            label="Online Volume"
+            value={isLoading ? "—" : fmtUsd(stats?.volumeUsd ?? 0)}
+            className="sm:px-4"
+          />
+          <InlineMetric
+            label="Success Rate"
+            value={isLoading ? "—" : stats?.successRate !== null && stats?.successRate !== undefined ? `${String(stats.successRate)}%` : "—"}
+            className="sm:px-4 sm:last:pr-0"
+          />
+        </div>
+      </GroupedMetricSurface>
       {statsError && (
         <p className="text-xs text-red-500">
           Could not load checkout stats.{" "}
@@ -1210,17 +1208,17 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       )}
 
       {/* ── Tab bar ──────────────────────────────────────────────────────── */}
-      <div className="w-full max-w-full overflow-hidden">
-        <div className="grid max-w-full grid-cols-2 gap-1.5 rounded-[12px] border border-gray-200/80 bg-white/85 p-1.5 shadow-[0_12px_34px_rgba(15,23,42,0.08)] backdrop-blur-sm sm:inline-grid sm:w-auto sm:grid-cols-4">
+      <div className="w-full max-w-full">
+        <div className="grid max-w-full grid-cols-2 gap-1 rounded-2xl border border-gray-200 bg-gray-100/80 p-1 shadow-sm sm:inline-grid sm:w-auto sm:grid-cols-4">
           {TABS.map((t) => (
             <button
               key={t.id}
               type="button"
               onClick={() => setTab(t.id)}
-              className={`min-w-0 rounded-[10px] border px-3 py-2 text-center text-sm font-semibold transition-all duration-200 ease-out sm:px-3.5 sm:py-2 ${
+              className={`min-w-0 rounded-xl px-3 py-2 text-center text-sm font-semibold transition-all duration-200 ease-out sm:px-3.5 sm:py-2 ${
                 tab === t.id
-                  ? "border-[#0052FF] bg-[#0052FF] text-white shadow-[0_8px_18px_rgba(0,82,255,0.22)]"
-                  : "border-gray-200/70 bg-white/70 text-slate-600 shadow-sm hover:border-blue-100 hover:bg-white hover:text-slate-900"
+                  ? "bg-white text-[#0052FF] shadow-[0_2px_8px_rgba(15,23,42,0.10)] ring-1 ring-gray-200/70"
+                  : "text-slate-600 hover:bg-white/60 hover:text-slate-900"
               }`}
             >
               {t.label}

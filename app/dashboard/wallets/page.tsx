@@ -1061,7 +1061,7 @@ function WalletOperationList({ operations }: { operations: WalletOperationSummar
             aria-labelledby="wallet-operation-title"
             className="max-h-[90vh] w-full overflow-y-auto rounded-t-3xl border border-white/80 bg-white shadow-2xl sm:max-w-2xl sm:rounded-3xl"
           >
-            <header className="flex items-center justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
+            <header className="flex items-center justify-between border-b border-blue-100 bg-gradient-to-r from-blue-50/80 to-white px-5 py-4 sm:px-6">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-600">Wallet Operation</p>
                 <h2 id="wallet-operation-title" className="mt-1 text-xl font-semibold text-slate-950">
@@ -1093,7 +1093,7 @@ function WalletOperationList({ operations }: { operations: WalletOperationSummar
             </header>
 
             <div className="space-y-5 p-5 sm:p-6">
-              <div className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-center gap-4 border-b border-blue-100 pb-5">
                 <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border ${appearance.className}`}>
                   <OperationIcon className="h-5 w-5" aria-hidden="true" />
                 </span>
@@ -1110,17 +1110,17 @@ function WalletOperationList({ operations }: { operations: WalletOperationSummar
                 </p>
               </div>
 
-              <dl className="grid gap-3 sm:grid-cols-2">
+              <dl className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
                 {details.map((detail) => (
-                  <div key={detail.label} className="min-w-0 rounded-2xl border border-slate-200 p-3.5">
+                  <div key={detail.label} className="grid min-w-0 gap-1 border-b border-slate-100 px-4 py-3 last:border-b-0 sm:grid-cols-[160px_minmax(0,1fr)] sm:items-start sm:gap-4">
                     <dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{detail.label}</dt>
-                    <dd className="mt-1.5 break-all text-sm text-slate-800">{detail.value}</dd>
+                    <dd className="break-all text-sm font-medium text-slate-800 sm:text-right">{detail.value}</dd>
                   </div>
                 ))}
               </dl>
             </div>
 
-            <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4 sm:px-6">
+            <footer className="flex justify-end gap-2 border-t border-blue-100 bg-blue-50/35 px-5 py-4 sm:px-6">
               <button type="button" className="btn-secondary" onClick={() => setSelectedOperation(null)}>
                 Close
               </button>
