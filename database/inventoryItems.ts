@@ -142,6 +142,22 @@ export async function updateInventoryItem(
   return data as InventoryItem
 }
 
+export async function deleteInventoryItem(
+  merchantId: string,
+  itemId: string
+): Promise<InventoryItem | null> {
+  const { data, error } = await db
+    .from("inventory_items")
+    .delete()
+    .eq("id", itemId)
+    .eq("merchant_id", merchantId)
+    .select()
+    .maybeSingle()
+
+  if (error) throw new Error(`Failed to delete inventory item: ${error.message}`)
+  return data as InventoryItem | null
+}
+
 export async function createInventoryMovement(
   merchantId: string,
   itemId: string,

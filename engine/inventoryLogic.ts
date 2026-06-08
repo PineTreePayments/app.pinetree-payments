@@ -20,6 +20,24 @@ export function deriveInventoryStatus(item: InventoryStockFields): InventoryEffe
   return "ACTIVE"
 }
 
+export function merchantVisibleInventoryItems<T extends { status: InventoryStoredStatus }>(
+  items: T[]
+): T[] {
+  return items.filter((item) => item.status !== "ARCHIVED")
+}
+
+export function merchantVisibleInventoryMovements<T extends { item_id: string; type: string }>(
+  movements: T[],
+  visibleItemIds: Set<string>
+): T[] {
+  return movements.filter(
+    (movement) =>
+      visibleItemIds.has(movement.item_id) &&
+      movement.type !== "ARCHIVE" &&
+      movement.type !== "RESTORE"
+  )
+}
+
 export function summarizeInventory(items: InventorySummaryFields[]) {
   const activeItems = items.filter((item) => item.status !== "ARCHIVED")
   const views = activeItems.map((item) => ({

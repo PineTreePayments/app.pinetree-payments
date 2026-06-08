@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Archive, Boxes, PackagePlus, RotateCcw, Search, Upload, X } from "lucide-react"
+import { Boxes, PackagePlus, Search, Trash2, Upload, X } from "lucide-react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import {
@@ -80,7 +80,7 @@ type ItemForm = {
   lowStockThreshold: string
 }
 
-type Filter = "ALL" | "ACTIVE" | "LOW" | "OUT" | "ARCHIVED"
+type Filter = "ALL" | "ACTIVE" | "LOW" | "OUT"
 
 const emptyForm: ItemForm = {
   name: "",
@@ -100,7 +100,6 @@ function formatUsd(value: number) {
 }
 
 function itemState(item: InventoryItem) {
-  if (item.effective_status === "ARCHIVED") return { label: "Archived", tone: "slate" as const }
   if (item.effective_status === "OUT_OF_STOCK") return { label: "Out of stock", tone: "red" as const }
   if (item.effective_status === "LOW_STOCK") return { label: "Low stock", tone: "amber" as const }
   return { label: "Active", tone: "green" as const }
@@ -173,8 +172,8 @@ export default function InventoryPage() {
   const visibleItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
     return items.filter((item) => {
+      if (item.effective_status === "ARCHIVED") return false
       if (filter === "ACTIVE" && item.effective_status !== "ACTIVE") return false
-      if (filter === "ARCHIVED" && item.effective_status !== "ARCHIVED") return false
       if (filter === "LOW" && item.effective_status !== "LOW_STOCK") return false
       if (filter === "OUT" && item.effective_status !== "OUT_OF_STOCK") return false
       if (!normalizedQuery) return true
@@ -230,27 +229,15 @@ export default function InventoryPage() {
     }
   }
 
-  async function archiveItem(item: InventoryItem) {
-    if (!window.confirm(`Archive ${item.name}? It will remain in inventory history.`)) return
+  async function deleteItem(item: InventoryItem) {
+    if (!window.confirm(`Delete ${item.name}? This permanently removes it from your inventory catalog.`)) return
     try {
       await request(`/api/inventory/${item.id}`, { method: "DELETE" })
-      toast.success("Inventory item archived")
+      setItems((current) => current.filter((candidate) => candidate.id !== item.id))
+      toast.success("Inventory item deleted")
       await loadInventory()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to archive inventory item")
-    }
-  }
-
-  async function restoreItem(item: InventoryItem) {
-    try {
-      await request(`/api/inventory/${item.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ action: "RESTORE" })
-      })
-      toast.success("Inventory item restored")
-      await loadInventory()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to restore inventory item")
+      toast.error(error instanceof Error ? error.message : "Failed to delete inventory item")
     }
   }
 
@@ -339,8 +326,7 @@ export default function InventoryPage() {
                 ["ALL", "All"],
                 ["ACTIVE", "Active"],
                 ["LOW", "Low stock"],
-                ["OUT", "Out of stock"],
-                ["ARCHIVED", "Archived"]
+                ["OUT", "Out of stock"]
               ] as Array<[Filter, string]>).map(([value, label]) => (
                 <button
                   key={value}
@@ -405,16 +391,10 @@ export default function InventoryPage() {
                       <p className="mt-2 text-[11px] text-gray-500">
                         Updated {new Date(item.updated_at).toLocaleDateString()}
                       </p>
-                      {item.effective_status !== "ARCHIVED" ? (
-                        <div className="mt-3 flex gap-2">
-                          <button onClick={() => openEdit(item)} className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700">Edit</button>
-                          <button onClick={() => void archiveItem(item)} className="rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Archive</button>
-                        </div>
-                      ) : (
-                        <button onClick={() => void restoreItem(item)} className="mt-3 inline-flex items-center gap-1.5 rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700">
-                          <RotateCcw size={13} /> Restore
-                        </button>
-                      )}
+                      <div className="mt-3 flex gap-2">
+                        <button onClick={() => openEdit(item)} className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700">Edit</button>
+                        <button onClick={() => void deleteItem(item)} className="rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Delete</button>
+                      </div>
                     </article>
                   )
                 })}
@@ -438,14 +418,10 @@ export default function InventoryPage() {
                           <td className="px-4 py-3"><ProviderStatusPill label={state.label} tone={state.tone} /></td>
                           <td className="px-4 py-3 text-xs text-gray-500">{new Date(item.updated_at).toLocaleDateString()}</td>
                           <td className="px-4 py-3">
-                            {item.effective_status !== "ARCHIVED" ? (
-                              <div className="flex justify-end gap-2">
-                                <button onClick={() => openEdit(item)} className="text-xs font-semibold text-blue-600 hover:text-blue-700">Edit</button>
-                                <button onClick={() => void archiveItem(item)} aria-label={`Archive ${item.name}`} className="text-gray-400 hover:text-red-600"><Archive size={15} /></button>
-                              </div>
-                            ) : (
-                              <button onClick={() => void restoreItem(item)} className="text-xs font-semibold text-blue-600 hover:text-blue-700">Restore</button>
-                            )}
+                            <div className="flex justify-end gap-2">
+                              <button onClick={() => openEdit(item)} className="text-xs font-semibold text-blue-600 hover:text-blue-700">Edit</button>
+                              <button onClick={() => void deleteItem(item)} aria-label={`Delete ${item.name}`} className="text-gray-400 hover:text-red-600"><Trash2 size={15} /></button>
+                            </div>
                           </td>
                         </tr>
                       )
@@ -461,15 +437,15 @@ export default function InventoryPage() {
       <DashboardSection title="Connect Existing POS Inventory" titleTone="blue">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {integrations.map((integration) => (
-            <div key={integration.provider} className="flex min-h-40 flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+            <div key={integration.provider} className="flex min-h-44 flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:border-blue-200 sm:p-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-gray-950">{integration.label}</p>
+                  <p className="text-base font-semibold leading-tight text-gray-950">{integration.label}</p>
                   <p className="mt-1 text-xs leading-5 text-gray-500">{integration.detail}</p>
                 </div>
                 <ProviderStatusPill
-                  label={integration.status.replaceAll("_", " ")}
-                  tone={integration.status === "CONNECTED" || integration.status === "AVAILABLE" ? "green" : integration.status === "ERROR" ? "red" : "slate"}
+                  label={integration.status === "CONNECTED" ? "Connected" : "Not Connected"}
+                  tone={integration.status === "CONNECTED" ? "blue" : "slate"}
                 />
               </div>
               <div className="mt-auto flex flex-wrap gap-2 pt-4">

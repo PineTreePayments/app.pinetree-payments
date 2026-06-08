@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import {
-  archiveInventoryItemEngine,
-  restoreInventoryItemEngine,
+  deleteInventoryItemEngine,
   updateInventoryItemEngine
 } from "@/engine/inventory"
 import {
@@ -21,9 +20,7 @@ export async function PATCH(
     const merchantId = await requireMerchantIdFromRequest(req)
     const { id } = await context.params
     const body = await req.json() as Record<string, unknown>
-    const item = body.action === "RESTORE"
-      ? await restoreInventoryItemEngine(merchantId, id)
-      : await updateInventoryItemEngine(merchantId, id, body)
+    const item = await updateInventoryItemEngine(merchantId, id, body)
     return NextResponse.json({ item })
   } catch (error) {
     const errorMessage = message(error)
@@ -42,7 +39,7 @@ export async function DELETE(
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
     const { id } = await context.params
-    const item = await archiveInventoryItemEngine(merchantId, id)
+    const item = await deleteInventoryItemEngine(merchantId, id)
     return NextResponse.json({ item })
   } catch (error) {
     const errorMessage = message(error)

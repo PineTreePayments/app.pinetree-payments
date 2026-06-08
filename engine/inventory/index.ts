@@ -1,6 +1,7 @@
 import {
   createInventoryMovement,
   createInventoryItem,
+  deleteInventoryItem,
   listInventoryItems,
   listInventoryMovements,
   updateInventoryItem,
@@ -9,6 +10,8 @@ import {
 } from "@/database"
 import {
   deriveInventoryStatus,
+  merchantVisibleInventoryItems,
+  merchantVisibleInventoryMovements,
   summarizeInventory,
   type InventoryEffectiveStatus
 } from "../inventoryLogic"
@@ -66,17 +69,23 @@ export async function getInventoryEngine(merchantId: string) {
     listInventoryMovements(merchantId),
     listInventoryIntegrationStatuses(merchantId)
   ])
+  const merchantVisibleItems = merchantVisibleInventoryItems(result.items)
+  const merchantVisibleItemIds = new Set(merchantVisibleItems.map((item) => item.id))
+  const merchantVisibleMovements = merchantVisibleInventoryMovements(
+    movementResult.movements,
+    merchantVisibleItemIds
+  )
 
   return {
     available: result.available && movementResult.available,
     movementsAvailable: movementResult.available,
     integrationsAvailable: true,
-    items: result.items.map((item): InventoryItemView => ({
+    items: merchantVisibleItems.map((item): InventoryItemView => ({
       ...item,
       effective_status: deriveInventoryStatus(item)
     })),
-    summary: summarizeInventory(result.items),
-    movements: movementResult.movements,
+    summary: summarizeInventory(merchantVisibleItems),
+    movements: merchantVisibleMovements,
     integrations
   }
 }
@@ -121,25 +130,9 @@ export async function updateInventoryItemEngine(
   return { ...item, effective_status: deriveInventoryStatus(item) }
 }
 
-export async function archiveInventoryItemEngine(merchantId: string, itemId: string) {
+export async function deleteInventoryItemEngine(merchantId: string, itemId: string) {
   requiredText(itemId, "Item ID")
-  const current = (await listInventoryItems(merchantId)).items.find((item) => item.id === itemId)
-  if (!current) throw new Error("Inventory item not found")
-  if (current.status === "ARCHIVED") return { ...current, effective_status: "ARCHIVED" as const }
-
-  const item = await updateInventoryItem(merchantId, itemId, { status: "ARCHIVED" })
-  await createInventoryMovement(merchantId, item.id, "ARCHIVE", 0, "Inventory item archived")
-  return { ...item, effective_status: "ARCHIVED" as const }
-}
-
-export async function restoreInventoryItemEngine(merchantId: string, itemId: string) {
-  requiredText(itemId, "Item ID")
-  const current = (await listInventoryItems(merchantId)).items.find((item) => item.id === itemId)
-  if (!current) throw new Error("Inventory item not found")
-
-  const item = await updateInventoryItem(merchantId, itemId, { status: "ACTIVE" })
-  if (current.status === "ARCHIVED") {
-    await createInventoryMovement(merchantId, item.id, "RESTORE", 0, "Inventory item restored")
-  }
-  return { ...item, effective_status: deriveInventoryStatus(item) }
+  const item = await deleteInventoryItem(merchantId, itemId)
+  if (!item) throw new Error("Inventory item not found")
+  return item
 }

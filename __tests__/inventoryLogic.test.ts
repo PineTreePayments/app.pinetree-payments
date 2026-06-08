@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 
 import {
   deriveInventoryStatus,
+  merchantVisibleInventoryItems,
+  merchantVisibleInventoryMovements,
   summarizeInventory
 } from "@/engine/inventoryLogic"
 
@@ -48,6 +50,26 @@ describe("inventory stock status", () => {
 })
 
 describe("inventory summary", () => {
+  it("removes archived items and archive history from merchant-facing inventory", () => {
+    const visibleItems = merchantVisibleInventoryItems([
+      { id: "active-item", status: "ACTIVE" as const },
+      { id: "archived-item", status: "ARCHIVED" as const }
+    ])
+
+    expect(visibleItems).toEqual([{ id: "active-item", status: "ACTIVE" }])
+
+    const visibleMovements = merchantVisibleInventoryMovements(
+      [
+        { item_id: "active-item", type: "SALE" },
+        { item_id: "active-item", type: "RESTORE" },
+        { item_id: "archived-item", type: "ARCHIVE" }
+      ],
+      new Set(visibleItems.map((entry) => entry.id))
+    )
+
+    expect(visibleMovements).toEqual([{ item_id: "active-item", type: "SALE" }])
+  })
+
   it("excludes archived items from active counts and value", () => {
     const summary = summarizeInventory([
       item({ id: "active", quantity: 4, cost: 2 }),

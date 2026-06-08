@@ -589,7 +589,7 @@ export default function POSPage() {
                 const balance = drawer?.balance ?? null
                 const lastEntry = drawer?.lastEntry
                 return (
-                  <div key={t.id} className="grid gap-3 rounded-xl border border-blue-100 bg-gradient-to-r from-blue-50/55 to-white px-4 py-3.5 shadow-[0_5px_18px_rgba(37,99,235,0.05)] transition hover:border-blue-200 sm:grid-cols-[minmax(0,1fr)_150px_140px] sm:items-center sm:px-5">
+                  <div key={t.id} className="grid gap-3 rounded-2xl border border-gray-200/80 bg-white px-4 py-3.5 shadow-[0_8px_24px_rgba(15,23,42,0.045)] transition hover:border-blue-200 hover:shadow-[0_12px_30px_rgba(15,23,42,0.07)] sm:grid-cols-[minmax(0,1fr)_150px_140px] sm:items-center sm:px-5">
                     <div className="min-w-0">
                       <p className="font-semibold text-gray-950">{t.name}</p>
                       {lastEntry ? (
