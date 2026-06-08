@@ -383,8 +383,8 @@ export default function DashboardPage() {
       {/* 3 — Compact payment operations */}
       <DashboardSection title="Payment Operations" titleTone="blue">
         <div className="rounded-2xl border border-blue-100 bg-blue-50/55 px-4 py-3.5 shadow-[0_8px_24px_rgba(37,99,235,0.06)] sm:px-5">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="min-w-0">
+          <div className="flex flex-col items-center gap-3 text-center sm:flex-row sm:justify-center sm:gap-6">
+            <div className="min-w-0 sm:border-r sm:border-blue-200 sm:pr-6">
               <p className="text-sm font-semibold text-gray-950">
                 Active rails:{" "}
                 <span className="font-medium text-gray-700">
@@ -392,9 +392,6 @@ export default function DashboardPage() {
                     ? connectedRailRows.map((rail) => rail.label).join(", ")
                     : "None connected"}
                 </span>
-              </p>
-              <p className="mt-1 text-xs text-gray-600">
-                Today: {formatUsd(today.volume)} across {today.transactionCount} payment{today.transactionCount === 1 ? "" : "s"}
               </p>
             </div>
             <div className="flex items-center gap-4">
@@ -471,14 +468,16 @@ export default function DashboardPage() {
 
       {/* 5 — Historical summary */}
       <GroupedMetricSurface title="Historical Summary" titleTone="blue">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-4">
           <InlineMetric label="All-Time Volume" value={formatUsd(volume)} />
           <InlineMetric label="All Transactions" value={txCount} />
+          <InlineMetric label="Success Rate" value={`${successRate}%`} />
+          <InlineMetric label="Confirmed Today" value={today.confirmed} />
         </div>
       </GroupedMetricSurface>
 
       {/* 6 — Quick Actions */}
-      <DashboardSection title="Quick Actions" titleTone="blue">
+      <DashboardSection title="Quick Actions" titleTone="blue" className="md:hidden">
         <div className="rounded-2xl border border-white/80 bg-white/80 p-2 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
             {quickActions.map(({ label, href, icon: Icon }) => (

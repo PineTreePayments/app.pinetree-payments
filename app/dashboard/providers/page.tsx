@@ -7,6 +7,7 @@ import { speedLoginUrl, speedSignupUrl, speedAccountSetupUrl } from "@/lib/speed
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
 import { toast } from "sonner"
 import QRCode from "qrcode"
+import { ChevronRight, X } from "lucide-react"
 import {
   CompactMetricTile,
   DashboardSection,
@@ -208,6 +209,7 @@ export default function ProvidersPage() {
 
   const [smartRouting, setSmartRouting] = useState(false)
   const [autoConversion, setAutoConversion] = useState(false)
+  const [engineSettingsPanel, setEngineSettingsPanel] = useState<"routing" | "conversion" | null>(null)
 
   const [selectedWalletType, setSelectedWalletType] = useState<string | null>(null)
   const [showMobileConnect, setShowMobileConnect] = useState(false)
@@ -603,6 +605,27 @@ export default function ProvidersPage() {
   url.searchParams.set("return_to", getDesktopProvidersUrl())
 
   return url.toString()
+}
+
+function EngineSettingStatus({
+  label,
+  value,
+  active
+}: {
+  label: string
+  value: string
+  active: boolean
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-3">
+      <p className="text-sm font-medium text-gray-700">{label}</p>
+      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+        active ? "bg-blue-600 text-white" : "border border-gray-200 bg-white text-gray-600"
+      }`}>
+        {value}
+      </span>
+    </div>
+  )
 }
 
   function buildWalletDeepLink(
@@ -1481,6 +1504,9 @@ export default function ProvidersPage() {
 
   const shift4Connected = getStatus("shift4") === "Connected"
   const connectedAndEnabledProvidersCount = getConnectedAndEnabledProvidersCount(providers)
+  const connectedAndEnabledProviders = providers.filter((provider) =>
+    provider.enabled && getStatus(provider.provider) === "Connected"
+  )
 
   return (
     <div className="space-y-5 md:space-y-7">
@@ -1506,7 +1532,18 @@ export default function ProvidersPage() {
       <DashboardSection title="Engine Settings" titleTone="blue">
       <div className="rounded-2xl border border-gray-200 bg-white p-2.5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
         <div className="grid gap-2 md:grid-cols-2">
-          <div className="flex min-h-16 items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setEngineSettingsPanel("routing")}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault()
+                setEngineSettingsPanel("routing")
+              }
+            }}
+            className="group flex min-h-20 cursor-pointer items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5 transition hover:border-blue-200 hover:bg-blue-50/60 focus:outline-none focus:ring-4 focus:ring-blue-100"
+          >
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <p className="text-sm font-semibold text-gray-950">Smart Routing</p>
@@ -1515,41 +1552,137 @@ export default function ProvidersPage() {
               <p className="mt-0.5 text-xs text-gray-600">Select the best payment provider</p>
             </div>
 
-            <ToggleSwitch
-              checked={smartRouting}
-              onChange={(v) => {
-                if (v && connectedAndEnabledProvidersCount < 2) {
-                  toast.error("Connect and enable at least 2 providers")
-                  return
-                }
+            <div
+              className="flex shrink-0 items-center gap-2"
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <ToggleSwitch
+                checked={smartRouting}
+                onChange={(v) => {
+                  if (v && connectedAndEnabledProvidersCount < 2) {
+                    toast.error("Connect and enable at least 2 providers")
+                    return
+                  }
 
-                setSmartRouting(v)
-                updateSettings("smart_routing_enabled", v)
-              }}
-            />
+                  setSmartRouting(v)
+                  updateSettings("smart_routing_enabled", v)
+                }}
+              />
+              <ChevronRight className="h-4 w-4 text-gray-400 transition group-hover:translate-x-0.5 group-hover:text-blue-600" />
+            </div>
           </div>
 
-          <div className="flex min-h-16 items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setEngineSettingsPanel("conversion")}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault()
+                setEngineSettingsPanel("conversion")
+              }
+            }}
+            className="group flex min-h-20 cursor-pointer items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5 transition hover:border-blue-200 hover:bg-blue-50/60 focus:outline-none focus:ring-4 focus:ring-blue-100"
+          >
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <p className="text-sm font-semibold text-gray-950">Auto Convert to Fiat</p>
                 <span className="text-[11px] font-semibold text-gray-500">{autoConversion ? "On" : "Off"}</span>
               </div>
-              <p className="mt-0.5 text-xs text-gray-600">Convert Shift4 payments to fiat</p>
+              <p className="mt-0.5 text-xs text-gray-600">Convert eligible payments to fiat</p>
             </div>
 
-            <ToggleSwitch
-              checked={autoConversion}
-              disabled={!shift4Connected}
-              onChange={(v) => {
-                setAutoConversion(v)
-                updateSettings("auto_conversion_enabled", v)
-              }}
-            />
+            <div
+              className="flex shrink-0 items-center gap-2"
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <ToggleSwitch
+                checked={autoConversion}
+                disabled={!shift4Connected}
+                onChange={(v) => {
+                  setAutoConversion(v)
+                  updateSettings("auto_conversion_enabled", v)
+                }}
+              />
+              <ChevronRight className="h-4 w-4 text-gray-400 transition group-hover:translate-x-0.5 group-hover:text-blue-600" />
+            </div>
           </div>
         </div>
       </div>
       </DashboardSection>
+
+      {engineSettingsPanel && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) setEngineSettingsPanel(null)
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="engine-settings-title"
+            className="max-h-[85vh] w-full overflow-y-auto rounded-t-3xl border border-white/80 bg-white shadow-2xl sm:max-w-lg sm:rounded-3xl"
+          >
+            <header className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-600">Engine Settings</p>
+                <h2 id="engine-settings-title" className="mt-1 text-xl font-semibold text-gray-950">
+                  {engineSettingsPanel === "routing" ? "Smart Routing" : "Auto Conversion"}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEngineSettingsPanel(null)}
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 text-gray-500 transition hover:bg-gray-50 hover:text-gray-900"
+                aria-label="Close engine settings"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </header>
+
+            <div className="space-y-4 px-5 py-5">
+              {engineSettingsPanel === "routing" ? (
+                <>
+                  <p className="text-sm leading-6 text-gray-600">
+                    Smart Routing automatically selects from connected, enabled payment providers when more than one option is available.
+                  </p>
+                  <EngineSettingStatus label="Current status" value={smartRouting ? "On" : "Off"} active={smartRouting} />
+                  <div className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.13em] text-gray-500">Available providers</p>
+                    <p className="mt-2 text-sm font-medium capitalize text-gray-950">
+                      {connectedAndEnabledProviders.length
+                        ? connectedAndEnabledProviders.map((provider) => provider.provider.replaceAll("_", " ")).join(", ")
+                        : "No connected and enabled providers"}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-gray-500">
+                      Routing requires at least two connected and enabled providers. Preferred and fallback provider controls are not currently configurable.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm leading-6 text-gray-600">
+                    Auto Conversion applies the merchant&apos;s existing fiat conversion setting to eligible provider payments.
+                  </p>
+                  <EngineSettingStatus label="Current status" value={autoConversion ? "On" : "Off"} active={autoConversion} />
+                  <div className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.13em] text-gray-500">Provider availability</p>
+                    <p className="mt-2 text-sm font-medium text-gray-950">
+                      {shift4Connected ? "An eligible conversion provider is connected" : "No eligible conversion provider is connected"}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-gray-500">
+                      Provider selection is based on existing connected provider capabilities and is not separately configurable here.
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
 
       <DashboardSection title="Payment Providers" titleTone="blue">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">

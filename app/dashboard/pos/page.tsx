@@ -481,52 +481,52 @@ export default function POSPage() {
           Active Terminals
         </p>
 
-        <div className="rounded-[1.35rem] border border-gray-200/80 bg-white p-3.5 shadow-[0_14px_44px_rgba(15,23,42,0.06)] sm:p-5">
+        <div className="overflow-hidden rounded-[1.35rem] border border-gray-200/80 bg-white shadow-[0_14px_44px_rgba(15,23,42,0.06)]">
 
           {terminals.length === 0 && (
-            <div className="text-sm text-gray-500">
+            <div className="p-4 text-sm text-gray-500 sm:p-5">
               No terminals created yet.
             </div>
           )}
 
-          <div className="space-y-3">
+          <div className="divide-y divide-gray-100">
 
             {terminals.map((t)=>(
 
               <div
                 key={t.id}
                 ref={expandedTerminalId === t.id ? detailsRef : null}
-                className="relative flex flex-col gap-3 rounded-2xl bg-gray-50/70 p-4 shadow-[0_8px_24px_rgba(15,23,42,0.035)] transition hover:bg-blue-50/40 md:flex-row md:items-center md:justify-between"
+                className="relative flex flex-col gap-4 border-l-4 border-l-blue-500 px-4 py-4 transition hover:bg-blue-50/35 sm:px-5 md:flex-row md:items-center md:justify-between"
               >
 
-                <div>
+                <div className="min-w-0">
 
                   <div className="font-semibold text-gray-950">
                     {t.name}
                   </div>
 
-                  <div className="mt-0.5 font-mono text-xs text-gray-500">
+                  <div className="mt-1 truncate font-mono text-xs text-gray-500" title={t.id}>
                     {t.id}
                   </div>
 
-                  <div className="mt-1.5 text-xs font-semibold uppercase tracking-[0.13em] text-green-600">
+                  <div className="mt-2 text-xs font-semibold uppercase tracking-[0.13em] text-blue-600">
                     ● Active
                   </div>
 
                 </div>
 
-                <div className="flex items-center gap-2 md:justify-end">
+                <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center md:justify-end">
 
                   <Button
                     variant="secondary"
                     onClick={() => toggleTerminalDetails(t.id)}
-                    className="rounded-xl px-3 text-xs"
+                    className="w-full rounded-xl px-3 text-xs sm:w-auto"
                   >
                     {expandedTerminalId === t.id ? "Hide" : "Details"}
                   </Button>
 
-                  <Link href={`/terminal?tid=${t.id}`} className="inline-block">
-                    <Button variant="primary" className="rounded-xl px-5">
+                  <Link href={`/terminal?tid=${t.id}`} className="block sm:inline-block">
+                    <Button variant="primary" className="w-full rounded-xl px-5 sm:w-auto">
                       Launch
                     </Button>
                   </Link>
@@ -537,7 +537,7 @@ export default function POSPage() {
                       setTerminalToDelete(t.id)
                       setConfirmDelete(true)
                     }}
-                    className="rounded-xl px-3 text-xs"
+                    className="w-full rounded-xl px-3 text-xs sm:w-auto"
                   >
                     Delete
                   </Button>
@@ -575,16 +575,22 @@ export default function POSPage() {
             Drawer Balances
           </p>
 
-          <div className="rounded-[1.35rem] border border-gray-200/80 bg-white p-3.5 shadow-[0_14px_44px_rgba(15,23,42,0.06)] sm:p-5">
+          <div className="overflow-hidden rounded-[1.35rem] border border-blue-100 bg-blue-50/35 shadow-[0_14px_44px_rgba(15,23,42,0.06)]">
 
-            <div className="space-y-3">
+            <div className="hidden grid-cols-[minmax(0,1fr)_150px_140px] border-b border-blue-100 bg-blue-50/80 px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-500 sm:grid">
+              <span>Terminal / drawer status</span>
+              <span className="text-right">Expected balance</span>
+              <span className="text-right">Action</span>
+            </div>
+
+            <div className="divide-y divide-blue-100">
               {terminals.map((t) => {
                 const drawer = drawerBalances[t.id]
                 const balance = drawer?.balance ?? null
                 const lastEntry = drawer?.lastEntry
                 return (
-                  <div key={t.id} className="flex flex-col gap-3 rounded-2xl bg-gray-50/70 p-4 shadow-[0_8px_24px_rgba(15,23,42,0.035)] transition hover:bg-blue-50/40 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
+                  <div key={t.id} className="grid gap-3 bg-white/75 px-4 py-3.5 transition hover:bg-white sm:grid-cols-[minmax(0,1fr)_150px_140px] sm:items-center sm:px-5">
+                    <div className="min-w-0">
                       <p className="font-semibold text-gray-950">{t.name}</p>
                       {lastEntry ? (
                         <p className="text-xs text-gray-500 mt-0.5">
@@ -593,24 +599,26 @@ export default function POSPage() {
                       ) : (
                         <p className="text-xs text-gray-400 mt-0.5">No activity yet</p>
                       )}
-                      <p className={`text-xs mt-1 ${drawer?.active ? "text-green-600" : "text-gray-400"}`}>
-                        {drawer?.active ? "Drawer open" : "No active drawer shift"}
+                      <p className={`mt-1 text-xs font-medium ${drawer?.active ? "text-blue-700" : "text-gray-400"}`}>
+                        {drawer?.active ? "Open drawer shift" : "No active drawer shift"}
                       </p>
                     </div>
-                    <div className="flex items-center justify-between gap-4 sm:justify-end">
-                      <div className="text-left sm:text-right">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">
+                    <div className="flex items-center justify-between sm:block sm:text-right">
+                      <div className="contents">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400 sm:hidden">
                           Expected
                         </p>
-                        <p className={`mt-0.5 text-2xl font-bold leading-none ${balance !== null ? "text-gray-900" : "text-gray-300"}`}>
+                        <p className={`text-xl font-semibold tabular-nums ${balance !== null ? "text-gray-950" : "text-gray-300"}`}>
                           {balance !== null ? fmtUsd(balance) : "—"}
                         </p>
                       </div>
+                    </div>
+                    <div className="flex sm:justify-end">
                       <Button
                         variant="secondary"
                         disabled={!drawer?.active}
                         onClick={() => { setCloseoutTerminalId(t.id); setCloseoutAmount(""); setCloseoutResult(null) }}
-                        className="rounded-xl"
+                        className="w-full rounded-xl sm:w-auto"
                       >
                         Close Drawer
                       </Button>
