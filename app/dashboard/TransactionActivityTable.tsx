@@ -410,7 +410,8 @@ export default function TransactionActivityTable({
 
       {selectedTx && selectedStatus && selectedReferences && (
         <div
-          className="fixed inset-0 bg-black/30 backdrop-blur-[2px] flex items-center justify-center z-50 p-3"
+          data-pinetree-overlay="true"
+          className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-3"
           onMouseDown={closeDetail}
         >
           <div

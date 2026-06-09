@@ -521,7 +521,7 @@ export default function InventoryPage() {
       </DashboardSection>
 
       {selectedIntegration && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+        <div data-pinetree-overlay="true" className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
           <div role="dialog" aria-modal="true" aria-label={`${selectedIntegration.label} inventory setup`} className="w-full rounded-t-3xl bg-white p-5 shadow-2xl sm:max-w-lg sm:rounded-3xl">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -547,7 +547,7 @@ export default function InventoryPage() {
       )}
 
       {formOpen && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 backdrop-blur-sm sm:items-center sm:p-4">
+        <div data-pinetree-overlay="true" className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
           <div role="dialog" aria-modal="true" aria-label={editing ? "Edit inventory item" : "Add inventory item"} className="max-h-[100dvh] w-full overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:max-w-xl sm:rounded-3xl sm:p-6">
             <div className="flex items-start justify-between gap-3">
               <div><h2 className="text-xl font-semibold text-gray-950">{editing ? "Edit Item" : "Add Item"}</h2><p className="mt-1 text-sm text-gray-500">Inventory values are stored for this merchant only.</p></div>

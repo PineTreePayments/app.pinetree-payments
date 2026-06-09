@@ -414,7 +414,7 @@ export default function TransactionsPage() {
       </DashboardSection>
 
       {showChart && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3">
+        <div data-pinetree-overlay="true" className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-3">
           <div className="relative max-h-[90vh] w-full max-w-[900px] overflow-y-auto rounded-2xl bg-white shadow-xl">
             <button
               onClick={() => setShowChart(false)}

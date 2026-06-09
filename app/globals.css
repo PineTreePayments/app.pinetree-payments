@@ -17,6 +17,18 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+body.pinetree-modal-open {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.pinetree-modal-backdrop {
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  overscroll-behavior: contain;
+}
 @keyframes fadeIn {
   from {
     opacity:0;

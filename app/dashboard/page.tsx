@@ -467,7 +467,8 @@ export default function DashboardPage() {
 
       {chartExpanded && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3"
+          data-pinetree-overlay="true"
+          className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-3"
           onMouseDown={() => setChartExpanded(false)}
         >
           <div

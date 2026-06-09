@@ -366,11 +366,8 @@ export default function HelpCenterPage() {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") setSelectedArticle(null)
     }
-    const prev = document.body.style.overflow
-    document.body.style.overflow = "hidden"
     document.addEventListener("keydown", handleKeyDown)
     return () => {
-      document.body.style.overflow = prev
       document.removeEventListener("keydown", handleKeyDown)
     }
   }, [selectedArticle])
@@ -380,11 +377,8 @@ export default function HelpCenterPage() {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") setSelectedTicket(null)
     }
-    const prev = document.body.style.overflow
-    document.body.style.overflow = "hidden"
     document.addEventListener("keydown", handleKeyDown)
     return () => {
-      document.body.style.overflow = prev
       document.removeEventListener("keydown", handleKeyDown)
     }
   }, [selectedTicket])
@@ -1674,7 +1668,8 @@ function TicketDetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      data-pinetree-overlay="true"
+      className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose()
       }}
@@ -1928,7 +1923,8 @@ function ArticleModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      data-pinetree-overlay="true"
+      className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose()
       }}

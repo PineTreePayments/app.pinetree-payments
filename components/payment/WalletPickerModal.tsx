@@ -1,6 +1,5 @@
 "use client"
 
-import { useEffect } from "react"
 import type { ReactNode } from "react"
 
 export type WalletPickerCard = {
@@ -102,31 +101,17 @@ export default function WalletPickerModal({
   onSearchChange,
   onClose,
 }: Props) {
-  // Lock body scroll (including horizontal) while modal is open.
-  // On iOS Safari this also prevents the page from shifting when the modal is
-  // in view, which fixes the "fixed modal appears off-screen" bug.
-  useEffect(() => {
-    if (!open) return
-    const prevOverflow = document.body.style.overflow
-    const prevOverflowX = document.body.style.overflowX
-    document.body.style.overflow = "hidden"
-    document.body.style.overflowX = "hidden"
-    return () => {
-      document.body.style.overflow = prevOverflow
-      document.body.style.overflowX = prevOverflowX
-    }
-  }, [open])
-
   if (!open) return null
 
   const hasResults = sections.some((section) => section.wallets.length > 0)
 
   return (
     <div
+      data-pinetree-overlay="true"
       // overflow-hidden: prevents any child overflow from expanding the scroll width.
       // inset-0 + w-screen: double-pins the overlay to exactly the viewport width so it
       // cannot be wider than the screen on any mobile browser / iOS Safari combination.
-      className="fixed inset-0 z-50 flex w-screen items-end justify-center overflow-hidden bg-black/70 backdrop-blur-md sm:items-center sm:p-6"
+      className="pinetree-modal-backdrop fixed inset-0 z-50 flex w-screen items-end justify-center overflow-hidden sm:items-center sm:p-6"
       onClick={onClose}
     >
       <div

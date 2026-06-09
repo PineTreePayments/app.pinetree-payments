@@ -54,18 +54,6 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
   const [search, setSearch] = useState("")
   const [explorerWallets, setExplorerWallets] = useState<BaseWalletApiEntry[] | null>(null)
 
-  // Lock body scroll while modal is open (matches WalletPickerModal behaviour)
-  useEffect(() => {
-    const prevOverflow = document.body.style.overflow
-    const prevOverflowX = document.body.style.overflowX
-    document.body.style.overflow = "hidden"
-    document.body.style.overflowX = "hidden"
-    return () => {
-      document.body.style.overflow = prevOverflow
-      document.body.style.overflowX = prevOverflowX
-    }
-  }, [])
-
   useEffect(() => {
     let cancelled = false
 
@@ -109,7 +97,8 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
 
   return (
     <div
-      className="fixed inset-0 z-50 flex w-screen items-end justify-center overflow-hidden bg-black/70 backdrop-blur-md sm:items-center sm:p-6"
+      data-pinetree-overlay="true"
+      className="pinetree-modal-backdrop fixed inset-0 z-50 flex w-screen items-end justify-center overflow-hidden sm:items-center sm:p-6"
       onClick={onClose}
     >
       <div

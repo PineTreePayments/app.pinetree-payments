@@ -1249,7 +1249,8 @@ export default function AdminPage() {
       {selectedTxId && (
         <>
           <div
-            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px]"
+            data-pinetree-overlay="true"
+            className="pinetree-modal-backdrop fixed inset-0 z-40"
             onClick={() => {
               setSelectedTxId(null)
               setTxDetail(null)
@@ -1424,7 +1425,8 @@ export default function AdminPage() {
       {selectedTicketId && (
         <>
           <div
-            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px]"
+            data-pinetree-overlay="true"
+            className="pinetree-modal-backdrop fixed inset-0 z-40"
             onClick={() => {
               setSelectedTicketId(null)
               setDetail(null)

@@ -951,7 +951,8 @@ export default function AdminTransactionsPage() {
       {selectedTxId && (
         <>
           <div
-            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px]"
+            data-pinetree-overlay="true"
+            className="pinetree-modal-backdrop fixed inset-0 z-40"
             onClick={() => { setSelectedTxId(null); setTxDetail(null) }}
           />
           <div className="fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-white shadow-2xl sm:w-[580px] lg:w-[640px]">

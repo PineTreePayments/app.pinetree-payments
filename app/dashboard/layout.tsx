@@ -131,7 +131,8 @@ export default function DashboardLayout({
       {/* MOBILE OVERLAY */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-30 bg-black/30 lg:hidden"
+          data-pinetree-overlay="true"
+          className="pinetree-modal-backdrop fixed inset-0 z-30 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}

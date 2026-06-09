@@ -1051,7 +1051,8 @@ function WalletOperationList({ operations }: { operations: WalletOperationSummar
 
       return (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-0 backdrop-blur-sm sm:items-center sm:p-6"
+          data-pinetree-overlay="true"
+          className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-6"
           onMouseDown={(event) => {
             if (event.currentTarget === event.target) setSelectedOperation(null)
           }}
@@ -3035,7 +3036,8 @@ export default function WalletsPage() {
 
       {connectionsOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3"
+          data-pinetree-overlay="true"
+          className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-3"
           onMouseDown={() => setConnectionsOpen(false)}
         >
           <div
@@ -3109,7 +3111,8 @@ export default function WalletsPage() {
 
       {cashOutSetupOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-3"
+          data-pinetree-overlay="true"
+          className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-3"
           onMouseDown={() => setCashOutSetupOpen(false)}
         >
           <div
@@ -3162,7 +3165,8 @@ export default function WalletsPage() {
       {/* ── Global Address Book Modal ───────────────────────────────────────── */}
       {addressBookOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/50 p-0 sm:items-start sm:p-6"
+          data-pinetree-overlay="true"
+          className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-end justify-center overflow-hidden p-0 sm:items-start sm:p-6"
           onMouseDown={() => setAddressBookOpen(false)}
         >
           <div
@@ -3355,7 +3359,8 @@ export default function WalletsPage() {
 
       {destModalOpen && (
         <div
-          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-3"
+          data-pinetree-overlay="true"
+          className="pinetree-modal-backdrop fixed inset-0 z-[60] flex items-end justify-center p-0 sm:items-center sm:p-3"
           onMouseDown={() => { setDestModalOpen(false); setDestSaveError(null) }}
         >
           <div
@@ -3522,7 +3527,8 @@ export default function WalletsPage() {
 
       {selectedWallet && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4"
+          data-pinetree-overlay="true"
+          className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4"
           onMouseDown={() => setSelectedWallet(null)}
         >
           <div

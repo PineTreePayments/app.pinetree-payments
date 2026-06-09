@@ -294,7 +294,8 @@ export default function ReportsPage() {
       {/* Email modal */}
       {emailModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm"
+          data-pinetree-overlay="true"
+          className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-center justify-center px-4"
           onClick={(e) => { if (e.target === e.currentTarget) closeEmailModal() }}
         >
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">

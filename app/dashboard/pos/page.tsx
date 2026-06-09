@@ -288,7 +288,7 @@ export default function POSPage() {
 
       {confirmDelete && (
 
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+        <div data-pinetree-overlay="true" className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4">
 
           <Card className="w-full max-w-md">
 
@@ -643,7 +643,7 @@ export default function POSPage() {
       {/* CLOSEOUT MODAL */}
 
       {closeoutTerminalId && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+        <div data-pinetree-overlay="true" className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4">
           <Card className="w-full max-w-md space-y-4">
 
             <h2 className="text-lg font-semibold text-gray-900">

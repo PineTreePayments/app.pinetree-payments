@@ -1701,7 +1701,8 @@ function EngineSettingStatus({
 
       {engineSettingsPanel && (
         <div
-          className="fixed inset-0 z-50 flex min-h-[100dvh] items-center justify-center bg-slate-950/40 p-3 backdrop-blur-sm sm:p-4"
+          data-pinetree-overlay="true"
+          className="pinetree-modal-backdrop fixed inset-0 z-50 flex min-h-[100dvh] items-center justify-center p-3 sm:p-4"
           onMouseDown={(event) => {
             if (event.currentTarget === event.target) setEngineSettingsPanel(null)
           }}
@@ -1911,7 +1912,8 @@ function EngineSettingStatus({
 
       {activeProvider && (
         <div
-          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-3"
+          data-pinetree-overlay="true"
+          className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-3"
           onMouseDown={closeProviderModal}
         >
           <div

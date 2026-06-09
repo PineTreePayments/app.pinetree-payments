@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Web3Provider } from "@/components/providers/Web3Provider"
 import { SolanaProvider } from "@/components/providers/SolanaProvider"
+import OverlayScrollLockManager from "@/components/ui/OverlayScrollLockManager"
 
 export const metadata: Metadata = {
   title: {
@@ -51,6 +52,7 @@ export default function RootLayout({
         <link rel="icon" type="image/png" href="/favicon.png" />
       </head>
       <body className="font-sans antialiased">
+        <OverlayScrollLockManager />
         <SolanaProvider>
           <Web3Provider>
             {children}
