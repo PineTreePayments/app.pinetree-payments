@@ -203,6 +203,7 @@ function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
         ...row,
         credentials: {
           account_reference: String(row.credentials?.account_reference || ""),
+          merchant_approval_status: String(row.credentials?.merchant_approval_status || ""),
           api_status: String(row.credentials?.api_status || ""),
           webhook_status: String(row.credentials?.webhook_status || ""),
           notes: String(row.credentials?.notes || ""),
@@ -537,8 +538,6 @@ export async function saveProviderEngine(args: {
   apiKey?: string
   providerSetup?: {
     account_reference?: string
-    api_status?: string
-    webhook_status?: string
     notes?: string
   }
 }) {
@@ -627,7 +626,7 @@ export async function saveProviderEngine(args: {
 
     const { data: existingShift4, error: existingShift4Error } = await db
       .from("merchant_providers")
-      .select("credentials")
+      .select("credentials,status,enabled")
       .eq("merchant_id", merchantId)
       .eq("provider", "shift4")
       .maybeSingle()
@@ -637,14 +636,11 @@ export async function saveProviderEngine(args: {
     }
 
     const existingCredentials = (existingShift4?.credentials || {}) as JsonObject
-    const apiStatus = String(providerSetup?.api_status || "Pending approval").trim()
-    status = apiStatus.toLowerCase() === "live ready" ? "active" : "pending"
-    enabled = status === "active"
+    status = String(existingShift4?.status || "pending")
+    enabled = existingShift4 ? Boolean(existingShift4.enabled) : false
     credentials = {
       ...existingCredentials,
       account_reference: accountReference.slice(0, 200),
-      api_status: apiStatus.slice(0, 100),
-      webhook_status: String(providerSetup?.webhook_status || "Not configured").trim().slice(0, 100),
       notes: String(providerSetup?.notes || "").trim().slice(0, 2000),
       provider_model: "shift4_merchant_account"
     }

@@ -52,7 +52,10 @@ export async function POST(req: NextRequest) {
         walletAddress: body.walletAddress,
         walletType: body.walletType,
         apiKey: body.apiKey,
-        providerSetup: body.providerSetup
+        providerSetup: {
+          account_reference: body.providerSetup?.account_reference,
+          notes: body.providerSetup?.notes
+        }
       })
     } else {
       return NextResponse.json({ error: "Unknown action" }, { status: 400 })

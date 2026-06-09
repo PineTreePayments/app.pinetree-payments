@@ -30,6 +30,7 @@ type ProviderCredentials = {
   wallet_label?: string
   provider_model?: string
   account_reference?: string
+  merchant_approval_status?: string
   api_status?: string
   webhook_status?: string
   notes?: string
@@ -1108,8 +1109,6 @@ function EngineSettingStatus({
           provider,
           providerSetup: {
             account_reference: accountReference,
-            api_status: shift4ApiStatus.trim(),
-            webhook_status: shift4WebhookStatus.trim(),
             notes: shift4Notes.trim()
           }
         })
@@ -1446,7 +1445,7 @@ function EngineSettingStatus({
     readyLabel?: string
   }) {
     return (
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-100 bg-white px-3 py-2.5">
+      <div className="flex items-center justify-between gap-3 py-2.5">
         <span className="text-sm font-medium text-gray-700">{label}</span>
         <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${shift4StatusBadgeClass(ready)}`}>
           {ready ? readyLabel : "Pending"}
@@ -1938,21 +1937,30 @@ function EngineSettingStatus({
             role="dialog"
             aria-modal="true"
             aria-label="Provider setup"
-            className="relative bg-white p-4 sm:p-6 rounded-lg w-full max-w-[520px] max-h-[90vh] overflow-y-auto shadow-lg"
+            className={`relative w-full max-w-[520px] max-h-[90vh] overflow-y-auto rounded-lg bg-white shadow-lg ${
+              activeProvider === "shift4" ? "p-4 sm:p-5" : "p-4 sm:p-6"
+            }`}
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="mb-4 flex items-start justify-between gap-4">
-              <h2 className="text-lg font-semibold text-gray-950">
-                {activeProvider === "solana"
-                  ? "Set Up Solana Pay"
-                  : activeProvider === "base"
-                    ? "Set Up Base Pay"
-                    : activeProvider === "lightning"
-                      ? "Bitcoin Lightning"
-                    : activeProvider === "shift4"
-                      ? "Connect Shift4"
-                    : `Connect ${activeProvider}`}
-              </h2>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-950">
+                  {activeProvider === "solana"
+                    ? "Set Up Solana Pay"
+                    : activeProvider === "base"
+                      ? "Set Up Base Pay"
+                      : activeProvider === "lightning"
+                        ? "Bitcoin Lightning"
+                      : activeProvider === "shift4"
+                        ? "Connect Shift4"
+                      : `Connect ${activeProvider}`}
+                </h2>
+                {activeProvider === "shift4" ? (
+                  <p className="mt-1 text-sm leading-5 text-gray-500">
+                    Track your Shift4 approval and API readiness for card and crypto routing.
+                  </p>
+                ) : null}
+              </div>
 
               <button
                 type="button"
@@ -2400,35 +2408,23 @@ function EngineSettingStatus({
             )}
 
             {activeProvider === "shift4" && (
-              <div className="mb-5 space-y-4">
-                <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">
-                    Shift4 provider connection
-                  </p>
-                  <p className="mt-2 text-sm leading-6 text-gray-700">
-                    Connect this merchant&apos;s Shift4 processing account to PineTree. Shift4 onboarding,
-                    merchant approval, and live API credentials are completed through Shift4. Once access
-                    is issued, PineTree can enable payment routing, settlement status, and reporting for
-                    this provider.
-                  </p>
-                  <p className="mt-3 text-xs leading-5 text-blue-800">
-                    When Shift4 approval or denial is returned to PineTree, this provider card will update
-                    automatically. PineTree will use the backend return/webhook flow to sync account status,
-                    API readiness, and routing availability.
-                  </p>
-                </div>
-
+              <div className="mb-5 space-y-5">
                 {(() => {
-                  const apiReady = shift4ApiStatus === "Sandbox ready" || shift4ApiStatus === "Live ready"
-                  const merchantApproved = apiReady
+                  const shift4Provider = getProvider("shift4")
+                  const merchantApprovalStatus = String(
+                    shift4Provider?.credentials?.merchant_approval_status ||
+                    (shift4Provider?.status === "active" ? "Approved" : "Pending")
+                  )
+                  const apiReady = ["Sandbox ready", "Live ready", "Active"].includes(shift4ApiStatus)
+                  const merchantApproved = ["Approved", "Active"].includes(merchantApprovalStatus)
                   const webhookConfigured = shift4WebhookStatus === "Configured" || shift4WebhookStatus === "Verified"
                   const webhookVerified = shift4WebhookStatus === "Verified"
-                  const liveRoutingEnabled = shift4ApiStatus === "Live ready"
+                  const liveRoutingEnabled = shift4Provider?.status === "active" && Boolean(shift4Provider.enabled)
 
                   const statusRows = [
                     {
                       label: "Merchant approval",
-                      value: merchantApproved ? "Approved" : shift4ApiStatus === "Disabled" ? "Disabled" : "Pending",
+                      value: merchantApprovalStatus,
                       ready: merchantApproved
                     },
                     { label: "API access", value: shift4ApiStatus, ready: apiReady },
@@ -2441,26 +2437,29 @@ function EngineSettingStatus({
 
                   return (
                     <>
-                      <section className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
+                      <section className="rounded-xl bg-gray-50 px-3.5 py-3">
                         <div className="flex items-center justify-between gap-3">
                           <div>
                             <p className="text-sm font-semibold text-gray-950">Provider setup status</p>
-                            <p className="mt-0.5 text-xs text-gray-500">Current onboarding and return-path readiness.</p>
+                            <p className="mt-0.5 text-xs text-gray-500">Managed by PineTree and Shift4.</p>
                           </div>
                           <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
                             liveRoutingEnabled
                               ? "border-blue-200 bg-blue-50 text-blue-700"
                               : "border-amber-200 bg-amber-50 text-amber-700"
                           }`}>
-                            {liveRoutingEnabled ? "Live ready" : "Setup pending"}
+                            {liveRoutingEnabled ? "Connected" : "Setup pending"}
                           </span>
                         </div>
 
-                        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                        <div className="mt-3 divide-y divide-gray-200">
                           {statusRows.map((row) => (
-                            <div key={row.label} className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
-                              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{row.label}</p>
-                              <span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${shift4StatusBadgeClass(row.ready)}`}>
+                            <div key={row.label} className="flex items-center justify-between gap-3 py-2.5">
+                              <div>
+                                <p className="text-sm font-medium text-gray-800">{row.label}</p>
+                                <p className="mt-0.5 text-xs text-gray-500">Managed by PineTree / Shift4</p>
+                              </div>
+                              <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${shift4StatusBadgeClass(row.ready)}`}>
                                 {row.value}
                               </span>
                             </div>
@@ -2468,82 +2467,36 @@ function EngineSettingStatus({
                         </div>
                       </section>
 
-                      <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-4">
+                      <section className="space-y-4">
                         <label className="block">
-                          <span className="text-sm font-semibold text-gray-900">Shift4 Account Reference</span>
+                          <span className="text-sm font-semibold text-gray-900">Shift4 account reference</span>
                           <span className="mt-0.5 block text-xs leading-5 text-gray-500">
-                            Use the merchant or application reference issued by Shift4.
+                            Enter the reference provided by Shift4 or PineTree support.
                           </span>
                           <input
                             value={shift4AccountReference}
                             onChange={(event) => setShift4AccountReference(event.target.value)}
-                            placeholder="Shift4 merchant/account reference"
+                            placeholder="Shift4 account or application reference"
                             className={lightningInputClass()}
                             autoComplete="off"
                           />
                         </label>
 
                         <label className="block">
-                          <span className="text-sm font-semibold text-gray-900">API Status</span>
-                          <span className="mt-0.5 block text-xs leading-5 text-gray-500">
-                            Tracks whether Shift4 has issued sandbox or live processing access.
-                          </span>
-                          <select
-                            value={shift4ApiStatus}
-                            onChange={(event) => setShift4ApiStatus(event.target.value)}
-                            className={lightningInputClass()}
-                          >
-                            <option>Pending approval</option>
-                            <option>Sandbox ready</option>
-                            <option>Live ready</option>
-                            <option>Disabled</option>
-                          </select>
-                        </label>
-
-                        <label className="block">
-                          <span className="text-sm font-semibold text-gray-900">Webhook Status</span>
-                          <span className="mt-0.5 block text-xs leading-5 text-gray-500">
-                            Used to receive Shift4 approval, denial, payment, and settlement updates.
-                          </span>
-                          <select
-                            value={shift4WebhookStatus}
-                            onChange={(event) => setShift4WebhookStatus(event.target.value)}
-                            className={lightningInputClass()}
-                          >
-                            <option>Not configured</option>
-                            <option>Pending</option>
-                            <option>Configured</option>
-                            <option>Verified</option>
-                          </select>
-                        </label>
-
-                        <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <span className="text-sm font-semibold text-gray-900">Approval return</span>
-                            <span className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-700">
-                              Automatic
-                            </span>
-                          </div>
-                          <p className="mt-1 text-xs leading-5 text-gray-600">
-                            Approval and denial updates will return to PineTree through the configured backend flow.
-                          </p>
-                        </div>
-
-                        <label className="block">
-                          <span className="text-sm font-semibold text-gray-900">Notes</span>
+                          <span className="text-sm font-semibold text-gray-900">Setup notes</span>
                           <textarea
                             value={shift4Notes}
                             onChange={(event) => setShift4Notes(event.target.value)}
-                            placeholder="Non-sensitive setup notes"
+                            placeholder="Optional internal note"
                             rows={3}
                             className={lightningInputClass()}
                           />
                         </label>
                       </section>
 
-                      <section className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
+                      <section className="rounded-xl bg-gray-50 px-3.5 py-3">
                         <p className="text-sm font-semibold text-gray-950">Setup checklist</p>
-                        <div className="mt-3 space-y-2">
+                        <div className="mt-2 divide-y divide-gray-200">
                           <Shift4ChecklistRow label="PineTree provider card ready" ready readyLabel="Ready" />
                           <Shift4ChecklistRow label="Backend return path prepared" ready readyLabel="Prepared" />
                           <Shift4ChecklistRow label="Shift4 merchant approval" ready={merchantApproved} />
@@ -2552,6 +2505,11 @@ function EngineSettingStatus({
                           <Shift4ChecklistRow label="Live routing enabled" ready={liveRoutingEnabled} />
                         </div>
                       </section>
+
+                      <div className="rounded-lg bg-blue-50 px-3.5 py-3 text-xs leading-5 text-blue-800">
+                        Shift4 approval and credential status update automatically after PineTree receives
+                        confirmation from Shift4. Contact PineTree support if your approval status looks incorrect.
+                      </div>
                     </>
                   )
                 })()}
