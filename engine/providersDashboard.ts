@@ -189,12 +189,27 @@ function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
 
   // Exclude raw internal rows — sanitized rows are synthesized below.
   // This prevents nwc_uri or other raw internal credentials from ever reaching the UI.
-  const decoratedRows: ProviderRow[] = rows.filter(
-    (row) =>
-      row.provider !== "lightning" &&
-      row.provider !== "lightning_nwc" &&
-      row.provider !== SPEED_PROVIDER_NAME
-  )
+  const decoratedRows: ProviderRow[] = rows
+    .filter(
+      (row) =>
+        row.provider !== "lightning" &&
+        row.provider !== "lightning_nwc" &&
+        row.provider !== SPEED_PROVIDER_NAME
+    )
+    .map((row) => {
+      if (row.provider !== "shift4") return row
+
+      return {
+        ...row,
+        credentials: {
+          account_reference: String(row.credentials?.account_reference || ""),
+          api_status: String(row.credentials?.api_status || ""),
+          webhook_status: String(row.credentials?.webhook_status || ""),
+          notes: String(row.credentials?.notes || ""),
+          provider_model: "shift4_merchant_account"
+        }
+      }
+    })
 
   // ── NWC Lightning (Advanced) ──────────────────────────────────────────────
   if (nwcRow) {
@@ -520,11 +535,19 @@ export async function saveProviderEngine(args: {
   walletAddress?: string
   walletType?: string | null
   apiKey?: string
+  providerSetup?: {
+    account_reference?: string
+    api_status?: string
+    webhook_status?: string
+    notes?: string
+  }
 }) {
   await loadProviders()
-  const { merchantId, provider, walletAddress, walletType, apiKey } = args
+  const { merchantId, provider, walletAddress, walletType, apiKey, providerSetup } = args
 
   let credentials: JsonObject = {}
+  let status = "connected"
+  let enabled = true
 
   if (provider === "solana" || provider === "base") {
     const address = String(walletAddress || "").trim()
@@ -596,6 +619,35 @@ export async function saveProviderEngine(args: {
   } else if (provider === "lightning") {
     // NWC Lightning is connected via /api/wallets/lightning/connect — not this path.
     throw new Error("Use the Lightning wallet connection flow to connect a Bitcoin Lightning wallet.")
+  } else if (provider === "shift4") {
+    const accountReference = String(providerSetup?.account_reference || "").trim()
+    if (!accountReference) {
+      throw new Error("Shift4 Account Reference is required")
+    }
+
+    const { data: existingShift4, error: existingShift4Error } = await db
+      .from("merchant_providers")
+      .select("credentials")
+      .eq("merchant_id", merchantId)
+      .eq("provider", "shift4")
+      .maybeSingle()
+
+    if (existingShift4Error) {
+      throw new Error(`Failed loading Shift4 provider setup: ${existingShift4Error.message}`)
+    }
+
+    const existingCredentials = (existingShift4?.credentials || {}) as JsonObject
+    const apiStatus = String(providerSetup?.api_status || "Pending approval").trim()
+    status = apiStatus.toLowerCase() === "active" ? "active" : "pending"
+    enabled = status === "active"
+    credentials = {
+      ...existingCredentials,
+      account_reference: accountReference.slice(0, 200),
+      api_status: apiStatus.slice(0, 100),
+      webhook_status: String(providerSetup?.webhook_status || "Not configured").trim().slice(0, 100),
+      notes: String(providerSetup?.notes || "").trim().slice(0, 2000),
+      provider_model: "shift4_merchant_account"
+    }
   } else {
     if (!apiKey) {
       throw new Error("API key required")
@@ -610,8 +662,8 @@ export async function saveProviderEngine(args: {
       {
         merchant_id: merchantId,
         provider,
-        status: "connected",
-        enabled: provider === "lightning" ? false : true,
+        status,
+        enabled,
         credentials
       },
       { onConflict: "merchant_id,provider" }

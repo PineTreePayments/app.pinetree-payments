@@ -29,6 +29,10 @@ type ProviderCredentials = {
   wallet_type?: string | null
   wallet_label?: string
   provider_model?: string
+  account_reference?: string
+  api_status?: string
+  webhook_status?: string
+  notes?: string
   [key: string]: unknown
 }
 
@@ -176,6 +180,10 @@ export default function ProvidersPage() {
   const [wallets, setWallets] = useState<WalletRecord[]>([])
   const [activeProvider, setActiveProvider] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState("")
+  const [shift4AccountReference, setShift4AccountReference] = useState("")
+  const [shift4ApiStatus, setShift4ApiStatus] = useState("Pending approval")
+  const [shift4WebhookStatus, setShift4WebhookStatus] = useState("Not configured")
+  const [shift4Notes, setShift4Notes] = useState("")
   const [nwcUri, setNwcUri] = useState("")
   const [nwcWalletLabel, setNwcWalletLabel] = useState("")
   const [nwcTestResult, setNwcTestResult] = useState<{
@@ -232,6 +240,10 @@ export default function ProvidersPage() {
   const closeProviderModal = useCallback(() => {
     setActiveProvider(null)
     setInputValue("")
+    setShift4AccountReference("")
+    setShift4ApiStatus("Pending approval")
+    setShift4WebhookStatus("Not configured")
+    setShift4Notes("")
     setNwcUri("")
     setNwcWalletLabel("")
     setNwcTestResult(null)
@@ -550,6 +562,7 @@ export default function ProvidersPage() {
     if (!p) return "Not Connected"
 
     if (p.status === "connected" || p.status === "active") return "Connected"
+    if (provider === "shift4" && p.status === "pending") return "Setup pending"
 
     return "Not Connected"
   }
@@ -869,6 +882,12 @@ function EngineSettingStatus({
       setSpeedAccountId(String(getProvider("lightning_speed")?.credentials?.account_id || ""))
       // Start at step 1 if no account ID saved, step 2 if already configured
       setSpeedSetupStep(getProvider("lightning_speed")?.credentials?.account_id ? 2 : 1)
+    } else if (provider === "shift4") {
+      setInputValue("")
+      setShift4AccountReference(String(p?.credentials?.account_reference || ""))
+      setShift4ApiStatus(String(p?.credentials?.api_status || "Pending approval"))
+      setShift4WebhookStatus(String(p?.credentials?.webhook_status || "Not configured"))
+      setShift4Notes(String(p?.credentials?.notes || ""))
     } else if (p?.credentials?.api_key) {
       setInputValue(p.credentials.api_key)
     } else if (p?.credentials?.wallet) {
@@ -1069,6 +1088,30 @@ function EngineSettingStatus({
     setLoading(true)
 
     try {
+      if (provider === "shift4") {
+        const accountReference = shift4AccountReference.trim()
+        if (!accountReference) {
+          toast.error("Shift4 Account Reference is required")
+          return
+        }
+
+        const payload = await callProvidersApi("POST", {
+          action: "saveProvider",
+          provider,
+          providerSetup: {
+            account_reference: accountReference,
+            api_status: shift4ApiStatus.trim(),
+            webhook_status: shift4WebhookStatus.trim(),
+            notes: shift4Notes.trim()
+          }
+        })
+
+        applyProvidersPayload(payload)
+        closeProviderModal()
+        toast.success("Shift4 provider setup saved")
+        return
+      }
+
       let walletAddress = (inputValue || "").trim()
       let walletType: string | null = selectedWalletType
 
@@ -1158,7 +1201,7 @@ function EngineSettingStatus({
         }
 
         walletAddress = walletAddress.trim()
-      } else if (provider === "coinbase" || provider === "shift4") {
+      } else if (provider === "coinbase") {
         if (!walletAddress) {
           toast.error("Required field missing")
           return
@@ -1203,7 +1246,7 @@ function EngineSettingStatus({
         provider,
         walletAddress: provider === "solana" || provider === "base" ? walletAddress : undefined,
         walletType: provider === "solana" || provider === "base" ? walletType : undefined,
-        apiKey: provider === "coinbase" || provider === "shift4" ? walletAddress : undefined
+        apiKey: provider === "coinbase" ? walletAddress : undefined
       })
 
       applyProvidersPayload(payload)
@@ -1334,7 +1377,7 @@ function EngineSettingStatus({
 
   function statusTone(status: string) {
     if (status === "Connected" || status === "Ready") return "blue"
-    if (status === "Setup needed" || status === "Needs verification" || status === "Needs permissions" || status === "Setup only") return "amber"
+    if (status === "Setup needed" || status === "Setup pending" || status === "Needs verification" || status === "Needs permissions" || status === "Setup only") return "amber"
     if (status === "Provider unavailable" || status === "Missing env") return "red"
     return "default"
   }
@@ -1401,6 +1444,8 @@ function EngineSettingStatus({
     const lightningWalletLabel = String(p?.credentials?.wallet_label || "")
     const walletType = p?.credentials?.wallet_type || wallet?.wallet_type || wallet?.asset
     const walletLabel = formatWalletLabel(provider, walletType, wallet?.asset || null)
+    const shift4AccountReference = String(p?.credentials?.account_reference || "").trim()
+    const shift4ApiStatus = String(p?.credentials?.api_status || "").trim()
     const connectedCredentialLine = walletValue
       ? provider === "solana" || provider === "base"
         ? `${walletLabel} • ${formatCredentialPart(walletValue, 6, 4)}`
@@ -1471,6 +1516,28 @@ function EngineSettingStatus({
               >
                 {lightningCredentialLine}
               </span>
+            </div>
+          ) : null}
+
+          {provider === "shift4" && shift4AccountReference ? (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+              <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                Connected
+              </span>
+              <span className="mt-1 block text-sm font-medium leading-snug text-gray-950">
+                Shift4 &bull; Merchant account
+              </span>
+              <span
+                className="mt-0.5 block truncate text-xs leading-5 text-gray-500"
+                title={shift4AccountReference}
+              >
+                Account reference: {formatCredentialPart(shift4AccountReference, 8, 4)}
+              </span>
+              {shift4ApiStatus ? (
+                <span className="block text-xs leading-5 text-gray-500">
+                  Status: {shift4ApiStatus}
+                </span>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -1707,8 +1774,8 @@ function EngineSettingStatus({
           name="Shift4"
           provider="shift4"
           networks="Card, crypto"
-          settlement="Shift4 account"
-          description="Accept card and crypto payments."
+          settlement="Shift4 merchant account"
+          description="Accept card and crypto payments through Shift4 once merchant onboarding and API access are enabled."
         />
 
         <ProviderCard
@@ -1844,6 +1911,8 @@ function EngineSettingStatus({
                     ? "Set Up Base Pay"
                     : activeProvider === "lightning"
                       ? "Bitcoin Lightning"
+                    : activeProvider === "shift4"
+                      ? "Connect Shift4"
                     : `Connect ${activeProvider}`}
               </h2>
 
@@ -2293,14 +2362,63 @@ function EngineSettingStatus({
             )}
 
             {activeProvider === "shift4" && (
-              <div className="mb-4">
-                <div className="w-full h-40 border rounded flex items-center justify-center text-black text-sm">
-                  Shift4 onboarding form will appear here
+              <div className="mb-5 space-y-4">
+                <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
+                  <p className="text-sm leading-6 text-gray-700">
+                    Connect this merchant&apos;s Shift4 processing account to PineTree. Shift4 onboarding,
+                    merchant approval, and live API credentials are completed through Shift4. Once access
+                    is issued, PineTree can enable payment routing, settlement status, and reporting for
+                    this provider.
+                  </p>
                 </div>
 
-                <p className="text-sm text-black mt-2">
-                  Complete your Shift4 merchant application and enter your API key below.
-                </p>
+                <label className="block">
+                  <span className="text-sm font-semibold text-gray-900">Shift4 Account Reference</span>
+                  <input
+                    value={shift4AccountReference}
+                    onChange={(event) => setShift4AccountReference(event.target.value)}
+                    placeholder="Merchant account or application reference"
+                    className={lightningInputClass()}
+                    autoComplete="off"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-semibold text-gray-900">API Status</span>
+                  <select
+                    value={shift4ApiStatus}
+                    onChange={(event) => setShift4ApiStatus(event.target.value)}
+                    className={lightningInputClass()}
+                  >
+                    <option>Pending approval</option>
+                    <option>Not issued</option>
+                    <option>Active</option>
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-semibold text-gray-900">Webhook Status</span>
+                  <select
+                    value={shift4WebhookStatus}
+                    onChange={(event) => setShift4WebhookStatus(event.target.value)}
+                    className={lightningInputClass()}
+                  >
+                    <option>Not configured</option>
+                    <option>Pending</option>
+                    <option>Active</option>
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-semibold text-gray-900">Notes</span>
+                  <textarea
+                    value={shift4Notes}
+                    onChange={(event) => setShift4Notes(event.target.value)}
+                    placeholder="Non-sensitive setup notes"
+                    rows={3}
+                    className={lightningInputClass()}
+                  />
+                </label>
               </div>
             )}
 
@@ -2509,6 +2627,7 @@ function EngineSettingStatus({
 
             {activeProvider !== "solana" &&
               activeProvider !== "base" &&
+              activeProvider !== "shift4" &&
               activeProvider !== "lightning" && (
                 <input
                   value={inputValue}
@@ -2516,9 +2635,7 @@ function EngineSettingStatus({
                   placeholder={
                     activeProvider === "coinbase"
                       ? "Enter Coinbase API Key"
-                      : activeProvider === "shift4"
-                        ? "Enter Shift4 API Key"
-                        : "Enter Wallet Address"
+                      : "Enter Wallet Address"
                   }
                   className="w-full border border-gray-300 rounded p-2 mb-4 text-black bg-white"
                 />
@@ -2538,7 +2655,11 @@ function EngineSettingStatus({
                 disabled={loading}
                 className="w-full sm:w-auto px-3 py-1.5 text-sm bg-blue-600 text-white rounded"
               >
-                {loading ? "Saving..." : activeProvider === "lightning" ? "Verify Bitcoin Lightning" : "Save Wallet"}
+                {loading
+                  ? "Saving..."
+                  : activeProvider === "shift4"
+                    ? "Save Setup"
+                    : "Save Wallet"}
               </button>
             </div>
             )}
