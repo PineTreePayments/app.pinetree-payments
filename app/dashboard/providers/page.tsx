@@ -1435,25 +1435,6 @@ function EngineSettingStatus({
       : "border-amber-200 bg-amber-50 text-amber-700"
   }
 
-  function Shift4ChecklistRow({
-    label,
-    ready,
-    readyLabel = "Ready"
-  }: {
-    label: string
-    ready: boolean
-    readyLabel?: string
-  }) {
-    return (
-      <div className="flex items-center justify-between gap-3 py-2.5">
-        <span className="text-sm font-medium text-gray-700">{label}</span>
-        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${shift4StatusBadgeClass(ready)}`}>
-          {ready ? readyLabel : "Pending"}
-        </span>
-      </div>
-    )
-  }
-
   function ProviderCard({
     name,
     provider,
@@ -1943,7 +1924,7 @@ function EngineSettingStatus({
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
+              <div className="min-w-0 flex-1">
                 <h2 className="text-lg font-semibold text-gray-950">
                   {activeProvider === "solana"
                     ? "Set Up Solana Pay"
@@ -1956,9 +1937,15 @@ function EngineSettingStatus({
                       : `Connect ${activeProvider}`}
                 </h2>
                 {activeProvider === "shift4" ? (
-                  <p className="mt-1 text-sm leading-5 text-gray-500">
-                    Track your Shift4 approval and API readiness for card and crypto routing.
-                  </p>
+                  <>
+                    <p className="mt-1 text-sm leading-5 text-gray-500">
+                      Track your Shift4 approval and API readiness for card and crypto routing.
+                    </p>
+                    <div className="mt-3 rounded-lg bg-blue-50 px-3.5 py-3 text-xs leading-5 text-blue-800">
+                      Shift4 approval and credential status update automatically after PineTree receives
+                      confirmation from Shift4. Contact PineTree support if your approval status looks incorrect.
+                    </div>
+                  </>
                 ) : null}
               </div>
 
@@ -2418,7 +2405,6 @@ function EngineSettingStatus({
                   const apiReady = ["Sandbox ready", "Live ready", "Active"].includes(shift4ApiStatus)
                   const merchantApproved = ["Approved", "Active"].includes(merchantApprovalStatus)
                   const webhookConfigured = shift4WebhookStatus === "Configured" || shift4WebhookStatus === "Verified"
-                  const webhookVerified = shift4WebhookStatus === "Verified"
                   const liveRoutingEnabled = shift4Provider?.status === "active" && Boolean(shift4Provider.enabled)
 
                   const statusRows = [
@@ -2494,22 +2480,6 @@ function EngineSettingStatus({
                         </label>
                       </section>
 
-                      <section className="rounded-xl bg-gray-50 px-3.5 py-3">
-                        <p className="text-sm font-semibold text-gray-950">Setup checklist</p>
-                        <div className="mt-2 divide-y divide-gray-200">
-                          <Shift4ChecklistRow label="PineTree provider card ready" ready readyLabel="Ready" />
-                          <Shift4ChecklistRow label="Backend return path prepared" ready readyLabel="Prepared" />
-                          <Shift4ChecklistRow label="Shift4 merchant approval" ready={merchantApproved} />
-                          <Shift4ChecklistRow label="API credentials issued" ready={apiReady} />
-                          <Shift4ChecklistRow label="Webhook verified" ready={webhookVerified} />
-                          <Shift4ChecklistRow label="Live routing enabled" ready={liveRoutingEnabled} />
-                        </div>
-                      </section>
-
-                      <div className="rounded-lg bg-blue-50 px-3.5 py-3 text-xs leading-5 text-blue-800">
-                        Shift4 approval and credential status update automatically after PineTree receives
-                        confirmation from Shift4. Contact PineTree support if your approval status looks incorrect.
-                      </div>
                     </>
                   )
                 })()}
