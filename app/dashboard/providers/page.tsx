@@ -883,10 +883,18 @@ function EngineSettingStatus({
       // Start at step 1 if no account ID saved, step 2 if already configured
       setSpeedSetupStep(getProvider("lightning_speed")?.credentials?.account_id ? 2 : 1)
     } else if (provider === "shift4") {
+      const savedApiStatus = String(p?.credentials?.api_status || "Pending approval")
+      const savedWebhookStatus = String(p?.credentials?.webhook_status || "Not configured")
       setInputValue("")
       setShift4AccountReference(String(p?.credentials?.account_reference || ""))
-      setShift4ApiStatus(String(p?.credentials?.api_status || "Pending approval"))
-      setShift4WebhookStatus(String(p?.credentials?.webhook_status || "Not configured"))
+      setShift4ApiStatus(
+        savedApiStatus === "Active"
+          ? "Live ready"
+          : savedApiStatus === "Not issued"
+            ? "Pending approval"
+            : savedApiStatus
+      )
+      setShift4WebhookStatus(savedWebhookStatus === "Active" ? "Verified" : savedWebhookStatus)
       setShift4Notes(String(p?.credentials?.notes || ""))
     } else if (p?.credentials?.api_key) {
       setInputValue(p.credentials.api_key)
@@ -1422,6 +1430,31 @@ function EngineSettingStatus({
     }
   }
 
+  function shift4StatusBadgeClass(ready: boolean) {
+    return ready
+      ? "border-blue-200 bg-blue-50 text-blue-700"
+      : "border-amber-200 bg-amber-50 text-amber-700"
+  }
+
+  function Shift4ChecklistRow({
+    label,
+    ready,
+    readyLabel = "Ready"
+  }: {
+    label: string
+    ready: boolean
+    readyLabel?: string
+  }) {
+    return (
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-100 bg-white px-3 py-2.5">
+        <span className="text-sm font-medium text-gray-700">{label}</span>
+        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${shift4StatusBadgeClass(ready)}`}>
+          {ready ? readyLabel : "Pending"}
+        </span>
+      </div>
+    )
+  }
+
   function ProviderCard({
     name,
     provider,
@@ -1445,7 +1478,8 @@ function EngineSettingStatus({
     const walletType = p?.credentials?.wallet_type || wallet?.wallet_type || wallet?.asset
     const walletLabel = formatWalletLabel(provider, walletType, wallet?.asset || null)
     const shift4AccountReference = String(p?.credentials?.account_reference || "").trim()
-    const shift4ApiStatus = String(p?.credentials?.api_status || "").trim()
+    const savedShift4ApiStatus = String(p?.credentials?.api_status || "").trim()
+    const savedShift4WebhookStatus = String(p?.credentials?.webhook_status || "").trim()
     const connectedCredentialLine = walletValue
       ? provider === "solana" || provider === "base"
         ? `${walletLabel} • ${formatCredentialPart(walletValue, 6, 4)}`
@@ -1522,7 +1556,7 @@ function EngineSettingStatus({
           {provider === "shift4" && shift4AccountReference ? (
             <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
               <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                Connected
+                {connected ? "Connected" : "Setup saved"}
               </span>
               <span className="mt-1 block text-sm font-medium leading-snug text-gray-950">
                 Shift4 &bull; Merchant account
@@ -1533,10 +1567,14 @@ function EngineSettingStatus({
               >
                 Account reference: {formatCredentialPart(shift4AccountReference, 8, 4)}
               </span>
-              {shift4ApiStatus ? (
-                <span className="block text-xs leading-5 text-gray-500">
-                  Status: {shift4ApiStatus}
-                </span>
+              <span className="block text-xs leading-5 text-gray-500">
+                Approval return: Automatic
+              </span>
+              <span className="block text-xs leading-5 text-gray-500">
+                Webhook: {savedShift4WebhookStatus || "Not configured"}
+              </span>
+              {savedShift4ApiStatus ? (
+                <span className="block text-xs leading-5 text-gray-500">API: {savedShift4ApiStatus}</span>
               ) : null}
             </div>
           ) : null}
@@ -1683,7 +1721,7 @@ function EngineSettingStatus({
 
       {engineSettingsPanel && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+          className="fixed inset-0 z-50 flex min-h-[100dvh] items-center justify-center bg-slate-950/40 p-3 backdrop-blur-sm sm:p-4"
           onMouseDown={(event) => {
             if (event.currentTarget === event.target) setEngineSettingsPanel(null)
           }}
@@ -1692,7 +1730,7 @@ function EngineSettingStatus({
             role="dialog"
             aria-modal="true"
             aria-labelledby="engine-settings-title"
-            className="max-h-[85vh] w-full overflow-y-auto rounded-t-3xl border border-white/80 bg-white shadow-2xl sm:max-w-lg sm:rounded-3xl"
+            className="max-h-[calc(100dvh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-3xl border border-white/80 bg-white shadow-2xl sm:max-h-[85vh]"
           >
             <header className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
               <div>
@@ -2363,62 +2401,160 @@ function EngineSettingStatus({
 
             {activeProvider === "shift4" && (
               <div className="mb-5 space-y-4">
-                <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
-                  <p className="text-sm leading-6 text-gray-700">
+                <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">
+                    Shift4 provider connection
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-gray-700">
                     Connect this merchant&apos;s Shift4 processing account to PineTree. Shift4 onboarding,
                     merchant approval, and live API credentials are completed through Shift4. Once access
                     is issued, PineTree can enable payment routing, settlement status, and reporting for
                     this provider.
                   </p>
+                  <p className="mt-3 text-xs leading-5 text-blue-800">
+                    When Shift4 approval or denial is returned to PineTree, this provider card will update
+                    automatically. PineTree will use the backend return/webhook flow to sync account status,
+                    API readiness, and routing availability.
+                  </p>
                 </div>
 
-                <label className="block">
-                  <span className="text-sm font-semibold text-gray-900">Shift4 Account Reference</span>
-                  <input
-                    value={shift4AccountReference}
-                    onChange={(event) => setShift4AccountReference(event.target.value)}
-                    placeholder="Merchant account or application reference"
-                    className={lightningInputClass()}
-                    autoComplete="off"
-                  />
-                </label>
+                {(() => {
+                  const apiReady = shift4ApiStatus === "Sandbox ready" || shift4ApiStatus === "Live ready"
+                  const merchantApproved = apiReady
+                  const webhookConfigured = shift4WebhookStatus === "Configured" || shift4WebhookStatus === "Verified"
+                  const webhookVerified = shift4WebhookStatus === "Verified"
+                  const liveRoutingEnabled = shift4ApiStatus === "Live ready"
 
-                <label className="block">
-                  <span className="text-sm font-semibold text-gray-900">API Status</span>
-                  <select
-                    value={shift4ApiStatus}
-                    onChange={(event) => setShift4ApiStatus(event.target.value)}
-                    className={lightningInputClass()}
-                  >
-                    <option>Pending approval</option>
-                    <option>Not issued</option>
-                    <option>Active</option>
-                  </select>
-                </label>
+                  const statusRows = [
+                    {
+                      label: "Merchant approval",
+                      value: merchantApproved ? "Approved" : shift4ApiStatus === "Disabled" ? "Disabled" : "Pending",
+                      ready: merchantApproved
+                    },
+                    { label: "API access", value: shift4ApiStatus, ready: apiReady },
+                    {
+                      label: "Webhook return",
+                      value: shift4WebhookStatus,
+                      ready: webhookConfigured
+                    }
+                  ]
 
-                <label className="block">
-                  <span className="text-sm font-semibold text-gray-900">Webhook Status</span>
-                  <select
-                    value={shift4WebhookStatus}
-                    onChange={(event) => setShift4WebhookStatus(event.target.value)}
-                    className={lightningInputClass()}
-                  >
-                    <option>Not configured</option>
-                    <option>Pending</option>
-                    <option>Active</option>
-                  </select>
-                </label>
+                  return (
+                    <>
+                      <section className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-gray-950">Provider setup status</p>
+                            <p className="mt-0.5 text-xs text-gray-500">Current onboarding and return-path readiness.</p>
+                          </div>
+                          <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                            liveRoutingEnabled
+                              ? "border-blue-200 bg-blue-50 text-blue-700"
+                              : "border-amber-200 bg-amber-50 text-amber-700"
+                          }`}>
+                            {liveRoutingEnabled ? "Live ready" : "Setup pending"}
+                          </span>
+                        </div>
 
-                <label className="block">
-                  <span className="text-sm font-semibold text-gray-900">Notes</span>
-                  <textarea
-                    value={shift4Notes}
-                    onChange={(event) => setShift4Notes(event.target.value)}
-                    placeholder="Non-sensitive setup notes"
-                    rows={3}
-                    className={lightningInputClass()}
-                  />
-                </label>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                          {statusRows.map((row) => (
+                            <div key={row.label} className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{row.label}</p>
+                              <span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${shift4StatusBadgeClass(row.ready)}`}>
+                                {row.value}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+
+                      <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-4">
+                        <label className="block">
+                          <span className="text-sm font-semibold text-gray-900">Shift4 Account Reference</span>
+                          <span className="mt-0.5 block text-xs leading-5 text-gray-500">
+                            Use the merchant or application reference issued by Shift4.
+                          </span>
+                          <input
+                            value={shift4AccountReference}
+                            onChange={(event) => setShift4AccountReference(event.target.value)}
+                            placeholder="Shift4 merchant/account reference"
+                            className={lightningInputClass()}
+                            autoComplete="off"
+                          />
+                        </label>
+
+                        <label className="block">
+                          <span className="text-sm font-semibold text-gray-900">API Status</span>
+                          <span className="mt-0.5 block text-xs leading-5 text-gray-500">
+                            Tracks whether Shift4 has issued sandbox or live processing access.
+                          </span>
+                          <select
+                            value={shift4ApiStatus}
+                            onChange={(event) => setShift4ApiStatus(event.target.value)}
+                            className={lightningInputClass()}
+                          >
+                            <option>Pending approval</option>
+                            <option>Sandbox ready</option>
+                            <option>Live ready</option>
+                            <option>Disabled</option>
+                          </select>
+                        </label>
+
+                        <label className="block">
+                          <span className="text-sm font-semibold text-gray-900">Webhook Status</span>
+                          <span className="mt-0.5 block text-xs leading-5 text-gray-500">
+                            Used to receive Shift4 approval, denial, payment, and settlement updates.
+                          </span>
+                          <select
+                            value={shift4WebhookStatus}
+                            onChange={(event) => setShift4WebhookStatus(event.target.value)}
+                            className={lightningInputClass()}
+                          >
+                            <option>Not configured</option>
+                            <option>Pending</option>
+                            <option>Configured</option>
+                            <option>Verified</option>
+                          </select>
+                        </label>
+
+                        <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm font-semibold text-gray-900">Approval return</span>
+                            <span className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-700">
+                              Automatic
+                            </span>
+                          </div>
+                          <p className="mt-1 text-xs leading-5 text-gray-600">
+                            Approval and denial updates will return to PineTree through the configured backend flow.
+                          </p>
+                        </div>
+
+                        <label className="block">
+                          <span className="text-sm font-semibold text-gray-900">Notes</span>
+                          <textarea
+                            value={shift4Notes}
+                            onChange={(event) => setShift4Notes(event.target.value)}
+                            placeholder="Non-sensitive setup notes"
+                            rows={3}
+                            className={lightningInputClass()}
+                          />
+                        </label>
+                      </section>
+
+                      <section className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
+                        <p className="text-sm font-semibold text-gray-950">Setup checklist</p>
+                        <div className="mt-3 space-y-2">
+                          <Shift4ChecklistRow label="PineTree provider card ready" ready readyLabel="Ready" />
+                          <Shift4ChecklistRow label="Backend return path prepared" ready readyLabel="Prepared" />
+                          <Shift4ChecklistRow label="Shift4 merchant approval" ready={merchantApproved} />
+                          <Shift4ChecklistRow label="API credentials issued" ready={apiReady} />
+                          <Shift4ChecklistRow label="Webhook verified" ready={webhookVerified} />
+                          <Shift4ChecklistRow label="Live routing enabled" ready={liveRoutingEnabled} />
+                        </div>
+                      </section>
+                    </>
+                  )
+                })()}
               </div>
             )}
 
@@ -2645,7 +2781,7 @@ function EngineSettingStatus({
             <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
               <button
                 onClick={closeProviderModal}
-                className="w-full sm:w-auto px-3 py-1.5 text-sm border rounded bg-white text-black"
+                className={`${activeProvider === "shift4" ? secondaryButtonClass() : "px-3 py-1.5 text-sm border rounded bg-white text-black"} w-full sm:w-auto`}
               >
                 Cancel
               </button>
@@ -2653,7 +2789,7 @@ function EngineSettingStatus({
               <button
                 onClick={() => saveProvider(activeProvider)}
                 disabled={loading}
-                className="w-full sm:w-auto px-3 py-1.5 text-sm bg-blue-600 text-white rounded"
+                className={`${activeProvider === "shift4" ? primaryButtonClass() : "px-3 py-1.5 text-sm bg-blue-600 text-white rounded"} w-full sm:w-auto`}
               >
                 {loading
                   ? "Saving..."

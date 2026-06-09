@@ -638,7 +638,7 @@ export async function saveProviderEngine(args: {
 
     const existingCredentials = (existingShift4?.credentials || {}) as JsonObject
     const apiStatus = String(providerSetup?.api_status || "Pending approval").trim()
-    status = apiStatus.toLowerCase() === "active" ? "active" : "pending"
+    status = apiStatus.toLowerCase() === "live ready" ? "active" : "pending"
     enabled = status === "active"
     credentials = {
       ...existingCredentials,
