@@ -76,4 +76,21 @@ describe("nonterminal transaction progress", () => {
     expect(eventProcessor).toContain("syncTransactionProgressForPayment")
     expect(updatePaymentStatus).toContain("reconcileTransactionForPayment")
   })
+
+  it("updates only transaction columns present in the production schema", () => {
+    const transactionsSource = fs.readFileSync(
+      path.join(process.cwd(), "database/transactions.ts"),
+      "utf8"
+    )
+    const updateStart = transactionsSource.indexOf(
+      "export async function updateTransactionStatus"
+    )
+    const updateEnd = transactionsSource.indexOf(
+      "export async function updateTransactionProviderReference"
+    )
+    const updateSource = transactionsSource.slice(updateStart, updateEnd)
+
+    expect(updateSource).toContain(".update({ status })")
+    expect(updateSource).not.toContain("updated_at")
+  })
 })

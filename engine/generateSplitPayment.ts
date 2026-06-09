@@ -194,12 +194,14 @@ export async function generateSplitPayment(
       if (isUsdc) {
         paymentUrl = `pinetree://base-v7?paymentId=${encodeURIComponent(String(input.paymentId || ""))}`
       } else {
-        const totalWei = toWeiString(nativeAmount)
+        const merchantAmountWei = BigInt(toWeiString(merchantNativeAmount))
+        const feeAmountWei = BigInt(toWeiString(feeNativeAmount))
+        const totalWei = (merchantAmountWei + feeAmountWei).toString()
         const calldata = splitEthIface.encodeFunctionData("splitEth", [
           input.merchantWallet,
           input.pinetreeWallet,
-          BigInt(toWeiString(merchantNativeAmount)),
-          BigInt(toWeiString(feeNativeAmount)),
+          merchantAmountWei,
+          feeAmountWei,
           String(input.paymentId || "")
         ])
         paymentUrl = `ethereum:${evmSplitContract}@${chainId}?value=${totalWei}&data=${calldata}`
