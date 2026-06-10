@@ -12,7 +12,8 @@ import {
 } from "./transactionReference"
 import {
   formatDashboardNetwork,
-  formatDashboardProvider
+  formatDashboardProvider,
+  formatTransactionSecondaryLabel
 } from "@/components/dashboard/displayHelpers"
 
 export type DashboardPaymentSummary = {
@@ -276,6 +277,7 @@ export default function TransactionActivityTable({
           const statusTime = tx.created_at || payment?.created_at || null
           const displayStatus = getPaymentDisplayStatus(tx.status)
           const reference = formatTransactionReference(tx)
+          const secondaryLabel = formatTransactionSecondaryLabel(tx.provider, tx.network)
 
           return (
             <button
@@ -287,8 +289,8 @@ export default function TransactionActivityTable({
               <div className="flex items-center justify-between gap-2 mb-1">
                 <span className="text-sm font-medium text-gray-900">
                   {providerName(tx.provider)}
-                  {tx.provider !== "cash" && tx.network && (
-                    <span className="text-gray-400 font-normal"> · {networkName(tx.network)}</span>
+                  {secondaryLabel !== "-" && (
+                    <span className="text-gray-400 font-normal"> · {secondaryLabel}</span>
                   )}
                 </span>
                 <StatusBadge label={displayStatus.status} classes={displayStatus.classes} />
@@ -386,7 +388,7 @@ export default function TransactionActivityTable({
                   </td>
 
                   <td className="px-4 py-4 text-gray-700 whitespace-nowrap">
-                    {networkName(tx.provider === "cash" ? "cash" : tx.network)}
+                    {formatTransactionSecondaryLabel(tx.provider, tx.network)}
                   </td>
 
                   <td className="px-4 py-4 text-gray-900 whitespace-nowrap">

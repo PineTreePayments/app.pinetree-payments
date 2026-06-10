@@ -55,6 +55,15 @@ export function formatDashboardNetwork(network: string | null | undefined) {
     .replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
+export function formatTransactionSecondaryLabel(
+  provider: string | null | undefined,
+  network: string | null | undefined
+) {
+  const normalizedProvider = String(provider || "").trim().toLowerCase()
+  if (normalizedProvider === "cash") return "Manual"
+  return formatDashboardNetwork(network)
+}
+
 export function mostFrequentKey(counts: Record<string, number>) {
   return Object.entries(counts)
     .filter(([, count]) => count > 0)
