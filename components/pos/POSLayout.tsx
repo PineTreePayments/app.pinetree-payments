@@ -1182,7 +1182,7 @@ export default function POSLayout({ terminalContext }: Props) {
                 }
               }}
             >
-              {cashRecording ? "Recording..." : "New Sale"}
+              {cashRecording ? "Recording..." : "Complete"}
             </Button>
 
           </div>

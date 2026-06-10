@@ -368,9 +368,6 @@ export default function DashboardPage() {
           <div className={`mt-0.5 ${dashboardHeroValueClass}`}>
             {formatUsd(today.volume)}
           </div>
-          <div className="mt-1 text-xs leading-5 text-gray-600">
-            {today.confirmed} confirmed payment{today.confirmed === 1 ? "" : "s"}
-          </div>
         </div>
       </div>
 
