@@ -1,3 +1,5 @@
+import { formatDashboardProvider } from "@/components/dashboard/displayHelpers"
+
 type PaymentReferenceFields = {
   id?: string | null
   provider_reference?: string | null
@@ -20,6 +22,29 @@ export function shortReferenceId(value: string | null | undefined) {
   const normalized = firstReferenceValue(value)
   if (!normalized) return null
   return normalized.length > 12 ? `${normalized.slice(0, 12)}...` : normalized
+}
+
+export function transactionReferenceProviderName(provider: string | null | undefined) {
+  const normalized = firstReferenceValue(provider)?.toLowerCase()
+  if (!normalized) return null
+  if (normalized === "cash") return "Cash payment"
+
+  const displayName = formatDashboardProvider(normalized)
+  return displayName === "-" ? null : displayName
+}
+
+export function formatProviderReference(
+  provider: string | null | undefined,
+  reference: string | null | undefined
+) {
+  const providerName = transactionReferenceProviderName(provider)
+  const normalizedReference = firstReferenceValue(reference)
+
+  if (providerName && normalizedReference) {
+    return `${providerName} \u00b7 ${normalizedReference}`
+  }
+
+  return normalizedReference || providerName
 }
 
 export function getTransactionReferenceParts(tx: TransactionReferenceFields) {
@@ -45,20 +70,22 @@ export function formatTransactionReference(tx: TransactionReferenceFields) {
     providerReference
   } = getTransactionReferenceParts(tx)
 
-  if (blockchainReference) return blockchainReference
-  if (providerReference) return providerReference
+  const directReference = blockchainReference || providerReference
+  if (directReference) return formatProviderReference(tx.provider, directReference) || directReference
 
-  if (tx.provider === "cash") {
-    return `Cash payment · ${shortReferenceId(paymentId || transactionId) || "local"}`
+  if (firstReferenceValue(tx.provider)?.toLowerCase() === "cash") {
+    return formatProviderReference("cash", shortReferenceId(paymentId || transactionId) || "local") || "Cash payment"
   }
 
   if (paymentId) {
-    return `Payment request · ${shortReferenceId(paymentId)}`
+    return formatProviderReference(tx.provider, shortReferenceId(paymentId))
+      || `Payment request \u00b7 ${shortReferenceId(paymentId)}`
   }
 
   if (transactionId) {
-    return `Transaction · ${shortReferenceId(transactionId)}`
+    return formatProviderReference(tx.provider, shortReferenceId(transactionId))
+      || `Transaction \u00b7 ${shortReferenceId(transactionId)}`
   }
 
-  return "Local payment"
+  return transactionReferenceProviderName(tx.provider) || "Local payment"
 }

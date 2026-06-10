@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 import StatusBadge from "@/components/ui/StatusBadge"
 import {
+  formatProviderReference,
   formatTransactionReference,
   getTransactionReferenceParts
 } from "./transactionReference"
@@ -143,7 +144,7 @@ function buildDetailRows(input: {
       { label: "Network", value: "Lightning" },
       { label: "Provider", value: providerName(tx.provider) },
       ...commonRows.slice(5),
-      { label: "Provider Reference", value: references.providerReference, mono: true },
+      { label: "Provider Reference", value: formatProviderReference(tx.provider, references.providerReference), mono: true },
       { label: "Lightning Invoice", value: lightningInvoice, mono: true }
     ]
   }
@@ -154,8 +155,8 @@ function buildDetailRows(input: {
       { label: "Network", value: "Base" },
       { label: "Provider", value: "Base Pay" },
       ...commonRows.slice(5),
-      { label: "Blockchain Transaction", value: references.blockchainReference, mono: true },
-      { label: "Provider Reference", value: references.providerReference, mono: true }
+      { label: "Blockchain Transaction", value: formatProviderReference(tx.provider, references.blockchainReference), mono: true },
+      { label: "Provider Reference", value: formatProviderReference(tx.provider, references.providerReference), mono: true }
     ]
   }
 
@@ -165,8 +166,8 @@ function buildDetailRows(input: {
       { label: "Network", value: "Solana" },
       { label: "Provider", value: "Solana Pay" },
       ...commonRows.slice(5),
-      { label: "Blockchain Transaction", value: references.blockchainReference, mono: true },
-      { label: "Provider Reference", value: references.providerReference, mono: true }
+      { label: "Blockchain Transaction", value: formatProviderReference(tx.provider, references.blockchainReference), mono: true },
+      { label: "Provider Reference", value: formatProviderReference(tx.provider, references.providerReference), mono: true }
     ]
   }
 
@@ -175,8 +176,8 @@ function buildDetailRows(input: {
     { label: "Network", value: networkName(tx.network) },
     { label: "Provider", value: providerName(tx.provider) },
     ...commonRows.slice(5),
-    { label: "Blockchain Transaction", value: references.blockchainReference, mono: true },
-    { label: "Provider Reference", value: references.providerReference, mono: true }
+    { label: "Blockchain Transaction", value: formatProviderReference(tx.provider, references.blockchainReference), mono: true },
+    { label: "Provider Reference", value: formatProviderReference(tx.provider, references.providerReference), mono: true }
   ]
 }
 
