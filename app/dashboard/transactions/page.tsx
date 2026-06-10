@@ -308,7 +308,7 @@ export default function TransactionsPage() {
               className="p-3 sm:p-3.5"
             />
             <InlineMetric
-              label="Confirmed Rate"
+              label="Success Rate"
               value={`${confirmedRate}%`}
               className="p-3 sm:p-3.5"
             />

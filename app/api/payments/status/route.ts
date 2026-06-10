@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getPaymentById, getPaymentIntentById } from "@/database"
 import { ensurePaymentFresh } from "@/engine/paymentMaintenance"
 import { schedulePaymentMaintenance } from "@/lib/api/paymentMaintenance"
+import { getPaymentStatusLabel } from "@/lib/utils/paymentStatus"
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
@@ -27,6 +28,7 @@ export async function GET(req: NextRequest) {
       payment = await getPaymentById(payment.id) || payment
       return NextResponse.json({
         status: payment.status,
+        displayStatus: getPaymentStatusLabel(payment.status),
         paymentId: payment.id,
         intentId: null
       })
@@ -38,8 +40,10 @@ export async function GET(req: NextRequest) {
         await ensurePaymentFresh(intent.payment_id)
       }
       const selectedPayment = intent.payment_id ? await getPaymentById(intent.payment_id) : null
+      const status = selectedPayment?.status ?? intent.status
       return NextResponse.json({
-        status: selectedPayment?.status ?? intent.status,
+        status,
+        displayStatus: getPaymentStatusLabel(status),
         paymentId: intent.payment_id ?? null,
         intentId: intent.id,
       })

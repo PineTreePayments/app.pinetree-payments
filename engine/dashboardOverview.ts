@@ -6,6 +6,7 @@ import {
   getProvidersDashboardEngine,
   type OverviewRailReadiness
 } from "./providersDashboard"
+import { getPaymentStatusLabel } from "@/lib/utils/paymentStatus"
 
 const db = supabaseAdmin || supabase
 
@@ -14,6 +15,7 @@ type PaymentSummary = {
   gross_amount?: number | string | null
   currency?: string | null
   status?: string | null
+  displayStatus?: string
   provider_reference?: string | null
   created_at?: string | null
   merchant_amount?: number | string | null
@@ -24,6 +26,7 @@ type TransactionRow = {
   id: string
   payment_id?: string | null
   status: string
+  displayStatus?: string
   provider?: string | null
   provider_transaction_id?: string | null
   network?: string | null
@@ -170,9 +173,21 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
   const railReadiness = buildOverviewRailReadiness(providersOverview)
 
   // Normalize network names with proper capitalization
-  const normalizedRecentTx = rows.slice(0, 10).map(tx => ({
+  const normalizedRecentTx = rows.slice(0, 10).map((tx) => ({
     ...tx,
-    network: displayNetworkName(tx.network)
+    displayStatus: getPaymentStatusLabel(tx.status),
+    network: displayNetworkName(tx.network),
+    payments: Array.isArray(tx.payments)
+      ? tx.payments.map((payment) => ({
+          ...payment,
+          displayStatus: getPaymentStatusLabel(payment.status)
+        }))
+      : tx.payments
+        ? {
+            ...tx.payments,
+            displayStatus: getPaymentStatusLabel(tx.payments.status)
+          }
+        : null
   }))
 
   return {

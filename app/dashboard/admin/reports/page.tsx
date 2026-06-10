@@ -11,6 +11,7 @@ import {
   DashboardSection,
   MetricGrid,
 } from "@/components/dashboard/DashboardPrimitives"
+import PaymentStatusBadge from "@/components/ui/StatusBadge"
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -345,7 +346,12 @@ export default function AdminReportsPage() {
 
   // Filtered stale rows for the table
   const filteredStaleRows = staleRows
-    .filter((row) => staleStatusFilter === "all" || row.status === staleStatusFilter)
+    .filter((row) =>
+      staleStatusFilter === "all" ||
+      (staleStatusFilter === "WAITING"
+        ? row.status === "CREATED" || row.status === "PENDING"
+        : row.status === staleStatusFilter)
+    )
     .filter((row) => staleEligibilityFilter === "all" || row.eligibility === staleEligibilityFilter)
     .slice(0, 200)
 
@@ -443,11 +449,11 @@ export default function AdminReportsPage() {
           >
             <MetricGrid columns="three">
               <CompactMetricTile label="Total"            value={r ? fmt(r.totalTransactions) : "—"} />
-              <CompactMetricTile label="Confirmed"        value={r ? fmt(r.confirmedTransactions) : "—"}  tone="green" />
-              <CompactMetricTile label="Confirmed Volume" value={r ? fmtUSD(r.confirmedVolume) : "—"}     tone="blue" />
+              <CompactMetricTile label="Success"        value={r ? fmt(r.confirmedTransactions) : "—"}  tone="green" />
+              <CompactMetricTile label="Success Volume" value={r ? fmtUSD(r.confirmedVolume) : "—"}     tone="blue" />
               <CompactMetricTile label="PineTree Fees"    value={r ? fmtUSD(r.pinetreeFees) : "—"}        tone="blue" />
               <CompactMetricTile label="Processing"       value={r ? fmt(r.processingTransactions) : "—"} tone="amber" detail="In-flight on-chain" />
-              <CompactMetricTile label="Awaiting"         value={r ? fmt(r.awaitingTransactions) : "—"}   detail="CREATED + PENDING" />
+              <CompactMetricTile label="Waiting"          value={r ? fmt(r.awaitingTransactions) : "—"}   detail="Waiting for customer action" />
               <CompactMetricTile label="Incomplete"       value={r ? fmt(r.incompleteTransactions) : "—"} tone="amber" detail="Customer abandoned" />
               <CompactMetricTile label="Failed"           value={r ? fmt(r.failedTransactions) : "—"}     tone="red" />
               <CompactMetricTile label="Expired"          value={r ? fmt(r.expiredTransactions) : "—"} />
@@ -467,7 +473,7 @@ export default function AdminReportsPage() {
             <DashboardSection title="Volume by Rail" titleTone="blue">
               <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
                 <div className="hidden grid-cols-[1fr_90px_90px_110px_100px_80px] gap-4 bg-gray-50/60 px-5 py-2.5 sm:grid">
-                  {["Rail", "Total", "Confirmed", "Volume", "Fees", "Conv %"].map((h) => (
+                  {["Rail", "Total", "Success", "Volume", "Fees", "Conv %"].map((h) => (
                     <div key={h} className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
                       {h}
                     </div>
@@ -501,7 +507,7 @@ export default function AdminReportsPage() {
             <DashboardSection title="Volume by Provider" titleTone="blue">
               <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
                 <div className="hidden grid-cols-[1fr_90px_90px_110px_100px_80px] gap-4 bg-gray-50/60 px-5 py-2.5 sm:grid">
-                  {["Provider", "Total", "Confirmed", "Volume", "Fees", "Conv %"].map((h) => (
+                  {["Provider", "Total", "Success", "Volume", "Fees", "Conv %"].map((h) => (
                     <div key={h} className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
                       {h}
                     </div>
@@ -535,7 +541,7 @@ export default function AdminReportsPage() {
             <DashboardSection title="Top Merchants by Volume" titleTone="blue">
               <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
                 <div className="hidden grid-cols-[1fr_100px_120px] gap-4 bg-gray-50/60 px-5 py-2.5 sm:grid">
-                  {["Merchant ID", "Confirmed", "Volume"].map((h) => (
+                  {["Merchant ID", "Success", "Volume"].map((h) => (
                     <div key={h} className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
                       {h}
                     </div>
@@ -566,9 +572,9 @@ export default function AdminReportsPage() {
           <DashboardSection title="Stale Payment Diagnostic" titleTone="blue">
             <div className="rounded-2xl border border-gray-200/80 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] space-y-4">
               <p className="text-sm text-gray-600">
-                Shows all payments in CREATED, PENDING, or PROCESSING status with age classification and
-                cleanup eligibility. PENDING &gt; 60 min are eligible for safe bulk marking as INCOMPLETE
-                via the state machine. CREATED and PROCESSING rows require manual review.
+                Shows all Waiting and Processing payments with age classification and cleanup eligibility.
+                Eligible Waiting payments can be safely marked Incomplete via the state machine.
+                Other Waiting and Processing payments require manual review.
               </p>
 
               {/* Run / refresh button */}
@@ -588,9 +594,8 @@ export default function AdminReportsPage() {
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                     {[
                       { label: "Total Stale", value: fmt(stale.totalStale),                     amber: true },
-                      { label: "CREATED",     value: fmt(stale.byStatus.CREATED ?? 0),          amber: false },
-                      { label: "PENDING",     value: fmt(stale.byStatus.PENDING ?? 0),          amber: false },
-                      { label: "PROCESSING",  value: fmt(stale.byStatus.PROCESSING ?? 0),       amber: true },
+                      { label: "Waiting",     value: fmt((stale.byStatus.CREATED ?? 0) + (stale.byStatus.PENDING ?? 0)), amber: false },
+                      { label: "Processing",  value: fmt(stale.byStatus.PROCESSING ?? 0),       amber: true },
                     ].map((s) => (
                       <div key={s.label} className="rounded-xl border border-gray-100 bg-gray-50 p-3">
                         <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">
@@ -612,7 +617,7 @@ export default function AdminReportsPage() {
                       <p className="mt-1 text-xl font-bold text-green-700">
                         {fmt(stale.eligibleCount ?? 0)}
                       </p>
-                      <p className="mt-0.5 text-[11px] text-green-600">PENDING &gt; 60 min</p>
+                      <p className="mt-0.5 text-[11px] text-green-600">Waiting &gt; 60 min</p>
                     </div>
                     <div className="flex-1 rounded-xl border border-amber-100 bg-amber-50 p-3">
                       <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-amber-600">
@@ -621,7 +626,7 @@ export default function AdminReportsPage() {
                       <p className="mt-1 text-xl font-bold text-amber-700">
                         {fmt(stale.reviewRequiredCount ?? 0)}
                       </p>
-                      <p className="mt-0.5 text-[11px] text-amber-600">CREATED &gt; 30 min · PROCESSING &gt; 24 h</p>
+                      <p className="mt-0.5 text-[11px] text-amber-600">Waiting &gt; 30 min · Processing &gt; 24 h</p>
                     </div>
                   </div>
 
@@ -675,7 +680,7 @@ export default function AdminReportsPage() {
                         <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mr-1">
                           Status:
                         </span>
-                        {["all", "CREATED", "PENDING", "PROCESSING"].map((s) => (
+                        {["all", "WAITING", "PROCESSING"].map((s) => (
                           <button
                             key={s}
                             onClick={() => setStaleStatusFilter(s)}
@@ -685,7 +690,7 @@ export default function AdminReportsPage() {
                                 : "border-gray-200 text-gray-500 hover:border-gray-300"
                             }`}
                           >
-                            {s === "all" ? "All" : s}
+                            {s === "all" ? "All" : s === "WAITING" ? "Waiting" : "Processing"}
                           </button>
                         ))}
                         <span className="mx-1 text-gray-200 select-none">|</span>
@@ -743,15 +748,7 @@ export default function AdminReportsPage() {
                                     </span>
                                   </td>
                                   <td className="px-4 py-2.5">
-                                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                      row.status === "PROCESSING"
-                                        ? "bg-amber-50 text-amber-700"
-                                        : row.status === "PENDING"
-                                        ? "bg-blue-50 text-blue-700"
-                                        : "bg-gray-100 text-gray-600"
-                                    }`}>
-                                      {row.status}
-                                    </span>
+                                    <PaymentStatusBadge status={row.status} />
                                   </td>
                                   <td className="px-4 py-2.5 text-gray-500">
                                     {row.network ? (NETWORK_LABELS[row.network] ?? row.network) : "—"}
@@ -796,13 +793,13 @@ export default function AdminReportsPage() {
                         <div className="rounded-2xl border border-green-200/60 bg-green-50/40 p-5 space-y-4">
                           <div>
                             <p className="text-sm font-semibold text-green-800">
-                              Safe Cleanup: Mark Stale PENDING Payments Incomplete
+                              Safe Cleanup: Mark Stale Waiting Payments Incomplete
                             </p>
                             <p className="mt-1 text-xs text-green-700">
-                              {fmt(stale.eligibleCount)} PENDING payment{stale.eligibleCount !== 1 ? "s" : ""} older than 60 minutes
-                              can be safely marked INCOMPLETE via the state machine (PENDING → INCOMPLETE is a valid transition).
+                              {fmt(stale.eligibleCount)} Waiting payment{stale.eligibleCount !== 1 ? "s" : ""} older than 60 minutes
+                              can be safely marked Incomplete via the state machine.
                               This fires the <code className="rounded bg-green-100 px-1 font-mono text-[11px]">payment.incomplete</code> webhook to each merchant.
-                              CREATED and PROCESSING rows are never touched by this action.
+                              Other Waiting and Processing rows are never touched by this action.
                             </p>
                           </div>
 
@@ -934,4 +931,3 @@ export default function AdminReportsPage() {
     </div>
   )
 }
-

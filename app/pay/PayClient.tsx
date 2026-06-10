@@ -1213,8 +1213,6 @@ export default function PayClient() {
   }
 
   if (isIntentMode && terminalPaymentStatus) {
-    const isMerchantCanceled =
-      terminalPaymentStatus === "INCOMPLETE" || terminalPaymentStatus === "CANCELED"
     const isConfirmed = terminalPaymentStatus === "CONFIRMED"
     const returnUrl = isConfirmed ? successUrl : cancelUrl
     const returnLabel = isConfirmed ? "Return to merchant" : "Return to store"
@@ -1222,12 +1220,7 @@ export default function PayClient() {
       <PageContainer>
         <div className="w-full max-w-md space-y-3 text-center">
           <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
-          <PaymentStatusVisual
-            status={terminalPaymentStatus}
-            variant="card"
-            labelOverride={isMerchantCanceled ? "Sale canceled" : undefined}
-            messageOverride={isMerchantCanceled ? "This payment was canceled by the merchant." : undefined}
-          />
+          <PaymentStatusVisual status={terminalPaymentStatus} variant="card" />
           {returnUrl && (
             <a
               href={returnUrl}

@@ -17,8 +17,6 @@ const ALL_STATUSES = [
   "FAILED",
   "INCOMPLETE",
   "EXPIRED",
-  "CANCELLED",
-  "REFUNDED",
 ]
 
 function makeTx(status: string, index: number): DashboardTransactionRow {
@@ -56,10 +54,9 @@ export default function TestStatusesPage() {
         </h2>
         <div className="flex flex-wrap gap-3 rounded-2xl border border-gray-200 bg-white p-5">
           {ALL_STATUSES.map((s) => {
-            const ds = getPaymentDisplayStatus(s)
             return (
               <div key={s} className="flex flex-col items-center gap-1.5">
-                <StatusBadge label={ds.status} classes={ds.classes} />
+                <StatusBadge status={s} />
                 <span className="text-[10px] text-gray-400 font-mono">{s}</span>
               </div>
             )
@@ -78,7 +75,7 @@ export default function TestStatusesPage() {
             return (
               <div key={s} className="flex flex-col items-center gap-1.5">
                 <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${ds.classes}`}>
-                  {ds.status}
+                  {ds.label}
                 </span>
                 <span className="text-[10px] text-gray-400 font-mono">{s}</span>
               </div>

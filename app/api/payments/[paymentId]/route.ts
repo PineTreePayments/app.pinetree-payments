@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getPaymentById } from "@/database"
+import { getPaymentStatusLabel } from "@/lib/utils/paymentStatus"
 import { ensurePaymentFresh } from "@/engine/paymentMaintenance"
 import { schedulePaymentMaintenance } from "@/lib/api/paymentMaintenance"
 
@@ -27,6 +28,7 @@ export async function GET(
     const safePayment = {
       id: payment.id,
       status: payment.status,
+      displayStatus: getPaymentStatusLabel(payment.status),
       gross_amount: payment.gross_amount,
       currency: payment.currency,
       network: payment.network ?? null,

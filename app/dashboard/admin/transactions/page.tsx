@@ -16,7 +16,7 @@ import {
   formatDashboardProvider,
   formatDashboardNetwork,
 } from "@/components/dashboard/displayHelpers"
-import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
+import PaymentStatusBadge from "@/components/ui/StatusBadge"
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -113,27 +113,22 @@ const LIMIT = 50
 
 const STATUSES = [
   { value: "", label: "All Statuses" },
-  { value: "CONFIRMED",  label: "Confirmed" },
+  { value: "CONFIRMED",  label: "Success" },
   { value: "PROCESSING", label: "Processing" },
-  { value: "PENDING",    label: "Awaiting Customer" },
-  { value: "CREATED",    label: "Created" },
+  { value: "WAITING",    label: "Waiting" },
   { value: "FAILED",     label: "Failed" },
   { value: "INCOMPLETE", label: "Incomplete" },
   { value: "EXPIRED",    label: "Expired" },
-  { value: "CANCELLED",  label: "Cancelled" },
-  { value: "REFUNDED",   label: "Refunded" },
 ]
 
 const STATUS_DESCRIPTIONS: Record<string, string> = {
-  CREATED:    "Created, not yet shown to customer",
-  PENDING:    "Waiting for customer payment",
-  PROCESSING: "In-flight on-chain",
-  CONFIRMED:  "Payment complete",
-  INCOMPLETE: "Customer abandoned or did not finish",
-  FAILED:     "Payment failed or could not be completed",
-  EXPIRED:    "Timed out",
-  CANCELLED:  "Cancelled before completion",
-  REFUNDED:   "Funds returned after confirmation",
+  CREATED:    "Payment request created and awaiting customer action.",
+  PENDING:    "Payment request created and awaiting customer action.",
+  PROCESSING: "Payment detected and awaiting confirmation.",
+  CONFIRMED:  "Payment successfully completed.",
+  INCOMPLETE: "Customer left the payment or switched payment methods before sending funds.",
+  FAILED:     "Payment attempt failed validation, was rejected, or could not complete.",
+  EXPIRED:    "The payment request timed out naturally.",
 }
 
 const TERMINAL_STATUSES = new Set([
@@ -146,15 +141,15 @@ const TERMINAL_STATUSES = new Set([
 ])
 
 const EVENT_LABELS: Record<string, string> = {
-  "payment.created":    "Created",
-  "payment.pending":    "Pending",
+  "payment.created":    "Waiting",
+  "payment.pending":    "Waiting",
   "payment.processing": "Processing",
-  "payment.confirmed":  "Confirmed",
+  "payment.confirmed":  "Success",
   "payment.failed":     "Failed",
-  "payment.cancelled":  "Cancelled",
+  "payment.cancelled":  "Incomplete",
   "payment.incomplete": "Incomplete",
   "payment.expired":    "Expired",
-  "payment.refunded":   "Refunded",
+  "payment.refunded":   "Success",
 }
 
 const NETWORK_LABELS_DETAIL: Record<string, string> = {
@@ -291,12 +286,7 @@ function Spinner() {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const ds = getPaymentDisplayStatus(status)
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${ds.classes}`}>
-      {ds.status}
-    </span>
-  )
+  return <PaymentStatusBadge status={status} />
 }
 
 // ─── Detail drawer helpers ─────────────────────────────────────────────────────
@@ -632,13 +622,13 @@ export default function AdminTransactionsPage() {
             value={s ? fmt(s.totalCount) : "—"}
           />
           <CompactMetricTile
-            label="Confirmed"
+            label="Success"
             value={s ? fmt(s.confirmedCount) : "—"}
             tone="green"
             detail={s && s.totalCount ? `${pct(s.confirmedCount, s.totalCount)} of total` : undefined}
           />
           <CompactMetricTile
-            label="Confirmed Volume"
+            label="Success Volume"
             value={s ? fmtUSD(s.confirmedVolume) : "—"}
             tone="blue"
           />
@@ -654,9 +644,9 @@ export default function AdminTransactionsPage() {
             detail="In-flight on-chain"
           />
           <CompactMetricTile
-            label="Awaiting Customer"
+            label="Waiting"
             value={s ? fmt(s.pendingCount) : "—"}
-            detail="CREATED + PENDING"
+            detail="Waiting for customer action"
           />
           <CompactMetricTile
             label="Failed"
@@ -673,7 +663,7 @@ export default function AdminTransactionsPage() {
           <CompactMetricTile
             label="Expired"
             value={s ? fmt(s.expiredCount) : "—"}
-            detail="Timed out"
+            detail="Expired"
           />
         </MetricGrid>
       </DashboardSection>

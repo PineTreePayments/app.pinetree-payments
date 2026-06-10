@@ -255,7 +255,7 @@ export default function TransactionActivityTable({
     ? buildDetailRows({
         tx: selectedTx,
         payment: selectedPayment || null,
-        statusLabel: selectedStatus.status,
+        statusLabel: selectedStatus.label,
         statusTime: selectedStatusTime,
         references: selectedReferences
       }).filter((row) => String(row.value || "").trim().length > 0)
@@ -275,7 +275,6 @@ export default function TransactionActivityTable({
         {visibleMobileTransactions.map((tx) => {
           const payment = getPayment(tx)
           const statusTime = tx.created_at || payment?.created_at || null
-          const displayStatus = getPaymentDisplayStatus(tx.status)
           const reference = formatTransactionReference(tx)
           const secondaryLabel = formatTransactionSecondaryLabel(tx.provider, tx.network)
 
@@ -293,7 +292,7 @@ export default function TransactionActivityTable({
                     <span className="text-gray-400 font-normal"> · {secondaryLabel}</span>
                   )}
                 </span>
-                <StatusBadge label={displayStatus.status} classes={displayStatus.classes} />
+                <StatusBadge status={tx.status} />
               </div>
               <div className="flex items-center justify-between gap-2 mb-1">
                 <span className="text-sm font-semibold text-gray-900">
@@ -359,7 +358,6 @@ export default function TransactionActivityTable({
             {transactions.map((tx) => {
               const payment = getPayment(tx)
               const statusTime = tx.created_at || payment?.created_at || null
-              const displayStatus = getPaymentDisplayStatus(tx.status)
               const reference = formatTransactionReference(tx)
 
               return (
@@ -396,7 +394,7 @@ export default function TransactionActivityTable({
                   </td>
 
                   <td className="px-4 py-4 whitespace-nowrap">
-                    <StatusBadge label={displayStatus.status} classes={displayStatus.classes} />
+                    <StatusBadge status={tx.status} />
                   </td>
 
                   <td className="px-4 py-4 text-gray-600 font-mono text-[11px]">

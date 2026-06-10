@@ -1,29 +1,8 @@
+import { CheckCircle, CircleMinus, Clock3, LoaderCircle, XCircle } from "lucide-react"
 import {
-  AlertTriangle,
-  CheckCircle,
-  CircleX,
-  Clock3,
-  LoaderCircle,
-  XCircle,
-} from "lucide-react"
-
-export type StandardPaymentStatus =
-  | "CONFIRMED"
-  | "PROCESSING"
-  | "PENDING"
-  | "INCOMPLETE"
-  | "FAILED"
-  | "EXPIRED"
-  | "CANCELED"
-
-type PaymentStatusVisualConfig = {
-  label: string
-  message: string
-  iconClassName: string
-  iconBgClassName: string
-  Icon: typeof CheckCircle
-  spin?: boolean
-}
+  getPaymentDisplayStatus,
+  type PaymentStatusIcon,
+} from "@/lib/utils/paymentStatus"
 
 type Props = {
   status: string
@@ -34,75 +13,19 @@ type Props = {
   labelClassName?: string
   iconSize?: number
   variant?: "plain" | "card"
-  /** "compact" reduces icon size and uses smaller text — suited for POS cards. */
   size?: "default" | "compact"
 }
 
-export function normalizeStandardPaymentStatus(status: string): StandardPaymentStatus {
-  const normalized = String(status || "").trim().toUpperCase()
+const STATUS_ICONS = {
+  "check-circle": CheckCircle,
+  "minus": CircleMinus,
+  "clock": Clock3,
+  "spinner": LoaderCircle,
+  "x-circle": XCircle,
+} satisfies Record<PaymentStatusIcon, typeof CheckCircle>
 
-  if (normalized === "CONFIRMED") return "CONFIRMED"
-  if (normalized === "PROCESSING") return "PROCESSING"
-  if (normalized === "INCOMPLETE") return "INCOMPLETE"
-  if (normalized === "FAILED" || normalized === "ERROR") return "FAILED"
-  if (normalized === "EXPIRED") return "EXPIRED"
-  if (normalized === "CANCELED" || normalized === "CANCELLED") return "CANCELED"
-
-  return "PENDING"
-}
-
-export const PAYMENT_STATUS_VISUALS: Record<StandardPaymentStatus, PaymentStatusVisualConfig> = {
-  CONFIRMED: {
-    Icon: CheckCircle,
-    label: "Payment Confirmed",
-    message: "Your payment was received successfully.",
-    iconClassName: "text-green-600",
-    iconBgClassName: "bg-green-50",
-  },
-  PROCESSING: {
-    Icon: LoaderCircle,
-    label: "Waiting for Payment",
-    message: "Complete the payment in your wallet.",
-    iconClassName: "text-[#0052FF]",
-    iconBgClassName: "bg-blue-50",
-    spin: true,
-  },
-  PENDING: {
-    Icon: LoaderCircle,
-    label: "Waiting for Payment",
-    message: "Complete the payment in your wallet.",
-    iconClassName: "text-[#0052FF]",
-    iconBgClassName: "bg-blue-50",
-    spin: true,
-  },
-  INCOMPLETE: {
-    Icon: AlertTriangle,
-    label: "Payment Incomplete",
-    message: "This payment was not completed.",
-    iconClassName: "text-amber-600",
-    iconBgClassName: "bg-amber-50",
-  },
-  FAILED: {
-    Icon: XCircle,
-    label: "Payment Failed",
-    message: "This payment could not be completed.",
-    iconClassName: "text-red-600",
-    iconBgClassName: "bg-red-50",
-  },
-  EXPIRED: {
-    Icon: Clock3,
-    label: "Payment Expired",
-    message: "This payment session has expired.",
-    iconClassName: "text-gray-500",
-    iconBgClassName: "bg-gray-100",
-  },
-  CANCELED: {
-    Icon: CircleX,
-    label: "Payment Canceled",
-    message: "This payment was canceled.",
-    iconClassName: "text-gray-500",
-    iconBgClassName: "bg-gray-100",
-  },
+export function normalizeStandardPaymentStatus(status: string) {
+  return getPaymentDisplayStatus(status).tone
 }
 
 export function PaymentStatusVisual({
@@ -116,10 +39,8 @@ export function PaymentStatusVisual({
   variant = "plain",
   size = "default",
 }: Props) {
-  const normalizedStatus = normalizeStandardPaymentStatus(status)
-  const config = PAYMENT_STATUS_VISUALS[normalizedStatus]
-  const Icon = config.Icon
-
+  const config = getPaymentDisplayStatus(status)
+  const Icon = STATUS_ICONS[config.icon]
   const isCompact = size === "compact"
   const resolvedIconSize = iconSize ?? (isCompact ? 28 : 56)
   const iconPadding = isCompact ? "p-2" : "p-3"
@@ -148,14 +69,8 @@ export function PaymentStatusVisual({
         />
       </div>
       <div className="space-y-0.5">
-        <h1 className={labelClass}>
-          {labelOverride || config.label}
-        </h1>
-        {showMessage ? (
-          <p className={messageClass}>
-            {messageOverride || config.message}
-          </p>
-        ) : null}
+        <h1 className={labelClass}>{labelOverride || config.label}</h1>
+        {showMessage ? <p className={messageClass}>{messageOverride || config.message}</p> : null}
       </div>
     </div>
   )

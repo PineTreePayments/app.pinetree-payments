@@ -1,3 +1,9 @@
+import {
+  cashTransactionSecondaryLabel,
+  formatTransactionProviderLabel
+} from "@/lib/transactionRailDisplay"
+import { getPaymentStatusLabel } from "@/lib/utils/paymentStatus"
+
 /**
  * Report display normalization helpers.
  *
@@ -18,48 +24,18 @@
  */
 export function normalizeReportStatus(rawStatus: string, createdAt: string): string {
   void createdAt
-  return String(rawStatus || "UNKNOWN").trim().toUpperCase()
+  return getPaymentStatusLabel(rawStatus)
 }
 
 /**
  * Returns the display network label for a payment.
- * Cash payments have no blockchain network; they are explicitly labelled
- * "Cash" using the provider field.
+ * Cash payments have no blockchain network; their secondary rail label is
+ * the settlement currency shown alongside the Cash provider label.
  */
 type AssetRow = { network: string; asset: string; gross: number; status: string }
 
 export function normalizeReportProvider(rawProvider: string | null | undefined): string {
-  const provider = String(rawProvider || "").toLowerCase().trim()
-
-  if (
-    provider === "lightning_speed" ||
-    provider === "speed" ||
-    provider === "tryspeed" ||
-    provider === "try_speed" ||
-    provider === "speed_lightning"
-  ) return "Speed"
-
-  if (
-    provider === "lightning_nwc" ||
-    provider === "nwc" ||
-    provider === "nwc_lightning"
-  ) return "NWC"
-
-  if (
-    provider === "lightning" ||
-    provider === "bitcoin_lightning" ||
-    provider === "bitcoin lightning" ||
-    provider === "btc_lightning" ||
-    provider === "lightning_btc"
-  ) return "Lightning"
-
-  if (provider === "solana") return "Solana Pay"
-  if (provider === "base") return "Base Pay"
-  if (provider === "coinbase") return "Coinbase Business"
-  if (provider === "shift4") return "Shift4"
-  if (provider === "cash") return "Cash"
-
-  return String(rawProvider || "Unknown")
+  return formatTransactionProviderLabel(rawProvider)
 }
 
 export function normalizeReportAsset(
@@ -104,7 +80,7 @@ export function buildNetworkAssetLabel(network: string, asset: string): string {
 export function buildNetworkAssetTotals(rows: AssetRow[]): Record<string, number> {
   const totals: Record<string, number> = {}
   for (const row of rows) {
-    if (row.status !== "CONFIRMED") continue
+    if (row.status !== "Success" && row.status !== "CONFIRMED") continue
     const label = buildNetworkAssetLabel(row.network, row.asset)
     totals[label] = (totals[label] || 0) + row.gross
   }
@@ -115,8 +91,10 @@ export function normalizeReportNetwork(
   rawNetwork: string | null | undefined,
   rawProvider: string | null | undefined
 ): string {
+  const cashLabel = cashTransactionSecondaryLabel(rawProvider)
+  if (cashLabel) return cashLabel
+
   const provider = String(rawProvider || "").toLowerCase().trim()
-  if (provider === "cash") return "Cash"
 
   const network = String(rawNetwork || "").toLowerCase().trim()
   if (

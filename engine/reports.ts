@@ -180,10 +180,8 @@ function addTotal(target: Record<string, number>, key: string, value: number) {
 function buildLedgerRow(payment: MerchantReportPaymentRow): ReportLedgerRow {
   const tx = primaryTransaction(payment)
   const metadata = payment.metadata || {}
-  const status = normalizeReportStatus(
-    String(payment.status || tx?.status || "UNKNOWN"),
-    payment.created_at
-  )
+  const statusCode = String(payment.status || tx?.status || "PENDING").trim().toUpperCase()
+  const status = normalizeReportStatus(statusCode, payment.created_at)
   const gross = money(payment.gross_amount) || centsToDollars(tx?.total_amount)
   const pinetreeFee = money(payment.pinetree_fee) || centsToDollars(tx?.platform_fee)
   const metadataSubtotal = getMetadataNumber(metadata, "subtotalAmount") || getMetadataNumber(metadata, "merchantAmount")
@@ -244,7 +242,7 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
   let incompleteCount = 0
 
   for (const row of transactionsTable) {
-    if (row.status === "CONFIRMED") {
+    if (row.status === "Success") {
       confirmedCount++
       grossVolume += row.gross
       netSettlements += row.netSettlement
@@ -255,9 +253,9 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
       addTotal(channelTotals, row.channel, row.gross)
       addTotal(networkTotals, row.network, row.gross)
       addTotal(assetTotals, row.asset, row.gross)
-    } else if (row.status === "FAILED" || row.status === "EXPIRED") {
+    } else if (row.status === "Failed" || row.status === "Expired") {
       failedCount++
-    } else if (row.status === "INCOMPLETE" || row.status === "CANCELED" || row.status === "CANCELLED") {
+    } else if (row.status === "Incomplete") {
       incompleteCount++
     }
   }

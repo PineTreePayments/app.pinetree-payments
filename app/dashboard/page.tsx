@@ -227,7 +227,7 @@ export default function DashboardPage() {
         ? `${today.failed} payment${today.failed === 1 ? "" : "s"} failed today and may need review.`
         : "",
     today.confirmed > 0
-      ? `${today.confirmed} confirmed payment${today.confirmed === 1 ? "" : "s"} generated ${formatUsd(today.volume)} today.`
+      ? `${today.confirmed} successful payment${today.confirmed === 1 ? "" : "s"} generated ${formatUsd(today.volume)} today.`
       : ""
   ]
 
@@ -355,15 +355,15 @@ export default function DashboardPage() {
         <p className="text-sm text-red-600 mb-4">Sync error: {syncError}</p>
       )}
 
-      {/* 1 — Today's Confirmed Sales */}
+      {/* 1 — Today's Successful Sales */}
       <div className="relative overflow-hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] px-4 py-3 shadow-[0_10px_28px_rgba(37,99,235,0.09)] sm:px-5 sm:py-3.5">
         <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/80 to-transparent" />
         <div className="relative">
           <p className={dashboardSectionLabelClass}>
-            Today&apos;s Confirmed Sales
+            Today&apos;s Successful Sales
           </p>
           <h2 className={`mt-1 font-medium ${dashboardSupportingTextClass}`}>
-            Confirmed merchant payment volume since midnight
+            Successful merchant payment volume since midnight
           </h2>
           <div className={`mt-0.5 ${dashboardHeroValueClass}`}>
             {formatUsd(today.volume)}
@@ -377,7 +377,7 @@ export default function DashboardPage() {
           <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3">
             <InlineMetric label="Payments" value={today.transactionCount} />
             <InlineMetric label="Average" value={formatUsd(today.averageTransaction)} />
-            <InlineMetric label="Confirmed" value={today.confirmed} />
+            <InlineMetric label="Success" value={today.confirmed} />
           </div>
         </GroupedMetricSurface>
         <GroupedMetricSurface title="Activity Health" titleTone="blue">
@@ -441,7 +441,7 @@ export default function DashboardPage() {
       <ChartCard
         title="Transaction Volume"
         titleTone="blue"
-        subtitle="Confirmed payment volume over time"
+        subtitle="Successful payment volume over time"
         action={renderChartControls()}
         className="overflow-hidden pb-5 sm:pb-5"
       >
@@ -480,7 +480,7 @@ export default function DashboardPage() {
                 <p className={dashboardSectionLabelClass}>
                   Transaction Volume
                 </p>
-                <p className="mt-1 text-sm text-gray-500">Confirmed payment volume over time</p>
+                <p className="mt-1 text-sm text-gray-500">Successful payment volume over time</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 {renderChartControls(false)}
@@ -504,7 +504,7 @@ export default function DashboardPage() {
           <InlineMetric label="All-Time Volume" value={formatUsd(volume)} />
           <InlineMetric label="All Transactions" value={txCount} />
           <InlineMetric label="Success Rate" value={`${successRate}%`} />
-          <InlineMetric label="Confirmed Today" value={today.confirmed} />
+          <InlineMetric label="Success Today" value={today.confirmed} />
         </div>
       </GroupedMetricSurface>
 

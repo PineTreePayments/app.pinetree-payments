@@ -1,4 +1,5 @@
 import { supabaseAdmin, supabase } from "@/database"
+import { getPaymentStatusLabel } from "@/lib/utils/paymentStatus"
 
 const db = supabaseAdmin || supabase
 
@@ -12,6 +13,7 @@ type PaymentRow = {
   provider?: string | null
   network?: string | null
   status: string
+  displayStatus?: string
   provider_reference?: string | null
   metadata?: Record<string, unknown> | null
 }
@@ -21,6 +23,7 @@ type TransactionRow = {
   payment_id?: string | null
   provider: string
   status: string
+  displayStatus?: string
   provider_transaction_id: string
   network: string | null
   channel?: string | null
@@ -252,8 +255,28 @@ export async function getTransactionsDashboardEngine(merchantId: string): Promis
   const todayTransactions = safePayments.length
   const confirmed = safePayments.filter((p) => p.status === "CONFIRMED").length
 
+  const transactions = ((txData || []) as TransactionRow[]).map((transaction) => {
+    const payments = Array.isArray(transaction.payments)
+      ? transaction.payments.map((payment) => ({
+          ...payment,
+          displayStatus: getPaymentStatusLabel(payment.status)
+        }))
+      : transaction.payments
+        ? {
+            ...transaction.payments,
+            displayStatus: getPaymentStatusLabel(transaction.payments.status)
+          }
+        : null
+
+    return {
+      ...transaction,
+      displayStatus: getPaymentStatusLabel(transaction.status),
+      payments
+    }
+  })
+
   return {
-    transactions: (txData || []) as TransactionRow[],
+    transactions,
     todayVolume,
     todayTransactions,
     confirmedRate: todayTransactions ? Math.round((confirmed / todayTransactions) * 100) : 0

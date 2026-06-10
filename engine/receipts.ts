@@ -1,5 +1,12 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib"
 import { supabaseAdmin, supabase } from "@/database"
+import {
+  cashTransactionSecondaryLabel,
+  formatTransactionProviderLabel,
+  isCashTransactionProvider
+} from "@/lib/transactionRailDisplay"
+import { normalizeReportNetwork } from "./reportDisplayNormalization"
+import { getPaymentStatusLabel } from "@/lib/utils/paymentStatus"
 
 const db = supabaseAdmin || supabase
 
@@ -40,6 +47,13 @@ function formatDate(value: string) {
     timeStyle: "short",
     timeZone: "America/Chicago"
   })
+}
+
+export function getReceiptDisplayRail(receipt: Pick<ReceiptData, "provider" | "network">) {
+  return {
+    provider: formatTransactionProviderLabel(receipt.provider),
+    network: normalizeReportNetwork(receipt.network, receipt.provider)
+  }
 }
 
 export async function getMerchantReceipt(
@@ -109,15 +123,16 @@ export async function getMerchantReceipt(
 }
 
 export function renderReceiptHtml(receipt: ReceiptData) {
+  const displayRail = getReceiptDisplayRail(receipt)
   const rows = [
     ["Receipt ID", receipt.paymentId],
     ["Transaction ID", receipt.transactionId],
     ["Date / Time", formatDate(receipt.createdAt)],
     ["Amount", formatAmount(receipt.amount, receipt.currency)],
     ["Currency", receipt.currency],
-    ["Provider", receipt.provider || null],
-    ["Network", receipt.network],
-    ["Status", receipt.status],
+    ["Provider", receipt.provider ? displayRail.provider : null],
+    ["Network", receipt.network || isCashTransactionProvider(receipt.provider) ? displayRail.network : null],
+    ["Status", getPaymentStatusLabel(receipt.status)],
     ["Reference", receipt.reference]
   ].filter((row): row is [string, string] => Boolean(row[1]))
 
@@ -164,6 +179,7 @@ export function renderReceiptHtml(receipt: ReceiptData) {
 }
 
 export async function renderReceiptPdf(receipt: ReceiptData) {
+  const displayRail = getReceiptDisplayRail(receipt)
   const pdf = await PDFDocument.create()
   const page = pdf.addPage([360, 600])
   const font = await pdf.embedFont(StandardFonts.Helvetica)
@@ -194,9 +210,9 @@ export async function renderReceiptPdf(receipt: ReceiptData) {
   if (receipt.transactionId) line("Transaction ID", receipt.transactionId)
   line("Date / Time", formatDate(receipt.createdAt))
   line("Currency", receipt.currency)
-  if (receipt.provider) line("Provider", receipt.provider)
-  if (receipt.network) line("Network", receipt.network)
-  line("Status", receipt.status, true)
+  if (receipt.provider) line("Provider", displayRail.provider)
+  if (receipt.network || cashTransactionSecondaryLabel(receipt.provider)) line("Network", displayRail.network)
+  line("Status", getPaymentStatusLabel(receipt.status), true)
   if (receipt.reference) line("Reference", receipt.reference)
 
   y -= 12

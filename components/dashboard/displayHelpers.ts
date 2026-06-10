@@ -1,3 +1,5 @@
+import { cashTransactionSecondaryLabel } from "@/lib/transactionRailDisplay"
+
 export function formatDashboardProvider(provider: string | null | undefined) {
   const normalized = String(provider || "").trim().toLowerCase()
 
@@ -37,6 +39,7 @@ export function formatDashboardNetwork(network: string | null | undefined) {
 
   const labels: Record<string, string> = {
     cash: "Cash",
+    usd: "USD",
     solana: "Solana",
     base: "Base",
     ethereum: "Ethereum",
@@ -59,9 +62,7 @@ export function formatTransactionSecondaryLabel(
   provider: string | null | undefined,
   network: string | null | undefined
 ) {
-  const normalizedProvider = String(provider || "").trim().toLowerCase()
-  if (normalizedProvider === "cash") return "Manual"
-  return formatDashboardNetwork(network)
+  return cashTransactionSecondaryLabel(provider) || formatDashboardNetwork(network)
 }
 
 export function mostFrequentKey(counts: Record<string, number>) {

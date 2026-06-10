@@ -24,7 +24,7 @@ import {
   formatDashboardProvider,
   formatDashboardNetwork,
 } from "@/components/dashboard/displayHelpers"
-import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
+import PaymentStatusBadge from "@/components/ui/StatusBadge"
 
 // ─── Overview types ────────────────────────────────────────────────────────────
 
@@ -242,11 +242,11 @@ function currentMonthLabel() {
 
 const EVENT_LABELS: Record<string, string> = {
   "payment.created":    "Created",
-  "payment.pending":    "Pending",
+  "payment.pending":    "Waiting",
   "payment.processing": "Processing",
-  "payment.confirmed":  "Confirmed",
+  "payment.confirmed":  "Success",
   "payment.failed":     "Failed",
-  "payment.cancelled":  "Cancelled",
+  "payment.cancelled":  "Incomplete",
   "payment.incomplete": "Incomplete",
   "payment.expired":    "Expired",
   "payment.refunded":   "Refunded",
@@ -723,12 +723,12 @@ export default function AdminPage() {
                     value={m ? fmt(m.totalTransactions) : "—"}
                   />
                   <CompactMetricTile
-                    label="Confirmed"
+                    label="Success"
                     value={m ? fmt(m.confirmedTransactions) : "—"}
                     tone="green"
                   />
                   <CompactMetricTile
-                    label="Confirmed Volume"
+                    label="Success Volume"
                     value={m ? fmtUSD(m.totalConfirmedVolume) : "—"}
                     tone="blue"
                   />
@@ -744,9 +744,9 @@ export default function AdminPage() {
                     detail="In-flight on-chain"
                   />
                   <CompactMetricTile
-                    label="Awaiting Customer"
+                    label="Waiting"
                     value={m ? fmt(m.pendingTransactions) : "—"}
-                    detail="CREATED + PENDING"
+                    detail="Waiting for customer action"
                   />
                   <CompactMetricTile
                     label="Failed"
@@ -763,7 +763,7 @@ export default function AdminPage() {
                   <CompactMetricTile
                     label="Expired"
                     value={m ? fmt(m.expiredTransactions) : "—"}
-                    detail="Timed out"
+                    detail="Expired"
                   />
                 </MetricGrid>
               </DashboardSection>
@@ -797,7 +797,7 @@ export default function AdminPage() {
                     {[
                       { label: "New Merchants", value: g ? fmt(g.usersThisMonth) : "—", color: "text-[#0052FF]" },
                       { label: "Transactions", value: g ? fmt(g.transactionsThisMonth) : "—", color: "text-gray-950" },
-                      { label: "Confirmed Volume", value: g ? fmtUSD(g.volumeThisMonth) : "—", color: "text-emerald-600" },
+                      { label: "Success Volume", value: g ? fmtUSD(g.volumeThisMonth) : "—", color: "text-emerald-600" },
                     ].map((row) => (
                       <div
                         key={row.label}
@@ -929,14 +929,7 @@ export default function AdminPage() {
                             {fmtUSD(Number(tx.gross_amount ?? 0))}
                           </div>
                           <div>
-                            {(() => {
-                              const ds = getPaymentDisplayStatus(tx.status)
-                              return (
-                                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${ds.classes}`}>
-                                  {ds.status}
-                                </span>
-                              )
-                            })()}
+                            <PaymentStatusBadge status={tx.status} />
                           </div>
                         </button>
                       ))}
@@ -1286,14 +1279,7 @@ export default function AdminPage() {
                 {/* Status + amounts */}
                 <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
                   <div className="flex items-center justify-between gap-3 mb-4">
-                    {(() => {
-                      const ds = getPaymentDisplayStatus(txDetail.payment.status)
-                      return (
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${ds.classes}`}>
-                          {ds.status}
-                        </span>
-                      )
-                    })()}
+                    <PaymentStatusBadge status={txDetail.payment.status} />
                     <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${paymentModeFromMetadata(txDetail.payment.metadata) === "test" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
                       {paymentModeFromMetadata(txDetail.payment.metadata) === "test" ? "Test" : "Live"}
                     </span>

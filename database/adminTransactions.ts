@@ -85,7 +85,8 @@ export async function getAdminTransactions(
         { count: "exact" }
       )
 
-    if (filters.status)     q = q.eq("status", filters.status)
+    if (filters.status === "WAITING") q = q.in("status", ["CREATED", "PENDING"])
+    else if (filters.status) q = q.eq("status", filters.status)
     if (filters.network)    q = q.eq("network", filters.network)
     if (filters.provider)   q = q.eq("provider", filters.provider)
     if (filters.merchantId) q = q.eq("merchant_id", filters.merchantId)
@@ -132,7 +133,8 @@ export async function getAdminTransactionSummary(
       .from("payments")
       .select("status, gross_amount, pinetree_fee")
 
-    if (filters.status)     q = q.eq("status", filters.status)
+    if (filters.status === "WAITING") q = q.in("status", ["CREATED", "PENDING"])
+    else if (filters.status) q = q.eq("status", filters.status)
     if (filters.network)    q = q.eq("network", filters.network)
     if (filters.provider)   q = q.eq("provider", filters.provider)
     if (filters.merchantId) q = q.eq("merchant_id", filters.merchantId)
@@ -314,7 +316,8 @@ export async function getAdminTransactionDistribution(
   try {
     let q = db.from("payments").select("provider, network")
 
-    if (filters.status)     q = q.eq("status", filters.status)
+    if (filters.status === "WAITING") q = q.in("status", ["CREATED", "PENDING"])
+    else if (filters.status) q = q.eq("status", filters.status)
     if (filters.network)    q = q.eq("network", filters.network)
     if (filters.provider)   q = q.eq("provider", filters.provider)
     if (filters.merchantId) q = q.eq("merchant_id", filters.merchantId)
