@@ -15,6 +15,10 @@ import {
   ProviderStatusPill,
   dashboardPageTitleClass
 } from "@/components/dashboard/DashboardPrimitives"
+import {
+  getShift4DisplayStatus,
+  type Shift4DisplayStatus
+} from "@/lib/shift4DisplayStatus"
 
 const providerAlbyHubAppsUrl = process.env.NEXT_PUBLIC_ALBY_HUB_APPS_URL || "https://getalby.com/hub/apps"
 const providerAlbyNwcDocsUrl = process.env.NEXT_PUBLIC_ALBY_NWC_DOCS_URL || "https://guides.getalby.com/user-guide/alby-account-and-browser-extension/alby-hub/nwc"
@@ -183,7 +187,6 @@ export default function ProvidersPage() {
   const [inputValue, setInputValue] = useState("")
   const [shift4AccountReference, setShift4AccountReference] = useState("")
   const [shift4ApiStatus, setShift4ApiStatus] = useState("Pending approval")
-  const [shift4WebhookStatus, setShift4WebhookStatus] = useState("Not configured")
   const [shift4Notes, setShift4Notes] = useState("")
   const [nwcUri, setNwcUri] = useState("")
   const [nwcWalletLabel, setNwcWalletLabel] = useState("")
@@ -243,7 +246,6 @@ export default function ProvidersPage() {
     setInputValue("")
     setShift4AccountReference("")
     setShift4ApiStatus("Pending approval")
-    setShift4WebhookStatus("Not configured")
     setShift4Notes("")
     setNwcUri("")
     setNwcWalletLabel("")
@@ -560,10 +562,18 @@ export default function ProvidersPage() {
     if ((provider === "solana" || provider === "base") && wallet) return "Connected"
 
     const p = getProvider(provider)
+    if (provider === "shift4") {
+      return getShift4DisplayStatus({
+        providerStatus: p?.status,
+        accountReference: String(p?.credentials?.account_reference || ""),
+        merchantApprovalStatus: String(p?.credentials?.merchant_approval_status || ""),
+        apiStatus: String(p?.credentials?.api_status || "")
+      }).label
+    }
+
     if (!p) return "Not Connected"
 
     if (p.status === "connected" || p.status === "active") return "Connected"
-    if (provider === "shift4" && p.status === "pending") return "Setup pending"
 
     return "Not Connected"
   }
@@ -885,7 +895,6 @@ function EngineSettingStatus({
       setSpeedSetupStep(getProvider("lightning_speed")?.credentials?.account_id ? 2 : 1)
     } else if (provider === "shift4") {
       const savedApiStatus = String(p?.credentials?.api_status || "Pending approval")
-      const savedWebhookStatus = String(p?.credentials?.webhook_status || "Not configured")
       setInputValue("")
       setShift4AccountReference(String(p?.credentials?.account_reference || ""))
       setShift4ApiStatus(
@@ -895,7 +904,6 @@ function EngineSettingStatus({
             ? "Pending approval"
             : savedApiStatus
       )
-      setShift4WebhookStatus(savedWebhookStatus === "Active" ? "Verified" : savedWebhookStatus)
       setShift4Notes(String(p?.credentials?.notes || ""))
     } else if (p?.credentials?.api_key) {
       setInputValue(p.credentials.api_key)
@@ -1384,7 +1392,7 @@ function EngineSettingStatus({
 
   function statusTone(status: string) {
     if (status === "Connected" || status === "Ready") return "blue"
-    if (status === "Setup needed" || status === "Setup pending" || status === "Needs verification" || status === "Needs permissions" || status === "Setup only") return "amber"
+    if (status === "Pending" || status === "Setup needed" || status === "Setup pending" || status === "Needs verification" || status === "Needs permissions" || status === "Setup only") return "amber"
     if (status === "Provider unavailable" || status === "Missing env") return "red"
     return "default"
   }
@@ -1429,10 +1437,10 @@ function EngineSettingStatus({
     }
   }
 
-  function shift4StatusBadgeClass(ready: boolean) {
-    return ready
-      ? "border-blue-200 bg-blue-50 text-blue-700"
-      : "border-amber-200 bg-amber-50 text-amber-700"
+  function shift4StatusBadgeClass(tone: Shift4DisplayStatus["tone"]) {
+    if (tone === "blue") return "border-blue-200 bg-blue-50 text-blue-700"
+    if (tone === "amber") return "border-amber-200 bg-amber-50 text-amber-800"
+    return "border-gray-200 bg-gray-50 text-gray-600"
   }
 
   function ProviderCard({
@@ -2400,27 +2408,17 @@ function EngineSettingStatus({
               <div className="mb-5 space-y-5">
                 {(() => {
                   const shift4Provider = getProvider("shift4")
-                  const merchantApprovalStatus = String(
-                    shift4Provider?.credentials?.merchant_approval_status ||
-                    (shift4Provider?.status === "active" ? "Approved" : "Pending")
-                  )
-                  const apiReady = ["Sandbox ready", "Live ready", "Active"].includes(shift4ApiStatus)
-                  const merchantApproved = ["Approved", "Active"].includes(merchantApprovalStatus)
-                  const webhookConfigured = shift4WebhookStatus === "Configured" || shift4WebhookStatus === "Verified"
-                  const liveRoutingEnabled = shift4Provider?.status === "active" && Boolean(shift4Provider.enabled)
+                  const shift4DisplayStatus = getShift4DisplayStatus({
+                    providerStatus: shift4Provider?.status,
+                    accountReference: String(shift4Provider?.credentials?.account_reference || ""),
+                    merchantApprovalStatus: String(shift4Provider?.credentials?.merchant_approval_status || ""),
+                    apiStatus: shift4ApiStatus
+                  })
 
                   const statusRows = [
-                    {
-                      label: "Merchant approval",
-                      value: merchantApprovalStatus,
-                      ready: merchantApproved
-                    },
-                    { label: "API access", value: shift4ApiStatus, ready: apiReady },
-                    {
-                      label: "Webhook return",
-                      value: shift4WebhookStatus,
-                      ready: webhookConfigured
-                    }
+                    { label: "Merchant approval" },
+                    { label: "API access" },
+                    { label: "Webhook return" }
                   ]
 
                   return (
@@ -2431,12 +2429,8 @@ function EngineSettingStatus({
                             <p className="text-sm font-semibold text-gray-950">Provider setup status</p>
                             <p className="mt-0.5 text-xs text-gray-500">Managed by PineTree and Shift4.</p>
                           </div>
-                          <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
-                            liveRoutingEnabled
-                              ? "border-blue-200 bg-blue-50 text-blue-700"
-                              : "border-amber-200 bg-amber-50 text-amber-700"
-                          }`}>
-                            {liveRoutingEnabled ? "Connected" : "Setup pending"}
+                          <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${shift4StatusBadgeClass(shift4DisplayStatus.tone)}`}>
+                            {shift4DisplayStatus.label}
                           </span>
                         </div>
 
@@ -2447,8 +2441,8 @@ function EngineSettingStatus({
                                 <p className="text-sm font-medium text-gray-800">{row.label}</p>
                                 <p className="mt-0.5 text-xs text-gray-500">Managed by PineTree / Shift4</p>
                               </div>
-                              <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${shift4StatusBadgeClass(row.ready)}`}>
-                                {row.value}
+                              <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${shift4StatusBadgeClass(shift4DisplayStatus.tone)}`}>
+                                {shift4DisplayStatus.label}
                               </span>
                             </div>
                           ))}
