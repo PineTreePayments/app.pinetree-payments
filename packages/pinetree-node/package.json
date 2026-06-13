@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "description": "Official PineTree Node SDK for the PineTree v1 platform API.",
+  "keywords": ["pinetree", "payments", "crypto", "blockchain", "solana", "base", "usdc", "checkout", "node"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pinetree-payments/pinetree-payments.git",
+    "directory": "packages/pinetree-node"
+  },
+  "homepage": "https://app.pinetree-payments.com",
+  "bugs": { "url": "https://github.com/pinetree-payments/pinetree-payments/issues" },
   "type": "module",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
@@ -17,7 +26,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "node ./scripts/build.mjs",

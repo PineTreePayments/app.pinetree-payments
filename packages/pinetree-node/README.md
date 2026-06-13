@@ -59,6 +59,11 @@ PineTree uses a single key format for all environments:
 pt_live_<64 hex characters>
 ```
 
+> **Security — server-only:** `pt_live_*` API keys grant full merchant access
+> and must **never** appear in browser code, React applications, or any
+> `NEXT_PUBLIC_` environment variable. For client-side checkout flows, use
+> `@pinetree/js` or `@pinetree/react` with a `pk_live_*` public key instead.
+
 Generate API keys from the **PineTree dashboard → Developer**. Pass the key
 when constructing the client, or set it via options:
 
@@ -163,9 +168,6 @@ const payment = await client.payments.retrieve("pay_...")
 ```typescript
 // List delivery attempts
 const deliveries = await client.webhookDeliveries.list({ status: "failed" })
-
-// Retrieve a single attempt
-const delivery = await client.webhookDeliveries.retrieve("wdl_...")
 
 // Retry a failed delivery
 await client.webhookDeliveries.retry("wdl_...")
@@ -423,7 +425,7 @@ Initial private beta release.
 
 - Checkout sessions: create, retrieve, list, cancel, expire
 - Payments: retrieve
-- Webhook deliveries: retrieve, list, retry
+- Webhook deliveries: list, retry
 - Webhook verification: `constructEvent` with HMAC-SHA256
 - ESM + CJS + TypeScript declarations
 - Idempotency support via `Idempotency-Key` header

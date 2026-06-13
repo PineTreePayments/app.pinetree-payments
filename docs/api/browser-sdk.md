@@ -1,8 +1,8 @@
 # PineTree Browser JavaScript SDK
 
 **Package:** `@pinetree/js`  
-**Status:** Preview  
-**Version:** 0.3.0
+**Status:** Private Beta — not yet published to npm
+**Next version:** `0.4.0-beta.1` (Phase 14 lifecycle events pending release)
 
 ---
 
@@ -431,6 +431,6 @@ To test `checkout.open()` locally:
 - Public keys can only create checkout sessions — they cannot access payments,
   webhooks, or any other merchant data.
 - The embedded iframe is created with a restrictive `sandbox` attribute
-  (`allow-scripts allow-forms allow-same-origin allow-popups`).
+  (`allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox`).
 - `@pinetree/js` contains no Node.js built-ins and will not work in a pure
   Node environment without a bundler.

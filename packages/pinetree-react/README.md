@@ -1,10 +1,44 @@
 # @pinetree/react
 
-Private React bindings for `@pinetree/js`.
+Official PineTree React SDK — browser checkout components and hooks.
 
-**Status:** Private Beta / Preview  
-**Published:** No  
-**Usage:** Local package only
+> **Private Beta — not yet published to npm.** Reference this package via a
+> local path or monorepo workspace while in private beta. When published, the
+> install command will be `npm install @pinetree/react`.
+
+---
+
+## Installation
+
+### Private beta (local path)
+
+```bash
+# package.json
+"dependencies": {
+  "@pinetree/react": "file:../../packages/pinetree-react",
+  "@pinetree/js":    "file:../../packages/pinetree-js"
+}
+```
+
+### When published (future)
+
+```bash
+npm install @pinetree/react
+```
+
+---
+
+## API key
+
+This package uses a browser-safe **public key** (`pk_live_*`). Public keys
+are safe to include in client-side React code and `NEXT_PUBLIC_` environment
+variables.
+
+**Never** pass a server API key (`pt_live_*`) to `PineTreeProvider` or any
+React component. Server keys grant full merchant access and must stay on the
+server. Use `@pinetree/node` for server-side operations.
+
+---
 
 ## Provider
 
@@ -13,7 +47,7 @@ import { PineTreeProvider } from "@pinetree/react"
 
 export function App() {
   return (
-    <PineTreeProvider publicKey="pk_live_...">
+    <PineTreeProvider publicKey={process.env.NEXT_PUBLIC_PINETREE_PUBLIC_KEY!}>
       <CheckoutPage />
     </PineTreeProvider>
   )
@@ -31,8 +65,7 @@ Local development can override the API origin:
 </PineTreeProvider>
 ```
 
-Only browser-safe public keys belong in React applications. Never expose a
-merchant API key or webhook secret.
+---
 
 ## Checkout Button
 
@@ -49,7 +82,10 @@ merchant API key or webhook secret.
 ```
 
 The button disables itself while checkout is opening and wires all browser SDK
-lifecycle events to typed callbacks.
+lifecycle events to typed callbacks: `onComplete`, `onFailed`, `onExpired`,
+`onCanceled`, `onError`, `onClosed`.
+
+---
 
 ## Embedded Checkout
 
@@ -65,19 +101,37 @@ lifecycle events to typed callbacks.
 `PineTreeCheckout` owns the iframe it creates. It destroys the browser SDK
 checkout instance and removes the iframe when unmounted.
 
+---
+
 ## Hook
 
 ```tsx
 const pinetree = usePineTree()
 ```
 
-`usePineTree()` must be called below `PineTreeProvider`.
+`usePineTree()` must be called below `PineTreeProvider`. Returns the
+underlying `@pinetree/js` client for direct use.
+
+---
 
 ## Development
 
 ```bash
-npm run build --prefix packages/pinetree-js
-npm run typecheck --prefix packages/pinetree-react
-npm run build --prefix packages/pinetree-react
-npm test --prefix packages/pinetree-react
+# Build @pinetree/js first (required peer)
+npm run build --workspace packages/pinetree-js
+
+# Type-check @pinetree/react
+npm run typecheck --workspace packages/pinetree-react
+
+# Build @pinetree/react
+npm run build --workspace packages/pinetree-react
+
+# Tests
+npm test --workspace packages/pinetree-react
 ```
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md).

@@ -7,7 +7,7 @@
  */
 
 import { spawnSync } from "node:child_process"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -81,6 +81,16 @@ function validateManifests() {
       }
     }
 
+    if (!manifest.description || manifest.description.trim() === "") {
+      fail(`${packageInfo.name} is missing a description.`)
+    }
+    if (!Array.isArray(manifest.keywords) || manifest.keywords.length === 0) {
+      fail(`${packageInfo.name} is missing keywords.`)
+    }
+    if (!manifest.license) {
+      fail(`${packageInfo.name} is missing a license field.`)
+    }
+
     if (packageInfo.expectedDependency) {
       const { name, value } = packageInfo.expectedDependency
       if (manifest.dependencies?.[name] !== value) {
@@ -117,6 +127,24 @@ function run(label, command, args, cwd = repoRoot) {
 
 function packagePath(packageInfo, path) {
   return resolve(repoRoot, packageInfo.directory, path)
+}
+
+function validateChangelogs() {
+  step("Confirm CHANGELOG.md exists and is declared in each package files array")
+  for (const packageInfo of packages) {
+    if (dryRun) {
+      console.log(`DRY RUN: check CHANGELOG.md in ${packageInfo.directory}`)
+      continue
+    }
+    const changelogPath = resolve(repoRoot, packageInfo.directory, "CHANGELOG.md")
+    if (!existsSync(changelogPath)) {
+      fail(`${packageInfo.name} is missing CHANGELOG.md at ${changelogPath}`)
+    }
+    const manifest = readManifest(packageInfo)
+    if (!manifest.files?.includes("CHANGELOG.md")) {
+      fail(`${packageInfo.name} package.json files array does not include CHANGELOG.md`)
+    }
+  }
 }
 
 function validatePackageArchive(packageInfo) {
@@ -161,6 +189,7 @@ function validatePackageArchive(packageInfo) {
     "dist/esm/index.js",
     "dist/cjs/index.js",
     "dist/types/index.d.ts",
+    "CHANGELOG.md",
   ]) {
     if (!files.includes(required)) {
       fail(`${packageInfo.name} archive is missing ${required}.`)
@@ -189,6 +218,7 @@ function validateUntrackedDist() {
 }
 
 validateManifests()
+validateChangelogs()
 run("Root TypeScript", node, [tsc, "--noEmit"])
 
 for (const packageInfo of packages) {
@@ -212,6 +242,12 @@ for (const packageInfo of packages) {
 }
 
 run("Full repository test suite", node, [vitest, "run"])
+
+run(
+  "Consumer validation — simulated package imports",
+  node,
+  [tsc, "-p", resolve(repoRoot, "consumer-validation", "tsconfig.json"), "--noEmit"]
+)
 
 for (const packageInfo of packages) {
   validatePackageArchive(packageInfo)

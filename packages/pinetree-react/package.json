@@ -2,7 +2,16 @@
   "name": "@pinetree/react",
   "version": "0.1.0",
   "private": true,
-  "description": "Private React bindings for the PineTree browser SDK.",
+  "description": "Official PineTree React SDK — browser checkout components and hooks.",
+  "keywords": ["pinetree", "payments", "react", "checkout", "crypto", "blockchain", "browser", "ui", "components"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pinetree-payments/pinetree-payments.git",
+    "directory": "packages/pinetree-react"
+  },
+  "homepage": "https://app.pinetree-payments.com",
+  "bugs": { "url": "https://github.com/pinetree-payments/pinetree-payments/issues" },
   "type": "module",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
@@ -17,7 +26,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "sideEffects": false,
   "scripts": {

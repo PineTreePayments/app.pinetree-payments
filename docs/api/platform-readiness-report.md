@@ -1,8 +1,8 @@
 # PineTree API Platform — Readiness Report
 
-**Date:** 2026-06-12  
+**Date:** 2026-06-13
 **Version:** v1 (pre-launch)  
-**SDK:** `@pinetree/node` 0.1.0 (private)
+**SDKs:** `@pinetree/node` 0.1.0 · `@pinetree/js` 0.3.0 (0.4.0-beta.1 planned) · `@pinetree/react` 0.1.0 (all private)
 
 ---
 
@@ -96,27 +96,47 @@ for consumer error handling.
 | List deliveries | `GET /api/v1/webhook-deliveries` | `webhookDeliveries.list()` |
 | Retry delivery | `POST /api/v1/webhook-deliveries/:id/retry` | `webhookDeliveries.retry()` |
 
-Deliveries carry `attempt`, `status`, `responseStatus`, and `deliveredAt`
+Deliveries carry `attemptCount`, `status`, `lastStatusCode`, `lastError`, and `deliveredAt`
 metadata.  Retry is idempotent against already-successful deliveries.
 
 ---
 
 ## SDK Status
 
-**Status: Private 0.1.0 — not published**
+**Status: Three private SDKs — not published**
+
+### @pinetree/node 0.1.0
 
 | Area | State |
 |---|---|
-| Package name | `@pinetree/node` |
-| Version | `0.1.0` |
 | Visibility | `private: true` |
 | Build targets | ESM, CJS, TypeScript declarations |
-| Node support | `>=18`; Node 20 LTS recommended |
+| Node support | `>=18` |
 | Exported resources | `PineTree` client, `checkout.sessions`, `payments`, `webhookDeliveries`, `webhooks` |
 | Exported errors | `PineTreeError`, `AuthenticationError`, `PermissionError`, `InvalidRequestError`, `APIConnectionError`, `IdempotencyConflictError`, `WebhookVerificationError` |
 | Exported constants | `PineTreeWebhookHeaders`, `PineTreeWebhookVersion` |
-| Build validation | Consumer type-check runs at build time; validated against strict TypeScript |
-| npm publish | Disabled; `private: true` until explicitly approved |
+| First publish target | `0.1.0-beta.1` |
+
+### @pinetree/js 0.3.0
+
+| Area | State |
+|---|---|
+| Visibility | `private: true` |
+| Build targets | ESM, CJS, TypeScript declarations |
+| Browser-safe | No Node.js built-ins |
+| Exported | `PineTree` client, `PineTreeBrowserError`, `CheckoutInitializationError`, `CheckoutSessionError`, all checkout types |
+| Phase 14 lifecycle events | Implemented but not yet versioned (unreleased in changelog) |
+| First publish target | `0.4.0-beta.1` (after Phase 14 version bump) |
+
+### @pinetree/react 0.1.0
+
+| Area | State |
+|---|---|
+| Visibility | `private: true` |
+| Build targets | ESM, CJS, TypeScript declarations |
+| Peer dependencies | React 18+, react-dom 18+ |
+| Exported | `PineTreeProvider`, `usePineTree`, `PineTreeCheckoutButton`, `PineTreeCheckout`, all types |
+| First publish target | `0.1.0-beta.1` |
 
 ---
 
@@ -170,20 +190,26 @@ or the SDK is published.
 
 ### SDK — Must Complete Before Publish
 
-7. **Remove `"private": true`** from `packages/pinetree-node/package.json` in
-   the designated release commit.
-8. **npm organization and publish rights** confirmed.
-9. **`npm run release-candidate`** passes cleanly against the release branch.
-10. **Sandbox integration test** passes end-to-end against staging.
-11. **README and API docs** reviewed and approved.
+7. **Remove `"private": true`** from each publishing package's `package.json`
+   in the designated release commit only. See [npm-publish-checklist.md](./npm-publish-checklist.md).
+8. **npm `@pinetree` organization** created and publish rights confirmed.
+9. **`npm run release-candidate`** passes cleanly (18+ checks) against the release branch.
+10. **Consumer validation typecheck** passes (step added to release-candidate script).
+11. **Sandbox integration test** passes end-to-end against staging.
+12. **Confirm repository URLs** — `repository`, `homepage`, and `bugs` fields in
+    `package.json` files currently use placeholder GitHub URLs. Update to the real
+    repo URL before publishing.
+13. **LICENSE file** is present in each package directory (already added; verify
+    it appears in `npm pack` output before publish).
+14. **Bump `@pinetree/js` to `0.4.0`** before publishing (Phase 14 lifecycle
+    events are implemented but not reflected in the current `0.3.0` version tag).
 
-### Phase 9 Candidates
+### Before First npm Publish
 
-- Full staging integration test run with real `pt_test_*` keys.
-- Changelog and release notes authored.
-- npm publish dry run against the npm registry (`--dry-run`).
-- SDK version bump to `1.0.0` (or agreed version) and `private` removal.
-- Post-publish smoke test in a clean Node project.
+- Full staging integration test run with real keys.
+- `npm publish --tag beta` dry run against the npm registry.
+- Per-package version bumps with beta suffix (see [version-strategy.md](./version-strategy.md)).
+- Post-publish smoke test in a clean project (`npm install @pinetree/node@beta`).
 - Monitoring and alerting review.
 
 ---

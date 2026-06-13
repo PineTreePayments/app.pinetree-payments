@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": false,
+    "baseUrl": "..",
+    "paths": {
+      "@pinetree/node": ["packages/pinetree-node/dist/types"],
+      "@pinetree/js": ["packages/pinetree-js/dist/types"],
+      "@pinetree/react": ["packages/pinetree-react/dist/types"]
+    }
+  },
+  "include": ["*.ts", "*.tsx"]
+}

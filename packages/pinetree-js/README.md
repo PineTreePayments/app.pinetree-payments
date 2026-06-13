@@ -2,9 +2,13 @@
 
 Official PineTree browser JavaScript SDK.
 
-> **Preview** — `@pinetree/js` creates checkout sessions from browser code
-> using a public key (`pk_live_*`) and opens the PineTree hosted checkout
-> page using redirect, popup, or embedded iframe modes.
+> **Private Beta — not yet published to npm.** Reference this package via a
+> local path or monorepo workspace while in private beta. When published, the
+> install command will be `npm install @pinetree/js`.
+>
+> `@pinetree/js` creates checkout sessions from browser code using a public
+> key (`pk_live_*`) and opens the PineTree hosted checkout page using
+> redirect, popup, or embedded iframe modes.
 
 ---
 

@@ -3,6 +3,15 @@
   "version": "0.3.0",
   "private": true,
   "description": "Official PineTree browser JavaScript SDK.",
+  "keywords": ["pinetree", "payments", "browser", "checkout", "crypto", "blockchain", "solana", "base", "usdc", "javascript"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pinetree-payments/pinetree-payments.git",
+    "directory": "packages/pinetree-js"
+  },
+  "homepage": "https://app.pinetree-payments.com",
+  "bugs": { "url": "https://github.com/pinetree-payments/pinetree-payments/issues" },
   "type": "module",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
@@ -18,7 +27,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "sideEffects": false,
   "scripts": {
