@@ -10,7 +10,8 @@ import {
 
 export type { ApiKeyPermission }
 
-// Prefix stored in DB: "pt_live_" + first PREFIX_SUFFIX_LENGTH hex chars of the random bytes
+// Prefix stored in DB: "pt_live_" + first PREFIX_SUFFIX_LENGTH hex chars of the random bytes.
+// PineTree issues one key format: pt_live_<64-hex>. There is no pt_test_* variant.
 const PREFIX_SUFFIX_LENGTH = 12
 
 async function hashKey(plaintext: string): Promise<string> {

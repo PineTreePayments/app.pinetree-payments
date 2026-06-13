@@ -65,4 +65,33 @@ describe("checkout metadata propagation", () => {
       })
     )
   })
+
+  it("preserves expired lifecycle semantics for disabled session links", async () => {
+    getCheckoutLinkByPublicToken.mockResolvedValue({
+      id: "session-expired",
+      merchant_id: "merchant-1",
+      public_token: "token-expired",
+      name: "Expired checkout",
+      description: null,
+      amount: 42,
+      currency: "USD",
+      customer_email: null,
+      reference: null,
+      status: "disabled",
+      expires_at: "2026-06-12T00:00:00.000Z",
+      success_url: null,
+      cancel_url: null,
+      link_metadata: {
+        channel: "online",
+        _pinetree_session_lifecycle: "expired",
+      },
+      created_at: "2026-06-12T00:00:00.000Z",
+      updated_at: "2026-06-12T00:00:00.000Z",
+    })
+
+    const result = await resolveCheckoutLinkForCustomer("token-expired")
+
+    expect(result?.resolvedStatus).toBe("expired")
+    expect(createPaymentIntentEngine).not.toHaveBeenCalled()
+  })
 })

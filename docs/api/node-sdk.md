@@ -78,3 +78,33 @@ then returns the typed v1 `Event`. V1 delivery headers are:
 - `PineTree-Webhook-Version: 2026-06-12`
 
 Legacy `X-PineTree-*` headers remain a server compatibility feature.
+
+The helper also accepts a Node-style header object:
+
+```ts
+const event = pinetree.webhooks.constructEvent(
+  rawBody,
+  request.headers,
+  process.env.PINETREE_WEBHOOK_SECRET!
+)
+```
+
+## Environment Testing
+
+Use the configurable `baseUrl` to test the same SDK build against each
+environment:
+
+```ts
+new PineTree({ apiKey: localKey, baseUrl: "http://localhost:3000" })
+new PineTree({ apiKey: stagingKey, baseUrl: "https://staging.example.com" })
+new PineTree({
+  apiKey: productionKey,
+  baseUrl: "https://app.pinetree-payments.com",
+})
+```
+
+Use environment-specific test merchants and API keys. Never commit live keys,
+webhook secrets, or production credentials to tests, fixtures, or snapshots.
+
+See [Node SDK integration testing](./node-sdk-integration-testing.md) for the
+opt-in local, staging, and production test harness and its safety controls.

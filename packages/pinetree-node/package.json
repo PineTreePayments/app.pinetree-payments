@@ -2,12 +2,33 @@
   "name": "@pinetree/node",
   "version": "0.1.0",
   "private": true,
+  "description": "Official PineTree Node SDK for the PineTree v1 platform API.",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "default": "./dist/esm/index.js"
+    }
+  },
   "files": [
-    "src"
+    "dist",
+    "README.md"
   ],
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:integration": "node ./scripts/run-integration.mjs",
+    "test:integration:local": "node ./scripts/run-integration.mjs local",
+    "lint": "eslint src test",
+    "release-candidate": "node ./scripts/release-candidate.mjs",
+    "setup-integration": "node ./scripts/setup-integration.mjs"
+  },
   "engines": {
     "node": ">=18"
   }

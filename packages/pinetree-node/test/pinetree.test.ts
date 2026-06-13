@@ -182,6 +182,32 @@ describe("PineTree Node SDK", () => {
     ).toThrow(WebhookVerificationError)
   })
 
+  it("constructs an event from Node-style headers", () => {
+    const timestamp = new Date().toISOString()
+    const event = {
+      eventId: "evt_headers",
+      type: "checkout.session.paid",
+      createdAt: timestamp,
+      data: { object: session },
+    }
+    const rawBody = JSON.stringify(event)
+    const secret = "whsec_headers"
+    const signature = `sha256=${createHmac("sha256", secret).update(rawBody).digest("hex")}`
+
+    expect(
+      new PineTree("pt_live_test").webhooks.constructEvent(
+        rawBody,
+        {
+          "pinetree-signature": signature,
+          "PineTree-Timestamp": [timestamp],
+          "pinetree-event-id": "evt_headers",
+          "pinetree-webhook-version": "2026-06-12",
+        },
+        secret
+      )
+    ).toEqual(event)
+  })
+
   it("maps API authentication and invalid request errors", async () => {
     vi.stubGlobal(
       "fetch",

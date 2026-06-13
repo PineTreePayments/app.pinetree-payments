@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation"
 import { resolveCheckoutLinkForCustomer } from "@/engine/checkoutLinks"
+import HostedCheckoutEventBridge from "@/components/checkout/HostedCheckoutEventBridge"
 
 export const dynamic = "force-dynamic"
 
@@ -28,11 +29,27 @@ export default async function CheckoutTokenPage({ params }: Props) {
   }
 
   if (result.resolvedStatus === "disabled") {
-    return <CheckoutErrorScreen message="This checkout link has been deactivated by the merchant." cancelUrl={result.cancelUrl} />
+    return (
+      <CheckoutErrorScreen
+        message="This checkout link has been deactivated by the merchant."
+        cancelUrl={result.cancelUrl}
+        sessionId={result.link.id}
+        event="canceled"
+        status="canceled"
+      />
+    )
   }
 
   if (result.resolvedStatus === "expired") {
-    return <CheckoutErrorScreen message="This checkout link has expired." cancelUrl={result.cancelUrl} />
+    return (
+      <CheckoutErrorScreen
+        message="This checkout link has expired."
+        cancelUrl={result.cancelUrl}
+        sessionId={result.link.id}
+        event="expired"
+        status="expired"
+      />
+    )
   }
 
   if (!result.intentId) {
@@ -41,6 +58,7 @@ export default async function CheckoutTokenPage({ params }: Props) {
 
   const payUrl = new URL("/pay", "https://placeholder.invalid")
   payUrl.searchParams.set("intent", result.intentId)
+  payUrl.searchParams.set("pinetree_session_id", result.link.id)
   if (result.successUrl) payUrl.searchParams.set("success_url", result.successUrl)
   if (result.cancelUrl) payUrl.searchParams.set("cancel_url", result.cancelUrl)
 
@@ -50,12 +68,25 @@ export default async function CheckoutTokenPage({ params }: Props) {
 function CheckoutErrorScreen({
   message,
   cancelUrl,
+  sessionId,
+  event,
+  status,
 }: {
   message: string
   cancelUrl?: string | null
+  sessionId?: string
+  event?: "expired" | "canceled"
+  status?: string
 }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-white via-[#f8fbff] to-[#edf5ff] px-4">
+      {sessionId && event && status ? (
+        <HostedCheckoutEventBridge
+          sessionId={sessionId}
+          event={event}
+          status={status}
+        />
+      ) : null}
       <div className="w-full max-w-sm rounded-3xl border border-gray-200/80 bg-white p-8 shadow-[0_18px_60px_rgba(15,23,42,0.10)] text-center space-y-4">
         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
           PineTree Checkout

@@ -8,7 +8,10 @@
       "Bash(curl -s http://localhost:3000/api/off-ramp/support -o /dev/null -w \"%{http_code}\")",
       "Bash(curl -s http://localhost:3000/api/wallets/speed/withdrawals/draft -X POST -H \"Content-Type: application/json\" -d '{\"amount\":1}')",
       "Bash(npx tsc *)",
-      "Bash(npx supabase *)"
+      "Bash(npx supabase *)",
+      "Bash(New-Item -ItemType Directory -Force \"c:\\\\Users\\\\andri\\\\Desktop\\\\app.pinetree-payments\\\\app\\\\api\\\\merchant\\\\public-keys\\\\[id]\")",
+      "Bash(Out-Null)",
+      "Bash(New-Item -ItemType Directory -Force \"c:\\\\Users\\\\andri\\\\Desktop\\\\app.pinetree-payments\\\\app\\\\api\\\\v1\\\\browser\\\\checkout\\\\sessions\")"
     ]
   }
 }

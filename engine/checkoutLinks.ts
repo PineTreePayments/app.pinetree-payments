@@ -7,7 +7,10 @@ import {
   type CheckoutLinkStatus,
 } from "@/database/checkoutLinks"
 import { createPaymentIntentEngine } from "./paymentIntents"
-import { getRequestedCheckoutSessionRails } from "./checkoutSessionMetadata"
+import {
+  getCheckoutSessionLifecycle,
+  getRequestedCheckoutSessionRails,
+} from "./checkoutSessionMetadata"
 
 const APP_URL = (() => {
   const u = process.env.NEXT_PUBLIC_APP_URL || ""
@@ -52,6 +55,9 @@ function generatePublicToken(): string {
 }
 
 function resolveStatus(link: CheckoutLink): CheckoutLinkStatus {
+  const lifecycle = getCheckoutSessionLifecycle(link.link_metadata)
+  if (lifecycle === "expired") return "expired"
+  if (lifecycle === "canceled") return "disabled"
   if (link.status === "disabled") return "disabled"
   if (link.expires_at && new Date(link.expires_at) < new Date()) return "expired"
   return "active"

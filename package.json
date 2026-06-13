@@ -10,7 +10,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "smoke:wallet-approval": "node scripts/smoke-wallet-approval.mjs",
-    "smoke:checkout-api": "node scripts/smoke-checkout-api.mjs"
+    "smoke:checkout-api": "node scripts/smoke-checkout-api.mjs",
+    "release-candidate": "node scripts/release-candidate.mjs",
+    "release-candidate:dry-run": "node scripts/release-candidate.mjs --dry-run",
+    "sdk:release-candidate": "npm run release-candidate --workspace packages/pinetree-node"
   },
   "dependencies": {
     "@meshconnect/web-link-sdk": "^3.9.8",

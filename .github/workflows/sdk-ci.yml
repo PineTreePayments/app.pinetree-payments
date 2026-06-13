@@ -1,0 +1,110 @@
+# PineTree Node SDK — CI workflow (draft)
+#
+# Triggers on any push or PR that touches the SDK package.
+# Normal CI never requires secrets and never runs production integration tests.
+# Integration tests are a separate opt-in job triggered only via workflow_dispatch.
+
+name: SDK CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/pinetree-node/**"
+      - "package.json"
+      - "tsconfig.json"
+      - "vitest.config.ts"
+  pull_request:
+    paths:
+      - "packages/pinetree-node/**"
+      - "package.json"
+      - "tsconfig.json"
+      - "vitest.config.ts"
+
+jobs:
+  # ── Standard CI (no secrets required) ──────────────────────────────────────
+  sdk:
+    name: SDK — Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["18", "20", "22"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Root typecheck (Next.js app + shared types)
+      - name: Root typecheck
+        run: npm run typecheck
+
+      # SDK typecheck
+      - name: SDK typecheck
+        run: npm run typecheck --workspace packages/pinetree-node
+
+      # SDK build (ESM + CJS + declarations)
+      - name: SDK build
+        run: npm run build --workspace packages/pinetree-node
+
+      # SDK offline unit tests
+      - name: SDK unit tests
+        run: npm test --workspace packages/pinetree-node
+
+      # Root tests (excludes SDK integration tests)
+      - name: Root tests
+        run: npm test
+
+      # Full release-candidate validation (typecheck + build + tests + pack check)
+      # Only run on Node 20 to avoid redundancy; the matrix above covers compat.
+      - name: SDK release-candidate validation
+        if: matrix.node == '20'
+        run: npm run release-candidate --workspace packages/pinetree-node
+
+  # ── Integration tests (opt-in, requires secrets) ────────────────────────────
+  #
+  # Triggered manually via workflow_dispatch only.
+  # Requires the following repository/environment secrets:
+  #   PINETREE_INTEGRATION_API_KEY         — test-mode API key (pt_test_*)
+  #   PINETREE_INTEGRATION_WEBHOOK_SECRET  — matching webhook signing secret
+  # And the following variable:
+  #   PINETREE_INTEGRATION_BASE_URL        — e.g. https://staging.pinetree-payments.com
+  #
+  # Production integration tests are never enabled by default.
+  # Set PINETREE_ALLOW_PRODUCTION_INTEGRATION=true only after explicit approval.
+  sdk-integration:
+    name: SDK Integration Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    environment: sdk-integration  # gate on a protected environment for secret access
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: SDK build
+        run: npm run build --workspace packages/pinetree-node
+
+      - name: SDK integration tests
+        run: npm run test:integration --workspace packages/pinetree-node
+        env:
+          PINETREE_RUN_INTEGRATION: "true"
+          PINETREE_INTEGRATION_BASE_URL: ${{ vars.PINETREE_INTEGRATION_BASE_URL }}
+          PINETREE_INTEGRATION_API_KEY: ${{ secrets.PINETREE_INTEGRATION_API_KEY }}
+          PINETREE_INTEGRATION_WEBHOOK_SECRET: ${{ secrets.PINETREE_INTEGRATION_WEBHOOK_SECRET }}
+          # Do NOT set PINETREE_ALLOW_PRODUCTION_INTEGRATION here.
+          # Production integration tests require separate manual approval.

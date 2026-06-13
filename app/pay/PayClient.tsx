@@ -13,6 +13,10 @@ import SolanaWalletPayment from "@/components/payment/SolanaWalletPayment"
 import LightningPayment from "@/components/payment/LightningPayment"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import {
+  getHostedCheckoutTerminalEvent,
+  postHostedCheckoutEvent,
+} from "@/lib/checkout/hostedCheckoutEvents"
+import {
   buildSignAndSendUrl,
   clearSolflareSession,
   consumePendingPaymentId,
@@ -36,6 +40,7 @@ const PHANTOM_PROVIDER_RETRY_TIMEOUT_MS = 4000
 const PHANTOM_PROVIDER_RETRY_INTERVAL_MS = 150
 const BASE_WC_PENDING_KEY = "pinetree_base_wc_pending"
 const BASE_EXEC_STORAGE_PREFIX = "pinetree_base_exec_"
+const CHECKOUT_SESSION_STORAGE_PREFIX = "pinetree_checkout_session_"
 const TERMINAL_PAYMENT_STATUSES = new Set(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "CANCELED"])
 
 type SplitOutput = {
@@ -227,6 +232,7 @@ export default function PayClient() {
   const searchParams = useSearchParams()
   const rawData = searchParams.get("data")
   const intentId = searchParams.get("intent")
+  const checkoutSessionParam = searchParams.get("pinetree_session_id")
   const walletBrowserPaymentId = searchParams.get("pinetree_payment_id")
   const walletBrowserMode = searchParams.get("mode")
   const walletBrowserWallet = searchParams.get("wallet")
@@ -258,6 +264,9 @@ export default function PayClient() {
   // Stored in a ref so useEffect closures (Phantom, Solflare) always see the
   // latest value without requiring effect re-registration.
   const [checkoutToken, setCheckoutToken] = useState<string>("")
+  const [checkoutSessionId, setCheckoutSessionId] = useState(
+    checkoutSessionParam || ""
+  )
   const checkoutTokenRef = useRef<string>("")
 
   // ── Shift4 redirect state (inline — no dedicated component needed) ─────────
@@ -325,6 +334,7 @@ export default function PayClient() {
       ? normalizedStatusOverride
       : ""
   const intentCardsRef = useRef<HTMLDivElement | null>(null)
+  const emittedCheckoutEventRef = useRef<string>("")
 
   // ── Intent mode helpers ────────────────────────────────────────────────────
 
@@ -526,6 +536,22 @@ export default function PayClient() {
   }, [intentId, loadIntentCallback])
 
   useEffect(() => {
+    if (!intentId) return
+    const storageKey = `${CHECKOUT_SESSION_STORAGE_PREFIX}${intentId}`
+    try {
+      if (checkoutSessionParam) {
+        window.sessionStorage.setItem(storageKey, checkoutSessionParam)
+        setCheckoutSessionId(checkoutSessionParam)
+        return
+      }
+      const storedSessionId = window.sessionStorage.getItem(storageKey)
+      if (storedSessionId) setCheckoutSessionId(storedSessionId)
+    } catch {
+      // Session correlation remains available from the query parameter.
+    }
+  }, [checkoutSessionParam, intentId])
+
+  useEffect(() => {
     if (!isIntentMode) return
     if (!terminalPaymentStatus) return
 
@@ -534,6 +560,31 @@ export default function PayClient() {
     setSolanaExecutionActive(false)
     setSelectedAssetId("")
   }, [isIntentMode, terminalPaymentStatus])
+
+  useEffect(() => {
+    if (!checkoutSessionId || !terminalPaymentStatus) return
+    const terminalEvent = getHostedCheckoutTerminalEvent(terminalPaymentStatus)
+    if (!terminalEvent) return
+    const eventKey = `${checkoutSessionId}:${terminalEvent.event}:${terminalEvent.status}`
+    if (emittedCheckoutEventRef.current === eventKey) return
+    emittedCheckoutEventRef.current = eventKey
+    postHostedCheckoutEvent(
+      checkoutSessionId,
+      terminalEvent.event,
+      terminalEvent.status
+    )
+  }, [checkoutSessionId, terminalPaymentStatus])
+
+  useEffect(() => {
+    if (!checkoutSessionId) return
+    const handlePageHide = () => {
+      if (emittedCheckoutEventRef.current) return
+      emittedCheckoutEventRef.current = `${checkoutSessionId}:closed`
+      postHostedCheckoutEvent(checkoutSessionId, "closed", "closed")
+    }
+    window.addEventListener("pagehide", handlePageHide)
+    return () => window.removeEventListener("pagehide", handlePageHide)
+  }, [checkoutSessionId])
 
   // ── Deselect asset when clicking outside the card list ────────────────────
 
@@ -1453,7 +1504,18 @@ export default function PayClient() {
             </div>
 
             {!(baseExecutionActive || solanaExecutionActive) && (
-              <Button variant="danger" fullWidth onClick={() => window.close()}>
+              <Button
+                variant="danger"
+                fullWidth
+                onClick={() => {
+                  if (checkoutSessionId) {
+                    postHostedCheckoutEvent(checkoutSessionId, "canceled", "canceled")
+                    postHostedCheckoutEvent(checkoutSessionId, "closed", "canceled")
+                    emittedCheckoutEventRef.current = `${checkoutSessionId}:closed`
+                  }
+                  window.close()
+                }}
+              >
                 Cancel
               </Button>
             )}

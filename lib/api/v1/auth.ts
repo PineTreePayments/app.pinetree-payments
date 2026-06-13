@@ -29,6 +29,7 @@ export async function requireV1MerchantApiKeyWithAnyPermission(
     })
   }
 
+  // PineTree issues one key format: pt_live_<64-hex>. No pt_test_* variant exists.
   if (!token.startsWith("pt_live_")) {
     throw new V1ApiError({
       status: 401,

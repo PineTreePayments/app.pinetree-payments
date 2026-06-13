@@ -32,3 +32,7 @@ export {
   PineTreeWebhookHeaders,
   PineTreeWebhookVersion,
 } from "./resources/webhooks"
+export type {
+  PineTreeWebhookHeaderObject,
+  PineTreeWebhookHeaderValue,
+} from "./resources/webhooks"

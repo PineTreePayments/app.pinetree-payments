@@ -13,6 +13,9 @@ export const PineTreeWebhookHeaders = {
 
 export const PineTreeWebhookVersion = "2026-06-12"
 
+export type PineTreeWebhookHeaderValue = string | string[] | undefined
+export type PineTreeWebhookHeaderObject = Record<string, PineTreeWebhookHeaderValue>
+
 function bodyToBuffer(rawBody: string | Uint8Array) {
   return typeof rawBody === "string" ? Buffer.from(rawBody, "utf8") : Buffer.from(rawBody)
 }
@@ -21,13 +24,59 @@ function normalizeSignature(signature: string) {
   return signature.trim().replace(/^sha256=/i, "")
 }
 
+function readHeader(headers: PineTreeWebhookHeaderObject, ...names: string[]) {
+  const normalized = new Map(
+    Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value])
+  )
+  for (const name of names) {
+    const value = normalized.get(name.toLowerCase())
+    if (Array.isArray(value)) return value[0]
+    if (value) return value
+  }
+  return undefined
+}
+
 export class WebhooksResource {
   constructEvent<T = unknown>(
     rawBody: string | Uint8Array,
     signature: string,
     timestamp: string,
     secret: string
+  ): Event<T>
+  constructEvent<T = unknown>(
+    rawBody: string | Uint8Array,
+    headers: PineTreeWebhookHeaderObject,
+    secret: string
+  ): Event<T>
+  constructEvent<T = unknown>(
+    rawBody: string | Uint8Array,
+    signatureOrHeaders: string | PineTreeWebhookHeaderObject,
+    timestampOrSecret: string,
+    maybeSecret?: string
   ): Event<T> {
+    const headers =
+      typeof signatureOrHeaders === "object" ? signatureOrHeaders : undefined
+    const signature =
+      typeof signatureOrHeaders === "string"
+        ? signatureOrHeaders
+        : readHeader(
+            signatureOrHeaders,
+            PineTreeWebhookHeaders.signature,
+            "X-PineTree-Signature"
+          ) || ""
+    const timestamp =
+      typeof signatureOrHeaders === "string"
+        ? timestampOrSecret
+        : readHeader(
+            signatureOrHeaders,
+            PineTreeWebhookHeaders.timestamp,
+            "X-PineTree-Timestamp"
+          ) || ""
+    const secret =
+      typeof signatureOrHeaders === "string"
+        ? maybeSecret || ""
+        : timestampOrSecret
+
     if (!rawBody || !signature || !timestamp || !secret) {
       throw new WebhookVerificationError(
         "rawBody, signature, timestamp, and secret are required."
@@ -74,6 +123,20 @@ export class WebhooksResource {
       !(event as Event).data?.object
     ) {
       throw new WebhookVerificationError("Webhook payload does not match the v1 event contract.")
+    }
+    if (headers) {
+      const eventId = readHeader(headers, PineTreeWebhookHeaders.eventId)
+      if (eventId && eventId !== (event as Event).eventId) {
+        throw new WebhookVerificationError(
+          "The PineTree-Event-Id header does not match the webhook payload."
+        )
+      }
+      const version = readHeader(headers, PineTreeWebhookHeaders.version)
+      if (version && version !== PineTreeWebhookVersion) {
+        throw new WebhookVerificationError(
+          `Unsupported PineTree webhook version: ${version}.`
+        )
+      }
     }
     return event as Event<T>
   }
