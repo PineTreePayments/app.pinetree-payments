@@ -50,6 +50,7 @@ function assert_equals($expected, $actual, string $label): void {
 $suites = [
     __DIR__ . '/PineTreeApiTest.php',
     __DIR__ . '/PineTreeWebhookTest.php',
+    __DIR__ . '/PineTreeIntegrationSmokeTest.php',
 ];
 
 foreach ($suites as $suite) {

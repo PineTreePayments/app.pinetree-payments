@@ -239,7 +239,7 @@ class PineTree_WC_Gateway extends WC_Payment_Gateway {
             return;
         }
 
-        $api = new PineTree_API(
+        $api = $this->create_api(
             $api_key,
             !empty($base_url) ? $base_url : 'https://app.pinetree-payments.com'
         );
@@ -384,6 +384,10 @@ class PineTree_WC_Gateway extends WC_Payment_Gateway {
             'result'   => 'success',
             'redirect' => esc_url_raw($session['checkoutUrl']),
         ];
+    }
+
+    protected function create_api(string $api_key, string $base_url): PineTree_API {
+        return new PineTree_API($api_key, $base_url);
     }
 
     // ------------------------------------------------------------------

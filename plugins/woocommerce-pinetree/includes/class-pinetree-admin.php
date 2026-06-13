@@ -228,7 +228,7 @@ class PineTree_Admin {
             return;
         }
 
-        $api = new PineTree_API(
+        $api = $this->create_api(
             $api_key,
             !empty($base_url) ? $base_url : 'https://app.pinetree-payments.com'
         );
@@ -318,6 +318,10 @@ class PineTree_Admin {
         update_option('pinetree_wc_last_sync_at', gmdate('c'), false);
 
         $order->save();
+    }
+
+    protected function create_api(string $api_key, string $base_url): PineTree_API {
+        return new PineTree_API($api_key, $base_url);
     }
 
     private function set_sync_notice(string $message): void {

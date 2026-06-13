@@ -80,6 +80,64 @@ if (!function_exists('__')) {
     }
 }
 
+foreach (['add_action', 'add_filter'] as $hook_function) {
+    if (!function_exists($hook_function)) {
+        eval("function {$hook_function}(...\$args): void {}");
+    }
+}
+
+if (!function_exists('wp_kses_post')) {
+    function wp_kses_post(string $value): string { return $value; }
+}
+if (!function_exists('esc_html')) {
+    function esc_html(string $value): string { return htmlspecialchars($value, ENT_QUOTES); }
+}
+if (!function_exists('esc_attr')) {
+    function esc_attr(string $value): string { return htmlspecialchars($value, ENT_QUOTES); }
+}
+if (!function_exists('esc_url')) {
+    function esc_url(string $value): string { return $value; }
+}
+if (!function_exists('get_bloginfo')) {
+    function get_bloginfo(string $show = ''): string { return 'https://shop.test'; }
+}
+if (!function_exists('wc_get_checkout_url')) {
+    function wc_get_checkout_url(): string { return 'https://shop.test/checkout'; }
+}
+if (!function_exists('wc_reduce_stock_levels')) {
+    function wc_reduce_stock_levels(int $order_id): void { $GLOBALS['_test_stock_reduced'][] = $order_id; }
+}
+
+if (!class_exists('WC_Order')) {
+    class WC_Order {}
+}
+
+if (!class_exists('WC_Payment_Gateway')) {
+    class WC_Payment_Gateway {
+        protected array $settings = [];
+        public function get_option(string $key, $default = '') {
+            return $this->settings[$key] ?? $default;
+        }
+        public function get_return_url($order = null): string {
+            return 'https://shop.test/order-received';
+        }
+    }
+}
+
+if (!function_exists('WC')) {
+    function WC(): object {
+        return new class {
+            public object $cart;
+            public function __construct() {
+                $this->cart = new class {
+                    public bool $emptied = false;
+                    public function empty_cart(): void { $this->emptied = true; }
+                };
+            }
+        };
+    }
+}
+
 if (!function_exists('http_response_code')) {
     function http_response_code(int $code): void {
         // no-op in test context
@@ -92,7 +150,7 @@ if (!function_exists('http_response_code')) {
 
 if (!function_exists('wc_get_order')) {
     function wc_get_order(int $id): ?object {
-        return null;
+        return $GLOBALS['_test_order'] ?? null;
     }
 }
 
@@ -175,12 +233,17 @@ if (!function_exists('get_transient')) {
 }
 
 if (!class_exists('MockWCOrder')) {
-    class MockWCOrder {
+    class MockWCOrder extends WC_Order {
         private string $status         = 'pending';
         private array  $meta           = [];
         private array  $notes          = [];
         private bool   $payment_called = false;
         private string $payment_txn_id = '';
+        private string $total          = '49.99';
+        private string $currency       = 'USD';
+        private string $billing_email  = 'buyer@example.com';
+        private string $order_key      = 'order_key_42';
+        private string $payment_method = 'pinetree';
 
         public function get_status(): string { return $this->status; }
 
@@ -212,5 +275,10 @@ if (!class_exists('MockWCOrder')) {
         public function was_payment_complete_called(): bool { return $this->payment_called; }
         public function get_payment_txn_id(): string        { return $this->payment_txn_id; }
         public function get_notes(): array                  { return $this->notes; }
+        public function get_total(): string                 { return $this->total; }
+        public function get_currency(): string              { return $this->currency; }
+        public function get_billing_email(): string         { return $this->billing_email; }
+        public function get_order_key(): string             { return $this->order_key; }
+        public function get_payment_method(): string        { return $this->payment_method; }
     }
 }

@@ -12,7 +12,7 @@
  */
 
 import { execFileSync } from "node:child_process"
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { resolve, join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -35,27 +35,6 @@ function pass(msg) {
 function fail(msg) {
   console.error(`    FAIL  ${msg}`)
   failCount++
-}
-
-function run(label, cmd, args, opts = {}) {
-  step(label)
-  if (dryRun) {
-    console.log(`    DRY RUN: ${cmd} ${args.join(" ")}`)
-    return ""
-  }
-  try {
-    const out = execFileSync(cmd, args, {
-      encoding: "utf8",
-      cwd: opts.cwd ?? repoRoot,
-      stdio: ["pipe", "pipe", "pipe"],
-    })
-    if (out.trim()) process.stdout.write("    " + out.trim().replace(/\n/g, "\n    ") + "\n")
-    return out
-  } catch (err) {
-    const msg = (err.stdout ?? "") + (err.stderr ?? "") || err.message
-    fail(msg.trim())
-    return null
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +148,60 @@ if (dryRun) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. PHP test suite
+// 4. Static simulated-integration wiring checks
+// ---------------------------------------------------------------------------
+
+step("Static simulated-integration wiring checks")
+
+const gatewaySource = readFileSync(join(pluginDir, "includes", "class-pinetree-gateway.php"), "utf8")
+const webhookSource = readFileSync(join(pluginDir, "includes", "class-pinetree-webhook.php"), "utf8")
+const adminSource = readFileSync(join(pluginDir, "includes", "class-pinetree-admin.php"), "utf8")
+const runnerSource = readFileSync(join(pluginDir, "tests", "run.php"), "utf8")
+const webhookTestSource = readFileSync(join(pluginDir, "tests", "PineTreeWebhookTest.php"), "utf8")
+const integrationTestSource = readFileSync(join(pluginDir, "tests", "PineTreeIntegrationSmokeTest.php"), "utf8")
+
+const REQUIRED_WIRING = [
+  [gatewaySource, "process_payment", "gateway checkout hook"],
+  [gatewaySource, "create_checkout_session", "checkout session creation"],
+  [gatewaySource, "checkoutUrl", "hosted checkout redirect"],
+  [gatewaySource, "protected function create_api", "gateway API injection seam"],
+  [webhookSource, "verify_and_parse", "signed webhook verification"],
+  [webhookSource, "_pinetree_processed_event_ids", "duplicate webhook suppression"],
+  [adminSource, "handle_sync_action", "manual status sync"],
+  [adminSource, "protected function create_api", "admin API injection seam"],
+  [runnerSource, "PineTreeIntegrationSmokeTest.php", "integration smoke suite registration"],
+  [webhookTestSource, "test_dispatch_paid_calls_payment_complete", "signed paid-webhook smoke"],
+  [webhookTestSource, "test_duplicate_event_id_is_ignored", "duplicate webhook smoke"],
+  [integrationTestSource, "test_gateway_creates_session_and_returns_checkout_redirect", "gateway redirect smoke"],
+  [integrationTestSource, "test_manual_sync_updates_order_from_mocked_session", "manual sync smoke"],
+]
+
+let wiringClean = true
+for (const [source, needle, label] of REQUIRED_WIRING) {
+  if (!source.includes(needle)) {
+    fail(`Missing ${label}: expected ${needle}`)
+    wiringClean = false
+  }
+}
+
+const unsafeStatusOutput = [
+  /echo\s+\$api_key\s*;/i,
+  /echo\s+\$wh_secret\s*;/i,
+  /printf\s*\([^;]*,\s*\$api_key\s*\)/i,
+  /printf\s*\([^;]*,\s*\$wh_secret\s*\)/i,
+].some((pattern) => pattern.test(adminSource))
+
+if (unsafeStatusOutput) {
+  fail("Admin/status output may expose a secret value")
+  wiringClean = false
+}
+
+if (wiringClean) {
+  pass("Checkout, redirect, signed webhook, idempotency, manual sync, and secret-safe status wiring found")
+}
+
+// ---------------------------------------------------------------------------
+// 5. PHP test suite
 // ---------------------------------------------------------------------------
 
 const testRunnerPath = join(pluginDir, "tests", "run.php")
