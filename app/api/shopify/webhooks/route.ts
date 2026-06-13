@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { verifyShopifyWebhook } from "@/integrations/shopify/lib/hmac"
 import type { ShopifyWebhookTopic } from "@/integrations/shopify/lib/config"
+import { markShopifyConnectionUninstalled } from "@/database/shopifyConnections"
 
 // POST /api/shopify/webhooks
 //
@@ -56,29 +57,26 @@ export async function POST(req: NextRequest) {
   return new NextResponse(null, { status: 200 })
 }
 
-// ── Stub handlers — wire to PineTree checkout session logic ──────────────────
+// Shopify order state is not authoritative for PineTree payment state.
 
 async function handleOrderPaid(shop: string, payload: unknown): Promise<void> {
-  // TODO: look up the PineTree checkout session by shopify_order_id from
-  // payload, then mark the session as paid if still in a pending state.
+  // Acknowledge safely; PineTree's signed payment webhooks drive fulfillment.
   void shop
   void payload
 }
 
 async function handleOrderCancelled(shop: string, payload: unknown): Promise<void> {
-  // TODO: look up the PineTree checkout session and mark as cancelled.
+  // Acknowledge safely without mutating PineTree payment state.
   void shop
   void payload
 }
 
 async function handleOrderUpdated(shop: string, payload: unknown): Promise<void> {
-  // TODO: sync status changes that PineTree should reflect (e.g., refunded).
+  // Acknowledge safely without mutating PineTree payment state.
   void shop
   void payload
 }
 
 async function handleAppUninstalled(shop: string): Promise<void> {
-  // TODO: update shopify_connections set status = 'uninstalled',
-  //       uninstalled_at = now() where shop = $1 and status = 'active'
-  void shop
+  await markShopifyConnectionUninstalled(shop)
 }

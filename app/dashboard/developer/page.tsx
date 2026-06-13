@@ -164,29 +164,29 @@ function SdkCards() {
   const cards = [
     {
       title: "REST API",
-      status: "Live",
+      status: "Ready",
       tone: "green" as const,
       purpose: "Create and manage checkout sessions directly over HTTP.",
       setup: "Use Authorization: Bearer pt_live_* with /api/v1.",
     },
     {
       title: "Node SDK",
-      status: "Private Beta",
-      tone: "amber" as const,
+      status: "Ready",
+      tone: "green" as const,
       purpose: "Server-side checkout sessions, payments, and webhook verification.",
       setup: "Package: @pinetree/node",
     },
     {
       title: "JavaScript SDK",
-      status: "Preview",
-      tone: "blue" as const,
+      status: "Ready",
+      tone: "green" as const,
       purpose: "Open hosted checkout from browser applications with a public key.",
       setup: "Package: @pinetree/js",
     },
     {
       title: "React SDK",
-      status: "Private Beta",
-      tone: "blue" as const,
+      status: "Ready",
+      tone: "green" as const,
       purpose: "React provider, hooks, checkout button, and embedded checkout.",
       setup: "Package: @pinetree/react",
     },
@@ -194,6 +194,9 @@ function SdkCards() {
 
   return (
     <DashboardSection title="SDKs & API" titleTone="blue">
+      <div className="mb-3 rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-sm text-gray-700">
+        Packages are ready for release; npm publication pending.
+      </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {cards.map((card) => (
           <details key={card.title} className="group rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
@@ -224,8 +227,9 @@ function IntegrationCards() {
         <IntegrationCard
           title="WooCommerce"
           description="Accept PineTree payments in WooCommerce stores."
-          status="Private Beta"
+          status="Ready for install testing"
           tone="blue"
+          note="Requires WordPress/WooCommerce environment for live validation."
         />
         <ShopifyIntegrationCard />
       </div>
@@ -238,11 +242,13 @@ function IntegrationCard({
   description,
   status,
   tone,
+  note,
 }: {
   title: string
   description: string
   status: string
   tone: "blue" | "slate" | "amber"
+  note?: string
 }) {
   return (
     <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
@@ -250,6 +256,7 @@ function IntegrationCard({
         <div>
           <h2 className="text-sm font-semibold text-gray-950">{title}</h2>
           <p className="mt-1 text-xs leading-5 text-gray-500">{description}</p>
+          {note && <p className="mt-2 text-xs leading-5 text-gray-500">{note}</p>}
         </div>
         <ProviderStatusPill label={status} tone={tone} />
       </div>
@@ -264,18 +271,16 @@ function ShopifyIntegrationCard() {
     "CSRF state cookie verification in callback",
     "AES-256-GCM token encryption utility",
     "Authorization code → access token exchange",
-    "Webhook receiver with topic dispatch stubs",
+    "Signed webhook receiver and uninstall cleanup",
     "Database migration (shopify_connections)",
-    "Safe disconnect route stub",
-    "Connection status route stub",
+    "Merchant-scoped safe disconnect",
+    "Database-backed connection status",
   ]
   const required = [
-    "Merchant session lookup in OAuth callback",
-    "Actual DB persistence (shopify_connections INSERT)",
-    "Webhook handlers → checkout session status updates",
-    "Merchant API key injection in /api/shopify/session",
-    "Shopify checkout extension (storefront-side component)",
-    "End-to-end private install test with a real Shopify store",
+    "Create and configure the Shopify app credentials",
+    "Bind OAuth installation to the signed-in PineTree merchant",
+    "Shopify storefront/payment extension",
+    "Private install test with a real Shopify store",
   ]
 
   return (
@@ -285,10 +290,10 @@ function ShopifyIntegrationCard() {
           <div>
             <h2 className="text-sm font-semibold text-gray-950">Shopify</h2>
             <p className="mt-1 text-xs leading-5 text-gray-500">
-              Private OAuth app foundation — not yet end-to-end usable.
+              Connection storage and checkout wiring are implemented; Shopify app setup is still required.
             </p>
           </div>
-          <ProviderStatusPill label="Foundation" tone="amber" />
+          <ProviderStatusPill label="Requires Shopify setup" tone="amber" />
         </div>
         <span className="mt-3 inline-flex text-xs font-semibold text-blue-700 group-open:hidden">
           View status
@@ -308,7 +313,7 @@ function ShopifyIntegrationCard() {
           </ul>
         </div>
         <div>
-          <p className="mb-1.5 text-xs font-semibold text-gray-700">Required before Private Beta</p>
+          <p className="mb-1.5 text-xs font-semibold text-gray-700">Remaining setup</p>
           <ul className="space-y-1">
             {required.map((item) => (
               <li key={item} className="flex items-start gap-2 text-xs text-gray-500">
