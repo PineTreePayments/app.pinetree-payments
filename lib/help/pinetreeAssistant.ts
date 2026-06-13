@@ -581,7 +581,7 @@ function withContextAnswer(
       title: "Developer and API setup",
       body: "PineTree API support is for server-side checkout sessions, payment links, API keys, and webhooks. Keep API keys and webhook secrets out of frontend code and support messages.",
       bullets: [
-        "Use Online Checkout for API keys and webhook configuration.",
+        "Use Developer for API keys and webhook configuration.",
         "Verify state from PineTree rather than trusting a browser redirect alone.",
         "For API support, include endpoint, request time, payment ID if relevant, and response error without secrets."
       ]

@@ -115,7 +115,16 @@ export default function DashboardLayout({
   const nav = [
     { name: "Overview", href: "/dashboard" },
     { name: "POS", href: "/dashboard/pos" },
-    { name: "Online Checkout", href: "/dashboard/checkout" },
+    {
+      name: "Online Checkout",
+      href: "/dashboard/checkout",
+      description: "Create payment links and checkout buttons for customers.",
+    },
+    {
+      name: "Developer",
+      href: "/dashboard/developer",
+      description: "API keys, webhooks, SDKs, and integrations.",
+    },
     { name: "Transactions", href: "/dashboard/transactions" },
     { name: "Reports", href: "/dashboard/reports" },
     { name: "Wallets", href: "/dashboard/wallets" },
@@ -181,7 +190,14 @@ export default function DashboardLayout({
                       : "text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus-visible:bg-blue-50/70 focus-visible:text-blue-700"
                   }`}
                 >
-                  {item.name}
+                  <span className="block">{item.name}</span>
+                  {"description" in item && item.description && (
+                    <span className={`mt-0.5 block text-xs font-normal leading-snug ${
+                      active ? "text-blue-500" : "text-gray-400"
+                    }`}>
+                      {item.description}
+                    </span>
+                  )}
                 </Link>
               )
             })}

@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
@@ -34,6 +35,7 @@ type CheckoutLink = {
 
 type Expiration = "never" | "24h" | "7d" | "30d"
 type Tab = "links" | "integration" | "webhooks" | "developer"
+type WorkspaceMode = "merchant" | "developer"
 
 type OnlineStats = {
   totalPayments: number
@@ -415,12 +417,22 @@ const API_ROUTE_CATEGORIES: ApiCategory[] = [
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function OnlineCheckoutPage() {
+  return <CheckoutWorkspace mode="merchant" />
+}
+
+export function CheckoutWorkspace({
+  mode,
+  showHeader = true,
+}: {
+  mode: WorkspaceMode
+  showHeader?: boolean
+}) {
   const [links, setLinks] = useState<CheckoutLink[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [disablingId, setDisablingId] = useState<string | null>(null)
-  const [tab, setTab] = useState<Tab>("links")
+  const [tab, setTab] = useState<Tab>(mode === "merchant" ? "links" : "developer")
   const [merchantId, setMerchantId] = useState("")
   const [copiedField, setCopiedField] = useState<string | null>(null)
 
@@ -593,9 +605,10 @@ export default function OnlineCheckoutPage() {
   }, [getToken])
 
   useEffect(() => {
+    if (mode !== "merchant") return
     void fetchLinks()
     void fetchStats()
-  }, [fetchLinks, fetchStats])
+  }, [mode, fetchLinks, fetchStats])
 
   useEffect(() => {
     if (tab === "webhooks") {
@@ -1121,12 +1134,17 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
     "w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 outline-none focus:border-[#0052FF] focus:ring-2 focus:ring-[#0052FF]/10"
   const labelClass = "text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-500"
 
-  const TABS: { id: Tab; label: string }[] = [
-    { id: "links", label: "Payment Links" },
-    { id: "integration", label: "Integration" },
-    { id: "webhooks", label: "Webhooks" },
-    { id: "developer", label: "Developer" },
-  ]
+  const TABS: { id: Tab; label: string }[] =
+    mode === "merchant"
+      ? [
+          { id: "links", label: "Payment Links" },
+          { id: "integration", label: "Checkout Buttons" },
+        ]
+      : [
+          { id: "developer", label: "API Keys & Test Tools" },
+          { id: "webhooks", label: "Webhooks" },
+          { id: "integration", label: "Integration Setup" },
+        ]
 
   const INTEGRATION_OPTIONS: IntegrationOption[] = [
     {
@@ -1194,19 +1212,45 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
 
   function handleIntegrationAction(id: string) {
     if (id === "hosted-link") { setTab("links"); return }
+    if (mode === "merchant" && id === "html-button") { setTab("links"); return }
     if (id === "js-session" || id === "html-button" || id === "rest-api" || id === "react-sdk") { setTab("developer"); return }
   }
+
+  const visibleIntegrationOptions =
+    mode === "merchant"
+      ? INTEGRATION_OPTIONS
+          .filter((option) => option.id === "hosted-link" || option.id === "html-button")
+          .map((option) =>
+            option.id === "html-button"
+              ? {
+                  ...option,
+                  description: "Use any active payment link as the destination for a customer-facing Pay with Crypto button.",
+                  action: "Choose a Payment Link",
+                }
+              : option
+          )
+      : INTEGRATION_OPTIONS.filter((option) => option.id !== "hosted-link" && option.id !== "html-button")
 
   return (
     <div className="space-y-6 md:space-y-8">
 
       {/* ── Page header ───────────────────────────────────────────────────── */}
-      <div>
-        <h1 className={dashboardPageTitleClass}>Online Payments</h1>
-      </div>
+      {showHeader && (
+        <div>
+          <h1 className={dashboardPageTitleClass}>
+            {mode === "merchant" ? "Online Checkout" : "Developer"}
+          </h1>
+          <p className="mt-2 text-sm text-gray-500">
+            {mode === "merchant"
+              ? "Create hosted payment links and customer checkout buttons."
+              : "Manage API keys, webhooks, SDKs, and platform integrations."}
+          </p>
+        </div>
+      )}
 
       {/* ── Summary metrics ──────────────────────────────────────────────── */}
-      <GroupedMetricSurface className="bg-gradient-to-br from-blue-50/70 via-white to-emerald-50/40">
+      {mode === "merchant" && (
+        <GroupedMetricSurface className="bg-gradient-to-br from-blue-50/70 via-white to-emerald-50/40">
         <div className="grid grid-cols-2 gap-y-4 sm:grid-cols-4 sm:divide-x sm:divide-gray-200">
           <InlineMetric
             label="Active Links"
@@ -1229,8 +1273,9 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
             className="sm:px-4 sm:last:pr-0"
           />
         </div>
-      </GroupedMetricSurface>
-      {statsError && (
+        </GroupedMetricSurface>
+      )}
+      {mode === "merchant" && statsError && (
         <p className="text-xs text-red-500">
           Could not load checkout stats.{" "}
           <button type="button" onClick={() => void fetchStats()} className="underline">Retry</button>
@@ -1239,7 +1284,9 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
 
       {/* ── Tab bar ──────────────────────────────────────────────────────── */}
       <div className="w-full max-w-full">
-        <div className="grid max-w-full grid-cols-2 gap-1 rounded-2xl border border-gray-200/80 bg-white/90 p-1.5 shadow-[0_8px_24px_rgba(15,23,42,0.06)] backdrop-blur-sm sm:inline-grid sm:w-auto sm:grid-cols-4">
+        <div className={`grid max-w-full grid-cols-2 gap-1 rounded-2xl border border-gray-200/80 bg-white/90 p-1.5 shadow-[0_8px_24px_rgba(15,23,42,0.06)] backdrop-blur-sm sm:inline-grid sm:w-auto ${
+          mode === "merchant" ? "sm:grid-cols-2" : "sm:grid-cols-3"
+        }`}>
           {TABS.map((t) => (
             <button
               key={t.id}
@@ -1260,7 +1307,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {/* PAYMENT LINKS TAB                                                  */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
-      {tab === "links" && (
+      {mode === "merchant" && tab === "links" && (
         <>
           <DashboardSection title="New Payment Link" titleTone="blue">
             <div className="rounded-2xl border border-gray-200/80 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-6">
@@ -1323,7 +1370,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
             </div>
           </DashboardSection>
 
-          <DashboardSection title="Your Payment Links" titleTone="blue">
+          <DashboardSection title="Payment Links & Recent Checkout Activity" titleTone="blue">
             {loading ? (
               <div className="rounded-2xl border border-gray-200/80 bg-white p-8 shadow-[0_10px_30px_rgba(15,23,42,0.05)] text-center">
                 <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
@@ -1427,14 +1474,44 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {tab === "integration" && (
         <div className="space-y-6">
-          <DashboardSection title="Integration Options" titleTone="blue">
+          <DashboardSection title={mode === "merchant" ? "Customer Checkout Options" : "Integration Options"} titleTone="blue">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {INTEGRATION_OPTIONS.map((opt) => (
+              {visibleIntegrationOptions.map((opt) => (
                 <IntegrationCard key={opt.id} option={opt} onAction={handleIntegrationAction} />
               ))}
             </div>
           </DashboardSection>
 
+          {mode === "merchant" && (
+            <>
+              <DashboardSection title="Simple Setup" titleTone="blue">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {[
+                    ["1", "Create a payment link", "Set the amount, customer details, and optional expiration."],
+                    ["2", "Share or add a button", "Send the hosted link or use it as the destination for a Pay with Crypto button."],
+                    ["3", "Track checkout activity", "Review active links, completed payments, volume, and checkout status above."],
+                  ].map(([step, title, description]) => (
+                    <div key={step} className="rounded-2xl border border-gray-200 bg-white p-4">
+                      <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-50 text-xs font-bold text-[#0052FF]">
+                        {step}
+                      </span>
+                      <h3 className="mt-3 text-sm font-semibold text-gray-900">{title}</h3>
+                      <p className="mt-1 text-xs leading-relaxed text-gray-500">{description}</p>
+                    </div>
+                  ))}
+                </div>
+              </DashboardSection>
+              <p className="text-sm text-gray-500">
+                Need API keys or webhooks?{" "}
+                <Link href="/dashboard/developer" className="font-semibold text-[#0052FF] hover:underline">
+                  Open Developer.
+                </Link>
+              </p>
+            </>
+          )}
+
+          {mode === "developer" && (
+            <>
           <DashboardSection title="Your Setup" titleTone="blue">
             <div className="space-y-2.5">
               {merchantId ? (
@@ -1462,21 +1539,23 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
               <code className="rounded bg-amber-100 px-1 font-mono text-[11px]">pt_live_...</code>{" "}
               API key in the{" "}
               <code className="rounded bg-amber-100 px-1 font-mono text-[11px]">Authorization: Bearer</code>{" "}
-              header. Create and manage keys in the{" "}
+              header. Create and manage keys in{" "}
               <button type="button" onClick={() => setTab("developer")}
                 className="font-semibold underline text-amber-800 hover:text-amber-900">
-                Developer tab
+                API Keys &amp; Test Tools
               </button>.{" "}
               Never expose API keys in frontend JavaScript — they must remain server-side only.
             </p>
           </div>
+            </>
+          )}
         </div>
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {/* WEBHOOKS TAB                                                       */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
-      {tab === "webhooks" && (
+      {mode === "developer" && tab === "webhooks" && (
         <div className="space-y-6">
           <div className="rounded-2xl border border-gray-200/80 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-6">
             <div className="mb-5 flex items-start justify-between gap-3">
@@ -1791,7 +1870,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {/* DEVELOPER TAB                                                      */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
-      {tab === "developer" && (
+      {mode === "developer" && tab === "developer" && (
         <div className="space-y-6">
 
           <DashboardSection title="v1 Quick Start" titleTone="blue">
@@ -2159,10 +2238,12 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       )}
 
       {/* ── PineTree Insights ─────────────────────────────────────────────── */}
-      <PineTreeInsightsCard
-        insights={insights}
-        emptyText="Insights will appear once payment links are created and payments begin."
-      />
+      {mode === "merchant" && (
+        <PineTreeInsightsCard
+          insights={insights.filter((insight) => !insight.toLowerCase().includes("webhook"))}
+          emptyText="Insights will appear once payment links are created and payments begin."
+        />
+      )}
     </div>
   )
 }

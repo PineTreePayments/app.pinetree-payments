@@ -46,7 +46,7 @@ export const helpArticles: HelpArticle[] = [
     title: "Dashboard overview",
     category: "Getting Started",
     description: "The dashboard groups payment operations into POS, checkout, transactions, reports, wallets, providers, settings, and help.",
-    body: "The PineTree dashboard is organized by workflow. POS is for in-person terminal setup and checkout. Online Checkout is for payment links, checkout sessions, webhooks, and API keys. Transactions shows ledger activity, filters, and channel mix. Reports creates PDF or CSV exports. Wallets shows connected wallet and payment-account balances. Providers is where payment rails are configured.\n\nWhat this means: Most merchant tasks start from one of those sections rather than from a hidden settings page.\n\nWhat to check: If a payment method is not showing up, start with Providers. If a balance is missing, start with Wallets. If a payment happened but numbers look off, start with Transactions and Reports.",
+    body: "The PineTree dashboard is organized by workflow. POS is for in-person terminal setup and checkout. Online Checkout is for payment links and customer checkout buttons. Developer is for API keys, webhooks, SDKs, and integrations. Transactions shows ledger activity, filters, and channel mix. Reports creates PDF or CSV exports. Wallets shows connected wallet and payment-account balances. Providers is where payment rails are configured.\n\nWhat this means: Most merchant tasks start from one of those sections rather than from a hidden settings page.\n\nWhat to check: If a payment method is not showing up, start with Providers. If a balance is missing, start with Wallets. If a payment happened but numbers look off, start with Transactions and Reports.",
     tags: ["dashboard", "navigation", "overview"],
     keywords: ["sidebar", "overview", "reports", "transactions"]
   },
@@ -378,8 +378,8 @@ export const helpArticles: HelpArticle[] = [
     id: "api-keys",
     title: "API keys",
     category: "Developer/API",
-    description: "Online Checkout includes API key creation, listing, and revocation for server-side integrations.",
-    body: "The Online Checkout developer area can create API keys, list existing keys by prefix, show created time and last used time, and revoke keys. Newly created keys are shown once for copying.\n\nWhat this means: API keys are for server-side use. Do not put live keys in frontend code.\n\nWhat to check: Key name, prefix, permissions, last used time, and whether a key has been revoked.",
+    description: "Developer includes API key creation, listing, and revocation for server-side integrations.",
+    body: "The Developer page can create API keys, list existing keys by prefix, show created time and last used time, and revoke keys. Newly created keys are shown once for copying.\n\nWhat this means: API keys are for server-side use. Do not put live keys in frontend code.\n\nWhat to check: Key name, prefix, permissions, last used time, and whether a key has been revoked.",
     tags: ["api keys", "developer", "security"],
     keywords: ["pt_live", "server side", "revoke"]
   },
@@ -388,7 +388,7 @@ export const helpArticles: HelpArticle[] = [
     title: "Payment links and checkout session API",
     category: "Developer/API",
     description: "The app includes payment link endpoints and a checkout session preview endpoint.",
-    body: "Online Checkout lists payment-link endpoints for creating, listing, and disabling links. It also includes a preview checkout session endpoint for server-side session creation and redirecting customers to a PineTree checkout URL.\n\nWhat this means: Static links are useful for fixed offers. Dynamic checkout sessions are better when your backend creates a payment for a specific order.\n\nWhat to check: Amount, currency, checkout URL, token, success URL, cancel URL, and whether your backend keeps API keys secret.",
+    body: "Developer lists payment-link endpoints for creating, listing, and disabling links. It also includes the checkout session endpoint for server-side session creation and redirecting customers to a PineTree checkout URL.\n\nWhat this means: Static links are useful for fixed offers. Dynamic checkout sessions are better when your backend creates a payment for a specific order.\n\nWhat to check: Amount, currency, checkout URL, token, success URL, cancel URL, and whether your backend keeps API keys secret.",
     tags: ["payment links", "checkout session", "api"],
     keywords: ["/api/checkout/session", "/api/checkout-links", "token"]
   },
@@ -396,8 +396,8 @@ export const helpArticles: HelpArticle[] = [
     id: "webhooks",
     title: "Webhooks",
     category: "Developer/API",
-    description: "Online Checkout includes merchant webhook configuration and delivery history views.",
-    body: "The Online Checkout page can configure a webhook URL and selected events such as payment.confirmed, payment.failed, payment.incomplete, and checkout.session.created. It also shows webhook delivery history when available.\n\nWhat this means: Webhooks let your backend react to PineTree events, but your system should still verify state from PineTree instead of trusting a single delivery blindly.\n\nWhat to check: Webhook URL, enabled events, secret handling, delivery status, response status, and attempt count.",
+    description: "Developer includes merchant webhook configuration and delivery history views.",
+    body: "The Developer page can configure a webhook URL and selected events such as payment.confirmed, payment.failed, payment.incomplete, and checkout.session.created. It also shows webhook delivery history when available.\n\nWhat this means: Webhooks let your backend react to PineTree events, but your system should still verify state from PineTree instead of trusting a single delivery blindly.\n\nWhat to check: Webhook URL, enabled events, secret handling, delivery status, response status, and attempt count.",
     tags: ["webhooks", "events", "developer"],
     keywords: ["payment.confirmed", "payment.failed", "deliveries"]
   },

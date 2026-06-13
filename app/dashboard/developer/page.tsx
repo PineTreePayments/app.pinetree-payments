@@ -1,7 +1,6 @@
 import {
   DashboardSection,
   dashboardPageTitleClass,
-  dashboardSectionLabelClass,
   dashboardSupportingTextClass,
 } from "@/components/dashboard/DashboardPrimitives"
 import {
@@ -9,6 +8,8 @@ import {
   Package,
   ShoppingCart,
 } from "lucide-react"
+import { CheckoutWorkspace } from "../checkout/page"
+import PublicKeysPanel from "./PublicKeysPanel"
 
 function StatusBadge({
   label,
@@ -96,15 +97,16 @@ export default function DeveloperPage() {
   return (
     <div className="space-y-10 px-4 py-8 md:px-8">
       <div>
-        <p className={dashboardSectionLabelClass}>Developer</p>
-        <h1 className={`mt-1 ${dashboardPageTitleClass}`}>API &amp; SDK Reference</h1>
+        <h1 className={dashboardPageTitleClass}>Developer</h1>
         <p className={`mt-2 max-w-2xl ${dashboardSupportingTextClass}`}>
-          Integrate PineTree payments using the stable v1 REST contract and
-          private SDK release candidates. Packages are not published to npm yet.
+          Manage API keys, webhooks, SDKs, and platform integrations.
         </p>
       </div>
 
-      <DashboardSection eyebrow="Release Candidate" title="Developer Stack Status">
+      <CheckoutWorkspace mode="developer" showHeader={false} />
+      <PublicKeysPanel />
+
+      <DashboardSection eyebrow="Platform" title="API Status & Configuration">
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {[
             ["API", "/api/v1", "Release candidate"],
@@ -112,7 +114,7 @@ export default function DeveloperPage() {
             ["JavaScript SDK", "@pinetree/js", "Preview"],
             ["React SDK", "@pinetree/react", "Private Beta"],
             ["npm publish", "All SDK packages", "Not yet public"],
-            ["WooCommerce", "Plugin", "Coming Soon"],
+            ["WooCommerce", "Plugin", "Private Beta"],
             ["Shopify", "Plugin", "Coming Soon"],
           ].map(([title, detail, status]) => (
             <div key={title} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
@@ -758,8 +760,8 @@ npm run test:integration:local --workspace packages/pinetree-node`}
         </div>
       </DashboardSection>
 
-      {/* Coming Soon */}
-      <DashboardSection eyebrow="Roadmap" title="Coming Soon">
+      {/* Platform integrations */}
+      <DashboardSection eyebrow="Integrations" title="Commerce Platforms">
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {[
             {
@@ -767,22 +769,26 @@ npm run test:integration:local --workspace packages/pinetree-node`}
               title: "WooCommerce Plugin",
               description:
                 "Accept crypto payments directly in WooCommerce stores with no custom code.",
+              status: "Private Beta",
+              statusColor: "blue" as const,
             },
             {
               icon: ShoppingCart,
               title: "Shopify Plugin",
               description:
                 "Native Shopify checkout integration for PineTree payment rails.",
+              status: "Coming Soon",
+              statusColor: "gray" as const,
             },
-          ].map(({ icon: Icon, title, description }) => (
+          ].map(({ icon: Icon, title, description, status, statusColor }) => (
             <div
               key={title}
-              className="rounded-xl border border-gray-200 bg-gray-50 p-5 opacity-60"
+              className="rounded-xl border border-gray-200 bg-gray-50 p-5"
             >
               <div className="mb-3 flex items-center gap-2.5">
                 <Icon className="h-5 w-5 text-gray-400" />
                 <span className="text-sm font-semibold text-gray-500">{title}</span>
-                <StatusBadge label="Coming Soon" color="gray" />
+                <StatusBadge label={status} color={statusColor} />
               </div>
               <p className="text-xs leading-relaxed text-gray-400">{description}</p>
             </div>
