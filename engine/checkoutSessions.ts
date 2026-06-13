@@ -1,6 +1,7 @@
 import { createCheckoutLinkEngine } from "./checkoutLinks"
 import type { CheckoutLinkWithUrl } from "./checkoutLinks"
 import { deliverWebhook, type WebhookPaymentData } from "./webhookDelivery"
+import { toPublicCheckoutSessionMetadata } from "./checkoutSessionMetadata"
 
 export type CreateCheckoutSessionInput = {
   merchantId: string
@@ -12,6 +13,7 @@ export type CreateCheckoutSessionInput = {
   successUrl?: string
   cancelUrl?: string
   metadata?: Record<string, unknown>
+  emitLegacyWebhook?: boolean
 }
 
 export type CheckoutSession = {
@@ -66,7 +68,7 @@ export async function createCheckoutSessionEngine(
     expiration: "24h",
     successUrl: input.successUrl,
     cancelUrl: input.cancelUrl,
-    metadata: sessionMetadata,
+      metadata: sessionMetadata,
   })
 
   // Fire checkout.session.created webhook — fire-and-forget, non-blocking
@@ -78,11 +80,13 @@ export async function createCheckoutSessionEngine(
     status: "active",
     reference: input.orderId,
     checkoutLinkId: link.id,
-    metadata: sessionMetadata,
+      metadata: toPublicCheckoutSessionMetadata(sessionMetadata),
   }
-  void deliverWebhook(merchantId, "checkout.session.created", webhookData).catch((err) => {
-    console.error("[webhook] checkout.session.created delivery failed:", err)
-  })
+  if (input.emitLegacyWebhook !== false) {
+    void deliverWebhook(merchantId, "checkout.session.created", webhookData).catch((err) => {
+      console.error("[webhook] checkout.session.created delivery failed:", err)
+    })
+  }
 
   return {
     sessionId: link.id,

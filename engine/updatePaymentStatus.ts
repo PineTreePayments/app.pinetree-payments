@@ -28,6 +28,8 @@ import {
   isExplicitUnpaidInvoiceExpiry,
   paymentHasProcessingEvidence
 } from "./paymentEvidence"
+import { toPublicCheckoutSessionMetadata } from "./checkoutSessionMetadata"
+import { deliverV1CheckoutSessionWebhook } from "./webhookDelivery"
 
 const STATUS_TO_WEBHOOK_EVENT: Partial<Record<PaymentStatus, WebhookEvent>> = {
   CONFIRMED: "payment.confirmed",
@@ -162,12 +164,40 @@ export async function updatePaymentStatus(
       reference: String(meta?.reference || "").trim() || undefined,
       checkoutLinkId: String(meta?.checkoutLinkId || "").trim() || undefined,
       confirmedAt: nextStatus === "CONFIRMED" ? new Date().toISOString() : undefined,
-      metadata: meta ?? undefined,
+      metadata: meta ? toPublicCheckoutSessionMetadata(meta) : undefined,
     }
 
     void deliverWebhook(payment.merchant_id, webhookEvent, webhookData).catch((err) => {
       console.error("[webhook] delivery failed after status update:", err)
     })
+
+  }
+
+  const paymentMetadata = (payment.metadata ?? null) as Record<string, unknown> | null
+  const checkoutLinkId = String(paymentMetadata?.checkoutLinkId || "").trim()
+  const v1Event =
+    nextStatus === "PROCESSING"
+      ? "checkout.session.processing"
+      : nextStatus === "CONFIRMED"
+        ? "checkout.session.paid"
+        : nextStatus === "FAILED"
+          ? "checkout.session.failed"
+          : nextStatus === "INCOMPLETE"
+            ? "checkout.session.canceled"
+            : null
+  if (checkoutLinkId && v1Event) {
+    void import("./publicCheckoutSessions")
+      .then(({ getPublicCheckoutSession }) =>
+        getPublicCheckoutSession(payment.merchant_id, checkoutLinkId)
+      )
+      .then((session) =>
+        session
+          ? deliverV1CheckoutSessionWebhook(payment.merchant_id, v1Event, session)
+          : undefined
+      )
+      .catch((err) => {
+        console.error("[webhook] v1 checkout status delivery failed:", err)
+      })
   }
 
   return updatedPayment

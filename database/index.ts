@@ -18,6 +18,7 @@ export * from "./paymentMaintenance"
 
 // Idempotency
 export * from "./idempotency"
+export * from "./apiIdempotencyClaims"
 
 // Merchants
 export * from "./merchants"

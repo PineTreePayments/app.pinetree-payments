@@ -14,6 +14,11 @@ const VALID_EVENTS: WebhookEvent[] = [
   "payment.failed",
   "payment.incomplete",
   "checkout.session.created",
+  "checkout.session.processing",
+  "checkout.session.paid",
+  "checkout.session.failed",
+  "checkout.session.expired",
+  "checkout.session.canceled",
 ]
 
 type UpsertBody = {

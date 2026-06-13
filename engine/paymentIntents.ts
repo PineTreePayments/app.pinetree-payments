@@ -44,7 +44,7 @@ function uniqueNetworks(networks: WalletNetwork[]) {
   return [...new Set(networks)]
 }
 
-function getLightningEstimatedSats(_metadata: unknown): number | undefined {
+function getLightningEstimatedSats(): number | undefined {
   // NWC invoices encode the sats amount in the invoice itself — no provider metadata needed.
   return undefined
 }
@@ -244,6 +244,7 @@ export async function createPaymentIntentEngine(input: {
   currency: string
   terminalId?: string
   metadata?: Record<string, unknown>
+  allowedNetworks?: string[]
 }) {
   const merchantId = String(input.merchantId || "").trim()
   const amount = Number(input.amount || 0)
@@ -252,7 +253,13 @@ export async function createPaymentIntentEngine(input: {
   if (!merchantId) throw new Error("Missing merchant id")
   if (!amount || amount <= 0) throw new Error("Invalid payment amount")
 
-  const availableNetworks = await getMerchantAvailableNetworks(merchantId)
+  const merchantNetworks = await getMerchantAvailableNetworks(merchantId)
+  const allowedNetworks = Array.isArray(input.allowedNetworks)
+    ? new Set(input.allowedNetworks.map((network) => String(network).toLowerCase().trim()))
+    : null
+  const availableNetworks = allowedNetworks
+    ? merchantNetworks.filter((network) => allowedNetworks.has(network))
+    : merchantNetworks
   if (availableNetworks.length === 0) {
     throw new Error("No crypto payment methods are enabled for this merchant.")
   }
@@ -395,7 +402,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
         const reusePaymentUrl = String(existingPayment.payment_url || "").trim()
         const reuseWalletUrl = reusePaymentUrl
         const reuseEstimatedSats = normalizedNetwork === "bitcoin_lightning"
-          ? getLightningEstimatedSats(existingPayment.metadata)
+          ? getLightningEstimatedSats()
           : undefined
 
         console.info("[payment-intent] select-network:reuse-existing", {
@@ -510,7 +517,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
       : payment.baseUsdcStrategy
     const persistedSplitContract = String(persistedSplit?.splitContract || payment.address || "").trim() || undefined
     const estimatedSats = normalizedNetwork === "bitcoin_lightning"
-      ? getLightningEstimatedSats(persistedPayment.metadata)
+      ? getLightningEstimatedSats()
       : undefined
 
     return {

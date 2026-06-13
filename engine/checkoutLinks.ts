@@ -7,6 +7,7 @@ import {
   type CheckoutLinkStatus,
 } from "@/database/checkoutLinks"
 import { createPaymentIntentEngine } from "./paymentIntents"
+import { getRequestedCheckoutSessionRails } from "./checkoutSessionMetadata"
 
 const APP_URL = (() => {
   const u = process.env.NEXT_PUBLIC_APP_URL || ""
@@ -124,6 +125,8 @@ export async function resolveCheckoutLinkForCustomer(token: string): Promise<Res
 
   const successUrl = link.success_url || null
   const cancelUrl = link.cancel_url || null
+  const linkMetadata = (link.link_metadata || {}) as Record<string, unknown>
+  const requestedRails = getRequestedCheckoutSessionRails(linkMetadata)
 
   if (resolvedStatus !== "active") {
     return { link, resolvedStatus: resolvedStatus as "disabled" | "expired", intentId: null, successUrl, cancelUrl }
@@ -134,6 +137,7 @@ export async function resolveCheckoutLinkForCustomer(token: string): Promise<Res
     amount: link.amount,
     currency: link.currency,
     metadata: {
+      ...linkMetadata,
       checkoutLinkId: link.id,
       checkoutLinkName: link.name,
       customerEmail: link.customer_email || undefined,
@@ -142,6 +146,7 @@ export async function resolveCheckoutLinkForCustomer(token: string): Promise<Res
       successUrl: successUrl || undefined,
       cancelUrl: cancelUrl || undefined,
     },
+    allowedNetworks: requestedRails,
   })
 
   return { link, resolvedStatus: "active", intentId: intent.intentId, successUrl, cancelUrl }

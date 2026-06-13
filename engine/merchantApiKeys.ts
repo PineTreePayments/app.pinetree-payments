@@ -55,6 +55,9 @@ export type VerifiedApiKey = {
 
 const DEFAULT_PERMISSIONS: ApiKeyPermission[] = [
   "checkout.sessions:create",
+  "checkout.sessions:read",
+  "checkout.sessions:write",
+  "payments:read",
   "checkout.links:create",
   "webhooks:read",
   "webhooks:write",

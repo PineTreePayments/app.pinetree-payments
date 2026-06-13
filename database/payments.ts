@@ -337,3 +337,21 @@ export async function getMerchantDailyVolume(
     volume
   }))
 }
+
+export async function getPublicPaymentById(
+  paymentId: string,
+  merchantId: string
+): Promise<Pick<
+  Payment,
+  "id" | "merchant_amount" | "currency" | "status" | "network" | "metadata" | "created_at" | "updated_at"
+> | null> {
+  const { data, error } = await supabase
+    .from("payments")
+    .select("id, merchant_amount, currency, status, network, metadata, created_at, updated_at")
+    .eq("id", paymentId)
+    .eq("merchant_id", merchantId)
+    .maybeSingle()
+
+  if (error) throw new Error(`Failed to load payment: ${error.message}`)
+  return data ?? null
+}

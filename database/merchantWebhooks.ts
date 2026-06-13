@@ -7,6 +7,11 @@ export type WebhookEvent =
   | "payment.failed"
   | "payment.incomplete"
   | "checkout.session.created"
+  | "checkout.session.processing"
+  | "checkout.session.paid"
+  | "checkout.session.failed"
+  | "checkout.session.expired"
+  | "checkout.session.canceled"
 
 export type MerchantWebhook = {
   id: string
@@ -31,6 +36,11 @@ export type WebhookDelivery = {
   response_status: number | null
   response_body: string | null
   attempt_count: number
+  next_attempt_at: string | null
+  last_attempt_at: string | null
+  last_status_code: number | null
+  last_error: string | null
+  delivered_at: string | null
   created_at: string
   updated_at: string
 }
@@ -46,6 +56,21 @@ export async function getMerchantWebhook(merchantId: string): Promise<MerchantWe
 
   if (error) throw new Error(`Failed to fetch webhook config: ${error.message}`)
   return data as MerchantWebhook | null
+}
+
+export async function getMerchantWebhookById(
+  id: string,
+  merchantId: string
+): Promise<MerchantWebhook | null> {
+  const { data, error } = await supabase
+    .from("merchant_webhooks")
+    .select("*")
+    .eq("id", id)
+    .eq("merchant_id", merchantId)
+    .maybeSingle()
+
+  if (error) throw new Error(`Failed to fetch webhook config: ${error.message}`)
+  return (data ?? null) as MerchantWebhook | null
 }
 
 export async function upsertMerchantWebhook(input: {
@@ -125,8 +150,10 @@ export async function insertWebhookDelivery(input: {
   responseStatus: number | null
   responseBody: string | null
   attemptCount: number
-}): Promise<void> {
-  const { error } = await supabase.from("webhook_deliveries").insert({
+  lastError?: string | null
+}): Promise<WebhookDelivery | null> {
+  const now = new Date().toISOString()
+  const { data, error } = await supabase.from("webhook_deliveries").insert({
     id: crypto.randomUUID(),
     merchant_id: input.merchantId,
     webhook_id: input.webhookId,
@@ -136,9 +163,114 @@ export async function insertWebhookDelivery(input: {
     response_status: input.responseStatus,
     response_body: input.responseBody,
     attempt_count: input.attemptCount,
-  })
+    last_attempt_at: now,
+    last_status_code: input.responseStatus,
+    last_error: input.lastError ?? null,
+    delivered_at: input.status === "delivered" ? now : null,
+    next_attempt_at:
+      input.status === "failed"
+        ? new Date(Date.now() + 60_000).toISOString()
+        : null,
+  }).select().single()
 
   if (error) {
     console.error("[webhook] failed to log delivery:", error.message)
+    return null
   }
+  return data as WebhookDelivery
+}
+
+export async function getWebhookDeliveryById(
+  id: string,
+  merchantId: string
+): Promise<WebhookDelivery | null> {
+  const { data, error } = await supabase
+    .from("webhook_deliveries")
+    .select("*")
+    .eq("id", id)
+    .eq("merchant_id", merchantId)
+    .maybeSingle()
+
+  if (error) throw new Error(`Failed to load webhook delivery: ${error.message}`)
+  return (data ?? null) as WebhookDelivery | null
+}
+
+export async function updateWebhookDeliveryAttempt(input: {
+  id: string
+  merchantId: string
+  status: WebhookDeliveryStatus
+  responseStatus: number | null
+  responseBody: string | null
+  lastError: string | null
+  attemptCount: number
+}): Promise<WebhookDelivery> {
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from("webhook_deliveries")
+    .update({
+      status: input.status,
+      response_status: input.responseStatus,
+      response_body: input.responseBody,
+      attempt_count: input.attemptCount,
+      last_attempt_at: now,
+      last_status_code: input.responseStatus,
+      last_error: input.lastError,
+      delivered_at: input.status === "delivered" ? now : null,
+      next_attempt_at:
+        input.status === "failed"
+          ? new Date(Date.now() + Math.min(60 * 2 ** input.attemptCount, 3600) * 1000).toISOString()
+          : null,
+      updated_at: now,
+    })
+    .eq("id", input.id)
+    .eq("merchant_id", input.merchantId)
+    .select()
+    .single()
+
+  if (error) throw new Error(`Failed to update webhook delivery: ${error.message}`)
+  return data as WebhookDelivery
+}
+
+export async function listWebhookDeliveriesForPublicApi(input: {
+  merchantId: string
+  limit: number
+  cursor?: { createdAt: string; id: string }
+  status?: WebhookDeliveryStatus
+  eventType?: WebhookEvent
+}): Promise<WebhookDelivery[]> {
+  let query = supabase
+    .from("webhook_deliveries")
+    .select("*")
+    .eq("merchant_id", input.merchantId)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(input.limit)
+
+  if (input.status) query = query.eq("status", input.status)
+  if (input.eventType) query = query.eq("event", input.eventType)
+  if (input.cursor) {
+    query = query.or(
+      `created_at.lt.${input.cursor.createdAt},and(created_at.eq.${input.cursor.createdAt},id.lt.${input.cursor.id})`
+    )
+  }
+
+  const { data, error } = await query
+  if (error) throw new Error(`Failed to list webhook deliveries: ${error.message}`)
+  return (data ?? []) as WebhookDelivery[]
+}
+
+export async function listRetryEligibleWebhookDeliveries(
+  limit = 50,
+  now = new Date().toISOString()
+): Promise<WebhookDelivery[]> {
+  const { data, error } = await supabase
+    .from("webhook_deliveries")
+    .select("*")
+    .eq("status", "failed")
+    .lte("next_attempt_at", now)
+    .order("next_attempt_at", { ascending: true })
+    .limit(limit)
+
+  if (error) throw new Error(`Failed to list retryable webhook deliveries: ${error.message}`)
+  return (data ?? []) as WebhookDelivery[]
 }

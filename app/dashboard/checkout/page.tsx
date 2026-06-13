@@ -119,6 +119,11 @@ const ALL_WEBHOOK_EVENTS = [
   { id: "payment.failed", label: "payment.failed", description: "Fires when a payment fails or is rejected" },
   { id: "payment.incomplete", label: "payment.incomplete", description: "Fires when a payment is canceled mid-flow" },
   { id: "checkout.session.created", label: "checkout.session.created", description: "Fires when a new checkout session is created" },
+  { id: "checkout.session.processing", label: "checkout.session.processing", description: "Fires when session payment processing begins" },
+  { id: "checkout.session.paid", label: "checkout.session.paid", description: "Fires when the session payment is confirmed" },
+  { id: "checkout.session.failed", label: "checkout.session.failed", description: "Fires when the session payment fails" },
+  { id: "checkout.session.expired", label: "checkout.session.expired", description: "Fires when the session expires" },
+  { id: "checkout.session.canceled", label: "checkout.session.canceled", description: "Fires when the session is canceled" },
 ]
 
 const APP_BASE =
@@ -359,10 +364,19 @@ const API_ROUTE_CATEGORIES: ApiCategory[] = [
     ],
   },
   {
-    label: "Checkout Sessions",
+    label: "Checkout Sessions v1",
     routes: [
-      { method: "POST", path: "/api/checkout/session",             desc: "Create a checkout session", status: "Live" },
-      { method: "GET",  path: "/api/checkout/session/:sessionId",  desc: "Get session status",         status: "Live" },
+      { method: "POST", path: "/api/v1/checkout/sessions",            desc: "Create a checkout session", status: "Live" },
+      { method: "GET",  path: "/api/v1/checkout/sessions",            desc: "List and filter sessions",  status: "Live" },
+      { method: "GET",  path: "/api/v1/checkout/sessions/:id",        desc: "Retrieve a session",         status: "Live" },
+      { method: "POST", path: "/api/v1/checkout/sessions/:id/cancel", desc: "Cancel an open session",     status: "Live" },
+      { method: "POST", path: "/api/v1/checkout/sessions/:id/expire", desc: "Expire an open session",     status: "Live" },
+    ],
+  },
+  {
+    label: "Payments v1",
+    routes: [
+      { method: "GET", path: "/api/v1/payments/:id", desc: "Retrieve a public payment", status: "Live" },
     ],
   },
   {
@@ -379,6 +393,13 @@ const API_ROUTE_CATEGORIES: ApiCategory[] = [
       { method: "DELETE", path: "/api/merchant/webhooks",           desc: "Delete webhook config",     status: "Live" },
       { method: "POST",   path: "/api/merchant/webhooks/test",      desc: "Send test event",           status: "Live" },
       { method: "GET",    path: "/api/merchant/webhook-deliveries", desc: "Delivery history",          status: "Live" },
+    ],
+  },
+  {
+    label: "Webhook Deliveries v1",
+    routes: [
+      { method: "GET", path: "/api/v1/webhook-deliveries", desc: "List delivery attempts", status: "Live" },
+      { method: "POST", path: "/api/v1/webhook-deliveries/:id/retry", desc: "Retry a delivery", status: "Live" },
     ],
   },
   {
@@ -943,7 +964,7 @@ export default function OnlineCheckoutPage() {
   }
 
   // ── Snippet content ──────────────────────────────────────────────────────────
-  const sessionEndpoint = `${APP_BASE}/api/checkout/session`
+  const sessionEndpoint = `${APP_BASE}/api/v1/checkout/sessions`
   const checkoutUrlPattern = `${APP_BASE}/checkout/{token}`
 
   const htmlSnippet = `<!-- Option 1: Static link to a payment link (no backend needed).
@@ -978,33 +999,41 @@ app.post('/api/your-checkout-handler', async (req, res) => {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': 'Bearer pt_live_YOUR_API_KEY'
+      'Authorization': 'Bearer pt_live_YOUR_API_KEY',
+      'Idempotency-Key': req.body.orderId
     },
     body: JSON.stringify({
       amount: req.body.amount,
       currency: 'USD',
-      orderId: req.body.orderId,
-      customerEmail: req.body.email,
+      reference: req.body.orderId,
+      customer: { email: req.body.email },
       successUrl: 'https://yourstore.com/success',
       cancelUrl: 'https://yourstore.com/cancel'
     })
   })
-  const { session } = await response.json()
-  res.json({ checkoutUrl: session.checkoutUrl })
+  const session = await response.json()
+  res.json({ sessionId: session.id, checkoutUrl: session.checkoutUrl })
 })`
 
   const curlSnippet = `# Server-side only — never expose pt_live_ keys in browser code
 curl -X POST ${sessionEndpoint} \\
   -H "Authorization: Bearer pt_live_YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
+  -H "Idempotency-Key: order_1042" \\
   -d '{
     "amount": 49.99,
     "currency": "USD",
-    "orderId": "order_1042",
-    "customerEmail": "customer@example.com",
+    "reference": "order_1042",
+    "customer": { "email": "customer@example.com" },
     "successUrl": "https://yourstore.com/success",
     "cancelUrl": "https://yourstore.com/cancel"
-  }'`
+  }'
+
+# Retrieve, cancel, or expire the session
+curl -H "Authorization: Bearer pt_live_YOUR_API_KEY" ${sessionEndpoint}/SESSION_ID
+curl -H "Authorization: Bearer pt_live_YOUR_API_KEY" "${sessionEndpoint}?status=paid&limit=20"
+curl -X POST -H "Authorization: Bearer pt_live_YOUR_API_KEY" ${sessionEndpoint}/SESSION_ID/cancel
+curl -X POST -H "Authorization: Bearer pt_live_YOUR_API_KEY" ${sessionEndpoint}/SESSION_ID/expire`
 
   const reactComponentSnippet = `// React component (your frontend) — calls YOUR backend, not PineTree directly.
 // Your pt_live_ API key must never appear in client-side code.
@@ -1054,15 +1083,15 @@ app.post('/api/your-checkout-handler', async (req, res) => {
     body: JSON.stringify({
       amount: req.body.amount,
       currency: 'USD',
-      orderId: req.body.orderId,
+      reference: req.body.orderId,
       successUrl: 'https://yourstore.com/success',
       cancelUrl: 'https://yourstore.com/cancel',
     }),
   })
-  const { session } = await ptRes.json()
-  // session.sessionId can be stored on your order for later status polling:
-  // GET ${sessionEndpoint}/:sessionId  →  { status: 'active'|'processing'|'paid'|'expired' }
-  res.json({ checkoutUrl: session.checkoutUrl })
+  const session = await ptRes.json()
+  // Store session.id for retrieval or open-session lifecycle controls:
+  // GET ${sessionEndpoint}/:id; POST /:id/cancel; POST /:id/expire
+  res.json({ sessionId: session.id, checkoutUrl: session.checkoutUrl })
 })`
 
   const webhookVerifySnippet = `const crypto = require('crypto')
@@ -1543,6 +1572,13 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                     Also check <code className="rounded bg-gray-100 px-1 font-mono text-[11px]">X-PineTree-Timestamp</code>{" "}
                     to reject replayed events.
                   </p>
+                  <p className="mb-3 text-xs leading-relaxed text-gray-500">
+                    V1 events also include{" "}
+                    <code className="rounded bg-gray-100 px-1 font-mono text-[11px]">PineTree-Event-Id</code>{" "}
+                    and{" "}
+                    <code className="rounded bg-gray-100 px-1 font-mono text-[11px]">PineTree-Webhook-Version: 2026-06-12</code>.
+                    Legacy <code className="font-mono">X-PineTree-*</code> headers remain supported.
+                  </p>
                   <div className="mb-4 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3.5 py-2.5">
                     <p className="text-[11px] font-semibold text-amber-700">Verify the raw request body — before any JSON parsing</p>
                     <p className="mt-1 text-[11px] leading-relaxed text-amber-800">
@@ -1596,7 +1632,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
                 <div>
                   <h3 className="text-sm font-semibold text-gray-950">Recent Webhook Deliveries</h3>
-                  <p className="mt-0.5 text-xs text-gray-500">Last 50 delivery attempts across all events.</p>
+                  <p className="mt-0.5 text-xs text-gray-500">Failed attempts remain retryable through the v1 delivery API.</p>
                 </div>
                 <button
                   type="button"
@@ -1758,13 +1794,49 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       {tab === "developer" && (
         <div className="space-y-6">
 
+          <DashboardSection title="v1 Quick Start" titleTone="blue">
+            <div className="rounded-2xl border border-gray-200/80 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+              <ol className="grid gap-3 text-sm text-gray-700 sm:grid-cols-2 lg:grid-cols-5">
+                {[
+                  "Create a checkout session from your server.",
+                  "Redirect the customer to checkoutUrl.",
+                  "Retrieve the session by id.",
+                  "Cancel or expire it while status is open.",
+                  "Use signed webhooks for final payment status.",
+                ].map((step, index) => (
+                  <li key={step} className="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
+                    <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.12em] text-[#0052FF]">
+                      Step {index + 1}
+                    </span>
+                    {step}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </DashboardSection>
+
+          <DashboardSection title="Node SDK Contract" titleTone="blue">
+            <div className="rounded-2xl border border-gray-200/80 bg-white p-5 text-xs leading-relaxed text-gray-700 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+              <code>pinetree.checkout.sessions.create()</code>,{" "}
+              <code>retrieve()</code>, <code>list()</code>, <code>cancel()</code>,{" "}
+              <code>expire()</code>; <code>pinetree.payments.retrieve()</code>;{" "}
+              <code>pinetree.webhooks.constructEvent()</code>; and{" "}
+              <code>pinetree.webhookDeliveries.list()</code> / <code>retry()</code>.
+              This is an SDK-ready contract only; no package has been published.
+            </div>
+          </DashboardSection>
+
           {/* ── API Keys ──────────────────────────────────────────────────── */}
           <DashboardSection title="API Keys" titleTone="blue">
             <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
                 <div>
                   <h3 className="text-sm font-semibold text-gray-950">Secret API Keys</h3>
-                  <p className="mt-0.5 text-xs text-gray-500">For server-to-server requests. Never expose in frontend code.</p>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    New keys include checkout.sessions:create, checkout.sessions:read,
+                    checkout.sessions:write, and payments:read.
+                    Never expose them in frontend code.
+                  </p>
                 </div>
                 <LiveBadge />
               </div>
@@ -1992,8 +2064,8 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
             <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-950">POST /api/checkout/session</h3>
-                  <p className="mt-0.5 text-xs text-gray-500">Create a checkout session and redirect to <code className="rounded bg-gray-100 px-1 font-mono text-[10px]">session.checkoutUrl</code>.</p>
+                  <h3 className="text-sm font-semibold text-gray-950">POST /api/v1/checkout/sessions</h3>
+                  <p className="mt-0.5 text-xs text-gray-500">Create a checkout session and redirect to <code className="rounded bg-gray-100 px-1 font-mono text-[10px]">checkoutUrl</code>.</p>
                 </div>
                 <LiveBadge />
               </div>
@@ -2003,15 +2075,15 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                   <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">Response</p>
                   <pre className="overflow-x-auto text-[11px] leading-relaxed text-gray-700">
                     <code>{`{
-  "session": {
-    "sessionId": "...",
-    "token": "...",
-    "checkoutUrl": "${APP_BASE}/checkout/{token}",
-    "amount": 49.99,
-    "currency": "USD",
-    "status": "active",
-    "expiresAt": "2026-05-14T12:00:00.000Z"
-  }
+  "id": "...",
+  "object": "checkout.session",
+  "status": "open",
+  "checkoutUrl": "${APP_BASE}/checkout/{token}",
+  "amount": 49.99,
+  "currency": "USD",
+  "reference": "order_1042",
+  "paymentId": null,
+  "expiresAt": "..."
 }`}</code>
                   </pre>
                 </div>
@@ -2041,9 +2113,9 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                 <CodeBlock code={reactBackendSnippet} fieldId="react_backend_snippet" copiedField={copiedField} onCopy={handleCopyField} lang="node.js" />
                 <div className="rounded-xl border border-gray-100 bg-gray-50/60 px-3.5 py-2.5 text-[11px] leading-relaxed text-gray-500">
                   <span className="font-semibold text-gray-700">Check payment status server-side:</span>{" "}
-                  <code className="font-mono text-[10px] text-gray-700">GET /api/checkout/session/:sessionId</code>{" "}
+                  <code className="font-mono text-[10px] text-gray-700">GET /api/v1/checkout/sessions/:id</code>{" "}
                   returns{" "}
-                  <code className="font-mono text-[10px] text-gray-600">active | processing | paid | expired | canceled</code>.
+                  <code className="font-mono text-[10px] text-gray-600">open | processing | paid | failed | expired | canceled</code>.
                   Use this as a fallback if your webhook delivery fails.
                 </div>
               </div>
