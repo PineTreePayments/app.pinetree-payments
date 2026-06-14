@@ -366,7 +366,7 @@ const API_ROUTE_CATEGORIES: ApiCategory[] = [
     ],
   },
   {
-    label: "Checkout Sessions v1",
+    label: "Checkout Sessions",
     routes: [
       { method: "POST", path: "/api/v1/checkout/sessions",            desc: "Create a checkout session", status: "Live" },
       { method: "GET",  path: "/api/v1/checkout/sessions",            desc: "List and filter sessions",  status: "Live" },
@@ -376,7 +376,7 @@ const API_ROUTE_CATEGORIES: ApiCategory[] = [
     ],
   },
   {
-    label: "Payments v1",
+    label: "Payments",
     routes: [
       { method: "GET", path: "/api/v1/payments/:id", desc: "Retrieve a public payment", status: "Live" },
     ],
@@ -398,7 +398,7 @@ const API_ROUTE_CATEGORIES: ApiCategory[] = [
     ],
   },
   {
-    label: "Webhook Deliveries v1",
+    label: "Webhook Deliveries",
     routes: [
       { method: "GET", path: "/api/v1/webhook-deliveries", desc: "List delivery attempts", status: "Live" },
       { method: "POST", path: "/api/v1/webhook-deliveries/:id/retry", desc: "Retry a delivery", status: "Live" },
@@ -1698,7 +1698,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                     to reject replayed events.
                   </p>
                   <p className="mb-3 text-xs leading-relaxed text-gray-500">
-                    V1 events also include{" "}
+                    Webhook events also include{" "}
                     <code className="rounded bg-gray-100 px-1 font-mono text-[11px]">PineTree-Event-Id</code>{" "}
                     and{" "}
                     <code className="rounded bg-gray-100 px-1 font-mono text-[11px]">PineTree-Webhook-Version: 2026-06-12</code>.
@@ -1759,7 +1759,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
                 <div>
                   <h3 className="text-sm font-semibold text-gray-950">Recent Webhook Deliveries</h3>
-                  <p className="mt-0.5 text-xs text-gray-500">Failed attempts remain retryable through the v1 delivery API.</p>
+                  <p className="mt-0.5 text-xs text-gray-500">Failed deliveries can be retried safely from this dashboard.</p>
                 </div>
                 <button
                   type="button"
@@ -1962,9 +1962,8 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                 <div>
                   <h3 className="text-sm font-semibold text-gray-950">Secret API Keys</h3>
                   <p className="mt-0.5 text-xs text-gray-500">
-                    New keys include checkout.sessions:create, checkout.sessions:read,
-                    checkout.sessions:write, and payments:read.
-                    Never expose them in frontend code.
+                    Use <code className="font-mono">pt_live_*</code> only on your server.
+                    These keys can create sessions, retrieve payments, and manage webhooks.
                   </p>
                 </div>
                 <LiveBadge />
@@ -2195,7 +2194,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
             <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-950">POST /api/v1/checkout/sessions</h3>
+                  <h3 className="text-sm font-semibold text-gray-950">Create a checkout session</h3>
                   <p className="mt-0.5 text-xs text-gray-500">Create a checkout session and redirect to <code className="rounded bg-gray-100 px-1 font-mono text-[10px]">checkoutUrl</code>.</p>
                 </div>
                 <LiveBadge />
@@ -2243,9 +2242,8 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                 <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">Backend handler (Node.js / Express)</p>
                 <CodeBlock code={reactBackendSnippet} fieldId="react_backend_snippet" copiedField={copiedField} onCopy={handleCopyField} lang="node.js" />
                 <div className="rounded-xl border border-gray-100 bg-gray-50/60 px-3.5 py-2.5 text-[11px] leading-relaxed text-gray-500">
-                  <span className="font-semibold text-gray-700">Check payment status server-side:</span>{" "}
-                  <code className="font-mono text-[10px] text-gray-700">GET /api/v1/checkout/sessions/:id</code>{" "}
-                  returns{" "}
+                  <span className="font-semibold text-gray-700">Check payment status from your server.</span>{" "}
+                  The checkout session API returns{" "}
                   <code className="font-mono text-[10px] text-gray-600">open | processing | paid | failed | expired | canceled</code>.
                   Use this as a fallback if your webhook delivery fails.
                 </div>

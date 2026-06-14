@@ -125,8 +125,8 @@ export default function PublicKeysPanel() {
         <div className="mb-5">
           <h3 className="text-sm font-semibold text-gray-950">Browser-safe keys</h3>
           <p className="mt-1 text-xs text-gray-500">
-            Create <code className="font-mono">pk_live_*</code> keys for the Browser and React SDKs.
-            These keys can create checkout sessions but cannot call server-only APIs.
+            Use <code className="font-mono">pk_live_*</code> on websites, checkout buttons, or React apps.
+            These keys can start customer checkout sessions but cannot access private account data.
           </p>
         </div>
 
