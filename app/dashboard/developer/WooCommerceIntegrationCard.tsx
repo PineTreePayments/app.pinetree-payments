@@ -6,7 +6,7 @@ import { ProviderStatusPill } from "@/components/dashboard/DashboardPrimitives"
 const WEBHOOK_FORMAT = "/?wc-api=pinetree_webhook"
 
 const setupSteps = [
-  "Download the PineTree WooCommerce plugin from PineTree.",
+  "Get the PineTree WooCommerce plugin from your PineTree onboarding contact.",
   "Install and activate it in a WooCommerce test store.",
   "Add a PineTree secret API key in the payment settings.",
   "Add the webhook signing secret.",

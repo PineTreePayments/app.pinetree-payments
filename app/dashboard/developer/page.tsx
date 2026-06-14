@@ -165,35 +165,35 @@ function SdkCards() {
       status: "Ready",
       tone: "green" as const,
       purpose: "Connect directly from your server.",
-      setup: "Use a secret API key from your server.",
+      setup: "No package required. Use a secret API key from your server to create checkout sessions.",
     },
     {
       title: "Node SDK",
       status: "Ready",
       tone: "green" as const,
       purpose: "Server tools for checkout and webhooks.",
-      setup: "Package: @pinetree/node",
+      setup: "Package: @pinetree/node. Use on your server for checkout sessions, payments, and webhook verification.",
     },
     {
       title: "JavaScript SDK",
       status: "Ready",
       tone: "green" as const,
       purpose: "Start checkout from a website.",
-      setup: "Package: @pinetree/js",
+      setup: "Package: @pinetree/js. Use in browser checkout flows with a public browser key.",
     },
     {
       title: "React SDK",
       status: "Ready",
       tone: "green" as const,
       purpose: "Add checkout to a React app.",
-      setup: "Package: @pinetree/react",
+      setup: "Package: @pinetree/react. Use in React apps for checkout buttons and embedded checkout.",
     },
   ]
 
   return (
     <DashboardSection title="SDKs & API" titleTone="blue">
       <div className="mb-3 rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-sm text-gray-700">
-        Packages are ready for release; npm publication pending.
+        SDK packages are built and tested. Installation commands will be available after npm publication.
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {cards.map((card) => (
