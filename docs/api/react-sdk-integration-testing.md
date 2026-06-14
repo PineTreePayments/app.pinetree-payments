@@ -1,8 +1,8 @@
 # PineTree React SDK Integration Testing
 
-`@pinetree/react` is a private, unpublished package. These smoke checks exercise
-the local React package against a real local PineTree app without using merchant
-secret keys in the browser.
+These smoke checks exercise the local `@pinetreepayments/react` workspace
+package against a real local PineTree app without using merchant secret keys
+in the browser.
 
 ## Local Setup
 
@@ -26,7 +26,7 @@ Never use `pt_live_*` keys or webhook secrets in React code.
 import {
   PineTreeCheckoutButton,
   PineTreeProvider,
-} from "@pinetree/react"
+} from "@pinetreepayments/react"
 
 export function PineTreeSmokeTest() {
   return (
@@ -62,7 +62,7 @@ secret appears in the browser bundle or network request.
 ```tsx
 "use client"
 
-import { PineTreeCheckout, PineTreeProvider } from "@pinetree/react"
+import { PineTreeCheckout, PineTreeProvider } from "@pinetreepayments/react"
 
 export function EmbeddedPineTreeSmokeTest() {
   return (

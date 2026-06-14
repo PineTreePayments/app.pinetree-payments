@@ -1,4 +1,4 @@
-// Consumer validation for @pinetree/react
+// Consumer validation for @pinetreepayments/react
 // Typechecked against dist/types — verifies all documented exports compile.
 import type { ReactNode } from "react"
 import {
@@ -6,7 +6,7 @@ import {
   PineTreeCheckout,
   PineTreeCheckoutButton,
   usePineTree,
-} from "@pinetree/react"
+} from "@pinetreepayments/react"
 import type {
   PineTreeProviderProps,
   PineTreeCheckoutButtonProps,
@@ -15,7 +15,7 @@ import type {
   CheckoutEventName,
   CheckoutMode,
   CheckoutOpenResult,
-} from "@pinetree/react"
+} from "@pinetreepayments/react"
 
 function AppWrapper({ children }: { children: ReactNode }) {
   const _providerProps: PineTreeProviderProps = {

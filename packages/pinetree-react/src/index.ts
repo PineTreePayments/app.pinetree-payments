@@ -19,4 +19,4 @@ export type {
   CheckoutOpenResult,
   CheckoutOptions,
   CheckoutSessionResult,
-} from "@pinetree/js"
+} from "@pinetreepayments/js"

@@ -1,10 +1,12 @@
 {
-  "name": "@pinetree/js",
+  "name": "@pinetreepayments/js",
   "version": "0.3.0",
-  "private": true,
   "description": "Official PineTree browser JavaScript SDK.",
   "keywords": ["pinetree", "payments", "browser", "checkout", "crypto", "blockchain", "solana", "base", "usdc", "javascript"],
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/pinetree-payments/pinetree-payments.git",

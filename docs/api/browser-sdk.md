@@ -1,13 +1,11 @@
 # PineTree Browser JavaScript SDK
 
-**Package:** `@pinetree/js`  
-**Status:** Ready for release; npm publication pending
-
+**Package:** `@pinetreepayments/js`
 ---
 
 ## Overview
 
-The PineTree browser JavaScript SDK (`@pinetree/js`) lets you create checkout
+The PineTree browser JavaScript SDK (`@pinetreepayments/js`) lets you create checkout
 sessions directly from browser code using a **public key** — no server-side
 proxy required.
 
@@ -36,19 +34,10 @@ Lifecycle events are delivered by hosted checkout via versioned
 </script>
 ```
 
-### npm (future)
+### npm
 
 ```bash
-npm install @pinetree/js
-```
-
-### Local workspace
-
-```javascript
-// package.json
-"dependencies": {
-  "@pinetree/js": "file:../../packages/pinetree-js"
-}
+npm install @pinetreepayments/js
 ```
 
 ---
@@ -148,7 +137,7 @@ type CheckoutOpenResult = {
 ### Usage — redirect (default)
 
 ```javascript
-import PineTree, { CheckoutSessionError, CheckoutInitializationError } from "@pinetree/js"
+import PineTree, { CheckoutSessionError, CheckoutInitializationError } from "@pinetreepayments/js"
 
 const pinetree = new PineTree(process.env.NEXT_PUBLIC_PINETREE_PUBLIC_KEY)
 
@@ -282,7 +271,7 @@ import type {
   CheckoutOpenResult,
   CheckoutSessionResult,
   CheckoutError,
-} from "@pinetree/js"
+} from "@pinetreepayments/js"
 ```
 
 ---
@@ -363,7 +352,7 @@ import {
   PineTreeBrowserError,
   CheckoutInitializationError,
   CheckoutSessionError,
-} from "@pinetree/js"
+} from "@pinetreepayments/js"
 
 try {
   await pinetree.checkout.open({ amount: 2500 })
@@ -388,7 +377,7 @@ types are exported from the package root.
 
 ## Relationship to the Node SDK
 
-| | `@pinetree/node` | `@pinetree/js` |
+| | `@pinetreepayments/node` | `@pinetreepayments/js` |
 |---|---|---|
 | Environment | Node.js server-side | Browser (and Node bundlers) |
 | Auth | Secret `pt_live_*` API key | Public `pk_live_*` key |
@@ -396,7 +385,7 @@ types are exported from the package root.
 | Events | Webhooks + `constructEvent()` | `postMessage` via `.on()` |
 | Status | Ready for release | Ready |
 
-Never use `@pinetree/node` in the browser — it requires secret API keys.
+Never use `@pinetreepayments/node` in the browser — it requires secret API keys.
 
 ---
 
@@ -404,7 +393,7 @@ Never use `@pinetree/node` in the browser — it requires secret API keys.
 
 | Feature | Description |
 |---|---|
-| React SDK (`@pinetree/react`) | React hooks and pre-built components |
+| React SDK (`@pinetreepayments/react`) | React hooks and pre-built components |
 | WooCommerce Plugin | Drop-in PineTree payment gateway for WooCommerce |
 | Shopify Plugin | Native Shopify checkout integration |
 
@@ -424,12 +413,12 @@ To test `checkout.open()` locally:
 ## Security
 
 - **Never expose `pt_live_*` API keys in browser code.** These are server-side
-  secrets and must stay on the server (`@pinetree/node`).
+  secrets and must stay on the server (`@pinetreepayments/node`).
 - Public keys (`pk_live_*`) can safely be committed to client-side code and
   environment variables prefixed `NEXT_PUBLIC_`.
 - Public keys can only create checkout sessions — they cannot access payments,
   webhooks, or any other merchant data.
 - The embedded iframe is created with a restrictive `sandbox` attribute
   (`allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox`).
-- `@pinetree/js` contains no Node.js built-ins and will not work in a pure
+- `@pinetreepayments/js` contains no Node.js built-ins and will not work in a pure
   Node environment without a bundler.

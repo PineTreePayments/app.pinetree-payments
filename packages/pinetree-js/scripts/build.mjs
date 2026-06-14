@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Build script for @pinetree/js.
+ * Build script for @pinetreepayments/js.
  * Produces ESM, CJS, and TypeScript declaration outputs in dist/.
  * Runs a consumer type-check using the published package exports.
  */
@@ -90,7 +90,7 @@ writeFileSync(
   type CheckoutOpenResult,
   type CheckoutError,
   type PineTreeJSOptions,
-} from "@pinetree/js"
+} from "@pinetreepayments/js"
 
 const client = new PineTree("pk_live_typecheck")
 const client2 = new PineTree({ publicKey: "pk_live_typecheck", baseUrl: "https://example.com" } satisfies PineTreeJSOptions)

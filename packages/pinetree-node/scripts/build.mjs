@@ -79,7 +79,7 @@ writeFileSync(
   type Payment,
   type WebhookDelivery,
   type Event,
-} from "@pinetree/node"
+} from "@pinetreepayments/node"
 
 const client = new PineTree("pt_live_typecheck")
 declare const session: CheckoutSession

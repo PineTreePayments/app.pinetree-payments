@@ -5,11 +5,11 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "."),
-      "@pinetree/js": path.resolve(
+      "@pinetreepayments/js": path.resolve(
         __dirname,
         "packages/pinetree-js/src/index.ts"
       ),
-      "@pinetree/react": path.resolve(
+      "@pinetreepayments/react": path.resolve(
         __dirname,
         "packages/pinetree-react/src/index.ts"
       ),

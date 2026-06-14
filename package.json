@@ -19,7 +19,9 @@
     "smoke:checkout-api": "node scripts/smoke-checkout-api.mjs",
     "release-candidate": "node scripts/release-candidate.mjs",
     "release-candidate:dry-run": "node scripts/release-candidate.mjs --dry-run",
-    "sdk:release-candidate": "npm run release-candidate --workspace packages/pinetree-node"
+    "sdk:release-candidate": "npm run release-candidate --workspace packages/pinetree-node",
+    "package:woocommerce": "node scripts/package-woocommerce-plugin.mjs",
+    "validate:woocommerce-package": "node scripts/package-woocommerce-plugin.mjs --dry-run && node scripts/validate-woocommerce-plugin.mjs"
   },
   "dependencies": {
     "@meshconnect/web-link-sdk": "^3.9.8",

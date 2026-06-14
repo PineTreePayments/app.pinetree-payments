@@ -1,10 +1,12 @@
 {
-  "name": "@pinetree/node",
+  "name": "@pinetreepayments/node",
   "version": "0.1.0",
-  "private": true,
   "description": "Official PineTree Node SDK for the PineTree v1 platform API.",
   "keywords": ["pinetree", "payments", "crypto", "blockchain", "solana", "base", "usdc", "checkout", "node"],
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/pinetree-payments/pinetree-payments.git",

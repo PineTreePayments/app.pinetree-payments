@@ -165,36 +165,37 @@ function SdkCards() {
       status: "Ready",
       tone: "green" as const,
       purpose: "Connect directly from your server.",
-      setup: "No package required. Use a secret API key from your server to create checkout sessions.",
+      command: null as string | null,
+      description: "No package required. Use a secret API key from your server to create checkout sessions.",
     },
     {
       title: "Node SDK",
       status: "Ready",
       tone: "green" as const,
       purpose: "Server tools for checkout and webhooks.",
-      setup: "Package: @pinetree/node. Use on your server for checkout sessions, payments, and webhook verification.",
+      command: "npm install @pinetreepayments/node",
+      description: "Use this on your server for checkout sessions, payments, and webhook verification.",
     },
     {
       title: "JavaScript SDK",
       status: "Ready",
       tone: "green" as const,
       purpose: "Start checkout from a website.",
-      setup: "Package: @pinetree/js. Use in browser checkout flows with a public browser key.",
+      command: "npm install @pinetreepayments/js",
+      description: "Use this in browser checkout flows with a public browser key.",
     },
     {
       title: "React SDK",
       status: "Ready",
       tone: "green" as const,
       purpose: "Add checkout to a React app.",
-      setup: "Package: @pinetree/react. Use in React apps for checkout buttons and embedded checkout.",
+      command: "npm install @pinetreepayments/react",
+      description: "Use this in React apps for checkout buttons and embedded checkout.",
     },
   ]
 
   return (
     <DashboardSection title="SDKs & API" titleTone="blue">
-      <div className="mb-3 rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-sm text-gray-700">
-        SDK packages are built and tested. Installation commands will be available after npm publication.
-      </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {cards.map((card) => (
           <details key={card.title} className="group rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
@@ -208,8 +209,13 @@ function SdkCards() {
               </div>
               <span className="mt-3 inline-flex text-xs font-semibold text-blue-700 group-open:hidden">View setup</span>
             </summary>
-            <div className="mt-3 border-t border-gray-100 pt-3">
-              <p className="text-xs text-gray-600">{card.setup}</p>
+            <div className="mt-3 space-y-2 border-t border-gray-100 pt-3">
+              {card.command && (
+                <code className="block rounded-lg bg-gray-950 px-3 py-2 font-mono text-[11px] text-emerald-400">
+                  {card.command}
+                </code>
+              )}
+              <p className="text-xs text-gray-600">{card.description}</p>
             </div>
           </details>
         ))}

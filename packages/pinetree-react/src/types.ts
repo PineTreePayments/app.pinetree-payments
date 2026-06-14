@@ -4,7 +4,7 @@ import type {
   CheckoutMode,
   CheckoutOpenResult,
   CheckoutOptions,
-} from "@pinetree/js"
+} from "@pinetreepayments/js"
 
 export type CheckoutLifecycleCallbacks = {
   onStart?: () => void

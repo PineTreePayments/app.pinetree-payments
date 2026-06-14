@@ -1,6 +1,6 @@
 "use client"
 
-import PineTree from "@pinetree/js"
+import PineTree from "@pinetreepayments/js"
 import {
   createContext,
   createElement,

@@ -28,7 +28,7 @@ request. `constructEvent` must receive the unmodified bytes.
 
 ```typescript
 import express from "express"
-import PineTree, { WebhookVerificationError } from "@pinetree/node"
+import PineTree, { WebhookVerificationError } from "@pinetreepayments/node"
 
 const app = express()
 const client = new PineTree(process.env.PINETREE_API_KEY!)
@@ -81,7 +81,7 @@ app.post(
 ## Express with typed event data
 
 ```typescript
-import type { CheckoutSession } from "@pinetree/node"
+import type { CheckoutSession } from "@pinetreepayments/node"
 
 // After constructEvent succeeds
 switch (event.type) {
@@ -101,7 +101,7 @@ to a `Buffer` before passing to `constructEvent`.
 ```typescript
 // app/api/webhooks/pinetree/route.ts
 import { NextRequest, NextResponse } from "next/server"
-import PineTree, { WebhookVerificationError } from "@pinetree/node"
+import PineTree, { WebhookVerificationError } from "@pinetreepayments/node"
 
 const client = new PineTree(process.env.PINETREE_API_KEY!)
 const webhookSecret = process.env.PINETREE_WEBHOOK_SECRET!

@@ -1,7 +1,7 @@
 # PineTree SDK — npm Publish Checklist
 
-Use this checklist for each npm release of `@pinetree/node`, `@pinetree/js`,
-and `@pinetree/react`. Complete every item in order; do not skip steps.
+Use this checklist for each npm release of `@pinetreepayments/node`, `@pinetreepayments/js`,
+and `@pinetreepayments/react`. Complete every item in order; do not skip steps.
 
 See also: [version-strategy.md](./version-strategy.md)
 
@@ -13,12 +13,12 @@ See also: [version-strategy.md](./version-strategy.md)
 - [ ] Add all engineers who need publish access to the org
 - [ ] Set org package visibility default to **Public** (packages are scoped
       but open-source)
-- [ ] Confirm `@pinetree/node`, `@pinetree/js`, and `@pinetree/react` are
+- [ ] Confirm `@pinetreepayments/node`, `@pinetreepayments/js`, and `@pinetreepayments/react` are
       available (not squatted) by running:
       ```bash
-      npm view @pinetree/node
-      npm view @pinetree/js
-      npm view @pinetree/react
+      npm view @pinetreepayments/node
+      npm view @pinetreepayments/js
+      npm view @pinetreepayments/react
       ```
       A 404 / "not found" response means the names are free.
 
@@ -30,7 +30,7 @@ See also: [version-strategy.md](./version-strategy.md)
       org creation to reserve the names, if any concern about squatting.
 - [ ] Mark the placeholder as deprecated:
       ```bash
-      npm deprecate @pinetree/node@0.0.1 "Reserved — first beta coming soon"
+      npm deprecate @pinetreepayments/node@0.0.1 "Reserved — first beta coming soon"
       ```
 
 ---
@@ -71,10 +71,10 @@ Before publishing, verify each `package.json` contains correct values for:
       version (e.g. `0.1.0-beta.1`)
 - [ ] Update CHANGELOG.md — move items from `[Unreleased]` to the new version
       section and set today's date
-- [ ] For `@pinetree/react`: if `@pinetree/js` was bumped, update the
+- [ ] For `@pinetreepayments/react`: if `@pinetreepayments/js` was bumped, update the
       `"dependencies"` entry from the `file:` reference to a semver range:
       ```json
-      "dependencies": { "@pinetree/js": "^0.4.0" }
+      "dependencies": { "@pinetreepayments/js": "^0.4.0" }
       ```
 - [ ] Commit the version bump (do not tag yet):
       ```bash
@@ -168,7 +168,7 @@ each package being published. Keep all other packages private.
 # Edit packages/pinetree-node/package.json — remove "private": true
 git add packages/pinetree-node/package.json
 git commit -m "release(node): 0.1.0-beta.1"
-git tag @pinetree/node@0.1.0-beta.1
+git tag @pinetreepayments/node@0.1.0-beta.1
 ```
 
 ---
@@ -176,7 +176,7 @@ git tag @pinetree/node@0.1.0-beta.1
 ## 10. Publish
 
 Publish each package from the repo root using the npm workspace flag.
-Use `--tag beta` for pre-release versions so `npm install @pinetree/node`
+Use `--tag beta` for pre-release versions so `npm install @pinetreepayments/node`
 installs the stable version (not the beta).
 
 ```bash
@@ -187,12 +187,12 @@ npm publish --workspace packages/pinetree-node --tag beta --access public
 npm publish --workspace packages/pinetree-node --access public
 ```
 
-Repeat for `@pinetree/js` and `@pinetree/react`.
+Repeat for `@pinetreepayments/js` and `@pinetreepayments/react`.
 
 **Publish order for a coordinated release:**
-1. `@pinetree/node` (no inter-package deps)
-2. `@pinetree/js` (no inter-package deps)
-3. `@pinetree/react` (depends on `@pinetree/js`)
+1. `@pinetreepayments/node` (no inter-package deps)
+2. `@pinetreepayments/js` (no inter-package deps)
+3. `@pinetreepayments/react` (depends on `@pinetreepayments/js`)
 
 ---
 
@@ -204,22 +204,22 @@ and verify basic functionality:
 ```bash
 mkdir /tmp/pinetree-smoke && cd /tmp/pinetree-smoke
 npm init -y
-npm install @pinetree/node@beta
+npm install @pinetreepayments/node@beta
 
 node -e "
-const { default: PineTree } = require('@pinetree/node');
+const { default: PineTree } = require('@pinetreepayments/node');
 const client = new PineTree('pt_live_test');
 console.log('import ok, client type:', typeof client);
 "
 ```
 
-Repeat for `@pinetree/js` (browser bundle import check) and `@pinetree/react`
+Repeat for `@pinetreepayments/js` (browser bundle import check) and `@pinetreepayments/react`
 (import of named exports from the package root).
 
 - [ ] Package installs without errors
 - [ ] Imports resolve (ESM and CJS)
 - [ ] TypeScript types resolve (`npx tsc --noEmit` in the smoke dir)
-- [ ] `npm view @pinetree/node@beta dist-tags` shows the new version
+- [ ] `npm view @pinetreepayments/node@beta dist-tags` shows the new version
 
 ---
 
@@ -231,7 +231,7 @@ If a critical bug is found after publishing, respond within 72 hours:
 consumers):
 
 ```bash
-npm deprecate @pinetree/node@0.1.0-beta.1 "Critical bug — upgrade to 0.1.0-beta.2"
+npm deprecate @pinetreepayments/node@0.1.0-beta.1 "Critical bug — upgrade to 0.1.0-beta.2"
 ```
 
 Then publish a fixed version (`0.1.0-beta.2`) immediately.
@@ -240,7 +240,7 @@ Then publish a fixed version (`0.1.0-beta.2`) immediately.
 within 72 h of the original publish):
 
 ```bash
-npm unpublish @pinetree/node@0.1.0-beta.1
+npm unpublish @pinetreepayments/node@0.1.0-beta.1
 ```
 
 npm will refuse `unpublish` after 72 hours unless the package is the only

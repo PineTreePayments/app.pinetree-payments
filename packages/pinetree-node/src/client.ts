@@ -3,7 +3,7 @@ import type { APIErrorPayload, PineTreeOptions } from "./types"
 
 const DEFAULT_BASE_URL = "https://app.pinetree-payments.com"
 const DEFAULT_TIMEOUT = 30_000
-const USER_AGENT = "@pinetree/node/0.1.0"
+const USER_AGENT = "@pinetreepayments/node/0.1.0"
 
 export class PineTreeClient {
   readonly apiKey: string

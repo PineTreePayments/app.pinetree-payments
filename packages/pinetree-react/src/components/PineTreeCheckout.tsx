@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import type { CheckoutOpenResult } from "@pinetree/js"
+import type { CheckoutOpenResult } from "@pinetreepayments/js"
 import {
   destroyReactCheckout,
   openReactCheckout,

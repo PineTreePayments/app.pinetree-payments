@@ -66,7 +66,7 @@ describe("PineTree Node SDK", () => {
     expect(request?.headers).toMatchObject({
       Authorization: "Bearer pt_live_test",
       "Idempotency-Key": "order-1",
-      "User-Agent": "@pinetree/node/0.1.0",
+      "User-Agent": "@pinetreepayments/node/0.1.0",
     })
   })
 

@@ -1,7 +1,7 @@
 # PineTree Local Stack Release Validation
 
 Use this checklist for a real local release-candidate pass across the PineTree API,
-`@pinetree/node`, `@pinetree/js`, and `@pinetree/react`. Automated unit tests
+`@pinetreepayments/node`, `@pinetreepayments/js`, and `@pinetreepayments/react`. Automated unit tests
 remain offline; this checklist creates real local checkout sessions.
 
 Never commit API keys, public-key management responses, webhook secrets,
@@ -74,11 +74,11 @@ Payment retrieval runs only when `PINETREE_INTEGRATION_PAYMENT_ID` is set.
 
 ## 5. Validate the Browser SDK
 
-Initialize `@pinetree/js` with the local public key and base URL. Use
+Initialize `@pinetreepayments/js` with the local public key and base URL. Use
 `redirect: false` to create a session without navigating away:
 
 ```ts
-import { PineTree } from "@pinetree/js"
+import { PineTree } from "@pinetreepayments/js"
 
 const pinetree = new PineTree({
   publicKey: "pk_live_local_value",

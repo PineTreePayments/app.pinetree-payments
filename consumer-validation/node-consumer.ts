@@ -1,4 +1,4 @@
-// Consumer validation for @pinetree/node
+// Consumer validation for @pinetreepayments/node
 // Typechecked against dist/types — verifies all documented exports compile.
 import PineTree, {
   PineTree as NamedPineTree,
@@ -11,7 +11,7 @@ import PineTree, {
   WebhookVerificationError,
   PineTreeWebhookHeaders,
   PineTreeWebhookVersion,
-} from "@pinetree/node"
+} from "@pinetreepayments/node"
 import type {
   CheckoutSession,
   CheckoutSessionCreateParams,
@@ -26,7 +26,7 @@ import type {
   Event,
   PineTreeOptions,
   PineTreeWebhookHeaderObject,
-} from "@pinetree/node"
+} from "@pinetreepayments/node"
 
 const _namedSameAsDefault: typeof PineTree = NamedPineTree
 

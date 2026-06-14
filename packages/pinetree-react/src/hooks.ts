@@ -1,11 +1,11 @@
 "use client"
 
-import type PineTree from "@pinetree/js"
+import type PineTree from "@pinetreepayments/js"
 import type {
   CheckoutEventHandler,
   CheckoutOpenResult,
   CheckoutOptions,
-} from "@pinetree/js"
+} from "@pinetreepayments/js"
 import { usePineTreeContext } from "./provider"
 import type { CheckoutLifecycleCallbacks } from "./types"
 

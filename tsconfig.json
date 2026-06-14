@@ -23,8 +23,8 @@
     ],
     "paths": {
       "@/*": ["./*"],
-      "@pinetree/js": ["./packages/pinetree-js/src/index.ts"],
-      "@pinetree/react": ["./packages/pinetree-react/src/index.ts"]
+      "@pinetreepayments/js": ["./packages/pinetree-js/src/index.ts"],
+      "@pinetreepayments/react": ["./packages/pinetree-react/src/index.ts"]
     }
   },
   "include": [

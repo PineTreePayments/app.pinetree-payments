@@ -1,11 +1,11 @@
-// Consumer validation for @pinetree/js
+// Consumer validation for @pinetreepayments/js
 // Typechecked against dist/types — verifies all documented exports compile.
 import PineTree, {
   PineTree as NamedPineTree,
   PineTreeBrowserError,
   CheckoutInitializationError,
   CheckoutSessionError,
-} from "@pinetree/js"
+} from "@pinetreepayments/js"
 import type {
   PineTreeJSOptions,
   CheckoutOptions,
@@ -17,7 +17,7 @@ import type {
   CheckoutOpenResult,
   CheckoutSessionResult,
   CheckoutError,
-} from "@pinetree/js"
+} from "@pinetreepayments/js"
 
 const _namedSameAsDefault: typeof PineTree = NamedPineTree
 

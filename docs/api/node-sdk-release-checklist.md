@@ -62,7 +62,7 @@ The integration test suite enforces a production safety guard automatically:
 
 ## Package
 
-- Confirm the final package name (`@pinetree/node`) and npm organization ownership.
+- Confirm the final package name (`@pinetreepayments/node`) and npm organization ownership.
 - Confirm npm authentication, publishing role, and 2FA policy.
 - Choose the semantic version and update the changelog/release notes.
 - Remove `"private": true` only in the designated release commit — never earlier.

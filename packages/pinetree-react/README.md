@@ -1,29 +1,16 @@
-# @pinetree/react
+# @pinetreepayments/react
 
 Official PineTree React SDK — browser checkout components and hooks.
-
-> **Ready for release.** npm publication is pending. Reference this package
-> through the monorepo workspace until publication.
 
 ---
 
 ## Installation
 
-### Local workspace
-
 ```bash
-# package.json
-"dependencies": {
-  "@pinetree/react": "file:../../packages/pinetree-react",
-  "@pinetree/js":    "file:../../packages/pinetree-js"
-}
+npm install @pinetreepayments/react
 ```
 
-### When published (future)
-
-```bash
-npm install @pinetree/react
-```
+The React SDK installs `@pinetreepayments/js` as a dependency.
 
 ---
 
@@ -35,14 +22,14 @@ variables.
 
 **Never** pass a server API key (`pt_live_*`) to `PineTreeProvider` or any
 React component. Server keys grant full merchant access and must stay on the
-server. Use `@pinetree/node` for server-side operations.
+server. Use `@pinetreepayments/node` for server-side operations.
 
 ---
 
 ## Provider
 
 ```tsx
-import { PineTreeProvider } from "@pinetree/react"
+import { PineTreeProvider } from "@pinetreepayments/react"
 
 export function App() {
   return (
@@ -109,20 +96,20 @@ const pinetree = usePineTree()
 ```
 
 `usePineTree()` must be called below `PineTreeProvider`. Returns the
-underlying `@pinetree/js` client for direct use.
+underlying `@pinetreepayments/js` client for direct use.
 
 ---
 
 ## Development
 
 ```bash
-# Build @pinetree/js first (required peer)
+# Build @pinetreepayments/js first (required peer)
 npm run build --workspace packages/pinetree-js
 
-# Type-check @pinetree/react
+# Type-check @pinetreepayments/react
 npm run typecheck --workspace packages/pinetree-react
 
-# Build @pinetree/react
+# Build @pinetreepayments/react
 npm run build --workspace packages/pinetree-react
 
 # Tests

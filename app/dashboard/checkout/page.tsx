@@ -2234,8 +2234,9 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
               <div className="space-y-4 p-5">
                 <div className="rounded-xl border border-amber-200/80 bg-amber-50/60 px-3 py-2.5 text-xs text-amber-700">
                   <strong>Create checkout sessions from your backend so your API key stays private.</strong>{" "}
-                  The browser calls your server; your server calls PineTree. The{" "}
-                  <code className="font-mono">@pinetree/react</code> npm package is not yet published — this pattern works today using the existing session API.
+                  The browser calls your server; your server calls PineTree. This
+                  backend-first pattern works with or without the{" "}
+                  <code className="font-mono">@pinetreepayments/react</code> SDK.
                 </div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">React component (frontend)</p>
                 <CodeBlock code={reactComponentSnippet} fieldId="react_component_snippet" copiedField={copiedField} onCopy={handleCopyField} lang="react" />

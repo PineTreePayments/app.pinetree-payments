@@ -1,7 +1,7 @@
 # PineTree SDK — Version Strategy
 
 This document covers the versioning conventions for the three PineTree SDK
-packages: `@pinetree/node`, `@pinetree/js`, and `@pinetree/react`.
+packages: `@pinetreepayments/node`, `@pinetreepayments/js`, and `@pinetreepayments/react`.
 
 ---
 
@@ -9,11 +9,11 @@ packages: `@pinetree/node`, `@pinetree/js`, and `@pinetree/react`.
 
 | Package | Current (private) | First public release |
 |---|---|---|
-| `@pinetree/node` | `0.1.0` | `0.1.0-beta.1` |
-| `@pinetree/js` | `0.3.0` (+ unreleased Phase 14) | `0.4.0-beta.1` |
-| `@pinetree/react` | `0.1.0` | `0.1.0-beta.1` |
+| `@pinetreepayments/node` | `0.1.0` | `0.1.0-beta.1` |
+| `@pinetreepayments/js` | `0.3.0` (+ unreleased Phase 14) | `0.4.0-beta.1` |
+| `@pinetreepayments/react` | `0.1.0` | `0.1.0-beta.1` |
 
-`@pinetree/js` must bump to `0.4.0` before publishing because Phase 14
+`@pinetreepayments/js` must bump to `0.4.0` before publishing because Phase 14
 lifecycle-event changes are already in the codebase and are not reflected in
 the current `0.3.0` version tag.
 
@@ -43,7 +43,7 @@ changelog entry. The stable `1.0.0` signal means the public API is locked.
 4. Remove `"private": true` from the package's `package.json` **only** in the
    release commit.
 5. `npm publish --tag beta --access public` from the package directory.
-6. Consumers install via `npm install @pinetree/node@beta`.
+6. Consumers install via `npm install @pinetreepayments/node@beta`.
 7. Collect feedback; iterate with `-beta.2`, `-beta.3`, … as needed.
 8. When stable, publish the same version without the pre-release suffix:
    `npm publish --access public` (the `latest` tag).
@@ -65,17 +65,17 @@ All three conditions must be met:
 
 ## Package coordination
 
-`@pinetree/react` depends on `@pinetree/js`. When `@pinetree/js` ships a
-breaking change, `@pinetree/react` must also release a new major version that
-pins the new `@pinetree/js` peer range.
+`@pinetreepayments/react` depends on `@pinetreepayments/js`. When `@pinetreepayments/js` ships a
+breaking change, `@pinetreepayments/react` must also release a new major version that
+pins the new `@pinetreepayments/js` peer range.
 
 Until npm publication, the dependency is a workspace `file:` reference.
 On publish, change it to a semver range:
 
 ```json
 "dependencies": {
-  "@pinetree/js": "^0.4.0"
+  "@pinetreepayments/js": "^0.4.0"
 }
 ```
 
-Update `peerDependencies` in `@pinetree/react` to match.
+Update `peerDependencies` in `@pinetreepayments/react` to match.

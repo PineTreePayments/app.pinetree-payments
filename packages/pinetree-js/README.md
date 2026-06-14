@@ -1,11 +1,8 @@
-# @pinetree/js
+# @pinetreepayments/js
 
 Official PineTree browser JavaScript SDK.
 
-> **Ready for release.** npm publication is pending. Reference this package
-> through the monorepo workspace until publication.
->
-> `@pinetree/js` creates checkout sessions from browser code using a public
+> `@pinetreepayments/js` creates checkout sessions from browser code using a public
 > key (`pk_live_*`) and opens the PineTree hosted checkout page using
 > redirect, popup, or embedded iframe modes.
 
@@ -13,19 +10,8 @@ Official PineTree browser JavaScript SDK.
 
 ## Installation
 
-### Local workspace
-
 ```bash
-# package.json
-"dependencies": {
-  "@pinetree/js": "file:../../packages/pinetree-js"
-}
-```
-
-### When published (future)
-
-```bash
-npm install @pinetree/js
+npm install @pinetreepayments/js
 ```
 
 ### Script tag (future)
@@ -39,7 +25,7 @@ npm install @pinetree/js
 ## Quick start
 
 ```javascript
-import PineTree from "@pinetree/js"
+import PineTree from "@pinetreepayments/js"
 
 const pinetree = new PineTree(process.env.NEXT_PUBLIC_PINETREE_PUBLIC_KEY)
 
@@ -186,7 +172,7 @@ import {
   PineTreeBrowserError,
   CheckoutInitializationError,
   CheckoutSessionError,
-} from "@pinetree/js"
+} from "@pinetreepayments/js"
 ```
 
 | Class | Trigger |
@@ -216,7 +202,7 @@ import type {
   CheckoutOpenResult,
   CheckoutSessionResult,
   CheckoutError,
-} from "@pinetree/js"
+} from "@pinetreepayments/js"
 ```
 
 ---

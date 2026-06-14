@@ -15,9 +15,9 @@
     "incremental": false,
     "baseUrl": "..",
     "paths": {
-      "@pinetree/node": ["packages/pinetree-node/dist/types"],
-      "@pinetree/js": ["packages/pinetree-js/dist/types"],
-      "@pinetree/react": ["packages/pinetree-react/dist/types"]
+      "@pinetreepayments/node": ["packages/pinetree-node/dist/types"],
+      "@pinetreepayments/js": ["packages/pinetree-js/dist/types"],
+      "@pinetreepayments/react": ["packages/pinetree-react/dist/types"]
     }
   },
   "include": ["*.ts", "*.tsx"]

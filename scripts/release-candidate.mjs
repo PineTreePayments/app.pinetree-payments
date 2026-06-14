@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Offline release-candidate validation for the PineTree API and private SDKs.
+ * Offline release-candidate validation for the PineTree API and SDKs.
  *
  * This command never publishes packages or runs credentialed integration tests.
  * Pass --dry-run to validate manifests and print the command plan only.
@@ -20,21 +20,21 @@ const vitest = resolve(repoRoot, "node_modules", "vitest", "vitest.mjs")
 
 const packages = [
   {
-    name: "@pinetree/node",
+    name: "@pinetreepayments/node",
     directory: "packages/pinetree-node",
     expectedDependency: null,
   },
   {
-    name: "@pinetree/js",
+    name: "@pinetreepayments/js",
     directory: "packages/pinetree-js",
     expectedDependency: null,
   },
   {
-    name: "@pinetree/react",
+    name: "@pinetreepayments/react",
     directory: "packages/pinetree-react",
     expectedDependency: {
-      name: "@pinetree/js",
-      value: "file:../pinetree-js",
+      name: "@pinetreepayments/js",
+      value: "^0.3.0",
     },
   },
 ]
@@ -58,15 +58,18 @@ function readManifest(packageInfo) {
 }
 
 function validateManifests() {
-  step("Validate private package metadata, dependencies, and exports")
+  step("Validate package metadata, dependencies, and exports")
 
   for (const packageInfo of packages) {
     const manifest = readManifest(packageInfo)
     if (manifest.name !== packageInfo.name) {
       fail(`${packageInfo.directory} has package name ${manifest.name}.`)
     }
-    if (manifest.private !== true) {
-      fail(`${packageInfo.name} must remain private.`)
+    if (manifest.private === true) {
+      fail(`${packageInfo.name} is still marked private — remove "private": true before publishing.`)
+    }
+    if (manifest.publishConfig?.access !== "public") {
+      fail(`${packageInfo.name} must have publishConfig.access = "public" for scoped npm publication.`)
     }
 
     const rootExport = manifest.exports?.["."]
@@ -102,7 +105,7 @@ function validateManifests() {
   const reactManifest = readManifest(packages[2])
   for (const peer of ["react", "react-dom"]) {
     if (typeof reactManifest.peerDependencies?.[peer] !== "string") {
-      fail(`@pinetree/react must declare ${peer} as a peer dependency.`)
+      fail(`@pinetreepayments/react must declare ${peer} as a peer dependency.`)
     }
   }
 }

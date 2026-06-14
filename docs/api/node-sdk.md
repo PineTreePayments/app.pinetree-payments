@@ -4,7 +4,7 @@ The first PineTree Node SDK is available in this repository at
 `packages/pinetree-node`. It is private and has not been published to npm.
 
 ```ts
-import { PineTree } from "@pinetree/node"
+import { PineTree } from "@pinetreepayments/node"
 
 const pinetree = new PineTree(process.env.PINETREE_API_KEY!)
 

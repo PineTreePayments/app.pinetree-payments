@@ -1,5 +1,5 @@
 /**
- * Base class for all @pinetree/js errors.
+ * Base class for all @pinetreepayments/js errors.
  */
 export class PineTreeBrowserError extends Error {
   readonly code?: string

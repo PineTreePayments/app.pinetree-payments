@@ -6,7 +6,7 @@ import {
   usePineTree,
 } from "../src"
 
-describe("@pinetree/react exports", () => {
+describe("@pinetreepayments/react exports", () => {
   it("exports the provider, hook, and checkout components", () => {
     expect(PineTreeProvider).toBeTypeOf("function")
     expect(usePineTree).toBeTypeOf("function")

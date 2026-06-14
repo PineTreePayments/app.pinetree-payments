@@ -1,9 +1,6 @@
-# @pinetree/node
+# @pinetreepayments/node
 
 Official Node.js SDK for [PineTree Payments](https://app.pinetree-payments.com).
-
-> **Ready for release.** npm publication is pending. Reference it through the
-> monorepo workspace until publication.
 
 **Requirements:** Node.js 18 or later · TypeScript 5+ (optional but recommended)
 
@@ -11,20 +8,8 @@ Official Node.js SDK for [PineTree Payments](https://app.pinetree-payments.com).
 
 ## Installation
 
-### Local workspace
-
 ```bash
-# From the repository root, reference the package in your project:
-# package.json
-"dependencies": {
-  "@pinetree/node": "file:../../packages/pinetree-node"
-}
-```
-
-### When published (future)
-
-```bash
-npm install @pinetree/node
+npm install @pinetreepayments/node
 ```
 
 ---
@@ -32,7 +17,7 @@ npm install @pinetree/node
 ## Quick start
 
 ```typescript
-import PineTree from "@pinetree/node"
+import PineTree from "@pinetreepayments/node"
 
 const client = new PineTree(process.env.PINETREE_API_KEY!)
 
@@ -62,7 +47,7 @@ pt_live_<64 hex characters>
 > **Security — server-only:** `pt_live_*` API keys grant full merchant access
 > and must **never** appear in browser code, React applications, or any
 > `NEXT_PUBLIC_` environment variable. For client-side checkout flows, use
-> `@pinetree/js` or `@pinetree/react` with a `pk_live_*` public key instead.
+> `@pinetreepayments/js` or `@pinetreepayments/react` with a `pk_live_*` public key instead.
 
 Generate API keys from the **PineTree dashboard → Developer**. Pass the key
 when constructing the client, or set it via options:
@@ -184,7 +169,7 @@ Verify the HMAC-SHA256 signature on incoming webhook deliveries using
 
 ```typescript
 import express from "express"
-import PineTree, { WebhookVerificationError } from "@pinetree/node"
+import PineTree, { WebhookVerificationError } from "@pinetreepayments/node"
 
 const app = express()
 const client = new PineTree(process.env.PINETREE_API_KEY!)
@@ -226,7 +211,7 @@ app.post(
 ```typescript
 // app/api/webhooks/pinetree/route.ts
 import { NextRequest, NextResponse } from "next/server"
-import PineTree, { WebhookVerificationError } from "@pinetree/node"
+import PineTree, { WebhookVerificationError } from "@pinetreepayments/node"
 
 const client = new PineTree(process.env.PINETREE_API_KEY!)
 
@@ -298,7 +283,7 @@ import PineTree, {
   IdempotencyConflictError,
   APIConnectionError,
   WebhookVerificationError,
-} from "@pinetree/node"
+} from "@pinetreepayments/node"
 
 try {
   await client.checkout.sessions.create({ amount: 2500, currency: "USD" })
@@ -366,7 +351,7 @@ import type {
   Event,
   PineTreeOptions,
   PineTreeWebhookHeaderObject,
-} from "@pinetree/node"
+} from "@pinetreepayments/node"
 ```
 
 ---

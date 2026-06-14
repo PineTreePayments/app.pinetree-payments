@@ -10,7 +10,7 @@ const browserSdkRoot = resolve(packageRoot, "..", "pinetree-js")
 
 rmSync(dist, { recursive: true, force: true })
 
-// The private package consumes the browser SDK's generated public declarations.
+// The React package consumes the browser SDK's generated public declarations.
 execFileSync(process.execPath, [join(browserSdkRoot, "scripts", "build.mjs")], {
   cwd: browserSdkRoot,
   stdio: "inherit",
@@ -83,7 +83,7 @@ writeFileSync(
   type PineTreeCheckoutButtonProps,
   type PineTreeCheckoutProps,
   type CheckoutEventPayload,
-} from "@pinetree/react"
+} from "@pinetreepayments/react"
 
 declare const providerProps: PineTreeProviderProps
 declare const buttonProps: PineTreeCheckoutButtonProps
@@ -108,8 +108,8 @@ writeFileSync(
         skipLibCheck: true,
         lib: ["dom", "dom.iterable", "es2020"],
         paths: {
-          "@pinetree/react": ["./types/index.d.ts"],
-          "@pinetree/js": ["../pinetree-js/dist/types/index.d.ts"],
+          "@pinetreepayments/react": ["./types/index.d.ts"],
+          "@pinetreepayments/js": ["../pinetree-js/dist/types/index.d.ts"],
         },
       },
       files: ["consumer-check.tsx"],

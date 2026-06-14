@@ -5,7 +5,7 @@ import type {
   CheckoutEventHandler,
   CheckoutEventName,
   CheckoutOpenResult,
-} from "@pinetree/js"
+} from "@pinetreepayments/js"
 import {
   destroyReactCheckout,
   openReactCheckout,

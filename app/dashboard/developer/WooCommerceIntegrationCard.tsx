@@ -2,11 +2,12 @@
 
 import { useState } from "react"
 import { ProviderStatusPill } from "@/components/dashboard/DashboardPrimitives"
+import { supabase } from "@/lib/supabaseClient"
 
 const WEBHOOK_FORMAT = "/?wc-api=pinetree_webhook"
 
 const setupSteps = [
-  "Get the PineTree WooCommerce plugin from your PineTree onboarding contact.",
+  "Download the PineTree WooCommerce plugin from this dashboard.",
   "Install and activate it in a WooCommerce test store.",
   "Add a PineTree secret API key in the payment settings.",
   "Add the webhook signing secret.",
@@ -23,12 +24,44 @@ const setupSteps = [
 
 export default function WooCommerceIntegrationCard() {
   const [copied, setCopied] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState("")
 
   function copyWebhookFormat() {
     void navigator.clipboard.writeText(WEBHOOK_FORMAT).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     })
+  }
+
+  async function downloadPlugin() {
+    setDownloading(true)
+    setDownloadError("")
+    try {
+      const { data } = await supabase.auth.getSession()
+      const token = data.session?.access_token ?? ""
+      if (!token) throw new Error("Sign in again to download the plugin.")
+      const response = await fetch("/api/woocommerce/plugin/download", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!response.ok) {
+        const payload = (await response.json()) as { error?: string }
+        throw new Error(payload.error ?? "Plugin download failed.")
+      }
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = "pinetree-woocommerce.zip"
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (cause) {
+      setDownloadError(cause instanceof Error ? cause.message : "Plugin download failed.")
+    } finally {
+      setDownloading(false)
+    }
   }
 
   return (
@@ -41,6 +74,20 @@ export default function WooCommerceIntegrationCard() {
           </p>
         </div>
         <ProviderStatusPill label="Not connected" tone="slate" />
+      </div>
+
+      <div className="mt-3">
+        <button
+          type="button"
+          onClick={() => void downloadPlugin()}
+          disabled={downloading}
+          className="inline-flex min-h-9 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+        >
+          {downloading ? "Downloading..." : "Download plugin"}
+        </button>
+        {downloadError && (
+          <p className="mt-2 text-xs leading-5 text-red-600">{downloadError}</p>
+        )}
       </div>
 
       <details id="woocommerce-setup-guide" className="mt-auto border-t border-gray-100 pt-3">

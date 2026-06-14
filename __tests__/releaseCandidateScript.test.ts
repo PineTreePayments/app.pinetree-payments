@@ -14,9 +14,9 @@ describe("release-candidate script", () => {
     )
 
     expect(result.status, result.stderr).toBe(0)
-    expect(result.stdout).toContain("@pinetree/node build")
-    expect(result.stdout).toContain("@pinetree/js build")
-    expect(result.stdout).toContain("@pinetree/react build")
+    expect(result.stdout).toContain("@pinetreepayments/node build")
+    expect(result.stdout).toContain("@pinetreepayments/js build")
+    expect(result.stdout).toContain("@pinetreepayments/react build")
     expect(result.stdout).toContain("npm pack --dry-run")
     expect(result.stdout).toContain("Release-candidate dry run passed")
   })

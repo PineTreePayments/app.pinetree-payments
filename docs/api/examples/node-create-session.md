@@ -6,13 +6,13 @@ session with all common options, redirecting the customer, and handling errors.
 ## Prerequisites
 
 - Node.js 18 or later
-- `@pinetree/node` installed from a local path or workspace reference until npm publication
+- `@pinetreepayments/node` installed with `npm install @pinetreepayments/node`
 - A `pt_live_*` API key from the PineTree dashboard
 
 ## Basic usage
 
 ```typescript
-import PineTree from "@pinetree/node"
+import PineTree from "@pinetreepayments/node"
 
 const client = new PineTree(process.env.PINETREE_API_KEY!)
 
@@ -94,7 +94,7 @@ import PineTree, {
   InvalidRequestError,
   IdempotencyConflictError,
   APIConnectionError,
-} from "@pinetree/node"
+} from "@pinetreepayments/node"
 
 try {
   const session = await client.checkout.sessions.create(
@@ -129,7 +129,7 @@ try {
 
 ```typescript
 import express from "express"
-import PineTree, { AuthenticationError, APIConnectionError } from "@pinetree/node"
+import PineTree, { AuthenticationError, APIConnectionError } from "@pinetreepayments/node"
 
 const app = express()
 app.use(express.json())
@@ -169,7 +169,7 @@ app.post("/checkout", async (req, res) => {
 ```typescript
 // app/api/checkout/route.ts
 import { NextRequest, NextResponse } from "next/server"
-import PineTree from "@pinetree/node"
+import PineTree from "@pinetreepayments/node"
 
 const client = new PineTree(process.env.PINETREE_API_KEY!)
 

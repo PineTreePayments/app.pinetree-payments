@@ -1,25 +1,21 @@
 # PineTree React SDK
 
-`@pinetree/react` is ready for release and wraps `@pinetree/js`. It does not
-add API endpoints or payment behavior. npm publication is pending.
+`@pinetreepayments/react` wraps `@pinetreepayments/js`. It does not add API
+endpoints or payment behavior.
 
-## Install Locally
+## Install
 
-```json
-{
-  "dependencies": {
-    "@pinetree/js": "file:../../packages/pinetree-js",
-    "@pinetree/react": "file:../../packages/pinetree-react"
-  }
-}
+```bash
+npm install @pinetreepayments/react
 ```
 
-React and React DOM are peer dependencies.
+`@pinetreepayments/js` is installed as a dependency. React and React DOM are
+peer dependencies.
 
 ## Provider
 
 ```tsx
-import { PineTreeProvider } from "@pinetree/react"
+import { PineTreeProvider } from "@pinetreepayments/react"
 
 <PineTreeProvider publicKey="pk_live_...">
   <App />

@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-13
 **Product:** PineTree API
-**SDKs:** `@pinetree/node` 0.1.0 · `@pinetree/js` 0.3.0 (0.4.0-beta.1 planned) · `@pinetree/react` 0.1.0 (all private)
+**SDKs:** `@pinetreepayments/node` 0.1.0 · `@pinetreepayments/js` 0.3.0 (0.4.0-beta.1 planned) · `@pinetreepayments/react` 0.1.0 (public packages)
 
 ---
 
@@ -105,7 +105,7 @@ metadata.  Retry is idempotent against already-successful deliveries.
 
 **Status: Three private SDKs — not published**
 
-### @pinetree/node 0.1.0
+### @pinetreepayments/node 0.1.0
 
 | Area | State |
 |---|---|
@@ -117,7 +117,7 @@ metadata.  Retry is idempotent against already-successful deliveries.
 | Exported constants | `PineTreeWebhookHeaders`, `PineTreeWebhookVersion` |
 | First publish target | `0.1.0-beta.1` |
 
-### @pinetree/js 0.3.0
+### @pinetreepayments/js 0.3.0
 
 | Area | State |
 |---|---|
@@ -128,7 +128,7 @@ metadata.  Retry is idempotent against already-successful deliveries.
 | Phase 14 lifecycle events | Implemented but not yet versioned (unreleased in changelog) |
 | First publish target | `0.4.0-beta.1` (after Phase 14 version bump) |
 
-### @pinetree/react 0.1.0
+### @pinetreepayments/react 0.1.0
 
 | Area | State |
 |---|---|
@@ -201,7 +201,7 @@ or the SDK is published.
     repo URL before publishing.
 13. **LICENSE file** is present in each package directory (already added; verify
     it appears in `npm pack` output before publish).
-14. **Bump `@pinetree/js` to `0.4.0`** before publishing (Phase 14 lifecycle
+14. **Bump `@pinetreepayments/js` to `0.4.0`** before publishing (Phase 14 lifecycle
     events are implemented but not reflected in the current `0.3.0` version tag).
 
 ### Before First npm Publish
@@ -209,7 +209,7 @@ or the SDK is published.
 - Full staging integration test run with real keys.
 - `npm publish --tag beta` dry run against the npm registry.
 - Per-package version bumps with beta suffix (see [version-strategy.md](./version-strategy.md)).
-- Post-publish smoke test in a clean project (`npm install @pinetree/node@beta`).
+- Post-publish smoke test in a clean project (`npm install @pinetreepayments/node@beta`).
 - Monitoring and alerting review.
 
 ---
