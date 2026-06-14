@@ -8,13 +8,16 @@ function read(relativePath: string) {
 
 describe("developer and integration wording", () => {
   it("keeps readiness labels out of merchant-facing Shopify surfaces", () => {
-    const card = read("app/dashboard/developer/ShopifyIntegrationCard.tsx")
+    const card = [
+      read("app/dashboard/developer/ShopifyIntegrationCard.tsx"),
+      read("app/dashboard/developer/ShopifyIntegrationCardView.tsx"),
+    ].join("\n")
     const readme = read("integrations/shopify/README.md")
     const setup = read("integrations/shopify/SETUP.md")
     const combined = `${card}\n${readme}\n${setup}`
 
     expect(combined).not.toMatch(/Foundation|Private Beta|Requires setup|backend checklist|implementation checklist/i)
-    expect(card).toContain('"Connected" : "Not connected"')
+    expect(card).toContain('label={connected ? "Connected" : "Not connected"}')
     expect(card).toContain("Connect Shopify")
     expect(card).toContain("View setup guide")
   })

@@ -37,7 +37,10 @@ describe("staging environment readiness", () => {
   })
 
   it("keeps Shopify secrets out of the client component", () => {
-    const card = read("app/dashboard/developer/ShopifyIntegrationCard.tsx")
+    const card = [
+      read("app/dashboard/developer/ShopifyIntegrationCard.tsx"),
+      read("app/dashboard/developer/ShopifyIntegrationCardView.tsx"),
+    ].join("\n")
     expect(card).not.toContain("SHOPIFY_CLIENT_SECRET")
     expect(card).not.toContain("SHOPIFY_TOKEN_ENCRYPTION_KEY")
     expect(card).not.toContain("shopifyAccessToken")

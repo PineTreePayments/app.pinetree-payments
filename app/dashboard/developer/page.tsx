@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type { ReactNode } from "react"
 import { Code2, KeyRound, Plug, Webhook } from "lucide-react"
 import {
@@ -49,6 +49,13 @@ const overviewCards = [
 
 export default function DeveloperPage() {
   const [tab, setTab] = useState<DeveloperTab>("keys")
+
+  useEffect(() => {
+    const shopifyResult = new URLSearchParams(window.location.search).get("shopify")
+    if (shopifyResult !== "connected") return
+    const timer = window.setTimeout(() => setTab("integrations"), 0)
+    return () => window.clearTimeout(timer)
+  }, [])
 
   return (
     <div className="space-y-5 md:space-y-7">

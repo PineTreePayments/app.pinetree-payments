@@ -96,6 +96,29 @@ describe("Shopify database-backed route wiring", () => {
     expect(mocks.getActiveMerchantConnection).toHaveBeenCalledWith("merchant_1")
   })
 
+  it("reports a safe unavailable state when Shopify configuration is missing", async () => {
+    delete process.env.SHOPIFY_CLIENT_ID
+    delete process.env.SHOPIFY_CLIENT_SECRET
+    delete process.env.SHOPIFY_SCOPES
+    delete process.env.SHOPIFY_APP_URL
+    delete process.env.SHOPIFY_TOKEN_ENCRYPTION_KEY
+    mocks.getActiveMerchantConnection.mockResolvedValue(null)
+
+    const response = await getStatus(new NextRequest(
+      "https://app.test/api/shopify/status",
+      { headers: { Authorization: "Bearer dashboard-token" } }
+    ))
+
+    await expect(response.json()).resolves.toEqual({
+      connected: false,
+      status: "not_connected",
+      shop: null,
+      connectedAt: null,
+      updatedAt: null,
+      configured: false,
+    })
+  })
+
   it("starts a merchant-bound Shopify connection", async () => {
     const response = await startAuth(new NextRequest("https://app.test/api/shopify/auth", {
       method: "POST",

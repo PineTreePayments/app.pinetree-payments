@@ -40,7 +40,10 @@ describe("dashboard checkout and developer navigation", () => {
   it("uses compact Developer cards as the only section selector", () => {
     const developer = read("app/dashboard/developer/page.tsx")
     const publicKeys = read("app/dashboard/developer/PublicKeysPanel.tsx")
-    const shopifyCard = read("app/dashboard/developer/ShopifyIntegrationCard.tsx")
+    const shopifyCard = [
+      read("app/dashboard/developer/ShopifyIntegrationCard.tsx"),
+      read("app/dashboard/developer/ShopifyIntegrationCardView.tsx"),
+    ].join("\n")
     const wooCommerceCard = read("app/dashboard/developer/WooCommerceIntegrationCard.tsx")
     const checkout = read("app/dashboard/checkout/page.tsx")
 
@@ -61,6 +64,8 @@ describe("dashboard checkout and developer navigation", () => {
     expect(developer).toContain("No package required. Use a secret API key from your server to create checkout sessions.")
     expect(developer).toContain("WooCommerce")
     expect(developer).toContain("<WooCommerceIntegrationCard />")
+    expect(developer).toContain('shopifyResult !== "connected"')
+    expect(developer).toContain('setTab("integrations")')
     // WooCommerce card: merchant-facing, no GitHub links, actionable setup guide
     expect(wooCommerceCard).toContain('label="Not connected"')
     expect(wooCommerceCard).toContain("tone=\"slate\"")
@@ -83,8 +88,8 @@ describe("dashboard checkout and developer navigation", () => {
     expect(wooCommerceCard).toContain('id="woocommerce-setup-guide" className="mt-4 border-t border-gray-100 pt-3"')
     // Shopify card: clean Connected/Not connected pattern, no ugly warning labels
     expect(shopifyCard).toContain("Connect a Shopify store to use PineTree Checkout.")
-    expect(shopifyCard).toContain('"Connected" : "Not connected"')
-    expect(shopifyCard).toContain('"blue" : "slate"')
+    expect(shopifyCard).toContain('label={connected ? "Connected" : "Not connected"}')
+    expect(shopifyCard).toContain('tone={connected ? "blue" : "slate"}')
     expect(shopifyCard).toContain("Connect Shopify")
     expect(shopifyCard).toContain("Disconnect")
     expect(shopifyCard).toContain("View setup guide")
