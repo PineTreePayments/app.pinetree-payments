@@ -110,7 +110,7 @@ export default function ShopifyIntegrationCard() {
         </div>
         <ProviderStatusPill
           label={status?.connected ? "Connected" : "Not connected"}
-          tone={status?.connected ? "green" : "slate"}
+          tone={status?.connected ? "blue" : "slate"}
         />
       </div>
 
@@ -150,8 +150,8 @@ export default function ShopifyIntegrationCard() {
             {working ? "Connecting..." : "Connect Shopify"}
           </button>
           {status && !status.configured && (
-            <p className="text-xs leading-5 text-amber-700">
-              Shopify connections need app credentials before a store can be connected.
+            <p className="text-xs leading-5 text-gray-500">
+              Shopify connection is not available yet. Contact PineTree support to enable Shopify.
             </p>
           )}
         </div>
