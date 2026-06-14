@@ -66,7 +66,7 @@ export default function WooCommerceIntegrationCard() {
 
   return (
     <div className="flex h-full flex-col rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex min-h-[4.5rem] items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-gray-950">WooCommerce</h2>
           <p className="mt-1 text-xs leading-5 text-gray-500">
@@ -76,21 +76,23 @@ export default function WooCommerceIntegrationCard() {
         <ProviderStatusPill label="Not connected" tone="slate" />
       </div>
 
-      <div className="mt-3">
-        <button
-          type="button"
-          onClick={() => void downloadPlugin()}
-          disabled={downloading}
-          className="inline-flex min-h-9 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
-        >
-          {downloading ? "Downloading..." : "Download plugin"}
-        </button>
+      <div className="flex flex-1 flex-col pt-4">
+        <div className="mt-auto">
+          <button
+            type="button"
+            onClick={() => void downloadPlugin()}
+            disabled={downloading}
+            className="inline-flex min-h-9 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+          >
+            {downloading ? "Downloading..." : "Download plugin"}
+          </button>
+        </div>
         {downloadError && (
           <p className="mt-2 text-xs leading-5 text-red-600">{downloadError}</p>
         )}
       </div>
 
-      <details id="woocommerce-setup-guide" className="mt-auto border-t border-gray-100 pt-3">
+      <details id="woocommerce-setup-guide" className="mt-4 border-t border-gray-100 pt-3">
         <summary className="cursor-pointer list-none text-xs font-semibold text-blue-700">
           View setup guide
         </summary>

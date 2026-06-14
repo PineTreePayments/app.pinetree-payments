@@ -211,7 +211,7 @@ function SdkCards() {
             </summary>
             <div className="mt-3 space-y-2 border-t border-gray-100 pt-3">
               {card.command && (
-                <code className="block rounded-lg bg-gray-950 px-3 py-2 font-mono text-[11px] text-emerald-400">
+                <code className="block overflow-x-auto rounded-xl border border-gray-200 bg-white px-3 py-2.5 font-mono text-[11px] font-medium text-gray-950 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                   {card.command}
                 </code>
               )}
