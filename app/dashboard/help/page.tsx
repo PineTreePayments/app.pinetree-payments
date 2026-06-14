@@ -6,6 +6,7 @@ import {
   BookOpen,
   CheckCircle2,
   ChevronRight,
+  Code2,
   Clock,
   CreditCard,
   FileText,
@@ -129,6 +130,12 @@ const supportHubSections = [
     articleIds: ["dashboard-overview", "transactions-page", "reports-page"]
   },
   {
+    title: "Developer Tools",
+    description: "Set up API keys, webhooks, SDKs, WooCommerce, and Shopify from the Developer dashboard.",
+    icon: Code2,
+    articleIds: ["api-keys", "webhooks", "sdks", "woocommerce", "shopify"]
+  },
+  {
     title: "Contact Support",
     description: "Open tickets with payment ID, provider, network, timestamp, amount, and transaction hash when available.",
     icon: LifeBuoy,
@@ -152,7 +159,7 @@ const emptyFeedbackForm: FeedbackForm = {
 
 const DEFAULT_VISIBLE_ARTICLES = 6
 const SUPPORT_STORAGE_DISABLED_MESSAGE =
-  "Support storage is not enabled yet. Apply the Help Center database migration to view and create tickets."
+  "Support tickets are temporarily unavailable. Please try again later."
 
 const TICKET_FILTERS = ["All", "Open", "In Review", "Resolved", "Archived"] as const
 type TicketFilter = typeof TICKET_FILTERS[number]

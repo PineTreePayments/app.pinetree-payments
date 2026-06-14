@@ -378,16 +378,16 @@ export const helpArticles: HelpArticle[] = [
     id: "api-keys",
     title: "API keys",
     category: "Developer/API",
-    description: "Developer includes API key creation, listing, and revocation for server-side integrations.",
-    body: "The Developer page can create API keys, list existing keys by prefix, show created time and last used time, and revoke keys. Newly created keys are shown once for copying.\n\nWhat this means: API keys are for server-side use. Do not put live keys in frontend code.\n\nWhat to check: Key name, prefix, permissions, last used time, and whether a key has been revoked.",
-    tags: ["api keys", "developer", "security"],
-    keywords: ["pt_live", "server side", "revoke"]
+    description: "Create and manage secret API keys for server-side PineTree integrations.",
+    body: "Open Developer, then API Keys, to create a secret key for your server. Newly created keys are shown once, so copy the key and store it securely. Existing keys can be reviewed by prefix and revoked when they are no longer needed.\n\nREST API: No package required. Use a secret API key from your server.\n\nWhat this means: Secret API keys must stay on your backend. Never place them in browser code, public repositories, or customer-facing pages.\n\nWhat to check: Key name, permissions, last used time, and whether an old key should be revoked.",
+    tags: ["api keys", "developer", "REST API", "security"],
+    keywords: ["secret key", "server side", "revoke", "REST"]
   },
   {
     id: "payment-links-api",
     title: "Payment links and checkout session API",
     category: "Developer/API",
-    description: "The app includes payment link endpoints and a checkout session preview endpoint.",
+    description: "Use payment link endpoints or create checkout sessions from your server.",
     body: "Developer lists payment-link endpoints for creating, listing, and disabling links. It also includes the checkout session endpoint for server-side session creation and redirecting customers to a PineTree checkout URL.\n\nWhat this means: Static links are useful for fixed offers. Dynamic checkout sessions are better when your backend creates a payment for a specific order.\n\nWhat to check: Amount, currency, checkout URL, token, success URL, cancel URL, and whether your backend keeps API keys secret.",
     tags: ["payment links", "checkout session", "api"],
     keywords: ["/api/checkout/session", "/api/checkout-links", "token"]
@@ -396,28 +396,46 @@ export const helpArticles: HelpArticle[] = [
     id: "webhooks",
     title: "Webhooks",
     category: "Developer/API",
-    description: "Developer includes merchant webhook configuration and delivery history views.",
-    body: "The Developer page can configure a webhook URL and selected events such as payment.confirmed, payment.failed, payment.incomplete, and checkout.session.created. It also shows webhook delivery history when available.\n\nWhat this means: Webhooks let your backend react to PineTree events, but your system should still verify state from PineTree instead of trusting a single delivery blindly.\n\nWhat to check: Webhook URL, enabled events, secret handling, delivery status, response status, and attempt count.",
+    description: "Configure event delivery and review webhook activity from Developer.",
+    body: "Open Developer, then Webhooks, to add your HTTPS endpoint and choose events such as payment.confirmed, payment.failed, payment.incomplete, and checkout.session.created. PineTree shows delivery activity so you can review response status and attempts.\n\nWhat this means: Webhooks notify your backend when PineTree activity changes. Your handler should verify the real PineTree headers, return a successful response promptly, and process repeated events safely.\n\nWhat to check: Endpoint URL, enabled events, signature verification, delivery status, response status, attempt count, and duplicate-event handling.",
     tags: ["webhooks", "events", "developer"],
-    keywords: ["payment.confirmed", "payment.failed", "deliveries"]
+    keywords: ["payment.confirmed", "payment.failed", "deliveries", "signature"]
+  },
+  {
+    id: "sdks",
+    title: "PineTree SDKs",
+    category: "Developer/API",
+    description: "Install the published Node, JavaScript, or React SDK for your integration.",
+    body: "Choose the SDK that matches your application.\n\nNode SDK: npm install @pinetreepayments/node\n\nJavaScript SDK: npm install @pinetreepayments/js\n\nReact SDK: npm install @pinetreepayments/react\n\nREST API: No package required. Use a secret API key from your server.\n\nWhat this means: Use the Node SDK or REST API from trusted server code. The JavaScript and React SDKs help launch PineTree Checkout in browser applications without exposing a secret API key.\n\nWhat to check: Package name, installed version, server-versus-browser usage, and that secret keys remain server-side.",
+    tags: ["SDKs", "Node", "JavaScript", "React", "developer"],
+    keywords: ["@pinetreepayments/node", "@pinetreepayments/js", "@pinetreepayments/react", "npm install"]
+  },
+  {
+    id: "woocommerce",
+    title: "WooCommerce setup",
+    category: "Developer/API",
+    description: "Download and test the PineTree WooCommerce plugin from Developer → Integrations.",
+    body: "Open Developer → Integrations and download the PineTree WooCommerce plugin from the dashboard. Install it in a WooCommerce test store first, then add your PineTree API key in the plugin settings.\n\nConfigure the webhook URL using ?wc-api=pinetree_webhook. Create a test order and confirm checkout opens PineTree Checkout. After payment, confirm the paid webhook updates the WooCommerce order.\n\nWhat this means: Duplicate webhook events should not duplicate order notes or status changes. If an order needs another status check, use Manual sync from the order screen.\n\nWhat to check: Plugin activation, API key, webhook URL, test order, checkout handoff, paid status, duplicate-event handling, and Manual sync.",
+    tags: ["WooCommerce", "plugin", "webhooks", "Developer → Integrations"],
+    keywords: ["dashboard plugin download", "?wc-api=pinetree_webhook", "Manual sync", "test order"]
+  },
+  {
+    id: "shopify",
+    title: "Shopify connection",
+    category: "Developer/API",
+    description: "Connect a Shopify store from Developer → Integrations when Shopify is enabled for PineTree.",
+    body: "Open Developer → Integrations. The Shopify card shows Not connected until a store is linked. Enter your Shopify store domain, click Connect Shopify, and approve the PineTree app in Shopify. Return to PineTree and confirm the store shows Connected.\n\nWhat this means: Shopify must be enabled by PineTree deployment configuration before merchants can connect. If connection controls are unavailable, contact PineTree support.\n\nWhat to check: Store domain, approval in Shopify, return to PineTree, Connected status, and a small checkout test after setup is enabled.",
+    tags: ["Shopify", "Developer → Integrations", "Connected", "Not connected"],
+    keywords: ["Connect Shopify", "store domain", "approve app", "deployment configuration"]
   },
   {
     id: "event-model",
     title: "Event model",
     category: "Developer/API",
-    description: "PineTree maps provider and watcher signals into payment events and status changes.",
-    body: "PineTree receives signals from providers, webhooks, wallet flows, and bounded watcher checks. Those signals are translated into events such as payment.pending, payment.processing, payment.confirmed, or payment.failed before the engine applies status changes.\n\nWhat this means: Integrations should treat PineTree payment status as the source of truth rather than trying to infer final state from a customer browser action alone.\n\nWhat to check: Payment status, provider reference, webhook delivery, and transaction row.",
+    description: "Use PineTree payment events and statuses to keep your integration in sync.",
+    body: "PineTree reports events such as payment.pending, payment.processing, payment.confirmed, and payment.failed as a payment moves through checkout.\n\nWhat this means: Treat PineTree payment status as the source of truth instead of assuming a customer browser action completed the payment.\n\nWhat to check: Payment status, provider reference, webhook delivery, duplicate-event handling, and the matching transaction row.",
     tags: ["events", "status", "developer", "webhooks"],
     keywords: ["event processor", "payment event", "source of truth"]
-  },
-  {
-    id: "pinetree-engine-safe",
-    title: "PineTree Engine",
-    category: "Developer/API",
-    description: "PineTree Engine is the internal layer that validates payment creation, provider routing, and status transitions.",
-    body: "PineTree Engine is the internal coordination layer behind payment creation and status updates. It validates inputs, calculates fee-aware amounts, chooses providers, creates records, and applies status transitions through one controlled path.\n\nWhat this means: UI pages and API routes should not directly decide final payment status. The engine keeps payment state consistent across providers.\n\nWhat to check: For developer support, provide the payment ID, provider, network, status, and any provider reference rather than internal secrets.",
-    tags: ["engine", "developer", "status", "architecture"],
-    keywords: ["UI API ENGINE DATABASE", "state machine"]
   },
   {
     id: "payment-stuck-pending",
@@ -496,7 +514,7 @@ export const helpArticles: HelpArticle[] = [
     title: "What PineTree support needs to review",
     category: "Troubleshooting",
     description: "Some payment, provider, compliance, and account-level questions require PineTree support or admin review.",
-    body: "PineTree AI can explain setup steps and basic troubleshooting, but it should escalate when funds are missing, a payment is stuck after funds were sent, a transaction is confirmed on-chain but not in PineTree, a provider connection fails repeatedly, or the issue involves account suspension, compliance, underwriting, KYC/KYB, fraud, refunds, disputes, legal questions, tax advice, or admin database review.\n\nWhat this means: PineTree AI should not guess about money movement, provider approval, account restrictions, or private account data. Those issues need a support ticket so PineTree can review authorized account and payment records.\n\nWhat to check: Open a support ticket and include payment ID, provider, wallet/network, approximate time, transaction hash if available, screenshots if helpful, and a short description of what the customer did.",
+    body: "PineTree AI can explain setup steps and basic troubleshooting, but it should escalate when funds are missing, a payment is stuck after funds were sent, a transaction is confirmed on-chain but not in PineTree, a provider connection fails repeatedly, or the issue involves account suspension, compliance, underwriting, KYC/KYB, fraud, refunds, disputes, legal questions, tax advice, or account review.\n\nWhat this means: PineTree AI should not guess about money movement, provider approval, account restrictions, or private account data. Those issues need a support ticket so PineTree can review authorized account and payment records.\n\nWhat to check: Open a support ticket and include payment ID, provider, wallet/network, approximate time, transaction hash if available, screenshots if helpful, and a short description of what the customer did.",
     tags: ["support", "escalation", "funds", "admin review"],
     keywords: ["missing funds", "refund", "dispute", "KYC", "KYB", "compliance", "legal", "tax", "confirmed on-chain"]
   },
@@ -511,19 +529,19 @@ export const helpArticles: HelpArticle[] = [
   },
   {
     id: "assistant-local-docs-only",
-    title: "Current PineTree AI data access",
+    title: "How PineTree AI uses Help Center information",
     category: "PineTree Assistant",
-    description: "The Help Center PineTree AI panel uses PineTree help docs and does not inspect private merchant data from this page.",
-    body: "The current PineTree AI panel uses local PineTree help documentation and structured PineTree support guidance. It does not read private merchant account data in the Help Center UI and should not claim a provider account is approved or funds are received unless authorized PineTree data shows that status.\n\nWhat this means: PineTree AI can explain what to check, but account-specific payment confirmation or provider approval questions should move to a support ticket.\n\nWhat to check: Search terms, matching docs, and whether a support ticket is better for account-specific problems.",
-    tags: ["assistant", "local docs", "privacy"],
-    keywords: ["private data", "local search", "merchant context", "authorized data"]
+    description: "PineTree AI uses Help Center guidance and does not inspect private merchant data from this page.",
+    body: "The PineTree AI panel uses PineTree help documentation and structured support guidance. It does not read private merchant account data from the Help Center and should not claim a provider account is approved or funds are received unless authorized PineTree data shows that status.\n\nWhat this means: PineTree AI can explain what to check, but account-specific payment confirmation or provider approval questions should move to a support ticket.\n\nWhat to check: Search terms, matching docs, and whether a support ticket is better for account-specific problems.",
+    tags: ["assistant", "help docs", "privacy"],
+    keywords: ["private data", "help search", "merchant context", "authorized data"]
   },
   {
     id: "assistant-boundaries",
     title: "What PineTree AI can and cannot answer",
     category: "PineTree Assistant",
     description: "PineTree AI answers setup and support questions, but escalates money movement, compliance, and account-review issues.",
-    body: "PineTree AI should answer questions about PineTree workflows, help docs, payment statuses, provider setup, wallet connections, POS, checkout, dashboard basics, and support ticket preparation. It should not invent provider behavior, expose secrets, provide legal or tax advice, or claim a payment is complete unless PineTree status supports that.\n\nWhat this means: If the question involves missing funds, stuck payments after funds were sent, confirmed on-chain activity not showing in PineTree, repeated provider setup failures, refunds, disputes, account suspension, compliance, underwriting, KYC/KYB, fraud, legal, tax, or admin database review, PineTree AI should send the merchant to support.\n\nWhat to check: Source docs, merchant scope, whether the question needs live account data, and whether a human support ticket is more appropriate.",
+    body: "PineTree AI should answer questions about PineTree workflows, help docs, payment statuses, provider setup, wallet connections, POS, checkout, dashboard basics, and support ticket preparation. It should not invent provider behavior, expose secrets, provide legal or tax advice, or claim a payment is complete unless PineTree status supports that.\n\nWhat this means: If the question involves missing funds, stuck payments after funds were sent, confirmed on-chain activity not showing in PineTree, repeated provider setup failures, refunds, disputes, account suspension, compliance, underwriting, KYC/KYB, fraud, legal, tax, or account review, PineTree AI should send the merchant to support.\n\nWhat to check: Source docs, merchant scope, whether the question needs live account data, and whether a human support ticket is more appropriate.",
     tags: ["assistant", "boundaries", "safety"],
     keywords: ["AI boundaries", "grounded answers", "merchant context", "escalate"]
   }
