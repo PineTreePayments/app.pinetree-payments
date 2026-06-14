@@ -15,6 +15,7 @@
   "homepage": "https://app.pinetree-payments.com",
   "bugs": { "url": "https://github.com/pinetree-payments/pinetree-payments/issues" },
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
   "types": "./dist/types/index.d.ts",
