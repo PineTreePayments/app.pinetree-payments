@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  outputFileTracingIncludes: {
+    '/api/woocommerce/plugin/download': ['./artifacts/woocommerce/*.zip'],
+  },
   async rewrites() {
     return [
       {

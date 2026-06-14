@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
 
     if (!existsSync(ARTIFACT_PATH)) {
       return NextResponse.json(
-        { error: "Plugin package is not yet available. Contact PineTree support." },
+        { error: "Plugin package is being prepared. Try again shortly." },
         { status: 503 }
       )
     }

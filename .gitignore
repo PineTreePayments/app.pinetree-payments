@@ -50,6 +50,7 @@ contracts/.env.deploy
 !contracts/.env.deploy.example
 
 *.zip
+!artifacts/woocommerce/pinetree-woocommerce.zip
 .zip files
 node_modules
 .next
