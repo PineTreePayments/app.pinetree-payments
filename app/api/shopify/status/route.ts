@@ -33,6 +33,7 @@ export async function GET(req: NextRequest) {
       configured: Boolean(
         process.env.SHOPIFY_CLIENT_ID &&
         process.env.SHOPIFY_CLIENT_SECRET &&
+        process.env.SHOPIFY_SCOPES &&
         (process.env.SHOPIFY_APP_URL || process.env.NEXT_PUBLIC_APP_URL) &&
         process.env.SHOPIFY_TOKEN_ENCRYPTION_KEY
       ),

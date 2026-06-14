@@ -12,11 +12,12 @@ const OAUTH_COOKIE = "shopify_oauth_context"
 function getConfig() {
   const clientId = process.env.SHOPIFY_CLIENT_ID
   const clientSecret = process.env.SHOPIFY_CLIENT_SECRET
+  const scopes = process.env.SHOPIFY_SCOPES
   const rawAppUrl = process.env.SHOPIFY_APP_URL ?? process.env.NEXT_PUBLIC_APP_URL
-  if (!clientId || !clientSecret || !rawAppUrl || !process.env.SHOPIFY_TOKEN_ENCRYPTION_KEY) {
+  if (!clientId || !clientSecret || !scopes || !rawAppUrl || !process.env.SHOPIFY_TOKEN_ENCRYPTION_KEY) {
     return null
   }
-  return { clientId, clientSecret, appUrl: rawAppUrl.replace(/\/$/, "") }
+  return { clientId, clientSecret, scopes, appUrl: rawAppUrl.replace(/\/$/, "") }
 }
 
 function setOAuthCookie(
@@ -57,6 +58,7 @@ async function createAuthResponse(req: NextRequest, shop: string, redirect: bool
       clientId: config.clientId,
       redirectUri,
       state,
+      scopes: config.scopes,
     })
     const context = createOAuthContext({ state, merchantId }, config.clientSecret)
     const response = redirect

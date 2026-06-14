@@ -27,6 +27,7 @@ export type ShopifyWebhookTopic =
 export const ENV_KEYS = {
   SHOPIFY_CLIENT_ID:              "SHOPIFY_CLIENT_ID",
   SHOPIFY_CLIENT_SECRET:          "SHOPIFY_CLIENT_SECRET",
+  SHOPIFY_SCOPES:                 "SHOPIFY_SCOPES",
   SHOPIFY_APP_URL:                "SHOPIFY_APP_URL",
   // 64-char hex (32 bytes) used by lib/crypto.ts to AES-256-GCM-encrypt access tokens.
   SHOPIFY_TOKEN_ENCRYPTION_KEY:   "SHOPIFY_TOKEN_ENCRYPTION_KEY",

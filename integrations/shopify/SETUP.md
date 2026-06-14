@@ -7,6 +7,7 @@ Add these values to the PineTree deployment:
 ```text
 SHOPIFY_CLIENT_ID=<Shopify app client ID>
 SHOPIFY_CLIENT_SECRET=<Shopify app client secret>
+SHOPIFY_SCOPES=read_orders,write_orders,read_checkouts
 SHOPIFY_APP_URL=https://your-pinetree-domain.com
 SHOPIFY_TOKEN_ENCRYPTION_KEY=<64-character hexadecimal key>
 ```
