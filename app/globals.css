@@ -45,6 +45,26 @@ body.pinetree-modal-open {
   animation:fadeIn .25s ease;
 }
 
+/* Sidebar navigation — PineTree glass scrollbar */
+.pinetree-sidebar-nav {
+  /* Firefox */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+}
+.pinetree-sidebar-nav::-webkit-scrollbar {
+  width: 5px;
+}
+.pinetree-sidebar-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+.pinetree-sidebar-nav::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.30);
+  border-radius: 999px;
+}
+.pinetree-sidebar-nav::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.50);
+}
+
 .form-field {
   min-height: 2.75rem;
   width: 100%;

@@ -167,7 +167,7 @@ export default function DashboardLayout({
             </Link>
           </div>
 
-          <nav className="flex-1 space-y-1.5 overflow-y-auto px-3 py-4">
+          <nav className="pinetree-sidebar-nav flex-1 space-y-1.5 overflow-y-auto px-3 py-4">
             {nav.map((item) => {
               const active = pathname === item.href
 

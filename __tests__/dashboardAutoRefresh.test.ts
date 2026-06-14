@@ -100,8 +100,11 @@ describe("Wallets page auto-refresh", () => {
     expect(wallets).toContain("enabled: !isRefreshing")
   })
 
-  it("still has a Refresh Balances button as a manual backup", () => {
-    expect(wallets).toContain("Refresh Balances")
+  it("does not show a manual Refresh Balances header button (auto-refresh handles it)", () => {
+    // The header-level "Refresh Balances" button was removed; the per-wallet inline
+    // "Refresh Balance" button inside the detail panel is intentionally kept.
+    const headerSection = wallets.slice(0, wallets.indexOf("DashboardHeroCard"))
+    expect(headerSection).not.toContain("Refresh Balances")
   })
 
   it("shows last wallet sync timestamp when available", () => {
@@ -131,9 +134,11 @@ describe("Overview page auto-refresh", () => {
     expect(overview).toContain("refreshOnMount: false")
   })
 
-  it("still has a Sync Now button for manual refresh", () => {
-    expect(overview).toContain("Sync Now")
-    expect(overview).toContain("syncNow")
+  it("does not show a manual Sync Now button (auto-refresh handles it)", () => {
+    expect(overview).not.toContain("Sync Now")
+    expect(overview).not.toContain("syncNow")
+    expect(overview).not.toContain("isSyncing")
+    expect(overview).not.toContain("syncError")
   })
 
   it("loads data on mount via its own useEffect (unchanged)", () => {
@@ -195,6 +200,53 @@ describe("Providers page auto-refresh", () => {
 
   it("wires the refresh to loadAll", () => {
     expect(providers).toContain("refresh: loadAll")
+  })
+})
+
+// ─── Sidebar scrollbar polish ─────────────────────────────────────────────────
+
+describe("sidebar scrollbar styling", () => {
+  it("layout applies pinetree-sidebar-nav class to the scrollable nav element", () => {
+    const layout = read("app/dashboard/layout.tsx")
+    expect(layout).toContain("pinetree-sidebar-nav")
+    expect(layout).toContain("overflow-y-auto")
+  })
+
+  it("globals.css defines WebKit scrollbar styles for pinetree-sidebar-nav", () => {
+    const css = read("app/globals.css")
+    expect(css).toContain(".pinetree-sidebar-nav")
+    expect(css).toContain("::-webkit-scrollbar")
+    expect(css).toContain("::-webkit-scrollbar-track")
+    expect(css).toContain("::-webkit-scrollbar-thumb")
+    expect(css).toContain("border-radius: 999px")
+  })
+
+  it("globals.css includes Firefox scrollbar-width and scrollbar-color fallback", () => {
+    const css = read("app/globals.css")
+    expect(css).toContain("scrollbar-width: thin")
+    expect(css).toContain("scrollbar-color")
+  })
+
+  it("globals.css sets a transparent scrollbar track (no chunky background)", () => {
+    const css = read("app/globals.css")
+    // Track must be transparent
+    const trackBlock = css.slice(
+      css.indexOf("::-webkit-scrollbar-track"),
+      css.indexOf("::-webkit-scrollbar-thumb")
+    )
+    expect(trackBlock).toContain("transparent")
+  })
+
+  it("globals.css thumb has a hover state for discoverability", () => {
+    const css = read("app/globals.css")
+    expect(css).toContain("::-webkit-scrollbar-thumb:hover")
+  })
+
+  it("scrollbar styles are scoped to .pinetree-sidebar-nav, not the global body", () => {
+    const css = read("app/globals.css")
+    // The body rule must not contain scrollbar overrides
+    const bodyBlock = css.slice(css.indexOf("body {"), css.indexOf("body.pinetree-modal-open"))
+    expect(bodyBlock).not.toContain("scrollbar")
   })
 })
 

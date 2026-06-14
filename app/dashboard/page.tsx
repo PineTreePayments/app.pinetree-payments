@@ -139,8 +139,6 @@ export default function DashboardPage() {
     failed: 0
   })
   const [railReadiness, setRailReadiness] = useState<NonNullable<DashboardOverviewResponse["railReadiness"]>>([])
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [syncError, setSyncError] = useState<string | null>(null)
   const [chartRange, setChartRange] = useState<ChartRange>("30D")
   const [chartExpanded, setChartExpanded] = useState(false)
 
@@ -184,20 +182,6 @@ export default function DashboardPage() {
     const payload = await callOverviewApi(false)
     applyOverviewPayload(payload)
   }, [applyOverviewPayload, callOverviewApi])
-
-  async function syncNow() {
-    setIsSyncing(true)
-    setSyncError(null)
-    try {
-      const payload = await callOverviewApi(true)
-      applyOverviewPayload(payload)
-    } catch (err) {
-      console.error("Manual sync failed:", err)
-      setSyncError(err instanceof Error ? err.message : "Sync failed")
-    } finally {
-      setIsSyncing(false)
-    }
-  }
 
   useEffect(() => {
     void loadOverview().catch((err) => {
@@ -342,23 +326,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-5 md:space-y-7">
 
-      <div className="flex items-center justify-between gap-3">
-        <h1 className={dashboardPageTitleClass}>
-          Overview
-        </h1>
-        <button
-          onClick={syncNow}
-          disabled={isSyncing}
-          className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-10 sm:px-4"
-        >
-          <span className="sm:hidden">{isSyncing ? "Syncing" : "Sync"}</span>
-          <span className="hidden sm:inline">{isSyncing ? "Syncing..." : "Sync Now"}</span>
-        </button>
-      </div>
-
-      {syncError && (
-        <p className="text-sm text-red-600 mb-4">Sync error: {syncError}</p>
-      )}
+      <h1 className={dashboardPageTitleClass}>Overview</h1>
 
       {/* 1 — Today's Successful Sales */}
       <div className="relative overflow-hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] px-4 py-3 shadow-[0_10px_28px_rgba(37,99,235,0.09)] sm:px-5 sm:py-3.5">

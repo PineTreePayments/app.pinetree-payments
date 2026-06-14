@@ -2846,21 +2846,7 @@ export default function WalletsPage() {
 
   return (
     <div className="w-full space-y-5 md:space-y-7">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className={dashboardPageTitleClass}>Wallets</h1>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => loadOverview(true)}
-          disabled={isRefreshing}
-          className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-10 sm:px-4"
-        >
-          <span className="sm:hidden">{isRefreshing ? "Refreshing" : "Refresh"}</span>
-          <span className="hidden sm:inline">{isRefreshing ? "Refreshing..." : "Refresh Balances"}</span>
-        </button>
-      </div>
+      <h1 className={dashboardPageTitleClass}>Wallets</h1>
 
       {refreshError && (
         <p className="mb-4 text-sm text-red-600">Refresh error: {refreshError}</p>
