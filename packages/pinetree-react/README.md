@@ -2,15 +2,14 @@
 
 Official PineTree React SDK — browser checkout components and hooks.
 
-> **Private Beta — not yet published to npm.** Reference this package via a
-> local path or monorepo workspace while in private beta. When published, the
-> install command will be `npm install @pinetree/react`.
+> **Ready for release.** npm publication is pending. Reference this package
+> through the monorepo workspace until publication.
 
 ---
 
 ## Installation
 
-### Private beta (local path)
+### Local workspace
 
 ```bash
 # package.json

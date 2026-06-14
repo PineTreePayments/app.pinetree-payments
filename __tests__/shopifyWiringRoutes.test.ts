@@ -5,8 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({
   requireMerchantId: vi.fn(),
   getMerchantConnection: vi.fn(),
+  getActiveMerchantConnection: vi.fn(),
   getActiveConnection: vi.fn(),
   markUninstalled: vi.fn(),
+  upsertConnection: vi.fn(),
+  encryptToken: vi.fn(),
   createSession: vi.fn(),
 }))
 
@@ -17,8 +20,14 @@ vi.mock("@/lib/api/merchantAuth", () => ({
 
 vi.mock("@/database/shopifyConnections", () => ({
   getMerchantShopifyConnection: mocks.getMerchantConnection,
+  getActiveMerchantShopifyConnection: mocks.getActiveMerchantConnection,
   getActiveShopifyConnection: mocks.getActiveConnection,
   markShopifyConnectionUninstalled: mocks.markUninstalled,
+  upsertShopifyConnection: mocks.upsertConnection,
+}))
+
+vi.mock("@/integrations/shopify/lib/crypto", () => ({
+  encryptShopifyToken: mocks.encryptToken,
 }))
 
 vi.mock("@/engine/checkoutSessions", () => ({
@@ -29,15 +38,28 @@ import { GET as getStatus } from "@/app/api/shopify/status/route"
 import { POST as disconnect } from "@/app/api/shopify/disconnect/route"
 import { POST as createSession } from "@/app/api/shopify/session/route"
 import { POST as receiveWebhook } from "@/app/api/shopify/webhooks/route"
+import { POST as startAuth } from "@/app/api/shopify/auth/route"
+import { GET as completeAuth } from "@/app/api/shopify/auth/callback/route"
+import { createOAuthContext } from "@/integrations/shopify/lib/oauth"
 
 describe("Shopify database-backed route wiring", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.requireMerchantId.mockResolvedValue("merchant_1")
+    mocks.encryptToken.mockReturnValue("encrypted-token")
+    process.env.SHOPIFY_CLIENT_ID = "client_123"
+    process.env.SHOPIFY_CLIENT_SECRET = "shopify-secret"
+    process.env.SHOPIFY_APP_URL = "https://app.test"
+    process.env.SHOPIFY_TOKEN_ENCRYPTION_KEY = "a".repeat(64)
   })
 
   it("returns the merchant-scoped connection status", async () => {
-    mocks.getMerchantConnection.mockResolvedValue({ status: "active" })
+    mocks.getMerchantConnection.mockResolvedValue({
+      shop: "pine-store.myshopify.com",
+      status: "active",
+      installed_at: "2026-06-13T12:00:00.000Z",
+      updated_at: "2026-06-13T12:05:00.000Z",
+    })
     const response = await getStatus(new NextRequest(
       "https://app.test/api/shopify/status?shop=pine-store.myshopify.com",
       { headers: { Authorization: "Bearer dashboard-token" } }
@@ -45,12 +67,80 @@ describe("Shopify database-backed route wiring", () => {
     await expect(response.json()).resolves.toEqual({
       shop: "pine-store.myshopify.com",
       connected: true,
-      status: "active",
+      status: "connected",
+      connectedAt: "2026-06-13T12:00:00.000Z",
+      updatedAt: "2026-06-13T12:05:00.000Z",
+      configured: true,
     })
     expect(mocks.getMerchantConnection).toHaveBeenCalledWith(
       "pine-store.myshopify.com",
       "merchant_1"
     )
+  })
+
+  it("returns not connected when the merchant has no active store", async () => {
+    mocks.getActiveMerchantConnection.mockResolvedValue(null)
+    const response = await getStatus(new NextRequest(
+      "https://app.test/api/shopify/status",
+      { headers: { Authorization: "Bearer dashboard-token" } }
+    ))
+    await expect(response.json()).resolves.toEqual({
+      connected: false,
+      status: "not_connected",
+      shop: null,
+      connectedAt: null,
+      updatedAt: null,
+      configured: true,
+    })
+    expect(mocks.getActiveMerchantConnection).toHaveBeenCalledWith("merchant_1")
+  })
+
+  it("starts a merchant-bound Shopify connection", async () => {
+    const response = await startAuth(new NextRequest("https://app.test/api/shopify/auth", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer dashboard-token",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ shop: "pine-store.myshopify.com" }),
+    }))
+    const payload = await response.json() as { authUrl: string }
+    expect(new URL(payload.authUrl).hostname).toBe("pine-store.myshopify.com")
+    expect(response.headers.get("set-cookie")).toContain("shopify_oauth_context=")
+  })
+
+  it("returns a safe callback error when merchant context is missing", async () => {
+    const query = signedOAuthQuery("csrf_123")
+    const response = await completeAuth(new NextRequest(
+      `https://app.test/api/shopify/auth/callback?${new URLSearchParams(query)}`
+    ))
+    expect(response.status).toBe(401)
+    await expect(response.json()).resolves.toEqual({
+      error: "This Shopify connection could not be linked to your PineTree account. Start the connection again from Developer.",
+    })
+  })
+
+  it("encrypts and persists a completed Shopify connection", async () => {
+    const state = "csrf_123"
+    const query = signedOAuthQuery(state)
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      access_token: "shpat_test",
+      scope: "read_orders",
+    }), { status: 200 })))
+    const context = createOAuthContext({ state, merchantId: "merchant_1" }, "shopify-secret")
+    const response = await completeAuth(new NextRequest(
+      `https://app.test/api/shopify/auth/callback?${new URLSearchParams(query)}`,
+      { headers: { cookie: `shopify_oauth_context=${context}` } }
+    ))
+    expect(response.status).toBe(307)
+    expect(mocks.encryptToken).toHaveBeenCalledWith("shpat_test")
+    expect(mocks.upsertConnection).toHaveBeenCalledWith({
+      shop: "pine-store.myshopify.com",
+      merchantId: "merchant_1",
+      encryptedToken: "encrypted-token",
+      scopes: "read_orders",
+    })
+    vi.unstubAllGlobals()
   })
 
   it("creates checkout internally for the connected merchant", async () => {
@@ -114,3 +204,21 @@ describe("Shopify database-backed route wiring", () => {
     expect(mocks.markUninstalled).toHaveBeenCalledWith("pine-store.myshopify.com")
   })
 })
+
+function signedOAuthQuery(state: string) {
+  const unsigned = {
+    shop: "pine-store.myshopify.com",
+    code: "fake_code",
+    state,
+    timestamp: "1710000000",
+  }
+  const hmac = createHmac("sha256", "shopify-secret")
+    .update(
+      Object.entries(unsigned)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, value]) => `${key}=${value}`)
+        .join("&")
+    )
+    .digest("hex")
+  return { ...unsigned, hmac }
+}

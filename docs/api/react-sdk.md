@@ -1,7 +1,7 @@
 # PineTree React SDK
 
-`@pinetree/react` is a private, unpublished Preview package that wraps
-`@pinetree/js`. It does not add API endpoints or payment behavior.
+`@pinetree/react` is ready for release and wraps `@pinetree/js`. It does not
+add API endpoints or payment behavior. npm publication is pending.
 
 ## Install Locally
 

@@ -1,4 +1,4 @@
-// Pure mapping functions: Shopify order context → PineTree v1 session params.
+// Pure mapping functions from Shopify order context to PineTree session params.
 // No network calls, no side effects.
 
 export type ShopifyOrderContext = {
@@ -22,7 +22,7 @@ export type PineTreeSessionParams = {
   cancelUrl: string
 }
 
-// Map a Shopify order context to PineTree v1 checkout session params.
+// Map a Shopify order context to PineTree checkout session params.
 // Throws if the amount is not a valid positive number.
 export function buildPineTreeSessionParams(
   ctx: ShopifyOrderContext

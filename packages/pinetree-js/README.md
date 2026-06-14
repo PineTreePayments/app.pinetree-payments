@@ -2,9 +2,8 @@
 
 Official PineTree browser JavaScript SDK.
 
-> **Private Beta — not yet published to npm.** Reference this package via a
-> local path or monorepo workspace while in private beta. When published, the
-> install command will be `npm install @pinetree/js`.
+> **Ready for release.** npm publication is pending. Reference this package
+> through the monorepo workspace until publication.
 >
 > `@pinetree/js` creates checkout sessions from browser code using a public
 > key (`pk_live_*`) and opens the PineTree hosted checkout page using
@@ -14,7 +13,7 @@ Official PineTree browser JavaScript SDK.
 
 ## Installation
 
-### Private beta (local path)
+### Local workspace
 
 ```bash
 # package.json
@@ -56,7 +55,7 @@ await pinetree.checkout.open({
 
 ## Checkout modes
 
-Redirect, popup, and embedded iframe modes are all **Preview**.
+Redirect, popup, and embedded iframe modes are ready.
 
 ### Redirect (default)
 
@@ -100,7 +99,7 @@ the DOM, or does not support `appendChild`.
 
 ---
 
-## Lifecycle Events (Preview)
+## Lifecycle Events
 
 All modes return a `CheckoutOpenResult` with `.on()`, `.off()`, and
 `.destroy()`:
@@ -262,13 +261,13 @@ cd packages/pinetree-js && npx vitest run
 
 ### 0.3.0 (2026-06-13)
 
-Phase 13: Checkout modes and event foundation.
+Phase 13: Checkout modes and lifecycle events.
 
 - `checkout.open()` now supports `mode: "redirect" | "popup" | "embedded"`
 - Popup mode: reserves a centered `window.open()` popup during user activation, then navigates it to checkout; throws `CheckoutInitializationError` (`code: "popup_blocked"`) if blocked
 - Embedded mode: creates an `<iframe>` inside `options.container`; throws `CheckoutInitializationError` on missing/invalid container
 - `checkout.open()` returns `CheckoutOpenResult` (extends `CheckoutSessionResult`) with `iframe?`, `popup?`, and `on()`
-- Event foundation introduced for `.on("complete" | "failed" | "expired" | "canceled" | "closed", handler)`
+- Lifecycle events introduced for `.on("complete" | "failed" | "expired" | "canceled" | "closed", handler)`
 - New types: `CheckoutMode`, `CheckoutEventName`, `CheckoutEvent`, `CheckoutEventHandler`, `CheckoutOpenResult`
 
 ### 0.2.0 (2026-06-13)

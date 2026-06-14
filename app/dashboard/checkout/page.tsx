@@ -186,10 +186,10 @@ function LiveBadge() {
   )
 }
 
-function PreviewBadge() {
+function ReadyBadge() {
   return (
     <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
-      Preview
+      Ready
     </span>
   )
 }
@@ -285,7 +285,7 @@ type IntegrationOption = {
   description: string
   useCase: string
   difficulty: "Easy" | "Medium" | "Advanced"
-  status: "live" | "preview" | "soon"
+  status: "live" | "ready" | "soon"
   action?: string
 }
 
@@ -304,7 +304,7 @@ function IntegrationCard({
 
   const statusEl =
     option.status === "live" ? <LiveBadge /> :
-    option.status === "preview" ? <PreviewBadge /> :
+    option.status === "ready" ? <ReadyBadge /> :
     <SoonBadge />
 
   return (
@@ -352,7 +352,7 @@ function IntegrationCard({
 // A route is "Live" only when: the route file exists, auth is enforced, real DB
 // data is used, and it is production-safe. Update here to change all badges.
 
-type RouteStatus = "Live" | "Preview"
+type RouteStatus = "Live" | "Ready"
 type ApiRoute = { method: string; path: string; desc: string; status: RouteStatus }
 type ApiCategory = { label: string; routes: ApiRoute[] }
 
@@ -1215,7 +1215,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       description: "Build a checkout button in React that calls your backend, which creates a PineTree session. No npm package required — works today with a few lines of code.",
       useCase: "React / Next.js apps",
       difficulty: "Medium",
-      status: "preview",
+      status: "ready",
       action: "View React Example",
     },
   ]
@@ -2229,7 +2229,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                   <h3 className="text-sm font-semibold text-gray-950">React Integration Pattern</h3>
                   <p className="mt-0.5 text-xs text-gray-500">Checkout button that calls your backend — works today, no npm package needed.</p>
                 </div>
-                <PreviewBadge />
+                <ReadyBadge />
               </div>
               <div className="space-y-4 p-5">
                 <div className="rounded-xl border border-amber-200/80 bg-amber-50/60 px-3 py-2.5 text-xs text-amber-700">

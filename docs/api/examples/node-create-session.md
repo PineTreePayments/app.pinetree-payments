@@ -6,7 +6,7 @@ session with all common options, redirecting the customer, and handling errors.
 ## Prerequisites
 
 - Node.js 18 or later
-- `@pinetree/node` installed (private beta: use a local path or workspace reference)
+- `@pinetree/node` installed from a local path or workspace reference until npm publication
 - A `pt_live_*` API key from the PineTree dashboard
 
 ## Basic usage

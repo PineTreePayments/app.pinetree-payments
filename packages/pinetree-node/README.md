@@ -2,8 +2,8 @@
 
 Official Node.js SDK for [PineTree Payments](https://app.pinetree-payments.com).
 
-> **Private Beta** — This SDK is not yet published to npm. Reference it via a
-> local path or monorepo workspace while in private beta.
+> **Ready for release.** npm publication is pending. Reference it through the
+> monorepo workspace until publication.
 
 **Requirements:** Node.js 18 or later · TypeScript 5+ (optional but recommended)
 
@@ -11,7 +11,7 @@ Official Node.js SDK for [PineTree Payments](https://app.pinetree-payments.com).
 
 ## Installation
 
-### Private beta (local path)
+### Local workspace
 
 ```bash
 # From the repository root, reference the package in your project:
@@ -421,7 +421,7 @@ for the full setup guide.
 
 ### 0.1.0 (2026-06-12)
 
-Initial private beta release.
+Initial package release.
 
 - Checkout sessions: create, retrieve, list, cancel, expire
 - Payments: retrieve

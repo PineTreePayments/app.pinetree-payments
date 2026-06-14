@@ -1,14 +1,14 @@
 # PineTree API Platform — Readiness Report
 
 **Date:** 2026-06-13
-**Version:** v1 (pre-launch)  
+**Product:** PineTree API
 **SDKs:** `@pinetree/node` 0.1.0 · `@pinetree/js` 0.3.0 (0.4.0-beta.1 planned) · `@pinetree/react` 0.1.0 (all private)
 
 ---
 
 ## Summary
 
-The PineTree v1 API platform and its companion Node SDK are feature-complete for
+The PineTree API platform and its companion Node SDK are feature-complete for
 the core payment workflow.  Integration tests are in place and passing offline.
 Several infrastructure prerequisites (database migrations, production webhook
 registration, Mesh managed transfers) remain before the platform is ready for
@@ -16,7 +16,7 @@ public launch.
 
 ---
 
-## v1 Checkout Sessions
+## Checkout Sessions
 
 **Status: Complete**
 
@@ -64,11 +64,11 @@ Both operations are idempotent against already-terminal sessions.
 `GET /api/v1/payments/:id` returns a public payment facade — amount, currency,
 status, and metadata — without exposing internal ledger details.  The SDK
 surfaces `payments.retrieve()` and the `Payment` type.  Full payment details
-remain internal and are not part of the v1 public API surface.
+remain private and are not part of the public API surface.
 
 ---
 
-## v1 Webhooks
+## Webhooks
 
 **Status: Complete**
 
@@ -80,7 +80,7 @@ Webhook events use HMAC-SHA256 signing:
 - Version header: `PineTree-Webhook-Version` (value: `2026-06-12`)
 
 The SDK's `webhooks.constructEvent()` verifies the signature, validates the
-replay window (default 300 s), parses the payload, and asserts the v1 event
+replay window (default 300 s), parses the payload, and asserts the event
 contract.  Both current (`PineTree-*`) and legacy (`X-PineTree-*`) header names
 are supported for a smooth transition.  `WebhookVerificationError` is exported
 for consumer error handling.
@@ -173,14 +173,14 @@ or the SDK is published.
 
 1. **Database migration `20260605`** (merchant send approval sessions) must be
    applied to staging and production.
-2. **Prior API v1 migrations** must be confirmed applied and healthy in all
+2. **Prior API migrations** must be confirmed applied and healthy in all
    environments.
 3. **Production webhook registration** — endpoint IDs and signing secrets must
    be configured and recorded in `INFRA.md`.
 4. **Contract deployment** — any pending smart contract deployments must be
    completed and their addresses recorded in `INFRA.md`.
 
-### Features — Deferred (not blocking v1)
+### Features — Deferred
 
 5. **Mesh managed transfers** — first-pass Mesh Connect integration is done
    (routes, DB table, SDK wiring, import UI); managed transfers are intentionally

@@ -11,6 +11,7 @@ import {
 } from "@/components/dashboard/DashboardPrimitives"
 import { CheckoutWorkspace } from "../checkout/page"
 import PublicKeysPanel from "./PublicKeysPanel"
+import ShopifyIntegrationCard from "./ShopifyIntegrationCard"
 
 type DeveloperTab = "keys" | "webhooks" | "sdks" | "integrations"
 
@@ -253,31 +254,5 @@ function IntegrationCard({
         <ProviderStatusPill label={status} tone={tone} />
       </div>
     </div>
-  )
-}
-
-function ShopifyIntegrationCard() {
-  return (
-    <details className="group rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-      <summary className="cursor-pointer list-none">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold text-gray-950">Shopify</h2>
-            <p className="mt-1 text-xs leading-5 text-gray-500">
-              Shopify support is wired, but a Shopify app and storefront setup are required before install testing.
-            </p>
-          </div>
-          <ProviderStatusPill label="Requires setup" tone="amber" />
-        </div>
-        <span className="mt-3 inline-flex text-xs font-semibold text-blue-700 group-open:hidden">
-          View setup
-        </span>
-      </summary>
-      <div className="mt-3 border-t border-gray-100 pt-3">
-        <p className="text-xs leading-5 text-gray-600">
-          Complete the Shopify app and storefront setup before connecting a test store.
-        </p>
-      </div>
-    </details>
   )
 }

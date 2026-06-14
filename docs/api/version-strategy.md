@@ -69,7 +69,7 @@ All three conditions must be met:
 breaking change, `@pinetree/react` must also release a new major version that
 pins the new `@pinetree/js` peer range.
 
-During private beta the dependency is a workspace `file:` reference.
+Until npm publication, the dependency is a workspace `file:` reference.
 On publish, change it to a semver range:
 
 ```json

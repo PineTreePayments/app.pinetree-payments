@@ -70,7 +70,7 @@ const event = pinetree.webhooks.constructEvent(
 ```
 
 The helper validates HMAC-SHA256 signatures and the timestamp replay window,
-then returns the typed v1 `Event`. V1 delivery headers are:
+then returns the typed `Event`. Webhook delivery headers are:
 
 - `PineTree-Signature`
 - `PineTree-Timestamp`

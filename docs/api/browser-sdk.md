@@ -1,8 +1,7 @@
 # PineTree Browser JavaScript SDK
 
 **Package:** `@pinetree/js`  
-**Status:** Private Beta — not yet published to npm
-**Next version:** `0.4.0-beta.1` (Phase 14 lifecycle events pending release)
+**Status:** Ready for release; npm publication pending
 
 ---
 
@@ -43,7 +42,7 @@ Lifecycle events are delivered by hosted checkout via versioned
 npm install @pinetree/js
 ```
 
-### Private beta (local path)
+### Local workspace
 
 ```javascript
 // package.json
@@ -102,13 +101,13 @@ hosted checkout using the mode specified in `options.mode` (default `"redirect"`
 
 ### Modes
 
-All three checkout modes are currently **Preview**.
+All three checkout modes are ready.
 
 | Mode | Status | Behavior |
 |---|---|---|
-| `"redirect"` | Preview | Calls `location.assign(checkoutUrl)`. Page navigates away. |
-| `"popup"` | Preview | Reserves a centered popup during the user action, then navigates it to checkout. Result includes `popup`. |
-| `"embedded"` | Preview | Creates a sandboxed `<iframe>` inside `options.container`. Result includes `iframe`. |
+| `"redirect"` | Ready | Calls `location.assign(checkoutUrl)`. Page navigates away. |
+| `"popup"` | Ready | Reserves a centered popup during the user action, then navigates it to checkout. Result includes `popup`. |
+| `"embedded"` | Ready | Creates a sandboxed `<iframe>` inside `options.container`. Result includes `iframe`. |
 
 ### Options
 
@@ -195,7 +194,7 @@ result.on("complete", ({ status }) => {
 
 ---
 
-## Lifecycle Events (Preview)
+## Lifecycle Events
 
 Hosted checkout emits browser-safe lifecycle events to its parent iframe or
 popup opener. No wallet addresses, provider payloads, metadata, API keys, or
@@ -395,7 +394,7 @@ types are exported from the package root.
 | Auth | Secret `pt_live_*` API key | Public `pk_live_*` key |
 | Checkout | Creates sessions server-side | Opens hosted checkout via redirect, popup, or iframe |
 | Events | Webhooks + `constructEvent()` | `postMessage` via `.on()` |
-| Status | Private Beta | Preview |
+| Status | Ready for release | Ready |
 
 Never use `@pinetree/node` in the browser — it requires secret API keys.
 

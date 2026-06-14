@@ -2,7 +2,7 @@
 
 Official WooCommerce payment gateway plugin for [PineTree Payments](https://app.pinetree-payments.com).
 
-> **Private Beta** — Not for distribution or publication to WordPress.org.
+> **Ready for install testing.** Not for distribution or publication to WordPress.org.
 
 ---
 
@@ -79,7 +79,7 @@ PineTree fires POST to ?wc-api=pinetree_webhook
   → PineTree-Signature and PineTree-Timestamp headers extracted
   → HMAC-SHA256 verified (hash_equals, timing-safe)
   → Timestamp checked within 300-second window
-  → Event payload validated against v1 contract (eventId, type, createdAt, data.object)
+  → Event payload validated against the PineTree webhook contract (eventId, type, createdAt, data.object)
   → WooCommerce order resolved via metadata.wc_order_id (fallback: reference field)
   → Order status updated
   → HTTP 200 returned

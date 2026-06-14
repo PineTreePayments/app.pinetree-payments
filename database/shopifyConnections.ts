@@ -65,6 +65,19 @@ export async function getMerchantShopifyConnection(shop: string, merchantId: str
   return (data ?? null) as ShopifyConnectionRow | null
 }
 
+export async function getActiveMerchantShopifyConnection(merchantId: string) {
+  const { data, error } = await db()
+    .from("shopify_connections")
+    .select("id, shop, merchant_id, scopes, status, installed_at, uninstalled_at, updated_at")
+    .eq("merchant_id", merchantId)
+    .eq("status", "active")
+    .order("installed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw new Error(`Failed to load Shopify connection status: ${error.message}`)
+  return (data ?? null) as Omit<ShopifyConnectionRow, "access_token"> | null
+}
+
 export async function markShopifyConnectionUninstalled(shop: string, merchantId?: string) {
   let query = db()
     .from("shopify_connections")

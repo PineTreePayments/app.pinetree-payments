@@ -1,48 +1,87 @@
 import { NextRequest, NextResponse } from "next/server"
-import { isValidShopDomain, buildShopifyAuthUrl, generateOAuthState } from "@/integrations/shopify/lib/oauth"
+import {
+  buildShopifyAuthUrl,
+  createOAuthContext,
+  generateOAuthState,
+  isValidShopDomain,
+} from "@/integrations/shopify/lib/oauth"
+import { getRouteErrorStatus, requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
 
-// GET /api/shopify/auth?shop=mystore.myshopify.com
-//
-// Initiates Shopify OAuth. The merchant must already be authenticated with
-// PineTree so we can associate the shop with their PineTree account in the
-// callback. Sets a short-lived HttpOnly CSRF state cookie then redirects to
-// the Shopify authorization page.
-export async function GET(req: NextRequest) {
-  const shop = req.nextUrl.searchParams.get("shop") ?? ""
+const OAUTH_COOKIE = "shopify_oauth_context"
 
+function getConfig() {
+  const clientId = process.env.SHOPIFY_CLIENT_ID
+  const clientSecret = process.env.SHOPIFY_CLIENT_SECRET
+  const rawAppUrl = process.env.SHOPIFY_APP_URL ?? process.env.NEXT_PUBLIC_APP_URL
+  if (!clientId || !clientSecret || !rawAppUrl || !process.env.SHOPIFY_TOKEN_ENCRYPTION_KEY) {
+    return null
+  }
+  return { clientId, clientSecret, appUrl: rawAppUrl.replace(/\/$/, "") }
+}
+
+function setOAuthCookie(
+  response: NextResponse,
+  context: string
+) {
+  response.cookies.set(OAUTH_COOKIE, context, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 300,
+    path: "/api/shopify/auth/callback",
+  })
+}
+
+async function createAuthResponse(req: NextRequest, shop: string, redirect: boolean) {
   if (!shop || !isValidShopDomain(shop)) {
     return NextResponse.json(
-      { error: "Missing or invalid shop parameter. Expected format: mystore.myshopify.com" },
+      { error: "Enter a valid Shopify store domain, such as mystore.myshopify.com." },
       { status: 400 }
     )
   }
 
-  const clientId   = process.env.SHOPIFY_CLIENT_ID
-  const rawAppUrl  = process.env.SHOPIFY_APP_URL ?? process.env.NEXT_PUBLIC_APP_URL
-
-  if (!clientId || !rawAppUrl) {
+  const config = getConfig()
+  if (!config) {
     return NextResponse.json(
-      { error: "Shopify integration is not configured on this server." },
+      { error: "Shopify connections are not configured yet. Review the setup guide and try again." },
       { status: 503 }
     )
   }
 
-  const appUrl      = rawAppUrl.replace(/\/$/, "")
-  const redirectUri = `${appUrl}/api/shopify/auth/callback`
-  const state       = generateOAuthState()
-  const authUrl     = buildShopifyAuthUrl({ shop, clientId, redirectUri, state })
+  try {
+    const merchantId = await requireMerchantIdFromRequest(req)
+    const state = generateOAuthState()
+    const redirectUri = `${config.appUrl}/api/shopify/auth/callback`
+    const authUrl = buildShopifyAuthUrl({
+      shop,
+      clientId: config.clientId,
+      redirectUri,
+      state,
+    })
+    const context = createOAuthContext({ state, merchantId }, config.clientSecret)
+    const response = redirect
+      ? NextResponse.redirect(authUrl)
+      : NextResponse.json({ authUrl })
+    setOAuthCookie(response, context)
+    return response
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unable to start Shopify connection." },
+      { status: getRouteErrorStatus(error) }
+    )
+  }
+}
 
-  const response = NextResponse.redirect(authUrl)
+export async function GET(req: NextRequest) {
+  return createAuthResponse(req, req.nextUrl.searchParams.get("shop")?.trim() ?? "", true)
+}
 
-  // CSRF protection: state is set here and verified in the callback handler.
-  // HttpOnly prevents XSS access; SameSite=Lax blocks cross-site POST injection.
-  response.cookies.set("shopify_oauth_state", state, {
-    httpOnly: true,
-    secure:   process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge:   300,  // 5 minutes — Shopify's authorization should complete well within this
-    path:     "/api/shopify/auth/callback",
-  })
-
-  return response
+export async function POST(req: NextRequest) {
+  let body: { shop?: string }
+  try {
+    body = await req.json() as { shop?: string }
+  } catch {
+    return NextResponse.json({ error: "Invalid request." }, { status: 400 })
+  }
+  return createAuthResponse(req, body.shop?.trim() ?? "", false)
 }

@@ -1,4 +1,4 @@
-# PineTree Node SDK Contract Draft
+# PineTree Node SDK Contract
 
 This document describes the intended server-side SDK surface. It is not a
 published package and adds no runtime dependency.
@@ -17,10 +17,10 @@ await pinetree.webhookDeliveries.retry(id)
 
 The canonical TypeScript definitions live in `types/pinetreeSdk.ts`.
 
-Webhook verification uses the raw request body and HMAC-SHA256. V1 deliveries
+Webhook verification uses the raw request body and HMAC-SHA256. Webhook deliveries
 include `PineTree-Signature`, `PineTree-Timestamp`, `PineTree-Event-Id`, and
 `PineTree-Webhook-Version: 2026-06-12`; legacy `X-PineTree-*` headers remain.
 
 Expired completed idempotency claims can be removed through the protected
-internal cleanup helper. Vercel cron is not available on the current plan, so
+protected cleanup helper. Vercel cron is not available on the current plan, so
 no automatic schedule is configured.

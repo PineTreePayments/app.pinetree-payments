@@ -1,6 +1,6 @@
 # PineTree Local Stack Release Validation
 
-Use this checklist for a real local release-candidate pass across `/api/v1`,
+Use this checklist for a real local release-candidate pass across the PineTree API,
 `@pinetree/node`, `@pinetree/js`, and `@pinetree/react`. Automated unit tests
 remain offline; this checklist creates real local checkout sessions.
 

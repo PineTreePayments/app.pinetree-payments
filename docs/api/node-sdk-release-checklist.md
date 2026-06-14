@@ -9,7 +9,7 @@ Before running any integration tests or staging a release, verify that the
 following database migrations have been applied to the target environment.
 
 - Confirm migration `20260605` (merchant send approval sessions) is applied.
-- Confirm all prior API v1 migrations are applied and healthy.
+- Confirm all prior API migrations are applied and healthy.
 - Run `SELECT COUNT(*) FROM checkout_sessions LIMIT 1` to verify the table exists.
 - Run `SELECT COUNT(*) FROM webhook_deliveries LIMIT 1` to verify webhook delivery
   table exists.

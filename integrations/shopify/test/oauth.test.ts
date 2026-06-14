@@ -3,7 +3,9 @@ import {
   isValidShopDomain,
   buildShopifyAuthUrl,
   buildTokenExchangeBody,
+  createOAuthContext,
   generateOAuthState,
+  verifyOAuthContext,
 } from "../lib/oauth"
 
 // ── isValidShopDomain ─────────────────────────────────────────────────────────
@@ -112,5 +114,26 @@ describe("generateOAuthState", () => {
   it("produces unique values on each call", () => {
     const states = new Set(Array.from({ length: 20 }, generateOAuthState))
     expect(states.size).toBe(20)
+  })
+})
+
+describe("merchant-bound OAuth context", () => {
+  it("round-trips the state and merchant ID", () => {
+    const value = createOAuthContext(
+      { state: "csrf_123", merchantId: "merchant_1" },
+      "shopify-secret"
+    )
+    expect(verifyOAuthContext(value, "shopify-secret")).toEqual({
+      state: "csrf_123",
+      merchantId: "merchant_1",
+    })
+  })
+
+  it("rejects a modified context", () => {
+    const value = createOAuthContext(
+      { state: "csrf_123", merchantId: "merchant_1" },
+      "shopify-secret"
+    )
+    expect(verifyOAuthContext(`${value}modified`, "shopify-secret")).toBeNull()
   })
 })

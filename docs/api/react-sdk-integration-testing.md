@@ -113,4 +113,4 @@ receive metadata, wallet addresses, provider payloads, or API keys.
   captured postMessage payloads with unreviewed data.
 
 See [Local stack release validation](./local-stack-release-validation.md) for
-the Node SDK and `/api/v1` portions of the release candidate.
+the Node SDK and REST API portions of the release candidate.
