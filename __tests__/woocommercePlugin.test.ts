@@ -66,3 +66,24 @@ describe("WooCommerce card", () => {
     expect(card).not.toContain("plugins/woocommerce-pinetree")
   })
 })
+
+describe("WooCommerce docs scope", () => {
+  it("test checklist is scoped to staging or test environments, not production", () => {
+    const checklist = read("docs/environment/woocommerce-test-checklist.md")
+    expect(checklist.toLowerCase()).toMatch(/staging|test site|test store|test install/)
+    expect(checklist).not.toMatch(/production[- ]ready|ready for production|go live/i)
+    expect(checklist).not.toContain("production merchant")
+  })
+
+  it("test checklist warns against using the plugin on a production store", () => {
+    const checklist = read("docs/environment/woocommerce-test-checklist.md")
+    expect(checklist).toMatch(/disposable|do not install.*production|staging.*site/i)
+  })
+
+  it("WooCommerce plugin source exists and is not empty", () => {
+    const plugin = read("plugins/woocommerce-pinetree/woocommerce-pinetree.php")
+    expect(plugin).toContain("PineTree")
+    expect(plugin).toContain("WooCommerce")
+    expect(plugin).toContain("woocommerce_payment_gateways")
+  })
+})
