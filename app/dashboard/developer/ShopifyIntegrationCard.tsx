@@ -100,7 +100,7 @@ export default function ShopifyIntegrationCard() {
   }
 
   return (
-    <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+    <div className="flex h-full flex-col rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-gray-950">Shopify</h2>
@@ -159,7 +159,7 @@ export default function ShopifyIntegrationCard() {
 
       {error && <p className="mt-3 text-xs leading-5 text-red-600">{error}</p>}
 
-      <details id="shopify-setup-guide" className="mt-4 border-t border-gray-100 pt-3">
+      <details id="shopify-setup-guide" className="mt-4 border-t border-gray-100 pt-3 sm:mt-auto">
         <summary className="cursor-pointer list-none text-xs font-semibold text-blue-700">
           View setup guide
         </summary>

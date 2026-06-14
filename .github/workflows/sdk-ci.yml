@@ -1,25 +1,27 @@
-# PineTree Node SDK — CI workflow (draft)
-#
-# Triggers on any push or PR that touches the SDK package.
-# Normal CI never requires secrets and never runs production integration tests.
-# Integration tests are a separate opt-in job triggered only via workflow_dispatch.
+# PineTree Node SDK CI.
+# Normal CI never requires secrets or live integration services.
 
 name: SDK CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
       - "packages/pinetree-node/**"
       - "package.json"
+      - "package-lock.json"
       - "tsconfig.json"
       - "vitest.config.ts"
+      - ".github/workflows/sdk-ci.yml"
   pull_request:
     paths:
       - "packages/pinetree-node/**"
       - "package.json"
+      - "package-lock.json"
       - "tsconfig.json"
       - "vitest.config.ts"
+      - ".github/workflows/sdk-ci.yml"
 
 jobs:
   # ── Standard CI (no secrets required) ──────────────────────────────────────
@@ -32,19 +34,16 @@ jobs:
         node: ["18", "20", "22"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+          cache-dependency-path: "package-lock.json"
 
       - name: Install dependencies
         run: npm ci
-
-      # Root typecheck (Next.js app + shared types)
-      - name: Root typecheck
-        run: npm run typecheck
 
       # SDK typecheck
       - name: SDK typecheck
@@ -58,12 +57,17 @@ jobs:
       - name: SDK unit tests
         run: npm test --workspace packages/pinetree-node
 
-      # Root tests (excludes SDK integration tests)
+      # The root app uses Next.js 16, which requires Node 20.9 or newer.
+      # Keep app validation in this workflow without applying that runtime
+      # requirement to the SDK's Node 18 compatibility job.
+      - name: Root typecheck
+        if: matrix.node == '20'
+        run: npm run typecheck
+
       - name: Root tests
+        if: matrix.node == '20'
         run: npm test
 
-      # Full release-candidate validation (typecheck + build + tests + pack check)
-      # Only run on Node 20 to avoid redundancy; the matrix above covers compat.
       - name: SDK release-candidate validation
         if: matrix.node == '20'
         run: npm run release-candidate --workspace packages/pinetree-node
@@ -86,12 +90,13 @@ jobs:
     environment: sdk-integration  # gate on a protected environment for secret access
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: npm
+          cache-dependency-path: "package-lock.json"
 
       - name: Install dependencies
         run: npm ci
