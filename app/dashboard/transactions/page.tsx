@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
+import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
 import TransactionActivityTable from "../TransactionActivityTable"
 import {
   ChartCard,
@@ -251,6 +252,9 @@ export default function TransactionsPage() {
       active = false
     }
   }, [loadDashboardData])
+
+  // Refresh transaction list when returning to this tab or refocusing.
+  useDashboardAutoRefresh({ refresh: loadDashboardData, refreshOnMount: false })
 
   const filteredTransactions = transactions.filter((tx) => {
     if (walletFilter !== "all" && tx.provider !== walletFilter) return false

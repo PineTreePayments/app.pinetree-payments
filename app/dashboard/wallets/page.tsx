@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
 import { Transaction } from "@solana/web3.js"
 import { QRCodeSVG } from "qrcode.react"
 import {
@@ -1255,9 +1256,14 @@ export default function WalletsPage() {
   const approvalPollRef = useRef<NodeJS.Timeout | null>(null)
   const directSendSubmittingRef = useRef(false)
 
-  useEffect(() => {
-    loadOverview(false)
-  }, [])
+  // Auto-refresh: sync balances on mount and when returning to the tab.
+  // Uses refresh=true so the provider APIs are queried for current balances,
+  // keeping "Last wallet sync" current without requiring a manual button click.
+  // The 60 s throttle on visibility/focus prevents repeated provider calls.
+  useDashboardAutoRefresh({
+    refresh: () => loadOverview(true),
+    enabled: !isRefreshing,
+  })
 
   useEffect(() => {
     if ((activeTab === "settlement" || activeTab === "send" || activeTab === "activity") && selectedWallet && !selectedWallet.isLightning) {

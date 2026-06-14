@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
 import Link from "next/link"
 import {
   BarChart3,
@@ -215,6 +216,10 @@ export default function DashboardPage() {
 
     return () => clearInterval(interval)
   }, [loadOverview])
+
+  // Refresh overview when the user returns to this tab or refocuses the window,
+  // so metrics stay current after switching away and coming back.
+  useDashboardAutoRefresh({ refresh: loadOverview, refreshOnMount: false })
 
   const connectedRailRows = railReadiness.filter((rail) => rail.status === "Connected")
   const overviewInsights = [

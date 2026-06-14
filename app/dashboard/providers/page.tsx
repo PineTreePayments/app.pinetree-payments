@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Image from "next/image"
 import { supabase } from "@/lib/supabaseClient"
+import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
 import { speedLoginUrl, speedSignupUrl, speedAccountSetupUrl } from "@/lib/speedDashboardLinks"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
 import { toast } from "sonner"
@@ -320,6 +321,10 @@ export default function ProvidersPage() {
   useEffect(() => {
     loadAll()
   }, [loadAll])
+
+  // Refresh provider statuses when returning to this tab or refocusing
+  // (e.g. after completing OAuth flow in another tab).
+  useDashboardAutoRefresh({ refresh: loadAll, refreshOnMount: false })
 
   useEffect(() => {
     return () => {

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
+import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
 import {
   CompactMetricTile,
   DashboardHeroCard,
@@ -91,6 +92,9 @@ export default function ReportsPage() {
   useEffect(() => {
     void fetchSummary()
   }, [fetchSummary])
+
+  // Refresh report summary when returning to this tab or refocusing.
+  useDashboardAutoRefresh({ refresh: fetchSummary, refreshOnMount: false })
 
   // Focus email input when modal opens
   useEffect(() => {
