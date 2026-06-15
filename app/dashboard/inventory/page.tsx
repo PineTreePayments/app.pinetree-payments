@@ -124,6 +124,23 @@ function formatUsd(value: number) {
   }).format(Number.isFinite(value) ? value : 0)
 }
 
+function normalizeWholeNumberInput(value: string) {
+  const digits = value.replace(/\D/g, "")
+  if (!digits) return ""
+  return digits.replace(/^0+(?=\d)/, "")
+}
+
+function parseWholeNumber(value: string, label: string) {
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`${label} must be a whole number of zero or more.`)
+  }
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`${label} is too large.`)
+  }
+  return parsed
+}
+
 function itemState(item: InventoryItem) {
   if (item.effective_status === "OUT_OF_STOCK") return { label: "Out of stock", tone: "red" as const }
   if (item.effective_status === "LOW_STOCK") return { label: "Low stock", tone: "amber" as const }
@@ -190,6 +207,7 @@ export default function InventoryPage() {
   const [filter, setFilter] = useState<Filter>("ALL")
   const [formOpen, setFormOpen] = useState(false)
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null)
+  const [outOfStockOpen, setOutOfStockOpen] = useState(false)
   const [editing, setEditing] = useState<InventoryItem | null>(null)
   const [form, setForm] = useState<ItemForm>(emptyForm)
   const [saving, setSaving] = useState(false)
@@ -259,6 +277,11 @@ export default function InventoryPage() {
     })
   }, [filter, items, query])
 
+  const outOfStockItems = useMemo(
+    () => items.filter((item) => item.effective_status === "OUT_OF_STOCK"),
+    [items]
+  )
+
   function openCreate() {
     setEditing(null)
     setForm(emptyForm)
@@ -283,12 +306,14 @@ export default function InventoryPage() {
   async function saveItem() {
     setSaving(true)
     try {
+      const quantity = parseWholeNumber(form.quantity, "Stock quantity")
+      const lowStockThreshold = parseWholeNumber(form.lowStockThreshold, "Low-stock threshold")
       const body = JSON.stringify({
         ...form,
         price: Number(form.price),
         cost: form.cost === "" ? null : Number(form.cost),
-        quantity: Number(form.quantity),
-        lowStockThreshold: Number(form.lowStockThreshold)
+        quantity,
+        lowStockThreshold
       })
       await request(editing ? `/api/inventory/${editing.id}` : "/api/inventory", {
         method: editing ? "PATCH" : "POST",
@@ -422,8 +447,14 @@ export default function InventoryPage() {
       <MetricGrid>
         <CompactMetricTile label="Catalog Items" value={summary.catalogItems} tone="blue" detail={`${summary.activeItems} active`} />
         <CompactMetricTile label="Low Stock" value={summary.lowStock} tone={summary.lowStock ? "amber" : "default"} />
-        <CompactMetricTile label="Out of Stock" value={summary.outOfStock} tone={summary.outOfStock ? "red" : "default"} />
-        <CompactMetricTile label="Inventory Value" value={formatUsd(summary.inventoryValue)} detail="Cost when available, otherwise retail price" />
+        <CompactMetricTile
+          label="Out of Stock"
+          value={summary.outOfStock}
+          tone={summary.outOfStock ? "red" : "default"}
+          interactive
+          onClick={() => setOutOfStockOpen(true)}
+        />
+        <CompactMetricTile label="Inventory Value" value={formatUsd(summary.inventoryValue)} />
       </MetricGrid>
 
       {!available && (
@@ -503,29 +534,27 @@ export default function InventoryPage() {
                     key={item.id}
                     type="button"
                     onClick={() => setSelectedItem(item)}
-                    className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 text-left transition hover:bg-gray-50 focus:bg-blue-50/50 focus:outline-none sm:grid-cols-[minmax(0,1.5fr)_minmax(5rem,0.5fr)_minmax(4rem,0.4fr)_auto_auto]"
+                    className="grid min-h-11 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-1.5 text-left transition hover:bg-gray-50 focus:bg-blue-50/50 focus:outline-none sm:grid-cols-[minmax(0,1.4fr)_minmax(5rem,0.55fr)_minmax(3.5rem,0.35fr)_auto_auto] sm:gap-3 sm:px-4"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-gray-950">{item.name}</p>
-                      <p className="mt-0.5 truncate text-xs text-gray-500">
-                        {item.sku || "No SKU"} · {item.category || "Uncategorized"}
+                      <p className="truncate text-[13px] font-semibold leading-4 text-gray-950 sm:text-sm">{item.name}</p>
+                      <p className="truncate text-[11px] leading-4 text-gray-500">
+                        {item.sku || item.category || "No SKU or category"}
                       </p>
                     </div>
                     <div className="hidden sm:block">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Price</p>
-                      <p className="mt-0.5 text-sm font-semibold text-gray-800">{formatUsd(item.price)}</p>
+                      <p className="text-sm font-semibold text-gray-800">{formatUsd(item.price)}</p>
                     </div>
                     <div className="hidden sm:block">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Stock</p>
-                      <p className="mt-0.5 text-sm font-semibold text-gray-800">{item.quantity}</p>
+                      <p className="text-sm font-semibold text-gray-800">{item.quantity}</p>
                     </div>
-                    <ProviderStatusPill label={state.label} tone={state.tone} className="hidden sm:inline-flex" />
+                    <ProviderStatusPill label={state.label} tone={state.tone} className="hidden !min-h-6 sm:inline-flex" />
                     <div className="flex items-center gap-2">
                       <div className="text-right sm:hidden">
-                        <p className="text-sm font-semibold text-gray-900">{formatUsd(item.price)}</p>
-                        <p className="text-[11px] text-gray-500">{item.quantity} in stock</p>
+                        <p className="text-xs font-semibold leading-4 text-gray-900">{formatUsd(item.price)}</p>
+                        <p className="text-[10px] leading-4 text-gray-500">{item.quantity} in stock</p>
                       </div>
-                      <ChevronRight size={17} className="shrink-0 text-gray-400" />
+                      <ChevronRight size={16} className="shrink-0 text-gray-400" />
                     </div>
                   </button>
                 )
@@ -642,6 +671,17 @@ export default function InventoryPage() {
         />
       )}
 
+      {outOfStockOpen && (
+        <OutOfStockModal
+          items={outOfStockItems}
+          onClose={() => setOutOfStockOpen(false)}
+          onSelect={(item) => {
+            setOutOfStockOpen(false)
+            setSelectedItem(item)
+          }}
+        />
+      )}
+
       {formOpen && (
         <div data-pinetree-overlay="true" className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
           <div role="dialog" aria-modal="true" aria-label={editing ? "Edit inventory item" : "Add inventory item"} className="max-h-[100dvh] w-full overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:max-w-xl sm:rounded-3xl sm:p-6">
@@ -655,8 +695,26 @@ export default function InventoryPage() {
               <Field label="Category"><input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="form-field" /></Field>
               <Field label="Price"><input type="number" min="0" step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} className="form-field" /></Field>
               <Field label="Cost (optional)"><input type="number" min="0" step="0.01" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} className="form-field" /></Field>
-              <Field label="Stock quantity"><input type="number" min="0" step="1" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} className="form-field" /></Field>
-              <Field label="Low-stock threshold"><input type="number" min="0" step="1" value={form.lowStockThreshold} onChange={(e) => setForm({ ...form, lowStockThreshold: e.target.value })} className="form-field" /></Field>
+              <Field label="Stock quantity">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={form.quantity}
+                  onChange={(event) => setForm({ ...form, quantity: normalizeWholeNumberInput(event.target.value) })}
+                  className="form-field"
+                />
+              </Field>
+              <Field label="Low-stock threshold">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={form.lowStockThreshold}
+                  onChange={(event) => setForm({ ...form, lowStockThreshold: normalizeWholeNumberInput(event.target.value) })}
+                  className="form-field"
+                />
+              </Field>
             </div>
             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button onClick={() => setFormOpen(false)} disabled={saving} className="min-h-10 rounded-xl border border-gray-200 px-4 text-sm font-semibold text-gray-700">Cancel</button>
@@ -675,6 +733,78 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">{label}</span>
       {children}
     </label>
+  )
+}
+
+function OutOfStockModal({
+  items,
+  onClose,
+  onSelect
+}: {
+  items: InventoryItem[]
+  onClose: () => void
+  onSelect: (item: InventoryItem) => void
+}) {
+  return (
+    <div
+      data-pinetree-overlay="true"
+      className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-end justify-center overflow-hidden p-0 sm:items-center sm:p-4"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Out-of-stock inventory items"
+        className="flex max-h-[calc(100dvh-env(safe-area-inset-top))] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:max-h-[min(38rem,calc(100dvh-2rem))] sm:max-w-lg sm:rounded-3xl"
+      >
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-100 px-5 pb-4 pt-[calc(env(safe-area-inset-top)+1.25rem)] sm:p-5">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-600">Inventory Status</p>
+            <h2 className="mt-1 text-xl font-semibold text-gray-950">Out of Stock</h2>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close out-of-stock items" className="rounded-xl p-2 text-gray-500 hover:bg-gray-100">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          {items.length ? (
+            <div className="divide-y divide-gray-100">
+              {items.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onSelect(item)}
+                  className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 px-5 py-2 text-left transition hover:bg-gray-50 focus:bg-blue-50/50 focus:outline-none"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-gray-950">{item.name}</p>
+                    <p className="truncate text-xs text-gray-500">{item.sku || item.category || "No SKU or category"}</p>
+                  </div>
+                  <p className="text-sm font-semibold text-gray-800">{formatUsd(item.price)}</p>
+                  <ChevronRight size={16} className="text-gray-400" />
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center px-6 py-14 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+                <Boxes size={22} />
+              </div>
+              <h3 className="mt-4 text-base font-semibold text-gray-950">No out-of-stock items</h3>
+              <p className="mt-1 max-w-sm text-sm leading-6 text-gray-500">
+                All tracked items currently have stock available.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="shrink-0 border-t border-gray-100 bg-white px-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-4 sm:p-5">
+          <button type="button" onClick={onClose} className="min-h-10 w-full rounded-xl border border-gray-200 px-4 text-sm font-semibold text-gray-700 sm:w-auto">
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
