@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Boxes,
+  ChevronRight,
   CreditCard,
   FileSpreadsheet,
   Grid2X2,
@@ -162,6 +163,14 @@ function connectorStatus(
   return { connected: false, label: "Not Connected", tone: "slate" as const }
 }
 
+function connectorSummary(provider: string) {
+  if (provider === "SHIFT4_SKYTAB") return "Shift4 and SkyTab inventory connection."
+  if (provider === "CLOVER") return "Clover merchant catalog connection."
+  if (provider === "SQUARE") return "Square merchant catalog connection."
+  if (provider === "SHOPIFY") return "Shopify store inventory connection."
+  return "Import catalog items from a CSV file."
+}
+
 export default function InventoryPage() {
   const [items, setItems] = useState<InventoryItem[]>([])
   const [summary, setSummary] = useState<InventorySummary>({
@@ -180,6 +189,7 @@ export default function InventoryPage() {
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<Filter>("ALL")
   const [formOpen, setFormOpen] = useState(false)
+  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null)
   const [editing, setEditing] = useState<InventoryItem | null>(null)
   const [form, setForm] = useState<ItemForm>(emptyForm)
   const [saving, setSaving] = useState(false)
@@ -256,6 +266,7 @@ export default function InventoryPage() {
   }
 
   function openEdit(item: InventoryItem) {
+    setSelectedItem(null)
     setEditing(item)
     setForm({
       name: item.name,
@@ -298,6 +309,7 @@ export default function InventoryPage() {
     try {
       await request(`/api/inventory/${item.id}`, { method: "DELETE" })
       setItems((current) => current.filter((candidate) => candidate.id !== item.id))
+      setSelectedItem(null)
       toast.success("Inventory item deleted")
       await loadInventory()
     } catch (error) {
@@ -424,42 +436,41 @@ export default function InventoryPage() {
       )}
 
       <DashboardSection title="Item Catalog" titleTone="blue">
-        <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-4">
-          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
-            <label className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search items, SKU, or category"
-                className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-3 text-sm text-gray-900 outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
-              />
-            </label>
-            <div className="flex gap-1 overflow-x-auto pb-1">
-              {([
-                ["ALL", "All"],
-                ["ACTIVE", "Active"],
-                ["LOW", "Low stock"],
-                ["OUT", "Out of stock"]
-              ] as Array<[Filter, string]>).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setFilter(value)}
-                  className={`shrink-0 rounded-full border px-3 py-2 text-xs font-semibold ${
-                    filter === value
-                      ? "border-blue-600 bg-blue-600 text-white"
-                      : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+        <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <div className="border-b border-gray-100 p-3 sm:p-4">
+            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+              <label className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search items, SKU, or category"
+                  className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-3 text-sm text-gray-900 outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                />
+              </label>
+              <div className="flex gap-1 overflow-x-auto pb-1">
+                {([
+                  ["ALL", "All"],
+                  ["ACTIVE", "Active"],
+                  ["LOW", "Low stock"],
+                  ["OUT", "Out of stock"]
+                ] as Array<[Filter, string]>).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setFilter(value)}
+                    className={`shrink-0 rounded-full border px-3 py-2 text-xs font-semibold ${
+                      filter === value
+                        ? "border-blue-600 bg-blue-600 text-white"
+                        : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-
-        <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
           {loading ? (
             <div className="space-y-3 p-5">
               {[1, 2, 3].map((row) => <div key={row} className="h-14 animate-pulse rounded-xl bg-gray-100" />)}
@@ -475,7 +486,7 @@ export default function InventoryPage() {
               <p className="mt-1 max-w-md text-sm leading-6 text-gray-500">
                 {items.length
                   ? "Adjust your search or inventory status filter."
-                  : "Build a manual PineTree catalog now. External POS inventory sync is not enabled yet."}
+                  : "Build a manual PineTree catalog, or connect an existing POS inventory source below."}
               </p>
               {!items.length && available && (
                 <button type="button" onClick={openCreate} className="mt-4 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white">
@@ -484,85 +495,60 @@ export default function InventoryPage() {
               )}
             </div>
           ) : (
-            <>
-              <div className="divide-y divide-gray-100 md:hidden">
-                {visibleItems.map((item) => {
-                  const state = itemState(item)
-                  return (
-                    <article key={item.id} className="p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <h3 className="font-semibold text-gray-950">{item.name}</h3>
-                          <p className="mt-0.5 truncate text-xs text-gray-500">{item.sku || "No SKU"} · {item.category || "Uncategorized"}</p>
-                        </div>
-                        <ProviderStatusPill label={state.label} tone={state.tone} />
-                      </div>
-                      <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
-                        <div><p className="text-[10px] uppercase text-gray-400">Price</p><p className="font-semibold">{formatUsd(item.price)}</p></div>
-                        <div><p className="text-[10px] uppercase text-gray-400">Stock</p><p className="font-semibold">{item.quantity}</p></div>
-                        <div><p className="text-[10px] uppercase text-gray-400">Alert at</p><p className="font-semibold">{item.low_stock_threshold}</p></div>
-                      </div>
-                      <p className="mt-2 text-[11px] text-gray-500">
-                        Updated {new Date(item.updated_at).toLocaleDateString()}
+            <div className="max-h-[34rem] divide-y divide-gray-100 overflow-y-auto overscroll-contain">
+              {visibleItems.map((item) => {
+                const state = itemState(item)
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setSelectedItem(item)}
+                    className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 text-left transition hover:bg-gray-50 focus:bg-blue-50/50 focus:outline-none sm:grid-cols-[minmax(0,1.5fr)_minmax(5rem,0.5fr)_minmax(4rem,0.4fr)_auto_auto]"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-gray-950">{item.name}</p>
+                      <p className="mt-0.5 truncate text-xs text-gray-500">
+                        {item.sku || "No SKU"} · {item.category || "Uncategorized"}
                       </p>
-                      <div className="mt-3 flex gap-2">
-                        <button onClick={() => openEdit(item)} className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700">Edit</button>
-                        <button onClick={() => void deleteItem(item)} className="rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Delete</button>
+                    </div>
+                    <div className="hidden sm:block">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Price</p>
+                      <p className="mt-0.5 text-sm font-semibold text-gray-800">{formatUsd(item.price)}</p>
+                    </div>
+                    <div className="hidden sm:block">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Stock</p>
+                      <p className="mt-0.5 text-sm font-semibold text-gray-800">{item.quantity}</p>
+                    </div>
+                    <ProviderStatusPill label={state.label} tone={state.tone} className="hidden sm:inline-flex" />
+                    <div className="flex items-center gap-2">
+                      <div className="text-right sm:hidden">
+                        <p className="text-sm font-semibold text-gray-900">{formatUsd(item.price)}</p>
+                        <p className="text-[11px] text-gray-500">{item.quantity} in stock</p>
                       </div>
-                    </article>
-                  )
-                })}
-              </div>
-              <div className="hidden overflow-x-auto md:block">
-                <table className="w-full min-w-[850px] text-sm">
-                  <thead className="bg-gray-50 text-left text-[11px] uppercase tracking-wide text-gray-500">
-                    <tr>{["Item", "SKU", "Category", "Price", "Stock", "Low at", "Status", "Updated", ""].map((label) => <th key={label} className="px-4 py-3 font-semibold">{label}</th>)}</tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {visibleItems.map((item) => {
-                      const state = itemState(item)
-                      return (
-                        <tr key={item.id} className="hover:bg-gray-50/70">
-                          <td className="px-4 py-3 font-semibold text-gray-950">{item.name}</td>
-                          <td className="px-4 py-3 font-mono text-xs text-gray-500">{item.sku || "-"}</td>
-                          <td className="px-4 py-3 text-gray-600">{item.category || "-"}</td>
-                          <td className="px-4 py-3 font-medium">{formatUsd(item.price)}</td>
-                          <td className="px-4 py-3 font-semibold">{item.quantity}</td>
-                          <td className="px-4 py-3 text-gray-600">{item.low_stock_threshold}</td>
-                          <td className="px-4 py-3"><ProviderStatusPill label={state.label} tone={state.tone} /></td>
-                          <td className="px-4 py-3 text-xs text-gray-500">{new Date(item.updated_at).toLocaleDateString()}</td>
-                          <td className="px-4 py-3">
-                            <div className="flex justify-end gap-2">
-                              <button onClick={() => openEdit(item)} className="text-xs font-semibold text-blue-600 hover:text-blue-700">Edit</button>
-                              <button onClick={() => void deleteItem(item)} aria-label={`Delete ${item.name}`} className="text-gray-400 hover:text-red-600"><Trash2 size={15} /></button>
-                            </div>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>
+                      <ChevronRight size={17} className="shrink-0 text-gray-400" />
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
           )}
         </div>
       </DashboardSection>
 
       <DashboardSection title="Connect Existing POS Inventory" titleTone="blue">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-3 xl:grid-cols-5">
           {integrations.map((integration) => {
             const status = connectorStatus(integration, shopifyStatus)
             const isManual = integration.provider === "MANUAL_CSV"
-            const canSync = status.connected && integration.canSync
 
             return (
               <article
                 key={integration.provider}
-                className="flex min-h-52 flex-col rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_14px_34px_rgba(15,23,42,0.08)]"
+                className="flex min-h-40 flex-col rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:border-blue-200 hover:bg-blue-50/30 sm:min-h-44 sm:p-3.5"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                    <ConnectorIcon provider={integration.provider} />
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+                    <ConnectorIcon provider={integration.provider} size={15} />
                   </div>
                   <ProviderStatusPill
                     label={status.label}
@@ -570,38 +556,17 @@ export default function InventoryPage() {
                     className="!min-h-6 shrink-0 !px-2 !text-[10px]"
                   />
                 </div>
-                <h3 className="mt-4 text-sm font-semibold text-gray-950">{integration.label}</h3>
-                <p className="mt-1 line-clamp-3 text-xs leading-5 text-gray-500">{integration.detail}</p>
-                <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">
+                <h3 className="mt-3 text-sm font-semibold leading-5 text-gray-950">{integration.label}</h3>
+                <p className="mt-0.5 text-[11px] leading-4 text-gray-500 sm:text-xs">{connectorSummary(integration.provider)}</p>
+                <div className="mt-auto pt-3">
                   <button
                     type="button"
                     onClick={() => openIntegration(integration)}
-                    className="inline-flex min-h-9 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3.5 text-xs font-semibold text-white transition hover:bg-blue-700"
+                    className="inline-flex min-h-8 items-center justify-center gap-1.5 text-left text-[11px] font-semibold text-blue-700 hover:text-blue-800"
                   >
                     {isManual ? <Upload size={14} /> : null}
                     {isManual ? "Upload CSV" : status.connected ? "Configure" : integration.provider === "SHOPIFY" ? "Connect" : "Configure"}
                   </button>
-                  {canSync && (
-                    <button
-                      type="button"
-                      onClick={() => void integrationAction(integration.provider, "sync")}
-                      disabled={integrationBusy !== null}
-                      className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-xl border border-gray-200 px-3 text-xs font-semibold text-gray-700 disabled:opacity-50"
-                    >
-                      <RefreshCw size={13} />
-                      Sync now
-                    </button>
-                  )}
-                  {status.connected && integration.canDisconnect && (
-                    <button
-                      type="button"
-                      onClick={() => void integrationAction(integration.provider, "disconnect")}
-                      disabled={integrationBusy !== null}
-                      className="min-h-9 rounded-xl border border-gray-200 px-3 text-xs font-semibold text-gray-500 disabled:opacity-50"
-                    >
-                      Disconnect
-                    </button>
-                  )}
                 </div>
               </article>
             )
@@ -663,6 +628,17 @@ export default function InventoryPage() {
           onCheck={() => void checkConfiguration(selectedIntegration)}
           onConnectShopify={() => void connectShopify()}
           onUploadCsv={(file) => void uploadCsv(file)}
+          onSync={() => void integrationAction(selectedIntegration.provider, "sync")}
+          onDisconnect={() => void integrationAction(selectedIntegration.provider, "disconnect")}
+        />
+      )}
+
+      {selectedItem && (
+        <ItemDetailModal
+          item={selectedItem}
+          onClose={() => setSelectedItem(null)}
+          onEdit={() => openEdit(selectedItem)}
+          onDelete={() => void deleteItem(selectedItem)}
         />
       )}
 
@@ -702,6 +678,90 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
+function ItemDetailModal({
+  item,
+  onClose,
+  onEdit,
+  onDelete
+}: {
+  item: InventoryItem
+  onClose: () => void
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const state = itemState(item)
+  const details = [
+    ["SKU", item.sku || "No SKU"],
+    ["Category", item.category || "Uncategorized"],
+    ["Price", formatUsd(item.price)],
+    ["Cost", item.cost === null ? "Not set" : formatUsd(item.cost)],
+    ["Stock quantity", String(item.quantity)],
+    ["Low-stock alert", String(item.low_stock_threshold)]
+  ]
+
+  return (
+    <div
+      data-pinetree-overlay="true"
+      className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-end justify-center overflow-hidden p-0 sm:items-center sm:p-4"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${item.name} inventory details`}
+        className="flex max-h-[calc(100dvh-env(safe-area-inset-top))] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:max-h-[min(40rem,calc(100dvh-2rem))] sm:max-w-lg sm:rounded-3xl"
+      >
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-100 px-5 pb-4 pt-[calc(env(safe-area-inset-top)+1.25rem)] sm:p-5">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-600">Inventory Item</p>
+            <h2 className="mt-1 truncate text-xl font-semibold text-gray-950">{item.name}</h2>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close item details" className="rounded-xl p-2 text-gray-500 hover:bg-gray-100">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5">
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Current status</p>
+              <p className="mt-1 text-sm text-gray-600">Updated {new Date(item.updated_at).toLocaleString()}</p>
+            </div>
+            <ProviderStatusPill label={state.label} tone={state.tone} />
+          </div>
+
+          <dl className="mt-5 grid grid-cols-2 gap-3">
+            {details.map(([label, value]) => (
+              <div key={label} className="rounded-xl border border-gray-100 bg-white p-3">
+                <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{label}</dt>
+                <dd className="mt-1 break-words text-sm font-semibold text-gray-900">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+
+        <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-gray-100 bg-white px-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-4 sm:flex-row sm:justify-between sm:p-5">
+          <button
+            type="button"
+            onClick={onDelete}
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-red-200 px-4 text-sm font-semibold text-red-600 hover:bg-red-50"
+          >
+            <Trash2 size={15} />
+            Delete
+          </button>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row">
+            <button type="button" onClick={onClose} className="min-h-10 rounded-xl border border-gray-200 px-4 text-sm font-semibold text-gray-700">
+              Close
+            </button>
+            <button type="button" onClick={onEdit} className="min-h-10 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700">
+              Edit Item
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ConnectorSetupModal({
   integration,
   shopifyStatus,
@@ -713,7 +773,9 @@ function ConnectorSetupModal({
   onClose,
   onCheck,
   onConnectShopify,
-  onUploadCsv
+  onUploadCsv,
+  onSync,
+  onDisconnect
 }: {
   integration: InventoryIntegration
   shopifyStatus: ShopifyStatus | null
@@ -726,6 +788,8 @@ function ConnectorSetupModal({
   onCheck: () => void
   onConnectShopify: () => void
   onUploadCsv: (file: File | null) => void
+  onSync: () => void
+  onDisconnect: () => void
 }) {
   const status = connectorStatus(integration, shopifyStatus)
   const isShift4 = integration.provider === "SHIFT4_SKYTAB"
@@ -890,6 +954,27 @@ function ConnectorSetupModal({
               className="min-h-10 rounded-xl border border-gray-200 px-4 text-sm font-semibold text-gray-700 disabled:opacity-50"
             >
               Check Configuration
+            </button>
+          )}
+          {status.connected && integration.canSync && (
+            <button
+              type="button"
+              onClick={onSync}
+              disabled={busy}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-gray-200 px-4 text-sm font-semibold text-gray-700 disabled:opacity-50"
+            >
+              <RefreshCw size={14} />
+              Sync now
+            </button>
+          )}
+          {status.connected && integration.canDisconnect && (
+            <button
+              type="button"
+              onClick={onDisconnect}
+              disabled={busy}
+              className="min-h-10 rounded-xl border border-gray-200 px-4 text-sm font-semibold text-gray-600 disabled:opacity-50"
+            >
+              Disconnect
             </button>
           )}
         </div>
