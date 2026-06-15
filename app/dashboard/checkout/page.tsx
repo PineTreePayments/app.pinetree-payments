@@ -1418,11 +1418,11 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           <h1 className={dashboardPageTitleClass}>
             {mode === "merchant" ? "Online Checkout" : "Developer"}
           </h1>
-          <p className="mt-2 text-sm text-gray-500">
-            {mode === "merchant"
-              ? "Create payment links and checkout buttons for customers."
-              : "Manage API keys, webhooks, SDKs, and platform integrations."}
-          </p>
+          {mode === "developer" && (
+            <p className="mt-2 text-sm text-gray-500">
+              Manage API keys, webhooks, SDKs, and platform integrations.
+            </p>
+          )}
         </div>
       )}
 

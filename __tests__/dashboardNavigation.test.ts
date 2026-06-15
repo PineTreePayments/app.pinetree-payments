@@ -25,7 +25,7 @@ describe("dashboard checkout and developer navigation", () => {
   it("keeps Online Checkout merchant-facing", () => {
     const checkout = read("app/dashboard/checkout/page.tsx")
 
-    expect(checkout).toContain('"Create payment links and checkout buttons for customers."')
+    expect(checkout).not.toContain('"Create payment links and checkout buttons for customers."')
     expect(checkout).toContain("Create and share hosted checkout links.")
     expect(checkout).toContain("Add a checkout button to your website.")
     expect(checkout).toContain("Checkout readiness")
