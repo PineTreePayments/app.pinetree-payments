@@ -94,4 +94,30 @@ describe("checkout metadata propagation", () => {
     expect(result?.resolvedStatus).toBe("expired")
     expect(createPaymentIntentEngine).not.toHaveBeenCalled()
   })
+
+  it("keeps archived links unavailable without deleting historical records", async () => {
+    getCheckoutLinkByPublicToken.mockResolvedValue({
+      id: "session-archived",
+      merchant_id: "merchant-1",
+      public_token: "token-archived",
+      name: "Archived checkout",
+      description: null,
+      amount: 42,
+      currency: "USD",
+      customer_email: null,
+      reference: null,
+      status: "archived",
+      expires_at: null,
+      success_url: null,
+      cancel_url: null,
+      link_metadata: { channel: "online" },
+      created_at: "2026-06-12T00:00:00.000Z",
+      updated_at: "2026-06-15T00:00:00.000Z",
+    })
+
+    const result = await resolveCheckoutLinkForCustomer("token-archived")
+
+    expect(result?.resolvedStatus).toBe("archived")
+    expect(createPaymentIntentEngine).not.toHaveBeenCalled()
+  })
 })

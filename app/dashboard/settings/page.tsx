@@ -248,7 +248,7 @@ export default function SettingsPage() {
           ? await walletResponse.json() as { wallets?: unknown[] }
           : {}
         const checkoutPayload = checkoutResponse.ok
-          ? await checkoutResponse.json() as { links?: unknown[] }
+          ? await checkoutResponse.json() as { links?: Array<{ resolvedStatus?: string }> }
           : {}
         const webhookPayload = webhookResponse.ok
           ? await webhookResponse.json() as { webhook?: unknown }
@@ -258,7 +258,7 @@ export default function SettingsPage() {
           : {}
         setIntegrationSummary({
           wallets: walletPayload.wallets?.length || 0,
-          checkoutLinks: checkoutPayload.links?.length || 0,
+          checkoutLinks: checkoutPayload.links?.filter((link) => link.resolvedStatus !== "archived").length || 0,
           webhookConfigured: Boolean(webhookPayload.webhook),
           inventoryAvailable: Boolean(inventoryPayload.available),
           inventoryItems: Number(inventoryPayload.summary?.totalItems || 0)

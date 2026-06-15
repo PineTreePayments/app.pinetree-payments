@@ -66,6 +66,7 @@ export async function GET(req: NextRequest) {
       (r) => r.status === "active" && r.expires_at !== null && new Date(r.expires_at) <= now
     ).length
     const disabledLinks = linkRows.filter((r) => r.status === "disabled").length
+    const archivedLinks = linkRows.filter((r) => r.status === "archived").length
 
     // ── Webhook health (test events excluded, last 24 h) ──────────────────────
     const recentWebhookFailures = failedDeliveriesResult.count ?? 0
@@ -79,10 +80,11 @@ export async function GET(req: NextRequest) {
       avgOrderValueUsd,
 
       // Checkout link inventory
-      totalLinks: linkRows.length,
+      totalLinks: linkRows.length - archivedLinks,
       activeLinks,
       expiredLinks,
       disabledLinks,
+      archivedLinks,
 
       // Webhook health
       recentWebhookFailures,

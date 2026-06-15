@@ -55,6 +55,7 @@ function generatePublicToken(): string {
 }
 
 function resolveStatus(link: CheckoutLink): CheckoutLinkStatus {
+  if (link.status === "archived") return "archived"
   const lifecycle = getCheckoutSessionLifecycle(link.link_metadata)
   if (lifecycle === "expired") return "expired"
   if (lifecycle === "canceled") return "disabled"
@@ -119,9 +120,17 @@ export async function disableCheckoutLinkEngine(
   return withUrl(updated)
 }
 
+export async function archiveCheckoutLinkEngine(
+  id: string,
+  merchantId: string
+): Promise<CheckoutLinkWithUrl> {
+  const updated = await updateCheckoutLinkStatus(id, merchantId, "archived")
+  return withUrl(updated)
+}
+
 export type ResolvedCheckoutLink =
   | { link: CheckoutLink; resolvedStatus: "active"; intentId: string; successUrl: string | null; cancelUrl: string | null }
-  | { link: CheckoutLink; resolvedStatus: "disabled" | "expired"; intentId: null; successUrl: string | null; cancelUrl: string | null }
+  | { link: CheckoutLink; resolvedStatus: "disabled" | "expired" | "archived"; intentId: null; successUrl: string | null; cancelUrl: string | null }
 
 export async function resolveCheckoutLinkForCustomer(token: string): Promise<ResolvedCheckoutLink | null> {
   const link = await getCheckoutLinkByPublicToken(token)
@@ -135,7 +144,7 @@ export async function resolveCheckoutLinkForCustomer(token: string): Promise<Res
   const requestedRails = getRequestedCheckoutSessionRails(linkMetadata)
 
   if (resolvedStatus !== "active") {
-    return { link, resolvedStatus: resolvedStatus as "disabled" | "expired", intentId: null, successUrl, cancelUrl }
+    return { link, resolvedStatus: resolvedStatus as "disabled" | "expired" | "archived", intentId: null, successUrl, cancelUrl }
   }
 
   const intent = await createPaymentIntentEngine({

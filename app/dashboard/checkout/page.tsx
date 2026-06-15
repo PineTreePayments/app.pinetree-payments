@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { X } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
@@ -15,7 +16,9 @@ import Button from "@/components/ui/Button"
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type CheckoutLinkStatus = "active" | "disabled" | "expired"
+type CheckoutLinkStatus = "active" | "disabled" | "expired" | "archived"
+type MerchantDialog = "links" | "button" | null
+type LinkFilter = "active" | "disabled" | "expired" | "archived"
 
 type CheckoutLink = {
   id: string
@@ -47,6 +50,7 @@ type OnlineStats = {
   activeLinks: number
   expiredLinks: number
   disabledLinks: number
+  archivedLinks: number
   recentWebhookFailures: number  // excludes test events
   webhookConfigured: boolean
   webhookEnabled: boolean
@@ -162,16 +166,117 @@ function statusPill(status: CheckoutLinkStatus) {
     active: "bg-emerald-50 text-emerald-700 border-emerald-200",
     disabled: "bg-gray-100 text-gray-500 border-gray-200",
     expired: "bg-amber-50 text-amber-700 border-amber-200",
+    archived: "bg-slate-100 text-slate-600 border-slate-200",
   }
   const labels: Record<CheckoutLinkStatus, string> = {
     active: "Active",
     disabled: "Disabled",
     expired: "Expired",
+    archived: "Archived",
   }
   return (
     <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold leading-none ${styles[status]}`}>
       {labels[status]}
     </span>
+  )
+}
+
+function CheckoutDialog({
+  open,
+  title,
+  description,
+  onClose,
+  children,
+}: {
+  open: boolean
+  title: string
+  description: string
+  onClose: () => void
+  children: React.ReactNode
+}) {
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
+  const titleId = `checkout-dialog-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
+
+  useEffect(() => {
+    if (!open) return
+
+    previousFocusRef.current = document.activeElement as HTMLElement | null
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    closeButtonRef.current?.focus()
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault()
+        onClose()
+        return
+      }
+      if (event.key !== "Tab") return
+
+      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
+      if (!focusable?.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown)
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown)
+      document.body.style.overflow = previousOverflow
+      previousFocusRef.current?.focus()
+    }
+  }, [open, onClose])
+
+  if (!open) return null
+
+  return (
+    <div
+      data-pinetree-overlay="true"
+      className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-end justify-center p-0 backdrop-blur-md sm:items-center sm:p-5"
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target) onClose()
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="flex h-[100dvh] w-full flex-col overflow-hidden rounded-t-3xl border border-white/80 bg-white/95 shadow-[0_30px_100px_rgba(15,23,42,0.32)] sm:h-auto sm:max-h-[90vh] sm:max-w-5xl sm:rounded-3xl"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-blue-100 bg-white/90 px-4 py-4 backdrop-blur-xl sm:px-6">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Online Checkout</p>
+            <h2 id={titleId} className="mt-1 text-xl font-semibold text-gray-950">{title}</h2>
+            <p className="mt-1 text-xs leading-5 text-gray-500">{description}</p>
+          </div>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={onClose}
+            aria-label={`Close ${title}`}
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 shadow-sm transition hover:border-blue-200 hover:text-[#0052FF] focus:outline-none focus:ring-4 focus:ring-blue-100"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6 sm:py-6">
+          {children}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -438,6 +543,10 @@ export function CheckoutWorkspace({
   const [submitting, setSubmitting] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [disablingId, setDisablingId] = useState<string | null>(null)
+  const [archivingId, setArchivingId] = useState<string | null>(null)
+  const [merchantDialog, setMerchantDialog] = useState<MerchantDialog>(null)
+  const [linkFilter, setLinkFilter] = useState<LinkFilter>("active")
+  const closeMerchantDialog = useCallback(() => setMerchantDialog(null), [])
   const [tab, setTab] = useState<Tab>(mode === "merchant" ? "links" : "developer")
   const [merchantId, setMerchantId] = useState("")
   const [copiedField, setCopiedField] = useState<string | null>(null)
@@ -656,6 +765,7 @@ export function CheckoutWorkspace({
       if (!res.ok) throw new Error(data.error || "Failed to create link")
       if (data.link) {
         setLinks((prev) => [data.link!, ...prev])
+        setLinkFilter("active")
         toast.success("Payment link created")
         setName(""); setAmount(""); setDescription(""); setCustomerEmail(""); setReference(""); setExpiration("never")
       }
@@ -685,6 +795,35 @@ export function CheckoutWorkspace({
       toast.error(err instanceof Error ? err.message : "Failed to disable link")
     } finally {
       setDisablingId(null)
+    }
+  }
+
+  async function handleArchive(link: CheckoutLink) {
+    const confirmed = window.confirm(
+      `Archive "${link.name}"? The link will stop accepting payments and move to Archived. Historical payments will remain intact.`
+    )
+    if (!confirmed) return
+
+    setArchivingId(link.id)
+    try {
+      const token = await getToken()
+      const res = await fetch(`/api/checkout-links/${encodeURIComponent(link.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: "archived" }),
+      })
+      const data = (await res.json()) as { link?: CheckoutLink; error?: string }
+      if (!res.ok || !data.link) {
+        throw new Error(data.error || "Failed to archive payment link")
+      }
+      setLinks((prev) => prev.map((item) => item.id === link.id ? data.link! : item))
+      setLinkFilter("archived")
+      void fetchStats()
+      toast.success("Payment link archived")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to archive payment link")
+    } finally {
+      setArchivingId(null)
     }
   }
 
@@ -941,17 +1080,27 @@ export function CheckoutWorkspace({
 
   // ── Derived ─────────────────────────────────────────────────────────────────
   const activeLinks = links.filter((l) => l.resolvedStatus === "active").length
+  const nonArchivedLinks = links.filter((l) => l.resolvedStatus !== "archived")
+  const linkCounts: Record<LinkFilter, number> = {
+    active: activeLinks,
+    disabled: links.filter((l) => l.resolvedStatus === "disabled").length,
+    expired: links.filter((l) => l.resolvedStatus === "expired").length,
+    archived: links.filter((l) => l.resolvedStatus === "archived").length,
+  }
+  const filteredLinks = links.filter((l) => l.resolvedStatus === linkFilter)
   const isLoading = loading || statsLoading
 
   const insights: string[] = []
 
   // ── Onboarding ─────────────────────────────────────────────────────────────
-  if (!loading && links.length === 0) {
+  if (!loading && nonArchivedLinks.length === 0) {
     insights.push("Create your first payment link to start accepting online payments.")
   }
 
   // ── Active links summary ──────────────────────────────────────────────────
-  if (activeLinks > 0) {
+  if (!loading && nonArchivedLinks.length > 0 && activeLinks === 0) {
+    insights.push("No active payment links. Create a new link before sharing checkout or configuring a payment button.")
+  } else if (activeLinks > 0) {
     insights.push(`${activeLinks} active payment link${activeLinks !== 1 ? "s" : ""} ready to accept payments.`)
   }
 
@@ -960,16 +1109,20 @@ export function CheckoutWorkspace({
   if (disabledCount > 0) {
     insights.push(`${disabledCount} payment link${disabledCount !== 1 ? "s are" : " is"} disabled and not accepting payments.`)
   }
-  if (stats && stats.expiredLinks > 0) {
-    insights.push(`${stats.expiredLinks} checkout link${stats.expiredLinks !== 1 ? "s have" : " has"} expired — they will no longer accept payments.`)
+  if (linkCounts.expired > 0) {
+    insights.push(`${linkCounts.expired} checkout link${linkCounts.expired !== 1 ? "s have" : " has"} expired — archive links you no longer need.`)
   }
 
   // ── Payment activity ──────────────────────────────────────────────────────
   if (stats && stats.confirmedPayments > 0) {
     const vol = fmtUsd(stats.volumeUsd)
     insights.push(`${stats.confirmedPayments} confirmed online payment${stats.confirmedPayments !== 1 ? "s" : ""} — ${vol} total volume.`)
-  } else if (!statsLoading && stats && stats.totalPayments === 0 && links.length > 0) {
+  } else if (!statsLoading && stats && stats.totalPayments === 0 && nonArchivedLinks.length > 0) {
     insights.push("No successful online payments yet — share your payment links to get started.")
+  }
+
+  if (!loading && activeLinks === 0) {
+    insights.push("Pay with Crypto button not configured — the simple embed needs an active payment link.")
   }
 
   // ── Average order value (only when meaningful) ────────────────────────────
@@ -989,6 +1142,12 @@ export function CheckoutWorkspace({
   // ── Snippet content ──────────────────────────────────────────────────────────
   const sessionEndpoint = `${APP_BASE}/api/v1/checkout/sessions`
   const checkoutUrlPattern = `${APP_BASE}/checkout/{token}`
+
+  const merchantHtmlSnippet = `<!-- Static payment-link button. No API key required.
+     Replace YOUR_LINK_TOKEN with an active Payment Link token. -->
+<a href="${APP_BASE}/checkout/YOUR_LINK_TOKEN" target="_blank" rel="noopener noreferrer">
+  <button type="button">Pay with Crypto</button>
+</a>`
 
   const htmlSnippet = `<!-- Option 1: Static link to a payment link (no backend needed).
      Replace YOUR_LINK_TOKEN with the token from the Payment Links tab. -->
@@ -1241,18 +1400,13 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           )
       : INTEGRATION_OPTIONS.filter((option) => option.id !== "hosted-link" && option.id !== "html-button")
 
-  function openMerchantSection(target: "links" | "integration") {
-    const sectionId =
-      target === "links" ? "payment-links-management" : "checkout-button-setup"
-
-    setTab(target)
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        const section = document.getElementById(sectionId)
-        section?.scrollIntoView({ behavior: "smooth", block: "start" })
-        section?.focus({ preventScroll: true })
-      })
-    })
+  function openMerchantDialog(target: "links" | "integration") {
+    if (target === "links") {
+      setLinkFilter("active")
+      setMerchantDialog("links")
+      return
+    }
+    setMerchantDialog("button")
   }
 
   return (
@@ -1294,8 +1448,8 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
               <button
                 key={card.title}
                 type="button"
-                onClick={() => openMerchantSection(card.target)}
-                aria-controls={card.target === "links" ? "payment-links-management" : "checkout-button-setup"}
+                onClick={() => openMerchantDialog(card.target)}
+                aria-haspopup="dialog"
                 className="rounded-2xl border border-gray-200/80 bg-white p-4 text-left shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:border-blue-200 hover:shadow-[0_14px_36px_rgba(37,99,235,0.10)] focus:outline-none focus:ring-4 focus:ring-blue-100 sm:p-5"
               >
                 <div className="flex items-start justify-between gap-3">
@@ -1351,6 +1505,12 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           <button type="button" onClick={() => void fetchStats()} className="underline">Retry</button>
         </p>
       )}
+      {mode === "merchant" && (
+        <PineTreeInsightsCard
+          insights={insights.filter((insight) => !insight.toLowerCase().includes("webhook"))}
+          emptyText="Insights will appear once payment links are created and payments begin."
+        />
+      )}
 
       {/* ── Tab bar ──────────────────────────────────────────────────────── */}
       {showNavigation && mode === "developer" && (
@@ -1396,12 +1556,14 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {/* PAYMENT LINKS TAB                                                  */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
-      {mode === "merchant" && tab === "links" && (
-        <div
-          id="payment-links-management"
-          tabIndex={-1}
-          className="scroll-mt-24 space-y-6 outline-none"
+      {mode === "merchant" && (
+        <CheckoutDialog
+          open={merchantDialog === "links"}
+          title="Payment Links"
+          description="Create, organize, and retire hosted checkout links without leaving Online Checkout."
+          onClose={closeMerchantDialog}
         >
+          <div className="space-y-6">
           <DashboardSection title="New Payment Link" titleTone="blue">
             <div className="rounded-2xl border border-gray-200/80 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-6">
               <form onSubmit={(e) => void handleCreate(e)} className="space-y-4">
@@ -1463,7 +1625,26 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
             </div>
           </DashboardSection>
 
-          <DashboardSection title="Payment Links & Recent Checkout Activity" titleTone="blue">
+          <DashboardSection title="Payment Link Organization" titleTone="blue">
+            <div className="space-y-3">
+              <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Payment link status">
+                {(["active", "disabled", "expired", "archived"] as LinkFilter[]).map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    role="tab"
+                    aria-selected={linkFilter === filter}
+                    onClick={() => setLinkFilter(filter)}
+                    className={`shrink-0 rounded-xl border px-3.5 py-2 text-xs font-semibold capitalize transition ${
+                      linkFilter === filter
+                        ? "border-blue-200 bg-blue-50 text-[#0052FF]"
+                        : "border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:text-[#0052FF]"
+                    }`}
+                  >
+                    {filter} <span className="ml-1 text-[10px] opacity-70">{linkCounts[filter]}</span>
+                  </button>
+                ))}
+              </div>
             {loading ? (
               <div className="rounded-2xl border border-gray-200/80 bg-white p-8 shadow-[0_10px_30px_rgba(15,23,42,0.05)] text-center">
                 <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
@@ -1474,9 +1655,11 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                   <button type="button" onClick={() => void fetchLinks()} className="underline">Retry</button>
                 </p>
               </div>
-            ) : links.length === 0 ? (
+            ) : filteredLinks.length === 0 ? (
               <div className="rounded-2xl border border-gray-200/80 bg-white p-8 shadow-[0_10px_30px_rgba(15,23,42,0.05)] text-center">
-                <p className="text-sm text-gray-500">No payment links yet. Create one above.</p>
+                <p className="text-sm text-gray-500">
+                  No {linkFilter} payment links{linkFilter === "active" ? ". Create one above." : "."}
+                </p>
               </div>
             ) : (
               <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
@@ -1490,7 +1673,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {links.map((link) => (
+                      {filteredLinks.map((link) => (
                         <tr key={link.id} className="transition-colors hover:bg-gray-50/60">
                           <td className="px-5 py-4">
                             <div className="font-medium text-gray-900">{link.name}</div>
@@ -1502,18 +1685,28 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                           <td className="px-5 py-4 text-gray-500">{link.expires_at ? fmtDate(link.expires_at) : "Never"}</td>
                           <td className="px-5 py-4">
                             <div className="flex items-center justify-end gap-2">
-                              <button onClick={() => void handleCopyLink(link.id, link.checkoutUrl)}
-                                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:border-[#0052FF]/30 hover:text-[#0052FF]">
-                                {copiedId === link.id ? "Copied ✓" : "Copy Link"}
-                              </button>
-                              <a href={link.checkoutUrl} target="_blank" rel="noopener noreferrer"
-                                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:border-[#0052FF]/30 hover:text-[#0052FF]">
-                                Open ↗
-                              </a>
+                              {link.resolvedStatus === "active" && (
+                                <>
+                                  <button onClick={() => void handleCopyLink(link.id, link.checkoutUrl)}
+                                    className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:border-[#0052FF]/30 hover:text-[#0052FF]">
+                                    {copiedId === link.id ? "Copied ✓" : "Copy Link"}
+                                  </button>
+                                  <a href={link.checkoutUrl} target="_blank" rel="noopener noreferrer"
+                                    className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:border-[#0052FF]/30 hover:text-[#0052FF]">
+                                    Open ↗
+                                  </a>
+                                </>
+                              )}
                               {link.resolvedStatus === "active" && (
                                 <button onClick={() => void handleDisable(link.id)} disabled={disablingId === link.id}
                                   className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50">
                                   {disablingId === link.id ? "…" : "Disable"}
+                                </button>
+                              )}
+                              {link.resolvedStatus !== "archived" && (
+                                <button onClick={() => void handleArchive(link)} disabled={archivingId === link.id}
+                                  className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:border-amber-200 hover:bg-amber-50 hover:text-amber-700 disabled:opacity-50">
+                                  {archivingId === link.id ? "…" : "Archive"}
                                 </button>
                               )}
                             </div>
@@ -1524,7 +1717,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                   </table>
                 </div>
                 <div className="divide-y divide-gray-100 md:hidden">
-                  {links.map((link) => (
+                  {filteredLinks.map((link) => (
                     <div key={link.id} className="space-y-3 p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
@@ -1538,18 +1731,28 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                         <span className="text-gray-400">{fmtDate(link.created_at)}</span>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <button onClick={() => void handleCopyLink(link.id, link.checkoutUrl)}
-                          className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">
-                          {copiedId === link.id ? "Copied ✓" : "Copy Link"}
-                        </button>
-                        <a href={link.checkoutUrl} target="_blank" rel="noopener noreferrer"
-                          className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">
-                          Open ↗
-                        </a>
+                        {link.resolvedStatus === "active" && (
+                          <>
+                            <button onClick={() => void handleCopyLink(link.id, link.checkoutUrl)}
+                              className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">
+                              {copiedId === link.id ? "Copied ✓" : "Copy Link"}
+                            </button>
+                            <a href={link.checkoutUrl} target="_blank" rel="noopener noreferrer"
+                              className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">
+                              Open ↗
+                            </a>
+                          </>
+                        )}
                         {link.resolvedStatus === "active" && (
                           <button onClick={() => void handleDisable(link.id)} disabled={disablingId === link.id}
                             className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600">
                             {disablingId === link.id ? "…" : "Disable"}
+                          </button>
+                        )}
+                        {link.resolvedStatus !== "archived" && (
+                          <button onClick={() => void handleArchive(link)} disabled={archivingId === link.id}
+                            className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 disabled:opacity-50">
+                            {archivingId === link.id ? "…" : "Archive"}
                           </button>
                         )}
                       </div>
@@ -1558,65 +1761,113 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                 </div>
               </div>
             )}
+            </div>
           </DashboardSection>
-        </div>
+          </div>
+        </CheckoutDialog>
+      )}
+
+      {mode === "merchant" && (
+        <CheckoutDialog
+          open={merchantDialog === "button"}
+          title="Pay with Crypto Button"
+          description="Use an active payment link for a simple website button, or continue to Developer for a dynamic integration."
+          onClose={closeMerchantDialog}
+        >
+          <div className="space-y-6">
+            <DashboardSection title="Simple Setup" titleTone="blue">
+              <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-950">Add the button to your website</h3>
+                    <p className="mt-0.5 text-xs text-gray-500">No API key is required. Point the button at any active payment link.</p>
+                  </div>
+                  <LiveBadge />
+                </div>
+                <div className="space-y-4 p-5">
+                  {activeLinks > 0 ? (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {links.filter((link) => link.resolvedStatus === "active").map((link) => (
+                        <div key={link.id} className="flex items-center justify-between gap-3 rounded-xl border border-blue-100 bg-blue-50/50 px-3.5 py-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-semibold text-gray-900">{link.name}</p>
+                            <p className="mt-0.5 text-[11px] text-gray-500">{fmtUsd(Number(link.amount))}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleCopyLink(link.id, link.checkoutUrl)}
+                            className="shrink-0 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-blue-700"
+                          >
+                            {copiedId === link.id ? "Copied ✓" : "Copy link"}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-xs text-amber-800">
+                      Create an active payment link before publishing this button.
+                    </div>
+                  )}
+                  <div className="rounded-xl border border-blue-100 bg-blue-50/60 px-3.5 py-2.5">
+                    <p className="text-[11px] leading-relaxed text-blue-800">
+                      Replace <code className="font-mono">YOUR_LINK_TOKEN</code> with the token from the active link you want to use.
+                    </p>
+                  </div>
+                  <CodeBlock
+                    code={merchantHtmlSnippet}
+                    fieldId="merchant_html_button_snippet"
+                    copiedField={copiedField}
+                    onCopy={handleCopyField}
+                    lang="html"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLinkFilter("active")
+                      setMerchantDialog("links")
+                    }}
+                    className="inline-flex min-h-9 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-3.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
+                  >
+                    Manage payment links
+                  </button>
+                </div>
+              </div>
+            </DashboardSection>
+
+            <DashboardSection title="Advanced Setup" titleTone="blue">
+              <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-4 sm:px-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-950">Need API keys, webhooks, or SDKs?</h3>
+                    <p className="mt-1 text-xs leading-5 text-gray-600">
+                      Build dynamic sessions from your backend and manage advanced integrations in Developer.
+                    </p>
+                  </div>
+                  <Link
+                    href="/dashboard/developer"
+                    className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+                  >
+                    Open Developer
+                  </Link>
+                </div>
+              </div>
+            </DashboardSection>
+          </div>
+        </CheckoutDialog>
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {/* INTEGRATION TAB                                                    */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
-      {tab === "integration" && (
+      {mode === "developer" && tab === "integration" && (
         <div className="space-y-6">
-          <DashboardSection title={mode === "merchant" ? "Customer Checkout Options" : "Integration Options"} titleTone="blue">
+          <DashboardSection title="Integration Options" titleTone="blue">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {visibleIntegrationOptions.map((opt) => (
                 <IntegrationCard key={opt.id} option={opt} onAction={handleIntegrationAction} />
               ))}
             </div>
           </DashboardSection>
-
-          {mode === "merchant" && (
-            <div
-              id="checkout-button-setup"
-              tabIndex={-1}
-              className="scroll-mt-24 space-y-6 outline-none"
-            >
-              <DashboardSection title="Pay with Crypto Button Setup" titleTone="blue">
-                <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-                  <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
-                    <div>
-                      <h3 className="text-sm font-semibold text-gray-950">Add the button to your website</h3>
-                      <p className="mt-0.5 text-xs text-gray-500">
-                        Use an active payment link directly, or create checkout sessions from your backend.
-                      </p>
-                    </div>
-                    <LiveBadge />
-                  </div>
-                  <div className="space-y-3 p-5">
-                    <div className="rounded-xl border border-blue-100 bg-blue-50/60 px-3.5 py-2.5">
-                      <p className="text-[11px] leading-relaxed text-blue-800">
-                        Replace <code className="font-mono">YOUR_LINK_TOKEN</code> with the token from one of your active payment links.
-                      </p>
-                    </div>
-                    <CodeBlock
-                      code={htmlSnippet}
-                      fieldId="merchant_html_button_snippet"
-                      copiedField={copiedField}
-                      onCopy={handleCopyField}
-                      lang="html"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => openMerchantSection("links")}
-                      className="inline-flex min-h-9 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-3.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
-                    >
-                      Manage payment links
-                    </button>
-                  </div>
-                </div>
-              </DashboardSection>
-            </div>
-          )}
 
           {mode === "developer" && (
             <>
@@ -2369,13 +2620,6 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
         </div>
       )}
 
-      {/* ── PineTree Insights ─────────────────────────────────────────────── */}
-      {mode === "merchant" && (
-        <PineTreeInsightsCard
-          insights={insights.filter((insight) => !insight.toLowerCase().includes("webhook"))}
-          emptyText="Insights will appear once payment links are created and payments begin."
-        />
-      )}
     </div>
   )
 }

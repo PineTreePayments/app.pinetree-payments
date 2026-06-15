@@ -28,10 +28,14 @@ export default async function CheckoutTokenPage({ params }: Props) {
     return <CheckoutErrorScreen message="This checkout link does not exist." />
   }
 
-  if (result.resolvedStatus === "disabled") {
+  if (result.resolvedStatus === "disabled" || result.resolvedStatus === "archived") {
     return (
       <CheckoutErrorScreen
-        message="This checkout link has been deactivated by the merchant."
+        message={
+          result.resolvedStatus === "archived"
+            ? "This checkout link is no longer available."
+            : "This checkout link has been deactivated by the merchant."
+        }
         cancelUrl={result.cancelUrl}
         sessionId={result.link.id}
         event="canceled"

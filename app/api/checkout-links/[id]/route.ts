@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
-import { disableCheckoutLinkEngine } from "@/engine/checkoutLinks"
+import { archiveCheckoutLinkEngine, disableCheckoutLinkEngine } from "@/engine/checkoutLinks"
 
 type PatchBody = {
-  status?: "disabled"
+  status?: "disabled" | "archived"
 }
 
 export async function PATCH(
@@ -15,11 +15,17 @@ export async function PATCH(
     const { id } = await params
     const body = (await req.json()) as PatchBody
 
-    if (body.status !== "disabled") {
-      return NextResponse.json({ error: "Only status: disabled is supported" }, { status: 400 })
+    if (body.status !== "disabled" && body.status !== "archived") {
+      return NextResponse.json(
+        { error: "Only status: disabled or archived is supported" },
+        { status: 400 }
+      )
     }
 
-    const link = await disableCheckoutLinkEngine(id, merchantId)
+    const link =
+      body.status === "archived"
+        ? await archiveCheckoutLinkEngine(id, merchantId)
+        : await disableCheckoutLinkEngine(id, merchantId)
     return NextResponse.json({ link })
   } catch (error: unknown) {
     return NextResponse.json(

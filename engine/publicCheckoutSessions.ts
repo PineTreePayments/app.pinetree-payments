@@ -60,6 +60,7 @@ function buildCheckoutUrl(token: string): string {
 function resolveLinkStatus(link: CheckoutLink) {
   const lifecycle = getCheckoutSessionLifecycle(link.link_metadata)
   if (lifecycle) return lifecycle
+  if (link.status === "archived") return "disabled"
   if (link.status === "disabled") return "disabled"
   if (link.expires_at && new Date(link.expires_at).getTime() <= Date.now()) return "expired"
   return "active"

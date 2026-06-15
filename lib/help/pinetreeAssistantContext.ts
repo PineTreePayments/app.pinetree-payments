@@ -611,6 +611,7 @@ export async function getPineTreeAssistantContext(merchantId: string): Promise<P
   const payments = paymentsResult.data
   const tickets = ticketsResult.data
   const checkoutLinksData = checkoutLinksEngineResult.data
+  const visibleCheckoutLinksData = checkoutLinksData.filter((link) => link.resolvedStatus !== "archived")
   const terminals = terminalsResult.data
 
   // Map MerchantWallet rows to AssistantWalletContext (no address exposed)
@@ -681,7 +682,7 @@ export async function getPineTreeAssistantContext(merchantId: string): Promise<P
         source: "listCheckoutLinksEngine()",
         ok: checkoutLinksEngineResult.ok,
         rawCount: checkoutLinksEngineResult.rawCount,
-        activeCount: checkoutLinksData.filter((l) => l.resolvedStatus === "active").length,
+        activeCount: visibleCheckoutLinksData.filter((l) => l.resolvedStatus === "active").length,
         errorMessage: checkoutLinksEngineResult.errorMessage
       },
       payments: {
@@ -779,10 +780,10 @@ export async function getPineTreeAssistantContext(merchantId: string): Promise<P
     })),
     // Use resolvedStatus from listCheckoutLinksEngine (handles expiry correctly)
     checkoutLinks: {
-      activeCount: checkoutLinksData.filter((l) => l.resolvedStatus === "active").length,
-      totalCount: checkoutLinksData.length,
-      mostRecentName: checkoutLinksData[0]?.name || null,
-      mostRecentStatus: checkoutLinksData[0]?.resolvedStatus || null
+      activeCount: visibleCheckoutLinksData.filter((l) => l.resolvedStatus === "active").length,
+      totalCount: visibleCheckoutLinksData.length,
+      mostRecentName: visibleCheckoutLinksData[0]?.name || null,
+      mostRecentStatus: visibleCheckoutLinksData[0]?.resolvedStatus || null
     },
     pos: {
       terminalCount: terminals.length,

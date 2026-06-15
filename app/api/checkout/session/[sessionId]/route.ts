@@ -42,7 +42,7 @@ export async function GET(
     }
 
     // ── Resolve base link status ─────────────────────────────────────────────
-    let linkStatus: "active" | "disabled" | "expired" = link.status
+    let linkStatus: "active" | "disabled" | "expired" | "archived" = link.status
     if (linkStatus === "active" && link.expires_at && new Date(link.expires_at) < new Date()) {
       linkStatus = "expired"
     }
@@ -80,7 +80,7 @@ export async function GET(
         )
         if (inProgress) {
           sessionStatus = "processing"
-        } else if (linkStatus === "disabled") {
+        } else if (linkStatus === "disabled" || linkStatus === "archived") {
           sessionStatus = "canceled"
         } else if (linkStatus === "expired") {
           sessionStatus = "expired"
@@ -89,7 +89,7 @@ export async function GET(
         }
       }
     } else {
-      if (linkStatus === "disabled") {
+      if (linkStatus === "disabled" || linkStatus === "archived") {
         sessionStatus = "canceled"
       } else if (linkStatus === "expired") {
         sessionStatus = "expired"

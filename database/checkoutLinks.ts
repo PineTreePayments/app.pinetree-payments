@@ -2,7 +2,7 @@ import { supabaseAdmin, supabase as supabaseAnon } from "./supabase"
 
 const supabase = supabaseAdmin || supabaseAnon
 
-export type CheckoutLinkStatus = "active" | "disabled" | "expired"
+export type CheckoutLinkStatus = "active" | "disabled" | "expired" | "archived"
 
 export type CheckoutLink = {
   id: string
@@ -160,6 +160,7 @@ export async function listCheckoutLinksForPublicApi(input: {
     .from("checkout_links")
     .select("*")
     .eq("merchant_id", input.merchantId)
+    .neq("status", "archived")
     .order("created_at", { ascending: false })
     .order("id", { ascending: false })
     .limit(input.limit)
