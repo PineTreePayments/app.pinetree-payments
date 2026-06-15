@@ -243,7 +243,7 @@ function CheckoutDialog({
   return (
     <div
       data-pinetree-overlay="true"
-      className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-end justify-center p-0 backdrop-blur-md sm:items-center sm:p-5"
+      className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-end justify-center px-0 pb-0 pt-[calc(env(safe-area-inset-top)_+_0.75rem)] backdrop-blur-md sm:items-center sm:p-5"
       onMouseDown={(event) => {
         if (event.currentTarget === event.target) onClose()
       }}
@@ -253,7 +253,7 @@ function CheckoutDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="flex h-[100dvh] w-full flex-col overflow-hidden rounded-t-3xl border border-white/80 bg-white/95 shadow-[0_30px_100px_rgba(15,23,42,0.32)] sm:h-auto sm:max-h-[90vh] sm:max-w-5xl sm:rounded-3xl"
+        className="flex h-[calc(100dvh_-_env(safe-area-inset-top)_-_0.75rem)] max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_0.75rem)] w-full flex-col overflow-hidden rounded-t-3xl border border-white/80 bg-white/95 shadow-[0_30px_100px_rgba(15,23,42,0.32)] sm:h-auto sm:max-h-[90vh] sm:max-w-5xl sm:rounded-3xl"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-blue-100 bg-white/90 px-4 py-4 backdrop-blur-xl sm:px-6">
@@ -272,7 +272,7 @@ function CheckoutDialog({
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6 sm:py-6">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(env(safe-area-inset-bottom)_+_1.25rem)] pt-5 sm:px-6 sm:py-6">
           {children}
         </div>
       </div>
@@ -1463,7 +1463,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       )}
       {mode === "merchant" && (
         <DashboardSection title="Start accepting online payments" titleTone="blue">
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-2 gap-2 sm:gap-3">
             {[
               {
                 title: "Payment Links",
@@ -1487,17 +1487,17 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                 type="button"
                 onClick={() => openMerchantDialog(card.target)}
                 aria-haspopup="dialog"
-                className="min-h-32 rounded-2xl border border-gray-200/80 bg-white p-3.5 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:border-blue-200 hover:bg-blue-50/30 focus:outline-none focus:ring-4 focus:ring-blue-100 sm:min-h-0 sm:p-4"
+                className="min-h-28 rounded-2xl border border-gray-200/80 bg-white p-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:border-blue-200 hover:bg-blue-50/30 focus:outline-none focus:ring-4 focus:ring-blue-100 sm:min-h-0 sm:p-3.5"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
-                    <Icon className="h-4 w-4" aria-hidden="true" />
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+                    <Icon className="h-3.5 w-3.5" aria-hidden="true" />
                   </div>
                   <LiveBadge />
                 </div>
-                <h2 className="mt-3 text-sm font-semibold text-gray-950">{card.title}</h2>
-                <p className="mt-1 text-xs leading-5 text-gray-500">{card.description}</p>
-                <span className="mt-3 inline-flex text-xs font-semibold text-blue-700">{card.action}</span>
+                <h2 className="mt-2.5 text-sm font-semibold text-gray-950">{card.title}</h2>
+                <p className="mt-0.5 text-[11px] leading-4 text-gray-500 sm:text-xs">{card.description}</p>
+                <span className="mt-2 inline-flex text-[11px] font-semibold text-blue-700">{card.action}</span>
               </button>
               )
             })}
