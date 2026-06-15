@@ -431,17 +431,8 @@ export default function InventoryPage() {
 
   return (
     <div className="space-y-5 md:space-y-7">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div>
         <h1 className={dashboardPageTitleClass}>Inventory</h1>
-        <button
-          type="button"
-          onClick={openCreate}
-          disabled={!available}
-          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <PackagePlus size={16} />
-          Add Item
-        </button>
       </div>
 
       <MetricGrid>
@@ -466,7 +457,21 @@ export default function InventoryPage() {
         </div>
       )}
 
-      <DashboardSection title="Item Catalog" titleTone="blue">
+      <DashboardSection
+        title="Item Catalog"
+        titleTone="blue"
+        action={
+          <button
+            type="button"
+            onClick={openCreate}
+            disabled={!available}
+            className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-full bg-blue-600 px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <PackagePlus size={13} />
+            Add Item
+          </button>
+        }
+      >
         <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
           <div className="border-b border-gray-100 p-3 sm:p-4">
             <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
@@ -526,39 +531,28 @@ export default function InventoryPage() {
               )}
             </div>
           ) : (
-            <div className="max-h-[34rem] divide-y divide-gray-100 overflow-y-auto overscroll-contain">
-              {visibleItems.map((item) => {
-                const state = itemState(item)
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setSelectedItem(item)}
-                    className="grid min-h-11 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-1.5 text-left transition hover:bg-gray-50 focus:bg-blue-50/50 focus:outline-none sm:grid-cols-[minmax(0,1.4fr)_minmax(5rem,0.55fr)_minmax(3.5rem,0.35fr)_auto_auto] sm:gap-3 sm:px-4"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-[13px] font-semibold leading-4 text-gray-950 sm:text-sm">{item.name}</p>
-                      <p className="truncate text-[11px] leading-4 text-gray-500">
-                        {item.sku || item.category || "No SKU or category"}
-                      </p>
-                    </div>
-                    <div className="hidden sm:block">
-                      <p className="text-sm font-semibold text-gray-800">{formatUsd(item.price)}</p>
-                    </div>
-                    <div className="hidden sm:block">
-                      <p className="text-sm font-semibold text-gray-800">{item.quantity}</p>
-                    </div>
-                    <ProviderStatusPill label={state.label} tone={state.tone} className="hidden !min-h-6 sm:inline-flex" />
-                    <div className="flex items-center gap-2">
-                      <div className="text-right sm:hidden">
-                        <p className="text-xs font-semibold leading-4 text-gray-900">{formatUsd(item.price)}</p>
-                        <p className="text-[10px] leading-4 text-gray-500">{item.quantity} in stock</p>
-                      </div>
-                      <ChevronRight size={16} className="shrink-0 text-gray-400" />
-                    </div>
-                  </button>
-                )
-              })}
+            <div className="max-h-[34rem] overflow-auto overscroll-contain">
+              <div className="min-w-[640px] divide-y divide-gray-100">
+                {visibleItems.map((item) => {
+                  const state = itemState(item)
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setSelectedItem(item)}
+                      className="grid h-10 w-full grid-cols-[minmax(8rem,1.3fr)_minmax(6rem,0.9fr)_minmax(6rem,0.8fr)_5rem_5rem_auto_1.25rem] items-center gap-3 px-4 text-left text-xs transition hover:bg-gray-50 focus:bg-blue-50/50 focus:outline-none"
+                    >
+                      <span className="truncate font-semibold text-gray-950">{item.name}</span>
+                      <span className="truncate text-gray-500">{item.sku || "No SKU"}</span>
+                      <span className="truncate text-gray-500">{item.category || "Uncategorized"}</span>
+                      <span className="font-semibold text-gray-800">{formatUsd(item.price)}</span>
+                      <span className="font-semibold text-gray-800">Stock {item.quantity}</span>
+                      <ProviderStatusPill label={state.label} tone={state.tone} className="!min-h-5 !px-2 !text-[10px]" />
+                      <ChevronRight size={15} className="text-gray-400" />
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           )}
         </div>
@@ -757,9 +751,18 @@ function OutOfStockModal({
         className="flex max-h-[calc(100dvh-env(safe-area-inset-top))] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:max-h-[min(38rem,calc(100dvh-2rem))] sm:max-w-lg sm:rounded-3xl"
       >
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-100 px-5 pb-4 pt-[calc(env(safe-area-inset-top)+1.25rem)] sm:p-5">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-600">Inventory Status</p>
-            <h2 className="mt-1 text-xl font-semibold text-gray-950">Out of Stock</h2>
+          <div className="flex items-center gap-3">
+            <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${
+              items.length ? "bg-red-50 text-red-600" : "bg-blue-50 text-blue-600"
+            }`}>
+              <Boxes size={18} />
+            </div>
+            <div>
+              <p className={`text-[10px] font-semibold uppercase tracking-[0.12em] ${
+                items.length ? "text-red-600" : "text-blue-600"
+              }`}>Inventory Status</p>
+              <h2 className="mt-0.5 text-xl font-semibold text-gray-950">Out of Stock</h2>
+            </div>
           </div>
           <button type="button" onClick={onClose} aria-label="Close out-of-stock items" className="rounded-xl p-2 text-gray-500 hover:bg-gray-100">
             <X size={18} />
@@ -768,26 +771,27 @@ function OutOfStockModal({
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {items.length ? (
-            <div className="divide-y divide-gray-100">
-              {items.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => onSelect(item)}
-                  className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 px-5 py-2 text-left transition hover:bg-gray-50 focus:bg-blue-50/50 focus:outline-none"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-gray-950">{item.name}</p>
-                    <p className="truncate text-xs text-gray-500">{item.sku || item.category || "No SKU or category"}</p>
-                  </div>
-                  <p className="text-sm font-semibold text-gray-800">{formatUsd(item.price)}</p>
-                  <ChevronRight size={16} className="text-gray-400" />
-                </button>
-              ))}
+            <div className="overflow-x-auto">
+              <div className="min-w-[520px] divide-y divide-gray-100">
+                {items.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => onSelect(item)}
+                    className="grid h-10 w-full grid-cols-[minmax(8rem,1.3fr)_minmax(6rem,0.9fr)_5rem_4rem_1.25rem] items-center gap-3 px-5 text-left text-xs transition hover:bg-red-50/40 focus:bg-red-50/60 focus:outline-none"
+                  >
+                    <span className="truncate font-semibold text-gray-950">{item.name}</span>
+                    <span className="truncate text-gray-500">{item.sku || item.category || "No SKU"}</span>
+                    <span className="font-semibold text-gray-800">{formatUsd(item.price)}</span>
+                    <span className="font-semibold text-red-700">Stock 0</span>
+                    <ChevronRight size={15} className="text-gray-400" />
+                  </button>
+                ))}
+              </div>
             </div>
           ) : (
             <div className="flex flex-col items-center px-6 py-14 text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
                 <Boxes size={22} />
               </div>
               <h3 className="mt-4 text-base font-semibold text-gray-950">No out-of-stock items</h3>
@@ -798,8 +802,8 @@ function OutOfStockModal({
           )}
         </div>
 
-        <div className="shrink-0 border-t border-gray-100 bg-white px-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-4 sm:p-5">
-          <button type="button" onClick={onClose} className="min-h-10 w-full rounded-xl border border-gray-200 px-4 text-sm font-semibold text-gray-700 sm:w-auto">
+        <div className="flex shrink-0 justify-end border-t border-gray-100 bg-white px-5 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-3 sm:p-4">
+          <button type="button" onClick={onClose} className="min-h-8 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50">
             Close
           </button>
         </div>
