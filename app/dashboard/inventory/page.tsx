@@ -1,7 +1,21 @@
 "use client"
 
+import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Boxes, PackagePlus, Search, Trash2, Upload, X } from "lucide-react"
+import {
+  Boxes,
+  CreditCard,
+  FileSpreadsheet,
+  Grid2X2,
+  PackagePlus,
+  RefreshCw,
+  Search,
+  ShoppingBag,
+  Sprout,
+  Trash2,
+  Upload,
+  X
+} from "lucide-react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import {
@@ -62,6 +76,15 @@ type ImportSummary = {
   errors: Array<{ row: number; message: string }>
 }
 
+type ShopifyStatus = {
+  connected: boolean
+  status: "connected" | "not_connected"
+  shop: string | null
+  connectedAt: string | null
+  updatedAt: string | null
+  configured: boolean
+}
+
 type InventoryResponse = {
   available: boolean
   items: InventoryItem[]
@@ -106,6 +129,39 @@ function itemState(item: InventoryItem) {
   return { label: "Active", tone: "green" as const }
 }
 
+function ConnectorIcon({ provider, size = 19 }: { provider: string; size?: number }) {
+  if (provider === "SHIFT4_SKYTAB") return <CreditCard size={size} />
+  if (provider === "CLOVER") return <Sprout size={size} />
+  if (provider === "SQUARE") return <Grid2X2 size={size} />
+  if (provider === "SHOPIFY") return <ShoppingBag size={size} />
+  return <FileSpreadsheet size={size} />
+}
+
+function connectorStatus(
+  integration: InventoryIntegration,
+  shopifyStatus: ShopifyStatus | null
+) {
+  if (integration.provider === "SHOPIFY" && shopifyStatus?.connected) {
+    return { connected: true, label: "Connected", tone: "blue" as const }
+  }
+  if (
+    integration.provider === "SHIFT4_SKYTAB" &&
+    integration.detail.includes("payment credentials exist")
+  ) {
+    return { connected: false, label: "Pending", tone: "amber" as const }
+  }
+  if (integration.status === "CONNECTED") {
+    return { connected: true, label: "Connected", tone: "blue" as const }
+  }
+  if (integration.status === "CONNECTING" || integration.status === "SYNCING") {
+    return { connected: false, label: "Pending", tone: "amber" as const }
+  }
+  if (integration.status === "ERROR") {
+    return { connected: false, label: "Needs attention", tone: "red" as const }
+  }
+  return { connected: false, label: "Not Connected", tone: "slate" as const }
+}
+
 export default function InventoryPage() {
   const [items, setItems] = useState<InventoryItem[]>([])
   const [summary, setSummary] = useState<InventorySummary>({
@@ -131,6 +187,9 @@ export default function InventoryPage() {
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null)
   const [integrationBusy, setIntegrationBusy] = useState<string | null>(null)
   const [selectedIntegration, setSelectedIntegration] = useState<InventoryIntegration | null>(null)
+  const [configurationMessage, setConfigurationMessage] = useState("")
+  const [shopifyStatus, setShopifyStatus] = useState<ShopifyStatus | null>(null)
+  const [shopifyShop, setShopifyShop] = useState("")
 
   const request = useCallback(async (path: string, init?: RequestInit) => {
     const { data: { session } } = await supabase.auth.getSession()
@@ -146,19 +205,23 @@ export default function InventoryPage() {
       cache: "no-store"
     })
     const payload = await response.json().catch(() => null)
-    if (!response.ok) throw new Error(payload?.error || "Inventory request failed")
+    if (!response.ok) throw new Error(payload?.error || payload?.message || "Inventory request failed")
     return payload
   }, [])
 
   const loadInventory = useCallback(async () => {
     setLoading(true)
     try {
-      const payload = await request("/api/inventory") as InventoryResponse
+      const [payload, shopifyPayload] = await Promise.all([
+        request("/api/inventory") as Promise<InventoryResponse>,
+        request("/api/shopify/status").catch(() => null) as Promise<ShopifyStatus | null>
+      ])
       setAvailable(payload.available)
       setItems(payload.items || [])
       setSummary(payload.summary)
       setMovements(payload.movements || [])
       setIntegrations(payload.integrations || [])
+      setShopifyStatus(shopifyPayload)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load inventory")
     } finally {
@@ -272,6 +335,59 @@ export default function InventoryPage() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Inventory integration request failed")
     } finally {
+      setIntegrationBusy(null)
+    }
+  }
+
+  function openIntegration(integration: InventoryIntegration) {
+    setConfigurationMessage("")
+    setSelectedIntegration(integration)
+  }
+
+  async function checkConfiguration(integration: InventoryIntegration) {
+    setConfigurationMessage("")
+    setIntegrationBusy(`${integration.provider}:connect`)
+    try {
+      if (integration.provider === "SHOPIFY") {
+        const status = await request("/api/shopify/status") as ShopifyStatus
+        setShopifyStatus(status)
+        setConfigurationMessage(
+          status.connected && status.shop
+            ? `${status.shop} is installed for this merchant. Inventory sync remains disabled until catalog access is available.`
+            : status.configured
+              ? "Shopify is configured, but no merchant store installation or token was found."
+              : "Shopify app credentials are not configured for this deployment."
+        )
+      } else {
+        const payload = await request(`/api/inventory/integrations/${integration.provider}/connect`, {
+          method: "POST"
+        }) as { message?: string }
+        setConfigurationMessage(payload.message || "Configuration check completed.")
+      }
+      await loadInventory()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Configuration check failed"
+      setConfigurationMessage(message)
+      toast.error(message)
+    } finally {
+      setIntegrationBusy(null)
+    }
+  }
+
+  async function connectShopify() {
+    setConfigurationMessage("")
+    setIntegrationBusy("SHOPIFY:connect")
+    try {
+      const payload = await request("/api/shopify/auth", {
+        method: "POST",
+        body: JSON.stringify({ shop: shopifyShop.trim() })
+      }) as { authUrl?: string }
+      if (!payload.authUrl) throw new Error("Could not start the Shopify connection.")
+      window.location.assign(payload.authUrl)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not start the Shopify connection."
+      setConfigurationMessage(message)
+      toast.error(message)
       setIntegrationBusy(null)
     }
   }
@@ -433,49 +549,63 @@ export default function InventoryPage() {
       </DashboardSection>
 
       <DashboardSection title="Connect Existing POS Inventory" titleTone="blue">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {integrations.map((integration) => (
-            <div key={integration.provider} className="flex min-h-44 flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:border-blue-200 sm:p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-base font-semibold leading-tight text-gray-950">{integration.label}</p>
-                  <p className="mt-1 text-xs leading-5 text-gray-500">{integration.detail}</p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {integrations.map((integration) => {
+            const status = connectorStatus(integration, shopifyStatus)
+            const isManual = integration.provider === "MANUAL_CSV"
+            const canSync = status.connected && integration.canSync
+
+            return (
+              <article
+                key={integration.provider}
+                className="flex min-h-52 flex-col rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_14px_34px_rgba(15,23,42,0.08)]"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                    <ConnectorIcon provider={integration.provider} />
+                  </div>
+                  <ProviderStatusPill
+                    label={status.label}
+                    tone={status.tone}
+                    className="!min-h-6 shrink-0 !px-2 !text-[10px]"
+                  />
                 </div>
-                <ProviderStatusPill
-                  label={integration.status === "CONNECTED" ? "Connected" : "Not Connected"}
-                  tone={integration.status === "CONNECTED" ? "blue" : "slate"}
-                  className="!min-h-6 shrink-0 !px-2 !text-[10px]"
-                />
-              </div>
-              <div className="mt-auto flex flex-wrap gap-2 pt-4">
-                {integration.provider === "MANUAL_CSV" ? (
-                  <label className="inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-xs font-semibold text-white">
-                    <Upload size={14} />
-                    {importing ? "Uploading..." : "Upload CSV"}
-                    <input
-                      type="file"
-                      accept=".csv,text/csv"
-                      className="hidden"
-                      disabled={importing}
-                      onChange={(event) => void uploadCsv(event.target.files?.[0] || null)}
-                    />
-                  </label>
-                ) : (
-                  <>
-                    <button type="button" onClick={() => setSelectedIntegration(integration)} disabled={integrationBusy !== null || !integration.canConnect} className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 disabled:opacity-50">
-                      Configure
-                    </button>
-                    <button type="button" onClick={() => void integrationAction(integration.provider, "sync")} disabled={integrationBusy !== null || !integration.canSync} className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 disabled:opacity-50">
+                <h3 className="mt-4 text-sm font-semibold text-gray-950">{integration.label}</h3>
+                <p className="mt-1 line-clamp-3 text-xs leading-5 text-gray-500">{integration.detail}</p>
+                <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => openIntegration(integration)}
+                    className="inline-flex min-h-9 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3.5 text-xs font-semibold text-white transition hover:bg-blue-700"
+                  >
+                    {isManual ? <Upload size={14} /> : null}
+                    {isManual ? "Upload CSV" : status.connected ? "Configure" : integration.provider === "SHOPIFY" ? "Connect" : "Configure"}
+                  </button>
+                  {canSync && (
+                    <button
+                      type="button"
+                      onClick={() => void integrationAction(integration.provider, "sync")}
+                      disabled={integrationBusy !== null}
+                      className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-xl border border-gray-200 px-3 text-xs font-semibold text-gray-700 disabled:opacity-50"
+                    >
+                      <RefreshCw size={13} />
                       Sync now
                     </button>
-                    <button type="button" onClick={() => void integrationAction(integration.provider, "disconnect")} disabled={integrationBusy !== null || !integration.canDisconnect} className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-500 disabled:opacity-50">
+                  )}
+                  {status.connected && integration.canDisconnect && (
+                    <button
+                      type="button"
+                      onClick={() => void integrationAction(integration.provider, "disconnect")}
+                      disabled={integrationBusy !== null}
+                      className="min-h-9 rounded-xl border border-gray-200 px-3 text-xs font-semibold text-gray-500 disabled:opacity-50"
+                    >
                       Disconnect
                     </button>
-                  </>
-                )}
-              </div>
-            </div>
-          ))}
+                  )}
+                </div>
+              </article>
+            )
+          })}
         </div>
         {importSummary && (
           <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4 text-sm text-blue-950">
@@ -521,29 +651,19 @@ export default function InventoryPage() {
       </DashboardSection>
 
       {selectedIntegration && (
-        <div data-pinetree-overlay="true" className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
-          <div role="dialog" aria-modal="true" aria-label={`${selectedIntegration.label} inventory setup`} className="w-full rounded-t-3xl bg-white p-5 shadow-2xl sm:max-w-lg sm:rounded-3xl">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">Inventory Connector</p>
-                <h2 className="mt-1 text-xl font-semibold text-gray-950">{selectedIntegration.label}</h2>
-              </div>
-              <button type="button" onClick={() => setSelectedIntegration(null)} aria-label="Close connector details" className="rounded-xl p-2 text-gray-500 hover:bg-gray-100">
-                <X size={18} />
-              </button>
-            </div>
-            <p className="mt-4 text-sm leading-6 text-gray-600">{selectedIntegration.detail}</p>
-            <div className="mt-4 rounded-xl border border-amber-100 bg-amber-50/70 p-3 text-xs leading-5 text-amber-900">
-              PineTree will only show this connector as connected after merchant-scoped credentials are stored and a real catalog request succeeds.
-            </div>
-            <div className="mt-5 flex justify-end gap-2">
-              <button type="button" onClick={() => setSelectedIntegration(null)} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700">Close</button>
-              <button type="button" onClick={() => void integrationAction(selectedIntegration.provider, "connect")} disabled={integrationBusy !== null} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-                Check Configuration
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConnectorSetupModal
+          integration={selectedIntegration}
+          shopifyStatus={shopifyStatus}
+          shopifyShop={shopifyShop}
+          busy={integrationBusy !== null}
+          importing={importing}
+          configurationMessage={configurationMessage}
+          onShopifyShopChange={setShopifyShop}
+          onClose={() => setSelectedIntegration(null)}
+          onCheck={() => void checkConfiguration(selectedIntegration)}
+          onConnectShopify={() => void connectShopify()}
+          onUploadCsv={(file) => void uploadCsv(file)}
+        />
       )}
 
       {formOpen && (
@@ -579,5 +699,201 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">{label}</span>
       {children}
     </label>
+  )
+}
+
+function ConnectorSetupModal({
+  integration,
+  shopifyStatus,
+  shopifyShop,
+  busy,
+  importing,
+  configurationMessage,
+  onShopifyShopChange,
+  onClose,
+  onCheck,
+  onConnectShopify,
+  onUploadCsv
+}: {
+  integration: InventoryIntegration
+  shopifyStatus: ShopifyStatus | null
+  shopifyShop: string
+  busy: boolean
+  importing: boolean
+  configurationMessage: string
+  onShopifyShopChange: (value: string) => void
+  onClose: () => void
+  onCheck: () => void
+  onConnectShopify: () => void
+  onUploadCsv: (file: File | null) => void
+}) {
+  const status = connectorStatus(integration, shopifyStatus)
+  const isShift4 = integration.provider === "SHIFT4_SKYTAB"
+  const isShopify = integration.provider === "SHOPIFY"
+  const isManual = integration.provider === "MANUAL_CSV"
+  const steps = isShift4
+    ? [
+        "Connect Shift4 from Provider Setup if it is not already connected.",
+        "Confirm PineTree has Shift4 partner catalog or inventory API access.",
+        "Check configuration here. Sync remains unavailable until access is verified."
+      ]
+    : isShopify
+      ? [
+          "Enter the store's myshopify.com domain.",
+          "Install and approve the PineTree app in Shopify.",
+          "Return to PineTree and check configuration for this merchant."
+        ]
+      : isManual
+        ? [
+            "Choose a CSV file containing your inventory items.",
+            "PineTree validates each row before creating catalog items.",
+            "Review the import summary for skipped rows or corrections."
+          ]
+        : [
+            `Create or select the PineTree ${integration.label} application.`,
+            "Complete merchant OAuth and store the merchant-scoped access token.",
+            "Check configuration here before inventory sync is enabled."
+          ]
+
+  return (
+    <div
+      data-pinetree-overlay="true"
+      className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-end justify-center overflow-hidden p-0 sm:items-center sm:p-4"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${integration.label} inventory setup`}
+        className="flex max-h-[calc(100dvh-env(safe-area-inset-top))] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:max-h-[min(44rem,calc(100dvh-2rem))] sm:max-w-xl sm:rounded-3xl"
+      >
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-100 px-5 pb-4 pt-[calc(env(safe-area-inset-top)+1.25rem)] sm:p-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+              <ConnectorIcon provider={integration.provider} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-600">Inventory Connector</p>
+              <h2 className="truncate text-xl font-semibold text-gray-950">{integration.label}</h2>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close connector details" className="rounded-xl p-2 text-gray-500 hover:bg-gray-100">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5">
+          <div className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Status</p>
+              <ProviderStatusPill label={status.label} tone={status.tone} />
+            </div>
+            <p className="mt-3 text-sm leading-6 text-gray-600">
+              {isShopify && shopifyStatus?.connected && shopifyStatus.shop
+                ? `${shopifyStatus.shop} has an active merchant installation.`
+                : integration.detail}
+            </p>
+          </div>
+
+          <div className="mt-5">
+            <h3 className="text-sm font-semibold text-gray-950">Required setup</h3>
+            <ol className="mt-3 space-y-3">
+              {steps.map((step, index) => (
+                <li key={step} className="flex gap-3 text-sm leading-5 text-gray-600">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-semibold text-blue-700">
+                    {index + 1}
+                  </span>
+                  <span className="pt-0.5">{step}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+
+          {isShopify && !shopifyStatus?.connected && (
+            <div className="mt-5">
+              <label htmlFor="inventory-shopify-domain" className="text-xs font-semibold text-gray-700">
+                Shopify store domain
+              </label>
+              <input
+                id="inventory-shopify-domain"
+                value={shopifyShop}
+                onChange={(event) => onShopifyShopChange(event.target.value)}
+                placeholder="mystore.myshopify.com"
+                disabled={shopifyStatus?.configured === false}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition placeholder:text-gray-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50"
+              />
+            </div>
+          )}
+
+          {isManual && (
+            <div className="mt-5 rounded-2xl border border-dashed border-blue-200 bg-blue-50/50 p-5 text-center">
+              <FileSpreadsheet className="mx-auto text-blue-600" size={24} />
+              <p className="mt-2 text-sm font-semibold text-gray-950">Import inventory from CSV</p>
+              <p className="mt-1 text-xs leading-5 text-gray-500">Existing CSV validation and import rules will be applied.</p>
+              <label className="mt-4 inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white">
+                <Upload size={15} />
+                {importing ? "Uploading..." : "Choose CSV"}
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  disabled={importing}
+                  onChange={(event) => onUploadCsv(event.target.files?.[0] || null)}
+                />
+              </label>
+            </div>
+          )}
+
+          {configurationMessage && (
+            <div className="mt-5 rounded-xl border border-blue-100 bg-blue-50/70 p-3 text-xs leading-5 text-blue-950">
+              {configurationMessage}
+            </div>
+          )}
+
+          {!isManual && (
+            <div className="mt-5 rounded-xl border border-gray-200 bg-white p-3 text-xs leading-5 text-gray-600">
+              Connected status is only shown after merchant-scoped authorization exists. Inventory sync stays disabled until the connector reports that it is ready.
+            </div>
+          )}
+        </div>
+
+        <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-gray-100 bg-white px-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-4 sm:flex-row sm:justify-end sm:p-5">
+          <button type="button" onClick={onClose} className="min-h-10 rounded-xl border border-gray-200 px-4 text-sm font-semibold text-gray-700">
+            Close
+          </button>
+          {isShift4 && (
+            <Link href="/dashboard/providers" className="inline-flex min-h-10 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700">
+              Open Shift4 Provider Setup
+            </Link>
+          )}
+          {!isManual && (
+            <button
+              type="button"
+              onClick={isShopify && !shopifyStatus?.connected ? onConnectShopify : onCheck}
+              disabled={busy || (isShopify && !shopifyStatus?.connected && (!shopifyShop.trim() || shopifyStatus?.configured === false))}
+              className="min-h-10 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {busy
+                ? "Checking..."
+                : isShopify && !shopifyStatus?.connected
+                  ? "Connect Shopify Store"
+                  : "Check Configuration"}
+            </button>
+          )}
+          {isShopify && !shopifyStatus?.connected && (
+            <button
+              type="button"
+              onClick={onCheck}
+              disabled={busy}
+              className="min-h-10 rounded-xl border border-gray-200 px-4 text-sm font-semibold text-gray-700 disabled:opacity-50"
+            >
+              Check Configuration
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
