@@ -1426,46 +1426,6 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
         </div>
       )}
 
-      {mode === "merchant" && (
-        <DashboardSection title="Start accepting online payments" titleTone="blue">
-          <div className="grid gap-3 sm:grid-cols-2">
-            {[
-              {
-                title: "Payment Links",
-                description: "Create and share hosted checkout links.",
-                action: "Manage links",
-                target: "links" as const,
-                badge: "Live",
-              },
-              {
-                title: "Pay with Crypto Button",
-                description: "Add a checkout button to your website.",
-                action: "Set up button",
-                target: "integration" as const,
-                badge: "Live",
-              },
-            ].map((card) => (
-              <button
-                key={card.title}
-                type="button"
-                onClick={() => openMerchantDialog(card.target)}
-                aria-haspopup="dialog"
-                className="rounded-2xl border border-gray-200/80 bg-white p-4 text-left shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:border-blue-200 hover:shadow-[0_14px_36px_rgba(37,99,235,0.10)] focus:outline-none focus:ring-4 focus:ring-blue-100 sm:p-5"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-base font-semibold text-gray-950">{card.title}</h2>
-                    <p className="mt-1 text-sm leading-5 text-gray-600">{card.description}</p>
-                  </div>
-                  <LiveBadge />
-                </div>
-                <span className="mt-4 inline-flex text-sm font-semibold text-blue-700">{card.action}</span>
-              </button>
-            ))}
-          </div>
-        </DashboardSection>
-      )}
-
       {/* ── Summary metrics ──────────────────────────────────────────────── */}
       {mode === "merchant" && (
         <DashboardSection title="Checkout readiness" titleTone="blue">
@@ -1504,6 +1464,45 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           Could not load checkout stats.{" "}
           <button type="button" onClick={() => void fetchStats()} className="underline">Retry</button>
         </p>
+      )}
+      {mode === "merchant" && (
+        <DashboardSection title="Start accepting online payments" titleTone="blue">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[
+              {
+                title: "Payment Links",
+                description: "Create and share hosted checkout links.",
+                action: "Manage links",
+                target: "links" as const,
+                badge: "Live",
+              },
+              {
+                title: "Pay with Crypto Button",
+                description: "Add a checkout button to your website.",
+                action: "Set up button",
+                target: "integration" as const,
+                badge: "Live",
+              },
+            ].map((card) => (
+              <button
+                key={card.title}
+                type="button"
+                onClick={() => openMerchantDialog(card.target)}
+                aria-haspopup="dialog"
+                className="rounded-2xl border border-gray-200/80 bg-white p-4 text-left shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:border-blue-200 hover:shadow-[0_14px_36px_rgba(37,99,235,0.10)] focus:outline-none focus:ring-4 focus:ring-blue-100 sm:p-5"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-semibold text-gray-950">{card.title}</h2>
+                    <p className="mt-1 text-sm leading-5 text-gray-600">{card.description}</p>
+                  </div>
+                  <LiveBadge />
+                </div>
+                <span className="mt-4 inline-flex text-sm font-semibold text-blue-700">{card.action}</span>
+              </button>
+            ))}
+          </div>
+        </DashboardSection>
       )}
       {mode === "merchant" && (
         <PineTreeInsightsCard
