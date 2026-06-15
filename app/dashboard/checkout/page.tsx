@@ -203,8 +203,6 @@ function CheckoutDialog({
     if (!open) return
 
     previousFocusRef.current = document.activeElement as HTMLElement | null
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = "hidden"
     closeButtonRef.current?.focus()
 
     function handleKeyDown(event: KeyboardEvent) {
@@ -233,8 +231,17 @@ function CheckoutDialog({
     document.addEventListener("keydown", handleKeyDown)
     return () => {
       document.removeEventListener("keydown", handleKeyDown)
-      document.body.style.overflow = previousOverflow
-      previousFocusRef.current?.focus()
+      const previousFocus = previousFocusRef.current
+      if (previousFocus?.isConnected) {
+        window.requestAnimationFrame(() => {
+          if (document.querySelector('[data-pinetree-overlay="true"]')) return
+          try {
+            previousFocus.focus({ preventScroll: true })
+          } catch {
+            // Focus restoration must never interrupt modal cleanup.
+          }
+        })
+      }
     }
   }, [open, onClose])
 
@@ -272,7 +279,7 @@ function CheckoutDialog({
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(env(safe-area-inset-bottom)_+_1.25rem)] pt-5 sm:px-6 sm:py-6">
+        <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-[calc(env(safe-area-inset-bottom)_+_1.25rem)] pt-5 [-webkit-overflow-scrolling:touch] sm:px-6 sm:py-6">
           {children}
         </div>
       </div>
@@ -1487,17 +1494,14 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                 type="button"
                 onClick={() => openMerchantDialog(card.target)}
                 aria-haspopup="dialog"
-                className="min-h-28 rounded-2xl border border-gray-200/80 bg-white p-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:border-blue-200 hover:bg-blue-50/30 focus:outline-none focus:ring-4 focus:ring-blue-100 sm:min-h-0 sm:p-3.5"
+                className="flex h-full min-h-28 flex-col rounded-2xl border border-gray-200/80 bg-white p-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:border-blue-200 hover:bg-blue-50/30 focus:outline-none focus:ring-4 focus:ring-blue-100 sm:p-3.5"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
-                    <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-                  </div>
-                  <LiveBadge />
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+                  <Icon className="h-3.5 w-3.5" aria-hidden="true" />
                 </div>
                 <h2 className="mt-2.5 text-sm font-semibold text-gray-950">{card.title}</h2>
                 <p className="mt-0.5 text-[11px] leading-4 text-gray-500 sm:text-xs">{card.description}</p>
-                <span className="mt-2 inline-flex text-[11px] font-semibold text-blue-700">{card.action}</span>
+                <span className="mt-auto inline-flex pt-2 text-[11px] font-semibold text-blue-700">{card.action}</span>
               </button>
               )
             })}
