@@ -1241,6 +1241,20 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           )
       : INTEGRATION_OPTIONS.filter((option) => option.id !== "hosted-link" && option.id !== "html-button")
 
+  function openMerchantSection(target: "links" | "integration") {
+    const sectionId =
+      target === "links" ? "payment-links-management" : "checkout-button-setup"
+
+    setTab(target)
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const section = document.getElementById(sectionId)
+        section?.scrollIntoView({ behavior: "smooth", block: "start" })
+        section?.focus({ preventScroll: true })
+      })
+    })
+  }
+
   return (
     <div className="space-y-6 md:space-y-8">
 
@@ -1266,21 +1280,22 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                 title: "Payment Links",
                 description: "Create and share hosted checkout links.",
                 action: "Manage links",
-                target: "links" as Tab,
+                target: "links" as const,
                 badge: "Live",
               },
               {
                 title: "Pay with Crypto Button",
                 description: "Add a checkout button to your website.",
                 action: "Set up button",
-                target: "integration" as Tab,
+                target: "integration" as const,
                 badge: "Live",
               },
             ].map((card) => (
               <button
                 key={card.title}
                 type="button"
-                onClick={() => setTab(card.target)}
+                onClick={() => openMerchantSection(card.target)}
+                aria-controls={card.target === "links" ? "payment-links-management" : "checkout-button-setup"}
                 className="rounded-2xl border border-gray-200/80 bg-white p-4 text-left shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:border-blue-200 hover:shadow-[0_14px_36px_rgba(37,99,235,0.10)] focus:outline-none focus:ring-4 focus:ring-blue-100 sm:p-5"
               >
                 <div className="flex items-start justify-between gap-3">
@@ -1382,7 +1397,11 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       {/* PAYMENT LINKS TAB                                                  */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {mode === "merchant" && tab === "links" && (
-        <>
+        <div
+          id="payment-links-management"
+          tabIndex={-1}
+          className="scroll-mt-24 space-y-6 outline-none"
+        >
           <DashboardSection title="New Payment Link" titleTone="blue">
             <div className="rounded-2xl border border-gray-200/80 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-6">
               <form onSubmit={(e) => void handleCreate(e)} className="space-y-4">
@@ -1540,7 +1559,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
               </div>
             )}
           </DashboardSection>
-        </>
+        </div>
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════ */}
@@ -1555,6 +1574,49 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
               ))}
             </div>
           </DashboardSection>
+
+          {mode === "merchant" && (
+            <div
+              id="checkout-button-setup"
+              tabIndex={-1}
+              className="scroll-mt-24 space-y-6 outline-none"
+            >
+              <DashboardSection title="Pay with Crypto Button Setup" titleTone="blue">
+                <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                  <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-950">Add the button to your website</h3>
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        Use an active payment link directly, or create checkout sessions from your backend.
+                      </p>
+                    </div>
+                    <LiveBadge />
+                  </div>
+                  <div className="space-y-3 p-5">
+                    <div className="rounded-xl border border-blue-100 bg-blue-50/60 px-3.5 py-2.5">
+                      <p className="text-[11px] leading-relaxed text-blue-800">
+                        Replace <code className="font-mono">YOUR_LINK_TOKEN</code> with the token from one of your active payment links.
+                      </p>
+                    </div>
+                    <CodeBlock
+                      code={htmlSnippet}
+                      fieldId="merchant_html_button_snippet"
+                      copiedField={copiedField}
+                      onCopy={handleCopyField}
+                      lang="html"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => openMerchantSection("links")}
+                      className="inline-flex min-h-9 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-3.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
+                    >
+                      Manage payment links
+                    </button>
+                  </div>
+                </div>
+              </DashboardSection>
+            </div>
+          )}
 
           {mode === "developer" && (
             <>
