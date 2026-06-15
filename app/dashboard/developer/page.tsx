@@ -7,7 +7,6 @@ import {
   DashboardSection,
   ProviderStatusPill,
   dashboardPageTitleClass,
-  dashboardSupportingTextClass,
 } from "@/components/dashboard/DashboardPrimitives"
 import { CheckoutWorkspace } from "../checkout/page"
 import PublicKeysPanel from "./PublicKeysPanel"
@@ -61,9 +60,6 @@ export default function DeveloperPage() {
     <div className="space-y-5 md:space-y-7">
       <div>
         <h1 className={dashboardPageTitleClass}>Developer</h1>
-        <p className={`mt-2 ${dashboardSupportingTextClass}`}>
-          Manage API keys, webhooks, SDKs, and integrations.
-        </p>
       </div>
 
       <DashboardSection title="Developer tools" titleTone="blue">

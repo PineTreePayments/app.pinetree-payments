@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { X } from "lucide-react"
+import { Link2, MousePointerClick, X } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
@@ -1434,25 +1434,21 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           <InlineMetric
             label="Hosted Checkout"
             value="Live"
-            detail="Customer checkout is available"
             className="sm:px-4 sm:first:pl-0"
           />
           <InlineMetric
             label="Active Links"
             value={isLoading ? "—" : String(activeLinks)}
-            detail="Ready to share"
             className="sm:px-4"
           />
           <InlineMetric
             label="Button Status"
             value={activeLinks > 0 ? "Ready" : "Set up"}
-            detail={activeLinks > 0 ? "Use any active link" : "Create a link first"}
             className="sm:px-4"
           />
           <InlineMetric
             label="Recent Activity"
             value={isLoading ? "—" : String(stats?.confirmedPayments ?? 0)}
-            detail={isLoading ? undefined : `${fmtUsd(stats?.volumeUsd ?? 0)} confirmed`}
             className="sm:px-4 sm:last:pr-0"
           />
         </div>
@@ -1474,33 +1470,37 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                 description: "Create and share hosted checkout links.",
                 action: "Manage links",
                 target: "links" as const,
-                badge: "Live",
+                icon: Link2,
               },
               {
                 title: "Pay with Crypto Button",
                 description: "Add a checkout button to your website.",
                 action: "Set up button",
                 target: "integration" as const,
-                badge: "Live",
+                icon: MousePointerClick,
               },
-            ].map((card) => (
+            ].map((card) => {
+              const Icon = card.icon
+              return (
               <button
                 key={card.title}
                 type="button"
                 onClick={() => openMerchantDialog(card.target)}
                 aria-haspopup="dialog"
-                className="rounded-2xl border border-gray-200/80 bg-white p-4 text-left shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:border-blue-200 hover:shadow-[0_14px_36px_rgba(37,99,235,0.10)] focus:outline-none focus:ring-4 focus:ring-blue-100 sm:p-5"
+                className="min-h-32 rounded-2xl border border-gray-200/80 bg-white p-3.5 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:border-blue-200 hover:bg-blue-50/30 focus:outline-none focus:ring-4 focus:ring-blue-100 sm:min-h-0 sm:p-4"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-base font-semibold text-gray-950">{card.title}</h2>
-                    <p className="mt-1 text-sm leading-5 text-gray-600">{card.description}</p>
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+                    <Icon className="h-4 w-4" aria-hidden="true" />
                   </div>
                   <LiveBadge />
                 </div>
-                <span className="mt-4 inline-flex text-sm font-semibold text-blue-700">{card.action}</span>
+                <h2 className="mt-3 text-sm font-semibold text-gray-950">{card.title}</h2>
+                <p className="mt-1 text-xs leading-5 text-gray-500">{card.description}</p>
+                <span className="mt-3 inline-flex text-xs font-semibold text-blue-700">{card.action}</span>
               </button>
-            ))}
+              )
+            })}
           </div>
         </DashboardSection>
       )}

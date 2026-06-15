@@ -61,7 +61,7 @@ describe("dashboard checkout and developer navigation", () => {
     const wooCommerceCard = read("app/dashboard/developer/WooCommerceIntegrationCard.tsx")
     const checkout = read("app/dashboard/checkout/page.tsx")
 
-    expect(developer).toContain("Manage API keys, webhooks, SDKs, and integrations.")
+    expect(developer).not.toContain("Manage API keys, webhooks, SDKs, and integrations.")
     expect(developer).not.toContain("const tabs")
     expect(developer).not.toContain("tabs.map")
     expect(developer).toContain("aria-pressed={tab === id}")
