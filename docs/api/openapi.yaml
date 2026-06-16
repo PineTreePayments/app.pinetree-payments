@@ -1,0 +1,687 @@
+openapi: "3.1.0"
+info:
+  title: PineTree Payments API
+  version: "1.0.0"
+  description: |
+    The PineTree REST API. Create checkout sessions, retrieve payments, manage
+    webhook deliveries, and verify webhook signatures.
+
+    All routes require `Authorization: Bearer pt_live_<key>` unless otherwise noted.
+  contact:
+    name: PineTree Support
+    url: https://app.pinetree-payments.com
+
+servers:
+  - url: https://app.pinetree-payments.com
+    description: Production
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: checkout-sessions
+    description: Create and manage hosted checkout sessions
+  - name: payments
+    description: Retrieve payment objects
+  - name: webhook-deliveries
+    description: Monitor and retry webhook deliveries
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Paths
+# ─────────────────────────────────────────────────────────────────────────────
+
+paths:
+
+  /api/v1/checkout/sessions:
+
+    post:
+      operationId: createCheckoutSession
+      summary: Create a checkout session
+      tags: [checkout-sessions]
+      description: |
+        Creates a new checkout session. Returns a `checkoutUrl` to redirect the
+        customer to the PineTree hosted payment page.
+
+        Supports idempotent creation via the `Idempotency-Key` header.
+        Required permission: `checkout.sessions:create`
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckoutSessionCreateParams"
+            example:
+              amount: 2500
+              currency: USD
+              reference: order_1042
+              customer:
+                email: jane@example.com
+              successUrl: https://yoursite.com/success
+              cancelUrl: https://yoursite.com/cancel
+      responses:
+        "201":
+          description: Session created
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    get:
+      operationId: listCheckoutSessions
+      summary: List checkout sessions
+      tags: [checkout-sessions]
+      description: |
+        Returns a paginated list of checkout sessions, most recent first.
+        Required permission: `checkout.sessions:read`
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+          description: Number of results to return
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/CheckoutSessionStatus"
+          description: Filter by session status
+        - name: reference
+          in: query
+          schema:
+            type: string
+          description: Filter by merchant reference/order ID
+        - name: starting_after
+          in: query
+          schema:
+            type: string
+          description: Pagination cursor (value of `nextCursor` from previous response)
+        - name: created_after
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Return only sessions created after this ISO 8601 datetime
+        - name: created_before
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Return only sessions created before this ISO 8601 datetime
+      responses:
+        "200":
+          description: List of sessions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutSessionList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/checkout/sessions/{id}:
+
+    get:
+      operationId: retrieveCheckoutSession
+      summary: Retrieve a checkout session
+      tags: [checkout-sessions]
+      description: |
+        Retrieves a single checkout session by ID.
+        Required permission: `checkout.sessions:read` or `checkout.sessions:create`
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Session object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/checkout/sessions/{id}/cancel:
+
+    post:
+      operationId: cancelCheckoutSession
+      summary: Cancel a checkout session
+      tags: [checkout-sessions]
+      description: |
+        Cancels an open checkout session. Terminal sessions (paid, failed, expired)
+        cannot be canceled.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Updated session with status "canceled"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/checkout/sessions/{id}/expire:
+
+    post:
+      operationId: expireCheckoutSession
+      summary: Expire a checkout session
+      tags: [checkout-sessions]
+      description: |
+        Immediately expires an open checkout session.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Updated session with status "expired"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/payments/{id}:
+
+    get:
+      operationId: retrievePayment
+      summary: Retrieve a payment
+      tags: [payments]
+      description: |
+        Retrieves a payment object by its ID.
+        Required permission: `payments:read`
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Payment ID
+      responses:
+        "200":
+          description: Payment object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/webhook-deliveries:
+
+    get:
+      operationId: listWebhookDeliveries
+      summary: List webhook deliveries
+      tags: [webhook-deliveries]
+      description: |
+        Returns a paginated list of webhook delivery records.
+        Required permission: `webhooks:read`
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/WebhookDeliveryStatus"
+        - name: eventType
+          in: query
+          schema:
+            type: string
+          description: Filter by event type (e.g., "payment.confirmed")
+      responses:
+        "200":
+          description: List of webhook deliveries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookDeliveryList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/webhook-deliveries/{id}/retry:
+
+    post:
+      operationId: retryWebhookDelivery
+      summary: Retry a webhook delivery
+      tags: [webhook-deliveries]
+      description: |
+        Manually triggers a retry of the specified webhook delivery.
+        Required permission: `webhooks:write`
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Webhook delivery ID
+      responses:
+        "200":
+          description: Updated webhook delivery
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookDelivery"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Components
+# ─────────────────────────────────────────────────────────────────────────────
+
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: "PineTree API key. Format: pt_live_<64 hex chars>"
+
+  parameters:
+
+    SessionId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Checkout session ID
+
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+      description: |
+        Unique key for idempotent session creation. Use your order ID.
+        Same key + same body returns the existing session.
+        Same key + different body returns 409.
+
+  headers:
+
+    XRequestId:
+      description: Unique request identifier for support
+      schema:
+        type: string
+
+  schemas:
+
+    CheckoutSessionStatus:
+      type: string
+      enum: [open, processing, paid, failed, expired, canceled]
+      description: |
+        - open: Session created, waiting for payment
+        - processing: Payment broadcast; awaiting confirmation
+        - paid: Payment confirmed on-chain
+        - failed: Payment failed
+        - expired: Session expired without payment
+        - canceled: Explicitly canceled
+
+    CheckoutSession:
+      type: object
+      required: [id, object, status, amount, currency, customer, metadata, checkoutUrl, supportedRails, createdAt]
+      properties:
+        id:
+          type: string
+          example: cs_01abc123
+        object:
+          type: string
+          enum: [checkout.session]
+        status:
+          $ref: "#/components/schemas/CheckoutSessionStatus"
+        amount:
+          type: integer
+          description: Amount in smallest currency unit (cents for USD)
+          example: 2500
+        currency:
+          type: string
+          example: USD
+        reference:
+          type: string
+          nullable: true
+          description: Merchant order/reference ID
+          example: order_1042
+        customer:
+          type: object
+          properties:
+            email:
+              type: string
+              nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
+        checkoutUrl:
+          type: string
+          description: URL to redirect customer for payment
+        paymentId:
+          type: string
+          nullable: true
+          description: Set once a payment attempt is made
+        supportedRails:
+          type: array
+          items:
+            type: string
+          example: [sol, base, base-usdc, lightning]
+        successUrl:
+          type: string
+          nullable: true
+        cancelUrl:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    CheckoutSessionCreateParams:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: integer
+          minimum: 1
+          description: Amount in smallest currency unit (cents for USD)
+          example: 2500
+        currency:
+          type: string
+          default: USD
+          description: ISO 4217 currency code
+        reference:
+          type: string
+          description: Your internal order/reference ID
+        customer:
+          type: object
+          properties:
+            email:
+              type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        rails:
+          type: array
+          items:
+            type: string
+          description: Restrict which payment rails to offer
+          example: [sol, base-usdc]
+        successUrl:
+          type: string
+          description: Redirect URL after successful payment
+        cancelUrl:
+          type: string
+          description: Redirect URL after cancellation
+
+    CheckoutSessionList:
+      type: object
+      required: [object, data, hasMore]
+      properties:
+        object:
+          type: string
+          enum: [list]
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckoutSession"
+        hasMore:
+          type: boolean
+        nextCursor:
+          type: string
+          nullable: true
+
+    Payment:
+      type: object
+      required: [id, object, status, amount, currency, metadata, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          example: pay_01abc123
+        object:
+          type: string
+          enum: [payment]
+        status:
+          type: string
+          enum: [open, processing, paid, failed, incomplete]
+        amount:
+          type: integer
+          example: 2500
+        currency:
+          type: string
+          example: USD
+        network:
+          type: string
+          nullable: true
+          example: solana
+        rail:
+          type: string
+          nullable: true
+          example: sol
+        reference:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    WebhookDeliveryStatus:
+      type: string
+      enum: [pending, delivered, failed]
+
+    WebhookDelivery:
+      type: object
+      required: [id, object, eventType, status, attemptCount, createdAt]
+      properties:
+        id:
+          type: string
+          example: wdel_01abc123
+        object:
+          type: string
+          enum: [webhook.delivery]
+        eventType:
+          type: string
+          example: payment.confirmed
+        status:
+          $ref: "#/components/schemas/WebhookDeliveryStatus"
+        attemptCount:
+          type: integer
+        nextAttemptAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastAttemptAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastStatusCode:
+          type: integer
+          nullable: true
+        lastError:
+          type: string
+          nullable: true
+        deliveredAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    WebhookDeliveryList:
+      type: object
+      required: [object, data, hasMore]
+      properties:
+        object:
+          type: string
+          enum: [list]
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebhookDelivery"
+        hasMore:
+          type: boolean
+        nextCursor:
+          type: string
+          nullable: true
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [type, code, message]
+          properties:
+            type:
+              type: string
+              enum:
+                - authentication_error
+                - authorization_error
+                - invalid_request_error
+                - idempotency_error
+                - not_found_error
+                - api_error
+            code:
+              type: string
+              example: missing_api_key
+            message:
+              type: string
+              example: A PineTree API key is required.
+            requestId:
+              type: string
+
+  responses:
+
+    BadRequest:
+      description: Invalid request — validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              type: invalid_request_error
+              code: invalid_amount
+              message: amount must be greater than zero.
+
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              type: authentication_error
+              code: missing_api_key
+              message: A PineTree API key is required.
+
+    Forbidden:
+      description: API key lacks required permission
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              type: authorization_error
+              code: missing_permission
+              message: The API key requires the checkout.sessions:create permission.
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              type: not_found_error
+              code: checkout_session_not_found
+              message: No checkout session was found for the provided ID.
+
+    Conflict:
+      description: Idempotency conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              type: idempotency_error
+              code: idempotency_key_conflict
+              message: The Idempotency-Key was already used with a different request body.
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              type: api_error
+              code: internal_error
+              message: An internal error occurred.
