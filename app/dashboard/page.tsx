@@ -184,9 +184,14 @@ export default function DashboardPage() {
   }, [applyOverviewPayload, callOverviewApi])
 
   useEffect(() => {
-    void loadOverview().catch((err) => {
-      console.error("Dashboard load failed:", err)
-    })
+    async function fetchOnMount() {
+      try {
+        await loadOverview()
+      } catch (err) {
+        console.error("Dashboard load failed:", err)
+      }
+    }
+    void fetchOnMount()
 
     if (!AUTO_POLLING_ENABLED) {
       return

@@ -32,6 +32,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated package build artifacts — not source, not linted:
+    "packages/*/dist/**",
+    "packages/*/node_modules/**",
+    "coverage/**",
+    // Hardhat/Solidity toolchain — separate CJS module system, not Next.js app source:
+    "contracts/**",
   ]),
 ]);
 

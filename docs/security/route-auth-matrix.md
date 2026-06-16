@@ -133,6 +133,17 @@ Auth not yet established when these are called; engine enforces brute-force prot
 
 ---
 
+## Coinbase OAuth
+
+HMAC-signed state cookie pattern (mirrors Shopify OAuth). The start route is browser-initiated and resolves the merchant from the Supabase session cookie. The callback verifies the signed state cookie — merchant identity comes from the cookie, not the active browser session. Tokens are stored server-side only in `merchant_providers.credentials` and never returned to the browser.
+
+| Route | Methods | Auth | Notes |
+|-------|---------|------|-------|
+| `/api/oauth/coinbase/start` | GET | Supabase session cookie | Requires active login; generates HMAC-signed `coinbase_oauth_context` cookie (httpOnly, sameSite:lax, maxAge:300, path-scoped to callback); redirects to `https://www.coinbase.com/oauth/authorize` |
+| `/api/oauth/coinbase/callback` | GET | HMAC-signed context cookie | Verifies `coinbase_oauth_context` cookie signature and `state` param; extracts `merchantId` from signed context (not browser session); exchanges `code` for tokens; stores `access_token`, `refresh_token`, `expires_in`, `token_type` in `merchant_providers.credentials` via `supabaseAdmin`; clears cookie on all paths (success and failure) |
+
+---
+
 ## Admin-Only
 
 | Route | Methods | Auth |
@@ -192,7 +203,6 @@ Routes with no authentication that accept mutations or manage session state. Rem
 |-------|---------|-----|------|---------------|
 | `/api/wallet-connect-session` | POST | Unauthenticated (see detail below) | Status-restricted; session_id is unguessable UUID | Accept for now; see detail below |
 | `/api/shift4/apply` | POST | No auth | Starts Shift4 merchant onboarding with just an email | Add MERCHANT auth |
-| `/api/oaut/coinbase/callback` | GET | OAuth callback (expected) | Path typo (`oaut` vs `oauth`); token read but **not stored** | Fix typo; implement token storage |
 
 ### wallet-connect-session POST — Remaining exposure and why it stays open
 

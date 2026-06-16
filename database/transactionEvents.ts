@@ -5,7 +5,7 @@ export interface TransactionEvent {
   transaction_id: string
   provider?: string
   event_type?: string
-  payload?: any
+  payload?: unknown
   created_at?: Date
 }
 
