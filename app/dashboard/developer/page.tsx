@@ -44,13 +44,6 @@ const overviewCards = [
     action: "View integrations",
     icon: Plug,
   },
-  {
-    id: "docs" as const,
-    title: "API Reference",
-    description: "Full developer documentation.",
-    action: "View docs",
-    icon: Book,
-  },
 ]
 
 export default function DeveloperPage() {
@@ -92,6 +85,32 @@ export default function DeveloperPage() {
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          onClick={() => setTab("docs")}
+          aria-pressed={tab === "docs"}
+          className={`w-full rounded-2xl border p-4 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition ${
+            tab === "docs"
+              ? "border-blue-200 bg-blue-50/60"
+              : "border-gray-200/80 bg-white hover:border-blue-200 hover:bg-blue-50/30"
+          } focus:outline-none focus:ring-4 focus:ring-blue-100`}
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+              <Book className="h-4 w-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-semibold text-gray-950">API Reference</h2>
+                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">Live</span>
+              </div>
+              <p className="mt-0.5 text-[12px] leading-5 text-gray-500">
+                Full documentation — endpoints, authentication, webhooks, SDKs, and integration guides.
+              </p>
+            </div>
+            <span className="hidden shrink-0 text-[11.5px] font-semibold text-blue-700 sm:inline">View docs →</span>
+          </div>
+        </button>
       </DashboardSection>
 
       {tab === "keys" && (
@@ -276,9 +295,9 @@ const docNav: { id: DocSection; label: string }[] = [
 function CodeBlock({ children }: { children: string }) {
   const [copied, setCopied] = useState(false)
   return (
-    <div className="relative my-3">
-      <pre className="overflow-x-auto rounded-xl bg-gray-900 px-4 py-3 text-[11.5px] leading-relaxed text-gray-200 font-mono">
-        <code>{children}</code>
+    <div className="relative my-3 max-w-full">
+      <pre className="max-w-full overflow-x-auto rounded-xl bg-gray-900 px-4 py-3 text-[11.5px] leading-relaxed text-gray-200 font-mono [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <code className="block min-w-0">{children}</code>
       </pre>
       <button
         type="button"
@@ -306,7 +325,7 @@ function DocH2({ children }: { children: ReactNode }) {
 
 function DocTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
   return (
-    <div className="my-3 overflow-x-auto rounded-xl border border-gray-200">
+    <div className="my-3 max-w-full overflow-x-auto rounded-xl border border-gray-200 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
       <table className="w-full text-[12.5px]">
         <thead>
           <tr className="border-b border-gray-200 bg-gray-50">
@@ -336,13 +355,13 @@ function DocTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
 function RouteRow({ method, path, description }: { method: "GET" | "POST"; path: string; description: string }) {
   return (
     <div className="my-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
-      <div className="flex items-center gap-2 mb-1.5">
-        <span className={`rounded px-1.5 py-0.5 text-[10px] font-700 font-mono ${method === "POST" ? "bg-green-100 text-green-800" : "bg-blue-50 text-blue-800"}`}>
+      <div className="mb-1.5 flex min-w-0 flex-wrap items-center gap-2">
+        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-700 font-mono ${method === "POST" ? "bg-green-100 text-green-800" : "bg-blue-50 text-blue-800"}`}>
           {method}
         </span>
-        <code className="text-[12.5px] font-semibold text-gray-900">{path}</code>
+        <code className="min-w-0 break-all text-[12.5px] font-semibold text-gray-900">{path}</code>
       </div>
-      <p className="text-[12px] text-gray-500">{description}</p>
+      <p className="break-words text-[12px] text-gray-500">{description}</p>
     </div>
   )
 }
@@ -781,41 +800,63 @@ function ApiReferencePanel() {
 
   return (
     <DashboardSection title="API Reference" titleTone="blue">
-      <div className="flex min-h-[600px] overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-        {/* Sidebar */}
-        <nav className="hidden w-44 shrink-0 border-r border-gray-100 py-4 sm:block">
-          {docNav.map(({ id, label }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setActiveDoc(id)}
-              className={`block w-full px-4 py-1.5 text-left text-[12.5px] border-l-2 transition ${
-                activeDoc === id
-                  ? "border-blue-600 bg-blue-50/60 font-semibold text-blue-700"
-                  : "border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-900"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-
-        {/* Mobile section picker */}
-        <div className="block w-full border-b border-gray-100 px-4 py-3 sm:hidden">
-          <select
-            value={activeDoc}
-            onChange={(e) => setActiveDoc(e.target.value as DocSection)}
-            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-[12.5px] text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
-          >
-            {docNav.map(({ id, label }) => (
-              <option key={id} value={id}>{label}</option>
+      <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+        {/* Intro banner */}
+        <div className="border-b border-gray-100 bg-gradient-to-r from-blue-50/40 to-white px-5 py-5 sm:px-6">
+          <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-blue-500">Documentation</p>
+          <h2 className="text-[15px] font-bold text-gray-950 sm:text-base">PineTree API Reference</h2>
+          <p className="mt-1 max-w-xl text-[12px] leading-relaxed text-gray-500">
+            Accept crypto payments using API keys, checkout sessions, real-time webhooks, and SDKs for Node and browsers.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            {["REST API", "Webhooks", "Node SDK", "Browser SDK"].map((pill) => (
+              <span key={pill} className="rounded-full bg-blue-100 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700">
+                {pill}
+              </span>
             ))}
-          </select>
+            <code className="rounded-full bg-gray-100 px-2.5 py-0.5 font-mono text-[10.5px] text-gray-500">
+              app.pinetree-payments.com
+            </code>
+          </div>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto px-6 py-6 sm:px-8">
-          <SectionComponent />
+        {/* Docs layout: stacked on mobile, sidebar+content on lg+ */}
+        <div className="flex min-h-[480px] flex-col lg:flex-row">
+          {/* Desktop sidebar — hidden on mobile */}
+          <nav className="hidden w-52 shrink-0 border-r border-gray-100 py-3 lg:block lg:max-h-[calc(100dvh-260px)] lg:overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            {docNav.map(({ id, label }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setActiveDoc(id)}
+                className={`block w-full border-l-2 px-4 py-1.5 text-left text-[12.5px] transition ${
+                  activeDoc === id
+                    ? "border-blue-600 bg-blue-50/60 font-semibold text-blue-700"
+                    : "border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+
+          {/* Mobile dropdown — hidden on lg+ */}
+          <div className="border-b border-gray-100 px-4 py-3 lg:hidden">
+            <select
+              value={activeDoc}
+              onChange={(e) => setActiveDoc(e.target.value as DocSection)}
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-[12.5px] text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            >
+              {docNav.map(({ id, label }) => (
+                <option key={id} value={id}>{label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Content */}
+          <div className="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:overflow-y-auto lg:px-8">
+            <SectionComponent />
+          </div>
         </div>
       </div>
     </DashboardSection>
