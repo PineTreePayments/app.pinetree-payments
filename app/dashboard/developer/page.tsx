@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import type { ReactNode } from "react"
-import { Book, Code2, KeyRound, Plug, Webhook } from "lucide-react"
+import { Book, BookOpen, Code2, KeyRound, Plug, Webhook } from "lucide-react"
 import {
   DashboardSection,
   ProviderStatusPill,
@@ -88,32 +88,54 @@ export default function DeveloperPage() {
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          onClick={() => setTab("docs")}
-          aria-pressed={tab === "docs"}
-          className={`w-full rounded-2xl border p-4 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition ${
-            tab === "docs"
-              ? "border-blue-200 bg-blue-50/60"
-              : "border-gray-200/80 bg-white hover:border-blue-200 hover:bg-blue-50/30"
-          } focus:outline-none focus:ring-4 focus:ring-blue-100`}
-        >
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
-              <Book className="h-4 w-4" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-sm font-semibold text-gray-950">API Reference</h2>
-                <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">Reference</span>
+        <div className="grid gap-2 sm:gap-3 md:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => setTab("docs")}
+            aria-pressed={tab === "docs"}
+            className={`rounded-2xl border p-4 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition ${
+              tab === "docs"
+                ? "border-blue-200 bg-blue-50/60"
+                : "border-gray-200/80 bg-white hover:border-blue-200 hover:bg-blue-50/30"
+            } focus:outline-none focus:ring-4 focus:ring-blue-100`}
+          >
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+                <Book className="h-4 w-4" />
               </div>
-              <p className="mt-0.5 text-[12px] leading-5 text-gray-500">
-                Full documentation — endpoints, authentication, webhooks, SDKs, and integration guides.
-              </p>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-sm font-semibold text-gray-950">API Reference</h2>
+                <p className="mt-1 text-[12px] leading-5 text-gray-500">
+                  Full documentation — endpoints, authentication, webhooks, SDKs, and integration guides.
+                </p>
+                <span className="mt-2 inline-flex text-[11.5px] font-semibold leading-5 text-blue-700">View docs</span>
+              </div>
             </div>
-            <span className="hidden shrink-0 text-[11.5px] font-semibold text-blue-700 sm:inline">View docs →</span>
-          </div>
-        </button>
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("docs")}
+            aria-pressed={tab === "docs"}
+            className={`rounded-2xl border p-4 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition ${
+              tab === "docs"
+                ? "border-blue-200 bg-blue-50/60"
+                : "border-gray-200/80 bg-white hover:border-blue-200 hover:bg-blue-50/30"
+            } focus:outline-none focus:ring-4 focus:ring-blue-100`}
+          >
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+                <BookOpen className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-sm font-semibold text-gray-950">Developer Guides</h2>
+                <p className="mt-1 text-[12px] leading-5 text-gray-500">
+                  Setup guides for checkout sessions, webhooks, SDKs, and provider integrations.
+                </p>
+                <span className="mt-2 inline-flex text-[11.5px] font-semibold leading-5 text-blue-700">View guides</span>
+              </div>
+            </div>
+          </button>
+        </div>
       </DashboardSection>
 
       {tab === "keys" && (
@@ -339,6 +361,28 @@ function DocH2({ children }: { children: ReactNode }) {
 }
 
 function DocTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
+  function renderCell(cell: string, header: string) {
+    const normalizedHeader = header.toLowerCase()
+
+    if (normalizedHeader === "asset") {
+      return <span className="font-semibold text-blue-700">{cell}</span>
+    }
+
+    if (normalizedHeader === "rail") {
+      return <code className="font-mono text-[11.5px] font-semibold text-slate-700">{cell}</code>
+    }
+
+    if (normalizedHeader === "status") {
+      return (
+        <span className="inline-flex rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1 text-[11px] font-semibold leading-5 text-emerald-700">
+          {cell}
+        </span>
+      )
+    }
+
+    return <code className="font-mono text-[11px] font-semibold text-blue-800">{cell}</code>
+  }
+
   return (
     <div className="my-3 max-w-full overflow-x-auto rounded-2xl border border-gray-200/80 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
       <table className="w-full text-[12.5px]">
@@ -356,7 +400,7 @@ function DocTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
             <tr key={i} className="border-b border-gray-100 last:border-0">
               {row.map((cell, j) => (
                 <td key={j} className="px-3 py-2.5 text-gray-700 align-top">
-                  <code className="rounded-lg bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-blue-800 ring-1 ring-slate-200/70">{cell}</code>
+                  {renderCell(cell, headers[j] || "")}
                 </td>
               ))}
             </tr>
@@ -408,7 +452,7 @@ function DocSectionOverview() {
       </div>
       <DocH2>Supported assets</DocH2>
       <DocTable
-        headers={["Asset", "Rail value", "Status"]}
+        headers={["Asset", "Rail", "Status"]}
         rows={[
           ["SOL on Solana", "solana", "Ready"],
           ["USDC on Solana", "solana", "Ready"],

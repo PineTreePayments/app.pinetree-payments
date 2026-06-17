@@ -88,7 +88,7 @@ curl -X POST https://app.pinetree-payments.com/api/v1/checkout/sessions \
 
 **Supported assets by rail:**
 
-| Rail value | Assets offered in hosted checkout |
+| Rail | Assets offered in hosted checkout |
 |------------|-----------------------------------|
 | `solana` | SOL on Solana, USDC on Solana |
 | `base` | ETH on Base, USDC on Base |

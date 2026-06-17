@@ -98,7 +98,7 @@ See [Quickstart](./quickstart.md) for a step-by-step integration guide.
 
 PineTree routes payments across multiple crypto networks:
 
-| Rail value | Supported assets |
+| Rail | Supported assets |
 |------------|------------------|
 | `solana` | SOL on Solana, USDC on Solana |
 | `base` | ETH on Base, USDC on Base |
