@@ -112,7 +112,14 @@ export default function DeveloperPage() {
                 <p className="mt-1 text-[12px] leading-5 text-gray-500">
                   Step-by-step setup for API keys, checkout sessions, webhooks, SDKs, and integrations.
                 </p>
-                <span className="mt-2 inline-flex text-[11.5px] font-semibold leading-5 text-blue-700">Start quickstart</span>
+                <div className="mt-3 space-y-2">
+                  {["Create keys", "Build checkout", "Configure webhooks"].map((item) => (
+                    <div key={item} className="flex items-center justify-between gap-3 text-xs">
+                      <span className="font-medium text-gray-600">{item}</span>
+                    </div>
+                  ))}
+                </div>
+                <span className="mt-3 inline-flex text-[11.5px] font-semibold leading-5 text-blue-700">Start quickstart</span>
               </div>
             </div>
           </button>
