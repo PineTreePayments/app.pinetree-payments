@@ -47,6 +47,11 @@ const session = await pinetree.checkout.sessions.create({
 console.log(session.checkoutUrl) // redirect customer here
 ```
 
+Hosted checkout supports SOL on Solana, USDC on Solana, ETH on Base,
+USDC on Base, BTC over Lightning, and cards where Shift4 is enabled.
+Pass `rails: ["solana", "base"]` only when you want to restrict the
+available network rails; asset selection happens in hosted checkout.
+
 ### With the REST API directly
 
 ```bash

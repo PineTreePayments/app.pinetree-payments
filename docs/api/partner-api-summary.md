@@ -8,7 +8,7 @@
 
 ## What is PineTree?
 
-PineTree is a crypto-native payment infrastructure layer for merchants. It accepts payments across multiple crypto networks (Solana, Base ETH, Base USDC, Lightning, Coinbase Commerce, Shift4) and provides:
+PineTree is a crypto-native payment infrastructure layer for merchants. It accepts payments across multiple crypto networks and assets (SOL on Solana, USDC on Solana, ETH on Base, USDC on Base, BTC over Lightning, and cards through Shift4 where enabled) and provides:
 
 - A hosted checkout page where customers select a network and complete payment
 - A REST API for merchants to create sessions and retrieve payments
@@ -46,15 +46,14 @@ The PineTree Engine is the central orchestration layer (not exposed directly to 
 
 ## Supported rails/providers
 
-| Rail | Network | Fee method | Status |
-|------|---------|------------|--------|
-| `sol` | Solana | atomic_split | Production |
-| `base` | Base (ETH) | contract_split | Production |
-| `base-usdc` | Base USDC | v7_eip3009_relayer | Production |
-| `lightning` | Lightning (Speed) | invoice_split | Production |
-| `lightning` | Lightning (NWC) | post_payment_nwc | Production |
-| `coinbase` | Coinbase Commerce | invoice_split | Production |
-| `shift4` | Shift4 Payments | invoice_split | Production |
+| Rail | Assets | Fee method | Status |
+|------|--------|------------|--------|
+| `solana` | SOL on Solana, USDC on Solana | atomic_split | Production |
+| `base` | ETH on Base | contract_split | Production |
+| `base` | USDC on Base | v7_eip3009_relayer | Production |
+| `bitcoin_lightning` | BTC over Lightning (Speed) | invoice_split | Production |
+| `bitcoin_lightning` | BTC over Lightning (NWC) | post_payment_nwc | Production |
+| `shift4` | Cards where enabled | invoice_split | Production |
 
 ---
 
@@ -176,6 +175,6 @@ PineTree requires:
 | Shopify integration | Production |
 | Lint / typecheck / tests / build | All passing |
 | Coinbase OAuth | Hardened (HMAC-signed state cookie) |
-| Solana, Base, Lightning, Coinbase, Shift4 | Live adapters |
+| Solana, Base, Lightning, Shift4 | Live adapters |
 | FluidPay | Integration pending |
 | Mesh managed transfers | Deferred |

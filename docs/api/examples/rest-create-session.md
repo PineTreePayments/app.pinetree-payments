@@ -68,7 +68,7 @@ const session = await response.json()
 | `reference` | string | No | Your internal order ID. Returned on the session and payment |
 | `customer.email` | string | No | Customer email address |
 | `metadata` | object | No | Arbitrary key/value pairs returned as-is |
-| `rails` | string[] | No | Restrict to specific payment rails. Omit to accept all |
+| `rails` | string[] | No | Restrict to specific network rails. Omit to accept all |
 | `successUrl` | string | No | Redirect URL after successful payment |
 | `cancelUrl` | string | No | Redirect URL after cancellation |
 
@@ -86,7 +86,7 @@ const session = await response.json()
   "metadata": {},
   "checkoutUrl": "https://app.pinetree-payments.com/checkout/cs_01j...",
   "paymentId": null,
-  "supportedRails": ["solana_usdc", "base_usdc", "base_eth"],
+  "supportedRails": ["solana", "base", "bitcoin_lightning"],
   "successUrl": "https://example.com/success",
   "cancelUrl": "https://example.com/cancel",
   "createdAt": "2026-06-12T12:00:00.000Z",
@@ -95,6 +95,11 @@ const session = await response.json()
 ```
 
 Redirect the customer to `checkoutUrl` to complete payment.
+
+Hosted checkout supports SOL on Solana, USDC on Solana, ETH on Base,
+USDC on Base, BTC over Lightning, and cards where Shift4 is enabled.
+The `rails` field limits the available network rails; the customer selects
+the asset inside hosted checkout.
 
 ## Idempotency
 

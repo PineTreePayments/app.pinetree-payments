@@ -18,5 +18,6 @@ export type {
   CheckoutMode,
   CheckoutOpenResult,
   CheckoutOptions,
+  CheckoutSessionRail,
   CheckoutSessionResult,
 } from "@pinetreepayments/js"

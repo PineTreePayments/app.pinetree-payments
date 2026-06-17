@@ -406,16 +406,16 @@ function DocSectionOverview() {
           </div>
         ))}
       </div>
-      <DocH2>Supported networks</DocH2>
+      <DocH2>Supported assets</DocH2>
       <DocTable
-        headers={["Network", "Rail", "Status"]}
+        headers={["Asset", "Rail value", "Status"]}
         rows={[
-          ["Solana", "sol", "Live"],
-          ["Base ETH", "base", "Live"],
-          ["Base USDC", "base-usdc", "Live"],
-          ["Lightning", "lightning", "Live"],
-          ["Coinbase Commerce", "coinbase", "Live"],
-          ["Shift4", "shift4", "Live"],
+          ["SOL on Solana", "solana", "Ready"],
+          ["USDC on Solana", "solana", "Ready"],
+          ["ETH on Base", "base", "Ready"],
+          ["USDC on Base", "base", "Ready"],
+          ["BTC over Lightning", "bitcoin_lightning", "Ready"],
+          ["Cards / Shift4", "shift4", "Ready"],
         ]}
       />
       <DocH2>Core concepts</DocH2>
@@ -585,7 +585,7 @@ function DocSectionPayments() {
   "amount": 2500,
   "currency": "USD",
   "network": "solana",
-  "rail": "sol",
+  "rail": "solana",
   "reference": "order_1042",
   "createdAt": "2026-06-16T12:01:00Z",
   "updatedAt": "2026-06-16T12:02:30Z"

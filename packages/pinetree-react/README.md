@@ -84,6 +84,9 @@ lifecycle events to typed callbacks: `onComplete`, `onFailed`, `onExpired`,
 />
 ```
 
+`rails` restricts network rails. Use `["solana"]` to offer SOL on Solana and
+USDC on Solana; use `["base"]` to offer ETH on Base and USDC on Base.
+
 `PineTreeCheckout` owns the iframe it creates. It destroys the browser SDK
 checkout instance and removes the iframe when unmounted.
 

@@ -157,6 +157,7 @@ const pinetree = new PineTree({
 | `reference` | `string` | Your internal order ID |
 | `customer.email` | `string` | Customer email address |
 | `metadata` | `object` | Arbitrary key/value pairs |
+| `rails` | `Array<"solana" \| "base" \| "bitcoin_lightning" \| "lightning" \| "shift4">` | Optional network rail restrictions. `solana` offers SOL on Solana and USDC on Solana. |
 | `successUrl` | `string` | Redirect URL after successful payment |
 | `cancelUrl` | `string` | Redirect URL after cancellation |
 | `mode` | `CheckoutMode` | `"redirect"` \| `"popup"` \| `"embedded"`. Default `"redirect"` |

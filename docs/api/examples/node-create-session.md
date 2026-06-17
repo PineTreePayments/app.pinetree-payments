@@ -55,8 +55,9 @@ const session = await client.checkout.sessions.create({
     userId: "usr_7891",
   },
 
-  // Restrict to specific payment rails. Omit to accept all supported rails.
-  rails: ["solana_usdc", "base_usdc"],
+  // Restrict to specific network rails. Omit to accept all supported rails.
+  // Solana checkout offers SOL on Solana and USDC on Solana.
+  rails: ["solana", "base"],
 
   // Redirect URLs after payment or cancellation
   successUrl: "https://example.com/success?session_id={SESSION_ID}",

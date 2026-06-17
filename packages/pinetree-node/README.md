@@ -82,13 +82,19 @@ const session = await client.checkout.sessions.create({
     plan: "pro",
     userId: "usr_7891",
   },
-  rails: ["solana_usdc", "base_usdc"],  // optional — restrict payment rails
+  // Optional: restrict checkout to network rails.
+  // Solana checkout offers SOL on Solana and USDC on Solana.
+  rails: ["solana", "base"],
   successUrl: "https://example.com/success",
   cancelUrl:  "https://example.com/cancel",
 })
 // session.status === "open"
 // Redirect the customer to session.checkoutUrl
 ```
+
+Supported hosted checkout assets are SOL on Solana, USDC on Solana, ETH on
+Base, USDC on Base, BTC over Lightning, and cards where Shift4 is enabled.
+The `rails` option restricts network rails; it does not preselect a token.
 
 ### Create with idempotency key
 

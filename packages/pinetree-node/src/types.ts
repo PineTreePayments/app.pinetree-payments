@@ -6,6 +6,13 @@ export type CheckoutSessionStatus =
   | "expired"
   | "canceled"
 
+export type CheckoutSessionRail =
+  | "solana"
+  | "base"
+  | "bitcoin_lightning"
+  | "lightning"
+  | "shift4"
+
 export type CheckoutSession = {
   id: string
   object: "checkout.session"
@@ -17,7 +24,7 @@ export type CheckoutSession = {
   metadata: Record<string, unknown>
   checkoutUrl: string
   paymentId: string | null
-  supportedRails: string[]
+  supportedRails: CheckoutSessionRail[]
   successUrl: string | null
   cancelUrl: string | null
   createdAt: string
@@ -30,7 +37,7 @@ export type CheckoutSessionCreateParams = {
   reference?: string
   customer?: { email?: string }
   metadata?: Record<string, unknown>
-  rails?: string[]
+  rails?: CheckoutSessionRail[]
   successUrl?: string
   cancelUrl?: string
 }

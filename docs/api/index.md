@@ -94,20 +94,20 @@ See [Quickstart](./quickstart.md) for a step-by-step integration guide.
 
 ---
 
-## Supported Networks and Rails
+## Supported Networks and Assets
 
 PineTree routes payments across multiple crypto networks:
 
-| Network | Rail Identifier |
-|---------|-----------------|
-| Solana | `sol` |
-| Base (ETH) | `base` |
-| Base USDC | `base-usdc` |
-| Lightning Network | `lightning` |
-| Coinbase Commerce | `coinbase` |
-| Shift4 | `shift4` |
+| Rail value | Supported assets |
+|------------|------------------|
+| `solana` | SOL on Solana, USDC on Solana |
+| `base` | ETH on Base, USDC on Base |
+| `bitcoin_lightning` | BTC over Lightning |
+| `lightning` | Alias for `bitcoin_lightning` |
+| `shift4` | Cards where enabled |
 
-You can restrict which rails a session accepts by passing the `rails` array at session creation.
+You can restrict which network rails a session accepts by passing the `rails`
+array at session creation. Asset selection happens in the hosted checkout flow.
 
 ---
 

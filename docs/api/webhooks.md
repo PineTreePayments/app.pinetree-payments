@@ -178,7 +178,7 @@ Fired when the transaction is confirmed on-chain. **This is the event to use for
       "amount": 2500,
       "currency": "USD",
       "network": "solana",
-      "rail": "sol",
+      "rail": "solana",
       "reference": "order_1042"
     }
   }

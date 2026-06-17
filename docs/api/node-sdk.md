@@ -48,6 +48,8 @@ const session = await pinetree.checkout.sessions.create(
     reference: "order_1042",
     customer: { email: "jane@example.com" },
     metadata: { productId: "prod_abc" },
+    // Optional: restrict network rails. Solana offers SOL and USDC.
+    rails: ["solana", "base"],
     successUrl: "https://yoursite.com/success",
     cancelUrl: "https://yoursite.com/cancel",
   },
@@ -112,8 +114,11 @@ console.log(updated.status) // "expired"
 const payment = await pinetree.payments.retrieve("pay_01abc...")
 console.log(payment.status)   // "paid"
 console.log(payment.network)  // "solana"
-console.log(payment.rail)     // "sol"
+console.log(payment.rail)     // "solana"
 ```
+
+Supported hosted checkout assets are SOL on Solana, USDC on Solana, ETH on
+Base, USDC on Base, BTC over Lightning, and cards where Shift4 is enabled.
 
 ---
 

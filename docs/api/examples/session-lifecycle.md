@@ -205,7 +205,7 @@ const session = await client.checkout.sessions.retrieve("cs_...")
 if (session.status === "paid" && session.paymentId) {
   const payment = await client.payments.retrieve(session.paymentId)
   console.log(payment.network) // "solana", "base", etc.
-  console.log(payment.rail)    // "solana_usdc", "base_eth", etc.
+  console.log(payment.rail)    // "solana", "base", etc.
 }
 ```
 

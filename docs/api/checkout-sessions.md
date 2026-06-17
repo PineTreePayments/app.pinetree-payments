@@ -20,7 +20,7 @@ A checkout session represents a single customer payment intent. Creating a sessi
   metadata: Record<string, unknown>  // arbitrary key-value data
   checkoutUrl: string           // redirect customers here
   paymentId: string | null      // set when a payment attempt is made
-  supportedRails: string[]      // ["sol", "base", "base-usdc", "lightning", "coinbase", "shift4"]
+  supportedRails: string[]      // ["solana", "base", "bitcoin_lightning", "shift4"]
   successUrl: string | null     // redirect after successful payment
   cancelUrl: string | null      // redirect after cancellation
   createdAt: string             // ISO 8601
@@ -64,7 +64,7 @@ Idempotency-Key: order_1042   (optional — see Idempotency)
 | `reference` | string | No | Your internal order or reference ID. Returned in webhook events. |
 | `customer.email` | string | No | Customer email for receipt or display purposes. |
 | `metadata` | object | No | Arbitrary key-value object. Passed through to webhook events. |
-| `rails` | string[] | No | Restrict which payment rails are offered. Defaults to all configured rails. |
+| `rails` | string[] | No | Restrict which network rails are offered. Defaults to all configured rails. |
 | `successUrl` | string | No | URL to redirect the customer after a successful payment. Must be http/https. |
 | `cancelUrl` | string | No | URL to redirect the customer if they cancel. Must be http/https. |
 
@@ -86,6 +86,20 @@ curl -X POST https://app.pinetree-payments.com/api/v1/checkout/sessions \
   }'
 ```
 
+**Supported assets by rail:**
+
+| Rail value | Assets offered in hosted checkout |
+|------------|-----------------------------------|
+| `solana` | SOL on Solana, USDC on Solana |
+| `base` | ETH on Base, USDC on Base |
+| `bitcoin_lightning` | BTC over Lightning |
+| `lightning` | Alias for `bitcoin_lightning` |
+| `shift4` | Cards where enabled |
+
+The `rails` field restricts the networks shown in hosted checkout. It does not
+preselect a token. For example, `rails: ["solana"]` offers both SOL on Solana
+and USDC on Solana when those assets are enabled for the merchant.
+
 **Example response (201):**
 
 ```json
@@ -100,7 +114,7 @@ curl -X POST https://app.pinetree-payments.com/api/v1/checkout/sessions \
   "metadata": { "productId": "prod_abc" },
   "checkoutUrl": "https://app.pinetree-payments.com/pay?token=...",
   "paymentId": null,
-  "supportedRails": ["sol", "base", "base-usdc", "lightning"],
+  "supportedRails": ["solana", "base", "bitcoin_lightning"],
   "successUrl": "https://yoursite.com/success",
   "cancelUrl": "https://yoursite.com/cancel",
   "createdAt": "2026-06-16T12:00:00.000Z",

@@ -13,8 +13,8 @@ A payment object is created when a customer begins a payment attempt against a c
   status: string                 // see statuses below
   amount: number                 // merchant amount in cents (USD)
   currency: string               // "USD"
-  network: string | null         // "solana" | "base" | "lightning" | ...
-  rail: string | null            // "sol" | "base" | "base-usdc" | "lightning" | ...
+  network: string | null         // "solana" | "base" | "bitcoin_lightning" | ...
+  rail: string | null            // public rail label, e.g. "solana" or "base"
   reference: string | null       // your order/reference ID from the checkout session
   metadata: Record<string, unknown>
   createdAt: string              // ISO 8601
@@ -93,7 +93,7 @@ curl "https://app.pinetree-payments.com/api/v1/payments/pay_01abc..." \
   "amount": 2500,
   "currency": "USD",
   "network": "solana",
-  "rail": "sol",
+  "rail": "solana",
   "reference": "order_1042",
   "metadata": { "productId": "prod_abc" },
   "createdAt": "2026-06-16T12:01:00.000Z",
@@ -116,7 +116,7 @@ PineTree charges a flat **$0.15 per transaction** fee. This fee is deducted from
 
 | Method | How fee is captured |
 |--------|---------------------|
-| `atomic_split` | Fee split at the Solana program level |
+| `atomic_split` | Fee split at the Solana transaction level for SOL on Solana and USDC on Solana |
 | `contract_split` | Fee split via Base ETH smart contract |
 | `v7_eip3009_relayer` | Fee split via Base USDC EIP-3009 relayer |
 | `invoice_split` | Fee included in the payment invoice (Shift4, Coinbase, Speed) |
@@ -136,7 +136,7 @@ const pinetree = new PineTree(process.env.PINETREE_API_KEY!)
 const payment = await pinetree.payments.retrieve("pay_01abc...")
 console.log(payment.status)   // "paid"
 console.log(payment.network)  // "solana"
-console.log(payment.rail)     // "sol"
+console.log(payment.rail)     // "solana"
 ```
 
 ---

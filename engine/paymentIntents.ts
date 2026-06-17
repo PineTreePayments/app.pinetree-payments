@@ -90,6 +90,9 @@ function resolveSupportedAssetForNetwork(network: WalletNetwork, asset?: string)
   if (!normalizedAsset) {
     throw new Error("Missing Solana asset selection")
   }
+  if (normalizedAsset !== "SOL" && normalizedAsset !== "USDC") {
+    throw new Error("Solana payments support SOL and USDC only")
+  }
 
   return normalizedAsset
 }

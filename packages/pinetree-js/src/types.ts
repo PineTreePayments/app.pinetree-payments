@@ -7,6 +7,13 @@ export type PineTreeJSOptions = {
 
 export type CheckoutMode = "redirect" | "popup" | "embedded"
 
+export type CheckoutSessionRail =
+  | "solana"
+  | "base"
+  | "bitcoin_lightning"
+  | "lightning"
+  | "shift4"
+
 export type CheckoutOptions = {
   amount: number
   currency?: string
@@ -15,7 +22,7 @@ export type CheckoutOptions = {
     email?: string
   }
   metadata?: Record<string, unknown>
-  rails?: string[]
+  rails?: CheckoutSessionRail[]
   successUrl?: string
   cancelUrl?: string
   mode?: CheckoutMode

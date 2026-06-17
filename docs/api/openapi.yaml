@@ -42,6 +42,11 @@ paths:
         Creates a new checkout session. Returns a `checkoutUrl` to redirect the
         customer to the PineTree hosted payment page.
 
+        The optional `rails` field restricts network rails, not individual
+        tokens. Use `solana` to offer both SOL on Solana and USDC on Solana,
+        `base` to offer ETH on Base and USDC on Base, and `bitcoin_lightning`
+        (or `lightning`) to offer BTC over Lightning.
+
         Supports idempotent creation via the `Idempotency-Key` header.
         Required permission: `checkout.sessions:create`
       parameters:
@@ -416,8 +421,8 @@ components:
         supportedRails:
           type: array
           items:
-            type: string
-          example: [sol, base, base-usdc, lightning]
+            $ref: "#/components/schemas/CheckoutSessionRail"
+          example: [solana, base, bitcoin_lightning]
         successUrl:
           type: string
           nullable: true
@@ -459,9 +464,9 @@ components:
         rails:
           type: array
           items:
-            type: string
-          description: Restrict which payment rails to offer
-          example: [sol, base-usdc]
+            $ref: "#/components/schemas/CheckoutSessionRail"
+          description: Restrict which network rails to offer. `solana` offers SOL on Solana and USDC on Solana.
+          example: [solana, base]
         successUrl:
           type: string
           description: Redirect URL after successful payment
@@ -485,6 +490,16 @@ components:
         nextCursor:
           type: string
           nullable: true
+
+    CheckoutSessionRail:
+      type: string
+      enum: [solana, base, bitcoin_lightning, lightning, shift4]
+      description: |
+        Network rail identifier for hosted checkout.
+        - solana: offers SOL on Solana and USDC on Solana
+        - base: offers ETH on Base and USDC on Base
+        - bitcoin_lightning/lightning: offers BTC over Lightning
+        - shift4: offers cards where enabled
 
     Payment:
       type: object
@@ -512,7 +527,7 @@ components:
         rail:
           type: string
           nullable: true
-          example: sol
+          example: solana
         reference:
           type: string
           nullable: true

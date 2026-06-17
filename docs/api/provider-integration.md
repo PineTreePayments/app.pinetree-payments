@@ -106,10 +106,10 @@ PineTree charges a flat **$0.15 per transaction** fee. The adapter declares how 
 
 | Method | Description | Used by |
 |--------|-------------|---------|
-| `atomic_split` | Fee split at the transaction level in the Solana program | Solana (sol) |
+| `atomic_split` | Fee split at the transaction level in the Solana transaction request | SOL on Solana, USDC on Solana |
 | `contract_split` | Fee split via Base ETH smart contract | Base ETH (base) |
-| `v7_eip3009_relayer` | Fee split via EIP-3009 meta-transaction relayer | Base USDC (base-usdc) |
-| `invoice_split` | Fee included in the total invoice amount | Shift4, Coinbase Commerce, Speed Lightning |
+| `v7_eip3009_relayer` | Fee split via EIP-3009 meta-transaction relayer | USDC on Base (`base`) |
+| `invoice_split` | Fee included in the total invoice amount | Shift4 and Speed Lightning |
 | `post_payment_nwc` | Fee collected via a separate NWC `pay_invoice` after payment | NWC Lightning |
 
 Declare your fee capture method on the adapter class:
@@ -165,16 +165,14 @@ Your `translateEvent()` method must map provider-specific events to these normal
 
 ---
 
-## Supported rails
+## Supported rails and assets
 
-| Rail | Network | Adapter |
-|------|---------|---------|
-| `sol` | Solana Mainnet | Alchemy watcher + SPL programs |
-| `base` | Base (ETH) | Alchemy watcher + split contract |
-| `base-usdc` | Base USDC | Alchemy watcher + EIP-3009 relayer |
-| `lightning` | Lightning Network | Speed or NWC |
-| `coinbase` | Coinbase Commerce | REST API |
-| `shift4` | Shift4 Payments | REST API |
+| Rail | Assets | Adapter |
+|------|--------|---------|
+| `solana` | SOL on Solana, USDC on Solana | Alchemy watcher + Solana/SPL Token transaction request |
+| `base` | ETH on Base, USDC on Base | Alchemy watcher + split contract / EIP-3009 relayer |
+| `bitcoin_lightning` | BTC over Lightning | Speed or NWC |
+| `shift4` | Cards where enabled | Shift4 Payments REST API |
 
 ---
 

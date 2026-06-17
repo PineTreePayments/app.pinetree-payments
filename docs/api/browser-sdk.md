@@ -60,6 +60,7 @@ const result = await pinetree.checkout.open({
   currency: "USD",
   reference: "order_1042",
   customer: { email: "jane@example.com" },
+  rails: ["solana", "base"],
   successUrl: "https://yoursite.com/success",
   cancelUrl: "https://yoursite.com/cancel",
   mode: "redirect",      // "redirect" | "popup" | "embedded"
@@ -75,11 +76,16 @@ const result = await pinetree.checkout.open({
 | `reference` | string | No | Your internal order ID — passed through to webhooks |
 | `customer.email` | string | No | Customer email |
 | `metadata` | object | No | Arbitrary metadata passed to the session |
-| `rails` | string[] | No | Restrict which payment rails to offer |
+| `rails` | string[] | No | Restrict which network rails to offer |
 | `successUrl` | string | No | URL to redirect after successful payment |
 | `cancelUrl` | string | No | URL to redirect after cancellation |
 | `mode` | string | No | `"redirect"` (default), `"popup"`, or `"embedded"` |
 | `container` | string \| HTMLElement | No | Required when `mode: "embedded"` |
+
+Supported hosted checkout assets are SOL on Solana, USDC on Solana, ETH on
+Base, USDC on Base, BTC over Lightning, and cards where Shift4 is enabled. Use
+`rails: ["solana"]` to offer the Solana rail; customers can then choose SOL or
+USDC on Solana in hosted checkout.
 
 ---
 

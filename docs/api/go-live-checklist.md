@@ -51,7 +51,7 @@ Complete this checklist before accepting real payments in production.
 
 ## Provider Credentials
 
-- [ ] **At least one payment provider configured** — Solana, Base, Lightning, Coinbase, or Shift4
+- [ ] **At least one payment provider configured** — Solana, Base, Lightning, or Shift4
 - [ ] **Provider credentials stored as environment variables** — not hardcoded
 - [ ] **Treasury wallet addresses verified** — payments will be sent to these addresses
 

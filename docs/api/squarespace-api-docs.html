@@ -508,16 +508,16 @@
         </div>
       </div>
 
-      <h2 class="pt-h2">Supported networks</h2>
+      <h2 class="pt-h2">Supported assets</h2>
       <table class="pt-table">
-        <thead><tr><th>Network</th><th>Rail</th><th>Status</th></tr></thead>
+        <thead><tr><th>Asset</th><th>Rail value</th><th>Status</th></tr></thead>
         <tbody>
-          <tr><td>Solana</td><td><code>sol</code></td><td><span class="pt-badge green">Live</span></td></tr>
-          <tr><td>Base (ETH)</td><td><code>base</code></td><td><span class="pt-badge green">Live</span></td></tr>
-          <tr><td>Base USDC</td><td><code>base-usdc</code></td><td><span class="pt-badge green">Live</span></td></tr>
-          <tr><td>Lightning Network</td><td><code>lightning</code></td><td><span class="pt-badge green">Live</span></td></tr>
-          <tr><td>Coinbase Commerce</td><td><code>coinbase</code></td><td><span class="pt-badge green">Live</span></td></tr>
-          <tr><td>Shift4 Payments</td><td><code>shift4</code></td><td><span class="pt-badge green">Live</span></td></tr>
+          <tr><td>SOL on Solana</td><td><code>solana</code></td><td><span class="pt-badge green">Live</span></td></tr>
+          <tr><td>USDC on Solana</td><td><code>solana</code></td><td><span class="pt-badge green">Live</span></td></tr>
+          <tr><td>ETH on Base</td><td><code>base</code></td><td><span class="pt-badge green">Live</span></td></tr>
+          <tr><td>USDC on Base</td><td><code>base</code></td><td><span class="pt-badge green">Live</span></td></tr>
+          <tr><td>BTC over Lightning</td><td><code>bitcoin_lightning</code></td><td><span class="pt-badge green">Live</span></td></tr>
+          <tr><td>Cards / Shift4</td><td><code>shift4</code></td><td><span class="pt-badge green">Live</span></td></tr>
         </tbody>
       </table>
 
@@ -750,7 +750,7 @@ Content-Type: application/json</code></pre>
   "amount": 2500,
   "currency": "USD",
   "network": "solana",
-  "rail": "sol",
+  "rail": "solana",
   "reference": "order_1042",
   "metadata": {},
   "createdAt": "2026-06-16T12:01:00.000Z",
@@ -1019,12 +1019,11 @@ npm run build      # clean build</code></pre>
       <table class="pt-table">
         <thead><tr><th>Rail</th><th>Network</th><th>Fee method</th></tr></thead>
         <tbody>
-          <tr><td><code>sol</code></td><td>Solana</td><td>atomic_split</td></tr>
-          <tr><td><code>base</code></td><td>Base ETH</td><td>contract_split</td></tr>
-          <tr><td><code>base-usdc</code></td><td>Base USDC</td><td>v7_eip3009_relayer</td></tr>
-          <tr><td><code>lightning</code></td><td>Lightning (Speed/NWC)</td><td>invoice_split / post_payment_nwc</td></tr>
-          <tr><td><code>coinbase</code></td><td>Coinbase Commerce</td><td>invoice_split</td></tr>
-          <tr><td><code>shift4</code></td><td>Shift4 Payments</td><td>invoice_split</td></tr>
+          <tr><td><code>solana</code></td><td>SOL on Solana / USDC on Solana</td><td>atomic_split</td></tr>
+          <tr><td><code>base</code></td><td>ETH on Base</td><td>contract_split</td></tr>
+          <tr><td><code>base</code></td><td>USDC on Base</td><td>v7_eip3009_relayer</td></tr>
+          <tr><td><code>bitcoin_lightning</code></td><td>BTC over Lightning (Speed/NWC)</td><td>invoice_split / post_payment_nwc</td></tr>
+          <tr><td><code>shift4</code></td><td>Cards where enabled</td><td>invoice_split</td></tr>
         </tbody>
       </table>
 

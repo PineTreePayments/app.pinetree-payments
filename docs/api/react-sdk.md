@@ -65,6 +65,10 @@ The button supports all browser SDK checkout options plus `disabled`,
 `className`, children, and lifecycle callbacks. It disables while opening and
 resets its loading state after success or failure.
 
+`rails` restricts network rails, not individual tokens. `rails={["solana"]}`
+offers SOL on Solana and USDC on Solana in hosted checkout; `rails={["base"]}`
+offers ETH on Base and USDC on Base.
+
 ## Embedded Checkout
 
 ```tsx
