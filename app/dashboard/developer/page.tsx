@@ -51,6 +51,7 @@ const overviewCards = [
 
 export default function DeveloperPage() {
   const [tab, setTab] = useState<DeveloperTab>("keys")
+  const [docSection, setDocSection] = useState<DocSection>("overview")
 
   useEffect(() => {
     const shopifyResult = new URLSearchParams(window.location.search).get("shopify")
@@ -91,10 +92,13 @@ export default function DeveloperPage() {
         <div className="grid gap-2 sm:gap-3 md:grid-cols-2">
           <button
             type="button"
-            onClick={() => setTab("docs")}
-            aria-pressed={tab === "docs"}
+            onClick={() => {
+              setDocSection("overview")
+              setTab("docs")
+            }}
+            aria-pressed={tab === "docs" && docSection === "overview"}
             className={`rounded-2xl border p-4 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition ${
-              tab === "docs"
+              tab === "docs" && docSection === "overview"
                 ? "border-blue-200 bg-blue-50/60"
                 : "border-gray-200/80 bg-white hover:border-blue-200 hover:bg-blue-50/30"
             } focus:outline-none focus:ring-4 focus:ring-blue-100`}
@@ -114,10 +118,13 @@ export default function DeveloperPage() {
           </button>
           <button
             type="button"
-            onClick={() => setTab("docs")}
-            aria-pressed={tab === "docs"}
+            onClick={() => {
+              setDocSection("quickstart")
+              setTab("docs")
+            }}
+            aria-pressed={tab === "docs" && docSection === "quickstart"}
             className={`rounded-2xl border p-4 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition ${
-              tab === "docs"
+              tab === "docs" && docSection === "quickstart"
                 ? "border-blue-200 bg-blue-50/60"
                 : "border-gray-200/80 bg-white hover:border-blue-200 hover:bg-blue-50/30"
             } focus:outline-none focus:ring-4 focus:ring-blue-100`}
@@ -129,9 +136,9 @@ export default function DeveloperPage() {
               <div className="min-w-0 flex-1">
                 <h2 className="text-sm font-semibold text-gray-950">Developer Guides</h2>
                 <p className="mt-1 text-[12px] leading-5 text-gray-500">
-                  Setup guides for checkout sessions, webhooks, SDKs, and provider integrations.
+                  Step-by-step setup for API keys, checkout sessions, webhooks, SDKs, and integrations.
                 </p>
-                <span className="mt-2 inline-flex text-[11.5px] font-semibold leading-5 text-blue-700">View guides</span>
+                <span className="mt-2 inline-flex text-[11.5px] font-semibold leading-5 text-blue-700">Start quickstart</span>
               </div>
             </div>
           </button>
@@ -189,7 +196,7 @@ export default function DeveloperPage() {
 
       {tab === "sdks" && <SdkCards />}
       {tab === "integrations" && <IntegrationCards />}
-      {tab === "docs" && <ApiReferencePanel />}
+      {tab === "docs" && <ApiReferencePanel activeDoc={docSection} setActiveDoc={setDocSection} />}
     </div>
   )
 }
@@ -866,8 +873,13 @@ const docSectionComponents: Record<DocSection, () => ReactNode> = {
   "go-live": DocSectionGoLive,
 }
 
-function ApiReferencePanel() {
-  const [activeDoc, setActiveDoc] = useState<DocSection>("overview")
+function ApiReferencePanel({
+  activeDoc,
+  setActiveDoc,
+}: {
+  activeDoc: DocSection
+  setActiveDoc: (section: DocSection) => void
+}) {
   const SectionComponent = docSectionComponents[activeDoc]
 
   return (
