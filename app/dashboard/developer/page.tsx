@@ -6,7 +6,10 @@ import { Book, Code2, KeyRound, Plug, Webhook } from "lucide-react"
 import {
   DashboardSection,
   ProviderStatusPill,
+  dashboardCardTitleClass,
   dashboardPageTitleClass,
+  dashboardSectionLabelClass,
+  dashboardSupportingTextClass,
 } from "@/components/dashboard/DashboardPrimitives"
 import { CheckoutWorkspace } from "../checkout/page"
 import PublicKeysPanel from "./PublicKeysPanel"
@@ -102,7 +105,7 @@ export default function DeveloperPage() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-sm font-semibold text-gray-950">API Reference</h2>
-                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">Live</span>
+                <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">Reference</span>
               </div>
               <p className="mt-0.5 text-[12px] leading-5 text-gray-500">
                 Full documentation — endpoints, authentication, webhooks, SDKs, and integration guides.
@@ -296,8 +299,8 @@ function CodeBlock({ children }: { children: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <div className="relative my-3 max-w-full">
-      <pre className="max-w-full overflow-x-auto rounded-xl bg-gray-900 px-4 py-3 text-[11.5px] leading-relaxed text-gray-200 font-mono [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-        <code className="block min-w-0">{children}</code>
+      <pre className="max-w-full overflow-x-auto rounded-xl border border-blue-100/80 bg-slate-50/90 px-4 py-3.5 font-mono text-[11.5px] leading-relaxed text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.85),0_8px_24px_rgba(15,23,42,0.04)] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <code className="block min-w-0 whitespace-pre">{children}</code>
       </pre>
       <button
         type="button"
@@ -307,7 +310,7 @@ function CodeBlock({ children }: { children: string }) {
             setTimeout(() => setCopied(false), 1600)
           })
         }}
-        className="absolute right-2.5 top-2.5 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10.5px] text-gray-400 transition hover:bg-white/10 hover:text-gray-200"
+        className="absolute right-2.5 top-2.5 rounded-lg border border-blue-100 bg-white/90 px-2 py-1 text-[10.5px] font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 focus:outline-none focus:ring-4 focus:ring-blue-100"
       >
         {copied ? "Copied!" : "Copy"}
       </button>
@@ -315,9 +318,21 @@ function CodeBlock({ children }: { children: string }) {
   )
 }
 
+function DocH1({ eyebrow, children, description }: { eyebrow?: string; children: ReactNode; description?: ReactNode }) {
+  return (
+    <div className="mb-5">
+      {eyebrow && <p className={dashboardSectionLabelClass}>{eyebrow}</p>}
+      <h1 className="mt-1 text-2xl font-semibold leading-tight tracking-tight text-gray-950 md:text-[1.7rem]">
+        {children}
+      </h1>
+      {description && <p className={`mt-2 max-w-2xl ${dashboardSupportingTextClass}`}>{description}</p>}
+    </div>
+  )
+}
+
 function DocH2({ children }: { children: ReactNode }) {
   return (
-    <h2 className="mt-8 mb-2.5 border-b border-gray-100 pb-2 text-[15px] font-700 text-gray-900 tracking-tight">
+    <h2 className="mb-3 mt-8 border-b border-gray-100 pb-2 text-sm font-semibold leading-tight tracking-tight text-gray-950">
       {children}
     </h2>
   )
@@ -325,12 +340,12 @@ function DocH2({ children }: { children: ReactNode }) {
 
 function DocTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
   return (
-    <div className="my-3 max-w-full overflow-x-auto rounded-xl border border-gray-200 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+    <div className="my-3 max-w-full overflow-x-auto rounded-2xl border border-gray-200/80 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
       <table className="w-full text-[12.5px]">
         <thead>
-          <tr className="border-b border-gray-200 bg-gray-50">
+          <tr className="border-b border-blue-100 bg-blue-50/55">
             {headers.map((h) => (
-              <th key={h} className="px-3 py-2.5 text-left text-xs font-600 text-gray-500 tracking-wide">
+              <th key={h} className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-[0.13em] text-blue-700">
                 {h}
               </th>
             ))}
@@ -341,7 +356,7 @@ function DocTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
             <tr key={i} className="border-b border-gray-100 last:border-0">
               {row.map((cell, j) => (
                 <td key={j} className="px-3 py-2.5 text-gray-700 align-top">
-                  <code className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-blue-800 font-mono">{cell}</code>
+                  <code className="rounded-lg bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-blue-800 ring-1 ring-slate-200/70">{cell}</code>
                 </td>
               ))}
             </tr>
@@ -354,14 +369,14 @@ function DocTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
 
 function RouteRow({ method, path, description }: { method: "GET" | "POST"; path: string; description: string }) {
   return (
-    <div className="my-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
+    <div className="my-3 rounded-2xl border border-gray-200/80 bg-white px-4 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:border-blue-200 hover:bg-blue-50/20">
       <div className="mb-1.5 flex min-w-0 flex-wrap items-center gap-2">
-        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-700 font-mono ${method === "POST" ? "bg-green-100 text-green-800" : "bg-blue-50 text-blue-800"}`}>
+        <span className={`shrink-0 rounded-lg border px-2 py-1 font-mono text-[10px] font-semibold ${method === "POST" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-blue-200 bg-blue-50 text-blue-700"}`}>
           {method}
         </span>
-        <code className="min-w-0 break-all text-[12.5px] font-semibold text-gray-900">{path}</code>
+        <code className="min-w-0 break-all text-[12.5px] font-semibold text-gray-950">{path}</code>
       </div>
-      <p className="break-words text-[12px] text-gray-500">{description}</p>
+      <p className="break-words text-xs leading-5 text-gray-600">{description}</p>
     </div>
   )
 }
@@ -370,11 +385,11 @@ function RouteRow({ method, path, description }: { method: "GET" | "POST"; path:
 function DocSectionOverview() {
   return (
     <div>
-      <div className="mb-1 inline-block rounded-full bg-blue-50 px-3 py-1 text-[11px] font-700 text-blue-700">
+      <div className="mb-2 inline-flex rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-700">
         REST · Production
       </div>
-      <h1 className="mb-2 text-2xl font-800 tracking-tight text-gray-950">PineTree API</h1>
-      <p className="mb-6 text-[13.5px] leading-relaxed text-gray-500">
+      <h1 className="mb-2 text-2xl font-semibold leading-tight tracking-tight text-gray-950 md:text-[1.7rem]">PineTree API</h1>
+      <p className="mb-6 max-w-2xl text-sm leading-5 text-gray-600">
         Accept crypto payments across Solana, Base, Lightning, and more. The PineTree API gives you checkout sessions,
         real-time webhooks, and a hosted payment page — so your customers can pay with any wallet in under 60 seconds.
       </p>
@@ -385,9 +400,9 @@ function DocSectionOverview() {
           ["Auth", "Bearer pt_live_..."],
           ["Flat fee", "$0.15 / tx"],
         ].map(([label, value]) => (
-          <div key={label} className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
-            <p className="mb-1 text-[11px] font-700 text-gray-500">{label}</p>
-            <code className="text-[11.5px] text-gray-900">{value}</code>
+          <div key={label} className="rounded-2xl border border-gray-200/80 bg-gradient-to-br from-white to-blue-50/35 p-3 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">{label}</p>
+            <code className="text-[11.5px] font-semibold text-gray-950">{value}</code>
           </div>
         ))}
       </div>
@@ -409,9 +424,9 @@ function DocSectionOverview() {
         ["Payment", "Tracks on-chain status. Lifecycle: open → processing → paid | failed | incomplete."],
         ["Webhook Event", "HMAC-signed HTTP POST when payment status changes. Use payment.confirmed to fulfill orders."],
       ].map(([title, desc]) => (
-        <div key={title} className="mb-2.5 rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm">
-          <p className="mb-1 text-[12.5px] font-700 text-gray-900">{title}</p>
-          <p className="text-[12px] text-gray-500 leading-relaxed">{desc}</p>
+        <div key={title} className="mb-2.5 rounded-2xl border border-gray-200/80 bg-white p-3.5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+          <p className="mb-1 text-sm font-semibold text-gray-950">{title}</p>
+          <p className="text-xs leading-5 text-gray-600">{desc}</p>
         </div>
       ))}
     </div>
@@ -421,8 +436,9 @@ function DocSectionOverview() {
 function DocSectionQuickstart() {
   return (
     <div>
-      <h1 className="mb-2 text-2xl font-800 tracking-tight text-gray-950">Quickstart</h1>
-      <p className="mb-5 text-[13.5px] text-gray-500">Integrate PineTree in minutes.</p>
+      <DocH1 eyebrow="Getting Started" description="Integrate PineTree in minutes. Start with a server-side checkout session, then verify the payment webhook before fulfillment.">
+        Quickstart
+      </DocH1>
       {[
         {
           step: "1",
@@ -470,11 +486,11 @@ res.redirect(session.checkoutUrl)`}</CodeBlock>
         },
       ].map(({ step, title, content }) => (
         <div key={step} className="mb-5 flex gap-4">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-[11px] font-700 text-blue-700 mt-0.5">
+          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-[11px] font-semibold text-blue-700 ring-1 ring-blue-100">
             {step}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="mb-1 text-[13px] font-700 text-gray-900">{title}</p>
+            <p className="mb-1 text-sm font-semibold text-gray-950">{title}</p>
             {content}
           </div>
         </div>
@@ -486,8 +502,9 @@ res.redirect(session.checkoutUrl)`}</CodeBlock>
 function DocSectionAuthentication() {
   return (
     <div>
-      <h1 className="mb-2 text-2xl font-800 tracking-tight text-gray-950">Authentication</h1>
-      <p className="mb-5 text-[13.5px] text-gray-500">Secret keys for server use. Public keys for browser use. Never mix them.</p>
+      <DocH1 eyebrow="Security" description="Secret keys are for server use. Public keys are for browser checkout flows. Never mix them.">
+        Authentication
+      </DocH1>
       <DocH2>Authorization header</DocH2>
       <CodeBlock>{`Authorization: Bearer pt_live_your_api_key_here
 Content-Type: application/json`}</CodeBlock>
@@ -502,7 +519,7 @@ Content-Type: application/json`}</CodeBlock>
           ["webhooks:write", "Retry webhook deliveries"],
         ]}
       />
-      <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-[12.5px] text-amber-800">
+      <div className="mt-4 rounded-2xl border border-amber-200/80 bg-amber-50/70 p-3.5 text-xs leading-5 text-amber-800">
         <strong>Security:</strong> Never use <code className="rounded bg-amber-100 px-1 text-xs">pt_live_*</code> keys in browser code.
         Use <code className="rounded bg-amber-100 px-1 text-xs">pk_live_*</code> public keys with the Browser SDK for frontend checkout flows.
       </div>
@@ -513,8 +530,12 @@ Content-Type: application/json`}</CodeBlock>
 function DocSectionCheckoutSessions() {
   return (
     <div>
-      <h1 className="mb-2 text-2xl font-800 tracking-tight text-gray-950">Checkout Sessions</h1>
-      <p className="mb-5 text-[13.5px] text-gray-500">Create a session server-side, redirect the customer to <code className="rounded bg-gray-100 px-1.5 text-xs text-blue-800">checkoutUrl</code>, and receive a webhook when payment is confirmed.</p>
+      <DocH1
+        eyebrow="Hosted Checkout"
+        description={<>Create a session server-side, redirect the customer to <code className="rounded-lg bg-blue-50 px-1.5 text-xs font-semibold text-blue-800 ring-1 ring-blue-100">checkoutUrl</code>, and receive a webhook when payment is confirmed.</>}
+      >
+        Checkout Sessions
+      </DocH1>
       <RouteRow method="POST" path="/checkout/sessions" description="Create a session. Requires checkout.sessions:create." />
       <RouteRow method="GET" path="/checkout/sessions" description="List sessions. Supports status, reference, limit, date filters." />
       <RouteRow method="GET" path="/checkout/sessions/{id}" description="Retrieve a single session by ID." />
@@ -552,8 +573,9 @@ console.log(session.checkoutUrl)  // redirect customer here`}</CodeBlock>
 function DocSectionPayments() {
   return (
     <div>
-      <h1 className="mb-2 text-2xl font-800 tracking-tight text-gray-950">Payments</h1>
-      <p className="mb-5 text-[13.5px] text-gray-500">Tracks on-chain payment status, network, and amount.</p>
+      <DocH1 eyebrow="Payment Objects" description="Track on-chain payment status, network, amount, and fulfillment reference.">
+        Payments
+      </DocH1>
       <RouteRow method="GET" path="/payments/{id}" description="Retrieve a payment. Requires payments:read." />
       <DocH2>Payment object</DocH2>
       <CodeBlock>{`{
@@ -572,7 +594,7 @@ function DocSectionPayments() {
       <CodeBlock>{`CREATED → PENDING → PROCESSING → CONFIRMED (status: "paid")
                              └→ FAILED    (status: "failed")
               └→ INCOMPLETE               (status: "incomplete")`}</CodeBlock>
-      <p className="mt-3 text-[12.5px] text-gray-500">Terminal states are permanent. Use <code className="rounded bg-gray-100 px-1 text-xs text-blue-800">payment.confirmed</code> webhook for order fulfillment.</p>
+      <p className="mt-3 text-xs leading-5 text-gray-600">Terminal states are permanent. Use <code className="rounded-lg bg-blue-50 px-1 text-xs text-blue-800 ring-1 ring-blue-100">payment.confirmed</code> webhook for order fulfillment.</p>
     </div>
   )
 }
@@ -580,8 +602,9 @@ function DocSectionPayments() {
 function DocSectionWebhooks() {
   return (
     <div>
-      <h1 className="mb-2 text-2xl font-800 tracking-tight text-gray-950">Webhooks</h1>
-      <p className="mb-5 text-[13.5px] text-gray-500">HMAC-signed events delivered to your HTTPS endpoint when payment status changes.</p>
+      <DocH1 eyebrow="Events" description="HMAC-signed events delivered to your HTTPS endpoint when payment status changes.">
+        Webhooks
+      </DocH1>
       <DocH2>Webhook headers</DocH2>
       <DocTable
         headers={["Header", "Description"]}
@@ -618,8 +641,9 @@ const event = pinetree.webhooks.constructEvent(
 function DocSectionWebhookDeliveries() {
   return (
     <div>
-      <h1 className="mb-2 text-2xl font-800 tracking-tight text-gray-950">Webhook Deliveries</h1>
-      <p className="mb-5 text-[13.5px] text-gray-500">Inspect delivery history and retry failed events.</p>
+      <DocH1 eyebrow="Reliability" description="Inspect delivery history and retry failed events from your server tooling.">
+        Webhook Deliveries
+      </DocH1>
       <RouteRow method="GET" path="/webhook-deliveries" description="List deliveries. Filter by status or eventType. Requires webhooks:read." />
       <RouteRow method="POST" path="/webhook-deliveries/{id}/retry" description="Manually retry a delivery. Requires webhooks:write." />
       <DocH2>Delivery statuses</DocH2>
@@ -642,8 +666,9 @@ console.log(delivery.attemptCount) // total delivery attempts`}</CodeBlock>
 function DocSectionErrors() {
   return (
     <div>
-      <h1 className="mb-2 text-2xl font-800 tracking-tight text-gray-950">Errors</h1>
-      <p className="mb-5 text-[13.5px] text-gray-500">All errors return a consistent JSON structure.</p>
+      <DocH1 eyebrow="Error Handling" description="All errors return a consistent JSON structure with a type, code, message, and request ID.">
+        Errors
+      </DocH1>
       <CodeBlock>{`{
   "error": {
     "type": "authentication_error",
@@ -684,10 +709,11 @@ try {
 function DocSectionIdempotency() {
   return (
     <div>
-      <h1 className="mb-2 text-2xl font-800 tracking-tight text-gray-950">Idempotency</h1>
-      <p className="mb-5 text-[13.5px] text-gray-500">Safely retry checkout session creation without duplicates.</p>
+      <DocH1 eyebrow="Retries" description="Safely retry checkout session creation without duplicates.">
+        Idempotency
+      </DocH1>
       <DocH2>Idempotency-Key header</DocH2>
-      <p className="mb-2 text-[12.5px] text-gray-600">Add to <code className="rounded bg-gray-100 px-1 text-xs text-blue-800">POST /checkout/sessions</code>. Use your order ID as the key.</p>
+      <p className="mb-2 text-xs leading-5 text-gray-600">Add to <code className="rounded-lg bg-blue-50 px-1 text-xs text-blue-800 ring-1 ring-blue-100">POST /checkout/sessions</code>. Use your order ID as the key.</p>
       <CodeBlock>{`const session = await pinetree.checkout.sessions.create(
   { amount: 2500, reference: "order_1042" },
   { idempotencyKey: "order_1042" }  // same key + same body = same session`}</CodeBlock>
@@ -707,9 +733,10 @@ function DocSectionIdempotency() {
 function DocSectionTesting() {
   return (
     <div>
-      <h1 className="mb-2 text-2xl font-800 tracking-tight text-gray-950">Testing</h1>
-      <p className="mb-5 text-[13.5px] text-gray-500">PineTree uses live keys only. Test with small amounts and ngrok for local webhooks.</p>
-      <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50/60 p-3.5 text-[12.5px] text-blue-800">
+      <DocH1 eyebrow="Validation" description="PineTree uses live keys only. Test with small amounts and ngrok for local webhooks.">
+        Testing
+      </DocH1>
+      <div className="mb-4 rounded-2xl border border-blue-200 bg-blue-50/60 p-3.5 text-xs leading-5 text-blue-800">
         <strong>No sandbox mode.</strong> Use amounts like <code className="rounded bg-blue-100 px-1 text-xs">1</code> ($0.01) for integration testing.
       </div>
       <DocH2>Platform test suite</DocH2>
@@ -727,8 +754,9 @@ npm run build      # clean build`}</CodeBlock>
 function DocSectionGoLive() {
   return (
     <div>
-      <h1 className="mb-2 text-2xl font-800 tracking-tight text-gray-950">Go-Live Checklist</h1>
-      <p className="mb-5 text-[13.5px] text-gray-500">Complete before accepting real payments.</p>
+      <DocH1 eyebrow="Launch" description="Complete these checks before accepting real payments.">
+        Go-Live Checklist
+      </DocH1>
       {[
         {
           title: "API & Keys",
@@ -765,10 +793,10 @@ function DocSectionGoLive() {
         },
       ].map(({ title, items }) => (
         <div key={title} className="mb-5">
-          <h2 className="mb-2 text-[13.5px] font-700 text-gray-900">{title}</h2>
-          <div className="rounded-xl border border-gray-200 bg-white">
+          <h2 className="mb-2 text-sm font-semibold text-gray-950">{title}</h2>
+          <div className="rounded-2xl border border-gray-200/80 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
             {items.map((item, i) => (
-              <div key={i} className="flex items-start gap-3 border-b border-gray-100 px-4 py-3 last:border-0 text-[12.5px] text-gray-700">
+              <div key={i} className="flex items-start gap-3 border-b border-gray-100 px-4 py-3 text-xs leading-5 text-gray-700 last:border-0">
                 <span className="mt-0.5 text-gray-300">□</span>
                 {item}
               </div>
@@ -802,50 +830,53 @@ function ApiReferencePanel() {
     <DashboardSection title="API Reference" titleTone="blue">
       <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
         {/* Intro banner */}
-        <div className="border-b border-gray-100 bg-gradient-to-r from-blue-50/40 to-white px-5 py-5 sm:px-6">
-          <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-blue-500">Documentation</p>
-          <h2 className="text-[15px] font-bold text-gray-950 sm:text-base">PineTree API Reference</h2>
-          <p className="mt-1 max-w-xl text-[12px] leading-relaxed text-gray-500">
-            Accept crypto payments using API keys, checkout sessions, real-time webhooks, and SDKs for Node and browsers.
-          </p>
-          <div className="mt-3 flex flex-wrap items-center gap-1.5">
-            {["REST API", "Webhooks", "Node SDK", "Browser SDK"].map((pill) => (
-              <span key={pill} className="rounded-full bg-blue-100 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700">
-                {pill}
-              </span>
-            ))}
-            <code className="rounded-full bg-gray-100 px-2.5 py-0.5 font-mono text-[10.5px] text-gray-500">
-              app.pinetree-payments.com
-            </code>
+        <div className="relative overflow-hidden border-b border-blue-100/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] px-5 py-5 sm:px-6">
+          <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/80 to-transparent" />
+          <div className="relative">
+            <p className={dashboardSectionLabelClass}>API Reference</p>
+            <h2 className={`mt-2 ${dashboardCardTitleClass}`}>PineTree API Reference</h2>
+            <p className={`mt-1 max-w-2xl ${dashboardSupportingTextClass}`}>
+              Accept crypto payments using API keys, checkout sessions, real-time webhooks, and SDKs for Node and browsers.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+              {["REST API", "Webhooks", "Node SDK", "Browser SDK"].map((pill) => (
+                <span key={pill} className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700">
+                  {pill}
+                </span>
+              ))}
+              <code className="rounded-full border border-gray-200 bg-white/90 px-2.5 py-1 font-mono text-[10.5px] font-semibold text-gray-700 shadow-sm">
+                app.pinetree-payments.com
+              </code>
+            </div>
           </div>
         </div>
 
         {/* Docs layout: stacked on mobile, sidebar+content on lg+ */}
         <div className="flex min-h-[480px] flex-col lg:flex-row">
           {/* Desktop sidebar — hidden on mobile */}
-          <nav className="hidden w-52 shrink-0 border-r border-gray-100 py-3 lg:block lg:max-h-[calc(100dvh-260px)] lg:overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <nav className="hidden w-56 shrink-0 border-r border-gray-100 bg-slate-50/45 py-3 lg:block lg:max-h-[calc(100dvh-260px)] lg:overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             {docNav.map(({ id, label }) => (
               <button
                 key={id}
                 type="button"
                 onClick={() => setActiveDoc(id)}
-                className={`block w-full border-l-2 px-4 py-1.5 text-left text-[12.5px] transition ${
+                className={`block w-full min-w-0 border-l-2 px-4 py-2 text-left text-xs font-medium transition ${
                   activeDoc === id
-                    ? "border-blue-600 bg-blue-50/60 font-semibold text-blue-700"
-                    : "border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+                    ? "border-blue-600 bg-blue-50/80 font-semibold text-blue-700"
+                    : "border-transparent text-gray-500 hover:bg-white hover:text-gray-950"
                 }`}
               >
-                {label}
+                <span className="block truncate">{label}</span>
               </button>
             ))}
           </nav>
 
           {/* Mobile dropdown — hidden on lg+ */}
-          <div className="border-b border-gray-100 px-4 py-3 lg:hidden">
+          <div className="border-b border-gray-100 bg-slate-50/60 px-4 py-3 lg:hidden">
             <select
               value={activeDoc}
               onChange={(e) => setActiveDoc(e.target.value as DocSection)}
-              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-[12.5px] text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-800 shadow-sm focus:outline-none focus:ring-4 focus:ring-blue-100"
             >
               {docNav.map(({ id, label }) => (
                 <option key={id} value={id}>{label}</option>

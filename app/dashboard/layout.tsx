@@ -142,14 +142,14 @@ export default function DashboardLayout({
         {/* SIDEBAR */}
         <aside
           className={`
-            fixed inset-y-0 left-0 z-40 w-64 bg-white border-r border-gray-200
+            fixed inset-y-0 left-0 z-40 flex h-[100dvh] max-h-[100dvh] w-64 flex-col overflow-hidden bg-white border-r border-gray-200
             transform transition-transform duration-300 ease-in-out
             ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
-            lg:translate-x-0 lg:flex lg:flex-col
-            min-h-screen pt-[env(safe-area-inset-top)]
+            lg:translate-x-0
+            pt-[env(safe-area-inset-top)]
           `}
         >
-          <div className="border-b border-gray-100 px-6 py-5">
+          <div className="shrink-0 border-b border-gray-100 px-6 py-5">
             <Link
               href="/dashboard"
               aria-label="PineTree Payments"
@@ -167,7 +167,7 @@ export default function DashboardLayout({
             </Link>
           </div>
 
-          <nav className="pinetree-sidebar-nav flex-1 space-y-1.5 overflow-y-auto px-3 py-4">
+          <nav className="pinetree-sidebar-nav min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain px-3 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
             {nav.map((item) => {
               const active = pathname === item.href
 
@@ -176,13 +176,13 @@ export default function DashboardLayout({
                   key={item.href}
                   href={item.href}
                   onClick={() => setSidebarOpen(false)}
-                  className={`block rounded-xl px-4 py-3 text-base font-medium outline-none transition focus-visible:ring-4 focus-visible:ring-blue-100 lg:text-sm ${
+                  className={`block min-w-0 max-w-full rounded-xl px-4 py-3 text-base font-medium outline-none transition focus-visible:ring-4 focus-visible:ring-blue-100 lg:text-sm ${
                     active
                       ? "bg-blue-50 text-blue-600 shadow-[inset_0_0_0_1px_rgba(0,82,255,0.08)]"
                       : "text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus-visible:bg-blue-50/70 focus-visible:text-blue-700"
                   }`}
                 >
-                  {item.name}
+                  <span className="block min-w-0 truncate">{item.name}</span>
                 </Link>
               )
             })}

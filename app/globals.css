@@ -47,22 +47,29 @@ body.pinetree-modal-open {
 
 /* Sidebar navigation — PineTree glass scrollbar */
 .pinetree-sidebar-nav {
-  /* Firefox */
   scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+  scrollbar-color: transparent transparent;
+  -ms-overflow-style: none;
 }
 .pinetree-sidebar-nav::-webkit-scrollbar {
-  width: 5px;
+  height: 0;
+  width: 0;
+  display: none;
 }
 .pinetree-sidebar-nav::-webkit-scrollbar-track {
   background: transparent;
 }
 .pinetree-sidebar-nav::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.30);
+  background: transparent;
   border-radius: 999px;
 }
 .pinetree-sidebar-nav::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 116, 139, 0.50);
+  background: transparent;
+}
+@supports (scrollbar-width: none) {
+  .pinetree-sidebar-nav {
+    scrollbar-width: none;
+  }
 }
 
 .form-field {
