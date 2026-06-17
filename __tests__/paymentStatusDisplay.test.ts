@@ -13,8 +13,8 @@ describe("shared payment status display", () => {
     ["PROCESSING", "Processing", "processing", "spinner"],
     ["CONFIRMED",  "Confirmed",  "confirmed",  "check-circle"],
     ["FAILED",     "Failed",     "failed",     "x-circle"],
-    ["INCOMPLETE", "Incomplete", "incomplete", "minus"],
-    ["EXPIRED",    "Expired",    "expired",    "clock"],
+    ["INCOMPLETE", "Incomplete", "incomplete", "x-circle"],
+    ["EXPIRED",    "Expired",    "expired",    "x-circle"],
   ])("%s displays as %s", (status, label, tone, icon) => {
     const display = getPaymentDisplayStatus(status)
 
@@ -87,40 +87,47 @@ describe("shared payment status display", () => {
     expect(display.tone).toBe("failed")
   })
 
-  it("Incomplete uses amber classes, not gray", () => {
+  it("Incomplete uses red classes, not amber or gray", () => {
     const display = getPaymentDisplayStatus("INCOMPLETE")
-    expect(display.classes).toContain("amber")
+    expect(display.classes).toContain("red")
+    expect(display.classes).not.toContain("amber")
     expect(display.classes).not.toContain("gray")
     expect(display.tone).toBe("incomplete")
   })
 
-  it("Expired uses amber classes, not gray", () => {
+  it("Expired uses red classes, not amber or gray", () => {
     const display = getPaymentDisplayStatus("EXPIRED")
-    expect(display.classes).toContain("amber")
+    expect(display.classes).toContain("red")
+    expect(display.classes).not.toContain("amber")
     expect(display.classes).not.toContain("gray")
     expect(display.tone).toBe("expired")
   })
 
-  it("no status tone maps payment states to gray classes", () => {
+  it("no payment status uses gray or amber classes", () => {
     const statuses = ["CREATED", "PENDING", "PROCESSING", "CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED"]
     for (const status of statuses) {
       const display = getPaymentDisplayStatus(status)
       expect(display.classes, `${status} should not use gray`).not.toContain("gray-1")
       expect(display.classes, `${status} should not use gray`).not.toContain("gray-7")
+      expect(display.classes, `${status} should not use amber`).not.toContain("amber")
     }
   })
 
-  it("Incomplete and Expired are visually distinct from Failed", () => {
+  it("Incomplete and Expired share red styling with Failed but keep distinct labels", () => {
     const incomplete = getPaymentDisplayStatus("INCOMPLETE")
     const expired    = getPaymentDisplayStatus("EXPIRED")
     const failed     = getPaymentDisplayStatus("FAILED")
 
-    expect(incomplete.classes).not.toContain("red")
-    expect(expired.classes).not.toContain("red")
+    expect(incomplete.classes).toContain("red")
+    expect(expired.classes).toContain("red")
     expect(failed.classes).toContain("red")
+
+    expect(incomplete.label).toBe("Incomplete")
+    expect(expired.label).toBe("Expired")
+    expect(failed.label).toBe("Failed")
   })
 
-  it("Incomplete and Expired share amber but have distinct labels", () => {
+  it("Incomplete and Expired share red styling but have distinct labels", () => {
     expect(getPaymentStatusLabel("INCOMPLETE")).toBe("Incomplete")
     expect(getPaymentStatusLabel("EXPIRED")).toBe("Expired")
   })
