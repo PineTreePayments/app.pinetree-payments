@@ -42,7 +42,10 @@ describe("cash transaction rail display", () => {
       network: null,
       status: "CONFIRMED",
       reference: "cash-reference",
-      footer: null
+      footer: null,
+      assetLabel: null,
+      amountPaidLabel: null,
+      rateLabel: null
     })
 
     expect(html).toContain("<dd>Cash</dd>")

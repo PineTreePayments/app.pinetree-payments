@@ -7,6 +7,7 @@ import {
 } from "@/lib/transactionRailDisplay"
 import { normalizeReportNetwork } from "./reportDisplayNormalization"
 import { getPaymentStatusLabel } from "@/lib/utils/paymentStatus"
+import { getPaymentAssetDisplay, type PaymentMetadataForAssetDisplay } from "@/lib/paymentAssetDisplay"
 
 const db = supabaseAdmin || supabase
 
@@ -23,6 +24,9 @@ export type ReceiptData = {
   status: string
   reference: string | null
   footer: string | null
+  assetLabel: string | null
+  amountPaidLabel: string | null
+  rateLabel: string | null
 }
 
 function escapeHtml(value: string) {
@@ -64,7 +68,7 @@ export async function getMerchantReceipt(
     await Promise.all([
       db
         .from("payments")
-        .select("id,merchant_id,gross_amount,currency,provider,network,status,provider_reference,created_at")
+        .select("id,merchant_id,gross_amount,currency,provider,network,status,provider_reference,created_at,metadata")
         .eq("id", paymentId)
         .eq("merchant_id", merchantId)
         .maybeSingle(),
@@ -104,6 +108,12 @@ export async function getMerchantReceipt(
     [settings?.city, settings?.state, settings?.zip].filter(Boolean).join(", ")
   ].filter(Boolean).join("\n")
 
+  const assetDisplay = getPaymentAssetDisplay(
+    String(payment.network || "") || null,
+    payment.metadata as PaymentMetadataForAssetDisplay | null,
+    Number(payment.gross_amount || 0)
+  )
+
   return {
     paymentId: String(payment.id),
     transactionId: showTransactionId ? String(transaction?.id || "") || null : null,
@@ -118,7 +128,10 @@ export async function getMerchantReceipt(
     reference: showWalletReference
       ? String(transaction?.provider_transaction_id || payment.provider_reference || "") || null
       : null,
-    footer: String(receiptSettings?.receipt_footer || "") || null
+    footer: String(receiptSettings?.receipt_footer || "") || null,
+    assetLabel: assetDisplay.assetLabel,
+    amountPaidLabel: assetDisplay.amountPaidLabel,
+    rateLabel: assetDisplay.rateLabel
   }
 }
 
@@ -130,6 +143,9 @@ export function renderReceiptHtml(receipt: ReceiptData) {
     ["Date / Time", formatDate(receipt.createdAt)],
     ["Amount", formatAmount(receipt.amount, receipt.currency)],
     ["Currency", receipt.currency],
+    ["Asset", receipt.assetLabel],
+    ["Amount Paid", receipt.amountPaidLabel],
+    ["Rate at Payment", receipt.rateLabel],
     ["Provider", receipt.provider ? displayRail.provider : null],
     ["Network", receipt.network || isCashTransactionProvider(receipt.provider) ? displayRail.network : null],
     ["Status", getPaymentStatusLabel(receipt.status)],
@@ -210,6 +226,9 @@ export async function renderReceiptPdf(receipt: ReceiptData) {
   if (receipt.transactionId) line("Transaction ID", receipt.transactionId)
   line("Date / Time", formatDate(receipt.createdAt))
   line("Currency", receipt.currency)
+  if (receipt.assetLabel) line("Asset", receipt.assetLabel)
+  if (receipt.amountPaidLabel) line("Amount Paid", receipt.amountPaidLabel)
+  if (receipt.rateLabel) line("Rate at Payment", receipt.rateLabel)
   if (receipt.provider) line("Provider", displayRail.provider)
   if (receipt.network || cashTransactionSecondaryLabel(receipt.provider)) line("Network", displayRail.network)
   line("Status", getPaymentStatusLabel(receipt.status), true)

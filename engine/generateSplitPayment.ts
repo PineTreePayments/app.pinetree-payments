@@ -248,6 +248,7 @@ export async function generateSplitPayment(
     usdTotalAmount,
     nativeAmount,
     nativeSymbol,
+    quotePriceUsd,
     merchantNativeAmount,
     feeNativeAmount,
     merchantNativeAmountAtomic,

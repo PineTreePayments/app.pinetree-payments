@@ -522,6 +522,8 @@ export async function createPayment(
         feeCaptureMethod: splitPayment.feeCaptureMethod,
         splitContract,
         expectedAmountNative: splitPayment.nativeAmount,
+        nativeSymbol: splitPayment.nativeSymbol ?? null,
+        quotePriceUsd: splitPayment.quotePriceUsd ?? null,
         merchantNativeAmount: splitPayment.merchantNativeAmount,
         feeNativeAmount: splitPayment.feeNativeAmount,
         merchantNativeAmountAtomic: splitPayment.merchantNativeAmountAtomic,

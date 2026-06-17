@@ -15,6 +15,7 @@ import {
   formatDashboardProvider,
   formatTransactionSecondaryLabel
 } from "@/components/dashboard/displayHelpers"
+import { getPaymentAssetDisplay } from "@/lib/paymentAssetDisplay"
 
 export type DashboardPaymentSummary = {
   id?: string | null
@@ -26,8 +27,16 @@ export type DashboardPaymentSummary = {
   status?: string | null
   provider_reference?: string | null
   metadata?: {
+    selectedAsset?: string | null
     split?: {
       lightningInvoice?: string | null
+      expectedAmountNative?: number | null
+      nativeSymbol?: string | null
+      quotePriceUsd?: number | null
+      lightningProviderMetadata?: {
+        amountSats?: number | null
+        btcPriceUsd?: number | null
+      } | null
     } | null
   } | null
 }
@@ -111,12 +120,27 @@ function buildDetailRows(input: {
 }): DetailDisplayRow[] {
   const { tx, payment, statusLabel, statusTime, references } = input
   const provider = String(tx.provider || "").toLowerCase()
-  const commonRows: DetailDisplayRow[] = [
+
+  const assetDisplay = getPaymentAssetDisplay(
+    tx.network,
+    payment?.metadata ?? null,
+    Number(payment?.gross_amount ?? 0)
+  )
+
+  const assetRows: DetailDisplayRow[] = []
+  if (assetDisplay.assetLabel) assetRows.push({ label: "Asset", value: assetDisplay.assetLabel })
+  if (assetDisplay.amountPaidLabel) assetRows.push({ label: "Amount Paid", value: assetDisplay.amountPaidLabel })
+  if (assetDisplay.rateLabel) assetRows.push({ label: "Rate at Payment", value: assetDisplay.rateLabel })
+
+  const coreRows: DetailDisplayRow[] = [
     { label: "Reference", value: formatTransactionReference(tx), mono: true },
     { label: "Payment ID", value: references.paymentId, mono: true },
     { label: "Transaction ID", value: references.transactionId, mono: true },
     { label: "Amount", value: formatUsd(Number(payment?.gross_amount ?? 0)) },
-    { label: "Currency", value: payment?.currency || null },
+    { label: "Currency", value: payment?.currency || null }
+  ]
+
+  const tailRows: DetailDisplayRow[] = [
     { label: "Status", value: statusLabel },
     { label: "Date / Time", value: formatChicagoDateTime(statusTime) },
     { label: "Channel", value: tx.channel || null }
@@ -124,9 +148,9 @@ function buildDetailRows(input: {
 
   if (provider === "cash") {
     return [
-      ...commonRows.slice(0, 5),
+      ...coreRows,
       { label: "Payment Method", value: "Cash" },
-      ...commonRows.slice(5),
+      ...tailRows,
       { label: "Cash Reference", value: formatTransactionReference(tx), mono: true }
     ]
   }
@@ -141,10 +165,11 @@ function buildDetailRows(input: {
   ) {
     const lightningInvoice = payment?.metadata?.split?.lightningInvoice || null
     return [
-      ...commonRows.slice(0, 5),
+      ...coreRows,
+      ...assetRows,
       { label: "Network", value: "Lightning" },
       { label: "Provider", value: providerName(tx.provider) },
-      ...commonRows.slice(5),
+      ...tailRows,
       { label: "Provider Reference", value: formatProviderReference(tx.provider, references.providerReference), mono: true },
       { label: "Lightning Invoice", value: lightningInvoice, mono: true }
     ]
@@ -152,10 +177,11 @@ function buildDetailRows(input: {
 
   if (provider === "base") {
     return [
-      ...commonRows.slice(0, 5),
+      ...coreRows,
+      ...assetRows,
       { label: "Network", value: "Base" },
       { label: "Provider", value: "Base Pay" },
-      ...commonRows.slice(5),
+      ...tailRows,
       { label: "Blockchain Transaction", value: formatProviderReference(tx.provider, references.blockchainReference), mono: true },
       { label: "Provider Reference", value: formatProviderReference(tx.provider, references.providerReference), mono: true }
     ]
@@ -163,20 +189,22 @@ function buildDetailRows(input: {
 
   if (provider === "solana") {
     return [
-      ...commonRows.slice(0, 5),
+      ...coreRows,
+      ...assetRows,
       { label: "Network", value: "Solana" },
       { label: "Provider", value: "Solana Pay" },
-      ...commonRows.slice(5),
+      ...tailRows,
       { label: "Blockchain Transaction", value: formatProviderReference(tx.provider, references.blockchainReference), mono: true },
       { label: "Provider Reference", value: formatProviderReference(tx.provider, references.providerReference), mono: true }
     ]
   }
 
   return [
-    ...commonRows.slice(0, 5),
+    ...coreRows,
+    ...assetRows,
     { label: "Network", value: networkName(tx.network) },
     { label: "Provider", value: providerName(tx.provider) },
-    ...commonRows.slice(5),
+    ...tailRows,
     { label: "Blockchain Transaction", value: formatProviderReference(tx.provider, references.blockchainReference), mono: true },
     { label: "Provider Reference", value: formatProviderReference(tx.provider, references.providerReference), mono: true }
   ]
