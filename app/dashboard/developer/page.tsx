@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import type { ReactNode } from "react"
-import { Book, BookOpen, Code2, KeyRound, Plug, Webhook } from "lucide-react"
+import { Activity, BookOpen, Code2, KeyRound, Plug, Webhook } from "lucide-react"
 import {
   DashboardSection,
   ProviderStatusPill,
@@ -93,32 +93,6 @@ export default function DeveloperPage() {
           <button
             type="button"
             onClick={() => {
-              setDocSection("overview")
-              setTab("docs")
-            }}
-            aria-pressed={tab === "docs" && docSection === "overview"}
-            className={`rounded-2xl border p-4 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition ${
-              tab === "docs" && docSection === "overview"
-                ? "border-blue-200 bg-blue-50/60"
-                : "border-gray-200/80 bg-white hover:border-blue-200 hover:bg-blue-50/30"
-            } focus:outline-none focus:ring-4 focus:ring-blue-100`}
-          >
-            <div className="flex min-w-0 items-start gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
-                <Book className="h-4 w-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <h2 className="text-sm font-semibold text-gray-950">API Reference</h2>
-                <p className="mt-1 text-[12px] leading-5 text-gray-500">
-                  Full documentation — endpoints, authentication, webhooks, SDKs, and integration guides.
-                </p>
-                <span className="mt-2 inline-flex text-[11.5px] font-semibold leading-5 text-blue-700">View docs</span>
-              </div>
-            </div>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
               setDocSection("quickstart")
               setTab("docs")
             }}
@@ -142,6 +116,37 @@ export default function DeveloperPage() {
               </div>
             </div>
           </button>
+          <div className="rounded-2xl border border-gray-200/80 bg-white p-4 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:border-blue-200 hover:bg-blue-50/30">
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+                <Activity className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-sm font-semibold text-gray-950">Developer Status</h2>
+                <p className="mt-1 text-[12px] leading-5 text-gray-500">
+                  Developer account setup and connection health.
+                </p>
+                <div className="mt-3 space-y-2">
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span className="font-medium text-gray-600">API Keys</span>
+                    <button type="button" onClick={() => setTab("keys")} className="font-semibold leading-5 text-blue-700 hover:text-blue-800">
+                      Manage keys
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span className="font-medium text-gray-600">Webhooks</span>
+                    <button type="button" onClick={() => setTab("webhooks")} className="font-semibold leading-5 text-blue-700 hover:text-blue-800">
+                      Manage webhooks
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span className="font-medium text-gray-600">SDKs</span>
+                    <span className="font-semibold leading-5 text-gray-700">Ready</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </DashboardSection>
 
@@ -883,13 +888,13 @@ function ApiReferencePanel({
   const SectionComponent = docSectionComponents[activeDoc]
 
   return (
-    <DashboardSection title="API Reference" titleTone="blue">
+    <DashboardSection title="Documents" titleTone="blue">
       <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
         {/* Intro banner */}
         <div className="relative overflow-hidden border-b border-blue-100/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] px-5 py-5 sm:px-6">
           <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/80 to-transparent" />
           <div className="relative">
-            <p className={dashboardSectionLabelClass}>API Reference</p>
+            <p className={dashboardSectionLabelClass}>Documents</p>
             <h2 className={`mt-2 ${dashboardCardTitleClass}`}>PineTree API Reference</h2>
             <p className={`mt-1 max-w-2xl ${dashboardSupportingTextClass}`}>
               Accept crypto payments using API keys, checkout sessions, real-time webhooks, and SDKs for Node and browsers.
