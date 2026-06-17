@@ -885,6 +885,9 @@ const docSectionComponents: Record<DocSection, () => ReactNode> = {
   "go-live": DocSectionGoLive,
 }
 
+const headerChipClass =
+  "inline-flex items-center rounded-full border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-semibold leading-5 text-blue-700"
+
 function ApiReferencePanel({
   activeDoc,
   setActiveDoc,
@@ -908,13 +911,9 @@ function ApiReferencePanel({
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-1.5">
               {["REST API", "Webhooks", "Node SDK", "Browser SDK"].map((pill) => (
-                <span key={pill} className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700">
-                  {pill}
-                </span>
+                <span key={pill} className={headerChipClass}>{pill}</span>
               ))}
-              <span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1.5 text-[10.5px] font-semibold leading-5 text-blue-700">
-                app.pinetree-payments.com
-              </span>
+              <span className={headerChipClass}>app.pinetree-payments.com</span>
             </div>
           </div>
         </div>
