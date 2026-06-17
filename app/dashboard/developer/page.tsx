@@ -912,9 +912,9 @@ function ApiReferencePanel({
                   {pill}
                 </span>
               ))}
-              <code className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1.5 font-mono text-[10.5px] font-semibold leading-5 text-blue-700">
+              <span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1.5 text-[10.5px] font-semibold leading-5 text-blue-700">
                 app.pinetree-payments.com
-              </code>
+              </span>
             </div>
           </div>
         </div>
