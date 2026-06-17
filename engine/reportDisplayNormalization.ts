@@ -80,7 +80,7 @@ export function buildNetworkAssetLabel(network: string, asset: string): string {
 export function buildNetworkAssetTotals(rows: AssetRow[]): Record<string, number> {
   const totals: Record<string, number> = {}
   for (const row of rows) {
-    if (row.status !== "Success" && row.status !== "CONFIRMED") continue
+    if (row.status !== "Confirmed" && row.status !== "CONFIRMED") continue
     const label = buildNetworkAssetLabel(row.network, row.asset)
     totals[label] = (totals[label] || 0) + row.gross
   }

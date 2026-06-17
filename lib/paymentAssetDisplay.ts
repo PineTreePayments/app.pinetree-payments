@@ -87,7 +87,10 @@ export function getPaymentAssetDisplay(
   if (normalizedNetwork === "bitcoin_lightning") {
     const lm = split?.lightningProviderMetadata ?? null
     const amountSats = safePositiveNumber(lm?.amountSats)
-    const btcPriceUsd = safePositiveNumber(lm?.btcPriceUsd)
+    // Check lightningProviderMetadata first (NWC), then split.quotePriceUsd (Speed / new payments)
+    const btcPriceUsd =
+      safePositiveNumber(lm?.btcPriceUsd) ??
+      safePositiveNumber(split?.quotePriceUsd)
 
     return {
       assetLabel: "BTC",

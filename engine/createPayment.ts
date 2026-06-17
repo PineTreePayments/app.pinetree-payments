@@ -388,6 +388,10 @@ export async function createPayment(
   let btcPriceUsd: number | undefined
   let speedMerchantAccountId: string | undefined
   if (network === "bitcoin_lightning") {
+    // Fetch BTC price for all Lightning paths so quotePriceUsd is stored for receipt display.
+    const prices = await getMarketPricesUSD()
+    btcPriceUsd = prices.BTC
+
     if (providerName === SPEED_PROVIDER_NAME) {
       const speedSetup = await getMerchantSpeedProvider(input.merchantId)
       if (!speedSetup?.accountId || !speedSetup.readyForPayments) {
@@ -396,16 +400,14 @@ export async function createPayment(
       speedMerchantAccountId = speedSetup.accountId
       merchantWalletAddress = speedMerchantAccountId
     } else {
-    const nwcSetup = await getMerchantNwcUriForPayment(input.merchantId)
-    if (!nwcSetup) {
-      throw new Error("Lightning wallet not connected. Please connect an NWC-compatible Lightning wallet in your dashboard.")
-    }
-    if (!nwcSetup.readiness.ready) {
-      throw new Error(nwcSetup.readiness.reason || "Lightning wallet is connected but not ready for live payments.")
-    }
-    nwcUri = nwcSetup.nwcUri
-    const prices = await getMarketPricesUSD()
-    btcPriceUsd = prices.BTC
+      const nwcSetup = await getMerchantNwcUriForPayment(input.merchantId)
+      if (!nwcSetup) {
+        throw new Error("Lightning wallet not connected. Please connect an NWC-compatible Lightning wallet in your dashboard.")
+      }
+      if (!nwcSetup.readiness.ready) {
+        throw new Error(nwcSetup.readiness.reason || "Lightning wallet is connected but not ready for live payments.")
+      }
+      nwcUri = nwcSetup.nwcUri
     }
   }
 
@@ -523,7 +525,9 @@ export async function createPayment(
         splitContract,
         expectedAmountNative: splitPayment.nativeAmount,
         nativeSymbol: splitPayment.nativeSymbol ?? null,
-        quotePriceUsd: splitPayment.quotePriceUsd ?? null,
+        quotePriceUsd: network === "bitcoin_lightning" && btcPriceUsd
+          ? btcPriceUsd
+          : splitPayment.quotePriceUsd ?? null,
         merchantNativeAmount: splitPayment.merchantNativeAmount,
         feeNativeAmount: splitPayment.feeNativeAmount,
         merchantNativeAmountAtomic: splitPayment.merchantNativeAmountAtomic,

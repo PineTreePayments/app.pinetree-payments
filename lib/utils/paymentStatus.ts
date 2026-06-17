@@ -9,7 +9,7 @@
 export type PaymentStatusTone =
   | "waiting"
   | "processing"
-  | "success"
+  | "confirmed"
   | "failed"
   | "incomplete"
   | "expired"
@@ -18,7 +18,7 @@ export type PaymentStatusIcon = "clock" | "spinner" | "check-circle" | "x-circle
 
 export type PaymentDisplayStatus = {
   status: string
-  label: "Waiting" | "Processing" | "Success" | "Failed" | "Incomplete" | "Expired"
+  label: "Waiting" | "Processing" | "Confirmed" | "Failed" | "Incomplete" | "Expired"
   message: string
   tone: PaymentStatusTone
   icon: PaymentStatusIcon
@@ -34,9 +34,9 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
     message: "Payment request created and awaiting customer action.",
     tone: "waiting",
     icon: "clock",
-    classes: "border border-gray-200 bg-gray-100 text-gray-700",
-    iconClassName: "text-gray-500",
-    iconBgClassName: "bg-gray-100",
+    classes: "border border-blue-200 bg-blue-100 text-blue-800",
+    iconClassName: "text-blue-600",
+    iconBgClassName: "bg-blue-50",
   },
   processing: {
     label: "Processing",
@@ -48,10 +48,10 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
     iconBgClassName: "bg-blue-50",
     spin: true,
   },
-  success: {
-    label: "Success",
+  confirmed: {
+    label: "Confirmed",
     message: "Payment successfully completed.",
-    tone: "success",
+    tone: "confirmed",
     icon: "check-circle",
     classes: "border border-green-200 bg-green-100 text-green-800",
     iconClassName: "text-green-600",
@@ -71,9 +71,9 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
     message: "Customer left the payment or switched payment methods before sending funds.",
     tone: "incomplete",
     icon: "minus",
-    classes: "border border-gray-200 bg-gray-100 text-gray-700",
-    iconClassName: "text-gray-500",
-    iconBgClassName: "bg-gray-100",
+    classes: "border border-amber-200 bg-amber-100 text-amber-800",
+    iconClassName: "text-amber-600",
+    iconBgClassName: "bg-amber-50",
   },
   expired: {
     label: "Expired",
@@ -94,7 +94,7 @@ function displayToneForStatus(normalizedStatus: string): PaymentStatusTone {
     return "processing"
   }
   if (["CONFIRMED", "SUCCESS", "SUCCEEDED", "COMPLETE", "COMPLETED", "PAID"].includes(normalizedStatus)) {
-    return "success"
+    return "confirmed"
   }
   if (["FAILED", "ERROR", "REJECTED", "DECLINED", "DENIED"].includes(normalizedStatus)) {
     return "failed"

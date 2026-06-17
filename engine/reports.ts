@@ -242,7 +242,7 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
   let incompleteCount = 0
 
   for (const row of transactionsTable) {
-    if (row.status === "Success") {
+    if (row.status === "Confirmed") {
       confirmedCount++
       grossVolume += row.gross
       netSettlements += row.netSettlement

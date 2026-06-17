@@ -1115,7 +1115,7 @@ export default function POSLayout({ terminalContext }: Props) {
           <div className="space-y-5">
 
             <div className="text-center">
-              <p className="text-xs uppercase tracking-widest text-gray-500 mb-2">Success</p>
+              <p className="text-xs uppercase tracking-widest text-gray-500 mb-2">Confirmed</p>
               {changeDue > 0.005 ? (
                 <>
                   <p className="text-sm text-gray-500 mb-1">Change Due</p>

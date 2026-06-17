@@ -250,7 +250,7 @@ export async function generateReportPdfFromSummary(report: ReportSummary) {
     { label: "PineTree Fees",   value: currency(report.pineTreeFees),   accent: "neutral" },
     { label: "Taxes Collected", value: currency(report.taxesCollected), accent: "neutral" },
     { label: "Transactions",    value: String(report.transactionCount), accent: "neutral" },
-    { label: "Success",         value: String(report.confirmedCount),   accent: "green" },
+    { label: "Confirmed",        value: String(report.confirmedCount),   accent: "green" },
     { label: "Failed",          value: String(report.failedCount),      accent: "red" },
     { label: "Incomplete",      value: String(report.incompleteCount),  accent: "neutral" },
     { label: "Success Rate",    value: `${report.successRate}%`,        accent: "green" },
