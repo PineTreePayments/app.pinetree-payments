@@ -777,10 +777,10 @@ Content-Type: application/json</code></pre>
       <table class="pt-table">
         <thead><tr><th>Header</th><th>Description</th></tr></thead>
         <tbody>
-          <tr><td><code>PineTree-Signature</code></td><td>HMAC-SHA256 of the raw body using your signing secret</td></tr>
+          <tr><td><code>PineTree-Signature</code></td><td>HMAC-SHA256 of <code>PineTree-Timestamp + "." + raw body</code> using your signing secret</td></tr>
           <tr><td><code>PineTree-Timestamp</code></td><td>ISO 8601 — must be within 5 minutes of current time</td></tr>
           <tr><td><code>PineTree-Event-Id</code></td><td>Unique event ID for deduplication</td></tr>
-          <tr><td><code>PineTree-Webhook-Version</code></td><td><code>2026-06-12</code></td></tr>
+          <tr><td><code>PineTree-Event-Schema</code></td><td><code>payments-v1</code></td></tr>
         </tbody>
       </table>
 
@@ -801,6 +801,7 @@ function verify(rawBody, signature, timestamp, secret) {
   if (age > 300) return false  // reject stale events
 
   const expected = createHmac("sha256", secret)
+    .update(timestamp + ".")
     .update(rawBody).digest("hex")
   const actual = signature.replace(/^sha256=/i, "")
 

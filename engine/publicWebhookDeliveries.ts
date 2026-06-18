@@ -16,6 +16,7 @@ export type PublicWebhookDelivery = {
   lastStatusCode: number | null
   lastError: string | null
   deliveredAt: string | null
+  deadLetteredAt: string | null
   createdAt: string
 }
 
@@ -33,6 +34,7 @@ export function normalizePublicWebhookDelivery(
     lastStatusCode: delivery.last_status_code ?? delivery.response_status,
     lastError: delivery.last_error,
     deliveredAt: delivery.delivered_at,
+    deadLetteredAt: delivery.dead_lettered_at,
     createdAt: delivery.created_at,
   }
 }

@@ -12,8 +12,8 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(Math.max(1, parseInt(searchParams.get("limit") || "50")), 100)
     const before = searchParams.get("before") // ISO timestamp cursor for pagination
 
-    // Fetch `payload` so we can surface the `_test` flag in the response.
-    // Test deliveries have `_test: true` at the top level of their payload JSONB.
+    // Fetch `payload` so we can surface test deliveries in the dashboard.
+    // Current test deliveries use `livemode: false`; old rows may still carry `_test`.
     let query = supabase
       .from("webhook_deliveries")
       .select("id, event, status, response_status, attempt_count, created_at, payload")
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
       response_status: row.response_status,
       attempt_count: row.attempt_count,
       created_at: row.created_at,
-      is_test: row.payload?._test === true,
+      is_test: row.payload?.livemode === false || row.payload?._test === true,
     }))
 
     const nextCursor =

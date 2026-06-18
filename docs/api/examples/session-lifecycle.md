@@ -164,7 +164,7 @@ res.redirect(session.checkoutUrl)
 // 2. Handle outcome via webhook
 // app/api/webhooks/pinetree/route.ts
 switch (event.type) {
-  case "checkout.session.paid": {
+  case "checkout.session.completed": {
     const session = event.data.object as CheckoutSession
     await db.orders.update({
       where: { reference: session.reference },

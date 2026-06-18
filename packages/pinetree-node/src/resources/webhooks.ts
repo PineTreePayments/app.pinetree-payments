@@ -1,6 +1,12 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import { WebhookVerificationError } from "../errors"
-import type { Event } from "../types"
+import {
+  WEBHOOK_SCHEMA,
+  WEBHOOK_SCHEMA_HEADER,
+  LEGACY_SCHEMA_HEADER,
+  type Event,
+  type PineTreeEvent,
+} from "../types"
 
 const DEFAULT_TOLERANCE_SECONDS = 300
 
@@ -8,13 +14,19 @@ export const PineTreeWebhookHeaders = {
   signature: "PineTree-Signature",
   timestamp: "PineTree-Timestamp",
   eventId: "PineTree-Event-Id",
-  version: "PineTree-Webhook-Version",
+  schema: WEBHOOK_SCHEMA_HEADER,
+  /** @deprecated Use `schema` (PineTree-Event-Schema) instead */
+  version: LEGACY_SCHEMA_HEADER,
 } as const
 
-export const PineTreeWebhookVersion = "2026-06-12"
+export const PineTreeWebhookVersion = WEBHOOK_SCHEMA
 
 export type PineTreeWebhookHeaderValue = string | string[] | undefined
 export type PineTreeWebhookHeaderObject = Record<string, PineTreeWebhookHeaderValue>
+
+function normalizeWebhookEventType(type: string) {
+  return type === "checkout.session.paid" ? "checkout.session.completed" : type
+}
 
 function bodyToBuffer(rawBody: string | Uint8Array) {
   return typeof rawBody === "string" ? Buffer.from(rawBody, "utf8") : Buffer.from(rawBody)
@@ -93,6 +105,7 @@ export class WebhooksResource {
     }
 
     const expected = createHmac("sha256", secret)
+      .update(`${timestamp}.`)
       .update(bodyToBuffer(rawBody))
       .digest("hex")
     const actual = normalizeSignature(signature)
@@ -118,8 +131,11 @@ export class WebhooksResource {
       !event ||
       typeof event !== "object" ||
       typeof (event as Event).eventId !== "string" ||
+      (event as Event).object !== "event" ||
       typeof (event as Event).type !== "string" ||
+      (event as Event).schema !== PineTreeWebhookVersion ||
       typeof (event as Event).createdAt !== "string" ||
+      typeof (event as Event).livemode !== "boolean" ||
       !(event as Event).data?.object
     ) {
       throw new WebhookVerificationError("Webhook payload does not match the v1 event contract.")
@@ -131,13 +147,20 @@ export class WebhooksResource {
           "The PineTree-Event-Id header does not match the webhook payload."
         )
       }
-      const version = readHeader(headers, PineTreeWebhookHeaders.version)
-      if (version && version !== PineTreeWebhookVersion) {
+      const schema = readHeader(
+        headers,
+        PineTreeWebhookHeaders.schema,
+        PineTreeWebhookHeaders.version
+      )
+      if (schema && schema !== PineTreeWebhookVersion) {
         throw new WebhookVerificationError(
-          `Unsupported PineTree webhook version: ${version}.`
+          `Unsupported PineTree event schema: ${schema}.`
         )
       }
     }
-    return event as Event<T>
+    return {
+      ...event as PineTreeEvent,
+      type: normalizeWebhookEventType((event as Event).type),
+    } as Event<T>
   }
 }

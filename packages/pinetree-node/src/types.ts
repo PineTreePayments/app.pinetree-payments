@@ -77,7 +77,17 @@ export type Payment = {
   updatedAt: string
 }
 
-export type WebhookDeliveryStatus = "pending" | "delivered" | "failed"
+export type PaymentLink = {
+  id: string
+  object: "payment_link"
+  status: "active" | "disabled" | "expired" | string
+  amount: number | null
+  currency: string | null
+  reference: string | null
+  metadata: Record<string, unknown>
+}
+
+export type WebhookDeliveryStatus = "pending" | "delivered" | "failed" | "dead_letter"
 
 export type WebhookDelivery = {
   id: string
@@ -90,6 +100,7 @@ export type WebhookDelivery = {
   lastStatusCode: number | null
   lastError: string | null
   deliveredAt: string | null
+  deadLetteredAt: string | null
   createdAt: string
 }
 
@@ -107,14 +118,59 @@ export type WebhookDeliveryList = {
   nextCursor: string | null
 }
 
-export type Event<T = unknown> = {
+export const WEBHOOK_SCHEMA = "payments-v1"
+export const WEBHOOK_SCHEMA_HEADER = "PineTree-Event-Schema"
+export const LEGACY_SCHEMA_HEADER = "PineTree-Webhook-Version"
+
+export type PaymentEventType =
+  | "payment.created"
+  | "payment.pending"
+  | "payment.processing"
+  | "payment.confirmed"
+  | "payment.failed"
+  | "payment.expired"
+  | "payment.cancelled"
+  | "payment.incomplete"
+  | "payment.refunded"
+
+export type CheckoutSessionEventType =
+  | "checkout.session.created"
+  | "checkout.session.processing"
+  | "checkout.session.completed"
+  | "checkout.session.failed"
+  | "checkout.session.expired"
+  | "checkout.session.canceled"
+
+export type LegacyCheckoutSessionEventType = "checkout.session.paid"
+
+export type PaymentLinkEventType =
+  | "payment_link.created"
+  | "payment_link.disabled"
+  | "payment_link.expired"
+
+export type WebhookEventType =
+  | PaymentEventType
+  | CheckoutSessionEventType
+  | PaymentLinkEventType
+
+export type PineTreeEventBase<TType extends WebhookEventType, TObject> = {
   eventId: string
-  type: string
+  object: "event"
+  type: TType
+  schema: typeof WEBHOOK_SCHEMA
   createdAt: string
+  livemode: boolean
   data: {
-    object: T
+    object: TObject
   }
 }
+
+export type PaymentEvent = PineTreeEventBase<PaymentEventType, Payment>
+export type CheckoutSessionEvent = PineTreeEventBase<CheckoutSessionEventType, CheckoutSession>
+export type PaymentLinkEvent = PineTreeEventBase<PaymentLinkEventType, PaymentLink>
+export type PineTreeEvent = PaymentEvent | CheckoutSessionEvent | PaymentLinkEvent
+
+export type Event<T = PineTreeEvent["data"]["object"]> = PineTreeEventBase<WebhookEventType, T>
 
 export type PineTreeOptions = {
   apiKey: string

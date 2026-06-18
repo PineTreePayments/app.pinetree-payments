@@ -30,14 +30,16 @@ function make_signed_event(string $secret, array $event_override = []): array {
 
     $event = array_merge([
         'eventId'   => 'evt_test_001',
-        'type'      => 'checkout.session.paid',
+        'type'      => 'checkout.session.completed',
+        'schema'    => 'payments-v1',
         'createdAt' => date('c'),
+        'livemode'  => false,
         'data'      => ['object' => $session],
     ], $event_override);
 
     $raw_body  = json_encode($event);
-    $signature = hash_hmac('sha256', $raw_body, $secret, false);
     $timestamp = date('c');
+    $signature = hash_hmac('sha256', $timestamp . '.' . $raw_body, $secret, false);
 
     return ['raw_body' => $raw_body, 'signature' => $signature, 'timestamp' => $timestamp, 'event' => $event];
 }
@@ -67,7 +69,17 @@ function test_valid_signature_passes(): void {
     $event = $wh->verify_and_parse($f['raw_body'], $f['signature'], $f['timestamp']);
 
     assert_equals('evt_test_001', $event['eventId'] ?? null, 'eventId parsed');
-    assert_equals('checkout.session.paid', $event['type'] ?? null, 'type parsed');
+    assert_equals('checkout.session.completed', $event['type'] ?? null, 'type parsed');
+}
+
+function test_legacy_paid_event_normalizes_to_completed(): void {
+    $secret = 'whsec_legacy_paid';
+    $f      = make_signed_event($secret, ['type' => 'checkout.session.paid']);
+    $wh     = make_webhook($secret);
+
+    $event = $wh->verify_and_parse($f['raw_body'], $f['signature'], $f['timestamp']);
+
+    assert_equals('checkout.session.completed', $event['type'] ?? null, 'Legacy paid normalized');
 }
 
 function test_sha256_prefix_in_signature_is_stripped(): void {
@@ -156,8 +168,8 @@ function test_invalid_timestamp_format_fails(): void {
 function test_malformed_json_payload_fails(): void {
     $secret    = 'whsec_json';
     $bad_body  = 'not valid json';
-    $signature = hash_hmac('sha256', $bad_body, $secret);
     $timestamp = date('c');
+    $signature = hash_hmac('sha256', $timestamp . '.' . $bad_body, $secret);
     $wh        = make_webhook($secret);
 
     $threw = false;
@@ -174,8 +186,8 @@ function test_missing_event_id_fails(): void {
     $secret    = 'whsec_fields';
     $bad_event = ['type' => 'checkout.session.paid', 'createdAt' => date('c'), 'data' => ['object' => []]];
     $raw_body  = json_encode($bad_event);
-    $signature = hash_hmac('sha256', $raw_body, $secret);
     $timestamp = date('c');
+    $signature = hash_hmac('sha256', $timestamp . '.' . $raw_body, $secret);
     $wh        = make_webhook($secret);
 
     $threw = false;

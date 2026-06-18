@@ -1,17 +1,17 @@
 import { supabaseAdmin, supabase as supabaseAnon } from "./supabase"
+export {
+  LEGACY_WEBHOOK_EVENTS,
+  SUPPORTED_WEBHOOK_EVENTS,
+  WEBHOOK_SCHEMA,
+  normalizeWebhookEventType,
+  webhookSubscriptionMatches,
+  type CanonicalWebhookEvent,
+  type LegacyWebhookEvent,
+  type WebhookEvent,
+} from "@/lib/webhooks/events"
+import type { WebhookEvent } from "@/lib/webhooks/events"
 
 const supabase = supabaseAdmin || supabaseAnon
-
-export type WebhookEvent =
-  | "payment.confirmed"
-  | "payment.failed"
-  | "payment.incomplete"
-  | "checkout.session.created"
-  | "checkout.session.processing"
-  | "checkout.session.paid"
-  | "checkout.session.failed"
-  | "checkout.session.expired"
-  | "checkout.session.canceled"
 
 export type MerchantWebhook = {
   id: string
@@ -24,7 +24,21 @@ export type MerchantWebhook = {
   updated_at: string
 }
 
-export type WebhookDeliveryStatus = "pending" | "delivered" | "failed"
+export type WebhookDeliveryStatus = "pending" | "delivered" | "failed" | "dead_letter"
+
+export const WEBHOOK_MAX_DELIVERY_ATTEMPTS = 10
+export const WEBHOOK_RETRY_DELAYS_SECONDS = [60, 120, 240, 480, 960, 1800, 3600] as const
+
+function getNextRetryAt(status: WebhookDeliveryStatus, attemptCount: number) {
+  if (status !== "failed") return null
+  const index = Math.min(Math.max(attemptCount - 1, 0), WEBHOOK_RETRY_DELAYS_SECONDS.length - 1)
+  return new Date(Date.now() + WEBHOOK_RETRY_DELAYS_SECONDS[index] * 1000).toISOString()
+}
+
+function normalizeDeliveryStatus(status: WebhookDeliveryStatus, attemptCount: number) {
+  if (status === "failed" && attemptCount >= WEBHOOK_MAX_DELIVERY_ATTEMPTS) return "dead_letter" as const
+  return status
+}
 
 export type WebhookDelivery = {
   id: string
@@ -41,6 +55,7 @@ export type WebhookDelivery = {
   last_status_code: number | null
   last_error: string | null
   delivered_at: string | null
+  dead_lettered_at: string | null
   created_at: string
   updated_at: string
 }
@@ -153,24 +168,23 @@ export async function insertWebhookDelivery(input: {
   lastError?: string | null
 }): Promise<WebhookDelivery | null> {
   const now = new Date().toISOString()
+  const status = normalizeDeliveryStatus(input.status, input.attemptCount)
   const { data, error } = await supabase.from("webhook_deliveries").insert({
     id: crypto.randomUUID(),
     merchant_id: input.merchantId,
     webhook_id: input.webhookId,
     event: input.event,
     payload: input.payload,
-    status: input.status,
+    status,
     response_status: input.responseStatus,
     response_body: input.responseBody,
     attempt_count: input.attemptCount,
     last_attempt_at: now,
     last_status_code: input.responseStatus,
     last_error: input.lastError ?? null,
-    delivered_at: input.status === "delivered" ? now : null,
-    next_attempt_at:
-      input.status === "failed"
-        ? new Date(Date.now() + 60_000).toISOString()
-        : null,
+    delivered_at: status === "delivered" ? now : null,
+    dead_lettered_at: status === "dead_letter" ? now : null,
+    next_attempt_at: getNextRetryAt(status, input.attemptCount),
   }).select().single()
 
   if (error) {
@@ -205,21 +219,20 @@ export async function updateWebhookDeliveryAttempt(input: {
   attemptCount: number
 }): Promise<WebhookDelivery> {
   const now = new Date().toISOString()
+  const status = normalizeDeliveryStatus(input.status, input.attemptCount)
   const { data, error } = await supabase
     .from("webhook_deliveries")
     .update({
-      status: input.status,
+      status,
       response_status: input.responseStatus,
       response_body: input.responseBody,
       attempt_count: input.attemptCount,
       last_attempt_at: now,
       last_status_code: input.responseStatus,
       last_error: input.lastError,
-      delivered_at: input.status === "delivered" ? now : null,
-      next_attempt_at:
-        input.status === "failed"
-          ? new Date(Date.now() + Math.min(60 * 2 ** input.attemptCount, 3600) * 1000).toISOString()
-          : null,
+      delivered_at: status === "delivered" ? now : null,
+      dead_lettered_at: status === "dead_letter" ? now : null,
+      next_attempt_at: getNextRetryAt(status, input.attemptCount),
       updated_at: now,
     })
     .eq("id", input.id)

@@ -64,7 +64,7 @@ Customer selects "Crypto Payments" → Places order
   → Customer redirected to session.checkoutUrl (PineTree hosted checkout)
   → Customer selects wallet/rail, completes payment
   → PineTree redirects to successUrl (WooCommerce thank-you page)
-  → PineTree fires checkout.session.paid webhook → order updated to "processing"
+  → PineTree fires checkout.session.completed webhook → order updated to "processing"
 ```
 
 **Idempotency:** Each session creation uses a stable key derived from the order ID and order key, so retrying a failed HTTP request cannot double-charge a customer.
@@ -77,9 +77,9 @@ Customer selects "Crypto Payments" → Places order
 PineTree fires POST to ?wc-api=pinetree_webhook
   → Raw body read from php://input
   → PineTree-Signature and PineTree-Timestamp headers extracted
-  → HMAC-SHA256 verified (hash_equals, timing-safe)
+  → HMAC-SHA256 verified over PineTree-Timestamp + "." + raw body (hash_equals, timing-safe)
   → Timestamp checked within 300-second window
-  → Event payload validated against the PineTree webhook contract (eventId, type, createdAt, data.object)
+  → Event payload validated against the PineTree webhook contract (eventId, type, schema, createdAt, livemode, data.object)
   → WooCommerce order resolved via metadata.wc_order_id (fallback: reference field)
   → Order status updated
   → HTTP 200 returned
@@ -89,7 +89,8 @@ PineTree fires POST to ?wc-api=pinetree_webhook
 
 | PineTree event | WooCommerce status |
 |---|---|
-| `checkout.session.paid` | `processing` (via `payment_complete()`) |
+| `checkout.session.completed` | `processing` (via `payment_complete()`) |
+| `checkout.session.paid` | legacy alias for `checkout.session.completed` |
 | `checkout.session.processing` | `on-hold` |
 | `checkout.session.failed` | `failed` |
 | `checkout.session.expired` | `cancelled` |
@@ -163,6 +164,6 @@ plugins/woocommerce-pinetree/
 ## Security Notes
 
 - `pt_live_*` keys are stored in the WordPress options table (same as all WC gateway credentials) and are never exposed in browser source, logs, or API responses.
-- Webhook signatures use HMAC-SHA256 with `hash_equals()` (timing-safe comparison).
+- Webhook signatures use HMAC-SHA256 over `PineTree-Timestamp + "." + raw body` with `hash_equals()` (timing-safe comparison).
 - The timestamp tolerance window is 300 seconds — events older than 5 minutes are rejected.
 - Both current (`PineTree-*`) and legacy (`X-PineTree-*`) header names are supported.

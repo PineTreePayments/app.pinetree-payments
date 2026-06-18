@@ -169,7 +169,8 @@ await client.webhookDeliveries.retry("wdl_...")
 ## Webhook Verification
 
 Verify the HMAC-SHA256 signature on incoming webhook deliveries using
-`constructEvent`. Pass the **raw body bytes** — do not parse JSON first.
+`constructEvent`. PineTree signs `PineTree-Timestamp + "." + raw body`.
+Pass the **raw body bytes** — do not parse JSON first.
 
 ### Express
 
@@ -199,7 +200,7 @@ app.post(
     }
 
     switch (event.type) {
-      case "checkout.session.paid":
+      case "checkout.session.completed":
         // Fulfill the order
         break
       case "checkout.session.expired":
@@ -242,7 +243,7 @@ export async function POST(req: NextRequest) {
   }
 
   switch (event.type) {
-    case "checkout.session.paid":
+    case "checkout.session.completed":
       break
   }
 
@@ -253,7 +254,7 @@ export async function POST(req: NextRequest) {
 ### `constructEvent` overloads
 
 ```typescript
-// Header-object form (recommended) — also verifies PineTree-Event-Id and version
+// Header-object form (recommended) — also verifies PineTree-Event-Id and schema
 client.webhooks.constructEvent(rawBody, headersObject, secret)
 
 // Individual-values form
@@ -272,7 +273,9 @@ The default replay window is **300 seconds (5 minutes)**. Events with a
 | `PineTree-Signature` | `sha256=<hmac-sha256-hex>` |
 | `PineTree-Timestamp` | ISO-8601 event timestamp |
 | `PineTree-Event-Id` | Unique event ID (use for deduplication) |
-| `PineTree-Webhook-Version` | `2026-06-12` |
+| `PineTree-Event-Schema` | `payments-v1` |
+
+`PineTree-Webhook-Version` is also sent as a legacy alias for `PineTree-Event-Schema`.
 
 ---
 

@@ -132,8 +132,9 @@ describe("dashboard checkout and developer navigation", () => {
     expect(developer).not.toContain("publication pending")
     expect(developer).not.toContain("Installation commands will be available")
     expect(developer).not.toContain('label="Live"')
-    expect(developer).not.toMatch(/\bV1\b|\bv1\b|version one|PineTree API v1|\/api\/v1/i)
-    expect(wooCommerceCard).not.toMatch(/\bV1\b|\bv1\b|internal checklist|backend checklist/i)
+    // payments-v1 is the public webhook schema name and is allowed; block bare V1/v1 labels
+    expect(developer).not.toMatch(/(?<![a-zA-Z\d-])v1\b|version one|PineTree API v1|\/api\/v1/i)
+    expect(wooCommerceCard).not.toMatch(/(?<![a-zA-Z\d-])v1\b|internal checklist|backend checklist/i)
     expect(checkout).not.toContain("Failed attempts remain retryable through the v1 delivery API.")
     expect(checkout).not.toContain("V1 events also include")
     expect(checkout).toContain("Failed deliveries can be retried safely from this dashboard.")

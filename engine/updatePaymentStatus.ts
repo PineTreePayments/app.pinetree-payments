@@ -179,7 +179,7 @@ export async function updatePaymentStatus(
     nextStatus === "PROCESSING"
       ? "checkout.session.processing"
       : nextStatus === "CONFIRMED"
-        ? "checkout.session.paid"
+        ? "checkout.session.completed"
         : nextStatus === "FAILED"
           ? "checkout.session.failed"
           : nextStatus === "INCOMPLETE"

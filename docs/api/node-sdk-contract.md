@@ -17,9 +17,9 @@ await pinetree.webhookDeliveries.retry(id)
 
 The canonical TypeScript definitions live in `types/pinetreeSdk.ts`.
 
-Webhook verification uses the raw request body and HMAC-SHA256. Webhook deliveries
+Webhook verification uses HMAC-SHA256 over `PineTree-Timestamp + "." + raw request body`. Webhook deliveries
 include `PineTree-Signature`, `PineTree-Timestamp`, `PineTree-Event-Id`, and
-`PineTree-Webhook-Version: 2026-06-12`; legacy `X-PineTree-*` headers remain.
+`PineTree-Event-Schema: payments-v1`; `PineTree-Webhook-Version` is sent as a legacy alias and legacy `X-PineTree-*` headers remain.
 
 Expired completed idempotency claims can be removed through the protected
 protected cleanup helper. Vercel cron is not available on the current plan, so

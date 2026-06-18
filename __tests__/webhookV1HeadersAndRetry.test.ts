@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { createHmac } from "node:crypto"
 
 const {
   getMerchantWebhook,
@@ -29,6 +30,7 @@ import {
   deliverWebhook,
   deliverV1CheckoutSessionWebhook,
   retryWebhookDelivery,
+  testWebhookDelivery,
   V1_WEBHOOK_VERSION,
 } from "@/engine/webhookDelivery"
 
@@ -77,7 +79,7 @@ describe("v1 webhook headers and retry", () => {
   it("sends stable v1 headers while retaining legacy headers", async () => {
     await deliverV1CheckoutSessionWebhook(
       "merchant-1",
-      "checkout.session.paid",
+      "checkout.session.completed",
       session
     )
 
@@ -86,9 +88,26 @@ describe("v1 webhook headers and retry", () => {
     expect(headers["PineTree-Signature"]).toMatch(/^sha256=/)
     expect(headers["PineTree-Timestamp"]).toBeTruthy()
     expect(headers["PineTree-Event-Id"]).toMatch(/^evt_/)
+    expect(headers["PineTree-Event-Schema"]).toBe(V1_WEBHOOK_VERSION)
     expect(headers["PineTree-Webhook-Version"]).toBe(V1_WEBHOOK_VERSION)
     expect(headers["X-PineTree-Signature"]).toBe(headers["PineTree-Signature"])
     expect(headers["X-PineTree-Timestamp"]).toBe(headers["PineTree-Timestamp"])
+
+    const rawBody = request?.body as string
+    const expected = `sha256=${createHmac("sha256", config.secret)
+      .update(`${headers["PineTree-Timestamp"]}.`)
+      .update(rawBody)
+      .digest("hex")}`
+    expect(headers["PineTree-Signature"]).toBe(expected)
+
+    const payload = JSON.parse(rawBody) as Record<string, unknown>
+    expect(payload).toMatchObject({
+      object: "event",
+      type: "checkout.session.completed",
+      schema: V1_WEBHOOK_VERSION,
+      livemode: false,
+    })
+    expect(payload.data).toHaveProperty("object")
   })
 
   it("keeps legacy webhook headers working", async () => {
@@ -101,6 +120,22 @@ describe("v1 webhook headers and retry", () => {
     })
     const request = vi.mocked(fetch).mock.calls[0][1]
     const headers = request?.headers as Record<string, string>
+    const payload = JSON.parse(request?.body as string)
+    expect(payload).toMatchObject({
+      type: "payment.confirmed",
+      object: "event",
+      schema: V1_WEBHOOK_VERSION,
+      livemode: false,
+      data: {
+        object: {
+          id: "payment-1",
+          object: "payment",
+          status: "CONFIRMED",
+        },
+      },
+    })
+    expect(headers["PineTree-Signature"]).toMatch(/^sha256=/)
+    expect(headers["PineTree-Timestamp"]).toBeTruthy()
     expect(headers["X-PineTree-Signature"]).toMatch(/^sha256=/)
     expect(headers["X-PineTree-Timestamp"]).toBeTruthy()
   })
@@ -108,8 +143,11 @@ describe("v1 webhook headers and retry", () => {
   it("redelivers a stored failed event and increments durable attempts", async () => {
     const payload = {
       eventId: "evt_stored",
+      object: "event",
       type: "checkout.session.paid",
+      schema: "payments-v1",
       createdAt: "2026-06-12T01:00:00.000Z",
+      livemode: true,
       data: { object: session },
     }
     getWebhookDeliveryById.mockResolvedValue({
@@ -143,5 +181,68 @@ describe("v1 webhook headers and retry", () => {
         attemptCount: 2,
       })
     )
+  })
+
+  it("normalizes legacy checkout.session.paid deliveries to completed", async () => {
+    await deliverV1CheckoutSessionWebhook(
+      "merchant-1",
+      "checkout.session.paid",
+      session
+    )
+
+    const request = vi.mocked(fetch).mock.calls[0][1]
+    const payload = JSON.parse(request?.body as string)
+    expect(payload.type).toBe("checkout.session.completed")
+    expect(payload.object).toBe("event")
+    expect(insertWebhookDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "checkout.session.completed",
+      })
+    )
+  })
+
+  it("builds a complete event envelope for every canonical webhook event", async () => {
+    const events = [
+      "payment.created",
+      "payment.pending",
+      "payment.processing",
+      "payment.confirmed",
+      "payment.failed",
+      "payment.expired",
+      "payment.cancelled",
+      "payment.incomplete",
+      "payment.refunded",
+      "checkout.session.created",
+      "checkout.session.processing",
+      "checkout.session.completed",
+      "checkout.session.failed",
+      "checkout.session.expired",
+      "checkout.session.canceled",
+      "payment_link.created",
+      "payment_link.disabled",
+      "payment_link.expired",
+    ] as const
+    getMerchantWebhook.mockResolvedValue({ ...config, events })
+
+    for (const event of events) {
+      vi.mocked(fetch).mockClear()
+      await testWebhookDelivery("merchant-1", event)
+
+      const request = vi.mocked(fetch).mock.calls[0][1]
+      const payload = JSON.parse(request?.body as string)
+      expect(payload).toMatchObject({
+        eventId: expect.stringMatching(/^evt_/),
+        object: "event",
+        type: event,
+        schema: V1_WEBHOOK_VERSION,
+        livemode: false,
+      })
+      expect(payload.createdAt).toEqual(expect.any(String))
+      expect(payload.data.object.object).toBe(
+        event.startsWith("checkout.session.") ? "checkout.session"
+          : event.startsWith("payment_link.") ? "payment_link"
+          : "payment"
+      )
+    }
   })
 })

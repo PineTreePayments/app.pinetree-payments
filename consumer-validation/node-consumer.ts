@@ -78,7 +78,7 @@ void (async () => {
     "PineTree-Signature": "sha256=abc",
     "PineTree-Timestamp": new Date().toISOString(),
     "PineTree-Event-Id": "evt_1",
-    "PineTree-Webhook-Version": PineTreeWebhookVersion,
+    "PineTree-Event-Schema": PineTreeWebhookVersion,
   }
   const event: Event<CheckoutSession> = client.webhooks.constructEvent(
     Buffer.from("{}"),

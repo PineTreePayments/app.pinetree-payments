@@ -6,8 +6,8 @@ event payload in a single call.
 
 ## How signing works
 
-PineTree generates an HMAC-SHA256 digest of the raw request body using your
-webhook secret and sends it in the `PineTree-Signature` header as
+PineTree generates an HMAC-SHA256 digest of
+`PineTree-Timestamp + "." + raw request body` using your webhook secret and sends it in the `PineTree-Signature` header as
 `sha256=<hex-digest>`. The `PineTree-Timestamp` header carries the ISO-8601
 event time. `constructEvent` re-computes the HMAC and rejects events with a
 timestamp older than 5 minutes (configurable per call).
@@ -19,7 +19,9 @@ timestamp older than 5 minutes (configurable per call).
 | `PineTree-Signature` | `sha256=<hmac-sha256-hex>` |
 | `PineTree-Timestamp` | ISO-8601 event timestamp |
 | `PineTree-Event-Id` | Unique event ID for deduplication |
-| `PineTree-Webhook-Version` | `2026-06-12` |
+| `PineTree-Event-Schema` | `payments-v1` |
+
+`PineTree-Webhook-Version` is sent alongside `PineTree-Event-Schema` for backwards compatibility. The SDK accepts either.
 
 ## Express
 
@@ -56,7 +58,7 @@ app.post(
     }
 
     switch (event.type) {
-      case "checkout.session.paid": {
+      case "checkout.session.completed": {
         const session = event.data.object
         // session is typed as unknown — cast to CheckoutSession if needed
         console.log("Payment received for session", session)
@@ -85,7 +87,7 @@ import type { CheckoutSession } from "@pinetreepayments/node"
 
 // After constructEvent succeeds
 switch (event.type) {
-  case "checkout.session.paid": {
+  case "checkout.session.completed": {
     const session = event.data.object as CheckoutSession
     await fulfillOrder(session.reference!, session.paymentId!)
     break
@@ -130,7 +132,7 @@ export async function POST(req: NextRequest) {
 
   // Process the event
   switch (event.type) {
-    case "checkout.session.paid":
+    case "checkout.session.completed":
       await handlePaid(event)
       break
     case "checkout.session.expired":
@@ -156,7 +158,7 @@ const event = client.webhooks.constructEvent(
 )
 ```
 
-The four-argument form skips the `PineTree-Event-Id` cross-check and version
+The four-argument form skips the `PineTree-Event-Id` cross-check and schema
 check that the header-object form performs automatically.
 
 ## Deduplication
@@ -187,11 +189,17 @@ const secret = "whsec_test"
 const timestamp = new Date().toISOString()
 const payload = JSON.stringify({
   eventId: "evt_test_001",
-  type: "checkout.session.paid",
+  object: "event",
+  type: "checkout.session.completed",
+  schema: "payments-v1",
   createdAt: timestamp,
+  livemode: false,
   data: { object: { id: "cs_test", status: "paid" } },
 })
-const signature = `sha256=${createHmac("sha256", secret).update(payload).digest("hex")}`
+const signature = `sha256=${createHmac("sha256", secret)
+  .update(`${timestamp}.`)
+  .update(payload)
+  .digest("hex")}`
 
 const event = client.webhooks.constructEvent(
   payload,
@@ -199,7 +207,7 @@ const event = client.webhooks.constructEvent(
     "PineTree-Signature": signature,
     "PineTree-Timestamp": timestamp,
     "PineTree-Event-Id": "evt_test_001",
-    "PineTree-Webhook-Version": "2026-06-12",
+    "PineTree-Event-Schema": "payments-v1",
   },
   secret
 )

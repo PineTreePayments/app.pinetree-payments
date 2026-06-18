@@ -98,18 +98,23 @@ export function createSignedWebhookFixture<T>(
 ) {
   const event: Event<T> = {
     eventId: `evt_test_${randomUUID()}`,
+    object: "event",
     type: "checkout.session.created",
+    schema: "payments-v1",
     createdAt: timestamp,
+    livemode: false,
     data: { object },
   }
   const rawBody = JSON.stringify(event)
   const signature = `sha256=${createHmac("sha256", secret)
+    .update(`${timestamp}.`)
     .update(rawBody)
     .digest("hex")}`
   const headers: PineTreeWebhookHeaderObject = {
     [PineTreeWebhookHeaders.signature]: signature,
     [PineTreeWebhookHeaders.timestamp]: timestamp,
     [PineTreeWebhookHeaders.eventId]: event.eventId,
+    [PineTreeWebhookHeaders.schema]: PineTreeWebhookVersion,
     [PineTreeWebhookHeaders.version]: PineTreeWebhookVersion,
   }
 

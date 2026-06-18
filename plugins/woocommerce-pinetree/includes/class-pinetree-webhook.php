@@ -37,7 +37,7 @@ class PineTree_Webhook {
     // ------------------------------------------------------------------
 
     /** Current supported webhook version (matches PineTree Node SDK). */
-    private const WEBHOOK_VERSION = '2026-06-12';
+    private const WEBHOOK_VERSION = 'payments-v1';
 
     /**
      * Handle an incoming webhook request.
@@ -49,20 +49,21 @@ class PineTree_Webhook {
         // Support both current (PineTree-*) and legacy (X-PineTree-*) header names.
         $signature = $_SERVER['HTTP_PINETREE_SIGNATURE']  ?? ($_SERVER['HTTP_X_PINETREE_SIGNATURE'] ?? '');
         $timestamp  = $_SERVER['HTTP_PINETREE_TIMESTAMP']  ?? ($_SERVER['HTTP_X_PINETREE_TIMESTAMP'] ?? '');
-        $version    = $_SERVER['HTTP_PINETREE_WEBHOOK_VERSION'] ?? '';
+        // Accept PineTree-Event-Schema (canonical) or PineTree-Webhook-Version (legacy alias).
+        $schema = $_SERVER['HTTP_PINETREE_EVENT_SCHEMA'] ?? ($_SERVER['HTTP_PINETREE_WEBHOOK_VERSION'] ?? '');
 
         if ('' === $raw_body || '' === $signature || '' === $timestamp) {
             $this->send_response(400, 'Missing required webhook headers or empty body.');
             return;
         }
 
-        // Reject events from unsupported future webhook versions.
-        if ('' !== $version && $version !== self::WEBHOOK_VERSION) {
+        // Reject events from unsupported future schema versions.
+        if ('' !== $schema && $schema !== self::WEBHOOK_VERSION) {
             wc_get_logger()->warning(
-                sprintf('PineTree webhook: unsupported version %s (expected %s).', $version, self::WEBHOOK_VERSION),
+                sprintf('PineTree webhook: unsupported schema %s (expected %s).', $schema, self::WEBHOOK_VERSION),
                 ['source' => 'woocommerce-pinetree']
             );
-            $this->send_response(400, sprintf('Unsupported PineTree webhook version: %s.', $version));
+            $this->send_response(400, sprintf('Unsupported PineTree event schema: %s.', $schema));
             return;
         }
 
@@ -130,8 +131,8 @@ class PineTree_Webhook {
             );
         }
 
-        // 2. Compute expected HMAC-SHA256 over the raw body.
-        $expected = hash_hmac('sha256', $raw_body, $this->webhook_secret, false);
+        // 2. Compute expected HMAC-SHA256 over timestamp.raw_body.
+        $expected = hash_hmac('sha256', $timestamp . '.' . $raw_body, $this->webhook_secret, false);
 
         // 3. Normalize received signature: strip optional sha256= prefix.
         $actual = trim($signature);
@@ -150,10 +151,16 @@ class PineTree_Webhook {
             !is_array($event)
             || empty($event['eventId'])
             || empty($event['type'])
+            || (($event['schema'] ?? null) !== 'payments-v1')
             || empty($event['createdAt'])
+            || !array_key_exists('livemode', $event)
+            || !is_bool($event['livemode'])
             || !isset($event['data']['object'])
         ) {
             throw new RuntimeException('Webhook payload does not match the PineTree v1 event contract.');
+        }
+        if (($event['type'] ?? null) === 'checkout.session.paid') {
+            $event['type'] = 'checkout.session.completed';
         }
 
         return $event;
@@ -174,6 +181,7 @@ class PineTree_Webhook {
         $event_id = $event['eventId']        ?? '';
 
         switch ($type) {
+            case 'checkout.session.completed':
             case 'checkout.session.paid':
                 $this->update_order($session, 'processing',
                     __('PineTree payment confirmed.', 'woocommerce-pinetree'),

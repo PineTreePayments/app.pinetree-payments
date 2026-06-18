@@ -77,7 +77,7 @@ describe("v1 webhook delivery routes", () => {
       nextCursor: "next-1",
     })
     const request = new NextRequest(
-      "https://example.test/api/v1/webhook-deliveries?limit=10&status=failed&eventType=checkout.session.paid"
+      "https://example.test/api/v1/webhook-deliveries?limit=10&status=failed&eventType=checkout.session.completed"
     )
     const response = await list(request)
     expect(response.status).toBe(200)
@@ -92,7 +92,7 @@ describe("v1 webhook delivery routes", () => {
         merchantId: "merchant-1",
         limit: 10,
         status: "failed",
-        eventType: "checkout.session.paid",
+        eventType: "checkout.session.completed",
       })
     )
   })

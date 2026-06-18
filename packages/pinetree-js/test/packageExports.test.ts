@@ -4,12 +4,18 @@ import PineTree, {
   PineTreeBrowserError,
   CheckoutInitializationError,
   CheckoutSessionError,
+  WEBHOOK_SCHEMA,
+  WEBHOOK_SCHEMA_HEADER,
+  LEGACY_SCHEMA_HEADER,
 } from "../src"
 
 describe("public package exports", () => {
   it("exports PineTree as both default and named export", () => {
     expect(PineTree).toBe(NamedPineTree)
     expect(new PineTree("pk_live_test")).toBeInstanceOf(NamedPineTree)
+    expect(WEBHOOK_SCHEMA).toBe("payments-v1")
+    expect(WEBHOOK_SCHEMA_HEADER).toBe("PineTree-Event-Schema")
+    expect(LEGACY_SCHEMA_HEADER).toBe("PineTree-Webhook-Version")
   })
 
   it("exports all browser error classes", () => {

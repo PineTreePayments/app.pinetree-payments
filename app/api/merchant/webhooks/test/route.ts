@@ -1,28 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
 import { testWebhookDelivery } from "@/engine/webhookDelivery"
-import type { WebhookEvent } from "@/database/merchantWebhooks"
-
-const VALID_EVENTS: WebhookEvent[] = [
-  "payment.confirmed",
-  "payment.failed",
-  "payment.incomplete",
-  "checkout.session.created",
-  "checkout.session.processing",
-  "checkout.session.paid",
-  "checkout.session.failed",
-  "checkout.session.expired",
-  "checkout.session.canceled",
-]
+import { normalizeWebhookEventType, type WebhookEvent } from "@/database/merchantWebhooks"
 
 export async function POST(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req, "webhooks:write")
 
     const body = (await req.json()) as { event?: string }
-    const event: WebhookEvent = VALID_EVENTS.includes(body.event as WebhookEvent)
-      ? (body.event as WebhookEvent)
-      : "payment.confirmed"
+    const event: WebhookEvent = normalizeWebhookEventType(String(body.event || "")) ?? "payment.confirmed"
 
     const result = await testWebhookDelivery(merchantId, event)
 

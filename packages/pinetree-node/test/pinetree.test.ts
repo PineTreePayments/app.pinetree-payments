@@ -5,6 +5,10 @@ import PineTree, {
   IdempotencyConflictError,
   InvalidRequestError,
   WebhookVerificationError,
+  WEBHOOK_SCHEMA,
+  WEBHOOK_SCHEMA_HEADER,
+  LEGACY_SCHEMA_HEADER,
+  PineTreeWebhookHeaders,
 } from "../src"
 
 const session = {
@@ -148,19 +152,25 @@ describe("PineTree Node SDK", () => {
   it("constructs and verifies a v1 webhook event", () => {
     const event = {
       eventId: "evt_1",
-      type: "checkout.session.paid",
+      object: "event",
+      type: "checkout.session.completed",
+      schema: "payments-v1",
       createdAt: new Date().toISOString(),
+      livemode: true,
       data: { object: { ...session, status: "paid" } },
     }
     const rawBody = JSON.stringify(event)
     const secret = "whsec_test"
-    const signature = `sha256=${createHmac("sha256", secret).update(rawBody).digest("hex")}`
+    const signature = `sha256=${createHmac("sha256", secret)
+      .update(`${event.createdAt}.`)
+      .update(rawBody)
+      .digest("hex")}`
 
     expect(
       new PineTree("pt_live_test").webhooks.constructEvent(
         rawBody,
         signature,
-        new Date().toISOString(),
+        event.createdAt,
         secret
       )
     ).toEqual(event)
@@ -171,8 +181,11 @@ describe("PineTree Node SDK", () => {
       new PineTree("pt_live_test").webhooks.constructEvent(
         JSON.stringify({
           eventId: "evt_1",
-          type: "checkout.session.paid",
+          object: "event",
+          type: "checkout.session.completed",
+          schema: "payments-v1",
           createdAt: new Date().toISOString(),
+          livemode: true,
           data: { object: session },
         }),
         "sha256=invalid",
@@ -186,13 +199,19 @@ describe("PineTree Node SDK", () => {
     const timestamp = new Date().toISOString()
     const event = {
       eventId: "evt_headers",
-      type: "checkout.session.paid",
+      object: "event",
+      type: "checkout.session.completed",
+      schema: "payments-v1",
       createdAt: timestamp,
+      livemode: true,
       data: { object: session },
     }
     const rawBody = JSON.stringify(event)
     const secret = "whsec_headers"
-    const signature = `sha256=${createHmac("sha256", secret).update(rawBody).digest("hex")}`
+    const signature = `sha256=${createHmac("sha256", secret)
+      .update(`${timestamp}.`)
+      .update(rawBody)
+      .digest("hex")}`
 
     expect(
       new PineTree("pt_live_test").webhooks.constructEvent(
@@ -201,11 +220,42 @@ describe("PineTree Node SDK", () => {
           "pinetree-signature": signature,
           "PineTree-Timestamp": [timestamp],
           "pinetree-event-id": "evt_headers",
-          "pinetree-webhook-version": "2026-06-12",
+          "pinetree-webhook-version": "payments-v1",
         },
         secret
       )
     ).toEqual(event)
+  })
+
+  it("normalizes legacy checkout.session.paid events to completed", () => {
+    const timestamp = new Date().toISOString()
+    const legacyEvent = {
+      eventId: "evt_legacy_paid",
+      object: "event",
+      type: "checkout.session.paid",
+      schema: "payments-v1",
+      createdAt: timestamp,
+      livemode: true,
+      data: { object: session },
+    }
+    const rawBody = JSON.stringify(legacyEvent)
+    const secret = "whsec_legacy_paid"
+    const signature = `sha256=${createHmac("sha256", secret)
+      .update(`${timestamp}.`)
+      .update(rawBody)
+      .digest("hex")}`
+
+    expect(
+      new PineTree("pt_live_test").webhooks.constructEvent(
+        rawBody,
+        signature,
+        timestamp,
+        secret
+      )
+    ).toMatchObject({
+      ...legacyEvent,
+      type: "checkout.session.completed",
+    })
   })
 
   it("maps API authentication and invalid request errors", async () => {
@@ -255,5 +305,86 @@ describe("PineTree Node SDK", () => {
         { idempotencyKey: "order-1" }
       )
     ).rejects.toBeInstanceOf(IdempotencyConflictError)
+  })
+
+  it("accepts PineTree-Event-Schema (canonical) header in constructEvent", () => {
+    const timestamp = new Date().toISOString()
+    const event = {
+      eventId: "evt_schema",
+      object: "event",
+      type: "payment.confirmed",
+      schema: "payments-v1",
+      createdAt: timestamp,
+      livemode: true,
+      data: { object: { id: "pay_1", object: "payment" } },
+    }
+    const rawBody = JSON.stringify(event)
+    const secret = "whsec_schema"
+    const sig = `sha256=${createHmac("sha256", secret).update(`${timestamp}.`).update(rawBody).digest("hex")}`
+
+    const result = new PineTree("pt_live_test").webhooks.constructEvent(
+      rawBody,
+      { "PineTree-Signature": sig, "PineTree-Timestamp": timestamp, [WEBHOOK_SCHEMA_HEADER]: WEBHOOK_SCHEMA },
+      secret
+    )
+    expect(result.eventId).toBe("evt_schema")
+  })
+
+  it("accepts legacy PineTree-Webhook-Version header in constructEvent", () => {
+    const timestamp = new Date().toISOString()
+    const event = {
+      eventId: "evt_legacy",
+      object: "event",
+      type: "payment.confirmed",
+      schema: "payments-v1",
+      createdAt: timestamp,
+      livemode: true,
+      data: { object: { id: "pay_2", object: "payment" } },
+    }
+    const rawBody = JSON.stringify(event)
+    const secret = "whsec_legacy"
+    const sig = `sha256=${createHmac("sha256", secret).update(`${timestamp}.`).update(rawBody).digest("hex")}`
+
+    const result = new PineTree("pt_live_test").webhooks.constructEvent(
+      rawBody,
+      { "PineTree-Signature": sig, "PineTree-Timestamp": timestamp, [LEGACY_SCHEMA_HEADER]: WEBHOOK_SCHEMA },
+      secret
+    )
+    expect(result.eventId).toBe("evt_legacy")
+  })
+
+  it("accepts dual headers (canonical + legacy) simultaneously", () => {
+    const timestamp = new Date().toISOString()
+    const event = {
+      eventId: "evt_dual",
+      object: "event",
+      type: "checkout.session.completed",
+      schema: "payments-v1",
+      createdAt: timestamp,
+      livemode: false,
+      data: { object: { id: "cs_1", object: "checkout.session", status: "paid" } },
+    }
+    const rawBody = JSON.stringify(event)
+    const secret = "whsec_dual"
+    const sig = `sha256=${createHmac("sha256", secret).update(`${timestamp}.`).update(rawBody).digest("hex")}`
+
+    const result = new PineTree("pt_live_test").webhooks.constructEvent(
+      rawBody,
+      {
+        "PineTree-Signature": sig,
+        "PineTree-Timestamp": timestamp,
+        [WEBHOOK_SCHEMA_HEADER]: WEBHOOK_SCHEMA,
+        [LEGACY_SCHEMA_HEADER]: WEBHOOK_SCHEMA,
+      },
+      secret
+    )
+    expect(result.type).toBe("checkout.session.completed")
+  })
+
+  it("PineTreeWebhookHeaders exposes schema and version fields pointing to correct header names", () => {
+    expect(PineTreeWebhookHeaders.schema).toBe(WEBHOOK_SCHEMA_HEADER)
+    expect(PineTreeWebhookHeaders.version).toBe(LEGACY_SCHEMA_HEADER)
+    expect(WEBHOOK_SCHEMA_HEADER).toBe("PineTree-Event-Schema")
+    expect(LEGACY_SCHEMA_HEADER).toBe("PineTree-Webhook-Version")
   })
 })

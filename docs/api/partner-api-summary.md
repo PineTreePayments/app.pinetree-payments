@@ -74,20 +74,23 @@ State transitions are enforced by a compare-and-set guard — concurrent webhook
 PineTree delivers HMAC-SHA256 signed events to merchant webhook endpoints.
 
 **Headers:**
-- `PineTree-Signature` — HMAC-SHA256 hex digest of raw body
+- `PineTree-Signature` — HMAC-SHA256 hex digest of `PineTree-Timestamp + "." + raw body`
 - `PineTree-Timestamp` — ISO 8601 timestamp (5-minute tolerance window)
 - `PineTree-Event-Id` — unique event identifier
-- `PineTree-Webhook-Version` — `2026-06-12`
+- `PineTree-Event-Schema` — `payments-v1` (also sent as `PineTree-Webhook-Version` for legacy compatibility)
 
-**Event types:** `payment.created`, `payment.pending`, `payment.processing`, `payment.confirmed`, `payment.failed`, `payment.incomplete`
+**Event types:** `payment.created`, `payment.pending`, `payment.processing`, `payment.confirmed`, `payment.failed`, `payment.expired`, `payment.cancelled`, `payment.incomplete`, `payment.refunded`, `checkout.session.created`, `checkout.session.processing`, `checkout.session.completed`, `checkout.session.failed`, `checkout.session.expired`, `checkout.session.canceled`, `payment_link.created`, `payment_link.disabled`, `payment_link.expired`
 
 **Event shape:**
 ```json
 {
   "eventId": "evt_01abc...",
+  "object": "event",
   "type": "payment.confirmed",
+  "schema": "payments-v1",
   "createdAt": "2026-06-16T12:02:30.000Z",
-  "data": { "object": { "id": "pay_01...", "status": "paid", ... } }
+  "livemode": true,
+  "data": { "object": { "id": "pay_01...", "object": "payment", "status": "CONFIRMED" } }
 }
 ```
 

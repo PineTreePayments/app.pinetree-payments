@@ -27,13 +27,15 @@ describe("v1 checkout session webhook normalization", () => {
       expiresAt: null,
     }
     const event = buildV1CheckoutSessionEvent(
-      "checkout.session.paid",
+      "checkout.session.completed",
       session,
       "2026-06-12T01:00:00.000Z"
     )
     expect(event).toMatchObject({
       eventId: expect.stringMatching(/^evt_/),
-      type: "checkout.session.paid",
+      object: "event",
+      type: "checkout.session.completed",
+      schema: "payments-v1",
       createdAt: "2026-06-12T01:00:00.000Z",
       data: { object: session },
     })

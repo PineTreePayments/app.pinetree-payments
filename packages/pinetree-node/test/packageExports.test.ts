@@ -9,6 +9,9 @@ import PineTree, {
   PineTreeError,
   PineTreeWebhookHeaders,
   PineTreeWebhookVersion,
+  WEBHOOK_SCHEMA,
+  WEBHOOK_SCHEMA_HEADER,
+  LEGACY_SCHEMA_HEADER,
   WebhookVerificationError,
 } from "../src"
 
@@ -26,6 +29,11 @@ describe("public package exports", () => {
       WebhookVerificationError,
     ]).toHaveLength(7)
     expect(PineTreeWebhookHeaders.signature).toBe("PineTree-Signature")
-    expect(PineTreeWebhookVersion).toBe("2026-06-12")
+    expect(PineTreeWebhookHeaders.schema).toBe("PineTree-Event-Schema")
+    expect(PineTreeWebhookHeaders.version).toBe("PineTree-Webhook-Version")
+    expect(PineTreeWebhookVersion).toBe("payments-v1")
+    expect(WEBHOOK_SCHEMA).toBe(PineTreeWebhookVersion)
+    expect(WEBHOOK_SCHEMA_HEADER).toBe("PineTree-Event-Schema")
+    expect(LEGACY_SCHEMA_HEADER).toBe("PineTree-Webhook-Version")
   })
 })

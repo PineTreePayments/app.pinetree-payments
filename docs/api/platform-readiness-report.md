@@ -77,7 +77,7 @@ Webhook events use HMAC-SHA256 signing:
 - Signature header: `PineTree-Signature`
 - Timestamp header: `PineTree-Timestamp`
 - Event ID header: `PineTree-Event-Id`
-- Version header: `PineTree-Webhook-Version` (value: `2026-06-12`)
+- Schema header: `PineTree-Event-Schema` (value: `payments-v1`; also sent as `PineTree-Webhook-Version` for legacy compatibility)
 
 The SDK's `webhooks.constructEvent()` verifies the signature, validates the
 replay window (default 300 s), parses the payload, and asserts the event

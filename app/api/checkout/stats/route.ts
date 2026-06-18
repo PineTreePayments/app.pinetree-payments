@@ -24,13 +24,14 @@ export async function GET(req: NextRequest) {
         .select("status, expires_at")
         .eq("merchant_id", merchantId),
       // Exclude test webhook events from the failure count.
-      // Test deliveries have `_test: true` at the top level of their payload JSONB.
+      // Current tests use `livemode: false`; old rows may still carry `_test`.
       supabase
         .from("webhook_deliveries")
         .select("id", { count: "exact", head: true })
         .eq("merchant_id", merchantId)
         .eq("status", "failed")
         .gte("created_at", yesterday)
+        .not("payload", "cs", '{"livemode":false}')
         .not("payload", "cs", '{"_test":true}'),
       getMerchantWebhook(merchantId).catch(() => null),
     ])

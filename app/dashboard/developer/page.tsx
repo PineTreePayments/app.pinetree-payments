@@ -672,10 +672,10 @@ function DocSectionWebhooks() {
       <DocTable
         headers={["Header", "Description"]}
         rows={[
-          ["PineTree-Signature", "HMAC-SHA256 hex of raw body"],
+          ["PineTree-Signature", "HMAC-SHA256 hex of PineTree-Timestamp + '.' + raw body"],
           ["PineTree-Timestamp", "ISO 8601 — must be within 5 minutes"],
           ["PineTree-Event-Id", "Unique event ID for deduplication"],
-          ["PineTree-Webhook-Version", "2026-06-12"],
+          ["PineTree-Event-Schema", "payments-v1"],
         ]}
       />
       <DocH2>Signature verification</DocH2>
@@ -691,10 +691,22 @@ const event = pinetree.webhooks.constructEvent(
         rows={[
           ["payment.confirmed", "On-chain confirmed — fulfill the order ✓"],
           ["payment.failed", "Payment failed at the network level"],
+          ["payment.expired", "Payment expired before completion"],
+          ["payment.cancelled", "Payment was cancelled"],
+          ["payment.refunded", "Payment was refunded"],
           ["payment.incomplete", "Session expired before payment"],
           ["payment.processing", "Transaction broadcast; awaiting confirmation"],
           ["payment.pending", "Customer wallet action detected"],
           ["payment.created", "Payment object first created"],
+          ["checkout.session.created", "Checkout session created"],
+          ["checkout.session.processing", "Checkout session processing"],
+          ["checkout.session.completed", "Checkout session completed"],
+          ["checkout.session.failed", "Checkout session failed"],
+          ["checkout.session.expired", "Checkout session expired"],
+          ["checkout.session.canceled", "Checkout session canceled"],
+          ["payment_link.created", "Payment link created"],
+          ["payment_link.disabled", "Payment link disabled"],
+          ["payment_link.expired", "Payment link expired"],
         ]}
       />
     </div>

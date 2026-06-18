@@ -5,14 +5,22 @@ import {
   insertWebhookDelivery,
   listRetryEligibleWebhookDeliveries,
   updateWebhookDeliveryAttempt,
-  type WebhookEvent,
   type WebhookDelivery,
   type MerchantWebhook,
 } from "@/database/merchantWebhooks"
+import {
+  WEBHOOK_SCHEMA,
+  WEBHOOK_SCHEMA_HEADER,
+  LEGACY_SCHEMA_HEADER,
+  normalizeWebhookEventType,
+  webhookSubscriptionMatches,
+  type CanonicalWebhookEvent,
+  type WebhookEvent,
+} from "@/lib/webhooks/events"
 import type { PublicCheckoutSession } from "./publicCheckoutSessions"
 
 const WEBHOOK_TIMEOUT_MS = 10_000
-export const V1_WEBHOOK_VERSION = "2026-06-12"
+export const V1_WEBHOOK_VERSION = WEBHOOK_SCHEMA
 
 export type WebhookPaymentData = {
   paymentId: string
@@ -27,6 +35,18 @@ export type WebhookPaymentData = {
   metadata?: Record<string, unknown>
 }
 
+type PineTreeWebhookEnvelope<T extends Record<string, unknown>> = {
+  eventId: string
+  object: "event"
+  type: CanonicalWebhookEvent
+  schema: typeof V1_WEBHOOK_VERSION
+  createdAt: string
+  livemode: boolean
+  data: {
+    object: T
+  }
+}
+
 function generateEventId(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(12))
   const hex = Array.from(bytes)
@@ -35,32 +55,110 @@ function generateEventId(): string {
   return `evt_${hex}`
 }
 
-function buildEventPayload(
+function resolveLivemode(metadata?: Record<string, unknown>, override?: boolean) {
+  if (typeof override === "boolean") return override
+  if (metadata?.test === true) return false
+  const configured = process.env.PINETREE_LIVEMODE ?? process.env.NEXT_PUBLIC_PINETREE_LIVEMODE
+  if (configured) return configured.toLowerCase() === "true"
+  return process.env.NODE_ENV === "production"
+}
+
+function buildWebhookEnvelope<T extends Record<string, unknown>>(
   event: WebhookEvent,
-  data: WebhookPaymentData
-): { payload: Record<string, unknown>; timestamp: string } {
-  const timestamp = new Date().toISOString()
+  object: T,
+  input?: { createdAt?: string; livemode?: boolean; metadata?: Record<string, unknown> }
+): PineTreeWebhookEnvelope<T> {
+  const canonicalEvent = normalizeWebhookEventType(event)
+  if (!canonicalEvent) throw new Error(`Unsupported webhook event: ${event}`)
   return {
-    timestamp,
-    payload: {
-      id: generateEventId(),
-      type: event,
-      created: timestamp,
-      merchantId: data.merchantId,
-      data: {
-        paymentId: data.paymentId,
-        checkoutLinkId: data.checkoutLinkId ?? null,
-        amount: data.amount,
-        currency: data.currency,
-        status: data.status,
-        reference: data.reference ?? null,
-        metadata: data.metadata ?? null,
-      },
-    },
+    eventId: generateEventId(),
+    object: "event",
+    type: canonicalEvent,
+    schema: V1_WEBHOOK_VERSION,
+    createdAt: input?.createdAt ?? new Date().toISOString(),
+    livemode: resolveLivemode(input?.metadata, input?.livemode),
+    data: { object },
   }
 }
 
-async function signPayload(payload: string, secret: string): Promise<string> {
+function buildPaymentWebhookEvent(
+  event: WebhookEvent,
+  data: WebhookPaymentData,
+  options?: { livemode?: boolean }
+): PineTreeWebhookEnvelope<Record<string, unknown>> {
+  return buildWebhookEnvelope(
+    event,
+    {
+      id: data.paymentId,
+      object: "payment",
+      merchantId: data.merchantId,
+      amount: data.amount,
+      currency: data.currency,
+      status: data.status,
+      network: data.network ?? null,
+      reference: data.reference ?? null,
+      checkoutLinkId: data.checkoutLinkId ?? null,
+      confirmedAt: data.confirmedAt ?? null,
+      metadata: data.metadata ?? {},
+    },
+    { metadata: data.metadata, livemode: options?.livemode }
+  )
+}
+
+function buildTestWebhookEvent(event: WebhookEvent, merchantId: string, data: WebhookPaymentData) {
+  if (event.startsWith("checkout.session.")) {
+    return buildWebhookEnvelope(
+      event,
+      {
+        id: `cs_test_${data.paymentId.slice(5)}`,
+        object: "checkout.session",
+        status: event === "checkout.session.completed" || event === "checkout.session.paid" ? "paid"
+          : event === "checkout.session.failed" ? "failed"
+          : event === "checkout.session.expired" ? "expired"
+          : event === "checkout.session.canceled" ? "canceled"
+          : event === "checkout.session.processing" ? "processing"
+          : "open",
+        amount: data.amount,
+        currency: data.currency,
+        reference: data.reference ?? null,
+        customer: { email: null },
+        metadata: data.metadata ?? {},
+        checkoutUrl: "https://checkout.pinetree-payments.com/test",
+        paymentId: data.paymentId,
+        supportedRails: [],
+        successUrl: null,
+        cancelUrl: null,
+        createdAt: new Date().toISOString(),
+        expiresAt: null,
+        merchantId,
+      },
+      { livemode: false }
+    )
+  }
+
+  if (event.startsWith("payment_link.")) {
+    return buildWebhookEnvelope(
+      event,
+      {
+        id: `plink_test_${data.paymentId.slice(5)}`,
+        object: "payment_link",
+        status: event === "payment_link.disabled" ? "disabled"
+          : event === "payment_link.expired" ? "expired"
+          : "active",
+        amount: data.amount,
+        currency: data.currency,
+        reference: data.reference ?? null,
+        metadata: data.metadata ?? {},
+        merchantId,
+      },
+      { livemode: false }
+    )
+  }
+
+  return buildPaymentWebhookEvent(event, data, { livemode: false })
+}
+
+async function signPayload(payload: string, secret: string, timestamp: string): Promise<string> {
   const enc = new TextEncoder()
   const key = await crypto.subtle.importKey(
     "raw",
@@ -69,7 +167,11 @@ async function signPayload(payload: string, secret: string): Promise<string> {
     false,
     ["sign"]
   )
-  const signature = await crypto.subtle.sign("HMAC", key, enc.encode(payload).buffer as ArrayBuffer)
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    enc.encode(`${timestamp}.${payload}`).buffer as ArrayBuffer
+  )
   return Array.from(new Uint8Array(signature))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("")
@@ -79,8 +181,10 @@ function isV1EventPayload(payload: Record<string, unknown>) {
   const data = payload.data
   return Boolean(
     payload.eventId &&
+    payload.object === "event" &&
     payload.type &&
     payload.createdAt &&
+    typeof payload.livemode === "boolean" &&
     data &&
     typeof data === "object" &&
     (data as Record<string, unknown>).object
@@ -88,8 +192,46 @@ function isV1EventPayload(payload: Record<string, unknown>) {
 }
 
 function getPayloadEventId(payload: Record<string, unknown>) {
-  const value = payload.eventId || payload.id
+  const value = payload.eventId
   return typeof value === "string" ? value : generateEventId()
+}
+
+function normalizeStoredPayload(event: WebhookEvent, payload: Record<string, unknown>) {
+  const canonicalEvent = normalizeWebhookEventType(event)
+  if (!canonicalEvent) throw new Error(`Unsupported webhook event: ${event}`)
+  if (isV1EventPayload(payload)) {
+    return {
+      ...payload,
+      object: "event",
+      type: normalizeWebhookEventType(String(payload.type)) ?? canonicalEvent,
+      schema: V1_WEBHOOK_VERSION,
+    }
+  }
+
+  const createdAt = typeof payload.created === "string" ? payload.created : undefined
+  const merchantId = typeof payload.merchantId === "string" ? payload.merchantId : null
+  const data = payload.data && typeof payload.data === "object"
+    ? payload.data as Record<string, unknown>
+    : {}
+
+  return buildWebhookEnvelope(
+    event,
+    {
+      id: data.paymentId ?? payload.id ?? null,
+      object: canonicalEvent.startsWith("checkout.session.") ? "checkout.session"
+        : canonicalEvent.startsWith("payment_link.") ? "payment_link"
+        : "payment",
+      merchantId,
+      paymentId: data.paymentId ?? null,
+      checkoutLinkId: data.checkoutLinkId ?? null,
+      amount: data.amount ?? null,
+      currency: data.currency ?? null,
+      status: data.status ?? null,
+      reference: data.reference ?? null,
+      metadata: data.metadata ?? {},
+    },
+    { createdAt, livemode: false }
+  )
 }
 
 async function sendStoredWebhookPayload(input: {
@@ -97,21 +239,20 @@ async function sendStoredWebhookPayload(input: {
   event: WebhookEvent
   payload: Record<string, unknown>
 }) {
-  const payloadJson = JSON.stringify(input.payload)
+  const payload = normalizeStoredPayload(input.event, input.payload)
+  const payloadJson = JSON.stringify(payload)
   const timestamp = new Date().toISOString()
-  const signature = await signPayload(payloadJson, input.config.secret)
-  const v1 = isV1EventPayload(input.payload)
+  const signature = await signPayload(payloadJson, input.config.secret, timestamp)
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    "X-PineTree-Event": input.event,
+    "X-PineTree-Event": String(payload.type),
     "X-PineTree-Signature": `sha256=${signature}`,
     "X-PineTree-Timestamp": timestamp,
-  }
-  if (v1) {
-    headers["PineTree-Signature"] = `sha256=${signature}`
-    headers["PineTree-Timestamp"] = timestamp
-    headers["PineTree-Event-Id"] = getPayloadEventId(input.payload)
-    headers["PineTree-Webhook-Version"] = V1_WEBHOOK_VERSION
+    "PineTree-Signature": `sha256=${signature}`,
+    "PineTree-Timestamp": timestamp,
+    "PineTree-Event-Id": getPayloadEventId(payload),
+    [WEBHOOK_SCHEMA_HEADER]: V1_WEBHOOK_VERSION,
+    [LEGACY_SCHEMA_HEADER]: V1_WEBHOOK_VERSION,
   }
 
   let responseStatus: number | null = null
@@ -157,62 +298,30 @@ export async function deliverWebhook(
   }
 
   if (!webhookConfig || !webhookConfig.enabled) return
-  if (!webhookConfig.events.includes(event)) return
-
-  const { payload, timestamp } = buildEventPayload(event, data)
-  const payloadJson = JSON.stringify(payload)
-
-  let signature = ""
-  try {
-    signature = await signPayload(payloadJson, webhookConfig.secret)
-  } catch (err) {
-    console.error("[webhook] failed to sign payload:", err)
-    return
-  }
-
-  let responseStatus: number | null = null
-  let responseBody: string | null = null
-  let deliveryStatus: "delivered" | "failed" = "failed"
+  const canonicalEvent = normalizeWebhookEventType(event)
+  if (!canonicalEvent || !webhookSubscriptionMatches(webhookConfig.events, canonicalEvent)) return
 
   try {
-    const controller = new AbortController()
-    const timeoutHandle = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS)
-
-    const res = await fetch(webhookConfig.url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-PineTree-Event": event,
-        "X-PineTree-Signature": `sha256=${signature}`,
-        "X-PineTree-Timestamp": timestamp,
-      },
-      body: payloadJson,
-      signal: controller.signal,
+    const payload = buildPaymentWebhookEvent(canonicalEvent, data)
+    const attempt = await sendStoredWebhookPayload({
+      config: webhookConfig,
+      event: canonicalEvent,
+      payload,
     })
-
-    clearTimeout(timeoutHandle)
-    responseStatus = res.status
-    responseBody = (await res.text()).slice(0, 1000)
-    deliveryStatus = res.ok ? "delivered" : "failed"
+    await insertWebhookDelivery({
+      merchantId,
+      webhookId: webhookConfig.id,
+      event: canonicalEvent,
+      payload,
+      status: attempt.status,
+      responseStatus: attempt.responseStatus,
+      responseBody: attempt.responseBody,
+      attemptCount: 1,
+      lastError: attempt.lastError,
+    })
   } catch (err) {
     console.error("[webhook] delivery error:", err)
   }
-
-  await insertWebhookDelivery({
-    merchantId,
-    webhookId: webhookConfig.id,
-    event,
-    payload,
-    status: deliveryStatus,
-    responseStatus,
-    responseBody,
-    attemptCount: 1,
-    lastError: deliveryStatus === "failed"
-      ? responseStatus
-        ? `HTTP ${responseStatus}`
-        : "Delivery failed"
-      : null,
-  })
 }
 
 export function buildV1CheckoutSessionEvent(
@@ -220,14 +329,7 @@ export function buildV1CheckoutSessionEvent(
   session: PublicCheckoutSession,
   createdAt = new Date().toISOString()
 ) {
-  return {
-    eventId: generateEventId(),
-    type: event,
-    createdAt,
-    data: {
-      object: session,
-    },
-  }
+  return buildWebhookEnvelope(event, session as unknown as Record<string, unknown>, { createdAt })
 }
 
 export async function deliverV1CheckoutSessionWebhook(
@@ -242,19 +344,29 @@ export async function deliverV1CheckoutSessionWebhook(
     console.error("[webhook] failed to load config:", err)
     return
   }
-  if (!webhookConfig || !webhookConfig.enabled || !webhookConfig.events.includes(event)) return
+  const canonicalEvent = normalizeWebhookEventType(event)
+  if (
+    !webhookConfig ||
+    !webhookConfig.enabled ||
+    !canonicalEvent ||
+    !canonicalEvent.startsWith("checkout.session.") ||
+    !webhookSubscriptionMatches(webhookConfig.events, canonicalEvent)
+  ) return
 
-  const payload = buildV1CheckoutSessionEvent(event, session)
+  const payload = buildV1CheckoutSessionEvent(
+    canonicalEvent as Extract<WebhookEvent, `checkout.session.${string}`>,
+    session
+  )
   try {
     const attempt = await sendStoredWebhookPayload({
       config: webhookConfig,
-      event,
+      event: canonicalEvent,
       payload,
     })
     await insertWebhookDelivery({
       merchantId,
       webhookId: webhookConfig.id,
-      event,
+      event: canonicalEvent,
       payload,
       status: attempt.status,
       responseStatus: attempt.responseStatus,
@@ -275,10 +387,12 @@ export async function retryWebhookDelivery(
   if (!delivery) return null
   const config = await getMerchantWebhookById(delivery.webhook_id, merchantId)
   if (!config) return null
+  const canonicalEvent = normalizeWebhookEventType(delivery.event)
+  if (!canonicalEvent) return null
 
   const attempt = await sendStoredWebhookPayload({
     config,
-    event: delivery.event,
+    event: canonicalEvent,
     payload: delivery.payload,
   })
   return updateWebhookDeliveryAttempt({
@@ -329,9 +443,8 @@ export type WebhookTestResult = {
  * Send a signed test event to the merchant's configured webhook URL.
  *
  * Reuses the same payload structure, HMAC signing, and logging as live
- * deliveries. The payload includes `"_test": true` so recipients can
- * distinguish test events. Results are logged to webhook_deliveries so they
- * appear in the delivery log.
+ * deliveries. Test events use `livemode: false`. Results are logged to
+ * webhook_deliveries so they appear in the delivery log.
  *
  * Returns an error (not throws) when the webhook is unconfigured, disabled,
  * or not subscribed to the requested event.
@@ -355,7 +468,11 @@ export async function testWebhookDelivery(
   if (!config.enabled) {
     return { success: false, statusCode: null, responseBody: null, deliveryId: null, sentAt, event, error: "Webhook is disabled — enable it first" }
   }
-  if (!config.events.includes(event)) {
+  const canonicalEvent = normalizeWebhookEventType(event)
+  if (!canonicalEvent) {
+    return { success: false, statusCode: null, responseBody: null, deliveryId: null, sentAt, event, error: `Unsupported webhook event: ${event}` }
+  }
+  if (!webhookSubscriptionMatches(config.events, canonicalEvent)) {
     return { success: false, statusCode: null, responseBody: null, deliveryId: null, sentAt, event, error: `Webhook is not subscribed to ${event}` }
   }
 
@@ -364,79 +481,40 @@ export async function testWebhookDelivery(
     merchantId,
     amount: 4999,
     currency: "USD",
-    status: event === "payment.confirmed" ? "CONFIRMED"
-      : event === "payment.failed" ? "FAILED"
+    status: canonicalEvent === "payment.confirmed" ? "CONFIRMED"
+      : canonicalEvent === "payment.failed" ? "FAILED"
+      : canonicalEvent === "payment.created" ? "CREATED"
+      : canonicalEvent === "payment.pending" ? "PENDING"
+      : canonicalEvent === "payment.processing" ? "PROCESSING"
+      : canonicalEvent === "payment.expired" ? "EXPIRED"
+      : canonicalEvent === "payment.cancelled" ? "CANCELLED"
+      : canonicalEvent === "payment.refunded" ? "REFUNDED"
       : "INCOMPLETE",
     reference: "test_event",
     metadata: { test: true, triggeredFrom: "dashboard" },
   }
 
-  const { payload, timestamp } = buildEventPayload(event, testData)
-  const payloadWithTestFlag = { ...payload, _test: true }
-  const payloadJson = JSON.stringify(payloadWithTestFlag)
-
-  let signature = ""
-  try {
-    signature = await signPayload(payloadJson, config.secret)
-  } catch {
-    return { success: false, statusCode: null, responseBody: null, deliveryId: null, sentAt, event, error: "Failed to sign payload" }
-  }
-
-  let statusCode: number | null = null
-  let responseBody: string | null = null
-  let deliveryStatus: "delivered" | "failed" = "failed"
-  let errorMsg: string | undefined
-
-  try {
-    const controller = new AbortController()
-    const timeoutHandle = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS)
-
-    const res = await fetch(config.url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-PineTree-Event": event,
-        "X-PineTree-Signature": `sha256=${signature}`,
-        "X-PineTree-Timestamp": timestamp,
-        "X-PineTree-Test": "1",
-      },
-      body: payloadJson,
-      signal: controller.signal,
-    })
-
-    clearTimeout(timeoutHandle)
-    statusCode = res.status
-    responseBody = (await res.text()).slice(0, 1000)
-    deliveryStatus = res.ok ? "delivered" : "failed"
-    if (!res.ok) errorMsg = `Non-2xx response: ${res.status}`
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Delivery failed"
-    errorMsg = msg.includes("abort") || msg.includes("AbortError")
-      ? `Timed out after ${WEBHOOK_TIMEOUT_MS / 1000}s`
-      : msg
-  }
-
-  const deliveryId = crypto.randomUUID()
-
-  await insertWebhookDelivery({
+  const payload = buildTestWebhookEvent(canonicalEvent, merchantId, testData)
+  const attempt = await sendStoredWebhookPayload({ config, event: canonicalEvent, payload })
+  const delivery = await insertWebhookDelivery({
     merchantId,
     webhookId: config.id,
-    event,
-    payload: payloadWithTestFlag,
-    status: deliveryStatus,
-    responseStatus: statusCode,
-    responseBody,
+    event: canonicalEvent,
+    payload,
+    status: attempt.status,
+    responseStatus: attempt.responseStatus,
+    responseBody: attempt.responseBody,
     attemptCount: 1,
-    lastError: errorMsg ?? null,
+    lastError: attempt.lastError,
   })
 
   return {
-    success: deliveryStatus === "delivered",
-    statusCode,
-    responseBody,
-    deliveryId,
+    success: attempt.status === "delivered",
+    statusCode: attempt.responseStatus,
+    responseBody: attempt.responseBody,
+    deliveryId: delivery?.id ?? null,
     sentAt,
-    event,
-    ...(errorMsg ? { error: errorMsg } : {}),
+    event: canonicalEvent,
+    ...(attempt.lastError ? { error: attempt.lastError } : {}),
   }
 }

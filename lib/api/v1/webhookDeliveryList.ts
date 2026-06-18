@@ -1,21 +1,11 @@
-import type {
-  WebhookDeliveryStatus,
-  WebhookEvent,
-} from "@/database/merchantWebhooks"
+import type { WebhookDeliveryStatus } from "@/database/merchantWebhooks"
+import {
+  normalizeWebhookEventType,
+  type WebhookEvent,
+} from "@/lib/webhooks/events"
 import { V1ApiError } from "./errors"
 
-const DELIVERY_STATUSES: WebhookDeliveryStatus[] = ["pending", "delivered", "failed"]
-const EVENT_TYPES: WebhookEvent[] = [
-  "payment.confirmed",
-  "payment.failed",
-  "payment.incomplete",
-  "checkout.session.created",
-  "checkout.session.processing",
-  "checkout.session.paid",
-  "checkout.session.failed",
-  "checkout.session.expired",
-  "checkout.session.canceled",
-]
+const DELIVERY_STATUSES: WebhookDeliveryStatus[] = ["pending", "delivered", "failed", "dead_letter"]
 
 export function parseWebhookDeliveryListQuery(url: string) {
   const params = new URL(url).searchParams
@@ -35,12 +25,13 @@ export function parseWebhookDeliveryListQuery(url: string) {
       status: 400,
       type: "invalid_request_error",
       code: "invalid_filter",
-      message: "status must be pending, delivered, or failed.",
+      message: "status must be pending, delivered, failed, or dead_letter.",
     })
   }
 
   const eventTypeValue = params.get("eventType")
-  if (eventTypeValue && !EVENT_TYPES.includes(eventTypeValue as WebhookEvent)) {
+  const eventType = eventTypeValue ? normalizeWebhookEventType(eventTypeValue) : undefined
+  if (eventTypeValue && !eventType) {
     throw new V1ApiError({
       status: 400,
       type: "invalid_request_error",
@@ -75,6 +66,6 @@ export function parseWebhookDeliveryListQuery(url: string) {
     limit,
     cursor,
     status: statusValue as WebhookDeliveryStatus | undefined,
-    eventType: eventTypeValue as WebhookEvent | undefined,
+    eventType: eventType as WebhookEvent | undefined,
   }
 }

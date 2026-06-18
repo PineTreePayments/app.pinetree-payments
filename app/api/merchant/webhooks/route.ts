@@ -4,22 +4,15 @@ import {
   getMerchantWebhook,
   upsertMerchantWebhook,
   deleteMerchantWebhook,
+  SUPPORTED_WEBHOOK_EVENTS,
+  normalizeWebhookEventType,
+  type CanonicalWebhookEvent,
   type WebhookEvent,
 } from "@/database/merchantWebhooks"
 import { generateWebhookSecret } from "@/engine/webhookDelivery"
 import { insertMerchantAuditEvent } from "@/database/merchantAuditEvents"
 
-const VALID_EVENTS: WebhookEvent[] = [
-  "payment.confirmed",
-  "payment.failed",
-  "payment.incomplete",
-  "checkout.session.created",
-  "checkout.session.processing",
-  "checkout.session.paid",
-  "checkout.session.failed",
-  "checkout.session.expired",
-  "checkout.session.canceled",
-]
+const VALID_EVENTS: readonly WebhookEvent[] = SUPPORTED_WEBHOOK_EVENTS
 
 type UpsertBody = {
   url: string
@@ -32,7 +25,14 @@ export async function GET(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req, "webhooks:read")
     const config = await getMerchantWebhook(merchantId)
-    return NextResponse.json({ webhook: config })
+    return NextResponse.json({
+      webhook: config
+        ? {
+            ...config,
+            events: Array.from(new Set(config.events.map((event) => normalizeWebhookEventType(event)).filter(Boolean))),
+          }
+        : config,
+    })
   } catch (error: unknown) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to fetch webhook config" },
@@ -59,9 +59,11 @@ export async function POST(req: NextRequest) {
     }
 
     const requestedEvents = Array.isArray(body.events) ? body.events : VALID_EVENTS
-    const events = requestedEvents.filter((e) =>
-      VALID_EVENTS.includes(e as WebhookEvent)
-    ) as WebhookEvent[]
+    const events = Array.from(new Set(
+      requestedEvents
+        .map((e) => normalizeWebhookEventType(String(e)))
+        .filter((e): e is CanonicalWebhookEvent => Boolean(e))
+    ))
 
     const existing = await getMerchantWebhook(merchantId)
     const isRegeneratingSecret = Boolean(body.regenerateSecret) && Boolean(existing?.secret)

@@ -7,17 +7,19 @@ using standard HMAC-SHA256.
 
 | Header | Value |
 |---|---|
-| `PineTree-Signature` | `sha256=<hmac-sha256-hex-of-raw-body>` |
+| `PineTree-Signature` | `sha256=<hmac-sha256-hex>` |
 | `PineTree-Timestamp` | ISO-8601 timestamp of the event |
 | `PineTree-Event-Id` | Unique event identifier for deduplication |
-| `PineTree-Webhook-Version` | `2026-06-12` |
+| `PineTree-Event-Schema` | `payments-v1` |
+
+`PineTree-Webhook-Version` is also sent as a legacy alias for `PineTree-Event-Schema`.
 
 ## Verification algorithm
 
 1. Read the raw request body **before** any JSON parsing.
 2. Extract `PineTree-Signature` (format: `sha256=<hex>`) and `PineTree-Timestamp`.
 3. Reject events with a timestamp older than 5 minutes.
-4. Compute `HMAC-SHA256(key=webhookSecret, message=rawBody)` and hex-encode it.
+4. Compute `HMAC-SHA256(key=webhookSecret, message=PineTree-Timestamp + "." + rawBody)` and hex-encode it.
 5. Use a timing-safe comparison to compare the computed hex with the header value (strip the `sha256=` prefix first).
 6. If they match, parse the body as JSON and process the event.
 
@@ -51,6 +53,7 @@ app.post(
 
     // Compute expected HMAC
     const expected = createHmac("sha256", WEBHOOK_SECRET)
+      .update(`${timestampHeader}.`)
       .update(req.body)
       .digest("hex")
 
@@ -72,7 +75,7 @@ app.post(
     const event = JSON.parse(req.body.toString("utf8"))
 
     switch (event.type) {
-      case "checkout.session.paid":
+      case "checkout.session.completed":
         // Fulfill order
         break
       case "checkout.session.expired":
@@ -121,7 +124,7 @@ def handle_pinetree_webhook():
     # Compute expected HMAC
     expected = hmac.new(
         WEBHOOK_SECRET.encode("utf-8"),
-        request.data,
+        timestamp_header.encode("utf-8") + b"." + request.data,
         hashlib.sha256,
     ).hexdigest()
 
@@ -132,7 +135,7 @@ def handle_pinetree_webhook():
     event = request.get_json()
 
     match event.get("type"):
-        case "checkout.session.paid":
+        case "checkout.session.completed":
             pass  # fulfill order
         case "checkout.session.expired":
             pass  # mark as expired
@@ -176,7 +179,7 @@ if (!hash_equals($expected, $actual)) {
 $event = json_decode($rawBody, true);
 
 switch ($event['type']) {
-    case 'checkout.session.paid':
+    case 'checkout.session.completed':
         // fulfill order
         break;
     case 'checkout.session.expired':
@@ -192,7 +195,8 @@ http_response_code(200);
 ```json
 {
   "eventId":   "evt_01j...",
-  "type":      "checkout.session.paid",
+  "object":    "event",
+  "type":      "checkout.session.completed",
   "createdAt": "2026-06-12T12:00:00.000Z",
   "data": {
     "object": {
@@ -214,7 +218,7 @@ http_response_code(200);
 | Event type | Trigger |
 |---|---|
 | `checkout.session.created` | Session was created |
-| `checkout.session.paid` | Payment completed |
+| `checkout.session.completed` | Payment completed |
 | `checkout.session.failed` | Payment attempt failed |
 | `checkout.session.expired` | Session expired without payment |
 | `checkout.session.canceled` | Session was canceled by the merchant |

@@ -121,16 +121,29 @@ const EXPIRATION_LABELS: Record<Expiration, string> = {
 }
 
 const ALL_WEBHOOK_EVENTS = [
+  { id: "payment.created", label: "payment.created", description: "Fires when a payment object is created" },
+  { id: "payment.pending", label: "payment.pending", description: "Fires when payment activity is pending" },
+  { id: "payment.processing", label: "payment.processing", description: "Fires when payment processing begins" },
   { id: "payment.confirmed", label: "payment.confirmed", description: "Fires when a payment is confirmed on-chain" },
   { id: "payment.failed", label: "payment.failed", description: "Fires when a payment fails or is rejected" },
+  { id: "payment.expired", label: "payment.expired", description: "Fires when a payment expires" },
+  { id: "payment.cancelled", label: "payment.cancelled", description: "Fires when a payment is cancelled" },
   { id: "payment.incomplete", label: "payment.incomplete", description: "Fires when a payment is canceled mid-flow" },
+  { id: "payment.refunded", label: "payment.refunded", description: "Fires when a payment is refunded" },
   { id: "checkout.session.created", label: "checkout.session.created", description: "Fires when a new checkout session is created" },
   { id: "checkout.session.processing", label: "checkout.session.processing", description: "Fires when session payment processing begins" },
-  { id: "checkout.session.paid", label: "checkout.session.paid", description: "Fires when the session payment is confirmed" },
+  { id: "checkout.session.completed", label: "checkout.session.completed", description: "Fires when the session payment is completed" },
   { id: "checkout.session.failed", label: "checkout.session.failed", description: "Fires when the session payment fails" },
   { id: "checkout.session.expired", label: "checkout.session.expired", description: "Fires when the session expires" },
   { id: "checkout.session.canceled", label: "checkout.session.canceled", description: "Fires when the session is canceled" },
+  { id: "payment_link.created", label: "payment_link.created", description: "Fires when a payment link is created" },
+  { id: "payment_link.disabled", label: "payment_link.disabled", description: "Fires when a payment link is disabled" },
+  { id: "payment_link.expired", label: "payment_link.expired", description: "Fires when a payment link expires" },
 ]
+
+function normalizeDashboardWebhookEvent(event: string) {
+  return event === "checkout.session.paid" ? "checkout.session.completed" : event
+}
 
 const APP_BASE =
   (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "") ||
@@ -675,9 +688,13 @@ export function CheckoutWorkspace({
       const data = (await res.json()) as { webhook: WebhookConfig }
       const wh = data.webhook
       if (wh) {
-        setWebhookConfig(wh)
+        const normalizedWebhook = {
+          ...wh,
+          events: Array.from(new Set(wh.events.map(normalizeDashboardWebhookEvent))),
+        }
+        setWebhookConfig(normalizedWebhook)
         setWebhookUrl(wh.url)
-        setWebhookEvents(wh.events)
+        setWebhookEvents(normalizedWebhook.events)
       }
     } catch {
       setWebhookError(true)
@@ -866,7 +883,12 @@ export function CheckoutWorkspace({
       const data = (await res.json()) as { webhook?: WebhookConfig; error?: string }
       if (!res.ok) throw new Error(data.error || "Failed to save webhook")
       if (data.webhook) {
-        setWebhookConfig(data.webhook)
+        const normalizedWebhook = {
+          ...data.webhook,
+          events: Array.from(new Set(data.webhook.events.map(normalizeDashboardWebhookEvent))),
+        }
+        setWebhookConfig(normalizedWebhook)
+        setWebhookEvents(normalizedWebhook.events)
         toast.success("Webhook configuration saved")
       }
     } catch (err) {
@@ -890,7 +912,12 @@ export function CheckoutWorkspace({
       const data = (await res.json()) as { webhook?: WebhookConfig; error?: string }
       if (!res.ok) throw new Error(data.error || "Failed to regenerate secret")
       if (data.webhook) {
-        setWebhookConfig(data.webhook)
+        const normalizedWebhook = {
+          ...data.webhook,
+          events: Array.from(new Set(data.webhook.events.map(normalizeDashboardWebhookEvent))),
+        }
+        setWebhookConfig(normalizedWebhook)
+        setWebhookEvents(normalizedWebhook.events)
         setShowSecret(true)
         toast.success("Signing secret regenerated")
       }
@@ -918,7 +945,12 @@ export function CheckoutWorkspace({
       const data = (await res.json()) as { webhook?: WebhookConfig; error?: string }
       if (!res.ok) throw new Error(data.error || "Failed to update webhook")
       if (data.webhook) {
-        setWebhookConfig(data.webhook)
+        const normalizedWebhook = {
+          ...data.webhook,
+          events: Array.from(new Set(data.webhook.events.map(normalizeDashboardWebhookEvent))),
+        }
+        setWebhookConfig(normalizedWebhook)
+        setWebhookEvents(normalizedWebhook.events)
         toast.success(data.webhook.enabled ? "Webhook enabled" : "Webhook disabled")
       }
     } catch (err) {
@@ -1288,8 +1320,8 @@ app.post('/api/your-checkout-handler', async (req, res) => {
 // IMPORTANT: pass the raw request body — not JSON.stringify(req.body).
 // Any whitespace difference will break the signature.
 function verifyPineTreeWebhook(rawBody, headers, secret) {
-  const signature = headers['x-pinetree-signature'] // "sha256=<hex>"
-  const timestamp  = headers['x-pinetree-timestamp']  // ISO string
+  const signature = headers['pinetree-signature'] || headers['x-pinetree-signature'] // "sha256=<hex>"
+  const timestamp  = headers['pinetree-timestamp'] || headers['x-pinetree-timestamp']  // ISO string
 
   // Reject stale events (replay attack protection — 5 min window)
   const ageMs = Date.now() - new Date(timestamp).getTime()
@@ -1297,6 +1329,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
 
   const expected = 'sha256=' + crypto
     .createHmac('sha256', secret)
+    .update(timestamp + '.')
     .update(rawBody)   // rawBody must be the original Buffer or string
     .digest('hex')
 
@@ -2008,16 +2041,17 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                 <div className="p-5 sm:p-6">
                   <p className="mb-3 text-xs leading-relaxed text-gray-500">
                     Verify incoming webhook requests using HMAC-SHA256. Compare the{" "}
-                    <code className="rounded bg-gray-100 px-1 font-mono text-[11px]">X-PineTree-Signature</code>{" "}
-                    header against a local signature built from the <strong>raw request body</strong> and this secret.
-                    Also check <code className="rounded bg-gray-100 px-1 font-mono text-[11px]">X-PineTree-Timestamp</code>{" "}
+                    <code className="rounded bg-gray-100 px-1 font-mono text-[11px]">PineTree-Signature</code>{" "}
+                    header against a local signature built from{" "}
+                    <strong>PineTree-Timestamp + &quot;.&quot; + raw request body</strong> and this secret.
+                    Also check <code className="rounded bg-gray-100 px-1 font-mono text-[11px]">PineTree-Timestamp</code>{" "}
                     to reject replayed events.
                   </p>
                   <p className="mb-3 text-xs leading-relaxed text-gray-500">
                     Webhook events also include{" "}
                     <code className="rounded bg-gray-100 px-1 font-mono text-[11px]">PineTree-Event-Id</code>{" "}
                     and{" "}
-                    <code className="rounded bg-gray-100 px-1 font-mono text-[11px]">PineTree-Webhook-Version: 2026-06-12</code>.
+                    <code className="rounded bg-gray-100 px-1 font-mono text-[11px]">PineTree-Webhook-Version: payments-v1</code>.
                     Legacy <code className="font-mono">X-PineTree-*</code> headers remain supported.
                   </p>
                   <div className="mb-4 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3.5 py-2.5">
@@ -2221,7 +2255,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                     )}
                     <p className="text-[11px] text-gray-400">
                       Test events are logged in the Delivery Log above.
-                      The payload includes <code className="font-mono">&quot;_test&quot;: true</code> so your handler can identify them.
+                      The payload includes <code className="font-mono">&quot;livemode&quot;: false</code> so your handler can identify them.
                     </p>
                   </>
                 )}
