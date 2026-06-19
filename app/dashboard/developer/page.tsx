@@ -313,12 +313,17 @@ type DocSection =
   | "overview"
   | "quickstart"
   | "authentication"
+  | "api-keys"
   | "checkout-sessions"
   | "payments"
+  | "rails-assets"
+  | "payment-states"
   | "webhooks"
+  | "webhook-events"
   | "webhook-deliveries"
   | "errors"
   | "idempotency"
+  | "sdks"
   | "testing"
   | "go-live"
 
@@ -326,12 +331,17 @@ const docNav: { id: DocSection; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "quickstart", label: "Quickstart" },
   { id: "authentication", label: "Authentication" },
+  { id: "api-keys", label: "API Keys" },
   { id: "checkout-sessions", label: "Checkout Sessions" },
   { id: "payments", label: "Payments" },
+  { id: "rails-assets", label: "Rails & Assets" },
+  { id: "payment-states", label: "Payment States" },
   { id: "webhooks", label: "Webhooks" },
+  { id: "webhook-events", label: "Webhook Events" },
   { id: "webhook-deliveries", label: "Webhook Deliveries" },
   { id: "errors", label: "Errors" },
   { id: "idempotency", label: "Idempotency" },
+  { id: "sdks", label: "SDKs" },
   { id: "testing", label: "Testing" },
   { id: "go-live", label: "Go Live" },
 ]
@@ -590,6 +600,35 @@ Content-Type: application/json`}</CodeBlock>
   )
 }
 
+function DocSectionApiKeys() {
+  return (
+    <div>
+      <DocH1 eyebrow="Credentials" description="Secret keys belong on servers. Public keys belong in browser checkout flows.">
+        API Keys
+      </DocH1>
+      <DocTable
+        headers={["Key", "Prefix", "Use"]}
+        rows={[
+          ["Secret API key", "pt_live_*", "Server REST API calls"],
+          ["Browser public key", "pk_live_*", "Browser SDK checkout creation"],
+        ]}
+      />
+      <DocH2>Permissions</DocH2>
+      <DocTable
+        headers={["Permission", "Grants"]}
+        rows={[
+          ["checkout.sessions:create", "Create checkout sessions"],
+          ["checkout.sessions:read", "List and retrieve sessions"],
+          ["checkout.sessions:write", "Cancel or expire sessions"],
+          ["payments:read", "Retrieve payments"],
+          ["webhooks:read", "List webhook deliveries"],
+          ["webhooks:write", "Retry webhook deliveries"],
+        ]}
+      />
+    </div>
+  )
+}
+
 function DocSectionCheckoutSessions() {
   return (
     <div>
@@ -662,6 +701,57 @@ function DocSectionPayments() {
   )
 }
 
+function DocSectionRailsAssets() {
+  return (
+    <div>
+      <DocH1 eyebrow="Payment Methods" description="Rails are network/provider paths. Assets are what the customer pays on that rail.">
+        Rails & Assets
+      </DocH1>
+      <DocTable
+        headers={["Rail", "Assets"]}
+        rows={[
+          ["solana", "SOL on Solana, USDC on Solana"],
+          ["base", "ETH on Base, USDC on Base"],
+          ["bitcoin_lightning", "BTC over Lightning"],
+          ["shift4", "Card/USD through Shift4 where enabled"],
+        ]}
+      />
+      <DocH2>Hosted checkout selections</DocH2>
+      <DocTable
+        headers={["Network", "Asset"]}
+        rows={[
+          ["solana", "SOL"],
+          ["solana", "USDC"],
+          ["base", "ETH"],
+          ["base", "USDC"],
+          ["bitcoin_lightning", "BTC"],
+        ]}
+      />
+    </div>
+  )
+}
+
+function DocSectionPaymentStates() {
+  return (
+    <div>
+      <DocH1 eyebrow="Lifecycle" description="Confirmed is the successful visible payment state. Public API objects use paid for compatibility.">
+        Payment States
+      </DocH1>
+      <DocTable
+        headers={["Visible State", "Meaning", "Terminal", "Color"]}
+        rows={[
+          ["Waiting", "Payment request open, no funds detected", "No", "Blue"],
+          ["Processing", "Payment detected, awaiting final confirmation", "No", "Blue"],
+          ["Confirmed", "Payment completed", "Yes", "Green"],
+          ["Failed", "Provider/network/payment attempt failed", "Yes", "Red"],
+          ["Expired", "Payment window timed out", "Yes", "Red"],
+          ["Incomplete", "Customer abandoned/backed out/no funds sent", "Yes", "Red"],
+        ]}
+      />
+    </div>
+  )
+}
+
 function DocSectionWebhooks() {
   return (
     <div>
@@ -713,6 +803,49 @@ const event = pinetree.webhooks.constructEvent(
   )
 }
 
+function DocSectionWebhookEvents() {
+  return (
+    <div>
+      <DocH1 eyebrow="Event Catalog" description="Every implemented merchant webhook event type in the payments-v1 envelope.">
+        Webhook Events
+      </DocH1>
+      <DocTable
+        headers={["Event", "Object"]}
+        rows={[
+          ["payment.created", "payment"],
+          ["payment.pending", "payment"],
+          ["payment.processing", "payment"],
+          ["payment.confirmed", "payment"],
+          ["payment.failed", "payment"],
+          ["payment.expired", "payment"],
+          ["payment.cancelled", "payment"],
+          ["payment.incomplete", "payment"],
+          ["payment.refunded", "payment"],
+          ["checkout.session.created", "checkout.session"],
+          ["checkout.session.processing", "checkout.session"],
+          ["checkout.session.completed", "checkout.session"],
+          ["checkout.session.failed", "checkout.session"],
+          ["checkout.session.expired", "checkout.session"],
+          ["checkout.session.canceled", "checkout.session"],
+          ["payment_link.created", "payment_link"],
+          ["payment_link.disabled", "payment_link"],
+          ["payment_link.expired", "payment_link"],
+        ]}
+      />
+      <DocH2>Envelope</DocH2>
+      <CodeBlock>{`{
+  "eventId": "evt_...",
+  "object": "event",
+  "type": "payment.confirmed",
+  "schema": "payments-v1",
+  "createdAt": "2026-06-16T00:00:00.000Z",
+  "livemode": true,
+  "data": { "object": { "id": "pay_...", "object": "payment" } }
+}`}</CodeBlock>
+    </div>
+  )
+}
+
 function DocSectionWebhookDeliveries() {
   return (
     <div>
@@ -727,7 +860,8 @@ function DocSectionWebhookDeliveries() {
         rows={[
           ["pending", "Not yet attempted or queued for retry"],
           ["delivered", "Your endpoint returned 2xx"],
-          ["failed", "All attempts exhausted"],
+          ["failed", "Last attempt failed"],
+          ["dead_letter", "Delivery requires operator attention"],
         ]}
       />
       <DocH2>Retry a failed delivery</DocH2>
@@ -801,6 +935,27 @@ function DocSectionIdempotency() {
           ["Request in progress", "409 idempotency_request_in_progress"],
         ]}
       />
+    </div>
+  )
+}
+
+function DocSectionSdks() {
+  return (
+    <div>
+      <DocH1 eyebrow="Libraries" description="Use the Node SDK on servers, JavaScript SDK in browser flows, and React SDK for components.">
+        SDKs
+      </DocH1>
+      <DocTable
+        headers={["SDK", "Package"]}
+        rows={[
+          ["Node SDK", "@pinetreepayments/node"],
+          ["JavaScript SDK", "@pinetreepayments/js"],
+          ["React SDK", "@pinetreepayments/react"],
+        ]}
+      />
+      <CodeBlock>{`npm install @pinetreepayments/node
+npm install @pinetreepayments/js
+npm install @pinetreepayments/react`}</CodeBlock>
     </div>
   )
 }
@@ -887,12 +1042,17 @@ const docSectionComponents: Record<DocSection, () => ReactNode> = {
   "overview": DocSectionOverview,
   "quickstart": DocSectionQuickstart,
   "authentication": DocSectionAuthentication,
+  "api-keys": DocSectionApiKeys,
   "checkout-sessions": DocSectionCheckoutSessions,
   "payments": DocSectionPayments,
+  "rails-assets": DocSectionRailsAssets,
+  "payment-states": DocSectionPaymentStates,
   "webhooks": DocSectionWebhooks,
+  "webhook-events": DocSectionWebhookEvents,
   "webhook-deliveries": DocSectionWebhookDeliveries,
   "errors": DocSectionErrors,
   "idempotency": DocSectionIdempotency,
+  "sdks": DocSectionSdks,
   "testing": DocSectionTesting,
   "go-live": DocSectionGoLive,
 }

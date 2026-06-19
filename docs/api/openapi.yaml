@@ -25,6 +25,8 @@ tags:
     description: Retrieve payment objects
   - name: webhook-deliveries
     description: Monitor and retry webhook deliveries
+  - name: browser-checkout
+    description: Browser checkout creation with public keys
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Paths
@@ -252,6 +254,46 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /api/v1/browser/checkout/sessions:
+
+    post:
+      operationId: createBrowserCheckoutSession
+      summary: Create a browser checkout session
+      tags: [browser-checkout]
+      security: []
+      description: |
+        Creates a checkout session from browser code using a PineTree public key.
+        This route only creates sessions and cannot read private merchant data.
+      parameters:
+        - name: X-PineTree-Public-Key
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Browser public key with `pk_live_` prefix.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckoutSessionCreateParams"
+            example:
+              amount: 2600
+              currency: USD
+              reference: order_123
+              rails: [solana, base]
+      responses:
+        "201":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /api/v1/webhook-deliveries:
 
@@ -513,7 +555,7 @@ components:
           enum: [payment]
         status:
           type: string
-          enum: [open, processing, paid, failed, incomplete]
+          enum: [open, processing, paid, failed, expired, canceled]
         amount:
           type: integer
           example: 2500
@@ -543,7 +585,56 @@ components:
 
     WebhookDeliveryStatus:
       type: string
-      enum: [pending, delivered, failed]
+      enum: [pending, delivered, failed, dead_letter]
+
+    WebhookEventType:
+      type: string
+      enum:
+        - payment.created
+        - payment.pending
+        - payment.processing
+        - payment.confirmed
+        - payment.failed
+        - payment.expired
+        - payment.cancelled
+        - payment.incomplete
+        - payment.refunded
+        - checkout.session.created
+        - checkout.session.processing
+        - checkout.session.completed
+        - checkout.session.failed
+        - checkout.session.expired
+        - checkout.session.canceled
+        - payment_link.created
+        - payment_link.disabled
+        - payment_link.expired
+
+    WebhookEvent:
+      type: object
+      required: [eventId, object, type, schema, createdAt, livemode, data]
+      properties:
+        eventId:
+          type: string
+          example: evt_0123456789abcdef01234567
+        object:
+          type: string
+          enum: [event]
+        type:
+          $ref: "#/components/schemas/WebhookEventType"
+        schema:
+          type: string
+          enum: [payments-v1]
+        createdAt:
+          type: string
+          format: date-time
+        livemode:
+          type: boolean
+        data:
+          type: object
+          properties:
+            object:
+              type: object
+              additionalProperties: true
 
     WebhookDelivery:
       type: object
@@ -577,6 +668,10 @@ components:
           type: string
           nullable: true
         deliveredAt:
+          type: string
+          format: date-time
+          nullable: true
+        deadLetteredAt:
           type: string
           format: date-time
           nullable: true

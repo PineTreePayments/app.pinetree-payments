@@ -1,1094 +1,286 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PineTree API Documentation</title>
-<style>
-  /* ── Reset & Base ─────────────────────────────────────────────────────── */
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  html { font-size: 15px; scroll-behavior: smooth; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    background: #f8fafc;
-    color: #0f172a;
-    line-height: 1.6;
-    min-height: 100vh;
-  }
-
-  /* ── Layout ───────────────────────────────────────────────────────────── */
-  .pt-layout {
-    display: flex;
-    min-height: 100vh;
-  }
-
-  /* ── Sidebar ──────────────────────────────────────────────────────────── */
-  .pt-sidebar {
-    width: 240px;
-    min-width: 240px;
-    background: #fff;
-    border-right: 1px solid #e2e8f0;
-    position: sticky;
-    top: 0;
-    height: 100vh;
-    overflow-y: auto;
-    padding: 28px 0 40px;
-    flex-shrink: 0;
-  }
-  .pt-sidebar-logo {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 0 20px 24px;
-    border-bottom: 1px solid #f1f5f9;
-    margin-bottom: 16px;
-  }
-  .pt-logo-mark {
-    width: 28px;
-    height: 28px;
-    background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
-    border-radius: 7px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
-    font-size: 13px;
-    font-weight: 800;
-    letter-spacing: -0.5px;
-    flex-shrink: 0;
-  }
-  .pt-sidebar-brand {
-    font-size: 14px;
-    font-weight: 700;
-    color: #0f172a;
-    letter-spacing: -0.3px;
-  }
-  .pt-sidebar-section {
-    padding: 4px 20px 2px;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #94a3b8;
-    margin-top: 16px;
-    margin-bottom: 2px;
-  }
-  .pt-nav-link {
-    display: block;
-    padding: 6px 20px;
-    font-size: 13.5px;
-    color: #475569;
-    text-decoration: none;
-    border-left: 2px solid transparent;
-    transition: all 0.12s;
-    cursor: pointer;
-  }
-  .pt-nav-link:hover {
-    background: #f8fafc;
-    color: #1e40af;
-    border-left-color: #bfdbfe;
-  }
-  .pt-nav-link.active {
-    color: #1d4ed8;
-    font-weight: 600;
-    border-left-color: #2563eb;
-    background: #eff6ff;
-  }
-
-  /* ── Main ─────────────────────────────────────────────────────────────── */
-  .pt-main {
-    flex: 1;
-    max-width: 820px;
-    padding: 48px 52px 80px;
-    min-width: 0;
-  }
-
-  /* ── Sections ─────────────────────────────────────────────────────────── */
-  .pt-section {
-    display: none;
-  }
-  .pt-section.visible {
-    display: block;
-  }
-
-  /* ── Typography ───────────────────────────────────────────────────────── */
-  .pt-h1 {
-    font-size: 28px;
-    font-weight: 800;
-    letter-spacing: -0.7px;
-    color: #0f172a;
-    margin-bottom: 10px;
-  }
-  .pt-h2 {
-    font-size: 17px;
-    font-weight: 700;
-    color: #0f172a;
-    margin-top: 36px;
-    margin-bottom: 10px;
-    letter-spacing: -0.3px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid #f1f5f9;
-  }
-  .pt-h3 {
-    font-size: 14px;
-    font-weight: 700;
-    color: #1e293b;
-    margin-top: 24px;
-    margin-bottom: 6px;
-  }
-  .pt-lead {
-    font-size: 15px;
-    color: #475569;
-    margin-bottom: 28px;
-    line-height: 1.65;
-  }
-  p {
-    margin-bottom: 14px;
-    color: #334155;
-    font-size: 14px;
-    line-height: 1.65;
-  }
-  a { color: #2563eb; text-decoration: none; }
-  a:hover { text-decoration: underline; }
-
-  /* ── Cards ────────────────────────────────────────────────────────────── */
-  .pt-card {
-    background: #fff;
-    border: 1px solid #e2e8f0;
-    border-radius: 14px;
-    padding: 20px 22px;
-    margin-bottom: 16px;
-    box-shadow: 0 1px 4px rgba(15,23,42,0.04);
-  }
-  .pt-card-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-bottom: 24px;
-  }
-  .pt-card-grid .pt-card {
-    margin-bottom: 0;
-  }
-  .pt-card-title {
-    font-size: 13px;
-    font-weight: 700;
-    color: #0f172a;
-    margin-bottom: 4px;
-  }
-  .pt-card-desc {
-    font-size: 12.5px;
-    color: #64748b;
-    line-height: 1.5;
-    margin-bottom: 0;
-  }
-  .pt-badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 600;
-    background: #eff6ff;
-    color: #1d4ed8;
-    margin-bottom: 8px;
-  }
-  .pt-badge.green {
-    background: #f0fdf4;
-    color: #15803d;
-  }
-  .pt-badge.purple {
-    background: #faf5ff;
-    color: #7e22ce;
-  }
-
-  /* ── Code blocks ──────────────────────────────────────────────────────── */
-  .pt-code-wrap {
-    position: relative;
-    margin: 14px 0 20px;
-  }
-  pre {
-    background: #0f172a;
-    color: #e2e8f0;
-    border-radius: 10px;
-    padding: 16px 18px;
-    overflow-x: auto;
-    font-size: 12.5px;
-    line-height: 1.65;
-    font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
-  }
-  code {
-    font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
-    font-size: 12px;
-  }
-  :not(pre) > code {
-    background: #f1f5f9;
-    color: #1e40af;
-    padding: 2px 6px;
-    border-radius: 5px;
-    font-size: 12px;
-  }
-  .pt-copy-btn {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.12);
-    color: #94a3b8;
-    border-radius: 6px;
-    padding: 4px 9px;
-    font-size: 11px;
-    font-family: inherit;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-  .pt-copy-btn:hover {
-    background: rgba(255,255,255,0.16);
-    color: #e2e8f0;
-  }
-  .pt-copy-btn.copied {
-    color: #4ade80;
-    border-color: rgba(74, 222, 128, 0.3);
-  }
-
-  /* ── Tables ───────────────────────────────────────────────────────────── */
-  .pt-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-    margin: 14px 0 22px;
-    border-radius: 10px;
-    overflow: hidden;
-    border: 1px solid #e2e8f0;
-  }
-  .pt-table th {
-    background: #f8fafc;
-    font-weight: 600;
-    text-align: left;
-    padding: 10px 14px;
-    color: #64748b;
-    font-size: 12px;
-    letter-spacing: 0.02em;
-    border-bottom: 1px solid #e2e8f0;
-  }
-  .pt-table td {
-    padding: 10px 14px;
-    border-bottom: 1px solid #f1f5f9;
-    color: #334155;
-    vertical-align: top;
-  }
-  .pt-table tr:last-child td { border-bottom: none; }
-  .pt-table code { font-size: 11.5px; }
-
-  /* ── Method badge ─────────────────────────────────────────────────────── */
-  .pt-method {
-    display: inline-block;
-    padding: 2px 7px;
-    border-radius: 5px;
-    font-size: 10.5px;
-    font-weight: 700;
-    margin-right: 6px;
-    font-family: "SF Mono", Consolas, monospace;
-  }
-  .pt-method.post { background: #dcfce7; color: #15803d; }
-  .pt-method.get  { background: #eff6ff; color: #1d4ed8; }
-
-  /* ── Route block ──────────────────────────────────────────────────────── */
-  .pt-route {
-    background: #fff;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    padding: 16px 18px;
-    margin: 20px 0;
-    box-shadow: 0 1px 3px rgba(15,23,42,0.04);
-  }
-  .pt-route-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
-  }
-  .pt-route-path {
-    font-family: "SF Mono", Consolas, monospace;
-    font-size: 13px;
-    font-weight: 600;
-    color: #0f172a;
-  }
-  .pt-route-desc {
-    font-size: 13px;
-    color: #64748b;
-    margin-bottom: 0;
-  }
-
-  /* ── Checklist ────────────────────────────────────────────────────────── */
-  .pt-checklist {
-    list-style: none;
-    margin: 12px 0 20px;
-  }
-  .pt-checklist li {
-    display: flex;
-    align-items: flex-start;
-    gap: 9px;
-    font-size: 13.5px;
-    color: #334155;
-    margin-bottom: 8px;
-    line-height: 1.5;
-  }
-  .pt-checklist li::before {
-    content: "□";
-    color: #94a3b8;
-    font-size: 14px;
-    flex-shrink: 0;
-    margin-top: 1px;
-  }
-
-  /* ── Step indicator ───────────────────────────────────────────────────── */
-  .pt-steps {
-    counter-reset: step;
-    margin: 20px 0;
-  }
-  .pt-step {
-    display: flex;
-    gap: 16px;
-    margin-bottom: 24px;
-    align-items: flex-start;
-  }
-  .pt-step-num {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    background: #eff6ff;
-    color: #1d4ed8;
-    font-size: 12px;
-    font-weight: 700;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    margin-top: 1px;
-  }
-  .pt-step-body { flex: 1; }
-  .pt-step-title {
-    font-size: 14px;
-    font-weight: 700;
-    color: #0f172a;
-    margin-bottom: 6px;
-  }
-
-  /* ── Info box ─────────────────────────────────────────────────────────── */
-  .pt-note {
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
-    border-radius: 10px;
-    padding: 13px 15px;
-    font-size: 13px;
-    color: #1e40af;
-    margin: 14px 0 20px;
-    line-height: 1.55;
-  }
-  .pt-warn {
-    background: #fffbeb;
-    border: 1px solid #fde68a;
-    border-radius: 10px;
-    padding: 13px 15px;
-    font-size: 13px;
-    color: #92400e;
-    margin: 14px 0 20px;
-    line-height: 1.55;
-  }
-
-  /* ── Mobile ───────────────────────────────────────────────────────────── */
-  .pt-mobile-nav {
-    display: none;
-    background: #fff;
-    border-bottom: 1px solid #e2e8f0;
-    padding: 12px 16px;
-    position: sticky;
-    top: 0;
-    z-index: 10;
-  }
-  .pt-mobile-select {
-    width: 100%;
-    padding: 8px 10px;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    font-size: 13px;
-    font-family: inherit;
-    color: #0f172a;
-    background: #fff;
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 10px center;
-    padding-right: 30px;
-    cursor: pointer;
-  }
-
-  @media (max-width: 768px) {
-    .pt-sidebar { display: none; }
-    .pt-mobile-nav { display: block; }
-    .pt-main { padding: 24px 18px 60px; }
-    .pt-card-grid { grid-template-columns: 1fr; }
-  }
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PineTree API Documentation</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: #dbeafe;
+      --blue: #2563eb;
+      --blue-soft: #eff6ff;
+      --green: #15803d;
+      --red: #b91c1c;
+      --bg: #f8fafc;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    .shell { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 100vh; }
+    nav {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      border-right: 1px solid #e2e8f0;
+      background: #fff;
+      padding: 24px 18px;
+    }
+    nav h1 { margin: 0 0 18px; font-size: 18px; letter-spacing: 0; }
+    nav a { display: block; padding: 8px 10px; border-radius: 8px; color: #475569; font-size: 14px; }
+    nav a:hover { background: var(--blue-soft); color: var(--blue); }
+    main { max-width: 1080px; padding: 42px 32px 80px; }
+    section { margin: 0 0 48px; }
+    h2 { margin: 0 0 12px; font-size: 28px; letter-spacing: 0; }
+    h3 { margin: 28px 0 10px; font-size: 18px; letter-spacing: 0; }
+    p { color: var(--muted); margin: 0 0 14px; }
+    .hero {
+      border: 1px solid var(--line);
+      background: linear-gradient(135deg, #fff, #eff6ff);
+      border-radius: 8px;
+      padding: 28px;
+      margin-bottom: 38px;
+    }
+    .hero h2 { font-size: 40px; margin-bottom: 8px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .card {
+      border: 1px solid #e2e8f0;
+      background: #fff;
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .endpoint { border-left: 4px solid var(--blue); }
+    .method {
+      display: inline-block;
+      min-width: 48px;
+      margin-right: 8px;
+      border-radius: 6px;
+      background: var(--blue-soft);
+      color: var(--blue);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      font-weight: 700;
+      text-align: center;
+      padding: 3px 6px;
+    }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+    }
+    pre {
+      position: relative;
+      overflow: auto;
+      border: 1px solid #dbeafe;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #e5edff;
+      padding: 16px;
+    }
+    button.copy {
+      float: right;
+      border: 1px solid #bfdbfe;
+      border-radius: 6px;
+      background: #fff;
+      color: var(--blue);
+      font-weight: 700;
+      padding: 5px 8px;
+      cursor: pointer;
+    }
+    table { width: 100%; border-collapse: collapse; overflow: hidden; border-radius: 8px; background: #fff; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: var(--blue-soft); color: #1d4ed8; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    td { color: #334155; font-size: 14px; }
+    .ok { color: var(--green); font-weight: 700; }
+    .bad { color: var(--red); font-weight: 700; }
+    @media (max-width: 820px) {
+      .shell { display: block; }
+      nav { position: static; height: auto; border-right: 0; border-bottom: 1px solid #e2e8f0; }
+      main { padding: 28px 18px 64px; }
+      .hero h2 { font-size: 32px; }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
 <body>
-
-<!-- Mobile navigation -->
-<div class="pt-mobile-nav">
-  <select class="pt-mobile-select" onchange="showSection(this.value)">
-    <option value="overview">Overview</option>
-    <option value="quickstart">Quickstart</option>
-    <option value="authentication">Authentication</option>
-    <option value="checkout-sessions">Checkout Sessions</option>
-    <option value="payments">Payments</option>
-    <option value="webhooks">Webhooks</option>
-    <option value="sdks">SDKs</option>
-    <option value="errors">Errors</option>
-    <option value="testing">Testing</option>
-    <option value="golive">Go Live</option>
-    <option value="providers">Provider Integrations</option>
-  </select>
-</div>
-
-<div class="pt-layout">
-
-  <!-- Sidebar -->
-  <nav class="pt-sidebar" aria-label="API documentation">
-    <div class="pt-sidebar-logo">
-      <div class="pt-logo-mark">PT</div>
-      <span class="pt-sidebar-brand">PineTree API</span>
-    </div>
-
-    <div class="pt-sidebar-section">Getting started</div>
-    <a class="pt-nav-link active" onclick="showSection('overview')">Overview</a>
-    <a class="pt-nav-link" onclick="showSection('quickstart')">Quickstart</a>
-    <a class="pt-nav-link" onclick="showSection('authentication')">Authentication</a>
-
-    <div class="pt-sidebar-section">API Reference</div>
-    <a class="pt-nav-link" onclick="showSection('checkout-sessions')">Checkout Sessions</a>
-    <a class="pt-nav-link" onclick="showSection('payments')">Payments</a>
-    <a class="pt-nav-link" onclick="showSection('webhooks')">Webhooks</a>
-
-    <div class="pt-sidebar-section">SDKs</div>
-    <a class="pt-nav-link" onclick="showSection('sdks')">SDKs &amp; Libraries</a>
-
-    <div class="pt-sidebar-section">Reference</div>
-    <a class="pt-nav-link" onclick="showSection('errors')">Errors</a>
-    <a class="pt-nav-link" onclick="showSection('testing')">Testing</a>
-    <a class="pt-nav-link" onclick="showSection('golive')">Go Live</a>
-
-    <div class="pt-sidebar-section">Partners</div>
-    <a class="pt-nav-link" onclick="showSection('providers')">Provider Integrations</a>
-  </nav>
-
-  <!-- Main content -->
-  <main class="pt-main">
-
-    <!-- ── Overview ──────────────────────────────────────────────────────── -->
-    <section id="section-overview" class="pt-section visible">
-      <div class="pt-badge">v1 · Production</div>
-      <h1 class="pt-h1">PineTree API</h1>
-      <p class="pt-lead">Accept crypto payments across Solana, Base, Lightning, and more. The PineTree API gives you checkout sessions, real-time webhooks, and a hosted payment page — so your customers can pay with any wallet in under 60 seconds.</p>
-
-      <div class="pt-card-grid">
-        <div class="pt-card">
-          <div class="pt-card-title">Base URL</div>
-          <code>https://app.pinetree-payments.com</code>
-        </div>
-        <div class="pt-card">
-          <div class="pt-card-title">API Version</div>
-          <code>/api/v1/</code> prefix on all routes
-        </div>
-        <div class="pt-card">
-          <div class="pt-card-title">Authentication</div>
-          <p class="pt-card-desc"><code>Authorization: Bearer pt_live_...</code></p>
-        </div>
-        <div class="pt-card">
-          <div class="pt-card-title">Flat fee</div>
-          <p class="pt-card-desc">$0.15 per confirmed transaction, captured at the network level</p>
-        </div>
+  <div class="shell">
+    <nav>
+      <h1>PineTree Docs</h1>
+      <a href="#overview">Overview</a>
+      <a href="#auth">Authentication</a>
+      <a href="#endpoints">Endpoints</a>
+      <a href="#objects">Objects</a>
+      <a href="#events">Webhook Events</a>
+      <a href="#deliveries">Webhook Deliveries</a>
+      <a href="#states">Payment States</a>
+      <a href="#rails">Rails & Assets</a>
+      <a href="#errors">Errors</a>
+      <a href="#go-live">Go Live</a>
+    </nav>
+    <main>
+      <div class="hero" id="overview">
+        <h2>PineTree API</h2>
+        <p>Create hosted checkout sessions, accept Solana, Base, Lightning, and Shift4 payments, then fulfill from signed webhooks.</p>
+        <pre><button class="copy">Copy</button><code>https://app.pinetree-payments.com/api/v1</code></pre>
       </div>
 
-      <h2 class="pt-h2">Supported assets</h2>
-      <table class="pt-table">
-        <thead><tr><th>Asset</th><th>Rail</th><th>Status</th></tr></thead>
-        <tbody>
-          <tr><td>SOL on Solana</td><td><code>solana</code></td><td><span class="pt-badge green">Live</span></td></tr>
-          <tr><td>USDC on Solana</td><td><code>solana</code></td><td><span class="pt-badge green">Live</span></td></tr>
-          <tr><td>ETH on Base</td><td><code>base</code></td><td><span class="pt-badge green">Live</span></td></tr>
-          <tr><td>USDC on Base</td><td><code>base</code></td><td><span class="pt-badge green">Live</span></td></tr>
-          <tr><td>BTC over Lightning</td><td><code>bitcoin_lightning</code></td><td><span class="pt-badge green">Live</span></td></tr>
-          <tr><td>Cards / Shift4</td><td><code>shift4</code></td><td><span class="pt-badge green">Live</span></td></tr>
-        </tbody>
-      </table>
-
-      <h2 class="pt-h2">Core concepts</h2>
-      <div class="pt-card">
-        <div class="pt-card-title">Checkout Session</div>
-        <p class="pt-card-desc">A payment intent with a hosted checkout URL. Customers select a network and complete payment in the PineTree checkout. Sessions expire after 24 hours.</p>
-      </div>
-      <div class="pt-card">
-        <div class="pt-card-title">Payment</div>
-        <p class="pt-card-desc">Created when a customer initiates a payment attempt. Tracks on-chain status, network, rail, and amount. Transitions through: open → processing → paid | failed | incomplete.</p>
-      </div>
-      <div class="pt-card">
-        <div class="pt-card-title">Webhook Event</div>
-        <p class="pt-card-desc">Signed HTTP POST delivered to your endpoint when payment status changes. Use <code>payment.confirmed</code> to fulfill orders. Verified with HMAC-SHA256.</p>
-      </div>
-    </section>
-
-    <!-- ── Quickstart ─────────────────────────────────────────────────────── -->
-    <section id="section-quickstart" class="pt-section">
-      <h1 class="pt-h1">Quickstart</h1>
-      <p class="pt-lead">Integrate PineTree in minutes. Create a session on your server, redirect your customer, and listen for the confirmation webhook.</p>
-
-      <div class="pt-steps">
-        <div class="pt-step">
-          <div class="pt-step-num">1</div>
-          <div class="pt-step-body">
-            <div class="pt-step-title">Get an API key</div>
-            <p>Go to <strong>Developer → API Keys</strong> in your dashboard. Create a key with <code>checkout.sessions:create</code> permission. Store it as <code>PINETREE_API_KEY</code>.</p>
-          </div>
+      <section id="auth">
+        <h2>Authentication</h2>
+        <div class="grid">
+          <div class="card"><strong>Secret API keys</strong><p>Use `pt_live_*` keys on servers with `Authorization: Bearer`.</p></div>
+          <div class="card"><strong>Browser public keys</strong><p>Use `pk_live_*` keys with `X-PineTree-Public-Key` for browser checkout creation only.</p></div>
         </div>
+        <pre><button class="copy">Copy</button><code>Authorization: Bearer pt_live_...
+Content-Type: application/json
+Idempotency-Key: order_123</code></pre>
+      </section>
 
-        <div class="pt-step">
-          <div class="pt-step-num">2</div>
-          <div class="pt-step-body">
-            <div class="pt-step-title">Install the Node SDK</div>
-            <div class="pt-code-wrap">
-              <pre><code>npm install @pinetreepayments/node</code></pre>
-              <button class="pt-copy-btn" onclick="copy(this)">Copy</button>
-            </div>
-          </div>
+      <section id="endpoints">
+        <h2>Endpoint Reference</h2>
+        <div class="grid">
+          <div class="card endpoint"><span class="method">POST</span><code>/api/v1/checkout/sessions</code><p>Create a hosted checkout session. Scope: `checkout.sessions:create`.</p></div>
+          <div class="card endpoint"><span class="method">GET</span><code>/api/v1/checkout/sessions</code><p>List sessions. Scope: `checkout.sessions:read`.</p></div>
+          <div class="card endpoint"><span class="method">GET</span><code>/api/v1/checkout/sessions/{id}</code><p>Retrieve a session. Scope: `checkout.sessions:read` or `checkout.sessions:create`.</p></div>
+          <div class="card endpoint"><span class="method">POST</span><code>/api/v1/checkout/sessions/{id}/cancel</code><p>Cancel an open session. Scope: `checkout.sessions:write` or `checkout.sessions:create`.</p></div>
+          <div class="card endpoint"><span class="method">POST</span><code>/api/v1/checkout/sessions/{id}/expire</code><p>Expire an open session. Scope: `checkout.sessions:write` or `checkout.sessions:create`.</p></div>
+          <div class="card endpoint"><span class="method">GET</span><code>/api/v1/payments/{id}</code><p>Retrieve a payment. Scope: `payments:read`.</p></div>
+          <div class="card endpoint"><span class="method">GET</span><code>/api/v1/webhook-deliveries</code><p>List delivery records. Scope: `webhooks:read`.</p></div>
+          <div class="card endpoint"><span class="method">POST</span><code>/api/v1/webhook-deliveries/{id}/retry</code><p>Retry a delivery. Scope: `webhooks:write`.</p></div>
+          <div class="card endpoint"><span class="method">POST</span><code>/api/v1/browser/checkout/sessions</code><p>Create checkout from browser code using `X-PineTree-Public-Key`.</p></div>
         </div>
-
-        <div class="pt-step">
-          <div class="pt-step-num">3</div>
-          <div class="pt-step-body">
-            <div class="pt-step-title">Create a checkout session</div>
-            <div class="pt-code-wrap">
-              <pre><code>import { PineTree } from "@pinetreepayments/node"
-
-const pinetree = new PineTree(process.env.PINETREE_API_KEY!)
-
-const session = await pinetree.checkout.sessions.create({
-  amount: 2500,                            // $25.00 in cents
-  currency: "USD",
-  reference: "order_1042",
-  successUrl: "https://yoursite.com/success",
-  cancelUrl: "https://yoursite.com/cancel",
-})
-
-// Redirect the customer
-res.redirect(session.checkoutUrl)</code></pre>
-              <button class="pt-copy-btn" onclick="copy(this)">Copy</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="pt-step">
-          <div class="pt-step-num">4</div>
-          <div class="pt-step-body">
-            <div class="pt-step-title">Verify the webhook</div>
-            <div class="pt-code-wrap">
-              <pre><code>// Express — must use express.raw() before parsing
-app.post("/webhooks/pinetree",
-  express.raw({ type: "application/json" }),
-  (req, res) => {
-    const event = pinetree.webhooks.constructEvent(
-      req.body,
-      req.headers,
-      process.env.PINETREE_WEBHOOK_SECRET!
-    )
-    if (event.type === "payment.confirmed") {
-      fulfillOrder(event.data.object.reference)
-    }
-    res.json({ received: true })
-  }
-)</code></pre>
-              <button class="pt-copy-btn" onclick="copy(this)">Copy</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="pt-note">
-        <strong>No sandbox mode.</strong> PineTree uses live keys only. Use small amounts (e.g., $0.01) for integration testing.
-      </div>
-    </section>
-
-    <!-- ── Authentication ─────────────────────────────────────────────────── -->
-    <section id="section-authentication" class="pt-section">
-      <h1 class="pt-h1">Authentication</h1>
-      <p class="pt-lead">PineTree uses API keys for server-to-server auth and public keys for browser-side checkout. Never expose secret keys in frontend code.</p>
-
-      <h2 class="pt-h2">Secret API keys</h2>
-      <p>Created in <strong>Developer → API Keys</strong>. Format: <code>pt_live_&lt;64 hex chars&gt;</code></p>
-      <div class="pt-code-wrap">
-        <pre><code>Authorization: Bearer pt_live_your_api_key_here
-Content-Type: application/json</code></pre>
-        <button class="pt-copy-btn" onclick="copy(this)">Copy</button>
-      </div>
-
-      <h2 class="pt-h2">Key permissions</h2>
-      <table class="pt-table">
-        <thead><tr><th>Permission</th><th>Grants</th></tr></thead>
-        <tbody>
-          <tr><td><code>checkout.sessions:create</code></td><td>Create checkout sessions</td></tr>
-          <tr><td><code>checkout.sessions:read</code></td><td>List and retrieve sessions</td></tr>
-          <tr><td><code>payments:read</code></td><td>Retrieve payment objects</td></tr>
-          <tr><td><code>webhooks:read</code></td><td>List webhook deliveries</td></tr>
-          <tr><td><code>webhooks:write</code></td><td>Retry webhook deliveries</td></tr>
-        </tbody>
-      </table>
-
-      <h2 class="pt-h2">Auth errors</h2>
-      <table class="pt-table">
-        <thead><tr><th>Code</th><th>Status</th><th>Cause</th></tr></thead>
-        <tbody>
-          <tr><td><code>missing_api_key</code></td><td>401</td><td>No Authorization header</td></tr>
-          <tr><td><code>invalid_api_key</code></td><td>401</td><td>Invalid format or revoked key</td></tr>
-          <tr><td><code>missing_permission</code></td><td>403</td><td>Key lacks required scope</td></tr>
-        </tbody>
-      </table>
-
-      <div class="pt-warn"><strong>Security:</strong> Never use <code>pt_live_*</code> keys in browser code. Use <code>pk_live_*</code> public keys with the Browser SDK for frontend checkout flows.</div>
-    </section>
-
-    <!-- ── Checkout Sessions ──────────────────────────────────────────────── -->
-    <section id="section-checkout-sessions" class="pt-section">
-      <h1 class="pt-h1">Checkout Sessions</h1>
-      <p class="pt-lead">A checkout session is a single payment intent. Create one server-side, redirect the customer to <code>checkoutUrl</code>, and receive a webhook when payment is confirmed.</p>
-
-      <div class="pt-route">
-        <div class="pt-route-title">
-          <span class="pt-method post">POST</span>
-          <span class="pt-route-path">/api/v1/checkout/sessions</span>
-        </div>
-        <p class="pt-route-desc">Create a checkout session. Requires <code>checkout.sessions:create</code>.</p>
-      </div>
-
-      <div class="pt-code-wrap">
-        <pre><code>curl -X POST https://app.pinetree-payments.com/api/v1/checkout/sessions \
-  -H "Authorization: Bearer pt_live_..." \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: order_1042" \
-  -d '{
-    "amount": 2500,
-    "currency": "USD",
-    "reference": "order_1042",
-    "customer": { "email": "jane@example.com" },
-    "successUrl": "https://yoursite.com/success",
-    "cancelUrl": "https://yoursite.com/cancel"
-  }'</code></pre>
-        <button class="pt-copy-btn" onclick="copy(this)">Copy</button>
-      </div>
-
-      <div class="pt-route">
-        <div class="pt-route-title">
-          <span class="pt-method get">GET</span>
-          <span class="pt-route-path">/api/v1/checkout/sessions</span>
-        </div>
-        <p class="pt-route-desc">List sessions. Supports <code>status</code>, <code>reference</code>, <code>limit</code>, <code>starting_after</code>, date filters.</p>
-      </div>
-
-      <div class="pt-route">
-        <div class="pt-route-title">
-          <span class="pt-method get">GET</span>
-          <span class="pt-route-path">/api/v1/checkout/sessions/{id}</span>
-        </div>
-        <p class="pt-route-desc">Retrieve a single session by ID.</p>
-      </div>
-
-      <div class="pt-route">
-        <div class="pt-route-title">
-          <span class="pt-method post">POST</span>
-          <span class="pt-route-path">/api/v1/checkout/sessions/{id}/cancel</span>
-        </div>
-        <p class="pt-route-desc">Cancel an open session.</p>
-      </div>
-
-      <div class="pt-route">
-        <div class="pt-route-title">
-          <span class="pt-method post">POST</span>
-          <span class="pt-route-path">/api/v1/checkout/sessions/{id}/expire</span>
-        </div>
-        <p class="pt-route-desc">Immediately expire a session.</p>
-      </div>
-
-      <h2 class="pt-h2">Session statuses</h2>
-      <table class="pt-table">
-        <thead><tr><th>Status</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td><code>open</code></td><td>Waiting for customer payment</td></tr>
-          <tr><td><code>processing</code></td><td>Payment broadcast; awaiting confirmation</td></tr>
-          <tr><td><code>paid</code></td><td>Confirmed — fulfill the order</td></tr>
-          <tr><td><code>failed</code></td><td>Payment failed at the network level</td></tr>
-          <tr><td><code>expired</code></td><td>Session expired without payment</td></tr>
-          <tr><td><code>canceled</code></td><td>Explicitly canceled by merchant</td></tr>
-        </tbody>
-      </table>
-    </section>
-
-    <!-- ── Payments ────────────────────────────────────────────────────────── -->
-    <section id="section-payments" class="pt-section">
-      <h1 class="pt-h1">Payments</h1>
-      <p class="pt-lead">A payment object is created when a customer initiates a payment attempt. It tracks on-chain status, network, and amount.</p>
-
-      <div class="pt-route">
-        <div class="pt-route-title">
-          <span class="pt-method get">GET</span>
-          <span class="pt-route-path">/api/v1/payments/{id}</span>
-        </div>
-        <p class="pt-route-desc">Retrieve a payment. Requires <code>payments:read</code>.</p>
-      </div>
-
-      <div class="pt-code-wrap">
-        <pre><code>{
-  "id": "pay_01abc...",
-  "object": "payment",
-  "status": "paid",
-  "amount": 2500,
+        <h3>Create checkout session</h3>
+        <pre><button class="copy">Copy</button><code>{
+  "amount": 2600,
   "currency": "USD",
-  "network": "solana",
-  "rail": "solana",
-  "reference": "order_1042",
-  "metadata": {},
-  "createdAt": "2026-06-16T12:01:00.000Z",
-  "updatedAt": "2026-06-16T12:02:30.000Z"
+  "reference": "order_123",
+  "rails": ["solana", "base"],
+  "metadata": { "cart_id": "cart_123" }
 }</code></pre>
-        <button class="pt-copy-btn" onclick="copy(this)">Copy</button>
-      </div>
+      </section>
 
-      <h2 class="pt-h2">Payment lifecycle</h2>
-      <div class="pt-code-wrap">
-        <pre><code>CREATED → PENDING → PROCESSING → CONFIRMED (status: "paid")
-                             └→ FAILED    (status: "failed")
-              └→ INCOMPLETE               (status: "incomplete")</code></pre>
-      </div>
-      <p>Terminal states (<code>paid</code>, <code>failed</code>, <code>incomplete</code>) are permanent. Use the <code>payment.confirmed</code> webhook event for order fulfillment.</p>
-    </section>
+      <section id="objects">
+        <h2>API Objects</h2>
+        <table>
+          <thead><tr><th>Object</th><th>Description</th><th>Important fields</th></tr></thead>
+          <tbody>
+            <tr><td><code>checkout.session</code></td><td>Hosted checkout session.</td><td><code>id</code>, <code>status</code>, <code>checkoutUrl</code>, <code>paymentId</code>, <code>supportedRails</code></td></tr>
+            <tr><td><code>payment</code></td><td>Payment attempt and status.</td><td><code>id</code>, <code>status</code>, <code>amount</code>, <code>network</code>, <code>rail</code>, <code>reference</code></td></tr>
+            <tr><td><code>event</code></td><td>Signed webhook envelope.</td><td><code>eventId</code>, <code>type</code>, <code>schema</code>, <code>createdAt</code>, <code>data.object</code></td></tr>
+            <tr><td><code>webhook.delivery</code></td><td>Webhook delivery attempt record.</td><td><code>status</code>, <code>attemptCount</code>, <code>lastStatusCode</code>, <code>deadLetteredAt</code></td></tr>
+          </tbody>
+        </table>
+      </section>
 
-    <!-- ── Webhooks ────────────────────────────────────────────────────────── -->
-    <section id="section-webhooks" class="pt-section">
-      <h1 class="pt-h1">Webhooks</h1>
-      <p class="pt-lead">PineTree delivers HMAC-signed events to your endpoint when payment status changes. Always verify the signature before processing.</p>
+      <section id="events">
+        <h2>Webhook Event Catalog</h2>
+        <table>
+          <thead><tr><th>Event</th><th>Object</th><th>Trigger</th></tr></thead>
+          <tbody>
+            <tr><td><code>payment.created</code></td><td>payment</td><td>Payment created</td></tr>
+            <tr><td><code>payment.pending</code></td><td>payment</td><td>Waiting for customer/network action</td></tr>
+            <tr><td><code>payment.processing</code></td><td>payment</td><td>Payment detected, awaiting confirmation</td></tr>
+            <tr><td><code>payment.confirmed</code></td><td>payment</td><td>Successful terminal confirmation</td></tr>
+            <tr><td><code>payment.failed</code></td><td>payment</td><td>Attempt failed</td></tr>
+            <tr><td><code>payment.expired</code></td><td>payment</td><td>Payment window expired</td></tr>
+            <tr><td><code>payment.cancelled</code></td><td>payment</td><td>Payment cancelled</td></tr>
+            <tr><td><code>payment.incomplete</code></td><td>payment</td><td>Customer abandoned or no funds sent</td></tr>
+            <tr><td><code>payment.refunded</code></td><td>payment</td><td>Payment refunded</td></tr>
+            <tr><td><code>checkout.session.created</code></td><td>checkout.session</td><td>Session created</td></tr>
+            <tr><td><code>checkout.session.processing</code></td><td>checkout.session</td><td>Session processing</td></tr>
+            <tr><td><code>checkout.session.completed</code></td><td>checkout.session</td><td>Session paid</td></tr>
+            <tr><td><code>checkout.session.failed</code></td><td>checkout.session</td><td>Session failed</td></tr>
+            <tr><td><code>checkout.session.expired</code></td><td>checkout.session</td><td>Session expired</td></tr>
+            <tr><td><code>checkout.session.canceled</code></td><td>checkout.session</td><td>Session canceled</td></tr>
+            <tr><td><code>payment_link.created</code></td><td>payment_link</td><td>Payment link created</td></tr>
+            <tr><td><code>payment_link.disabled</code></td><td>payment_link</td><td>Payment link disabled</td></tr>
+            <tr><td><code>payment_link.expired</code></td><td>payment_link</td><td>Payment link expired</td></tr>
+          </tbody>
+        </table>
+      </section>
 
-      <h2 class="pt-h2">Webhook headers</h2>
-      <table class="pt-table">
-        <thead><tr><th>Header</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td><code>PineTree-Signature</code></td><td>HMAC-SHA256 of <code>PineTree-Timestamp + "." + raw body</code> using your signing secret</td></tr>
-          <tr><td><code>PineTree-Timestamp</code></td><td>ISO 8601 — must be within 5 minutes of current time</td></tr>
-          <tr><td><code>PineTree-Event-Id</code></td><td>Unique event ID for deduplication</td></tr>
-          <tr><td><code>PineTree-Event-Schema</code></td><td><code>payments-v1</code></td></tr>
-        </tbody>
-      </table>
+      <section id="deliveries">
+        <h2>Webhook Delivery Headers</h2>
+        <table>
+          <thead><tr><th>Header</th><th>Value</th></tr></thead>
+          <tbody>
+            <tr><td><code>PineTree-Signature</code></td><td><code>sha256=&lt;hex&gt;</code></td></tr>
+            <tr><td><code>PineTree-Timestamp</code></td><td>ISO 8601 timestamp</td></tr>
+            <tr><td><code>PineTree-Event-Id</code></td><td>Matches <code>eventId</code></td></tr>
+            <tr><td><code>PineTree-Event-Schema</code></td><td><code>payments-v1</code></td></tr>
+            <tr><td><code>PineTree-Webhook-Version</code></td><td>Legacy schema compatibility</td></tr>
+          </tbody>
+        </table>
+      </section>
 
-      <h2 class="pt-h2">Signature verification</h2>
-      <div class="pt-code-wrap">
-        <pre><code>// Node SDK (recommended)
-const event = pinetree.webhooks.constructEvent(
-  rawBody,          // Buffer — do not JSON.parse() first
-  req.headers,      // pass the full headers object
-  process.env.PINETREE_WEBHOOK_SECRET!
-)
+      <section id="states">
+        <h2>Payment States</h2>
+        <table>
+          <thead><tr><th>Visible State</th><th>Meaning</th><th>Terminal</th><th>Color</th></tr></thead>
+          <tbody>
+            <tr><td>Waiting</td><td>Payment request open, no funds detected</td><td>No</td><td>Blue</td></tr>
+            <tr><td>Processing</td><td>Payment detected, awaiting final confirmation</td><td>No</td><td>Blue</td></tr>
+            <tr><td class="ok">Confirmed</td><td>Payment completed</td><td>Yes</td><td>Green</td></tr>
+            <tr><td class="bad">Failed</td><td>Provider/network/payment attempt failed</td><td>Yes</td><td>Red</td></tr>
+            <tr><td class="bad">Expired</td><td>Payment window timed out</td><td>Yes</td><td>Red</td></tr>
+            <tr><td class="bad">Incomplete</td><td>Customer abandoned/backed out/no funds sent</td><td>Yes</td><td>Red</td></tr>
+          </tbody>
+        </table>
+      </section>
 
-// Manual verification (Node.js)
-import { createHmac, timingSafeEqual } from "node:crypto"
+      <section id="rails">
+        <h2>Rails & Assets</h2>
+        <table>
+          <thead><tr><th>Rail</th><th>Assets</th></tr></thead>
+          <tbody>
+            <tr><td><code>solana</code></td><td>SOL on Solana, USDC on Solana</td></tr>
+            <tr><td><code>base</code></td><td>ETH on Base, USDC on Base</td></tr>
+            <tr><td><code>bitcoin_lightning</code></td><td>BTC over Lightning</td></tr>
+            <tr><td><code>shift4</code></td><td>Card/USD through Shift4 where enabled</td></tr>
+          </tbody>
+        </table>
+      </section>
 
-function verify(rawBody, signature, timestamp, secret) {
-  const age = Math.abs(Date.now() - new Date(timestamp).getTime()) / 1000
-  if (age > 300) return false  // reject stale events
-
-  const expected = createHmac("sha256", secret)
-    .update(timestamp + ".")
-    .update(rawBody).digest("hex")
-  const actual = signature.replace(/^sha256=/i, "")
-
-  return timingSafeEqual(
-    Buffer.from(expected, "hex"),
-    Buffer.from(actual, "hex")
-  )
-}</code></pre>
-        <button class="pt-copy-btn" onclick="copy(this)">Copy</button>
-      </div>
-
-      <h2 class="pt-h2">Event types</h2>
-      <table class="pt-table">
-        <thead><tr><th>Event</th><th>When it fires</th></tr></thead>
-        <tbody>
-          <tr><td><code>payment.created</code></td><td>Payment object first created</td></tr>
-          <tr><td><code>payment.pending</code></td><td>Customer wallet action detected</td></tr>
-          <tr><td><code>payment.processing</code></td><td>Transaction broadcast; awaiting confirmation</td></tr>
-          <tr><td><code>payment.confirmed</code></td><td><strong>On-chain confirmed — fulfill the order</strong></td></tr>
-          <tr><td><code>payment.failed</code></td><td>Payment failed at the network level</td></tr>
-          <tr><td><code>payment.incomplete</code></td><td>Session expired before payment</td></tr>
-        </tbody>
-      </table>
-
-      <div class="pt-note">Register your webhook endpoint and copy the signing secret from <strong>Developer → Webhooks</strong> in your dashboard. Use the signing secret as <code>PINETREE_WEBHOOK_SECRET</code>.</div>
-    </section>
-
-    <!-- ── SDKs ───────────────────────────────────────────────────────────── -->
-    <section id="section-sdks" class="pt-section">
-      <h1 class="pt-h1">SDKs &amp; Libraries</h1>
-      <p class="pt-lead">PineTree provides official SDKs for Node.js, browser JavaScript, and React. The REST API is available without an SDK.</p>
-
-      <h2 class="pt-h2">Node SDK</h2>
-      <p><code>@pinetreepayments/node</code> — for server-side session creation, payment retrieval, and webhook verification.</p>
-      <div class="pt-code-wrap">
-        <pre><code>npm install @pinetreepayments/node</code></pre>
-        <button class="pt-copy-btn" onclick="copy(this)">Copy</button>
-      </div>
-      <div class="pt-code-wrap">
-        <pre><code>import { PineTree } from "@pinetreepayments/node"
-const pinetree = new PineTree(process.env.PINETREE_API_KEY!)
-
-const session = await pinetree.checkout.sessions.create({ amount: 2500 })
-const payment = await pinetree.payments.retrieve("pay_01abc...")
-await pinetree.webhookDeliveries.retry("wdel_01abc...")</code></pre>
-        <button class="pt-copy-btn" onclick="copy(this)">Copy</button>
-      </div>
-
-      <h2 class="pt-h2">Browser JavaScript SDK</h2>
-      <p><code>@pinetreepayments/js</code> — open checkout from browser code using a public key. Supports redirect, popup, and embedded modes.</p>
-      <div class="pt-code-wrap">
-        <pre><code>npm install @pinetreepayments/js</code></pre>
-        <button class="pt-copy-btn" onclick="copy(this)">Copy</button>
-      </div>
-      <div class="pt-code-wrap">
-        <pre><code>import { PineTree } from "@pinetreepayments/js"
-const pinetree = new PineTree("pk_live_your_public_key")
-
-const result = await pinetree.checkout.open({
-  amount: 2500,
-  currency: "USD",
-  mode: "popup",        // "redirect" | "popup" | "embedded"
-})
-
-result.on("complete", (event) => {
-  console.log("Paid:", event.sessionId)
-})</code></pre>
-        <button class="pt-copy-btn" onclick="copy(this)">Copy</button>
-      </div>
-
-      <h2 class="pt-h2">React SDK</h2>
-      <p><code>@pinetreepayments/react</code> — React components for checkout buttons and embedded checkout.</p>
-      <div class="pt-code-wrap">
-        <pre><code>npm install @pinetreepayments/react</code></pre>
-        <button class="pt-copy-btn" onclick="copy(this)">Copy</button>
-      </div>
-    </section>
-
-    <!-- ── Errors ─────────────────────────────────────────────────────────── -->
-    <section id="section-errors" class="pt-section">
-      <h1 class="pt-h1">Errors</h1>
-      <p class="pt-lead">All API errors return a consistent JSON structure. Use the <code>type</code> and <code>code</code> fields for programmatic handling.</p>
-
-      <div class="pt-code-wrap">
-        <pre><code>{
+      <section id="errors">
+        <h2>Errors</h2>
+        <pre><button class="copy">Copy</button><code>{
   "error": {
     "type": "authentication_error",
     "code": "missing_api_key",
     "message": "A PineTree API key is required.",
-    "requestId": "req_01abc..."
+    "requestId": "req_..."
   }
 }</code></pre>
-      </div>
+      </section>
 
-      <h2 class="pt-h2">Error types</h2>
-      <table class="pt-table">
-        <thead><tr><th>Type</th><th>Status</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td><code>authentication_error</code></td><td>401</td><td>Missing or invalid API key</td></tr>
-          <tr><td><code>authorization_error</code></td><td>403</td><td>Key lacks required permission</td></tr>
-          <tr><td><code>invalid_request_error</code></td><td>400</td><td>Validation or malformed request</td></tr>
-          <tr><td><code>idempotency_error</code></td><td>409</td><td>Idempotency key conflict</td></tr>
-          <tr><td><code>not_found_error</code></td><td>404</td><td>Resource not found</td></tr>
-          <tr><td><code>api_error</code></td><td>500</td><td>Internal server error</td></tr>
-        </tbody>
-      </table>
-
-      <h2 class="pt-h2">Common error codes</h2>
-      <table class="pt-table">
-        <thead><tr><th>Code</th><th>Status</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td><code>missing_api_key</code></td><td>401</td><td>No Authorization header</td></tr>
-          <tr><td><code>invalid_api_key</code></td><td>401</td><td>Invalid or revoked key</td></tr>
-          <tr><td><code>missing_permission</code></td><td>403</td><td>Key lacks required scope</td></tr>
-          <tr><td><code>invalid_amount</code></td><td>400</td><td>Amount missing or &lt;= 0</td></tr>
-          <tr><td><code>invalid_rails</code></td><td>400</td><td>Unsupported rail identifier</td></tr>
-          <tr><td><code>idempotency_key_conflict</code></td><td>409</td><td>Same key, different body</td></tr>
-          <tr><td><code>checkout_session_not_found</code></td><td>404</td><td>Session not found</td></tr>
-          <tr><td><code>payment_not_found</code></td><td>404</td><td>Payment not found</td></tr>
-        </tbody>
-      </table>
-    </section>
-
-    <!-- ── Testing ────────────────────────────────────────────────────────── -->
-    <section id="section-testing" class="pt-section">
-      <h1 class="pt-h1">Testing</h1>
-      <p class="pt-lead">PineTree uses live keys only. Test with small amounts and use ngrok to receive webhooks locally.</p>
-
-      <div class="pt-note"><strong>No sandbox mode.</strong> All keys are <code>pt_live_*</code>. Use amounts like <code>1</code> (= $0.01) for integration testing.</div>
-
-      <h2 class="pt-h2">Test a checkout flow</h2>
-      <div class="pt-code-wrap">
-        <pre><code>curl -X POST https://app.pinetree-payments.com/api/v1/checkout/sessions \
-  -H "Authorization: Bearer $PINETREE_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{ "amount": 1, "currency": "USD", "reference": "test_001" }'</code></pre>
-        <button class="pt-copy-btn" onclick="copy(this)">Copy</button>
-      </div>
-
-      <h2 class="pt-h2">Test webhooks locally</h2>
-      <div class="pt-code-wrap">
-        <pre><code># Start ngrok
-ngrok http 3000
-
-# Register the tunnel URL in Developer → Webhooks:
-# https://abc123.ngrok-free.app/webhooks/pinetree</code></pre>
-        <button class="pt-copy-btn" onclick="copy(this)">Copy</button>
-      </div>
-
-      <h2 class="pt-h2">Platform test suite</h2>
-      <div class="pt-code-wrap">
-        <pre><code>npm run lint       # 0 errors
-npm run typecheck  # 0 errors
-npx vitest run     # 506 tests
-npm run build      # clean build</code></pre>
-        <button class="pt-copy-btn" onclick="copy(this)">Copy</button>
-      </div>
-    </section>
-
-    <!-- ── Go Live ────────────────────────────────────────────────────────── -->
-    <section id="section-golive" class="pt-section">
-      <h1 class="pt-h1">Go-Live Checklist</h1>
-      <p class="pt-lead">Complete before accepting real payments.</p>
-
-      <h2 class="pt-h2">API &amp; Keys</h2>
-      <ul class="pt-checklist">
-        <li>Secret API key created with minimal required permissions</li>
-        <li>API key stored in environment variables, not source code</li>
-        <li>No <code>pt_live_*</code> keys in frontend code</li>
-        <li>Public browser key created if using Browser SDK</li>
-      </ul>
-
-      <h2 class="pt-h2">Webhooks</h2>
-      <ul class="pt-checklist">
-        <li>Webhook endpoint registered (HTTPS only)</li>
-        <li>Signing secret stored as <code>PINETREE_WEBHOOK_SECRET</code></li>
-        <li><code>PineTree-Signature</code> verified on every event</li>
-        <li>Duplicate events handled via <code>eventId</code> deduplication</li>
-        <li>Events processed asynchronously — handler returns 2xx immediately</li>
-      </ul>
-
-      <h2 class="pt-h2">Payment flows tested</h2>
-      <ul class="pt-checklist">
-        <li>Happy path: session created → paid → order fulfilled</li>
-        <li>Failed payment: not fulfilled, customer notified</li>
-        <li>Expired/incomplete: not fulfilled</li>
-        <li>Canceled session: not fulfilled</li>
-      </ul>
-
-      <h2 class="pt-h2">Provider &amp; environment</h2>
-      <ul class="pt-checklist">
-        <li>At least one payment rail configured in the dashboard</li>
-        <li><code>CHECKOUT_SESSION_SECRET</code>, <code>TERMINAL_SESSION_SECRET</code> set in production</li>
-        <li>Treasury wallet addresses verified</li>
-        <li>Reports reviewed in Dashboard → Reports</li>
-      </ul>
-    </section>
-
-    <!-- ── Provider Integrations ──────────────────────────────────────────── -->
-    <section id="section-providers" class="pt-section">
-      <h1 class="pt-h1">Provider Integrations</h1>
-      <p class="pt-lead">For payment processors and infrastructure partners who want to integrate with PineTree. Every provider implements a standard adapter interface.</p>
-
-      <h2 class="pt-h2">Adapter interface</h2>
-      <div class="pt-code-wrap">
-        <pre><code>interface ProviderAdapter {
-  createPayment(input): Promise&lt;CreatePaymentResult&gt;
-  getPaymentStatus(id): Promise&lt;"pending"|"paid"|"failed"|"expired"&gt;
-  verifyWebhook(rawBody, headers): boolean  // must use timingSafeEqual
-  translateEvent(event): NormalizedEvent    // map to payment.confirmed etc.
-  healthCheck(): Promise&lt;{ status, message }&gt;
-}</code></pre>
-      </div>
-
-      <h2 class="pt-h2">Supported rails (live)</h2>
-      <table class="pt-table">
-        <thead><tr><th>Rail</th><th>Network</th><th>Fee method</th></tr></thead>
-        <tbody>
-          <tr><td><code>solana</code></td><td>SOL on Solana / USDC on Solana</td><td>atomic_split</td></tr>
-          <tr><td><code>base</code></td><td>ETH on Base</td><td>contract_split</td></tr>
-          <tr><td><code>base</code></td><td>USDC on Base</td><td>v7_eip3009_relayer</td></tr>
-          <tr><td><code>bitcoin_lightning</code></td><td>BTC over Lightning (Speed/NWC)</td><td>invoice_split / post_payment_nwc</td></tr>
-          <tr><td><code>shift4</code></td><td>Cards where enabled</td><td>invoice_split</td></tr>
-        </tbody>
-      </table>
-
-      <h2 class="pt-h2">What PineTree needs from a new provider</h2>
-      <ul class="pt-checklist">
-        <li>REST API docs + sandbox credentials</li>
-        <li>Webhook event spec (types, payload schema, signing algorithm)</li>
-        <li>HMAC signing secret for webhook verification</li>
-        <li>Settlement model — direct to merchant wallet or custody?</li>
-        <li>Fee model — flat, percentage, or hybrid?</li>
-        <li>Refund API — supported?</li>
-        <li>Rate limits and uptime SLA</li>
-        <li>Test payment flow (success, failure, expiry in sandbox)</li>
-      </ul>
-    </section>
-
-  </main>
-</div>
-
-<script>
-function showSection(id) {
-  // Hide all
-  document.querySelectorAll('.pt-section').forEach(s => s.classList.remove('visible'))
-  document.querySelectorAll('.pt-nav-link').forEach(l => l.classList.remove('active'))
-
-  // Show target
-  const target = document.getElementById('section-' + id)
-  if (target) target.classList.add('visible')
-
-  // Highlight nav
-  document.querySelectorAll('.pt-nav-link').forEach(l => {
-    if (l.getAttribute('onclick') && l.getAttribute('onclick').includes("'" + id + "'")) {
-      l.classList.add('active')
-    }
-  })
-
-  // Sync mobile select
-  const sel = document.querySelector('.pt-mobile-select')
-  if (sel) sel.value = id
-
-  window.scrollTo(0, 0)
-}
-
-function copy(btn) {
-  const pre = btn.previousElementSibling
-  const text = pre ? pre.textContent : ''
-  if (!text) return
-
-  navigator.clipboard.writeText(text).then(() => {
-    btn.textContent = 'Copied!'
-    btn.classList.add('copied')
-    setTimeout(() => {
-      btn.textContent = 'Copy'
-      btn.classList.remove('copied')
-    }, 1800)
-  }).catch(() => {
-    // fallback — select text
-    const range = document.createRange()
-    range.selectNode(pre)
-    window.getSelection().removeAllRanges()
-    window.getSelection().addRange(range)
-  })
-}
-</script>
-
+      <section id="go-live">
+        <h2>Go Live Checklist</h2>
+        <div class="grid">
+          <div class="card">Secret keys stored server-side only.</div>
+          <div class="card">Webhook signatures verified from raw request body.</div>
+          <div class="card">`eventId` persisted for duplicate protection.</div>
+          <div class="card">Orders fulfilled from `payment.confirmed` only.</div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script>
+    document.querySelectorAll("button.copy").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const code = button.parentElement.querySelector("code").innerText;
+        await navigator.clipboard.writeText(code);
+        const old = button.textContent;
+        button.textContent = "Copied";
+        setTimeout(() => { button.textContent = old; }, 1200);
+      });
+    });
+  </script>
 </body>
 </html>

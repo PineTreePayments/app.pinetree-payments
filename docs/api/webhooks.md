@@ -1,168 +1,132 @@
 # Webhooks
 
-PineTree sends signed HTTP POST events to your webhook endpoint when payment, checkout session, or payment link state changes.
+PineTree sends signed webhook events to the endpoint configured in the merchant dashboard. Use webhooks for fulfillment and reconciliation instead of polling.
 
-## Webhook event model
+Webhook events are documented in [Webhook Events](./webhook-events.md). Delivery logs and manual retry are documented in [Webhook Deliveries](./webhook-deliveries.md).
 
-```typescript
-{
-  eventId: string
-  object: "event"
-  type: string
-  schema: "payments-v1"
-  createdAt: string
-  livemode: boolean
-  data: {
-    object: Record<string, unknown>
-  }
-}
-```
+## Endpoint configuration
 
-Example:
+Configure a single HTTPS endpoint in the dashboard under Developer -> Webhooks. The endpoint can subscribe to any implemented event type in `lib/webhooks/events.ts`.
+
+Webhook settings are managed by internal dashboard APIs. Public server integrations can inspect and retry delivery records through `/api/v1/webhook-deliveries`.
+
+## Event envelope
 
 ```json
 {
-  "eventId": "evt_8f4d9a2c1b0e3f57a6124c90",
+  "eventId": "evt_0123456789abcdef01234567",
   "object": "event",
   "type": "payment.confirmed",
   "schema": "payments-v1",
-  "createdAt": "2026-06-16T12:02:30.000Z",
+  "createdAt": "2026-06-16T00:00:00.000Z",
   "livemode": true,
   "data": {
     "object": {
-      "id": "pay_01abc",
+      "id": "pay_123",
       "object": "payment",
-      "merchantId": "merch_123",
-      "amount": 2500,
+      "amount": 2600,
       "currency": "USD",
       "status": "CONFIRMED",
       "network": "solana",
-      "reference": "order_1042",
-      "checkoutLinkId": null,
-      "confirmedAt": "2026-06-16T12:02:30.000Z",
+      "reference": "order_123",
       "metadata": {}
     }
   }
 }
 ```
 
-Test events use the same envelope with `livemode: false`.
+## Headers
 
-## Webhook headers
+| Header | Value | Notes |
+|---|---|---|
+| `PineTree-Signature` | `sha256=<hex>` | Current HMAC-SHA256 signature header. |
+| `PineTree-Timestamp` | ISO 8601 timestamp | Used in the signed payload and replay protection. |
+| `PineTree-Event-Id` | Event ID | Matches `eventId` in the body. |
+| `PineTree-Event-Schema` | `payments-v1` | Current event schema header. |
+| `PineTree-Webhook-Version` | `payments-v1` | Legacy schema compatibility header. |
+| `X-PineTree-Event` | Event type | Legacy compatibility header. |
+| `X-PineTree-Signature` | `sha256=<hex>` | Legacy compatibility signature header. |
+| `X-PineTree-Timestamp` | ISO 8601 timestamp | Legacy compatibility timestamp header. |
 
-Every webhook request includes these current headers:
-
-| Header | Description |
-| --- | --- |
-| `Content-Type` | `application/json` |
-| `PineTree-Signature` | `sha256=<hex>` HMAC-SHA256 digest |
-| `PineTree-Timestamp` | ISO 8601 timestamp used for replay protection |
-| `PineTree-Event-Id` | Matches `event.eventId` in the body |
-| `PineTree-Event-Schema` | `payments-v1` |
-
-PineTree also sends `PineTree-Webhook-Version` (legacy alias for `PineTree-Event-Schema`) and `X-PineTree-Event`, `X-PineTree-Signature`, `X-PineTree-Timestamp` headers for compatibility.
-
-## Signature verification
-
-PineTree signs the exact string:
+PineTree signs this exact string:
 
 ```text
 PineTree-Timestamp + "." + raw_request_body
 ```
 
-The algorithm is HMAC-SHA256 using the endpoint signing secret. The Node SDK rejects events with timestamps outside a 300 second tolerance window and verifies the `PineTree-Event-Id` and `PineTree-Event-Schema` (or legacy `PineTree-Webhook-Version`) headers when a full header object is passed.
+The signing algorithm is HMAC-SHA256 using the endpoint signing secret. The Node SDK enforces a 300 second timestamp tolerance.
 
-```typescript
+## Node verification example
+
+Use the raw request body. Do not parse JSON before verification.
+
+```ts
+import express from "express"
 import { PineTree } from "@pinetreepayments/node"
 
+const app = express()
 const pinetree = new PineTree(process.env.PINETREE_API_KEY!)
 
-app.post("/webhooks/pinetree", express.raw({ type: "application/json" }), (req, res) => {
-  const event = pinetree.webhooks.constructEvent(
-    req.body,
-    req.headers as Record<string, string>,
-    process.env.PINETREE_WEBHOOK_SECRET!
-  )
+app.post(
+  "/webhooks/pinetree",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    const event = pinetree.webhooks.constructEvent(
+      req.body,
+      req.headers,
+      process.env.PINETREE_WEBHOOK_SECRET!
+    )
 
-  if (event.type === "payment.confirmed") {
-    fulfillOrder(event.data.object)
+    if (event.type === "payment.confirmed") {
+      const payment = event.data.object
+      // Fulfill payment.reference exactly once.
+    }
+
+    res.json({ received: true })
   }
-
-  res.json({ received: true })
-})
+)
 ```
 
-Manual verification:
-
-```typescript
-import { createHmac, timingSafeEqual } from "node:crypto"
-
-function verifyPineTreeWebhook(
-  rawBody: Buffer | string,
-  signature: string,
-  timestamp: string,
-  secret: string
-) {
-  const age = Math.abs(Date.now() - new Date(timestamp).getTime()) / 1000
-  if (age > 300) return false
-
-  const body = typeof rawBody === "string" ? Buffer.from(rawBody, "utf8") : rawBody
-  const expected = createHmac("sha256", secret)
-    .update(`${timestamp}.`)
-    .update(body)
-    .digest("hex")
-  const actual = signature.trim().replace(/^sha256=/i, "")
-
-  const expectedBuffer = Buffer.from(expected, "hex")
-  const actualBuffer = Buffer.from(actual, "hex")
-  return actualBuffer.length === expectedBuffer.length &&
-    timingSafeEqual(actualBuffer, expectedBuffer)
-}
-```
-
-## Event types
-
-Supported events:
-
-| Event | Data object |
-| --- | --- |
-| `payment.created` | payment |
-| `payment.pending` | payment |
-| `payment.processing` | payment |
-| `payment.confirmed` | payment |
-| `payment.failed` | payment |
-| `payment.expired` | payment |
-| `payment.cancelled` | payment |
-| `payment.incomplete` | payment |
-| `payment.refunded` | payment |
-| `checkout.session.created` | checkout.session |
-| `checkout.session.processing` | checkout.session |
-| `checkout.session.completed` | checkout.session |
-| `checkout.session.failed` | checkout.session |
-| `checkout.session.expired` | checkout.session |
-| `checkout.session.canceled` | checkout.session |
-| `payment_link.created` | payment_link |
-| `payment_link.disabled` | payment_link |
-| `payment_link.expired` | payment_link |
-
-`checkout.session.paid` is accepted as a legacy alias and normalized to `checkout.session.completed`.
+The SDK accepts either the current PineTree headers or the legacy `X-PineTree-*` compatibility headers for signature/timestamp verification. When a full header object is passed, it also validates `PineTree-Event-Id` and `PineTree-Event-Schema` or `PineTree-Webhook-Version`.
 
 ## Retry behavior
 
-PineTree retries failed webhook deliveries with these delays, in seconds:
+Each delivery records:
 
-```text
-60, 120, 240, 480, 960, 1800, 3600
+- `status`: `pending`, `delivered`, `failed`, or `dead_letter`
+- `attemptCount`
+- `lastAttemptAt`
+- `nextAttemptAt`
+- `lastStatusCode`
+- `lastError`
+- `deliveredAt`
+- `deadLetteredAt`
+
+The delivery worker can retry eligible failed deliveries, and the public API exposes manual retry:
+
+```http
+POST /api/v1/webhook-deliveries/{id}/retry
+Authorization: Bearer pt_live_...
 ```
 
-The 3600 second delay is reused after the seventh failed attempt. After attempt 10, the delivery status becomes `dead_letter`, `dead_lettered_at` is set, and no further automatic retry is scheduled. Delivery metadata includes `next_attempt_at`, `last_attempt_at`, `last_status_code`, `last_error`, `delivered_at`, and `dead_lettered_at`.
+## Idempotent handling
 
-Use `POST /api/v1/webhook-deliveries/{id}/retry` to manually retry a delivery.
+Webhook delivery is at-least-once. Your endpoint should:
 
-## Security notes
+- Verify the signature before reading the event.
+- Store `eventId` and ignore duplicates.
+- Fulfill only terminal success events such as `payment.confirmed` or `checkout.session.completed`.
+- Return a 2xx response only after durable processing.
+- Treat `payment.failed`, `payment.expired`, and `payment.incomplete` as separate negative terminal cases.
 
-- Verify `PineTree-Signature` before processing an event.
-- Use the raw request body bytes. Do not sign `JSON.stringify(req.body)`.
-- Reject stale timestamps older than 300 seconds.
-- Use `eventId` for idempotent processing.
-- Return `2xx` quickly and process longer work asynchronously.
+## Event schema compatibility
+
+Current schema: `payments-v1`.
+
+Legacy event type compatibility:
+
+| Legacy event | Current event |
+|---|---|
+| `checkout.session.paid` | `checkout.session.completed` |
+
+New integrations should subscribe to and handle the current event names listed in [Webhook Events](./webhook-events.md).

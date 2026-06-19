@@ -40,7 +40,7 @@ A payment object is created when a customer begins a payment attempt against a c
 |----------------|-----------------|---------------|
 | `open` | Waiting | `payment.created`, `payment.pending` |
 | `processing` | Processing | `payment.processing` |
-| `paid` | Success | `payment.confirmed` |
+| `paid` | Confirmed | `payment.confirmed` |
 | `failed` | Failed | `payment.failed` |
 | `incomplete` | Incomplete | `payment.incomplete` |
 
@@ -62,7 +62,7 @@ CREATED ──► PENDING ──► PROCESSING ──► CONFIRMED (paid)
 
 ### Terminal states
 
-`paid`, `failed`, and `incomplete` are terminal. Once a payment enters a terminal state, no further transitions are possible.
+`paid`, `failed`, `expired`, and `incomplete` are terminal for merchant fulfillment decisions. The public API uses `paid` for the successful value; PineTree's visible label for that state is **Confirmed**.
 
 ### Idempotency note
 

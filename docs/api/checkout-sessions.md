@@ -96,6 +96,8 @@ curl -X POST https://app.pinetree-payments.com/api/v1/checkout/sessions \
 | `lightning` | Alias for `bitcoin_lightning` |
 | `shift4` | Cards where enabled |
 
+Accepted aliases for Lightning are `lightning`, `btc_lightning`, and `lightning_btc`; each normalizes to `bitcoin_lightning`.
+
 The `rails` field restricts the networks shown in hosted checkout. It does not
 preselect a token. For example, `rails: ["solana"]` offers both SOL on Solana
 and USDC on Solana when those assets are enabled for the merchant.
@@ -228,7 +230,7 @@ curl "https://app.pinetree-payments.com/api/v1/checkout/sessions/cs_01abc..." \
 
 Cancel an open checkout session. The session moves to `canceled` status and no further payments can be made against it.
 
-**Auth:** `checkout.sessions:create` or `checkout.sessions:read` permission
+**Auth:** `checkout.sessions:write` or `checkout.sessions:create` permission
 
 **Request body:** Empty
 
@@ -254,7 +256,7 @@ curl -X POST "https://app.pinetree-payments.com/api/v1/checkout/sessions/cs_01ab
 
 Expire an open checkout session immediately. The session moves to `expired` status.
 
-**Auth:** `checkout.sessions:create` or `checkout.sessions:read` permission
+**Auth:** `checkout.sessions:write` or `checkout.sessions:create` permission
 
 **Request body:** Empty
 
