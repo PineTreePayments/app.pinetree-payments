@@ -42,8 +42,10 @@ jobs:
           cache: npm
           cache-dependency-path: "package-lock.json"
 
+      # Keep the install deterministic while skipping dependency-owned lifecycle
+      # scripts from unrelated app packages. SDK build/test scripts run below.
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       # SDK typecheck
       - name: SDK typecheck
@@ -98,8 +100,10 @@ jobs:
           cache: npm
           cache-dependency-path: "package-lock.json"
 
+      # Keep the install deterministic while skipping dependency-owned lifecycle
+      # scripts from unrelated app packages. SDK build/test scripts run below.
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: SDK build
         run: npm run build --workspace packages/pinetree-node

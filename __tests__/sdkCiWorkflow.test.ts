@@ -33,8 +33,9 @@ describe("SDK CI workflow", () => {
     expect(workflow).toContain("actions/checkout@v6")
     expect(workflow).toContain("actions/setup-node@v6")
     expect(workflow).toContain('"package-lock.json"')
-    // Lockfile is committed and aligned — use npm ci for reproducible installs
-    expect(workflow).toContain("run: npm ci")
+    // Lockfile is committed and aligned; SDK validation runs explicit scripts below.
+    expect(workflow.match(/run: npm ci --ignore-scripts/g)).toHaveLength(2)
+    expect(workflow).not.toContain("run: npm ci\n")
     expect(workflow).not.toContain("run: npm install")
   })
 })
