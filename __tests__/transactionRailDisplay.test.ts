@@ -29,7 +29,7 @@ describe("cash transaction rail display", () => {
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co")
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "test-anon-key")
 
-    const { renderReceiptHtml } = await import("@/engine/receipts")
+    const { renderReceiptHtml } = await import("@/engine/receiptHtml")
     const html = renderReceiptHtml({
       paymentId: "payment-id",
       transactionId: "transaction-id",
