@@ -6,7 +6,7 @@ PineTree uses API keys for server-to-server authentication. There are two key ty
 
 ## Secret API Keys
 
-Secret API keys authenticate requests to the PineTree v1 REST API. They are created in the **Developer → API Keys** section of your dashboard.
+Secret API keys authenticate server requests to the PineTree API. PineTree API uses versioned REST endpoints. The current API path prefix is `/api/v1`. Keys are created in the **Developer → API Keys** section of your dashboard.
 
 **Format:** `pt_live_<64 hex characters>`
 
@@ -131,7 +131,7 @@ HTTP/1.1 403 Forbidden
 
 | Auth Method | Used By | Secret? | Scope |
 |-------------|---------|---------|-------|
-| `pt_live_*` API key | Your server | Yes — keep secret | REST API v1 |
+| `pt_live_*` API key | Your server | Yes — keep secret | REST API |
 | `pk_live_*` public key | Browser / frontend | No — safe to expose | Browser checkout sessions only |
 | Webhook signing secret (`whsec_*`) | Your webhook handler | Yes — keep secret | Webhook verification only |
 | Supabase JWT | Dashboard browser session | Cookie-scoped | Dashboard routes only |

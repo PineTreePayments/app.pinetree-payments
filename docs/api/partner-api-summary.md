@@ -170,7 +170,7 @@ PineTree requires:
 
 | Area | Status |
 |------|--------|
-| REST API v1 | Production |
+| REST API | Production |
 | Node SDK (`@pinetreepayments/node`) | Published, v0.1.0 |
 | Browser SDK (`@pinetreepayments/js`) | Published, v0.1.0 |
 | React SDK (`@pinetreepayments/react`) | Published, v0.1.0 |

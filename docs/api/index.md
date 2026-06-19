@@ -13,7 +13,7 @@ The PineTree API is a REST API that lets you:
 - Monitor **webhook deliveries** and retry failed events
 - Verify **webhook signatures** to authenticate events sent to your server
 
-The API is versioned (`/api/v1/`) and accepts standard `Authorization: Bearer` headers with API keys.
+PineTree API uses versioned REST endpoints. The current API path prefix is `/api/v1`. Requests accept standard `Authorization: Bearer` headers with API keys.
 
 ---
 
@@ -43,7 +43,7 @@ All API routes are relative to this base URL.
 
 ## Versioning
 
-All public API routes are prefixed with `/api/v1/`. Breaking changes will result in a new version prefix (e.g., `/api/v2/`). The current version is `v1`.
+PineTree API uses versioned REST endpoints. The current API path prefix is `/api/v1`. Breaking changes will use a new path prefix.
 
 ---
 

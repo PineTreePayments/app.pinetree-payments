@@ -1,7 +1,7 @@
 {
   "name": "@pinetreepayments/node",
   "version": "0.1.0",
-  "description": "Official PineTree Node SDK for the PineTree v1 platform API.",
+  "description": "Official PineTree Node SDK for the PineTree API.",
   "keywords": ["pinetree", "payments", "crypto", "blockchain", "solana", "base", "usdc", "checkout", "node"],
   "license": "MIT",
   "publishConfig": {
