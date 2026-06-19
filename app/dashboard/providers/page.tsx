@@ -26,6 +26,10 @@ const providerAlbyNwcDocsUrl = process.env.NEXT_PUBLIC_ALBY_NWC_DOCS_URL || "htt
 const providerZeusIosUrl = process.env.NEXT_PUBLIC_ZEUS_IOS_URL || "https://apps.apple.com/us/app/zeus-ln/id1456038895"
 const providerZeusAndroidUrl = process.env.NEXT_PUBLIC_ZEUS_ANDROID_URL || "https://play.google.com/store/apps/details?id=app.zeusln"
 const providerZeusDocsUrl = process.env.NEXT_PUBLIC_ZEUS_DOCS_URL || "https://zeusln.app"
+const shift4ApplicationUrl =
+  process.env.NEXT_PUBLIC_SHIFT4_APPLICATION_URL ||
+  process.env.SHIFT4_APPLICATION_URL ||
+  ""
 
 
 type ProviderCredentials = {
@@ -186,9 +190,6 @@ export default function ProvidersPage() {
   const [wallets, setWallets] = useState<WalletRecord[]>([])
   const [activeProvider, setActiveProvider] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState("")
-  const [shift4AccountReference, setShift4AccountReference] = useState("")
-  const [shift4ApiStatus, setShift4ApiStatus] = useState("Pending approval")
-  const [shift4Notes, setShift4Notes] = useState("")
   const [nwcUri, setNwcUri] = useState("")
   const [nwcWalletLabel, setNwcWalletLabel] = useState("")
   const [nwcTestResult, setNwcTestResult] = useState<{
@@ -245,9 +246,6 @@ export default function ProvidersPage() {
   const closeProviderModal = useCallback(() => {
     setActiveProvider(null)
     setInputValue("")
-    setShift4AccountReference("")
-    setShift4ApiStatus("Pending approval")
-    setShift4Notes("")
     setNwcUri("")
     setNwcWalletLabel("")
     setNwcTestResult(null)
@@ -899,17 +897,7 @@ function EngineSettingStatus({
       // Start at step 1 if no account ID saved, step 2 if already configured
       setSpeedSetupStep(getProvider("lightning_speed")?.credentials?.account_id ? 2 : 1)
     } else if (provider === "shift4") {
-      const savedApiStatus = String(p?.credentials?.api_status || "Pending approval")
       setInputValue("")
-      setShift4AccountReference(String(p?.credentials?.account_reference || ""))
-      setShift4ApiStatus(
-        savedApiStatus === "Active"
-          ? "Live ready"
-          : savedApiStatus === "Not issued"
-            ? "Pending approval"
-            : savedApiStatus
-      )
-      setShift4Notes(String(p?.credentials?.notes || ""))
     } else if (p?.credentials?.api_key) {
       setInputValue(p.credentials.api_key)
     } else if (p?.credentials?.wallet) {
@@ -1110,28 +1098,6 @@ function EngineSettingStatus({
     setLoading(true)
 
     try {
-      if (provider === "shift4") {
-        const accountReference = shift4AccountReference.trim()
-        if (!accountReference) {
-          toast.error("Shift4 Account Reference is required")
-          return
-        }
-
-        const payload = await callProvidersApi("POST", {
-          action: "saveProvider",
-          provider,
-          providerSetup: {
-            account_reference: accountReference,
-            notes: shift4Notes.trim()
-          }
-        })
-
-        applyProvidersPayload(payload)
-        closeProviderModal()
-        toast.success("Shift4 provider setup saved")
-        return
-      }
-
       let walletAddress = (inputValue || "").trim()
       let walletType: string | null = selectedWalletType
 
@@ -1359,6 +1325,12 @@ function EngineSettingStatus({
     }
   }
 
+  function beginShift4Application() {
+    const url = shift4ApplicationUrl.trim()
+    if (!url) return
+    window.open(url, "_blank", "noopener,noreferrer")
+  }
+
   function optionButtonClass(selected: boolean) {
     return `border rounded-lg py-2 px-3 text-sm transition ${
       selected
@@ -1470,7 +1442,6 @@ function EngineSettingStatus({
     const lightningWalletLabel = String(p?.credentials?.wallet_label || "")
     const walletType = p?.credentials?.wallet_type || wallet?.wallet_type || wallet?.asset
     const walletLabel = formatWalletLabel(provider, walletType, wallet?.asset || null)
-    const shift4AccountReference = String(p?.credentials?.account_reference || "").trim()
     const savedShift4ApiStatus = String(p?.credentials?.api_status || "").trim()
     const savedShift4WebhookStatus = String(p?.credentials?.webhook_status || "").trim()
     const connectedCredentialLine = walletValue
@@ -1480,9 +1451,11 @@ function EngineSettingStatus({
       : provider === "lightning" && lightningWalletLabel
         ? `Lightning • ${lightningWalletLabel}`
         : ""
-    const primaryActionLabel = connected
-      ? "Disconnect"
-      : provider === "lightning"
+    const primaryActionLabel = provider === "shift4"
+      ? "Start Shift4 Application"
+      : connected
+        ? "Disconnect"
+        : provider === "lightning"
         ? "Connect"
         : "Connect"
     const lightningCredentialLine =
@@ -1546,22 +1519,16 @@ function EngineSettingStatus({
             </div>
           ) : null}
 
-          {provider === "shift4" && shift4AccountReference ? (
+          {provider === "shift4" ? (
             <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
               <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                {connected ? "Connected" : "Setup saved"}
+                Provider status
               </span>
               <span className="mt-1 block text-sm font-medium leading-snug text-gray-950">
-                Shift4 &bull; Merchant account
-              </span>
-              <span
-                className="mt-0.5 block truncate text-xs leading-5 text-gray-500"
-                title={shift4AccountReference}
-              >
-                Account reference: {formatCredentialPart(shift4AccountReference, 8, 4)}
+                Managed by PineTree / Shift4
               </span>
               <span className="block text-xs leading-5 text-gray-500">
-                Approval return: Automatic
+                Approval: Automatic
               </span>
               <span className="block text-xs leading-5 text-gray-500">
                 Webhook: {savedShift4WebhookStatus || "Not configured"}
@@ -1575,9 +1542,19 @@ function EngineSettingStatus({
 
         <div className="mt-auto flex items-center justify-between gap-3 border-t border-gray-100 pt-4">
           <button
-            onClick={() => connected ? disconnect(provider) : openProvider(provider)}
+            onClick={() => {
+              if (provider === "shift4") {
+                openProvider(provider)
+                return
+              }
+              if (connected) {
+                void disconnect(provider)
+              } else {
+                openProvider(provider)
+              }
+            }}
             className={`h-9 rounded-md px-3.5 text-sm font-semibold shadow-sm transition ${
-              connected
+              connected && provider !== "shift4"
                 ? "border border-red-200 bg-white text-red-600 hover:bg-red-50"
               : provider === "lightning" && status === "Provider unavailable"
                   ? "cursor-not-allowed border border-gray-200 bg-gray-100 text-gray-500"
@@ -1948,17 +1925,16 @@ function EngineSettingStatus({
                       : activeProvider === "lightning"
                         ? "Bitcoin Lightning"
                       : activeProvider === "shift4"
-                        ? "Connect Shift4"
+                        ? "Shift4 Merchant Application"
                       : `Connect ${activeProvider}`}
                 </h2>
                 {activeProvider === "shift4" ? (
                   <>
                     <p className="mt-1 text-sm leading-5 text-gray-500">
-                      Track your Shift4 approval and API readiness for card and crypto routing.
+                      Complete the application to begin onboarding for card and crypto payment acceptance through Shift4.
                     </p>
                     <div className="mt-3 rounded-lg bg-blue-50 px-3.5 py-3 text-xs leading-5 text-blue-800">
-                      Shift4 approval and credential status update automatically after PineTree receives
-                      confirmation from Shift4. Contact PineTree support if your approval status looks incorrect.
+                      PineTree will keep this provider status updated after Shift4 approval and API access are enabled.
                     </div>
                   </>
                 ) : null}
@@ -2417,7 +2393,7 @@ function EngineSettingStatus({
                     providerStatus: shift4Provider?.status,
                     accountReference: String(shift4Provider?.credentials?.account_reference || ""),
                     merchantApprovalStatus: String(shift4Provider?.credentials?.merchant_approval_status || ""),
-                    apiStatus: shift4ApiStatus
+                    apiStatus: String(shift4Provider?.credentials?.api_status || "")
                   })
 
                   const statusRows = [
@@ -2432,7 +2408,7 @@ function EngineSettingStatus({
                         <div className="flex items-center justify-between gap-3">
                           <div>
                             <p className="text-sm font-semibold text-gray-950">Provider setup status</p>
-                            <p className="mt-0.5 text-xs text-gray-500">Managed by PineTree and Shift4.</p>
+                            <p className="mt-0.5 text-xs text-gray-500">Managed by PineTree / Shift4.</p>
                           </div>
                           <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${shift4StatusBadgeClass(shift4DisplayStatus.tone)}`}>
                             {shift4DisplayStatus.label}
@@ -2454,31 +2430,21 @@ function EngineSettingStatus({
                         </div>
                       </section>
 
-                      <section className="space-y-4">
-                        <label className="block">
-                          <span className="text-sm font-semibold text-gray-900">Shift4 account reference</span>
-                          <span className="mt-0.5 block text-xs leading-5 text-gray-500">
-                            Enter the reference provided by Shift4 or PineTree support.
-                          </span>
-                          <input
-                            value={shift4AccountReference}
-                            onChange={(event) => setShift4AccountReference(event.target.value)}
-                            placeholder="Shift4 account or application reference"
-                            className={lightningInputClass()}
-                            autoComplete="off"
-                          />
-                        </label>
-
-                        <label className="block">
-                          <span className="text-sm font-semibold text-gray-900">Setup notes</span>
-                          <textarea
-                            value={shift4Notes}
-                            onChange={(event) => setShift4Notes(event.target.value)}
-                            placeholder="Optional internal note"
-                            rows={3}
-                            className={lightningInputClass()}
-                          />
-                        </label>
+                      <section className="rounded-xl border border-gray-200 bg-white px-3.5 py-3.5">
+                        <p className="text-sm font-semibold text-gray-950">Application checklist</p>
+                        <div className="mt-3 grid gap-2">
+                          {[
+                            "Business information",
+                            "Banking details",
+                            "Ownership details",
+                            "Processing details"
+                          ].map((item) => (
+                            <div key={item} className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2">
+                              <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                              <span className="text-sm font-medium text-gray-800">{item}</span>
+                            </div>
+                          ))}
+                        </div>
                       </section>
 
                     </>
@@ -2706,11 +2672,37 @@ function EngineSettingStatus({
                 />
               )}
 
-            {activeProvider !== "lightning" && (
+            {activeProvider === "shift4" && (
+            <div className="-mx-4 -mb-4 flex flex-col-reverse gap-2 border-t border-gray-100 bg-white p-4 sm:-mx-5 sm:-mb-5 sm:flex-row sm:items-center sm:justify-between sm:p-5 sticky bottom-0">
+              <button
+                type="button"
+                onClick={closeProviderModal}
+                className={`${secondaryButtonClass()} w-full sm:w-auto`}
+              >
+                Cancel
+              </button>
+
+              <div className="flex w-full flex-col gap-1 sm:w-auto sm:items-end">
+                <button
+                  type="button"
+                  onClick={beginShift4Application}
+                  disabled={!shift4ApplicationUrl.trim()}
+                  className={`${primaryButtonClass()} w-full sm:w-auto`}
+                >
+                  Begin Application
+                </button>
+                {!shift4ApplicationUrl.trim() ? (
+                  <p className="text-xs font-medium text-amber-700">Application link not configured yet.</p>
+                ) : null}
+              </div>
+            </div>
+            )}
+
+            {activeProvider !== "lightning" && activeProvider !== "shift4" && (
             <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
               <button
                 onClick={closeProviderModal}
-                className={`${activeProvider === "shift4" ? secondaryButtonClass() : "px-3 py-1.5 text-sm border rounded bg-white text-black"} w-full sm:w-auto`}
+                className="px-3 py-1.5 text-sm border rounded bg-white text-black w-full sm:w-auto"
               >
                 Cancel
               </button>
@@ -2718,13 +2710,9 @@ function EngineSettingStatus({
               <button
                 onClick={() => saveProvider(activeProvider)}
                 disabled={loading}
-                className={`${activeProvider === "shift4" ? primaryButtonClass() : "px-3 py-1.5 text-sm bg-blue-600 text-white rounded"} w-full sm:w-auto`}
+                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded w-full sm:w-auto"
               >
-                {loading
-                  ? "Saving..."
-                  : activeProvider === "shift4"
-                    ? "Save Setup"
-                    : "Save Wallet"}
+                {loading ? "Saving..." : "Save Wallet"}
               </button>
             </div>
             )}
