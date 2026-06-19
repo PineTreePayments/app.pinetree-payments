@@ -86,4 +86,69 @@ describe("API reference documentation", () => {
     expect(documentedEvents).toContain("payment_link.disabled")
     expect(documentedEvents).not.toContain("payment_link.archived")
   })
+
+  it("keeps Squarespace docs aligned with the in-app Developer Documents navigation", () => {
+    const page = read("app/dashboard/developer/page.tsx")
+    const squarespace = read("docs/api/squarespace-api-docs.html")
+    const navBlock = page.slice(page.indexOf("const docNav"), page.indexOf("function CodeBlock"))
+    const labels = [...navBlock.matchAll(/label: "([^"]+)"/g)].map((match) => match[1])
+
+    expect(labels).toEqual([
+      "Overview",
+      "Quickstart",
+      "Authentication",
+      "API Keys",
+      "Checkout Sessions",
+      "Payments",
+      "Rails & Assets",
+      "Payment States",
+      "Webhooks",
+      "Webhook Events",
+      "Webhook Deliveries",
+      "Errors",
+      "Idempotency",
+      "SDKs",
+      "Testing",
+      "Go Live",
+    ])
+
+    for (const label of labels) {
+      expect(squarespace).toContain(`data-doc-label="${label.replace("&", "&amp;")}"`)
+    }
+  })
+
+  it("keeps Squarespace docs professional and /api/v1 endpoint-focused", () => {
+    const squarespace = read("docs/api/squarespace-api-docs.html")
+
+    expect(squarespace).toContain("PineTree API uses versioned REST endpoints. The current API path prefix is <code>/api/v1</code>.")
+    expect(squarespace).toContain("POST</span><code>/api/v1/checkout/sessions</code>")
+    expect(squarespace).toContain("GET</span><code>/api/v1/checkout/sessions/{id}</code>")
+    expect(squarespace).toContain("POST</span><code>/api/v1/checkout/sessions/{id}/cancel</code>")
+    expect(squarespace).toContain("POST</span><code>/api/v1/checkout/sessions/{id}/expire</code>")
+    expect(squarespace).toContain("GET</span><code>/api/v1/payments/{id}</code>")
+    expect(squarespace).toContain("GET</span><code>/api/v1/webhook-deliveries</code>")
+    expect(squarespace).toContain("POST</span><code>/api/v1/webhook-deliveries/{id}/retry</code>")
+    expect(squarespace).toContain("POST</span><code>/api/v1/browser/checkout/sessions</code>")
+    expect(squarespace).not.toMatch(/\bV1 API\b|\bV1 Quickstart\b|\bV1 Webhooks\b|\bV1 SDKs\b|PineTree API V1|PineTree API v1|REST API v1/i)
+  })
+
+  it("keeps Squarespace docs aligned with supported events, rails, and visible states", () => {
+    const squarespace = read("docs/api/squarespace-api-docs.html")
+
+    expect(squarespace).toContain("Webhook Events")
+    expect(squarespace).toContain("Rails &amp; Assets")
+    expect(squarespace).toContain("Payment States")
+    for (const event of SUPPORTED_WEBHOOK_EVENTS) {
+      expect(squarespace).toContain(`<code>${event}</code>`)
+    }
+    expect(squarespace).toContain("payment_link.disabled")
+    expect(squarespace).not.toContain("payment_link.archived")
+    expect(squarespace).toContain("<td><strong class=\"pt-green\">Confirmed</strong></td><td>Payment completed</td><td>Yes</td><td>Green</td>")
+    expect(squarespace).not.toMatch(/<td>\s*Success\s*<\/td>/)
+    expect(squarespace).toContain("<td><code>solana</code></td><td>SOL, USDC</td>")
+    expect(squarespace).toContain("<td><code>base</code></td><td>ETH, USDC</td>")
+    expect(squarespace).toContain("<td><code>bitcoin_lightning</code></td><td>BTC</td>")
+    expect(squarespace).toContain("<td><code>shift4</code></td><td>Card / USD</td>")
+    expect(squarespace).not.toMatch(/\b(?:solana_usdc|base_usdc|base_eth|usdc_base)\b/)
+  })
 })

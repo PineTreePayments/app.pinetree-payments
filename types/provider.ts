@@ -155,7 +155,7 @@ export interface ProviderAdapter {
     headers?: Record<string, string>
   ): boolean
 
-  translateEvent?(payload: unknown): StandardPaymentEvent
+  translateEvent?(payload: unknown): StandardPaymentEvent | null
 
   /**
    * Health check implementation
