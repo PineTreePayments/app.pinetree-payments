@@ -30,8 +30,6 @@ const shift4ApplicationUrl =
   process.env.NEXT_PUBLIC_SHIFT4_APPLICATION_URL ||
   process.env.SHIFT4_APPLICATION_URL ||
   ""
-const stripeApplicationUrl = process.env.NEXT_PUBLIC_STRIPE_APPLICATION_URL || ""
-const fluidPayApplicationUrl = process.env.NEXT_PUBLIC_FLUIDPAY_APPLICATION_URL || ""
 
 type CardOnboardingProvider = "shift4" | "stripe" | "fluidpay"
 type CardApplicationStatus = "Not started" | "Pending" | "Approved" | "Denied"
@@ -232,6 +230,9 @@ export default function ProvidersPage() {
   const [shift4ApplicationStatusOverride, setShift4ApplicationStatusOverride] = useState<"Pending" | null>(null)
   const [stripeApplicationStatusOverride, setStripeApplicationStatusOverride] = useState<"Pending" | null>(null)
   const [fluidPayApplicationStatusOverride, setFluidPayApplicationStatusOverride] = useState<"Pending" | null>(null)
+  const [setupLoadingProvider, setSetupLoadingProvider] = useState<CardOnboardingProvider | null>(null)
+  const [setupErrors, setSetupErrors] = useState<Partial<Record<CardOnboardingProvider, string>>>({})
+  const [setupReturnNotice, setSetupReturnNotice] = useState("")
   const [nwcUri, setNwcUri] = useState("")
   const [nwcWalletLabel, setNwcWalletLabel] = useState("")
   const [nwcTestResult, setNwcTestResult] = useState<{
@@ -306,6 +307,7 @@ export default function ProvidersPage() {
     setSpeedTesting(false)
     setSpeedSetupStep(1)
     setNwcWalletReadyOpen(false)
+    setSetupErrors({})
 
     if (pollerRef.current) {
       clearInterval(pollerRef.current)
@@ -360,6 +362,54 @@ export default function ProvidersPage() {
 
   useEffect(() => {
     loadAll()
+  }, [loadAll])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const provider = params.get("provider")
+    const setup = params.get("setup")
+    if (!isManagedCardProvider(provider) || provider === "shift4" || setup !== "returned") return
+
+    let cancelled = false
+    async function recordSetupReturn() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        const token = session?.access_token
+        if (!token || !isManagedCardProvider(provider) || provider === "shift4") return
+
+        const res = await fetch(`/api/providers/${provider}/setup-return`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          credentials: "include",
+          cache: "no-store"
+        })
+        const payload = await res.json().catch(() => null)
+
+        if (!res.ok || !payload?.ok) {
+          throw new Error(payload?.error || "Failed to record setup return")
+        }
+
+        if (!cancelled) {
+          if (provider === "stripe") {
+            setStripeApplicationStatusOverride("Pending")
+          } else {
+            setFluidPayApplicationStatusOverride("Pending")
+          }
+          setSetupReturnNotice("Setup received. PineTree will update this provider after approval is complete.")
+          await loadAll()
+        }
+      } catch (error) {
+        if (!cancelled) {
+          toast.error(error instanceof Error ? error.message : "Failed to record setup return")
+        }
+      }
+    }
+
+    void recordSetupReturn()
+
+    return () => {
+      cancelled = true
+    }
   }, [loadAll])
 
   // Refresh provider statuses when returning to this tab or refocusing
@@ -1366,17 +1416,51 @@ function EngineSettingStatus({
     }
   }
 
-  function beginCardProviderSetup(provider: CardOnboardingProvider) {
-    const url = getCardProviderSetupUrl(provider).trim()
-    if (!url) return
-    window.open(url, "_blank", "noopener,noreferrer")
+  async function beginCardProviderSetup(provider: CardOnboardingProvider) {
+    setSetupErrors((current) => ({ ...current, [provider]: "" }))
 
     if (provider === "shift4") {
+      const url = getCardProviderSetupUrl(provider).trim()
+      if (!url) return
+      window.open(url, "_blank", "noopener,noreferrer")
       setShift4ApplicationStatusOverride("Pending")
-    } else if (provider === "stripe") {
-      setStripeApplicationStatusOverride("Pending")
-    } else {
-      setFluidPayApplicationStatusOverride("Pending")
+      return
+    }
+
+    setSetupLoadingProvider(provider)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      if (!token) {
+        throw new Error("Please sign in again")
+      }
+
+      const res = await fetch(`/api/providers/${provider}/start-setup`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+        cache: "no-store"
+      })
+      const payload = await res.json().catch(() => null)
+
+      if (!res.ok || !payload?.ok || !payload?.url) {
+        throw new Error(payload?.error || "Failed to start setup")
+      }
+
+      if (provider === "stripe") {
+        setStripeApplicationStatusOverride("Pending")
+      } else {
+        setFluidPayApplicationStatusOverride("Pending")
+      }
+
+      window.location.assign(String(payload.url))
+    } catch (error) {
+      setSetupErrors((current) => ({
+        ...current,
+        [provider]: error instanceof Error ? error.message : "Failed to start setup"
+      }))
+    } finally {
+      setSetupLoadingProvider(null)
     }
   }
 
@@ -1480,8 +1564,7 @@ function EngineSettingStatus({
 
   function getCardProviderSetupUrl(provider: CardOnboardingProvider) {
     if (provider === "shift4") return shift4ApplicationUrl
-    if (provider === "stripe") return stripeApplicationUrl
-    return fluidPayApplicationUrl
+    return ""
   }
 
   function getCardProviderSetupCta(provider: CardOnboardingProvider) {
@@ -1514,6 +1597,11 @@ function EngineSettingStatus({
     providerKey: CardOnboardingProvider,
     provider?: ProviderRecord | null
   ): CardApplicationStatus {
+    const applicationStatus = String(provider?.credentials?.application_status || provider?.status || "").trim().toLowerCase()
+    if (applicationStatus === "approved" || applicationStatus === "active" || applicationStatus === "connected") return "Approved"
+    if (applicationStatus === "denied" || applicationStatus === "declined" || applicationStatus === "rejected") return "Denied"
+    if (applicationStatus === "pending" || applicationStatus === "setup_started") return "Pending"
+
     const displayStatus = getShift4DisplayStatus({
       providerStatus: provider?.status,
       accountReference: String(provider?.credentials?.account_reference || ""),
@@ -1690,6 +1778,12 @@ function EngineSettingStatus({
       <div>
         <h1 className={dashboardPageTitleClass}>Providers</h1>
       </div>
+
+      {setupReturnNotice ? (
+        <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-800">
+          {setupReturnNotice}
+        </div>
+      ) : null}
 
       <MetricGrid columns="four">
         <CompactMetricTile label="Connected" value={connectedAndEnabledProvidersCount} tone="blue" />
@@ -2756,13 +2850,19 @@ function EngineSettingStatus({
                 <button
                   type="button"
                   onClick={() => beginCardProviderSetup(activeProvider)}
-                  disabled={!getCardProviderSetupUrl(activeProvider).trim()}
+                  disabled={
+                    setupLoadingProvider === activeProvider ||
+                    (activeProvider === "shift4" && !getCardProviderSetupUrl(activeProvider).trim())
+                  }
                   className={`${primaryButtonClass()} w-full sm:w-auto`}
                 >
-                  {getCardProviderPrimaryAction(activeProvider)}
+                  {setupLoadingProvider === activeProvider ? "Starting..." : getCardProviderPrimaryAction(activeProvider)}
                 </button>
-                {!getCardProviderSetupUrl(activeProvider).trim() ? (
+                {activeProvider === "shift4" && !getCardProviderSetupUrl(activeProvider).trim() ? (
                   <p className="text-xs font-medium text-amber-700">{getCardProviderMissingUrlMessage(activeProvider)}</p>
+                ) : null}
+                {setupErrors[activeProvider] ? (
+                  <p className="text-xs font-medium text-red-600">{setupErrors[activeProvider]}</p>
                 ) : null}
               </div>
             </div>

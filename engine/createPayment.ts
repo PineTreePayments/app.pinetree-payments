@@ -288,9 +288,12 @@ export async function createPayment(
     normalizeWalletNetwork(String(input.metadata?.selectedNetwork || input.metadata?.network || "")) ||
     undefined
 
-  // Hosted-checkout providers (Shift4) don't use a blockchain wallet address.
+  // Provider-settled card rails don't use a blockchain wallet address.
   // Skip wallet lookup and treasury assertions — fee capture is handled by the provider.
-  const isHostedCheckout = preferredNetwork === "shift4"
+  const isHostedCheckout =
+    preferredNetwork === "shift4" ||
+    preferredNetwork === "stripe" ||
+    preferredNetwork === "fluidpay"
   const isLightning = preferredNetwork === "bitcoin_lightning"
   const isProviderSettlement = isHostedCheckout || isLightning
 
@@ -543,6 +546,9 @@ export async function createPayment(
           : {}),
         ...((network === "bitcoin_lightning" && (providerPayment as { metadata?: Record<string, unknown> } | null)?.metadata)
           ? { lightningProviderMetadata: (providerPayment as { metadata?: Record<string, unknown> }).metadata }
+          : {}),
+        ...((network === "stripe" && (providerPayment as { clientSecret?: string } | null)?.clientSecret)
+          ? { stripeClientSecret: (providerPayment as { clientSecret?: string }).clientSecret }
           : {}),
         ...(baseUsdcStrategy ? { baseUsdcStrategy } : {}),
         ...(isBaseV7Payment ? { baseVersion: "v7" as const } : {}),

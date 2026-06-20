@@ -18,6 +18,28 @@ const NETWORK_DEFAULT_ADAPTER: Partial<Record<string, PaymentAdapterId>> = {
   base: "base"
 }
 
+function getApplicationStatus(credentials: unknown): string {
+  if (!credentials || typeof credentials !== "object") return ""
+  return String((credentials as Record<string, unknown>).application_status || "")
+    .toLowerCase()
+    .trim()
+}
+
+function merchantProviderCanProcessPayments(provider: {
+  provider?: string
+  enabled?: boolean
+  credentials?: unknown
+}): boolean {
+  if (provider.enabled === false) return false
+
+  const adapterId = normalizeProvider(provider.provider)
+  if (adapterId === "stripe" || adapterId === "fluidpay") {
+    return getApplicationStatus(provider.credentials) === "approved"
+  }
+
+  return true
+}
+
 function adapterMeetsNetworkRequirements(adapterId: PaymentAdapterId, network: string): boolean {
   if (network === "bitcoin_lightning") {
     if (adapterId === SPEED_PROVIDER_NAME) return providerSupportsFeeAtPaymentTime(adapterId)
@@ -61,7 +83,7 @@ export async function chooseBestAdapter(input: {
 
   const merchantProviders = await getMerchantProviders(input.merchantId)
   const connectedAdapterIds = merchantProviders
-    .filter((provider) => provider.enabled !== false)
+    .filter(merchantProviderCanProcessPayments)
     .map((provider) => normalizeProvider(provider.provider))
     .filter((value): value is PaymentAdapterId => Boolean(value))
 
@@ -121,6 +143,8 @@ export async function getAvailableNetworks(merchantId: string) {
   const networks = new Set<string>()
 
   for (const provider of providers) {
+    if (!merchantProviderCanProcessPayments(provider)) continue
+
     const adapterId = normalizeProvider(provider.provider)
     const metadata = adapterId ? getProviderMetadata(adapterId) : null
 

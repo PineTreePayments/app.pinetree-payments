@@ -26,7 +26,7 @@ export type MerchantSettings = {
 export type MerchantProvider = {
   merchant_id: string
   provider: string
-  status: "connected" | "active" | "disconnected"
+  status: "connected" | "active" | "disconnected" | "pending" | "denied"
   enabled?: boolean
   credentials?: unknown
   created_at: string

@@ -1,0 +1,6 @@
+export const STRIPE_PROVIDER_ID = "stripe" as const
+export const STRIPE_DISPLAY_NAME = "Stripe"
+export const STRIPE_API_BASE_URL = "https://api.stripe.com"
+export const STRIPE_PAYMENT_INTENTS_PATH = "/v1/payment_intents"
+export const STRIPE_SIGNATURE_HEADER = "stripe-signature"
+export const STRIPE_WEBHOOK_TOLERANCE_SECONDS = 300

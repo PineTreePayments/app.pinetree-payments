@@ -114,6 +114,8 @@ export interface ProviderAdapter {
     paymentUrl?: string
     qrCodeUrl?: string
     feeCaptureMethod?: FeeCaptureMethod
+    clientSecret?: string
+    raw?: unknown
   }>
 
   /* --------------------------------

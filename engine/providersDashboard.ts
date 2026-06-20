@@ -180,6 +180,20 @@ function getLightningDashboardStatus(row?: ProviderRow | null): LightningDashboa
   return "connected"
 }
 
+function sanitizeManagedCardProviderRow(row: ProviderRow): ProviderRow {
+  const credentials = row.credentials || {}
+  return {
+    ...row,
+    credentials: {
+      application_status: String(credentials.application_status || ""),
+      setup_started_at: String(credentials.setup_started_at || ""),
+      setup_submitted_at: String(credentials.setup_submitted_at || ""),
+      setup_returned_at: String(credentials.setup_returned_at || ""),
+      provider_model: String(credentials.provider_model || "")
+    }
+  }
+}
+
 function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
   const providersByKey = new Map(rows.map((row) => [row.provider, row]))
   const nwcRow = providersByKey.get("lightning_nwc")
@@ -197,6 +211,10 @@ function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
         row.provider !== SPEED_PROVIDER_NAME
     )
     .map((row) => {
+      if (row.provider === "stripe" || row.provider === "fluidpay") {
+        return sanitizeManagedCardProviderRow(row)
+      }
+
       if (row.provider !== "shift4") return row
 
       return {

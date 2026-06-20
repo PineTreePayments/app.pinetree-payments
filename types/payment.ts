@@ -1,6 +1,8 @@
 export type PaymentAdapterId =
   | "coinbase"
   | "shift4"
+  | "stripe"
+  | "fluidpay"
   | "solana"
   | "base"
   | "lightning_speed"
@@ -14,6 +16,8 @@ export type PaymentNetwork =
   | "solana"
   | "base"
   | "shift4"
+  | "stripe"
+  | "fluidpay"
   | "bitcoin_lightning"
 
 export const PAYMENT_ADAPTER_NETWORKS: Readonly<Record<PaymentAdapterId, readonly PaymentNetwork[]>> = {
@@ -21,6 +25,8 @@ export const PAYMENT_ADAPTER_NETWORKS: Readonly<Record<PaymentAdapterId, readonl
   base: ["base"],
   coinbase: ["base"],
   shift4: ["shift4"],
+  stripe: ["stripe"],
+  fluidpay: ["fluidpay"],
   lightning_speed: ["bitcoin_lightning"],
   lightning_nwc: ["bitcoin_lightning"]
 } as const
@@ -36,6 +42,8 @@ export function normalizePaymentAdapter(value?: string): PaymentAdapterId | unde
   if (
     normalized === "coinbase" ||
     normalized === "shift4" ||
+    normalized === "stripe" ||
+    normalized === "fluidpay" ||
     normalized === "solana" ||
     normalized === "base" ||
     normalized === "lightning_speed" ||
@@ -55,6 +63,8 @@ export function normalizePaymentNetwork(value?: string): PaymentNetwork | null {
     normalized === "solana" ||
     normalized === "base" ||
     normalized === "shift4" ||
+    normalized === "stripe" ||
+    normalized === "fluidpay" ||
     normalized === "bitcoin_lightning" ||
     normalized === "lightning" ||
     normalized === "btc_lightning" ||

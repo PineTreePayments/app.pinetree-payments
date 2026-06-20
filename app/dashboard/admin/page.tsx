@@ -151,9 +151,23 @@ type TxEvent = {
   created_at: string
 }
 
+type ProviderOnboarding = {
+  merchantId: string
+  provider: "stripe" | "fluidpay"
+  status: string
+  enabled: boolean
+  applicationStatus: "not_started" | "pending" | "approved" | "denied"
+  setupStartedAt: string | null
+  setupSubmittedAt: string | null
+  setupReturnedAt: string | null
+  approvedAt: string | null
+  deniedAt: string | null
+  updatedAt: string | null
+}
+
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
-type AdminTab = "overview" | "support" | "feedback"
+type AdminTab = "overview" | "providers" | "support" | "feedback"
 
 const STATUS_FILTERS = [
   { value: "", label: "All" },
@@ -346,6 +360,12 @@ export default function AdminPage() {
   const [overview, setOverview] = useState<Overview | null>(null)
   const [loadingOverview, setLoadingOverview] = useState(true)
 
+  // Provider onboarding state
+  const [providerOnboarding, setProviderOnboarding] = useState<ProviderOnboarding[]>([])
+  const [loadingProviderOnboarding, setLoadingProviderOnboarding] = useState(false)
+  const [providerOnboardingLoaded, setProviderOnboardingLoaded] = useState(false)
+  const [updatingProviderOnboarding, setUpdatingProviderOnboarding] = useState<string | null>(null)
+
   // ── Support state ───────────────────────────────────────────────────────────
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [loadingTickets, setLoadingTickets] = useState(false)
@@ -445,6 +465,76 @@ export default function AdminPage() {
   }, [token, activeTab, ticketsLoaded, fetchTickets])
 
   // ── Load feedback ───────────────────────────────────────────────────────────
+
+  const fetchProviderOnboarding = useCallback(async (tk: string) => {
+    setLoadingProviderOnboarding(true)
+    try {
+      const res = await fetch("/api/admin/provider-onboarding", {
+        headers: { Authorization: `Bearer ${tk}` },
+      })
+      if (res.status === 403) {
+        setUnauthorized(true)
+        return
+      }
+      if (!res.ok) {
+        toast.error("Failed to load provider onboarding")
+        return
+      }
+      const data = await res.json()
+      setProviderOnboarding(data.providers || [])
+      setProviderOnboardingLoaded(true)
+    } catch {
+      toast.error("Failed to load provider onboarding")
+    } finally {
+      setLoadingProviderOnboarding(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (token && activeTab === "providers" && !providerOnboardingLoaded) {
+      fetchProviderOnboarding(token)
+    }
+  }, [token, activeTab, providerOnboardingLoaded, fetchProviderOnboarding])
+
+  const updateProviderOnboarding = async (
+    item: ProviderOnboarding,
+    applicationStatus: "approved" | "denied"
+  ) => {
+    if (!token) return
+    const key = `${item.provider}:${item.merchantId}`
+    setUpdatingProviderOnboarding(key)
+    try {
+      const res = await fetch("/api/admin/provider-onboarding", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          merchantId: item.merchantId,
+          provider: item.provider,
+          applicationStatus,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || "Failed to update provider onboarding")
+        return
+      }
+      setProviderOnboarding((current) =>
+        current.map((row) =>
+          row.merchantId === item.merchantId && row.provider === item.provider
+            ? data.provider
+            : row
+        )
+      )
+      toast.success(`${item.provider === "stripe" ? "Stripe" : "Fluid Pay"} onboarding ${applicationStatus}`)
+    } catch {
+      toast.error("Failed to update provider onboarding")
+    } finally {
+      setUpdatingProviderOnboarding(null)
+    }
+  }
 
   const fetchFeedback = useCallback(async (tk: string) => {
     setLoadingFeedback(true)
@@ -672,6 +762,7 @@ export default function AdminPage() {
         {(
           [
             { key: "overview" as AdminTab, label: "Overview" },
+            { key: "providers" as AdminTab, label: "Providers", badge: providerOnboardingLoaded ? providerOnboarding.length : null },
             { key: "support" as AdminTab, label: "Support", badge: ticketsLoaded ? tickets.length : null },
             { key: "feedback" as AdminTab, label: "Feedback", badge: feedbackLoaded ? feedback.length : null },
           ] as const
@@ -1038,6 +1129,88 @@ export default function AdminPage() {
       {/* ════════════════════════════════════════════════════════════════════════
           SUPPORT TAB
       ════════════════════════════════════════════════════════════════════════ */}
+      {activeTab === "providers" && (
+        <div className="space-y-5 pb-8">
+          <DashboardSection title="Provider Onboarding" titleTone="blue">
+            <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+              {loadingProviderOnboarding ? (
+                <Spinner />
+              ) : providerOnboarding.length === 0 ? (
+                <div className="px-5 py-12 text-center">
+                  <p className="text-sm font-medium text-gray-900">No provider onboarding records</p>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Stripe and Fluid Pay setup requests will appear here after merchants start onboarding.
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {providerOnboarding.map((item) => {
+                    const key = `${item.provider}:${item.merchantId}`
+                    const busy = updatingProviderOnboarding === key
+                    const providerLabel = item.provider === "stripe" ? "Stripe" : "Fluid Pay"
+                    const statusLabel =
+                      item.applicationStatus === "approved"
+                        ? "Approved"
+                        : item.applicationStatus === "denied"
+                          ? "Denied"
+                          : item.applicationStatus === "pending"
+                            ? "Pending"
+                            : "Not started"
+                    const statusClass =
+                      item.applicationStatus === "approved"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : item.applicationStatus === "denied"
+                          ? "border-red-200 bg-red-50 text-red-700"
+                          : "border-amber-200 bg-amber-50 text-amber-700"
+
+                    return (
+                      <div key={key} className="flex flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-semibold text-gray-950">{providerLabel}</p>
+                            <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${statusClass}`}>
+                              {statusLabel}
+                            </span>
+                            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-xs font-medium text-gray-500">
+                              {item.enabled ? "Enabled" : "Disabled"}
+                            </span>
+                          </div>
+                          <p className="mt-1 font-mono text-xs text-gray-500">Merchant: {item.merchantId}</p>
+                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+                            <span>Started: {item.setupStartedAt ? fmtDateTime(item.setupStartedAt) : "-"}</span>
+                            <span>Returned: {item.setupReturnedAt ? fmtDateTime(item.setupReturnedAt) : "-"}</span>
+                            <span>Updated: {item.updatedAt ? fmtDateTime(item.updatedAt) : "-"}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex shrink-0 flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => updateProviderOnboarding(item, "approved")}
+                            disabled={busy || item.applicationStatus === "approved"}
+                            className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {busy ? "Updating..." : "Approve"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateProviderOnboarding(item, "denied")}
+                            disabled={busy || item.applicationStatus === "denied"}
+                            className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {busy ? "Updating..." : "Deny"}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </DashboardSection>
+        </div>
+      )}
+
       {activeTab === "support" && (
         <div className="space-y-5 pb-8">
 

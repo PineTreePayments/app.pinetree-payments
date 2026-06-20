@@ -41,13 +41,27 @@ describe("card provider setup UI", () => {
     expect(source).toContain("Begin Setup")
   })
 
-  it("keeps Stripe and Fluid Pay setup links configurable and safely disabled by default", () => {
+  it("starts Stripe and Fluid Pay setup through server routes", () => {
     const source = read("app/dashboard/providers/page.tsx")
 
-    expect(source).toContain("NEXT_PUBLIC_STRIPE_APPLICATION_URL")
-    expect(source).toContain("NEXT_PUBLIC_FLUIDPAY_APPLICATION_URL")
-    expect(source).toContain("Setup link not configured yet.")
-    expect(source).toContain("disabled={!getCardProviderSetupUrl(activeProvider).trim()}")
+    expect(source).toContain('fetch(`/api/providers/${provider}/start-setup`')
+    expect(source).toContain('fetch(`/api/providers/${provider}/setup-return`')
+    expect(source).toContain("window.location.assign(String(payload.url))")
+    expect(source).toContain('setupLoadingProvider === activeProvider ? "Starting..."')
+    expect(source).toContain("Setup received. PineTree will update this provider after approval is complete.")
+    expect(source).toContain("setStripeApplicationStatusOverride(\"Pending\")")
+    expect(source).toContain("setFluidPayApplicationStatusOverride(\"Pending\")")
+    expect(source).not.toContain("NEXT_PUBLIC_STRIPE_APPLICATION_URL")
+    expect(source).not.toContain("NEXT_PUBLIC_FLUIDPAY_APPLICATION_URL")
+  })
+
+  it("maps admin-approved and denied onboarding statuses to merchant card status", () => {
+    const source = read("app/dashboard/providers/page.tsx")
+
+    expect(source).toContain('if (applicationStatus === "Approved") return "Connected"')
+    expect(source).toContain('if (applicationStatus === "Denied") return "Denied"')
+    expect(source).toContain('applicationStatus === "approved"')
+    expect(source).toContain('applicationStatus === "denied"')
   })
 
   it("keeps merchant-facing card setup free of technical processor wording", () => {

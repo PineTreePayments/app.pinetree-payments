@@ -14,6 +14,8 @@ export type WalletAsset =
   | "eth-base"
   | "base-usdc"
   | "shift4"
+  | "stripe"
+  | "fluidpay"
   | "btc-lightning"
 
 export type WalletNetwork = PaymentNetwork
@@ -36,6 +38,8 @@ export const ALLOWED_ASSETS: Readonly<Record<WalletAsset, { label: string; netwo
   "eth-base": { label: "ETH (Base)", network: "base", symbol: "ETH" },
   "base-usdc": { label: "USDC (Base)", network: "base", symbol: "USDC" },
   "shift4": { label: "Card / Fiat (Shift4)", network: "shift4", symbol: "USD" },
+  "stripe": { label: "Card / Fiat (Stripe)", network: "stripe", symbol: "USD" },
+  "fluidpay": { label: "Card / Fiat (Fluid Pay)", network: "fluidpay", symbol: "USD" },
   "btc-lightning": { label: "Bitcoin Lightning", network: "bitcoin_lightning", symbol: "BTC" },
 } as const
 

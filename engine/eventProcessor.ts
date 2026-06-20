@@ -229,6 +229,7 @@ export async function processWebhook({
     headers?.["x-signature"] ||
     headers?.["x-lightning-signature"] ||
     headers?.["x-shift4-signature"] ||
+    headers?.["stripe-signature"] ||
     headers?.["webhook-signature"] ||
     ""
 
