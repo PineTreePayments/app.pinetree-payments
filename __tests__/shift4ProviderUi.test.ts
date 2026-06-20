@@ -6,6 +6,14 @@ function read(relativePath: string) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), "utf8")
 }
 
+function shift4ModalSource(source: string) {
+  const start = source.indexOf('activeProvider === "shift4" && (')
+  const end = source.indexOf('{(activeProvider === "solana" || activeProvider === "base")', start)
+  expect(start).toBeGreaterThanOrEqual(0)
+  expect(end).toBeGreaterThan(start)
+  return source.slice(start, end)
+}
+
 describe("Shift4 provider setup UI", () => {
   it("uses the application CTA and removes manual setup fields", () => {
     const source = read("app/dashboard/providers/page.tsx")
@@ -25,12 +33,20 @@ describe("Shift4 provider setup UI", () => {
     expect(source).not.toContain("Shift4 provider setup saved")
   })
 
-  it("keeps Shift4 status rows read-only and managed by PineTree / Shift4", () => {
+  it("keeps the Shift4 modal focused on the application checklist", () => {
     const source = read("app/dashboard/providers/page.tsx")
+    const modal = shift4ModalSource(source)
 
-    expect(source).toContain("Merchant approval")
-    expect(source).toContain("API access")
-    expect(source).toContain("Webhook return")
-    expect(source).toContain("Managed by PineTree / Shift4")
+    expect(modal).toContain("Application checklist")
+    expect(modal).toContain("Business information")
+    expect(modal).toContain("Banking details")
+    expect(modal).toContain("Ownership details")
+    expect(modal).toContain("Processing details")
+    expect(modal).not.toContain("Provider setup status")
+    expect(modal).not.toContain("Merchant approval")
+    expect(modal).not.toContain("API access")
+    expect(modal).not.toContain("Webhook return")
+    expect(modal).not.toContain("Not connected")
+    expect(modal).not.toContain("Not Connected")
   })
 })

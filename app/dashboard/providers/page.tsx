@@ -2387,69 +2387,22 @@ function EngineSettingStatus({
 
             {activeProvider === "shift4" && (
               <div className="mb-5 space-y-5">
-                {(() => {
-                  const shift4Provider = getProvider("shift4")
-                  const shift4DisplayStatus = getShift4DisplayStatus({
-                    providerStatus: shift4Provider?.status,
-                    accountReference: String(shift4Provider?.credentials?.account_reference || ""),
-                    merchantApprovalStatus: String(shift4Provider?.credentials?.merchant_approval_status || ""),
-                    apiStatus: String(shift4Provider?.credentials?.api_status || "")
-                  })
-
-                  const statusRows = [
-                    { label: "Merchant approval" },
-                    { label: "API access" },
-                    { label: "Webhook return" }
-                  ]
-
-                  return (
-                    <>
-                      <section className="rounded-xl bg-gray-50 px-3.5 py-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-semibold text-gray-950">Provider setup status</p>
-                            <p className="mt-0.5 text-xs text-gray-500">Managed by PineTree / Shift4.</p>
-                          </div>
-                          <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${shift4StatusBadgeClass(shift4DisplayStatus.tone)}`}>
-                            {shift4DisplayStatus.label}
-                          </span>
-                        </div>
-
-                        <div className="mt-3 divide-y divide-gray-200">
-                          {statusRows.map((row) => (
-                            <div key={row.label} className="flex items-center justify-between gap-3 py-2.5">
-                              <div>
-                                <p className="text-sm font-medium text-gray-800">{row.label}</p>
-                                <p className="mt-0.5 text-xs text-gray-500">Managed by PineTree / Shift4</p>
-                              </div>
-                              <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${shift4StatusBadgeClass(shift4DisplayStatus.tone)}`}>
-                                {shift4DisplayStatus.label}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </section>
-
-                      <section className="rounded-xl border border-gray-200 bg-white px-3.5 py-3.5">
-                        <p className="text-sm font-semibold text-gray-950">Application checklist</p>
-                        <div className="mt-3 grid gap-2">
-                          {[
-                            "Business information",
-                            "Banking details",
-                            "Ownership details",
-                            "Processing details"
-                          ].map((item) => (
-                            <div key={item} className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2">
-                              <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-                              <span className="text-sm font-medium text-gray-800">{item}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </section>
-
-                    </>
-                  )
-                })()}
+                <section className="rounded-xl border border-gray-200 bg-white px-3.5 py-3.5">
+                  <p className="text-sm font-semibold text-gray-950">Application checklist</p>
+                  <div className="mt-3 grid gap-2">
+                    {[
+                      "Business information",
+                      "Banking details",
+                      "Ownership details",
+                      "Processing details"
+                    ].map((item) => (
+                      <div key={item} className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2">
+                        <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                        <span className="text-sm font-medium text-gray-800">{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
               </div>
             )}
 
