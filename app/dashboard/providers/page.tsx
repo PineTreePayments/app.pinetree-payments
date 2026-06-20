@@ -190,6 +190,7 @@ export default function ProvidersPage() {
   const [wallets, setWallets] = useState<WalletRecord[]>([])
   const [activeProvider, setActiveProvider] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState("")
+  const [shift4ApplicationStatusOverride, setShift4ApplicationStatusOverride] = useState<"Pending" | null>(null)
   const [nwcUri, setNwcUri] = useState("")
   const [nwcWalletLabel, setNwcWalletLabel] = useState("")
   const [nwcTestResult, setNwcTestResult] = useState<{
@@ -566,12 +567,11 @@ export default function ProvidersPage() {
 
     const p = getProvider(provider)
     if (provider === "shift4") {
-      return getShift4DisplayStatus({
-        providerStatus: p?.status,
-        accountReference: String(p?.credentials?.account_reference || ""),
-        merchantApprovalStatus: String(p?.credentials?.merchant_approval_status || ""),
-        apiStatus: String(p?.credentials?.api_status || "")
-      }).label
+      const applicationStatus = getShift4ApplicationStatus(p)
+      if (applicationStatus === "Approved") return "Connected"
+      if (applicationStatus === "Pending") return "Pending"
+      if (applicationStatus === "Denied") return "Denied"
+      return "Not connected"
     }
 
     if (!p) return "Not Connected"
@@ -1329,6 +1329,7 @@ function EngineSettingStatus({
     const url = shift4ApplicationUrl.trim()
     if (!url) return
     window.open(url, "_blank", "noopener,noreferrer")
+    setShift4ApplicationStatusOverride("Pending")
   }
 
   function optionButtonClass(selected: boolean) {
@@ -1370,7 +1371,7 @@ function EngineSettingStatus({
   function statusTone(status: string) {
     if (status === "Connected" || status === "Ready") return "blue"
     if (status === "Pending" || status === "Setup needed" || status === "Setup pending" || status === "Needs verification" || status === "Needs permissions" || status === "Setup only") return "amber"
-    if (status === "Provider unavailable" || status === "Missing env") return "red"
+    if (status === "Provider unavailable" || status === "Missing env" || status === "Denied") return "red"
     return "default"
   }
 
@@ -1417,7 +1418,22 @@ function EngineSettingStatus({
   function shift4StatusBadgeClass(tone: Shift4DisplayStatus["tone"]) {
     if (tone === "blue") return "border-blue-200 bg-blue-50 text-blue-700"
     if (tone === "amber") return "border-amber-200 bg-amber-50 text-amber-800"
+    if (tone === "red") return "border-red-200 bg-red-50 text-red-700"
     return "border-gray-200 bg-gray-50 text-gray-600"
+  }
+
+  function getShift4ApplicationStatus(provider?: ProviderRecord | null): "Not started" | "Pending" | "Approved" | "Denied" {
+    const displayStatus = getShift4DisplayStatus({
+      providerStatus: provider?.status,
+      accountReference: String(provider?.credentials?.account_reference || ""),
+      merchantApprovalStatus: String(provider?.credentials?.merchant_approval_status || ""),
+      apiStatus: String(provider?.credentials?.api_status || "")
+    })
+
+    if (displayStatus.label === "Denied") return "Denied"
+    if (displayStatus.label === "Connected") return "Approved"
+    if (displayStatus.label === "Pending" || shift4ApplicationStatusOverride === "Pending") return "Pending"
+    return "Not started"
   }
 
   function ProviderCard({
@@ -1442,8 +1458,7 @@ function EngineSettingStatus({
     const lightningWalletLabel = String(p?.credentials?.wallet_label || "")
     const walletType = p?.credentials?.wallet_type || wallet?.wallet_type || wallet?.asset
     const walletLabel = formatWalletLabel(provider, walletType, wallet?.asset || null)
-    const savedShift4ApiStatus = String(p?.credentials?.api_status || "").trim()
-    const savedShift4WebhookStatus = String(p?.credentials?.webhook_status || "").trim()
+    const shift4ApplicationStatus = provider === "shift4" ? getShift4ApplicationStatus(p) : null
     const connectedCredentialLine = walletValue
       ? provider === "solana" || provider === "base"
         ? `${walletLabel} • ${formatCredentialPart(walletValue, 6, 4)}`
@@ -1522,20 +1537,14 @@ function EngineSettingStatus({
           {provider === "shift4" ? (
             <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
               <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                Provider status
+                Provider Status
               </span>
               <span className="mt-1 block text-sm font-medium leading-snug text-gray-950">
+                Application: {shift4ApplicationStatus || "Not started"}
+              </span>
+              <span className="block text-xs leading-5 text-gray-500">
                 Managed by PineTree / Shift4
               </span>
-              <span className="block text-xs leading-5 text-gray-500">
-                Approval: Automatic
-              </span>
-              <span className="block text-xs leading-5 text-gray-500">
-                Webhook: {savedShift4WebhookStatus || "Not configured"}
-              </span>
-              {savedShift4ApiStatus ? (
-                <span className="block text-xs leading-5 text-gray-500">API: {savedShift4ApiStatus}</span>
-              ) : null}
             </div>
           ) : null}
         </div>
@@ -1784,7 +1793,7 @@ function EngineSettingStatus({
           provider="shift4"
           networks="Card, crypto"
           settlement="Shift4 merchant account"
-          description="Accept card and crypto payments through Shift4 once merchant onboarding and API access are enabled."
+          description="Accept card and crypto payments through Shift4 once merchant onboarding is complete."
         />
 
         <ProviderCard
@@ -1934,7 +1943,7 @@ function EngineSettingStatus({
                       Complete the application to begin onboarding for card and crypto payment acceptance through Shift4.
                     </p>
                     <div className="mt-3 rounded-lg bg-blue-50 px-3.5 py-3 text-xs leading-5 text-blue-800">
-                      PineTree will keep this provider status updated after Shift4 approval and API access are enabled.
+                      PineTree will keep this provider status updated after Shift4 approval is complete.
                     </div>
                   </>
                 ) : null}

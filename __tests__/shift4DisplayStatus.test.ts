@@ -31,14 +31,14 @@ describe("Shift4 provider display status", () => {
   })
 
   it.each(["Rejected", "Declined", "Denied"])(
-    "returns rejected applications to Not connected for %s",
+    "shows Denied for rejected applications with %s",
     (merchantApprovalStatus) => {
       expect(getShift4DisplayStatus({
         accountReference: "shift4-application-123",
         merchantApprovalStatus
       })).toEqual({
-        label: "Not connected",
-        tone: "default"
+        label: "Denied",
+        tone: "red"
       })
     }
   )
@@ -56,8 +56,8 @@ describe("Shift4 provider display status", () => {
       accountReference: "shift4-application-123",
       merchantApprovalStatus: "Rejected"
     })).toEqual({
-      label: "Not connected",
-      tone: "default"
+      label: "Denied",
+      tone: "red"
     })
   })
 })

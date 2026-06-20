@@ -1,6 +1,6 @@
 export type Shift4DisplayStatus = {
-  label: "Not connected" | "Pending" | "Connected"
-  tone: "default" | "amber" | "blue"
+  label: "Not connected" | "Pending" | "Connected" | "Denied"
+  tone: "default" | "amber" | "blue" | "red"
 }
 
 type Shift4DisplayStatusInput = {
@@ -31,7 +31,7 @@ export function getShift4DisplayStatus(input: Shift4DisplayStatusInput): Shift4D
     matchesStatus(value, ["rejected", "declined", "denied"])
   )
   if (rejected) {
-    return { label: "Not connected", tone: "default" }
+    return { label: "Denied", tone: "red" }
   }
 
   const connected =

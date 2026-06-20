@@ -49,4 +49,21 @@ describe("Shift4 provider setup UI", () => {
     expect(modal).not.toContain("Not connected")
     expect(modal).not.toContain("Not Connected")
   })
+
+  it("keeps merchant-facing Shift4 status focused on the application", () => {
+    const source = read("app/dashboard/providers/page.tsx")
+
+    expect(source).toContain("Provider Status")
+    expect(source).toContain("Application:")
+    expect(source).toContain("Not started")
+    expect(source).toContain("Pending")
+    expect(source).toContain("Approved")
+    expect(source).toContain("Denied")
+    expect(source).toContain("Managed by PineTree / Shift4")
+
+    expect(source).not.toContain("API access")
+    expect(source).not.toContain("Webhook return")
+    expect(source).not.toContain("Webhook:")
+    expect(source).not.toContain("API:")
+  })
 })
