@@ -7,7 +7,7 @@ function read(relativePath: string) {
 }
 
 function shift4ModalSource(source: string) {
-  const start = source.indexOf('activeProvider === "shift4" && (')
+  const start = source.indexOf("isManagedCardProvider(activeProvider) && (")
   const end = source.indexOf('{(activeProvider === "solana" || activeProvider === "base")', start)
   expect(start).toBeGreaterThanOrEqual(0)
   expect(end).toBeGreaterThan(start)
@@ -59,7 +59,8 @@ describe("Shift4 provider setup UI", () => {
     expect(source).toContain("Pending")
     expect(source).toContain("Approved")
     expect(source).toContain("Denied")
-    expect(source).toContain("Managed by PineTree / Shift4")
+    expect(source).toContain('name: "Shift4"')
+    expect(source).toContain("Managed by PineTree / {getCardProviderName(provider)}")
 
     expect(source).not.toContain("API access")
     expect(source).not.toContain("Webhook return")

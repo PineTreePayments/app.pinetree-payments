@@ -30,6 +30,45 @@ const shift4ApplicationUrl =
   process.env.NEXT_PUBLIC_SHIFT4_APPLICATION_URL ||
   process.env.SHIFT4_APPLICATION_URL ||
   ""
+const stripeApplicationUrl = process.env.NEXT_PUBLIC_STRIPE_APPLICATION_URL || ""
+const fluidPayApplicationUrl = process.env.NEXT_PUBLIC_FLUIDPAY_APPLICATION_URL || ""
+
+type CardOnboardingProvider = "shift4" | "stripe" | "fluidpay"
+type CardApplicationStatus = "Not started" | "Pending" | "Approved" | "Denied"
+
+const cardProviderSetupContent: Record<CardOnboardingProvider, {
+  name: string
+  cta: string
+  modalTitle: string
+  subtitle: string
+  primaryAction: string
+  missingUrlMessage: string
+}> = {
+  shift4: {
+    name: "Shift4",
+    cta: "Start Shift4 Application",
+    modalTitle: "Shift4 Merchant Application",
+    subtitle: "Complete the application to begin onboarding for card and crypto payment acceptance through Shift4.",
+    primaryAction: "Begin Application",
+    missingUrlMessage: "Application link not configured yet."
+  },
+  stripe: {
+    name: "Stripe",
+    cta: "Start Stripe Setup",
+    modalTitle: "Stripe Merchant Setup",
+    subtitle: "Complete setup to begin onboarding for card payment acceptance through Stripe.",
+    primaryAction: "Begin Setup",
+    missingUrlMessage: "Setup link not configured yet."
+  },
+  fluidpay: {
+    name: "Fluid Pay",
+    cta: "Start Fluid Pay Setup",
+    modalTitle: "Fluid Pay Merchant Setup",
+    subtitle: "Complete setup to begin onboarding for card payment acceptance through Fluid Pay.",
+    primaryAction: "Begin Setup",
+    missingUrlMessage: "Setup link not configured yet."
+  }
+}
 
 
 type ProviderCredentials = {
@@ -191,6 +230,8 @@ export default function ProvidersPage() {
   const [activeProvider, setActiveProvider] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState("")
   const [shift4ApplicationStatusOverride, setShift4ApplicationStatusOverride] = useState<"Pending" | null>(null)
+  const [stripeApplicationStatusOverride, setStripeApplicationStatusOverride] = useState<"Pending" | null>(null)
+  const [fluidPayApplicationStatusOverride, setFluidPayApplicationStatusOverride] = useState<"Pending" | null>(null)
   const [nwcUri, setNwcUri] = useState("")
   const [nwcWalletLabel, setNwcWalletLabel] = useState("")
   const [nwcTestResult, setNwcTestResult] = useState<{
@@ -566,8 +607,8 @@ export default function ProvidersPage() {
     if ((provider === "solana" || provider === "base") && wallet) return "Connected"
 
     const p = getProvider(provider)
-    if (provider === "shift4") {
-      const applicationStatus = getShift4ApplicationStatus(p)
+    if (isManagedCardProvider(provider)) {
+      const applicationStatus = getCardProviderApplicationStatus(provider, p)
       if (applicationStatus === "Approved") return "Connected"
       if (applicationStatus === "Pending") return "Pending"
       if (applicationStatus === "Denied") return "Denied"
@@ -1325,11 +1366,18 @@ function EngineSettingStatus({
     }
   }
 
-  function beginShift4Application() {
-    const url = shift4ApplicationUrl.trim()
+  function beginCardProviderSetup(provider: CardOnboardingProvider) {
+    const url = getCardProviderSetupUrl(provider).trim()
     if (!url) return
     window.open(url, "_blank", "noopener,noreferrer")
-    setShift4ApplicationStatusOverride("Pending")
+
+    if (provider === "shift4") {
+      setShift4ApplicationStatusOverride("Pending")
+    } else if (provider === "stripe") {
+      setStripeApplicationStatusOverride("Pending")
+    } else {
+      setFluidPayApplicationStatusOverride("Pending")
+    }
   }
 
   function optionButtonClass(selected: boolean) {
@@ -1422,7 +1470,50 @@ function EngineSettingStatus({
     return "border-gray-200 bg-gray-50 text-gray-600"
   }
 
-  function getShift4ApplicationStatus(provider?: ProviderRecord | null): "Not started" | "Pending" | "Approved" | "Denied" {
+  function isManagedCardProvider(provider: string | null | undefined): provider is CardOnboardingProvider {
+    return provider === "shift4" || provider === "stripe" || provider === "fluidpay"
+  }
+
+  function getCardProviderName(provider: CardOnboardingProvider) {
+    return cardProviderSetupContent[provider].name
+  }
+
+  function getCardProviderSetupUrl(provider: CardOnboardingProvider) {
+    if (provider === "shift4") return shift4ApplicationUrl
+    if (provider === "stripe") return stripeApplicationUrl
+    return fluidPayApplicationUrl
+  }
+
+  function getCardProviderSetupCta(provider: CardOnboardingProvider) {
+    return cardProviderSetupContent[provider].cta
+  }
+
+  function getCardProviderModalTitle(provider: CardOnboardingProvider) {
+    return cardProviderSetupContent[provider].modalTitle
+  }
+
+  function getCardProviderModalSubtitle(provider: CardOnboardingProvider) {
+    return cardProviderSetupContent[provider].subtitle
+  }
+
+  function getCardProviderPrimaryAction(provider: CardOnboardingProvider) {
+    return cardProviderSetupContent[provider].primaryAction
+  }
+
+  function getCardProviderMissingUrlMessage(provider: CardOnboardingProvider) {
+    return cardProviderSetupContent[provider].missingUrlMessage
+  }
+
+  function getCardProviderStatusOverride(provider: CardOnboardingProvider) {
+    if (provider === "shift4") return shift4ApplicationStatusOverride
+    if (provider === "stripe") return stripeApplicationStatusOverride
+    return fluidPayApplicationStatusOverride
+  }
+
+  function getCardProviderApplicationStatus(
+    providerKey: CardOnboardingProvider,
+    provider?: ProviderRecord | null
+  ): CardApplicationStatus {
     const displayStatus = getShift4DisplayStatus({
       providerStatus: provider?.status,
       accountReference: String(provider?.credentials?.account_reference || ""),
@@ -1432,7 +1523,7 @@ function EngineSettingStatus({
 
     if (displayStatus.label === "Denied") return "Denied"
     if (displayStatus.label === "Connected") return "Approved"
-    if (displayStatus.label === "Pending" || shift4ApplicationStatusOverride === "Pending") return "Pending"
+    if (displayStatus.label === "Pending" || getCardProviderStatusOverride(providerKey) === "Pending") return "Pending"
     return "Not started"
   }
 
@@ -1453,12 +1544,13 @@ function EngineSettingStatus({
     const connected = status === "Connected"
     const enabled = isEnabled(provider)
     const p = getProvider(provider)
+    const isManagedCard = isManagedCardProvider(provider)
     const wallet = getWallet(provider)
     const walletValue = p?.credentials?.wallet || wallet?.wallet_address
     const lightningWalletLabel = String(p?.credentials?.wallet_label || "")
     const walletType = p?.credentials?.wallet_type || wallet?.wallet_type || wallet?.asset
     const walletLabel = formatWalletLabel(provider, walletType, wallet?.asset || null)
-    const shift4ApplicationStatus = provider === "shift4" ? getShift4ApplicationStatus(p) : null
+    const cardApplicationStatus = isManagedCard ? getCardProviderApplicationStatus(provider, p) : null
     const connectedCredentialLine = walletValue
       ? provider === "solana" || provider === "base"
         ? `${walletLabel} • ${formatCredentialPart(walletValue, 6, 4)}`
@@ -1466,8 +1558,8 @@ function EngineSettingStatus({
       : provider === "lightning" && lightningWalletLabel
         ? `Lightning • ${lightningWalletLabel}`
         : ""
-    const primaryActionLabel = provider === "shift4"
-      ? "Start Shift4 Application"
+    const primaryActionLabel = isManagedCard
+      ? getCardProviderSetupCta(provider)
       : connected
         ? "Disconnect"
         : provider === "lightning"
@@ -1534,16 +1626,16 @@ function EngineSettingStatus({
             </div>
           ) : null}
 
-          {provider === "shift4" ? (
+          {isManagedCard ? (
             <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
               <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                 Provider Status
               </span>
               <span className="mt-1 block text-sm font-medium leading-snug text-gray-950">
-                Application: {shift4ApplicationStatus || "Not started"}
+                Application: {cardApplicationStatus || "Not started"}
               </span>
               <span className="block text-xs leading-5 text-gray-500">
-                Managed by PineTree / Shift4
+                Managed by PineTree / {getCardProviderName(provider)}
               </span>
             </div>
           ) : null}
@@ -1552,7 +1644,7 @@ function EngineSettingStatus({
         <div className="mt-auto flex items-center justify-between gap-3 border-t border-gray-100 pt-4">
           <button
             onClick={() => {
-              if (provider === "shift4") {
+              if (isManagedCard) {
                 openProvider(provider)
                 return
               }
@@ -1563,7 +1655,7 @@ function EngineSettingStatus({
               }
             }}
             className={`h-9 rounded-md px-3.5 text-sm font-semibold shadow-sm transition ${
-              connected && provider !== "shift4"
+              connected && !isManagedCard
                 ? "border border-red-200 bg-white text-red-600 hover:bg-red-50"
               : provider === "lightning" && status === "Provider unavailable"
                   ? "cursor-not-allowed border border-gray-200 bg-gray-100 text-gray-500"
@@ -1601,7 +1693,7 @@ function EngineSettingStatus({
 
       <MetricGrid columns="four">
         <CompactMetricTile label="Connected" value={connectedAndEnabledProvidersCount} tone="blue" />
-        <CompactMetricTile label="Payment Options" value="5" />
+        <CompactMetricTile label="Payment Options" value="7" />
         <CompactMetricTile
           label="Smart Routing"
           value={smartRouting ? "On" : "Off"}
@@ -1797,6 +1889,22 @@ function EngineSettingStatus({
         />
 
         <ProviderCard
+          name="Stripe"
+          provider="stripe"
+          networks="Card"
+          settlement="Stripe merchant account"
+          description="Accept card payments through Stripe once merchant onboarding is approved."
+        />
+
+        <ProviderCard
+          name="Fluid Pay"
+          provider="fluidpay"
+          networks="Card"
+          settlement="Fluid Pay merchant account"
+          description="Accept card payments through Fluid Pay once merchant onboarding is approved."
+        />
+
+        <ProviderCard
           name="Base Pay"
           provider="base"
           networks="Base"
@@ -1920,7 +2028,7 @@ function EngineSettingStatus({
             aria-modal="true"
             aria-label="Provider setup"
             className={`relative w-full max-w-[520px] max-h-[90vh] overflow-y-auto rounded-lg bg-white shadow-lg ${
-              activeProvider === "shift4" ? "p-4 sm:p-5" : "p-4 sm:p-6"
+              isManagedCardProvider(activeProvider) ? "p-4 sm:p-5" : "p-4 sm:p-6"
             }`}
             onMouseDown={(event) => event.stopPropagation()}
           >
@@ -1933,17 +2041,17 @@ function EngineSettingStatus({
                       ? "Set Up Base Pay"
                       : activeProvider === "lightning"
                         ? "Bitcoin Lightning"
-                      : activeProvider === "shift4"
-                        ? "Shift4 Merchant Application"
+                      : isManagedCardProvider(activeProvider)
+                        ? getCardProviderModalTitle(activeProvider)
                       : `Connect ${activeProvider}`}
                 </h2>
-                {activeProvider === "shift4" ? (
+                {isManagedCardProvider(activeProvider) ? (
                   <>
                     <p className="mt-1 text-sm leading-5 text-gray-500">
-                      Complete the application to begin onboarding for card and crypto payment acceptance through Shift4.
+                      {getCardProviderModalSubtitle(activeProvider)}
                     </p>
                     <div className="mt-3 rounded-lg bg-blue-50 px-3.5 py-3 text-xs leading-5 text-blue-800">
-                      PineTree will keep this provider status updated after Shift4 approval is complete.
+                      PineTree will keep this provider status updated after approval is completed.
                     </div>
                   </>
                 ) : null}
@@ -2394,7 +2502,7 @@ function EngineSettingStatus({
               </div>
             )}
 
-            {activeProvider === "shift4" && (
+            {isManagedCardProvider(activeProvider) && (
               <div className="mb-5 space-y-5">
                 <section className="rounded-xl border border-gray-200 bg-white px-3.5 py-3.5">
                   <p className="text-sm font-semibold text-gray-950">Application checklist</p>
@@ -2620,7 +2728,7 @@ function EngineSettingStatus({
 
             {activeProvider !== "solana" &&
               activeProvider !== "base" &&
-              activeProvider !== "shift4" &&
+              !isManagedCardProvider(activeProvider) &&
               activeProvider !== "lightning" && (
                 <input
                   value={inputValue}
@@ -2634,7 +2742,7 @@ function EngineSettingStatus({
                 />
               )}
 
-            {activeProvider === "shift4" && (
+            {isManagedCardProvider(activeProvider) && (
             <div className="-mx-4 -mb-4 flex flex-col-reverse gap-2 border-t border-gray-100 bg-white p-4 sm:-mx-5 sm:-mb-5 sm:flex-row sm:items-center sm:justify-between sm:p-5 sticky bottom-0">
               <button
                 type="button"
@@ -2647,20 +2755,20 @@ function EngineSettingStatus({
               <div className="flex w-full flex-col gap-1 sm:w-auto sm:items-end">
                 <button
                   type="button"
-                  onClick={beginShift4Application}
-                  disabled={!shift4ApplicationUrl.trim()}
+                  onClick={() => beginCardProviderSetup(activeProvider)}
+                  disabled={!getCardProviderSetupUrl(activeProvider).trim()}
                   className={`${primaryButtonClass()} w-full sm:w-auto`}
                 >
-                  Begin Application
+                  {getCardProviderPrimaryAction(activeProvider)}
                 </button>
-                {!shift4ApplicationUrl.trim() ? (
-                  <p className="text-xs font-medium text-amber-700">Application link not configured yet.</p>
+                {!getCardProviderSetupUrl(activeProvider).trim() ? (
+                  <p className="text-xs font-medium text-amber-700">{getCardProviderMissingUrlMessage(activeProvider)}</p>
                 ) : null}
               </div>
             </div>
             )}
 
-            {activeProvider !== "lightning" && activeProvider !== "shift4" && (
+            {activeProvider !== "lightning" && !isManagedCardProvider(activeProvider) && (
             <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
               <button
                 onClick={closeProviderModal}
