@@ -10,23 +10,21 @@ describe("passkey support", () => {
   it("login page still has email, password fields and forgot-password link", () => {
     const login = read("app/login/page.tsx")
     expect(login).toContain('type="email"')
+    expect(login).toContain('type={showPassword ? "text" : "password"}')
     expect(login).toContain("Forgot password?")
     expect(login).toContain('href="/forgot-password"')
+    expect(login).toContain("Create account")
     expect(login).toContain("signInWithPassword")
   })
 
-  it("login page passkey affordance is a secondary link, not a primary button", () => {
+  it("login page does not render a visible passkey button or link", () => {
     const login = read("app/login/page.tsx")
-    expect(login).toContain("Use a passkey")
-    expect(login).toContain("passkeySupported")
-    // Passkey trigger is a plain text link (type=button), NOT given bg-blue-600
-    expect(login).toContain('type="button"')
-    expect(login).not.toContain('"Use a passkey"\n            className="w-full bg-blue-600')
-  })
 
-  it("login page passkey affordance is gated on login mode and browser support", () => {
-    const login = read("app/login/page.tsx")
-    expect(login).toContain('mode === "login" && passkeySupported')
+    expect(login).not.toContain("Use a passkey")
+    expect(login).not.toContain("handlePasskeySignIn")
+    expect(login).not.toContain("signInWithPasskey")
+    expect(login).not.toContain("passkeyMsg")
+    expect(login).not.toContain('mode === "login" && passkeySupported')
   })
 
   it("login page safely detects conditional passkey mediation and uses webauthn autocomplete", () => {
@@ -37,19 +35,16 @@ describe("passkey support", () => {
     expect(login).toContain('"email"')
   })
 
-  it("passkey cancel shows neutral message without blocking the login form", () => {
+  it("login page has no visible passkey cancellation error surface", () => {
     const login = read("app/login/page.tsx")
-    expect(login).toContain("Passkey sign-in was cancelled.")
-    expect(login).toContain("handlePasskeySignIn")
-    // Error shown as plain grey text, not error styling
-    expect(login).toContain("text-gray-400")
+    expect(login).not.toContain("Passkey sign-in was cancelled.")
     expect(login).not.toContain('passkeyMsg && (\n            <p className="text-sm text-red-600')
   })
 
-  it("login page detects passkey support via PublicKeyCredential", () => {
+  it("login page detects conditional passkey support via PublicKeyCredential", () => {
     const login = read("app/login/page.tsx")
     expect(login).toContain("window.PublicKeyCredential")
-    expect(login).toContain("setPasskeySupported")
+    expect(login).toContain("setConditionalPasskeySupported")
     expect(login).toContain("TODO: Supabase passkey helpers are still experimental")
   })
 

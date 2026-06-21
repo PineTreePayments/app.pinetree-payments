@@ -26,9 +26,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [errorMsg, setErrorMsg] = useState("")
   const [infoMsg, setInfoMsg] = useState("")
-  const [passkeySupported, setPasskeySupported] = useState(false)
   const [conditionalPasskeySupported, setConditionalPasskeySupported] = useState(false)
-  const [passkeyMsg, setPasskeyMsg] = useState("")
 
   /* -----------------------------
   AUTO REDIRECT IF LOGGED IN
@@ -61,8 +59,6 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.PublicKeyCredential) return
-
-    setPasskeySupported(true)
 
     const credential = window.PublicKeyCredential as ConditionalPublicKeyCredential
     if (typeof credential.isConditionalMediationAvailable === "function") {
@@ -147,7 +143,6 @@ export default function LoginPage() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setPasskeyMsg("")
     if (mode === "login") {
       handleLogin()
     } else {
@@ -156,25 +151,11 @@ export default function LoginPage() {
   }
 
   /* -----------------------------
-  PASSKEY SIGN IN (OPTIONAL)
+  CONDITIONAL PASSKEY SUPPORT (OPTIONAL)
   ----------------------------- */
 
-  async function handlePasskeySignIn() {
-    setPasskeyMsg("")
-    try {
-      // TODO: Supabase passkey helpers are still experimental in the installed SDK types.
-      // Keep manual passkey sign-in as the stable fallback until conditional mediation is typed.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error } = await (supabase.auth as any).signInWithPasskey()
-      if (error) {
-        setPasskeyMsg("Passkey sign-in was cancelled.")
-        return
-      }
-      window.location.href = "/dashboard"
-    } catch {
-      setPasskeyMsg("Passkey sign-in was cancelled.")
-    }
-  }
+  // TODO: Supabase passkey helpers are still experimental in the installed SDK types.
+  // Keep login-screen passkeys conditional/autofill-only until true mediation is stable.
 
   /* -----------------------------
   GOOGLE LOGIN (SAFE TO KEEP)
@@ -319,21 +300,6 @@ export default function LoginPage() {
                 : "Create account"}
           </button>
 
-          {mode === "login" && passkeySupported && (
-            <div className="mt-3 text-center">
-              <button
-                type="button"
-                onClick={handlePasskeySignIn}
-                className="text-xs text-gray-400 underline underline-offset-2 transition hover:text-gray-600"
-              >
-                Use a passkey
-              </button>
-            </div>
-          )}
-
-          {passkeyMsg && (
-            <p className="mt-1.5 text-center text-xs text-gray-400">{passkeyMsg}</p>
-          )}
         </form>
 
         <p className="text-xs text-gray-600 mt-4 text-center">
