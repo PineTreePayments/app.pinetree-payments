@@ -13,7 +13,8 @@ import {
   DashboardHeroCard,
   DashboardSection,
   ProviderStatusPill,
-  dashboardPageTitleClass
+  dashboardPageTitleClass,
+  dashboardSectionLabelClass
 } from "@/components/dashboard/DashboardPrimitives"
 import {
   getShift4DisplayStatus,
@@ -1961,17 +1962,17 @@ function EngineSettingStatus({
       )}
 
       <div className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Payment Providers</p>
-        <div className="flex w-fit rounded-xl bg-gray-100 p-1">
+        <p className={dashboardSectionLabelClass}>Payment Providers</p>
+        <div className="flex flex-wrap gap-1.5">
           {(["all", "card", "crypto"] as const).map((f) => (
             <button
               key={f}
               type="button"
               onClick={() => setProviderFilter(f)}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+              className={`rounded-lg border px-3 py-1.5 text-sm transition ${
                 providerFilter === f
-                  ? "bg-white font-semibold text-gray-900 shadow-sm"
-                  : "text-gray-500 hover:text-gray-700"
+                  ? "border-blue-300 bg-blue-50 font-semibold text-blue-700 shadow-sm"
+                  : "border-gray-200 bg-white/70 font-medium text-gray-500 hover:border-blue-200 hover:text-blue-600"
               }`}
             >
               {f === "all" ? "All" : f === "card" ? "Card Providers" : "Crypto Rails"}
