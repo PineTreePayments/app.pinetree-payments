@@ -5,12 +5,10 @@ import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
 import {
-  CompactMetricTile,
   DashboardHeroCard,
   DashboardSection,
   GroupedMetricSurface,
   InlineMetric,
-  MetricGrid,
   PineTreeInsightsCard,
   dashboardPageTitleClass
 } from "@/components/dashboard/DashboardPrimitives"
@@ -254,12 +252,37 @@ export default function ReportsPage() {
         }
       />
 
-      <MetricGrid columns="four">
-        <CompactMetricTile label="Transactions"    value={summary ? String(summary.transactionCount) : "0"} />
-        <CompactMetricTile label="Avg Transaction" value={summary ? fmt(summary.avgTransaction) : "$0.00"}  tone="blue" />
-        <CompactMetricTile label="Failed"          value={summary ? String(summary.failedPayments) : "0"}   tone={summary?.failedPayments ? "red" : undefined} />
-        <CompactMetricTile label="Success Rate"    value={`${successRate}%`}                                tone="green" />
-      </MetricGrid>
+      <DashboardSection title="Performance Overview" titleTone="blue">
+        <div className="relative overflow-hidden rounded-[1.35rem] border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.16),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] p-4 shadow-[0_18px_60px_rgba(37,99,235,0.13)] sm:p-5 md:p-6">
+          <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/80 to-transparent" />
+          <div className="relative grid gap-4 sm:grid-cols-2 sm:divide-x sm:divide-y-0 sm:divide-blue-200/80">
+            <div className="grid gap-4 border-b border-blue-200/80 pb-4 sm:border-b-0 sm:pb-0 sm:pr-5">
+              <InlineMetric
+                label="Transactions"
+                value={summary ? String(summary.transactionCount) : "0"}
+                className="[&>p]:!overflow-visible [&>p]:!whitespace-normal [&>p]:!text-clip"
+              />
+              <InlineMetric
+                label="Average Transaction"
+                value={summary ? fmt(summary.avgTransaction) : "$0.00"}
+                className="[&>p]:!overflow-visible [&>p]:!whitespace-normal [&>p]:!text-clip"
+              />
+            </div>
+            <div className="grid gap-4 sm:pl-5">
+              <InlineMetric
+                label="Failed Payments"
+                value={summary ? String(summary.failedPayments) : "0"}
+                className="[&>p]:!overflow-visible [&>p]:!whitespace-normal [&>p]:!text-clip"
+              />
+              <InlineMetric
+                label="Success Rate"
+                value={`${successRate}%`}
+                className="[&>p]:!overflow-visible [&>p]:!whitespace-normal [&>p]:!text-clip"
+              />
+            </div>
+          </div>
+        </div>
+      </DashboardSection>
 
       {summary && (
         <PineTreeInsightsCard

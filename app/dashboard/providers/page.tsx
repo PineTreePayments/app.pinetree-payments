@@ -1786,25 +1786,16 @@ function EngineSettingStatus({
       ) : null}
 
       <DashboardHeroCard
-        eyebrow="PAYMENT INFRASTRUCTURE"
-        title="Manage payment processors, crypto rails, and routing preferences."
+        eyebrow="Payment Infrastructure"
+        title="View connected payment providers and manage your payment infrastructure."
         value={connectedAndEnabledProvidersCount}
+        detail="Connected Providers"
         secondary={
-          <div className="grid w-full grid-cols-3 divide-x divide-blue-200/80 border-t border-blue-200/80 pt-3 sm:w-auto sm:min-w-[460px] sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
+          <div className="w-full border-t border-blue-200/80 pt-3 sm:w-auto sm:min-w-[220px] sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
             <InlineMetric
-              label="Payment options"
+              label="Payment Operations"
               value="7"
-              className="pr-4"
-            />
-            <InlineMetric
-              label="Smart routing status"
-              value={smartRouting ? "On" : "Off"}
-              className="px-4"
-            />
-            <InlineMetric
-              label="Auto conversion status"
-              value={autoConversion ? "On" : "Off"}
-              className="pl-4"
+              className="[&>p]:!overflow-visible [&>p]:!whitespace-normal [&>p]:!text-clip"
             />
           </div>
         }
