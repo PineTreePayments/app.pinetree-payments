@@ -53,7 +53,7 @@ async function save(req: NextRequest) {
     const message = getErrorMessage(error, "Failed to save settings")
     const status = message.includes("migration required")
       ? 409
-      : message.includes("must be") || message.includes("too long")
+      : message.includes("must be") || message.includes("required") || message.includes("too long")
         ? 400
         : getRouteErrorStatus(error)
     return NextResponse.json(

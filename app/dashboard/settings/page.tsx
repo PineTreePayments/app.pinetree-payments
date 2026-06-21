@@ -277,6 +277,12 @@ export default function SettingsPage() {
   }, [loadSettings])
 
   async function saveSettings() {
+    const parsedTaxRate = parseTaxRate(taxRate)
+    if (taxEnabled && (parsedTaxRate === null || parsedTaxRate <= 0 || parsedTaxRate > 100)) {
+      toast.error("Enter a valid tax rate before enabling taxes.")
+      return
+    }
+
     setSaving(true)
 
     try {
@@ -298,7 +304,7 @@ export default function SettingsPage() {
         },
         tax: {
           tax_enabled: taxEnabled,
-          tax_rate: sanitizeTaxRate(taxRate),
+          tax_rate: taxEnabled ? parsedTaxRate || 0 : parsedTaxRate || 0,
           tax_name: taxName || "Sales Tax"
         },
         operations
@@ -314,12 +320,12 @@ export default function SettingsPage() {
     }
   }
 
-  function sanitizeTaxRate(raw: string): number {
-    if (raw === "") return 0
+  function parseTaxRate(raw: string): number | null {
+    if (raw.trim() === "") return null
     const parsed = Number(raw)
-    if (!Number.isFinite(parsed)) return 0
+    if (!Number.isFinite(parsed)) return null
     // Clamp to [0, 100] — a rate outside this range is almost certainly a typo
-    return Math.min(100, Math.max(0, parsed))
+    return parsed
   }
 
   if (loading) {

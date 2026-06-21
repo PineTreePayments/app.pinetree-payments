@@ -61,6 +61,12 @@ export type SettingsDashboardData = {
   schemaReady: boolean
 }
 
+export type MerchantSettingsReadiness = {
+  complete: boolean
+  missing: string[]
+  reason?: string
+}
+
 const DEFAULT_SETTINGS: MerchantSettingsPayload = {
   business_name: null,
   contact_email: null,
@@ -140,14 +146,21 @@ function normalizeSettings(input: Partial<MerchantSettingsPayload>): MerchantSet
   }
 }
 
-function normalizeTax(input: Partial<MerchantTaxSettingsPayload>): MerchantTaxSettingsPayload {
+export function normalizeTax(input: Partial<MerchantTaxSettingsPayload>): MerchantTaxSettingsPayload {
+  const taxEnabled = bool(input.tax_enabled)
   const rate = Number(input.tax_rate ?? 0)
-  if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+
+  if (taxEnabled && (!Number.isFinite(rate) || rate <= 0 || rate > 100)) {
+    throw new Error("Tax rate is required and must be between 0 and 100 when taxes are enabled")
+  }
+
+  if (!taxEnabled && (!Number.isFinite(rate) || rate < 0 || rate > 100)) {
     throw new Error("Tax rate must be between 0 and 100")
   }
+
   return {
-    tax_enabled: bool(input.tax_enabled),
-    tax_rate: rate,
+    tax_enabled: taxEnabled,
+    tax_rate: taxEnabled ? rate : rate || 0,
     tax_name: text(input.tax_name, 80) || "Sales Tax"
   }
 }
@@ -277,4 +290,88 @@ export async function saveSettingsDashboardEngine(
   if (operationsResult.error) {
     throw new Error(`Failed to save operations settings: ${operationsResult.error.message}`)
   }
+}
+
+export function getMissingSettingsRequirements(input: {
+  settings: Partial<MerchantSettingsPayload> | null
+  tax: Partial<MerchantTaxSettingsPayload> | null
+  operations?: unknown
+  hasSettingsRow: boolean
+  hasTaxRow: boolean
+  hasOperationsRow: boolean
+}): string[] {
+  const missing: string[] = []
+  const businessName = String(input.settings?.business_name || "").trim()
+  const taxEnabled = input.tax?.tax_enabled === true
+  const taxRate = Number(input.tax?.tax_rate ?? 0)
+
+  if (!input.hasSettingsRow || !businessName) {
+    missing.push("Business name")
+  }
+
+  if (!input.hasTaxRow) {
+    missing.push("Tax enabled or disabled decision")
+  } else if (taxEnabled && (!Number.isFinite(taxRate) || taxRate <= 0 || taxRate > 100)) {
+    missing.push("Valid tax rate")
+  }
+
+  if (!input.hasOperationsRow) {
+    missing.push("POS preferences")
+  }
+
+  return missing
+}
+
+export async function getMerchantSettingsReadiness(merchantId: string): Promise<MerchantSettingsReadiness> {
+  const [settingsResult, taxResult, operationsResult] = await Promise.all([
+    db
+      .from("merchant_settings")
+      .select("business_name")
+      .eq("merchant_id", merchantId)
+      .maybeSingle(),
+    db
+      .from("merchant_tax_settings")
+      .select("tax_enabled,tax_rate")
+      .eq("merchant_id", merchantId)
+      .maybeSingle(),
+    db
+      .from("merchant_operations_settings")
+      .select("merchant_id")
+      .eq("merchant_id", merchantId)
+      .maybeSingle()
+  ])
+
+  if (settingsResult.error) throw new Error(`Failed to load settings readiness: ${settingsResult.error.message}`)
+  if (taxResult.error) throw new Error(`Failed to load tax readiness: ${taxResult.error.message}`)
+  if (operationsResult.error) {
+    if (isSchemaMissing(operationsResult.error.message)) {
+      return {
+        complete: false,
+        missing: ["POS preferences"],
+        reason: "Settings database migration required before POS terminals can be enabled."
+      }
+    }
+    throw new Error(`Failed to load POS readiness: ${operationsResult.error.message}`)
+  }
+
+  const missing = getMissingSettingsRequirements({
+    settings: settingsResult.data || null,
+    tax: taxResult.data || null,
+    operations: operationsResult.data || null,
+    hasSettingsRow: Boolean(settingsResult.data),
+    hasTaxRow: Boolean(taxResult.data),
+    hasOperationsRow: Boolean(operationsResult.data)
+  })
+
+  return {
+    complete: missing.length === 0,
+    missing,
+    reason: missing.length
+      ? "Complete your business and tax settings before enabling POS terminals."
+      : undefined
+  }
+}
+
+export async function isMerchantSettingsComplete(merchantId: string) {
+  return (await getMerchantSettingsReadiness(merchantId)).complete
 }

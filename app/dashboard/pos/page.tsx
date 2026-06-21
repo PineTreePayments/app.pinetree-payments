@@ -46,6 +46,12 @@ type DrawerBalance = {
   log: DrawerEntry[]
 }
 
+type MerchantSettingsReadiness = {
+  complete: boolean
+  missing: string[]
+  reason?: string
+}
+
 function fmtUsd(n: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
     Number.isFinite(n) ? n : 0
@@ -71,6 +77,7 @@ export default function POSPage() {
   const [drawerStartingAmount, setDrawerStartingAmount] = useState("")
 
   const [drawerBalances, setDrawerBalances] = useState<Record<string, DrawerBalance>>({})
+  const [settingsReadiness, setSettingsReadiness] = useState<MerchantSettingsReadiness | null>(null)
   const [closeoutTerminalId, setCloseoutTerminalId] = useState<string | null>(null)
   const [closeoutAmount, setCloseoutAmount] = useState("")
   const [closeoutResult, setCloseoutResult] = useState<{ expected: number; actual: number; discrepancy: number } | null>(null)
@@ -104,19 +111,29 @@ export default function POSPage() {
       cache: "no-store"
     })
 
-    const payload = await res.json().catch(() => null)
-    if (!res.ok) {
-      throw new Error(payload?.error || "Terminal request failed")
-    }
+      const payload = await res.json().catch(() => null)
+      if (!res.ok) {
+        const error = new Error(payload?.error || "Terminal request failed") as Error & {
+          readiness?: MerchantSettingsReadiness
+          messageDetail?: string
+        }
+        error.readiness = payload?.readiness
+        error.messageDetail = payload?.message
+        throw error
+      }
 
     return payload
   }, [])
 
   const loadTerminals = useCallback(async () => {
     try {
-      const payload = await callPosTerminalsApi("GET") as { terminals?: Terminal[] }
+      const payload = await callPosTerminalsApi("GET") as {
+        terminals?: Terminal[]
+        readiness?: MerchantSettingsReadiness
+      }
       const list = payload.terminals || []
       setTerminals(list)
+      if (payload.readiness) setSettingsReadiness(payload.readiness)
       void loadDrawerBalances(list)
     } catch (error) {
       console.error(error)
@@ -220,7 +237,32 @@ export default function POSPage() {
 
   /* CREATE TERMINAL */
 
+  function showSettingsRequired(readiness = settingsReadiness) {
+    toast.warning("Settings required before creating a terminal.", {
+      description: "Complete your business and tax settings before enabling POS terminals.",
+      action: {
+        label: "Go to Settings",
+        onClick: () => {
+          window.location.href = "/dashboard/settings"
+        }
+      }
+    })
+    if (readiness) setSettingsReadiness(readiness)
+  }
+
+  function startCreatingTerminal() {
+    if (settingsReadiness && !settingsReadiness.complete) {
+      showSettingsRequired(settingsReadiness)
+      return
+    }
+    setCreating(true)
+  }
+
   async function createTerminal(){
+    if (settingsReadiness && !settingsReadiness.complete) {
+      showSettingsRequired(settingsReadiness)
+      return
+    }
 
     if(!name){
       toast.error("Register name required")
@@ -259,6 +301,10 @@ export default function POSPage() {
       toast.success("Terminal created")
     } catch (error) {
       console.error(error)
+      if (error instanceof Error && error.message === "Settings required before creating a terminal.") {
+        showSettingsRequired((error as Error & { readiness?: MerchantSettingsReadiness }).readiness)
+        return
+      }
       toast.error(error instanceof Error ? error.message : "Failed to create terminal")
     }
 
@@ -358,7 +404,7 @@ export default function POSPage() {
         }
         action={
           <button
-            onClick={() => setCreating(true)}
+            onClick={startCreatingTerminal}
             style={{ boxShadow: "0 10px 24px rgba(0,82,255,0.18)" }}
             className="inline-flex shrink-0 items-center gap-1.5 rounded-[18px] bg-[#1652f0] px-[18px] py-2.5 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.98]"
           >
@@ -366,6 +412,25 @@ export default function POSPage() {
           </button>
         }
       />
+
+      {settingsReadiness && !settingsReadiness.complete && (
+        <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm text-blue-950 shadow-[0_8px_24px_rgba(37,99,235,0.06)] sm:px-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-semibold">Settings required before creating a terminal.</p>
+              <p className="mt-0.5 text-blue-900/80">
+                Complete your business and tax settings before enabling POS terminals.
+              </p>
+            </div>
+            <Link
+              href="/dashboard/settings"
+              className="inline-flex min-h-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
+            >
+              Go to Settings
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* CREATE TERMINAL */}
 

@@ -4,6 +4,7 @@ import {
   deletePosTerminalEngine,
   getPosTerminalsEngine
 } from "@/engine/posTerminals"
+import { getMerchantSettingsReadiness } from "@/engine/settingsDashboard"
 import {
   getRouteErrorStatus,
   requireMerchantIdFromRequest
@@ -17,8 +18,11 @@ export async function GET(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
 
-    const terminals = await getPosTerminalsEngine(merchantId)
-    return NextResponse.json({ success: true, terminals })
+    const [terminals, readiness] = await Promise.all([
+      getPosTerminalsEngine(merchantId),
+      getMerchantSettingsReadiness(merchantId)
+    ])
+    return NextResponse.json({ success: true, terminals, readiness })
   } catch (error: unknown) {
     return NextResponse.json(
       { error: getErrorMessage(error, "Failed to load terminals") },
@@ -30,6 +34,18 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
+    const readiness = await getMerchantSettingsReadiness(merchantId)
+
+    if (!readiness.complete) {
+      return NextResponse.json(
+        {
+          error: "Settings required before creating a terminal.",
+          message: "Complete your business and tax settings before enabling POS terminals.",
+          readiness
+        },
+        { status: 409 }
+      )
+    }
 
     const body = (await req.json()) as {
       name?: string

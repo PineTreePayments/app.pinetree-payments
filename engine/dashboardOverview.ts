@@ -138,14 +138,18 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
 
   const byDate: Record<string, number> = {}
   paymentRows.forEach((payment) => {
-    const date = new Date(payment.created_at).toLocaleDateString()
+    const createdAt = new Date(payment.created_at)
+    if (Number.isNaN(createdAt.getTime())) return
+    const date = createdAt.toISOString().slice(0, 10)
     byDate[date] = (byDate[date] || 0) + Number(payment.gross_amount ?? 0)
   })
 
-  const chartData = Object.keys(byDate).map((date) => ({
-    date,
-    volume: byDate[date]
-  })).reverse()
+  const chartData = Object.keys(byDate)
+    .sort()
+    .map((date) => ({
+      date,
+      volume: byDate[date]
+    }))
 
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)

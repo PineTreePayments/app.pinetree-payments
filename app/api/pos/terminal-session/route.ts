@@ -6,6 +6,13 @@ function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
 }
 
+function getErrorStatus(error: unknown) {
+  if (typeof error === "object" && error !== null && "status" in error) {
+    return Number((error as { status?: number }).status) || 500
+  }
+  return 500
+}
+
 /**
  * GET - returns safe terminal display info (name, drawer state, provider) and
  * a scoped terminal session token. Never returns the terminal PIN.
@@ -23,7 +30,7 @@ export async function GET(req: NextRequest) {
   } catch (error: unknown) {
     return NextResponse.json(
       { error: getErrorMessage(error, "Failed to load terminal session") },
-      { status: 500 }
+      { status: getErrorStatus(error) }
     )
   }
 }
@@ -62,7 +69,7 @@ export async function POST(req: NextRequest) {
   } catch (error: unknown) {
     return NextResponse.json(
       { error: getErrorMessage(error, "Failed to reset terminal PIN") },
-      { status: 500 }
+      { status: getErrorStatus(error) }
     )
   }
 }

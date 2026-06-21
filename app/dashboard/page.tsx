@@ -17,6 +17,10 @@ import { AUTO_POLLING_ENABLED } from "@/lib/utils/polling"
 import TransactionActivityTable, {
   type DashboardTransactionRow
 } from "./TransactionActivityTable"
+import {
+  normalizeOverviewChartData,
+  type OverviewChartRange
+} from "@/lib/dashboardChartData"
 
 import {
   AreaChart,
@@ -80,12 +84,7 @@ type ChartPoint = {
   volume: number
 }
 
-type ChartRange = "7D" | "30D" | "90D" | "ALL"
-
-function parseTimestamp(value: string) {
-  const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(value)
-  return new Date(hasTimezone ? value : `${value}Z`)
-}
+type ChartRange = OverviewChartRange
 
 function formatUsd(amount: number) {
   return new Intl.NumberFormat("en-US", {
@@ -93,35 +92,6 @@ function formatUsd(amount: number) {
     currency: "USD",
     maximumFractionDigits: 2
   }).format(Number.isFinite(amount) ? amount : 0)
-}
-
-function getChartWindow(data: ChartPoint[], range: ChartRange) {
-  if (range === "ALL" || data.length === 0) return data
-
-  const daysByRange: Record<Exclude<ChartRange, "ALL">, number> = {
-    "7D": 7,
-    "30D": 30,
-    "90D": 90
-  }
-  const days = daysByRange[range]
-  const datedRows = data
-    .map((point) => ({ point, date: parseTimestamp(point.date) }))
-    .filter((row) => !Number.isNaN(row.date.getTime()))
-
-  if (!datedRows.length) {
-    return data.slice(Math.max(data.length - days, 0))
-  }
-
-  const latest = new Date(Math.max(...datedRows.map((row) => row.date.getTime())))
-  const cutoff = new Date(latest)
-  cutoff.setDate(cutoff.getDate() - (days - 1))
-  cutoff.setHours(0, 0, 0, 0)
-
-  const filtered = datedRows
-    .filter((row) => row.date >= cutoff)
-    .map((row) => row.point)
-
-  return filtered.length ? filtered : data
 }
 
 export default function DashboardPage() {
@@ -234,16 +204,17 @@ export default function DashboardPage() {
     { label: "Manage Inventory", href: "/dashboard/inventory", icon: Boxes }
   ]
 
-  const visibleChartData = useMemo(
-    () => getChartWindow(chartData, chartRange),
+  const normalizedChart = useMemo(
+    () => normalizeOverviewChartData(chartData, chartRange),
     [chartData, chartRange]
   )
-  const chartDisplayData = visibleChartData.length > 0
-    ? visibleChartData
-    : [
-      { date: "", volume: 0 },
-      { date: "", volume: 0 }
-    ]
+  const chartDisplayData = normalizedChart.points
+  const singleActivePoint = normalizedChart.activeDayCount === 1
+    ? chartDisplayData.find((point) => point.volume > 0)
+    : null
+  const singleActiveIndex = singleActivePoint
+    ? chartDisplayData.findIndex((point) => point.date === singleActivePoint.date)
+    : -1
 
   const renderChartControls = (showExpand = true) => (
     <div className="flex flex-wrap items-center gap-2">
@@ -274,10 +245,20 @@ export default function DashboardPage() {
   )
 
   const renderVolumeChart = (className: string, gradientId = "overviewVolumeGradient") => (
-    <div className={className}>
+    <div className={`relative ${className}`}>
+      {normalizedChart.isEmpty ? (
+        <div className="flex h-full flex-col items-center justify-center rounded-2xl border border-dashed border-blue-100 bg-blue-50/40 px-4 text-center">
+          <p className="text-sm font-semibold text-gray-950">No payment volume yet</p>
+          <p className="mt-1 max-w-sm text-xs leading-5 text-gray-500">
+            Transactions will appear here once payments are confirmed.
+          </p>
+        </div>
+      ) : (
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart
-          data={chartDisplayData}
+          data={normalizedChart.activeDayCount === 1
+            ? chartDisplayData.map((point) => ({ ...point, volume: 0 }))
+            : chartDisplayData}
           margin={{ top: 8, right: 8, left: -12, bottom: 16 }}
         >
           <defs>
@@ -288,7 +269,7 @@ export default function DashboardPage() {
           </defs>
           <CartesianGrid stroke="#f1f5f9" strokeDasharray="2 8" vertical={false} />
           <XAxis
-            dataKey="date"
+            dataKey="label"
             axisLine={false}
             tickLine={false}
             tick={{ fill: "#64748b", fontSize: 9 }}
@@ -302,6 +283,7 @@ export default function DashboardPage() {
             width={52}
             tick={{ fill: "#64748b", fontSize: 9 }}
             tickFormatter={(value) => formatUsd(Number(value))}
+            domain={[0, normalizedChart.maxValue]}
           />
           <Tooltip
             formatter={(value) => [formatUsd(Number(value)), "Volume (USD)"]}
@@ -314,17 +296,47 @@ export default function DashboardPage() {
               fontSize: "12px"
             }}
           />
-          <Area
-            type="monotone"
-            dataKey="volume"
-            stroke="#2563eb"
-            strokeWidth={2.25}
-            fill={`url(#${gradientId})`}
-            dot={false}
-            activeDot={{ r: 4, strokeWidth: 0, fill: "#1d4ed8" }}
-          />
+          {normalizedChart.activeDayCount > 1 && (
+            <Area
+              type="monotone"
+              dataKey="volume"
+              stroke="#2563eb"
+              strokeWidth={2.25}
+              fill={`url(#${gradientId})`}
+              dot={false}
+              activeDot={{ r: 4, strokeWidth: 0, fill: "#1d4ed8" }}
+            />
+          )}
+          {normalizedChart.activeDayCount === 1 && (
+            <Area
+              type="linear"
+              dataKey="volume"
+              stroke="#93c5fd"
+              strokeWidth={1.5}
+              fill="transparent"
+              dot={false}
+              activeDot={false}
+              isAnimationActive={false}
+            />
+          )}
         </AreaChart>
       </ResponsiveContainer>
+      )}
+      {singleActivePoint && singleActiveIndex >= 0 && chartDisplayData.length > 1 && (
+        <div
+          className="pointer-events-none absolute"
+          style={{
+            left: `${(singleActiveIndex / (chartDisplayData.length - 1)) * 100}%`,
+            top: "34%",
+            transform: "translate(-50%, -50%)"
+          }}
+        >
+          <div className="h-3 w-3 rounded-full bg-blue-600 shadow-[0_0_0_5px_rgba(37,99,235,0.12)]" />
+          <div className="mt-2 whitespace-nowrap rounded-full border border-blue-100 bg-white px-2 py-1 text-[11px] font-semibold text-gray-900 shadow-sm">
+            {formatUsd(singleActivePoint.volume)}
+          </div>
+        </div>
+      )}
     </div>
   )
 

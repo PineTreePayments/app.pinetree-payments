@@ -1,6 +1,7 @@
 import { supabaseAdmin, supabase } from "@/database"
 import { getDrawerState } from "./cashDrawer"
 import { signTerminalSession } from "@/lib/api/terminalAuth"
+import { getMerchantSettingsReadiness } from "./settingsDashboard"
 
 const db = supabaseAdmin || supabase
 
@@ -37,6 +38,14 @@ export async function getPosTerminalDisplayEngine(terminalId: string): Promise<T
 
   if (terminalError || !terminal) {
     throw new Error("Terminal not found")
+  }
+
+  const readiness = await getMerchantSettingsReadiness(terminal.merchant_id)
+  if (!readiness.complete) {
+    throw Object.assign(
+      new Error("Settings required before using a terminal."),
+      { status: 409, readiness }
+    )
   }
 
   const { data: wallet } = await db
@@ -85,6 +94,14 @@ export async function verifyPosTerminalPinEngine(
 
   if (error || !terminal) {
     throw Object.assign(new Error("Terminal not found"), { status: 404 })
+  }
+
+  const readiness = await getMerchantSettingsReadiness(terminal.merchant_id)
+  if (!readiness.complete) {
+    throw Object.assign(
+      new Error("Settings required before using a terminal."),
+      { status: 409, readiness }
+    )
   }
 
   if (!pin || pin.length !== 4 || pin !== String(terminal.pin)) {
