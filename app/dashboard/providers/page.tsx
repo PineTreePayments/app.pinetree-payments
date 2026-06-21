@@ -267,6 +267,7 @@ export default function ProvidersPage() {
   const [smartRouting, setSmartRouting] = useState(false)
   const [autoConversion, setAutoConversion] = useState(false)
   const [engineSettingsPanel, setEngineSettingsPanel] = useState<"routing" | "conversion" | null>(null)
+  const [providerFilter, setProviderFilter] = useState<"all" | "card" | "crypto">("all")
 
   const [selectedWalletType, setSelectedWalletType] = useState<string | null>(null)
   const [showMobileConnect, setShowMobileConnect] = useState(false)
@@ -1959,6 +1960,27 @@ function EngineSettingStatus({
         </div>
       )}
 
+      <div className="space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Payment Providers</p>
+        <div className="flex w-fit rounded-xl bg-gray-100 p-1">
+          {(["all", "card", "crypto"] as const).map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setProviderFilter(f)}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                providerFilter === f
+                  ? "bg-white font-semibold text-gray-900 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {f === "all" ? "All" : f === "card" ? "Card Providers" : "Crypto Rails"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {(providerFilter === "all" || providerFilter === "card") && (
       <DashboardSection title="Card Providers" titleTone="blue">
       <div className="space-y-3">
         <p className="text-sm leading-6 text-gray-500">
@@ -1991,7 +2013,9 @@ function EngineSettingStatus({
         </div>
       </div>
       </DashboardSection>
+      )}
 
+      {(providerFilter === "all" || providerFilter === "crypto") && (
       <DashboardSection title="Crypto Rails" titleTone="blue">
       <div className="space-y-3">
         <p className="text-sm leading-6 text-gray-500">
@@ -2127,6 +2151,7 @@ function EngineSettingStatus({
       </div>
       </div>
       </DashboardSection>
+      )}
 
       {activeProvider && (
         <div

@@ -111,4 +111,54 @@ describe("card provider setup UI", () => {
     expect(source).not.toContain("Processor credentials")
     expect(source).not.toContain("Terminal configuration")
   })
+
+  it("renders provider category filter with All, Card Providers, and Crypto Rails labels", () => {
+    const source = read("app/dashboard/providers/page.tsx")
+
+    expect(source).toContain('"All"')
+    expect(source).toContain('"Card Providers"')
+    expect(source).toContain('"Crypto Rails"')
+    expect(source).toContain('providerFilter')
+    expect(source).toContain('setProviderFilter')
+  })
+
+  it("defaults the provider filter to All", () => {
+    const source = read("app/dashboard/providers/page.tsx")
+    expect(source).toContain('useState<"all" | "card" | "crypto">("all")')
+  })
+
+  it("conditionally renders Card Providers section based on filter", () => {
+    const source = read("app/dashboard/providers/page.tsx")
+    expect(source).toContain('providerFilter === "all" || providerFilter === "card"')
+    const cardSectionStart = source.indexOf('<DashboardSection title="Card Providers"')
+    expect(source.slice(0, cardSectionStart)).toContain('providerFilter === "card"')
+  })
+
+  it("conditionally renders Crypto Rails section based on filter", () => {
+    const source = read("app/dashboard/providers/page.tsx")
+    expect(source).toContain('providerFilter === "all" || providerFilter === "crypto"')
+    const cryptoSectionStart = source.indexOf('<DashboardSection title="Crypto Rails"')
+    expect(source.slice(0, cryptoSectionStart)).toContain('providerFilter === "crypto"')
+  })
+
+  it("Card Providers filter hides Crypto Rails and vice versa via conditional rendering", () => {
+    const source = read("app/dashboard/providers/page.tsx")
+    const cardConditional = 'providerFilter === "all" || providerFilter === "card"'
+    const cryptoConditional = 'providerFilter === "all" || providerFilter === "crypto"'
+    expect(source).toContain(cardConditional)
+    expect(source).toContain(cryptoConditional)
+    // Both conditionals must be distinct — card filter excludes crypto and vice versa
+    expect(cardConditional).not.toEqual(cryptoConditional)
+    // Crypto Rails conditional does not include "card"
+    expect(cryptoConditional).not.toContain('"card"')
+    // Card Providers conditional does not include "crypto"
+    expect(cardConditional).not.toContain('"crypto"')
+  })
+
+  it("provider actions and toggles are still present regardless of filter", () => {
+    const source = read("app/dashboard/providers/page.tsx")
+    expect(source).toContain("openProvider(provider)")
+    expect(source).toContain("<ToggleSwitch")
+    expect(source).toContain("toggleProvider(provider, v)")
+  })
 })
