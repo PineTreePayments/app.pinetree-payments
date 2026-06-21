@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import Image from "next/image"
+import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import { Eye, EyeOff } from "lucide-react"
@@ -156,9 +157,9 @@ export default function LoginPage() {
   ----------------------------- */
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center overflow-hidden">
+    <div className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden px-4 py-6 sm:min-h-screen sm:px-0 sm:py-0">
       {/* Animated Background */}
-      <div className="absolute inset-0 bg-cover bg-center wave-bg"></div>
+      <div className="absolute inset-0 h-[100dvh] bg-cover bg-center sm:h-auto wave-bg"></div>
 
       {/* Login Card */}
       <div className="relative z-10 w-full max-w-md bg-white/90 backdrop-blur-xl shadow-xl rounded-xl p-6">
@@ -219,6 +220,17 @@ export default function LoginPage() {
               className="border border-gray-300 p-2.5 rounded-md w-full mb-2 text-gray-900"
               onChange={(e) => setBusiness(e.target.value)}
             />
+          )}
+
+          {mode === "login" && (
+            <div className="mb-1 flex justify-end">
+              <Link
+                href="/forgot-password"
+                className="text-xs font-medium text-blue-600 transition hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              >
+                Forgot password?
+              </Link>
+            </div>
           )}
 
           <div className="relative mb-3">
@@ -295,6 +307,13 @@ export default function LoginPage() {
           transform: scale(1.05);
         }
 
+        @media (max-width: 640px) {
+          .wave-bg {
+            background-position: center top;
+            transform: scale(1.02);
+          }
+        }
+
         @keyframes waveMove {
           0% {
             transform: scale(1.05) translateY(0px);
@@ -304,6 +323,20 @@ export default function LoginPage() {
           }
           100% {
             transform: scale(1.05) translateY(10px);
+          }
+        }
+
+        @media (max-width: 640px) {
+          @keyframes waveMove {
+            0% {
+              transform: scale(1.02) translateY(0px);
+            }
+            50% {
+              transform: scale(1.03) translateY(-8px);
+            }
+            100% {
+              transform: scale(1.02) translateY(6px);
+            }
           }
         }
       `}</style>
