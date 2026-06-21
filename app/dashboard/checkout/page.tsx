@@ -6,8 +6,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import {
+  DashboardHeroCard,
   DashboardSection,
-  GroupedMetricSurface,
   InlineMetric,
   PineTreeInsightsCard,
   dashboardPageTitleClass,
@@ -1468,32 +1468,30 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
 
       {/* ── Summary metrics ──────────────────────────────────────────────── */}
       {mode === "merchant" && (
-        <DashboardSection title="Checkout readiness" titleTone="blue">
-        <GroupedMetricSurface className="bg-gradient-to-br from-blue-50/70 via-white to-emerald-50/40">
-        <div className="grid grid-cols-2 gap-y-4 sm:grid-cols-4 sm:divide-x sm:divide-gray-200">
+        <DashboardHeroCard
+          eyebrow="ONLINE CHECKOUT"
+          title="Hosted checkout and payment links are ready."
+          value="Live"
+          secondary={
+            <div className="grid w-full grid-cols-3 divide-x divide-blue-200/80 border-t border-blue-200/80 pt-3 sm:w-auto sm:min-w-[460px] sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
           <InlineMetric
-            label="Hosted Checkout"
-            value="Live"
-            className="sm:px-4 sm:first:pl-0"
-          />
-          <InlineMetric
-            label="Active Links"
+            label="Active links"
             value={isLoading ? "—" : String(activeLinks)}
-            className="sm:px-4"
+            className="pr-4"
           />
           <InlineMetric
-            label="Button Status"
+            label="Button status"
             value={activeLinks > 0 ? "Ready" : "Set up"}
-            className="sm:px-4"
+            className="px-4"
           />
           <InlineMetric
-            label="Recent Activity"
+            label="Recent activity"
             value={isLoading ? "—" : String(stats?.confirmedPayments ?? 0)}
-            className="sm:px-4 sm:last:pr-0"
+            className="pl-4"
           />
-        </div>
-        </GroupedMetricSurface>
-        </DashboardSection>
+            </div>
+          }
+        />
       )}
       {mode === "merchant" && statsError && (
         <p className="text-xs text-red-500">

@@ -20,9 +20,9 @@ import {
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import {
-  CompactMetricTile,
+  DashboardHeroCard,
   DashboardSection,
-  MetricGrid,
+  InlineMetric,
   ProviderStatusPill,
   dashboardPageTitleClass
 } from "@/components/dashboard/DashboardPrimitives"
@@ -435,18 +435,40 @@ export default function InventoryPage() {
         <h1 className={dashboardPageTitleClass}>Inventory</h1>
       </div>
 
-      <MetricGrid>
-        <CompactMetricTile label="Catalog Items" value={summary.catalogItems} tone="blue" detail={`${summary.activeItems} active`} />
-        <CompactMetricTile label="Low Stock" value={summary.lowStock} tone={summary.lowStock ? "amber" : "default"} />
-        <CompactMetricTile
-          label="Out of Stock"
-          value={summary.outOfStock}
-          tone={summary.outOfStock ? "red" : "default"}
-          interactive
-          onClick={() => setOutOfStockOpen(true)}
-        />
-        <CompactMetricTile label="Inventory Value" value={formatUsd(summary.inventoryValue)} />
-      </MetricGrid>
+      <DashboardHeroCard
+        eyebrow="INVENTORY OVERVIEW"
+        title="Track products, stock levels, and inventory value."
+        value={summary.catalogItems}
+        secondary={
+          <div className="grid w-full grid-cols-2 gap-y-4 border-t border-blue-200/80 pt-3 sm:w-auto sm:min-w-[520px] sm:grid-cols-4 sm:divide-x sm:divide-blue-200/80 sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
+            <InlineMetric
+              label="Active items"
+              value={summary.activeItems}
+              className="pr-4 sm:px-4 sm:first:pl-0"
+            />
+            <InlineMetric
+              label="Low stock count"
+              value={summary.lowStock}
+              className="pl-4 sm:px-4"
+            />
+            <button
+              type="button"
+              onClick={() => setOutOfStockOpen(true)}
+              className="min-w-0 rounded-xl pl-0 pr-4 text-left transition hover:bg-blue-50/50 focus:outline-none focus:ring-4 focus:ring-blue-100 sm:px-4"
+            >
+              <InlineMetric
+                label="Out of stock count"
+                value={summary.outOfStock}
+              />
+            </button>
+            <InlineMetric
+              label="Inventory value"
+              value={formatUsd(summary.inventoryValue)}
+              className="pl-4 sm:px-4 sm:last:pr-0"
+            />
+          </div>
+        }
+      />
 
       {!available && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">

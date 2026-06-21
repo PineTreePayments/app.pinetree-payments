@@ -10,9 +10,9 @@ import { toast } from "sonner"
 import QRCode from "qrcode"
 import { ChevronRight, X } from "lucide-react"
 import {
-  CompactMetricTile,
+  DashboardHeroCard,
   DashboardSection,
-  MetricGrid,
+  InlineMetric,
   ProviderStatusPill,
   dashboardPageTitleClass
 } from "@/components/dashboard/DashboardPrimitives"
@@ -1785,20 +1785,30 @@ function EngineSettingStatus({
         </div>
       ) : null}
 
-      <MetricGrid columns="four">
-        <CompactMetricTile label="Connected" value={connectedAndEnabledProvidersCount} tone="blue" />
-        <CompactMetricTile label="Payment Options" value="7" />
-        <CompactMetricTile
-          label="Smart Routing"
-          value={smartRouting ? "On" : "Off"}
-          tone={smartRouting ? "green" : "slate"}
-        />
-        <CompactMetricTile
-          label="Auto Conversion"
-          value={autoConversion ? "On" : "Off"}
-          tone={autoConversion ? "green" : "slate"}
-        />
-      </MetricGrid>
+      <DashboardHeroCard
+        eyebrow="PAYMENT INFRASTRUCTURE"
+        title="Manage payment processors, crypto rails, and routing preferences."
+        value={connectedAndEnabledProvidersCount}
+        secondary={
+          <div className="grid w-full grid-cols-3 divide-x divide-blue-200/80 border-t border-blue-200/80 pt-3 sm:w-auto sm:min-w-[460px] sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
+            <InlineMetric
+              label="Payment options"
+              value="7"
+              className="pr-4"
+            />
+            <InlineMetric
+              label="Smart routing status"
+              value={smartRouting ? "On" : "Off"}
+              className="px-4"
+            />
+            <InlineMetric
+              label="Auto conversion status"
+              value={autoConversion ? "On" : "Off"}
+              className="pl-4"
+            />
+          </div>
+        }
+      />
 
       <DashboardSection title="Engine Settings" titleTone="blue">
       <div className="rounded-2xl border border-gray-200 bg-white p-2.5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">

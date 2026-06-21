@@ -8,6 +8,8 @@ import { toast } from "sonner"
 import Button from "@/components/ui/Button"
 import Card from "@/components/ui/Card"
 import {
+  DashboardHeroCard,
+  InlineMetric,
   dashboardCardTitleClass,
   dashboardMetricValueClass,
   dashboardPageTitleClass,
@@ -328,21 +330,42 @@ export default function POSPage() {
 
       {/* HEADER */}
 
-      <div className="flex items-center justify-between gap-3">
+      <div>
 
         <h1 className={dashboardPageTitleClass}>
           Point of Sale
         </h1>
 
-        <button
-          onClick={() => setCreating(true)}
-          style={{ boxShadow: "0 10px 24px rgba(0,82,255,0.18)" }}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-[18px] bg-[#1652f0] px-[18px] py-2.5 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.98]"
-        >
-          + New Terminal
-        </button>
-
       </div>
+
+      <DashboardHeroCard
+        eyebrow="ACTIVE TERMINALS"
+        title="Manage terminals and launch POS sessions."
+        value={terminals.length}
+        secondary={
+          <div className="grid w-full grid-cols-2 divide-x divide-blue-200/80 border-t border-blue-200/80 pt-3 sm:w-auto sm:min-w-[320px] sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
+            <InlineMetric
+              label="Active terminals"
+              value={terminals.length}
+              className="pr-4"
+            />
+            <InlineMetric
+              label="Terminal status summary"
+              value={terminals.length ? "Active" : "None"}
+              className="pl-4"
+            />
+          </div>
+        }
+        action={
+          <button
+            onClick={() => setCreating(true)}
+            style={{ boxShadow: "0 10px 24px rgba(0,82,255,0.18)" }}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-[18px] bg-[#1652f0] px-[18px] py-2.5 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.98]"
+          >
+            + New Terminal
+          </button>
+        }
+      />
 
       {/* CREATE TERMINAL */}
 
