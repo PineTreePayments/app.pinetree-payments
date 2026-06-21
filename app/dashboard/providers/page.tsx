@@ -1959,24 +1959,12 @@ function EngineSettingStatus({
         </div>
       )}
 
-      <DashboardSection title="Payment Providers" titleTone="blue">
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
-        <ProviderCard
-          name="Coinbase Business"
-          provider="coinbase"
-          networks="Base, Ethereum"
-          settlement="Coinbase account"
-          description="Connect your Coinbase Business account."
-        />
-
-        <ProviderCard
-          name="Solana Pay"
-          provider="solana"
-          networks="Solana"
-          settlement="Connected wallet"
-          description="Accept Solana wallet payments."
-        />
-
+      <DashboardSection title="Card Providers" titleTone="blue">
+      <div className="space-y-3">
+        <p className="text-sm leading-6 text-gray-500">
+          Connect card processors for in-person and online card acceptance.
+        </p>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
         <ProviderCard
           name="Shift4"
           provider="shift4"
@@ -2000,6 +1988,23 @@ function EngineSettingStatus({
           settlement="Fluid Pay merchant account"
           description="Accept card payments through Fluid Pay once merchant onboarding is approved."
         />
+        </div>
+      </div>
+      </DashboardSection>
+
+      <DashboardSection title="Crypto Rails" titleTone="blue">
+      <div className="space-y-3">
+        <p className="text-sm leading-6 text-gray-500">
+          Connect wallets and rails for crypto payment acceptance.
+        </p>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
+        <ProviderCard
+          name="Solana Pay"
+          provider="solana"
+          networks="Solana"
+          settlement="Connected wallet"
+          description="Accept Solana wallet payments."
+        />
 
         <ProviderCard
           name="Base Pay"
@@ -2007,6 +2012,14 @@ function EngineSettingStatus({
           networks="Base"
           settlement="Connected wallet"
           description="Accept Base wallet payments."
+        />
+
+        <ProviderCard
+          name="Coinbase Business"
+          provider="coinbase"
+          networks="Base, Ethereum"
+          settlement="Coinbase account"
+          description="Connect your Coinbase Business account."
         />
 
         {/* Bitcoin Lightning — full-width, two-option: Speed recommended + NWC advanced */}
@@ -2111,6 +2124,7 @@ function EngineSettingStatus({
           )
         })()}
 
+      </div>
       </div>
       </DashboardSection>
 

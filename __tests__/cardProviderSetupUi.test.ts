@@ -7,6 +7,37 @@ function read(relativePath: string) {
 }
 
 describe("card provider setup UI", () => {
+  it("groups card providers separately from crypto rails", () => {
+    const source = read("app/dashboard/providers/page.tsx")
+    const cardSectionStart = source.indexOf('<DashboardSection title="Card Providers"')
+    const cryptoSectionStart = source.indexOf('<DashboardSection title="Crypto Rails"')
+    const cardSection = source.slice(cardSectionStart, cryptoSectionStart)
+    const cryptoSection = source.slice(cryptoSectionStart, source.indexOf("{activeProvider && ("))
+
+    expect(cardSectionStart).toBeGreaterThan(-1)
+    expect(cryptoSectionStart).toBeGreaterThan(cardSectionStart)
+    expect(cardSection).toContain("Connect card processors for in-person and online card acceptance.")
+    expect(cryptoSection).toContain("Connect wallets and rails for crypto payment acceptance.")
+
+    expect(cardSection).toContain('name="Shift4"')
+    expect(cardSection).toContain('name="Stripe"')
+    expect(cardSection).toContain('name="Fluid Pay"')
+    expect(cardSection).not.toContain('name="Solana Pay"')
+    expect(cardSection).not.toContain('name="Base Pay"')
+    expect(cardSection).not.toContain("Bitcoin Lightning")
+
+    expect(cryptoSection).toContain('name="Solana Pay"')
+    expect(cryptoSection).toContain('name="Base Pay"')
+    expect(cryptoSection).toContain("Bitcoin Lightning")
+    expect(cryptoSection).toContain('name="Coinbase Business"')
+    expect(cryptoSection).not.toContain('name="Stripe"')
+    expect(cryptoSection).not.toContain('name="Fluid Pay"')
+
+    expect(source).toContain("openProvider(provider)")
+    expect(source).toContain("<ToggleSwitch")
+    expect(source).toContain("toggleProvider(provider, v)")
+  })
+
   it("renders Stripe and Fluid Pay provider cards with merchant-facing setup copy", () => {
     const source = read("app/dashboard/providers/page.tsx")
 
