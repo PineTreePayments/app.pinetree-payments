@@ -252,34 +252,6 @@ export default function ReportsPage() {
         }
       />
 
-      <DashboardSection title="Performance Overview" titleTone="blue">
-        <div className="relative overflow-hidden rounded-[1.35rem] border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.16),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] p-4 shadow-[0_18px_60px_rgba(37,99,235,0.13)] sm:p-5 md:p-6">
-          <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/80 to-transparent" />
-          <div className="relative grid grid-cols-2">
-            <InlineMetric
-              label="Transactions"
-              value={summary ? String(summary.transactionCount) : "0"}
-              className="border-b border-r border-blue-200/80 pb-4 pr-3 [&>p]:!overflow-visible [&>p]:!whitespace-normal [&>p]:!text-clip sm:pr-5"
-            />
-            <InlineMetric
-              label="Average Transaction"
-              value={summary ? fmt(summary.avgTransaction) : "$0.00"}
-              className="border-b border-blue-200/80 pb-4 pl-3 [&>p]:!overflow-visible [&>p]:!whitespace-normal [&>p]:!text-clip sm:pl-5"
-            />
-            <InlineMetric
-              label="Failed Payments"
-              value={summary ? String(summary.failedPayments) : "0"}
-              className="border-r border-blue-200/80 pr-3 pt-4 [&>p]:!overflow-visible [&>p]:!whitespace-normal [&>p]:!text-clip sm:pr-5"
-            />
-            <InlineMetric
-              label="Success Rate"
-              value={`${successRate}%`}
-              className="pl-3 pt-4 [&>p]:!overflow-visible [&>p]:!whitespace-normal [&>p]:!text-clip sm:pl-5"
-            />
-          </div>
-        </div>
-      </DashboardSection>
-
       {summary && (
         <PineTreeInsightsCard
           insights={insights}
