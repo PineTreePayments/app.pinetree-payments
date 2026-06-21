@@ -1788,22 +1788,16 @@ function EngineSettingStatus({
         eyebrow="PAYMENT INFRASTRUCTURE"
         title="View connected payment providers and manage your payment infrastructure."
         value={connectedAndEnabledProvidersCount}
-        detail={
-          <div className="space-y-3">
-            <p>Connected Providers</p>
-            <div className="grid gap-2 border-t border-blue-200/80 pt-3 text-xs leading-5 text-gray-600 sm:grid-cols-3 sm:divide-x sm:divide-blue-200/80">
-              <div className="min-w-0 sm:pr-4">
-                <span className="font-semibold text-gray-950">Connected providers:</span>{" "}
-                <span>{connectedAndEnabledProvidersCount}</span>
-              </div>
-              <div className="min-w-0 sm:px-4">
-                <span className="font-semibold text-gray-950">Card providers:</span>{" "}
-                <span>3 available</span>
-              </div>
-              <div className="min-w-0 sm:pl-4">
-                <span className="font-semibold text-gray-950">Crypto rails:</span>{" "}
-                <span>3 active</span>
-              </div>
+        detail="Connected Providers"
+        secondary={
+          <div className="grid w-full gap-2 border-t border-blue-200/80 pt-3 text-xs leading-5 text-gray-600 sm:w-auto sm:min-w-[260px] sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
+            <div className="min-w-0">
+              <span className="font-semibold text-gray-950">Card providers:</span>{" "}
+              <span>3 available</span>
+            </div>
+            <div className="min-w-0">
+              <span className="font-semibold text-gray-950">Crypto rails:</span>{" "}
+              <span>3 active</span>
             </div>
           </div>
         }

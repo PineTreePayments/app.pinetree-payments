@@ -649,8 +649,8 @@ export default function HelpCenterPage() {
 
         {/* AI tab */}
         {mobileSection === "ai" && (
-          <div className="flex h-[calc(100dvh-8rem)] max-h-[calc(100dvh-8rem)] flex-col overflow-hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-4 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
-            <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="flex h-[calc(100dvh-9rem)] max-h-[34rem] min-h-[24rem] flex-col overflow-hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-3 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
+            <div className="mb-2 flex shrink-0 items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Bot className="h-5 w-5 text-[#0052FF]" />
                 <h2 className="text-base font-semibold text-gray-950">Ask PineTree AI</h2>
@@ -658,7 +658,7 @@ export default function HelpCenterPage() {
               <ProviderStatusPill label="Account-aware" tone="blue" />
             </div>
 
-            <div className="flex gap-2 overflow-x-auto pb-2">
+            <div className="flex shrink-0 gap-2 overflow-x-auto pb-2">
               {suggestedQuestions.map((question) => (
                 <button
                   key={question}
@@ -672,7 +672,7 @@ export default function HelpCenterPage() {
               ))}
             </div>
 
-            <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain rounded-xl border border-blue-100 bg-white/75 p-3">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain rounded-xl border border-blue-100 bg-white/75 p-3">
               {assistantMessages.map((message) => (
                 <AssistantMessageBubble
                   key={message.id}
@@ -691,7 +691,7 @@ export default function HelpCenterPage() {
               )}
             </div>
 
-            <div className="mt-3 flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
+            <div className="mt-3 flex shrink-0 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
               <Sparkles className="h-4 w-4 shrink-0 text-[#0052FF]" />
               <input
                 value={assistantQuestion}
@@ -1270,8 +1270,8 @@ export default function HelpCenterPage() {
           </DashboardSection>
 
         <DashboardSection title="PineTree AI" titleTone="blue">
-          <div id="pinetree-ai" className="flex h-[30rem] max-h-[calc(100vh-12rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-4 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
-            <div className="flex items-start justify-between gap-3">
+          <div id="pinetree-ai" className="flex h-[32rem] max-h-[calc(100vh-12rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-4 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
+            <div className="flex shrink-0 items-start justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Bot className="h-5 w-5 text-[#0052FF]" />
                 <h2 className="text-lg font-semibold text-gray-950">Ask PineTree AI</h2>
@@ -1298,7 +1298,7 @@ export default function HelpCenterPage() {
               )}
             </div>
 
-            <div className="mt-3 flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
+            <div className="mt-3 flex shrink-0 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
               <Sparkles className="h-4 w-4 text-[#0052FF]" />
               <input
                 value={assistantQuestion}

@@ -9,7 +9,6 @@ import Button from "@/components/ui/Button"
 import Card from "@/components/ui/Card"
 import {
   DashboardHeroCard,
-  InlineMetric,
   dashboardCardTitleClass,
   dashboardMetricValueClass,
   dashboardPageTitleClass,
@@ -90,7 +89,6 @@ export default function POSPage() {
   const [expandedTerminalId, setExpandedTerminalId] = useState<string | null>(null)
 
   const formRef = useRef<HTMLDivElement | null>(null)
-  const detailsRef = useRef<HTMLDivElement | null>(null)
 
   const callPosTerminalsApi = useCallback(async (method: "GET" | "POST" | "DELETE", body?: unknown) => {
     const { data: { session } } = await supabase.auth.getSession()
@@ -213,24 +211,15 @@ export default function POSPage() {
   useEffect(() => {
     if (!expandedTerminalId) return
 
-    function handlePointerDown(event: MouseEvent) {
-      const target = event.target as Node | null
-      if (!target) return
-      if (detailsRef.current?.contains(target)) return
-      setExpandedTerminalId(null)
-    }
-
     function handleEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setExpandedTerminalId(null)
       }
     }
 
-    document.addEventListener("mousedown", handlePointerDown)
     document.addEventListener("keydown", handleEscape)
 
     return () => {
-      document.removeEventListener("mousedown", handlePointerDown)
       document.removeEventListener("keydown", handleEscape)
     }
   }, [expandedTerminalId])
@@ -328,6 +317,20 @@ export default function POSPage() {
     setExpandedTerminalId((prev) => (prev === id ? null : id))
   }
 
+  const selectedTerminal = terminals.find((terminal) => terminal.id === expandedTerminalId) || null
+  const selectedDrawer = selectedTerminal ? drawerBalances[selectedTerminal.id] : null
+  const todayKey = new Date().toDateString()
+  const selectedTodaySalesEntries = selectedDrawer?.log.filter((entry) => {
+    const isToday = new Date(entry.created_at).toDateString() === todayKey
+    const looksLikeSale = entry.type.toLowerCase().includes("sale") || entry.sale_total !== undefined
+    return isToday && looksLikeSale
+  }) || []
+  const selectedTodaySalesTotal = selectedTodaySalesEntries.reduce((sum, entry) => {
+    const amount = typeof entry.sale_total === "number" ? entry.sale_total : entry.amount
+    return sum + (Number.isFinite(amount) ? amount : 0)
+  }, 0)
+  const hasTerminalActivityStats = selectedTodaySalesEntries.length > 0
+
   return (
 
     <div className="relative space-y-4 md:space-y-6">
@@ -388,20 +391,6 @@ export default function POSPage() {
         eyebrow="ACTIVE TERMINALS"
         title="Manage terminals and launch POS sessions."
         value={terminals.length}
-        secondary={
-          <div className="grid w-full grid-cols-2 divide-x divide-blue-200/80 border-t border-blue-200/80 pt-3 sm:w-auto sm:min-w-[320px] sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
-            <InlineMetric
-              label="Active terminals"
-              value={terminals.length}
-              className="pr-4"
-            />
-            <InlineMetric
-              label="Terminal status summary"
-              value={terminals.length ? "Active" : "None"}
-              className="pl-4"
-            />
-          </div>
-        }
         action={
           <button
             onClick={startCreatingTerminal}
@@ -412,25 +401,6 @@ export default function POSPage() {
           </button>
         }
       />
-
-      {settingsReadiness && !settingsReadiness.complete && (
-        <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm text-blue-950 shadow-[0_8px_24px_rgba(37,99,235,0.06)] sm:px-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="font-semibold">Settings required before creating a terminal.</p>
-              <p className="mt-0.5 text-blue-900/80">
-                Complete your business and tax settings before enabling POS terminals.
-              </p>
-            </div>
-            <Link
-              href="/dashboard/settings"
-              className="inline-flex min-h-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
-            >
-              Go to Settings
-            </Link>
-          </div>
-        </div>
-      )}
 
       {/* CREATE TERMINAL */}
 
@@ -589,7 +559,6 @@ export default function POSPage() {
 
               <div
                 key={t.id}
-                ref={expandedTerminalId === t.id ? detailsRef : null}
                 className="relative flex flex-col gap-4 rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.045)] transition hover:border-blue-200 hover:shadow-[0_12px_30px_rgba(15,23,42,0.07)] sm:px-5 md:flex-row md:items-center md:justify-between"
               >
 
@@ -616,7 +585,7 @@ export default function POSPage() {
                     onClick={() => toggleTerminalDetails(t.id)}
                     className="w-full rounded-xl px-3 text-xs sm:w-auto"
                   >
-                    {expandedTerminalId === t.id ? "Hide" : "Details"}
+                    Details
                   </Button>
 
                   <Link href={`/terminal?tid=${t.id}`} className="block sm:inline-block">
@@ -638,17 +607,6 @@ export default function POSPage() {
 
                 </div>
 
-                {expandedTerminalId === t.id && (
-                  <div className="md:absolute md:right-4 md:top-14 z-20 w-full md:w-72 rounded-xl bg-white p-3 text-xs text-gray-600 shadow-xl shadow-gray-900/10 ring-1 ring-gray-100 space-y-1">
-                    <div><span className="font-medium text-gray-800">Auto-lock:</span> {formatAutoLock(t.autolock)}</div>
-                    <div><span className="font-medium text-gray-800">Merchant:</span> {t.merchant_id || "-"}</div>
-                    <div>
-                      <span className="font-medium text-gray-800">Created:</span>{" "}
-                      {t.created_at ? new Date(t.created_at).toLocaleString() : "-"}
-                    </div>
-                  </div>
-                )}
-
               </div>
 
             ))}
@@ -658,6 +616,133 @@ export default function POSPage() {
         </div>
 
       </section>
+
+      {selectedTerminal && (
+        <div
+          data-pinetree-overlay="true"
+          className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-end justify-center px-0 sm:items-center sm:p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setExpandedTerminalId(null)
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="terminal-details-title"
+            className="flex max-h-[calc(100dvh-1.5rem)] w-full flex-col overflow-hidden rounded-t-3xl border border-gray-200 bg-white shadow-2xl sm:max-h-[calc(100vh-4rem)] sm:max-w-2xl sm:rounded-3xl"
+          >
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-100 px-5 py-4 sm:px-6">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-600">Terminal Details</p>
+                <h2 id="terminal-details-title" className="mt-1 truncate text-xl font-semibold text-gray-950">
+                  {selectedTerminal.name}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setExpandedTerminalId(null)}
+                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-600 transition hover:bg-gray-50"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Status</p>
+                  <p className="mt-1 text-sm font-semibold text-blue-700">Active</p>
+                </div>
+                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Terminal ID</p>
+                  <p className="mt-1 truncate font-mono text-xs text-gray-700" title={selectedTerminal.id}>
+                    {selectedTerminal.id}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Created</p>
+                  <p className="mt-1 text-sm font-medium text-gray-900">
+                    {selectedTerminal.created_at ? new Date(selectedTerminal.created_at).toLocaleString() : "-"}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Last Active</p>
+                  <p className="mt-1 text-sm font-medium text-gray-900">
+                    {selectedDrawer?.lastEntry ? new Date(selectedDrawer.lastEntry.created_at).toLocaleString() : "-"}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Drawer Status</p>
+                  <p className={`mt-1 text-sm font-semibold ${selectedDrawer?.active ? "text-blue-700" : "text-gray-500"}`}>
+                    {selectedDrawer?.active ? "Open drawer shift" : "No active drawer shift"}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Current Drawer Balance</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-950">
+                    {selectedDrawer ? fmtUsd(selectedDrawer.balance) : "-"}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Today Transactions</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-950">
+                    {hasTerminalActivityStats ? selectedTodaySalesEntries.length : "-"}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Today Sales</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-950">
+                    {hasTerminalActivityStats ? fmtUsd(selectedTodaySalesTotal) : "-"}
+                  </p>
+                </div>
+              </div>
+
+              {!hasTerminalActivityStats && (
+                <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-sm text-blue-900">
+                  Terminal activity will appear here after this terminal processes payments.
+                </div>
+              )}
+
+              <div className="mt-4 rounded-2xl border border-gray-100 bg-white p-3 text-sm text-gray-600">
+                <div className="flex justify-between gap-4 py-1">
+                  <span className="text-gray-500">Auto-lock</span>
+                  <span className="font-medium text-gray-900">{formatAutoLock(selectedTerminal.autolock)}</span>
+                </div>
+                <div className="flex justify-between gap-4 py-1">
+                  <span className="text-gray-500">Merchant</span>
+                  <span className="truncate font-medium text-gray-900">{selectedTerminal.merchant_id || "-"}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid shrink-0 grid-cols-3 gap-2 border-t border-gray-100 bg-white px-5 py-4 sm:flex sm:justify-end sm:px-6">
+              <Link href={`/terminal?tid=${selectedTerminal.id}`} className="block sm:inline-block">
+                <Button variant="primary" className="w-full rounded-xl px-5 sm:w-auto">
+                  Launch
+                </Button>
+              </Link>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  setTerminalToDelete(selectedTerminal.id)
+                  setConfirmDelete(true)
+                  setExpandedTerminalId(null)
+                }}
+                className="w-full rounded-xl px-3 text-xs sm:w-auto"
+              >
+                Delete
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => setExpandedTerminalId(null)}
+                className="w-full rounded-xl px-3 text-xs sm:w-auto"
+              >
+                Close
+              </Button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {/* DRAWER BALANCES */}
 

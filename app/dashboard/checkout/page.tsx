@@ -382,19 +382,19 @@ function CodeBlock({
   lang?: string
 }) {
   return (
-    <div className="relative rounded-xl border border-gray-800 bg-gray-950 p-4">
+    <div className="relative rounded-xl border border-gray-200 bg-gray-50 p-4">
       {lang && (
-        <span className="absolute left-4 top-3 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+        <span className="absolute left-4 top-3 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
           {lang}
         </span>
       )}
-      <pre className={`overflow-x-auto pr-16 text-[11px] leading-relaxed text-green-400 ${lang ? "mt-4" : ""}`}>
+      <pre className={`overflow-x-auto pr-16 font-mono text-[11px] leading-relaxed text-gray-800 ${lang ? "mt-4" : ""}`}>
         <code>{code}</code>
       </pre>
       <button
         type="button"
         onClick={() => onCopy(fieldId, code)}
-        className="absolute right-3 top-3 rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-1 text-[11px] font-semibold text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
+        className="absolute right-3 top-3 rounded-lg border border-blue-100 bg-white px-2.5 py-1 text-[11px] font-semibold text-[#0052FF] transition-colors hover:border-[#0052FF]/30 hover:bg-blue-50"
       >
         {copiedField === fieldId ? "Copied ✓" : "Copy"}
       </button>
@@ -1128,6 +1128,27 @@ export function CheckoutWorkspace({
   }
   const filteredLinks = links.filter((l) => l.resolvedStatus === linkFilter)
   const isLoading = loading || statsLoading
+  const confirmedCheckoutPayments = stats?.confirmedPayments ?? 0
+  const checkoutReadinessStatus =
+    isLoading
+      ? "..."
+      : activeLinks > 0 && confirmedCheckoutPayments > 0
+        ? "Live"
+        : activeLinks > 0
+          ? "Configured"
+          : nonArchivedLinks.length > 0
+            ? "Needs attention"
+            : "Ready to set up"
+  const checkoutReadinessCopy =
+    checkoutReadinessStatus === "Live"
+      ? "Hosted checkout and payment links are accepting payments."
+      : checkoutReadinessStatus === "Configured"
+        ? "Hosted checkout is configured. Share an active link to start seeing volume."
+        : checkoutReadinessStatus === "Needs attention"
+          ? "Review expired or disabled links before sharing checkout."
+          : checkoutReadinessStatus === "..."
+            ? "Loading hosted checkout readiness."
+            : "Create an active payment link to start accepting online payments."
 
   const insights: string[] = []
 
@@ -1470,8 +1491,8 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       {mode === "merchant" && (
         <DashboardHeroCard
           eyebrow="ONLINE CHECKOUT"
-          title="Hosted checkout and payment links are ready."
-          value="Live"
+          title={checkoutReadinessCopy}
+          value={checkoutReadinessStatus}
           secondary={
             <div className="grid w-full grid-cols-3 divide-x divide-blue-200/80 border-t border-blue-200/80 pt-3 sm:w-auto sm:min-w-[460px] sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
           <InlineMetric
