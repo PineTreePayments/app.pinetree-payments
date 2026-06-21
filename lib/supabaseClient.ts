@@ -8,6 +8,13 @@ export const supabase = createBrowserClient(
       path: "/",
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production"
+    },
+    auth: {
+      // Enables supabase.auth.signInWithPasskey() and supabase.auth.registerPasskey()
+      // @ts-expect-error — experimental field not yet in @supabase/ssr type stubs
+      experimental: {
+        passkey: true
+      }
     }
   }
 )

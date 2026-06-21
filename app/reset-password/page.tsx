@@ -171,7 +171,13 @@ export default function ResetPasswordPage() {
 
         @media (max-width: 640px) {
           .wave-bg {
-            background-position: center top;
+            background-image:
+              radial-gradient(circle at 12% 18%, rgba(0, 82, 255, 0.22), transparent 34%),
+              radial-gradient(circle at 18% 78%, rgba(92, 80, 255, 0.2), transparent 36%),
+              radial-gradient(circle at 86% 16%, rgba(255, 156, 64, 0.16), transparent 28%),
+              url("/pinetree-app-bg.png");
+            background-position: center, center, center, 45% center;
+            background-size: 100% 100%, 100% 100%, 100% 100%, auto 100%;
             transform: scale(1.02);
           }
         }

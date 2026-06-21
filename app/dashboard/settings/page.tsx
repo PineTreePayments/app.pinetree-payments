@@ -136,6 +136,9 @@ export default function SettingsPage() {
   const [taxName, setTaxName] = useState("Sales Tax")
   const [operations, setOperations] = useState<MerchantOperationsSettingsPayload>(defaultOperationsSettings)
 
+  const [passkeyMsg, setPasskeyMsg] = useState("")
+  const [passkeyLoading, setPasskeyLoading] = useState(false)
+
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [schemaReady, setSchemaReady] = useState(true)
@@ -342,6 +345,25 @@ export default function SettingsPage() {
   async function signOut() {
     await supabase.auth.signOut()
     window.location.href = "/login"
+  }
+
+  async function handleAddPasskey() {
+    setPasskeyMsg("")
+    setPasskeyLoading(true)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase.auth as any).registerPasskey()
+      if (error) {
+        setPasskeyMsg("Passkey setup was cancelled.")
+      } else {
+        setPasskeyMsg("Passkey added.")
+      }
+    } catch {
+      setPasskeyMsg("Passkey setup was cancelled.")
+    } finally {
+      setPasskeyLoading(false)
+    }
+    // TODO: list and delete passkeys once Supabase SDK exposes management APIs
   }
 
   const enabledRails = providerSummary.filter((provider) =>
@@ -577,6 +599,32 @@ export default function SettingsPage() {
               </div>
               <ToggleSwitch checked={reportToast} onChange={setReportToast} />
             </div>
+          </div>
+        </div>
+      </DashboardSection>
+
+      <DashboardSection title="Passkeys" titleTone="blue">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-900">Passkeys</p>
+              <p className="mt-0.5 text-xs text-gray-500">
+                Use Face ID, Touch ID, Windows Hello, or a security key to sign in faster.
+              </p>
+              {passkeyMsg && (
+                <p className={`mt-2 text-xs ${passkeyMsg === "Passkey added." ? "text-green-600" : "text-gray-500"}`}>
+                  {passkeyMsg}
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleAddPasskey}
+              disabled={passkeyLoading}
+              className="shrink-0 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-100 disabled:opacity-60"
+            >
+              {passkeyLoading ? "Adding..." : "Add passkey"}
+            </button>
           </div>
         </div>
       </DashboardSection>

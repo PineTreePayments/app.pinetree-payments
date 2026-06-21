@@ -9,12 +9,18 @@ function read(relativePath: string) {
 describe("auth password reset flow", () => {
   it("keeps the login background mobile-safe and links to forgot password", () => {
     const login = read("app/login/page.tsx")
+    const signup = read("app/signup/page.tsx")
 
     expect(login).toContain('href="/forgot-password"')
     expect(login).toContain("Forgot password?")
     expect(login).toContain("min-h-[100dvh]")
     expect(login).toContain("h-[100dvh]")
     expect(login).toContain("@media (max-width: 640px)")
+    expect(login).toContain("radial-gradient(circle at 12% 18%")
+    expect(login).toContain("auto 100%")
+    expect(signup).toContain("min-h-[100dvh]")
+    expect(signup).toContain("pinetree-app-bg.png")
+    expect(signup).toContain("radial-gradient(circle at 12% 18%")
   })
 
   it("adds a forgot-password page that sends Supabase reset links", () => {
@@ -38,5 +44,17 @@ describe("auth password reset flow", () => {
     expect(resetPassword).toContain("supabase.auth.updateUser({ password })")
     expect(resetPassword).toContain("Your password has been updated.")
     expect(resetPassword).toContain("PASSWORD_RECOVERY")
+  })
+
+  it("documents PineTree-branded Supabase reset email template", () => {
+    const template = read("docs/auth/supabase-email-templates.md")
+
+    expect(template).toContain("PineTree Payments")
+    expect(template).toContain("Reset your PineTree password")
+    expect(template).toContain("{{ .ConfirmationURL }}")
+    expect(template).toContain("Authentication -> Emails -> Reset Password")
+    expect(template).toContain("support@pinetree-payments.com")
+    expect(template).not.toContain("powered by Supabase")
+    expect(template).not.toContain("Supabase Auth")
   })
 })

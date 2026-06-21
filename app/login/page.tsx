@@ -13,6 +13,10 @@ TOGGLE GOOGLE LOGIN HERE
 
 const ENABLE_GOOGLE = false
 
+type ConditionalPublicKeyCredential = typeof PublicKeyCredential & {
+  isConditionalMediationAvailable?: () => Promise<boolean>
+}
+
 export default function LoginPage() {
   const [mode, setMode] = useState("login")
   const [email, setEmail] = useState("")
@@ -22,6 +26,9 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [errorMsg, setErrorMsg] = useState("")
   const [infoMsg, setInfoMsg] = useState("")
+  const [passkeySupported, setPasskeySupported] = useState(false)
+  const [conditionalPasskeySupported, setConditionalPasskeySupported] = useState(false)
+  const [passkeyMsg, setPasskeyMsg] = useState("")
 
   /* -----------------------------
   AUTO REDIRECT IF LOGGED IN
@@ -46,6 +53,23 @@ export default function LoginPage() {
     })
 
     return () => subscription.unsubscribe()
+  }, [])
+
+  /* -----------------------------
+  PASSKEY SUPPORT DETECTION
+  ----------------------------- */
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.PublicKeyCredential) return
+
+    setPasskeySupported(true)
+
+    const credential = window.PublicKeyCredential as ConditionalPublicKeyCredential
+    if (typeof credential.isConditionalMediationAvailable === "function") {
+      void credential.isConditionalMediationAvailable()
+        .then((available) => setConditionalPasskeySupported(Boolean(available)))
+        .catch(() => setConditionalPasskeySupported(false))
+    }
   }, [])
 
   /* -----------------------------
@@ -123,10 +147,32 @@ export default function LoginPage() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    setPasskeyMsg("")
     if (mode === "login") {
       handleLogin()
     } else {
       handleSignup()
+    }
+  }
+
+  /* -----------------------------
+  PASSKEY SIGN IN (OPTIONAL)
+  ----------------------------- */
+
+  async function handlePasskeySignIn() {
+    setPasskeyMsg("")
+    try {
+      // TODO: Supabase passkey helpers are still experimental in the installed SDK types.
+      // Keep manual passkey sign-in as the stable fallback until conditional mediation is typed.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase.auth as any).signInWithPasskey()
+      if (error) {
+        setPasskeyMsg("Passkey sign-in was cancelled.")
+        return
+      }
+      window.location.href = "/dashboard"
+    } catch {
+      setPasskeyMsg("Passkey sign-in was cancelled.")
     }
   }
 
@@ -209,6 +255,7 @@ export default function LoginPage() {
           <input
             type="email"
             placeholder="Email"
+            autoComplete={mode === "login" && conditionalPasskeySupported ? "username webauthn" : "email"}
             className="border border-gray-300 p-2.5 rounded-md w-full mb-2 text-gray-900"
             onChange={(e) => setEmail(e.target.value)}
           />
@@ -271,6 +318,22 @@ export default function LoginPage() {
                 ? "Sign in"
                 : "Create account"}
           </button>
+
+          {mode === "login" && passkeySupported && (
+            <div className="mt-3 text-center">
+              <button
+                type="button"
+                onClick={handlePasskeySignIn}
+                className="text-xs text-gray-400 underline underline-offset-2 transition hover:text-gray-600"
+              >
+                Use a passkey
+              </button>
+            </div>
+          )}
+
+          {passkeyMsg && (
+            <p className="mt-1.5 text-center text-xs text-gray-400">{passkeyMsg}</p>
+          )}
         </form>
 
         <p className="text-xs text-gray-600 mt-4 text-center">
@@ -309,7 +372,13 @@ export default function LoginPage() {
 
         @media (max-width: 640px) {
           .wave-bg {
-            background-position: center top;
+            background-image:
+              radial-gradient(circle at 12% 18%, rgba(0, 82, 255, 0.22), transparent 34%),
+              radial-gradient(circle at 18% 78%, rgba(92, 80, 255, 0.2), transparent 36%),
+              radial-gradient(circle at 86% 16%, rgba(255, 156, 64, 0.16), transparent 28%),
+              url("/pinetree-app-bg.png");
+            background-position: center, center, center, 45% center;
+            background-size: 100% 100%, 100% 100%, 100% 100%, auto 100%;
             transform: scale(1.02);
           }
         }
