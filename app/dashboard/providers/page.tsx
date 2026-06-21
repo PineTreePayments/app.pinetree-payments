@@ -10,11 +10,12 @@ import { toast } from "sonner"
 import QRCode from "qrcode"
 import { ChevronRight, X } from "lucide-react"
 import {
-  DashboardHeroCard,
   DashboardSection,
-  InlineMetric,
   ProviderStatusPill,
-  dashboardPageTitleClass
+  dashboardHeroValueClass,
+  dashboardPageTitleClass,
+  dashboardSectionLabelClass,
+  dashboardSupportingTextClass
 } from "@/components/dashboard/DashboardPrimitives"
 import {
   getShift4DisplayStatus,
@@ -1785,21 +1786,41 @@ function EngineSettingStatus({
         </div>
       ) : null}
 
-      <DashboardHeroCard
-        eyebrow="Payment Infrastructure"
-        title="View connected payment providers and manage your payment infrastructure."
-        value={connectedAndEnabledProvidersCount}
-        detail="Connected Providers"
-        secondary={
-          <div className="w-full border-t border-blue-200/80 pt-3 sm:w-auto sm:min-w-[220px] sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
-            <InlineMetric
-              label="Payment Operations"
-              value="7"
-              className="[&>p]:!overflow-visible [&>p]:!whitespace-normal [&>p]:!text-clip"
-            />
+      <div className="relative overflow-hidden rounded-[1.35rem] border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.16),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] p-4 shadow-[0_18px_60px_rgba(37,99,235,0.13)] sm:p-5 md:p-6">
+        <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/80 to-transparent" />
+        <div className="relative">
+          <p className={dashboardSectionLabelClass}>
+            PAYMENT INFRASTRUCTURE
+          </p>
+          <h2 className={`mt-2 font-medium ${dashboardSupportingTextClass}`}>
+            View connected payment providers and manage your payment infrastructure.
+          </h2>
+          <div className="mt-4 grid grid-cols-2 divide-x divide-blue-200/80 border-t border-blue-200/80 pt-4">
+            <div className="min-w-0 pr-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500 [overflow:visible] [text-overflow:clip] [white-space:normal]">
+                CONNECTED PROVIDERS
+              </p>
+              <div className={`mt-1 ${dashboardHeroValueClass}`}>
+                {connectedAndEnabledProvidersCount}
+              </div>
+              <p className="mt-1 text-xs leading-5 text-gray-500">
+                Connected Providers
+              </p>
+            </div>
+            <div className="min-w-0 pl-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500 [overflow:visible] [text-overflow:clip] [white-space:normal]">
+                PAYMENT OPERATIONS
+              </p>
+              <div className={`mt-1 ${dashboardHeroValueClass}`}>
+                7
+              </div>
+              <p className="mt-1 text-xs leading-5 text-gray-500">
+                Payment Operations
+              </p>
+            </div>
           </div>
-        }
-      />
+        </div>
+      </div>
 
       <DashboardSection title="Engine Settings" titleTone="blue">
       <div className="rounded-2xl border border-gray-200 bg-white p-2.5 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
