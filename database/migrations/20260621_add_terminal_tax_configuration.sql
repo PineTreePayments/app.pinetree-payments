@@ -1,7 +1,10 @@
 alter table public.terminals
-  add column if not exists tax_mode text not null default 'none',
+  add column if not exists tax_mode text not null default 'merchant_default',
   add column if not exists tax_rate numeric null,
   add column if not exists tax_label text not null default 'Sales tax';
+
+alter table public.terminals
+  alter column tax_mode set default 'merchant_default';
 
 alter table public.terminals
   drop constraint if exists terminals_tax_mode_check;

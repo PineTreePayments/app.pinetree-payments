@@ -60,7 +60,7 @@ export function calculatePosTotals(input: {
   } else if (input.terminalTax.taxMode === "merchant_default") {
     taxRate = Number(input.merchantDefaultTaxRate || 0)
     if (!Number.isFinite(taxRate) || taxRate <= 0 || taxRate > 100) {
-      throw new Error("No valid default tax rate is configured")
+      taxRate = 0
     }
   }
 

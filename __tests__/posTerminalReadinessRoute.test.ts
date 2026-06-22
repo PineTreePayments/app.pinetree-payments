@@ -25,7 +25,7 @@ vi.mock("@/database/merchants", () => ({
   getMerchantTaxSettings: mocks.getMerchantTaxSettings
 }))
 
-import { POST } from "@/app/api/pos/terminals/route"
+import { GET, POST } from "@/app/api/pos/terminals/route"
 
 function terminalRequest(tax: Record<string, unknown>) {
   return new Request("https://app.pinetree-payments.test/api/pos/terminals", {
@@ -46,6 +46,8 @@ describe("POS terminal tax setup route", () => {
     mocks.requireMerchantIdFromRequest.mockResolvedValue("merchant_123")
     mocks.createPosTerminalEngine.mockReset()
     mocks.createPosTerminalEngine.mockResolvedValue({ id: "terminal_123", name: "Front Register" })
+    mocks.getPosTerminalsEngine.mockReset()
+    mocks.getPosTerminalsEngine.mockResolvedValue([])
     mocks.getMerchantTaxSettings.mockReset()
     mocks.getMerchantTaxSettings.mockResolvedValue({ taxEnabled: false, taxRate: 0 })
   })
@@ -57,6 +59,16 @@ describe("POS terminal tax setup route", () => {
       "merchant_123",
       expect.objectContaining({ taxMode: "none", taxRate: null })
     )
+  })
+
+  it("exposes a valid Settings tax rate as the terminal default", async () => {
+    mocks.getMerchantTaxSettings.mockResolvedValue({ taxEnabled: true, taxRate: 8.25 })
+
+    const response = await GET(new Request("https://app.pinetree-payments.test/api/pos/terminals") as never)
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.defaultTax).toEqual({ available: true, rate: 8.25 })
   })
 
   it("creates a terminal with a valid custom tax rate", async () => {
@@ -81,6 +93,8 @@ describe("POS terminal tax setup route", () => {
     expect(source).toContain("Tax configuration")
     expect(source).toContain("No tax")
     expect(source).toContain("Use default tax rate")
+    expect(source).toContain('setTaxMode(payload.defaultTax.available ? "merchant_default" : "none")')
+    expect(source).toContain("Use your merchant tax rate of")
     expect(source).toContain("Custom tax rate")
     expect(source).not.toContain("Settings required before creating a terminal")
     expect(source).not.toContain("showSettingsRequired")

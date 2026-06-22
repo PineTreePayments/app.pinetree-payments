@@ -1140,7 +1140,7 @@ export function CheckoutWorkspace({
     checkoutReadinessStatus === "Live"
       ? "Hosted checkout and payment links are accepting payments."
       : checkoutReadinessStatus === "Configured"
-        ? "Hosted checkout is configured. Share an active link to start seeing volume."
+        ? "Hosted checkout is configured. Share an active link or add a checkout button to start seeing volume."
         : checkoutReadinessStatus === "..."
             ? "Loading hosted checkout readiness."
             : "Create a payment link or add a checkout button to start accepting online payments."
@@ -1491,16 +1491,16 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           secondary={
             <div
               data-checkout-hero-metrics
-              className="w-full overflow-hidden rounded-xl border border-blue-200/80 bg-white/55 sm:min-w-[280px]"
+              className="flex w-full flex-wrap gap-2 sm:min-w-[340px]"
             >
               {[
                 ["Active links", isLoading ? "—" : String(activeLinks)],
-                ["Button status", activeLinks > 0 ? "Ready" : "Set up"],
-                ["Recent activity", isLoading ? "—" : String(stats?.confirmedPayments ?? 0)],
-              ].map(([label, value], index) => (
+                ["Button", activeLinks > 0 ? "Ready" : "Set up"],
+                ["Activity", isLoading ? "—" : String(stats?.confirmedPayments ?? 0)],
+              ].map(([label, value]) => (
                 <div
                   key={label}
-                  className={`flex items-center justify-between gap-4 px-3.5 py-2.5 ${index > 0 ? "border-t border-blue-100" : ""}`}
+                  className="inline-flex min-w-[96px] flex-1 items-center justify-between gap-2 rounded-full bg-white/65 px-3 py-2 shadow-sm ring-1 ring-blue-100/70"
                 >
                   <span className="text-xs font-semibold text-gray-600">{label}</span>
                   <span className="text-sm font-semibold text-gray-950">{value}</span>

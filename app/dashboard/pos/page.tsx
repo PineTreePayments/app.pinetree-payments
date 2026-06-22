@@ -126,7 +126,10 @@ export default function POSPage() {
       }
       const list = payload.terminals || []
       setTerminals(list)
-      if (payload.defaultTax) setDefaultTax(payload.defaultTax)
+      if (payload.defaultTax) {
+        setDefaultTax(payload.defaultTax)
+        setTaxMode(payload.defaultTax.available ? "merchant_default" : "none")
+      }
       void loadDrawerBalances(list)
     } catch (error) {
       console.error(error)
@@ -272,7 +275,7 @@ export default function POSPage() {
       setRecoveryPhrase("")
       setAutoLock("5")
       setDrawerStartingAmount("")
-      setTaxMode("none")
+      setTaxMode(defaultTax.available ? "merchant_default" : "none")
       setCustomTaxRate("")
       setCreating(false)
       toast.success("Terminal created")
@@ -507,9 +510,9 @@ export default function POSPage() {
               <legend className="px-1 text-sm font-semibold text-gray-700">Tax configuration</legend>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
                 {([
-                  ["none", "No tax", "Do not add tax at this terminal."],
-                  ["merchant_default", "Use default tax rate", defaultTax.available && defaultTax.rate ? `${defaultTax.rate}% merchant default` : "No default tax rate configured."],
+                  ["merchant_default", "Use default tax rate", defaultTax.available && defaultTax.rate ? `Use your merchant tax rate of ${defaultTax.rate.toFixed(2)}%.` : "No default tax rate configured."],
                   ["custom", "Custom tax rate", "Set a rate for this terminal."],
+                  ["none", "No tax", "Do not add tax at this terminal."],
                 ] as Array<[TerminalTaxMode, string, string]>).map(([value, label, detail]) => (
                   <label
                     key={value}

@@ -15,15 +15,18 @@ describe("mobile dashboard hero cleanup", () => {
     expect(checkout).not.toContain('? "Needs attention"')
   })
 
-  it("shows full Online Checkout metric labels in stacked rows", () => {
+  it("shows readable Online Checkout metrics in compact pills", () => {
     const checkout = read("app/dashboard/checkout/page.tsx")
     const metrics = checkout.match(/data-checkout-hero-metrics[\s\S]*?\.map/)?.[0] ?? ""
 
     expect(metrics).toContain('"Active links", isLoading ? "—" : String(activeLinks)')
-    expect(metrics).toContain('"Button status", activeLinks > 0 ? "Ready" : "Set up"')
-    expect(metrics).toContain('"Recent activity", isLoading ? "—" : String(stats?.confirmedPayments ?? 0)')
+    expect(metrics).toContain('"Button", activeLinks > 0 ? "Ready" : "Set up"')
+    expect(metrics).toContain('"Activity", isLoading ? "—" : String(stats?.confirmedPayments ?? 0)')
     expect(metrics).not.toContain("truncate")
     expect(metrics).not.toContain("text-ellipsis")
+    expect(checkout).toContain('className="inline-flex min-w-[96px] flex-1 items-center justify-between gap-2 rounded-full')
+    expect(metrics).not.toContain("overflow-hidden")
+    expect(metrics).not.toContain("divide-")
     expect(checkout).not.toContain("BUTTON S...")
     expect(checkout).not.toContain("RECENT ACTI...")
   })
