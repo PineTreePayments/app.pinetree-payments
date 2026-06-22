@@ -98,6 +98,15 @@ const groups = [
     ],
   },
   {
+    name: "Stripe card processing",
+    entries: [
+      ["STRIPE_SECRET_KEY", false, "secret16"],
+      ["STRIPE_WEBHOOK_SECRET", false, "secret16"],
+      ["STRIPE_API_VERSION", false, "text"],
+      ["STRIPE_APPLICATION_URL", false, "url"],
+    ],
+  },
+  {
     name: "Provider webhook signing",
     entries: [
       ["SPEED_WEBHOOK_SECRET", true, "secret16"],
