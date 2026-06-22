@@ -7,6 +7,32 @@ function read(relativePath: string) {
 }
 
 describe("developer and integration wording", () => {
+  it("keeps Stripe docs scoped to PaymentIntents — no Billing or Checkout claims", () => {
+    const files = [
+      "app/dashboard/developer/page.tsx",
+      "docs/api/squarespace-developer-page.html",
+      "docs/api/squarespace-api-docs.html",
+    ]
+    const copy = files.map(read).join("\n")
+
+    expect(copy).not.toMatch(/Stripe Billing|Stripe Checkout|Stripe subscription/i)
+    expect(copy).not.toMatch(/Stripe\.js|stripe\.redirectToCheckout/i)
+  })
+
+  it("keeps Fluid Pay and Stripe marked as early-access in all doc surfaces", () => {
+    const files = [
+      "app/dashboard/developer/page.tsx",
+      "docs/api/squarespace-developer-page.html",
+      "docs/api/squarespace-api-docs.html",
+    ]
+    const copy = files.map(read).join("\n")
+
+    expect(copy).toMatch(/Stripe.*early.access|early.access.*Stripe/i)
+    expect(copy).toMatch(/Fluid Pay.*early.access|early.access.*Fluid Pay/i)
+    expect(copy).not.toMatch(/Stripe.*(?:is )?(?:generally )?live for all merchants/i)
+    expect(copy).not.toMatch(/Fluid Pay.*(?:is )?(?:generally )?live for all merchants/i)
+  })
+
   it("keeps readiness labels out of merchant-facing Shopify surfaces", () => {
     const card = [
       read("app/dashboard/developer/ShopifyIntegrationCard.tsx"),

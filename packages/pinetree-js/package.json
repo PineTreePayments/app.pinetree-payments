@@ -33,7 +33,6 @@
     "README.md",
     "CHANGELOG.md"
   ],
-  "sideEffects": false,
   "scripts": {
     "build": "node ./scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json",
