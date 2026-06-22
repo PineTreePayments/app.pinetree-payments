@@ -1896,7 +1896,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                   </div>
                   <Link
                     href="/dashboard/developer"
-                    className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+                    className="inline-flex h-9 shrink-0 items-center justify-center rounded-md bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
                   >
                     Open Developer
                   </Link>
@@ -2664,7 +2664,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
             </div>
             <Link
               href="/dashboard/developer"
-              className="inline-flex min-h-9 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+              className="inline-flex h-9 items-center justify-center rounded-md bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
             >
               Open Developer
             </Link>

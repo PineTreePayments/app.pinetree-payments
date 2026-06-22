@@ -1,4 +1,4 @@
-export type OverviewChartRange = "7D" | "30D" | "90D" | "ALL"
+export type OverviewChartRange = "24H" | "7D" | "30D" | "90D" | "ALL"
 
 export type OverviewChartInputPoint = {
   date: string
@@ -19,6 +19,7 @@ export type NormalizedOverviewChartData = {
 }
 
 const DAYS_BY_RANGE: Record<Exclude<OverviewChartRange, "ALL">, number> = {
+  "24H": 1,
   "7D": 7,
   "30D": 30,
   "90D": 90

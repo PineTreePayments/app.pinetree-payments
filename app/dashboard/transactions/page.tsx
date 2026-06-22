@@ -24,15 +24,9 @@ import {
 } from "@/components/dashboard/displayHelpers"
 
 import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend,
-  CartesianGrid
-} from "recharts"
+  type TransactionVolumeSeries
+} from "@/components/dashboard/TransactionVolumeChart"
+import TransactionVolumeChart from "@/components/dashboard/TransactionVolumeChart"
 
 type Payment = {
   id?: string | null
@@ -64,8 +58,29 @@ type ChartRow = {
   lightning: number
   coinbase: number
   shift4: number
+  fluidpay?: number
+  stripe?: number
   cash: number
 }
+
+const transactionVolumeSeries: TransactionVolumeSeries[] = [
+  { key: "solana", label: "Solana SOL/USDC", color: "#8b5cf6" },
+  { key: "base", label: "Base ETH/USDC", color: "#0052FF" },
+  { key: "lightning", label: "Bitcoin Lightning", color: "#f59e0b" },
+  { key: "coinbase", label: "Coinbase", color: "#1e40af" },
+  { key: "shift4", label: "Card (Shift4)", color: "#14b8a6" },
+  { key: "fluidpay", label: "Card (FluidPay)", color: "#0ea5e9" },
+  { key: "stripe", label: "Card (Stripe)", color: "#635bff" },
+  { key: "cash", label: "Cash (USD)", color: "#22c55e" }
+]
+
+const transactionChartRanges = [
+  { label: "24H", value: "24h" },
+  { label: "7D", value: "7d" },
+  { label: "30D", value: "1m" },
+  { label: "90D", value: "3m" },
+  { label: "All", value: "1y" }
+]
 
 type TransactionsDashboardResponse = {
   success?: boolean
@@ -441,68 +456,28 @@ export default function TransactionsPage() {
             >
 
             <div className="flex flex-wrap gap-2 mb-6">
-              {["24h", "7d", "1m", "3m", "6m", "1y"].map((r) => (
+              {transactionChartRanges.map((range) => (
                 <button
-                  key={r}
+                  key={range.value}
                   onClick={() => {
-                    setChartRange(r)
-                    void loadChartData(r, chartMode)
+                    setChartRange(range.value)
+                    void loadChartData(range.value, chartMode)
                   }}
-                  className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition ${chartRange === r ? "bg-[#0052FF] text-white border-[#0052FF]" : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"}`}
+                  className={`rounded-md border px-3 py-1.5 text-sm font-medium transition ${chartRange === range.value ? "bg-[#0052FF] text-white border-[#0052FF]" : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"}`}
                 >
-                  {r.toUpperCase()}
+                  {range.label}
                 </button>
               ))}
             </div>
 
-            <div className="h-[300px] sm:h-[350px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={chartData}
-                margin={{ top: 20, right: 20, left: 0, bottom: 10 }}
-              >
-                <CartesianGrid
-                  stroke="#e5e7eb"
-                  strokeDasharray="4 4"
-                  vertical={false}
-                />
-
-                <XAxis
-                  dataKey="time"
-                  axisLine={{ stroke: "#2563eb", strokeWidth: 2 }}
-                  tickLine={false}
-                  tick={{ fill: "#374151", fontSize: 12 }}
-                />
-
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: "#374151", fontSize: 12 }}
-                  tickFormatter={(value) => formatUsd(Number(value))}
-                />
-
-                <Tooltip
-                  formatter={(value, name) => [formatUsd(Number(value)), `${name} Volume (USD)`]}
-                  labelFormatter={(label) => `Period: ${label}`}
-                  contentStyle={{
-                    background: "#fff",
-                    border: "1px solid #e5e7eb",
-                    borderRadius: "8px",
-                    boxShadow: "0 6px 18px rgba(0,0,0,0.08)"
-                  }}
-                />
-
-                <Legend wrapperStyle={{ fontSize: "12px" }} />
-
-                <Bar dataKey="solana" name="Solana SOL/USDC" stackId="a" fill="#8b5cf6" radius={[0, 0, 0, 0]} />
-                <Bar dataKey="base" name="Base ETH/USDC" stackId="a" fill="#0052FF" radius={[0, 0, 0, 0]} />
-                <Bar dataKey="lightning" name="Bitcoin Lightning" stackId="a" fill="#f59e0b" radius={[0, 0, 0, 0]} />
-                <Bar dataKey="coinbase" name="Coinbase" stackId="a" fill="#1e40af" radius={[0, 0, 0, 0]} />
-                <Bar dataKey="shift4" name="Card (Shift4)" stackId="a" fill="#14b8a6" radius={[0, 0, 0, 0]} />
-                <Bar dataKey="cash" name="Cash (USD)" stackId="a" fill="#22c55e" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-            </div>
+            <TransactionVolumeChart
+              data={chartData}
+              xKey="time"
+              series={transactionVolumeSeries}
+              className="h-[300px] sm:h-[350px]"
+              gradientId="transactions-volume"
+              emptyDescription="Confirmed transactions will appear here for the selected range."
+            />
             </ChartCard>
           </div>
         </div>

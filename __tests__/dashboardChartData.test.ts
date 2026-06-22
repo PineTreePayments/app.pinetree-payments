@@ -4,6 +4,17 @@ import { normalizeOverviewChartData } from "@/lib/dashboardChartData"
 const now = new Date("2026-06-21T12:00:00Z")
 
 describe("normalizeOverviewChartData", () => {
+  it("supports a compact 24-hour view", () => {
+    const result = normalizeOverviewChartData(
+      [{ date: "2026-06-21", volume: 20 }],
+      "24H",
+      now
+    )
+
+    expect(result.points).toHaveLength(1)
+    expect(result.points[0]).toMatchObject({ date: "2026-06-21", volume: 20 })
+  })
+
   it("returns an empty state with every day represented when there are no payments", () => {
     const result = normalizeOverviewChartData([], "7D", now)
 

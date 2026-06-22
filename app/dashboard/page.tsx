@@ -22,15 +22,7 @@ import {
   type OverviewChartRange
 } from "@/lib/dashboardChartData"
 
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid
-} from "recharts"
+import TransactionVolumeChart from "@/components/dashboard/TransactionVolumeChart"
 import {
   ChartCard,
   DashboardSection,
@@ -209,21 +201,15 @@ export default function DashboardPage() {
     [chartData, chartRange]
   )
   const chartDisplayData = normalizedChart.points
-  const singleActivePoint = normalizedChart.activeDayCount === 1
-    ? chartDisplayData.find((point) => point.volume > 0)
-    : null
-  const singleActiveIndex = singleActivePoint
-    ? chartDisplayData.findIndex((point) => point.date === singleActivePoint.date)
-    : -1
 
   const renderChartControls = (showExpand = true) => (
     <div className="flex flex-wrap items-center gap-2">
-      {(["7D", "30D", "90D", "ALL"] as ChartRange[]).map((range) => (
+      {(["24H", "7D", "30D", "90D", "ALL"] as ChartRange[]).map((range) => (
         <button
           key={range}
           type="button"
           onClick={() => setChartRange(range)}
-          className={`inline-flex h-8 items-center justify-center rounded-full border px-3 text-[11px] font-semibold transition focus:outline-none focus:ring-4 focus:ring-blue-100 ${
+          className={`inline-flex h-8 items-center justify-center rounded-md border px-3 text-[11px] font-semibold transition focus:outline-none focus:ring-4 focus:ring-blue-100 ${
             chartRange === range
               ? "border-[#0052FF] bg-[#0052FF] text-white"
               : "border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
@@ -236,7 +222,7 @@ export default function DashboardPage() {
         <button
           type="button"
           onClick={() => setChartExpanded(true)}
-          className="inline-flex h-8 items-center justify-center rounded-full border border-gray-200 bg-white px-3 text-[11px] font-semibold text-gray-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-100"
+          className="inline-flex h-8 items-center justify-center rounded-xl border border-gray-200 bg-white px-3 text-[11px] font-semibold text-gray-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-100"
         >
           Expand
         </button>
@@ -245,99 +231,13 @@ export default function DashboardPage() {
   )
 
   const renderVolumeChart = (className: string, gradientId = "overviewVolumeGradient") => (
-    <div className={`relative ${className}`}>
-      {normalizedChart.isEmpty ? (
-        <div className="flex h-full flex-col items-center justify-center rounded-2xl border border-dashed border-blue-100 bg-blue-50/40 px-4 text-center">
-          <p className="text-sm font-semibold text-gray-950">No payment volume yet</p>
-          <p className="mt-1 max-w-sm text-xs leading-5 text-gray-500">
-            Transactions will appear here once payments are confirmed.
-          </p>
-        </div>
-      ) : (
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart
-          data={normalizedChart.activeDayCount === 1
-            ? chartDisplayData.map((point) => ({ ...point, volume: 0 }))
-            : chartDisplayData}
-          margin={{ top: 8, right: 8, left: -12, bottom: 16 }}
-        >
-          <defs>
-            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#2563eb" stopOpacity={0.28} />
-              <stop offset="100%" stopColor="#2563eb" stopOpacity={0.02} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid stroke="#f1f5f9" strokeDasharray="2 8" vertical={false} />
-          <XAxis
-            dataKey="label"
-            axisLine={false}
-            tickLine={false}
-            tick={{ fill: "#64748b", fontSize: 9 }}
-            interval="preserveStartEnd"
-            minTickGap={36}
-            dy={8}
-          />
-          <YAxis
-            axisLine={false}
-            tickLine={false}
-            width={52}
-            tick={{ fill: "#64748b", fontSize: 9 }}
-            tickFormatter={(value) => formatUsd(Number(value))}
-            domain={[0, normalizedChart.maxValue]}
-          />
-          <Tooltip
-            formatter={(value) => [formatUsd(Number(value)), "Volume (USD)"]}
-            labelFormatter={(label) => `Date: ${label}`}
-            contentStyle={{
-              background: "#fff",
-              border: "1px solid #dbeafe",
-              borderRadius: "12px",
-              boxShadow: "0 18px 50px rgba(15,23,42,0.12)",
-              fontSize: "12px"
-            }}
-          />
-          {normalizedChart.activeDayCount > 1 && (
-            <Area
-              type="monotone"
-              dataKey="volume"
-              stroke="#2563eb"
-              strokeWidth={2.25}
-              fill={`url(#${gradientId})`}
-              dot={false}
-              activeDot={{ r: 4, strokeWidth: 0, fill: "#1d4ed8" }}
-            />
-          )}
-          {normalizedChart.activeDayCount === 1 && (
-            <Area
-              type="linear"
-              dataKey="volume"
-              stroke="#93c5fd"
-              strokeWidth={1.5}
-              fill="transparent"
-              dot={false}
-              activeDot={false}
-              isAnimationActive={false}
-            />
-          )}
-        </AreaChart>
-      </ResponsiveContainer>
-      )}
-      {singleActivePoint && singleActiveIndex >= 0 && chartDisplayData.length > 1 && (
-        <div
-          className="pointer-events-none absolute"
-          style={{
-            left: `${(singleActiveIndex / (chartDisplayData.length - 1)) * 100}%`,
-            top: "34%",
-            transform: "translate(-50%, -50%)"
-          }}
-        >
-          <div className="h-3 w-3 rounded-full bg-blue-600 shadow-[0_0_0_5px_rgba(37,99,235,0.12)]" />
-          <div className="mt-2 whitespace-nowrap rounded-full border border-blue-100 bg-white px-2 py-1 text-[11px] font-semibold text-gray-900 shadow-sm">
-            {formatUsd(singleActivePoint.volume)}
-          </div>
-        </div>
-      )}
-    </div>
+    <TransactionVolumeChart
+      data={chartDisplayData}
+      xKey="label"
+      series={[{ key: "volume", label: "Volume (USD)", color: "#2563eb" }]}
+      className={className}
+      gradientId={gradientId}
+    />
   )
 
   return (
@@ -477,7 +377,7 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   onClick={() => setChartExpanded(false)}
-                  className="inline-flex h-8 items-center justify-center rounded-full bg-[#0052FF] px-3 text-[11px] font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-100"
+                  className="inline-flex h-8 items-center justify-center rounded-xl bg-[#0052FF] px-3 text-[11px] font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-100"
                 >
                   Close
                 </button>
