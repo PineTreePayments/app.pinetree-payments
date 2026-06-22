@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { Toaster } from "sonner"
+import PineTreeDynamicProvider from "@/components/providers/PineTreeDynamicProvider"
 
 export default function DashboardLayout({
   children,
@@ -119,6 +120,7 @@ export default function DashboardLayout({
     { name: "Transactions", href: "/dashboard/transactions" },
     { name: "Reports", href: "/dashboard/reports" },
     { name: "Wallets", href: "/dashboard/wallets" },
+    { name: "Wallet Setup", href: "/dashboard/wallet-setup" },
     { name: "Inventory", href: "/dashboard/inventory" },
     { name: "Providers", href: "/dashboard/providers" },
     { name: "Help Center", href: "/dashboard/help" },
@@ -128,6 +130,7 @@ export default function DashboardLayout({
   ]
 
   return (
+    <PineTreeDynamicProvider>
     <div className="relative min-h-screen bg-gray-100">
       {/* MOBILE OVERLAY */}
       {sidebarOpen && (
@@ -250,5 +253,6 @@ export default function DashboardLayout({
         </div>
       </div>
     </div>
+    </PineTreeDynamicProvider>
   )
 }

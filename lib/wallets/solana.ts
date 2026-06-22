@@ -45,7 +45,7 @@ export type DetectedSolanaWallet = {
   source: "injected" | "wallet-standard"
 }
 
-type SolanaBrowserWindow = Window & {
+type SolanaBrowserWindow = Pick<Window, "addEventListener" | "dispatchEvent"> & {
   solana?: SolanaBrowserProvider
   phantom?: { solana?: SolanaBrowserProvider }
   solflare?: SolanaBrowserProvider
