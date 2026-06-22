@@ -8,7 +8,6 @@ import { supabase } from "@/lib/supabaseClient"
 import {
   DashboardHeroCard,
   DashboardSection,
-  InlineMetric,
   PineTreeInsightsCard,
   dashboardPageTitleClass,
 } from "@/components/dashboard/DashboardPrimitives"
@@ -1490,22 +1489,23 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           title={checkoutReadinessCopy}
           value={checkoutReadinessStatus}
           secondary={
-            <div className="grid w-full grid-cols-3 divide-x divide-blue-200/80 border-t border-blue-200/80 pt-3 sm:w-auto sm:min-w-[460px] sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
-          <InlineMetric
-            label="Active links"
-            value={isLoading ? "—" : String(activeLinks)}
-            className="pr-4"
-          />
-          <InlineMetric
-            label="Button status"
-            value={activeLinks > 0 ? "Ready" : "Set up"}
-            className="px-4"
-          />
-          <InlineMetric
-            label="Recent activity"
-            value={isLoading ? "—" : String(stats?.confirmedPayments ?? 0)}
-            className="pl-4"
-          />
+            <div
+              data-checkout-hero-metrics
+              className="w-full overflow-hidden rounded-xl border border-blue-200/80 bg-white/55 sm:min-w-[280px]"
+            >
+              {[
+                ["Active links", isLoading ? "—" : String(activeLinks)],
+                ["Button status", activeLinks > 0 ? "Ready" : "Set up"],
+                ["Recent activity", isLoading ? "—" : String(stats?.confirmedPayments ?? 0)],
+              ].map(([label, value], index) => (
+                <div
+                  key={label}
+                  className={`flex items-center justify-between gap-4 px-3.5 py-2.5 ${index > 0 ? "border-t border-blue-100" : ""}`}
+                >
+                  <span className="text-xs font-semibold text-gray-600">{label}</span>
+                  <span className="text-sm font-semibold text-gray-950">{value}</span>
+                </div>
+              ))}
             </div>
           }
         />
