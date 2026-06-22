@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useDynamicContext, useUserWallets } from "@dynamic-labs/sdk-react-core"
 import { CheckCircle2, Copy, X } from "lucide-react"
+import { type NetworkId, networkForWallet, shortAddress } from "@/lib/wallets/sparkDetection"
 import {
   DashboardSection,
   ProviderStatusPill,
@@ -10,7 +11,6 @@ import {
 } from "@/components/dashboard/DashboardPrimitives"
 import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/PineTreeDynamicProvider"
 
-type NetworkId = "base" | "solana" | "bitcoin" | "lightning"
 type WalletTab = "overview" | "balances" | "receive" | "withdraw" | "activity"
 type AddressEntry = { id: string; address: string; detail?: string }
 
@@ -24,18 +24,64 @@ const walletTabs: Array<{ id: WalletTab; label: string }> = [
 
 const primaryRails = ["Base", "Solana", "Bitcoin Lightning"] as const
 
-function networkForWallet(chain: string, key: string, connectorName: string): NetworkId | null {
-  const identity = `${chain} ${key} ${connectorName}`.toLowerCase()
-  if (identity.includes("spark") || identity.includes("lightning")) return "lightning"
-  if (chain.toUpperCase() === "SOL" || identity.includes("solana")) return "solana"
-  if (chain.toUpperCase() === "EVM" || identity.includes("ethereum")) return "base"
-  if (chain.toUpperCase() === "BTC" || identity.includes("bitcoin")) return "bitcoin"
-  return null
-}
+function WalletDiagnosticsPanel({
+  wallets,
+  networkAddresses,
+}: {
+  wallets: ReturnType<typeof useUserWallets>
+  networkAddresses: Record<NetworkId, AddressEntry[]>
+}) {
+  const rows = wallets.map((w) => ({
+    key: w.key,
+    connectorName: w.connector.name,
+    connectorKey: String((w.connector as unknown as Record<string, unknown>)["key"] ?? ""),
+    chain: w.chain,
+    detectedNetwork: networkForWallet(w.chain, w.key, w.connector.name),
+    hasAddress: Boolean(w.address),
+    addressPrefix: w.address ? `${w.address.slice(0, 6)}…` : "—",
+    extraAddressCount: (w.additionalAddresses ?? []).length,
+  }))
 
-function shortAddress(address: string) {
-  if (address.length <= 26) return address
-  return `${address.slice(0, 12)}…${address.slice(-10)}`
+  useEffect(() => {
+    console.debug("[pinetree-wallets] sdk diagnostics", {
+      walletCount: wallets.length,
+      wallets: rows,
+      networkSummary: {
+        base: networkAddresses.base.length,
+        solana: networkAddresses.solana.length,
+        lightning: networkAddresses.lightning.length,
+        bitcoin: networkAddresses.bitcoin.length,
+      },
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallets])
+
+  return (
+    <div className="rounded-xl border border-dashed border-yellow-300 bg-yellow-50/60 px-4 py-3 text-[11px] font-mono">
+      <p className="mb-2 font-sans text-xs font-semibold text-yellow-700">DEV — wallet SDK diagnostics (hidden in production)</p>
+      {rows.length === 0 ? (
+        <p className="text-yellow-700">No wallet objects returned by useUserWallets() yet</p>
+      ) : (
+        <div className="space-y-1 text-yellow-900">
+          {rows.map((row, idx) => (
+            <div key={idx} className="flex flex-wrap gap-x-3 rounded bg-yellow-100/70 px-2 py-1">
+              <span><span className="text-yellow-600">net:</span> {row.detectedNetwork ?? "undetected"}</span>
+              <span><span className="text-yellow-600">chain:</span> {row.chain}</span>
+              <span><span className="text-yellow-600">connector:</span> {row.connectorName}{row.connectorKey ? ` [${row.connectorKey}]` : ""}</span>
+              <span><span className="text-yellow-600">addr:</span> {row.addressPrefix}</span>
+              {row.extraAddressCount > 0 ? <span><span className="text-yellow-600">+extra:</span> {row.extraAddressCount}</span> : null}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mt-2 flex flex-wrap gap-3 text-yellow-700">
+        <span>lightning: {networkAddresses.lightning.length}</span>
+        <span>base: {networkAddresses.base.length}</span>
+        <span>solana: {networkAddresses.solana.length}</span>
+        <span>btc: {networkAddresses.bitcoin.length}</span>
+      </div>
+    </div>
+  )
 }
 
 function WalletProfileShell({
@@ -48,7 +94,7 @@ function WalletProfileShell({
   message: string
 }) {
   return (
-    <article className="rounded-2xl border border-gray-200/80 bg-white/90 p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur sm:p-5">
+    <article className="rounded-2xl border border-gray-200/80 bg-white/90 p-6 shadow-[0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur sm:p-7">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-gray-950">PineTree Wallet</h2>
@@ -153,12 +199,16 @@ function PineTreeWalletRuntime() {
     )
   }
 
-  const hasAddresses = Object.values(networkAddresses).some((entries) => entries.length > 0)
-  const walletStatus = hasAddresses ? "Ready" : user ? "Needs attention" : "Not created"
-  const statusTone = hasAddresses ? "green" : user ? "amber" : "slate"
+  const hasAnyAddress = Object.values(networkAddresses).some((entries) => entries.length > 0)
+  const baseReady = networkAddresses.base.length > 0
+  const solanaReady = networkAddresses.solana.length > 0
+  const lightningReady = networkAddresses.lightning.length > 0
+  const allPrimaryRailsReady = baseReady && solanaReady && lightningReady
+  const walletStatus = !hasAnyAddress ? "Not created" : allPrimaryRailsReady ? "Ready" : "Needs attention"
+  const statusTone = !hasAnyAddress ? "slate" : allPrimaryRailsReady ? "green" : "amber"
 
   function handlePrimaryAction() {
-    if (!hasAddresses) {
+    if (!hasAnyAddress) {
       setShowAuthFlow(true)
       return
     }
@@ -167,11 +217,15 @@ function PineTreeWalletRuntime() {
   }
 
   function ReceiveRow({ label, entries }: { label: string; entries: AddressEntry[] }) {
+    const ready = entries.length > 0
     return (
-      <div className="rounded-xl border border-gray-200/80 bg-white px-3 py-3 shadow-sm">
-        <p className="text-xs font-semibold text-gray-700">{label}</p>
-        <div className="mt-2 space-y-2">
-          {entries.length ? entries.map((entry) => (
+      <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.05)] sm:px-5 sm:py-5">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-semibold text-gray-800">{label}</p>
+          <ProviderStatusPill label={ready ? "Ready" : "Setup pending"} tone={ready ? "green" : "amber"} />
+        </div>
+        <div className="mt-3 space-y-3">
+          {ready ? entries.map((entry) => (
             <div key={entry.id} className="flex min-w-0 items-center gap-2">
               <div className="min-w-0 flex-1">
                 {entry.detail ? (
@@ -191,7 +245,7 @@ function PineTreeWalletRuntime() {
               </button>
             </div>
           )) : (
-            <p className="text-xs text-gray-400">Not available yet</p>
+            <p className="text-sm text-amber-700">Setup pending</p>
           )}
         </div>
       </div>
@@ -200,9 +254,9 @@ function PineTreeWalletRuntime() {
 
   return (
     <>
-      <article className="rounded-2xl border border-gray-200/80 bg-white/90 p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur sm:p-5">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="max-w-2xl">
+      <article className="min-h-[230px] rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-6 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:p-8">
+        <div className="flex h-full flex-wrap items-start justify-between gap-8">
+          <div className="max-w-2xl space-y-4">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base font-semibold text-gray-950">PineTree Wallet</h2>
               <ProviderStatusPill
@@ -210,26 +264,33 @@ function PineTreeWalletRuntime() {
                 tone={statusTone as "green" | "amber" | "slate"}
               />
             </div>
-            <p className="mt-2 text-sm leading-5 text-gray-600">
+            <p className="text-sm leading-6 text-gray-600">
               One merchant wallet for receiving funds and managing PineTree’s supported payment rails.
             </p>
-            <div className="mt-3 flex flex-wrap gap-2" aria-label="Supported rails">
+            <div className="flex flex-wrap gap-2.5" aria-label="Supported rails">
               {primaryRails.map((rail) => (
                 <span key={rail} className="rounded-full border border-blue-100 bg-blue-50/80 px-2.5 py-1 text-xs font-semibold text-blue-700">
                   {rail}
                 </span>
               ))}
             </div>
+            {!lightningReady && hasAnyAddress ? (
+              <p className="text-xs font-semibold text-amber-700">Bitcoin Lightning setup pending</p>
+            ) : null}
           </div>
           <button
             type="button"
             onClick={handlePrimaryAction}
             className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
           >
-            {hasAddresses ? "Open PineTree Wallet" : "Create PineTree Wallet"}
+            {hasAnyAddress ? "Open PineTree Wallet" : "Create PineTree Wallet"}
           </button>
         </div>
       </article>
+
+      {process.env.NODE_ENV !== "production" ? (
+        <WalletDiagnosticsPanel wallets={wallets} networkAddresses={networkAddresses} />
+      ) : null}
 
       {walletOpen ? (
         <div
@@ -243,13 +304,13 @@ function PineTreeWalletRuntime() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="pinetree-wallet-modal-title"
-            className="flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-[1.35rem] border border-white/70 bg-white/95 shadow-[0_28px_90px_rgba(15,23,42,0.28)] backdrop-blur-xl"
+            className="flex max-h-[92dvh] w-full max-w-4xl flex-col overflow-hidden rounded-[1.5rem] border border-white/70 bg-white/95 shadow-[0_32px_100px_rgba(15,23,42,0.30)] backdrop-blur-xl"
           >
-            <header className="flex items-start justify-between gap-3 border-b border-gray-100 px-4 py-4 sm:px-5">
+            <header className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-5 sm:px-7 sm:py-6">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 id="pinetree-wallet-modal-title" className="text-lg font-semibold text-gray-950">PineTree Wallet</h2>
-                  <ProviderStatusPill label="Ready" tone="green" />
+                  <ProviderStatusPill label={walletStatus} tone={statusTone as "green" | "amber" | "slate"} />
                 </div>
                 <p className="mt-1 text-xs text-gray-500">Merchant wallet profile</p>
               </div>
@@ -263,13 +324,13 @@ function PineTreeWalletRuntime() {
               </button>
             </header>
 
-            <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-gray-100 px-3 py-2 sm:px-4" aria-label="PineTree Wallet sections">
+            <nav className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-gray-100 px-4 py-3 sm:px-6" aria-label="PineTree Wallet sections">
               {walletTabs.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
-                  className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                  className={`shrink-0 rounded-xl px-4 py-2.5 text-xs font-semibold transition ${
                     activeTab === tab.id ? "bg-[#0052FF] text-white" : "text-gray-500 hover:bg-gray-100 hover:text-gray-800"
                   }`}
                 >
@@ -278,7 +339,7 @@ function PineTreeWalletRuntime() {
               ))}
             </nav>
 
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-7 sm:py-7">
               {activeTab === "overview" ? (
                 <div className="space-y-4">
                   <div>
@@ -287,11 +348,24 @@ function PineTreeWalletRuntime() {
                       PineTree Wallet keeps each supported rail organized under one business wallet experience.
                     </p>
                   </div>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    {["Base", "Solana", "Bitcoin Lightning / Spark"].map((rail) => (
-                      <div key={rail} className="rounded-xl border border-blue-100 bg-blue-50/60 px-3 py-3">
-                        <p className="text-xs font-semibold text-blue-800">{rail}</p>
-                        <p className="mt-1 text-[11px] text-blue-600">Supported rail</p>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {[
+                      { label: "Base", ready: baseReady },
+                      { label: "Solana", ready: solanaReady },
+                      { label: "Bitcoin Lightning / Spark", ready: lightningReady },
+                    ].map((rail) => (
+                      <div key={rail.label} className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-4 shadow-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-blue-900">{rail.label}</p>
+                          <ProviderStatusPill label={rail.ready ? "Ready" : "Setup pending"} tone={rail.ready ? "green" : "amber"} />
+                        </div>
+                        <p className="mt-2 text-xs text-blue-700">
+                          {rail.ready
+                            ? "Address available"
+                            : rail.label.startsWith("Bitcoin")
+                              ? "Bitcoin Lightning setup pending"
+                              : "Address setup pending"}
+                        </p>
                       </div>
                     ))}
                   </div>
@@ -299,14 +373,14 @@ function PineTreeWalletRuntime() {
               ) : null}
 
               {activeTab === "balances" ? (
-                <div className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200/80 bg-white">
+                <div className="divide-y divide-gray-100 overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-sm">
                   {[
                     ["Base balance", "Not available yet"],
                     ["Solana balance", "Not available yet"],
                     ["Bitcoin Lightning balance", "Not available yet"],
                   ].map(([label, value]) => (
-                    <div key={label} className="flex items-center justify-between gap-3 px-3 py-3 text-xs">
-                      <span className="font-semibold text-gray-700">{label}</span>
+                    <div key={label} className="flex items-center justify-between gap-4 px-4 py-5 text-sm sm:px-5">
+                      <span className="font-semibold text-gray-800">{label}</span>
                       <span className="text-gray-400">{value}</span>
                     </div>
                   ))}
@@ -328,7 +402,61 @@ function PineTreeWalletRuntime() {
               ) : null}
 
               {activeTab === "withdraw" ? (
-                <EmptyWalletPanel title="Withdrawals coming soon" detail="Withdrawal controls will be added in a future PineTree Wallet release." />
+                <div className="space-y-5">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-950">Prepare a withdrawal</p>
+                    <p className="mt-1 text-xs leading-5 text-gray-500">
+                      Withdrawals are not enabled yet. This screen is a safe preview of the merchant withdrawal flow.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-4 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4 shadow-inner shadow-white sm:p-5">
+                    <label className="block">
+                      <span className="text-xs font-semibold text-gray-700">Select rail</span>
+                      <select
+                        defaultValue="base"
+                        aria-label="Select withdrawal rail"
+                        className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      >
+                        <option value="base">Base</option>
+                        <option value="solana">Solana</option>
+                        <option value="bitcoin_lightning">Bitcoin Lightning</option>
+                      </select>
+                    </label>
+
+                    <label className="block">
+                      <span className="text-xs font-semibold text-gray-700">Destination address</span>
+                      <input
+                        type="text"
+                        inputMode="text"
+                        placeholder="Enter destination address"
+                        aria-label="Destination address"
+                        className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="text-xs font-semibold text-gray-700">Amount</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        aria-label="Withdrawal amount"
+                        className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      disabled
+                      className="h-11 cursor-not-allowed rounded-xl bg-gray-200 px-4 text-sm font-semibold text-gray-500"
+                    >
+                      Review withdrawal — coming soon
+                    </button>
+                  </div>
+                </div>
               ) : null}
 
               {activeTab === "activity" ? (
