@@ -471,7 +471,7 @@ function DocSectionOverview() {
           ["Base URL", "app.pinetree-payments.com"],
           ["API prefix", "Versioned REST routes"],
           ["Auth", "Bearer pt_live_..."],
-          ["Flat fee", "$0.15 / tx"],
+          ["Service fee", "$0.15 / tx"],
         ].map(([label, value]) => (
           <div key={label} className="rounded-2xl border border-gray-200/80 bg-gradient-to-br from-white to-blue-50/35 p-3 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">{label}</p>
@@ -782,7 +782,7 @@ const event = pinetree.webhooks.constructEvent(
           ["payment.confirmed", "On-chain confirmed — fulfill the order ✓"],
           ["payment.failed", "Payment failed at the network level"],
           ["payment.expired", "Payment expired before completion"],
-          ["payment.cancelled", "Payment was cancelled"],
+          ["payment.canceled", "Payment was canceled"],
           ["payment.refunded", "Payment was refunded"],
           ["payment.incomplete", "Session expired before payment"],
           ["payment.processing", "Transaction broadcast; awaiting confirmation"],
@@ -818,7 +818,7 @@ function DocSectionWebhookEvents() {
           ["payment.confirmed", "payment"],
           ["payment.failed", "payment"],
           ["payment.expired", "payment"],
-          ["payment.cancelled", "payment"],
+          ["payment.canceled", "payment"],
           ["payment.incomplete", "payment"],
           ["payment.refunded", "payment"],
           ["checkout.session.created", "checkout.session"],

@@ -21,7 +21,7 @@ describe("webhook event contract", () => {
       "payment.confirmed",
       "payment.failed",
       "payment.expired",
-      "payment.cancelled",
+      "payment.canceled",
       "payment.incomplete",
       "payment.refunded",
       "checkout.session.created",

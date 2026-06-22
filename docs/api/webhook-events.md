@@ -14,7 +14,7 @@ Use `eventId` for idempotency. Fulfill orders from `payment.confirmed` or `check
 | `payment.confirmed` | Payment reached final confirmed state | `payment` | Provider/network confirmation |
 | `payment.failed` | Payment failed | `payment` | Provider/network/payment attempt failed |
 | `payment.expired` | Payment expired | `payment` | Provider or payment window expired |
-| `payment.cancelled` | Payment was cancelled | `payment` | Cancelled state emitted by engine or test delivery |
+| `payment.canceled` | Payment was canceled | `payment` | Canceled state emitted by engine or test delivery |
 | `payment.incomplete` | Payment was abandoned or could not be completed | `payment` | Stale/abandoned payment marked incomplete |
 | `payment.refunded` | Payment was refunded | `payment` | Refunded state emitted by engine or test delivery |
 | `checkout.session.created` | Checkout session was created | `checkout.session` | Session creation succeeds |
@@ -27,7 +27,7 @@ Use `eventId` for idempotency. Fulfill orders from `payment.confirmed` or `check
 | `payment_link.disabled` | Payment link was disabled | `payment_link` | Payment link disabled/archived in implementation |
 | `payment_link.expired` | Payment link expired | `payment_link` | Payment link expiration |
 
-Legacy compatibility: `checkout.session.paid` is accepted and normalized to `checkout.session.completed`. It should not be used for new integrations.
+Legacy compatibility: `checkout.session.paid` is accepted and normalized to `checkout.session.completed`. `payment.cancelled` (British spelling) is accepted and normalized to `payment.canceled`. Neither should be used for new integrations.
 
 ## Event envelope
 
@@ -133,9 +133,9 @@ Fires when a provider, network, or payment attempt fails. Object type: `payment`
 
 Fires when a payment expires. Object type: `payment`. Retryable: yes. Status mapping: visible `Expired`.
 
-### payment.cancelled
+### payment.canceled
 
-Fires when a payment is cancelled. Object type: `payment`. Retryable: yes. Status mapping: visible `Incomplete` for dashboard display compatibility.
+Fires when a payment is canceled. Object type: `payment`. Retryable: yes. Status mapping: visible `Incomplete` for dashboard display compatibility. Legacy spelling `payment.cancelled` is accepted and normalized.
 
 ### payment.incomplete
 

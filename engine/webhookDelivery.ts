@@ -487,7 +487,7 @@ export async function testWebhookDelivery(
       : canonicalEvent === "payment.pending" ? "PENDING"
       : canonicalEvent === "payment.processing" ? "PROCESSING"
       : canonicalEvent === "payment.expired" ? "EXPIRED"
-      : canonicalEvent === "payment.cancelled" ? "CANCELLED"
+      : canonicalEvent === "payment.canceled" ? "CANCELLED"
       : canonicalEvent === "payment.refunded" ? "REFUNDED"
       : "INCOMPLETE",
     reference: "test_event",

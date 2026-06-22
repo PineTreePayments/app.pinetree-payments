@@ -129,9 +129,12 @@ export type PaymentEventType =
   | "payment.confirmed"
   | "payment.failed"
   | "payment.expired"
-  | "payment.cancelled"
+  | "payment.canceled"
   | "payment.incomplete"
   | "payment.refunded"
+
+/** @deprecated Use "payment.canceled" — legacy British spelling accepted but normalized */
+export type LegacyPaymentEventType = "payment.cancelled"
 
 export type CheckoutSessionEventType =
   | "checkout.session.created"

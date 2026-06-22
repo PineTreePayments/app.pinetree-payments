@@ -9,7 +9,7 @@ export const SUPPORTED_WEBHOOK_EVENTS = [
   "payment.confirmed",
   "payment.failed",
   "payment.expired",
-  "payment.cancelled",
+  "payment.canceled",
   "payment.incomplete",
   "payment.refunded",
   "checkout.session.created",
@@ -25,6 +25,7 @@ export const SUPPORTED_WEBHOOK_EVENTS = [
 
 export const LEGACY_WEBHOOK_EVENTS = [
   "checkout.session.paid",
+  "payment.cancelled",
 ] as const
 
 export type CanonicalWebhookEvent = typeof SUPPORTED_WEBHOOK_EVENTS[number]
@@ -33,6 +34,7 @@ export type WebhookEvent = CanonicalWebhookEvent | LegacyWebhookEvent
 
 export function normalizeWebhookEventType(event: string): CanonicalWebhookEvent | null {
   if (event === "checkout.session.paid") return "checkout.session.completed"
+  if (event === "payment.cancelled") return "payment.canceled"
   return (SUPPORTED_WEBHOOK_EVENTS as readonly string[]).includes(event)
     ? event as CanonicalWebhookEvent
     : null
