@@ -41,6 +41,7 @@ export type StripeCreatePaymentInput = {
   pinetreeWallet?: string
   merchantId?: string
   providerApiKey?: string
+  stripeConnectedAccountId?: string
 }
 
 export type StripePaymentIntentRequest = {
@@ -50,6 +51,8 @@ export type StripePaymentIntentRequest = {
     enabled: true
   }
   metadata: Record<string, string>
+  // TODO: Add application_fee_amount only after Stripe fee settlement and
+  // reconciliation are explicitly supported by PineTree's fee model.
 }
 
 export type StripeNormalizedPayment = {

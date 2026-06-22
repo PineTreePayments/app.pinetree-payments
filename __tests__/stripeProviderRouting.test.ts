@@ -51,7 +51,8 @@ describe("Stripe provider routing gate", () => {
         status: "active",
         enabled: true,
         credentials: {
-          application_status: "pending"
+          stripe_account_id: "acct_123",
+          charges_enabled: false
         }
       }
     ])
@@ -63,7 +64,7 @@ describe("Stripe provider routing gate", () => {
     })).rejects.toThrow("Requested payment adapter is not connected: stripe")
   })
 
-  it("routes approved Stripe providers", async () => {
+  it("routes Stripe providers with charges enabled", async () => {
     mocks.getMerchantProviders.mockResolvedValue([
       {
         merchant_id: "merchant_1",
@@ -71,7 +72,8 @@ describe("Stripe provider routing gate", () => {
         status: "active",
         enabled: true,
         credentials: {
-          application_status: "approved"
+          stripe_account_id: "acct_123",
+          charges_enabled: true
         }
       }
     ])

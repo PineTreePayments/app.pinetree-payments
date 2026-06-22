@@ -28,6 +28,7 @@ import {
   validateConfigOnce
 } from "./config"
 import { getMerchantCredential } from "@/database/merchants"
+import { getMerchantStripeAccountId } from "./stripeConnect"
 import { getMerchantNwcUriForPayment } from "./lightningNwc"
 import { getMerchantSpeedProvider, SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { getMarketPricesUSD } from "./marketPrices"
@@ -117,6 +118,7 @@ type CreatePaymentResult = {
   asset?: string
   baseUsdcStrategy?: string
   clientSecret?: string
+  stripeAccountId?: string
 }
 
 export type BuildCreatePaymentRequestInput = {
@@ -417,6 +419,9 @@ export async function createPayment(
   // ✅ ENGINE NOW PASSES FULL SPLIT DATA TO PROVIDER
   // No more single amount, provider receives exact split values
   const providerApiKey = await getProviderApiKey(providerName, input.merchantId)
+  const stripeConnectedAccountId = providerName === "stripe"
+    ? await getMerchantStripeAccountId(input.merchantId)
+    : undefined
 
   // Resolve NWC URI from database before calling the provider.
   // The provider adapter must not query the database — all DB reads happen here in the engine.
@@ -472,7 +477,8 @@ export async function createPayment(
         pinetreeWallet,
         merchantId: input.merchantId,
         network,
-        providerApiKey
+        providerApiKey,
+        stripeConnectedAccountId
       })
 
   // Use the provider's declared feeCaptureMethod if available.
@@ -580,9 +586,6 @@ export async function createPayment(
         ...((network === "bitcoin_lightning" && (providerPayment as { metadata?: Record<string, unknown> } | null)?.metadata)
           ? { lightningProviderMetadata: (providerPayment as { metadata?: Record<string, unknown> }).metadata }
           : {}),
-        ...((network === "stripe" && (providerPayment as { clientSecret?: string } | null)?.clientSecret)
-          ? { stripeClientSecret: (providerPayment as { clientSecret?: string }).clientSecret }
-          : {}),
         ...(baseUsdcStrategy ? { baseUsdcStrategy } : {}),
         ...(isBaseV7Payment ? { baseVersion: "v7" as const } : {}),
         ...((network === "solana" || network === "base") && requestedAsset === "USDC" ? { asset: "USDC" } : {})
@@ -658,7 +661,10 @@ export async function createPayment(
     nativeSymbol: String(splitPayment.nativeSymbol || "").toUpperCase() || undefined,
     asset: network === "solana" || network === "base" ? requestedAsset : input.asset,
     baseUsdcStrategy,
-    clientSecret: stripeClientSecret
+    clientSecret: stripeClientSecret,
+    ...(network === "stripe" && stripeConnectedAccountId
+      ? { stripeAccountId: stripeConnectedAccountId }
+      : {})
   }
   } catch (error) {
     if (claimedIdempotencyKey && input.idempotencyKey) {

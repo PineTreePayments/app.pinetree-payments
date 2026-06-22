@@ -54,9 +54,41 @@ describe("Stripe checkout path", () => {
     expect(ENGINE_INTENTS).toMatch(/SUPPORTED_NETWORKS[\s\S]*stripe|stripe[\s\S]*SUPPORTED_NETWORKS/)
   })
 
-  it("engine returns clientSecret for Stripe in both payment paths", () => {
+  it("engine returns clientSecret from fresh Stripe payment creation only", () => {
     expect(ENGINE_INTENTS).toContain("clientSecret: payment.clientSecret")
-    expect(ENGINE_INTENTS).toContain("clientSecret: reuseClientSecret")
+    expect(ENGINE_INTENTS).toContain('normalizedNetwork !== "stripe"')
+  })
+
+  it("Stripe checkout response includes its connected account context", () => {
+    const stripeResponse = ENGINE_INTENTS.slice(
+      ENGINE_INTENTS.indexOf('if (normalizedNetwork === "stripe")', ENGINE_INTENTS.indexOf("const estimatedSats")),
+      ENGINE_INTENTS.indexOf("\n    return {", ENGINE_INTENTS.indexOf('if (normalizedNetwork === "stripe")', ENGINE_INTENTS.indexOf("const estimatedSats")))
+    )
+    expect(stripeResponse).toContain("paymentId: payment.id")
+    expect(stripeResponse).toContain("provider: payment.provider")
+    expect(stripeResponse).toContain("network: normalizedNetwork")
+    expect(stripeResponse).toContain("clientSecret: payment.clientSecret")
+    expect(stripeResponse).toContain("stripeAccountId: payment.stripeAccountId")
+    expect(stripeResponse).not.toContain("credentials")
+    expect(ENGINE_CREATE).toContain("stripeAccountId?: string")
+  })
+
+  it("Shift4 response does not include stripeAccountId", () => {
+    expect(ENGINE_CREATE).toContain('network === "stripe" && stripeConnectedAccountId')
+    expect(ENGINE_INTENTS).toContain('if (normalizedNetwork === "stripe")')
+    const nonStripeResponse = ENGINE_INTENTS.slice(
+      ENGINE_INTENTS.indexOf("\n    return {", ENGINE_INTENTS.indexOf('if (normalizedNetwork === "stripe")', ENGINE_INTENTS.indexOf("const estimatedSats"))),
+      ENGINE_INTENTS.indexOf("\n  } catch", ENGINE_INTENTS.indexOf("const estimatedSats"))
+    )
+    expect(nonStripeResponse).not.toContain("stripeAccountId")
+  })
+
+  it("checkout responses never return credentials or Stripe server secrets", () => {
+    for (const source of [SELECT_NETWORK_ROUTE, ENGINE_INTENTS]) {
+      expect(source).not.toContain("STRIPE_SECRET_KEY")
+      expect(source).not.toContain("STRIPE_WEBHOOK_SECRET")
+    }
+    expect(SELECT_NETWORK_ROUTE).not.toContain("credentials")
   })
 
   it("createPayment engine surfaces clientSecret in result", () => {
@@ -64,9 +96,18 @@ describe("Stripe checkout path", () => {
     expect(ENGINE_CREATE).toContain("clientSecret: stripeClientSecret")
   })
 
+  it("does not persist the Stripe client secret in payment metadata", () => {
+    expect(ENGINE_CREATE).not.toContain("stripeClientSecret:")
+  })
+
   it("StripeCardPayment uses PaymentElement (not raw card fields)", () => {
     expect(STRIPE_COMPONENT).toContain("PaymentElement")
     expect(STRIPE_COMPONENT).toContain("confirmPayment")
+    expect(STRIPE_COMPONENT).toContain('redirect: "if_required"')
+    expect(STRIPE_COMPONENT).toContain("Loading card form")
+    expect(STRIPE_COMPONENT).toContain("Payment ready")
+    expect(STRIPE_COMPONENT).toContain("Processing payment")
+    expect(STRIPE_COMPONENT).toContain("stripeAccount: stripeAccountId")
   })
 
   it("StripeCardPayment uses the published key env var — not the secret key", () => {
@@ -83,5 +124,6 @@ describe("Stripe checkout path", () => {
   it("select-network route passes result directly — no server-side secret key exposure", () => {
     expect(SELECT_NETWORK_ROUTE).not.toContain("STRIPE_SECRET_KEY")
     expect(SELECT_NETWORK_ROUTE).not.toContain("STRIPE_WEBHOOK_SECRET")
+    expect(SELECT_NETWORK_ROUTE).not.toContain("credentials")
   })
 })

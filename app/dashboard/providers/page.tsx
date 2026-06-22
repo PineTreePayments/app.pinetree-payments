@@ -1598,6 +1598,14 @@ function EngineSettingStatus({
     providerKey: CardOnboardingProvider,
     provider?: ProviderRecord | null
   ): CardApplicationStatus {
+    if (providerKey === "stripe") {
+      const creds = provider?.credentials
+      if (Boolean(creds?.charges_enabled)) return "Approved"
+      if (Boolean(creds?.details_submitted) || Boolean(creds?.stripe_account_id)) return "Pending"
+      if (getCardProviderStatusOverride(providerKey) === "Pending") return "Pending"
+      return "Not started"
+    }
+
     const applicationStatus = String(provider?.credentials?.application_status || provider?.status || "").trim().toLowerCase()
     if (applicationStatus === "approved" || applicationStatus === "active" || applicationStatus === "connected") return "Approved"
     if (applicationStatus === "denied" || applicationStatus === "declined" || applicationStatus === "rejected") return "Denied"
@@ -1614,6 +1622,13 @@ function EngineSettingStatus({
     if (displayStatus.label === "Connected") return "Approved"
     if (displayStatus.label === "Pending" || getCardProviderStatusOverride(providerKey) === "Pending") return "Pending"
     return "Not started"
+  }
+
+  function getStripeConnectCtaLabel(p: ProviderRecord | undefined): string {
+    const creds = p?.credentials
+    if (!creds?.stripe_account_id) return "Start Stripe Setup"
+    if (Boolean(creds.charges_enabled)) return "Start Stripe Setup"
+    return "Continue Setup"
   }
 
   function ProviderCard({
@@ -1648,7 +1663,9 @@ function EngineSettingStatus({
         ? `Lightning • ${lightningWalletLabel}`
         : ""
     const primaryActionLabel = isManagedCard
-      ? getCardProviderSetupCta(provider)
+      ? provider === "stripe"
+        ? getStripeConnectCtaLabel(p)
+        : getCardProviderSetupCta(provider)
       : connected
         ? "Disconnect"
         : provider === "lightning"

@@ -1,4 +1,5 @@
 import { supabase, supabaseAdmin } from "@/database"
+import { startStripeConnectOnboarding } from "./stripeConnect"
 
 const db = supabaseAdmin || supabase
 
@@ -87,6 +88,10 @@ export async function startCardProviderSetup(args: {
   provider: CardSetupProvider
   returnUrl: string
 }): Promise<{ ok: true; url: string; applicationStatus: "pending" } | { ok: false; error: string }> {
+  if (args.provider === "stripe") {
+    return startStripeConnectOnboarding({ merchantId: args.merchantId })
+  }
+
   const redirectUrl = buildCardSetupRedirectUrl(args.provider, args.returnUrl)
   if (!redirectUrl) {
     return { ok: false, error: "Setup link not configured yet." }

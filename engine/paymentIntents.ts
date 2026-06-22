@@ -390,14 +390,17 @@ export async function selectPaymentIntentNetworkEngine(input: {
       const existingNetwork = String(existingPayment.network || "").toLowerCase().trim()
       const existingMeta = (existingPayment.metadata ?? null) as {
         selectedAsset?: string
-        split?: { baseUsdcStrategy?: string; splitContract?: string; stripeClientSecret?: string }
+        split?: { baseUsdcStrategy?: string; splitContract?: string }
       } | null
       const existingSelectedAsset = String(existingMeta?.selectedAsset || "").toUpperCase()
       const isSameNetwork = existingNetwork === normalizedNetwork
       const isSameAsset = !selectedAsset || existingSelectedAsset === String(selectedAsset || "").toUpperCase()
       const isActiveStatus = existingStatus === "CREATED" || existingStatus === "PENDING" || existingStatus === "PROCESSING"
 
-      if (isActiveStatus && isSameNetwork && isSameAsset) {
+      // Stripe client secrets are deliberately never persisted. A repeated Stripe
+      // selection therefore creates a fresh PaymentIntent instead of returning an
+      // unusable response or storing a reusable secret in PineTree metadata.
+      if (isActiveStatus && isSameNetwork && isSameAsset && normalizedNetwork !== "stripe") {
         const existingSplit = existingMeta?.split
         const reuseStrategy = existingSplit?.baseUsdcStrategy === "v7_eip3009_relayer"
           ? "v7_eip3009_relayer" as const
@@ -417,10 +420,6 @@ export async function selectPaymentIntentNetworkEngine(input: {
           durationMs: Date.now() - startedAt
         })
 
-        const reuseClientSecret = normalizedNetwork === "stripe"
-          ? String(existingMeta?.split?.stripeClientSecret || "").trim() || undefined
-          : undefined
-
         return {
           intentId: intent.id,
           paymentId: existingPayment.id,
@@ -438,7 +437,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
           nativeSymbol: undefined,
           estimatedSats: reuseEstimatedSats,
           baseUsdcStrategy: reuseStrategy,
-          clientSecret: reuseClientSecret,
+          clientSecret: undefined,
           metadata: {
             split: {
               baseUsdcStrategy: reuseStrategy,
@@ -528,6 +527,16 @@ export async function selectPaymentIntentNetworkEngine(input: {
     const estimatedSats = normalizedNetwork === "bitcoin_lightning"
       ? getLightningEstimatedSats()
       : undefined
+
+    if (normalizedNetwork === "stripe") {
+      return {
+        paymentId: payment.id,
+        provider: payment.provider,
+        network: normalizedNetwork,
+        clientSecret: payment.clientSecret,
+        stripeAccountId: payment.stripeAccountId
+      }
+    }
 
     return {
       intentId: intent.id,

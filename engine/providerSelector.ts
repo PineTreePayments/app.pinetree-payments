@@ -33,7 +33,13 @@ function merchantProviderCanProcessPayments(provider: {
   if (provider.enabled === false) return false
 
   const adapterId = normalizeProvider(provider.provider)
-  if (adapterId === "stripe" || adapterId === "fluidpay") {
+  if (adapterId === "stripe") {
+    const credentials = provider.credentials && typeof provider.credentials === "object"
+      ? provider.credentials as Record<string, unknown>
+      : {}
+    return provider.enabled === true && credentials.charges_enabled === true
+  }
+  if (adapterId === "fluidpay") {
     return getApplicationStatus(provider.credentials) === "approved"
   }
 

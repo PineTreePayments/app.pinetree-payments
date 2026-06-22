@@ -42,7 +42,7 @@ export function buildStripePaymentIntentRequest(
 
   return {
     amount: stripeAmountToMinorUnits(input.grossAmount),
-    currency: String(input.currency || "").trim().toLowerCase(),
+    currency: String(input.currency || "usd").trim().toLowerCase() || "usd",
     automatic_payment_methods: {
       enabled: true
     },
@@ -51,7 +51,8 @@ export function buildStripePaymentIntentRequest(
       pinetree_payment_id: paymentId,
       merchantId,
       pinetree_merchant_id: merchantId,
-      provider: "pinetree"
+      provider: "stripe",
+      network: "stripe"
     }
   }
 }
@@ -61,7 +62,9 @@ export async function createPayment(
 ): Promise<StripeNormalizedPayment> {
   const client = new StripeClient({ secretKey: input.providerApiKey || undefined })
   const request = buildStripePaymentIntentRequest(input)
-  const response = await client.createPaymentIntent(request, input.paymentId)
+  const connectedAccountId = String(input.stripeConnectedAccountId || "").trim()
+  if (!connectedAccountId) throw new Error("Stripe connected account not configured")
+  const response = await client.createPaymentIntent(request, input.paymentId, connectedAccountId)
 
   return {
     provider: "stripe",

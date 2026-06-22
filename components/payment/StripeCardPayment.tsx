@@ -1,15 +1,11 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useMemo } from "react"
 import { loadStripe } from "@stripe/stripe-js"
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js"
 import Button from "@/components/ui/Button"
 
 // Singleton promise — created once per page load, never re-created.
-const stripePromise = typeof window !== "undefined" && process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
-  ? loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY)
-  : null
-
 type StripePaymentFormProps = {
   onSuccess: () => void
   onError: (message: string) => void
@@ -19,6 +15,7 @@ function StripePaymentForm({ onSuccess, onError }: StripePaymentFormProps) {
   const stripe = useStripe()
   const elements = useElements()
   const [submitting, setSubmitting] = useState(false)
+  const [ready, setReady] = useState(false)
 
   const handlePay = useCallback(async () => {
     if (!stripe || !elements) return
@@ -44,12 +41,15 @@ function StripePaymentForm({ onSuccess, onError }: StripePaymentFormProps) {
 
   return (
     <div className="space-y-4">
-      <PaymentElement />
+      <p className="text-xs text-gray-500" role="status">
+        {ready ? "Payment ready" : "Loading card form"}
+      </p>
+      <PaymentElement onReady={() => setReady(true)} />
       <Button fullWidth disabled={submitting || !stripe || !elements} onClick={() => void handlePay()}>
         {submitting ? (
           <>
             <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
-            Processing…
+            Processing payment…
           </>
         ) : "Pay Now"}
       </Button>
@@ -59,12 +59,19 @@ function StripePaymentForm({ onSuccess, onError }: StripePaymentFormProps) {
 
 type StripeCardPaymentProps = {
   clientSecret: string
+  stripeAccountId: string
   onSuccess: () => void
   onError: (message: string) => void
 }
 
-export function StripeCardPayment({ clientSecret, onSuccess, onError }: StripeCardPaymentProps) {
-  if (!stripePromise || !clientSecret) return null
+export function StripeCardPayment({ clientSecret, stripeAccountId, onSuccess, onError }: StripeCardPaymentProps) {
+  const stripePromise = useMemo(() => {
+    const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+    if (!publishableKey || !stripeAccountId) return null
+    return loadStripe(publishableKey, { stripeAccount: stripeAccountId })
+  }, [stripeAccountId])
+
+  if (!stripePromise || !clientSecret || !stripeAccountId) return null
 
   return (
     <Elements stripe={stripePromise} options={{ clientSecret }}>

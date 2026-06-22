@@ -49,7 +49,8 @@ describe("Stripe provider adapter", () => {
         pinetree_payment_id: "pay_123",
         merchantId: "merchant_1",
         pinetree_merchant_id: "merchant_1",
-        provider: "pinetree"
+        provider: "stripe",
+        network: "stripe"
       }
     })
   })
@@ -76,7 +77,8 @@ describe("Stripe provider adapter", () => {
       pinetreeFee: 0.15,
       grossAmount: 10.15,
       currency: "USD",
-      merchantId: "merchant_1"
+      merchantId: "merchant_1",
+      stripeConnectedAccountId: "acct_123"
     })).resolves.toMatchObject({
       provider: "stripe",
       providerReference: "pi_123",
@@ -94,7 +96,8 @@ describe("Stripe provider adapter", () => {
         headers: expect.objectContaining({
           Authorization: `Basic ${Buffer.from("sk_test_123:").toString("base64")}`,
           "Content-Type": "application/x-www-form-urlencoded",
-          "Idempotency-Key": "pay_123"
+          "Idempotency-Key": "pay_123",
+          "Stripe-Account": "acct_123"
         })
       })
     )
@@ -105,6 +108,8 @@ describe("Stripe provider adapter", () => {
     expect(body.get("automatic_payment_methods[enabled]")).toBe("true")
     expect(body.get("metadata[paymentId]")).toBe("pay_123")
     expect(body.get("metadata[merchantId]")).toBe("merchant_1")
+    expect(body.get("metadata[provider]")).toBe("stripe")
+    expect(body.get("metadata[network]")).toBe("stripe")
   })
 
   it("blocks createPayment before a real API call when the Stripe secret key is missing", async () => {
@@ -224,4 +229,3 @@ describe("Stripe provider adapter", () => {
     })
   })
 })
-

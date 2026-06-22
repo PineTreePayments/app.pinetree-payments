@@ -109,6 +109,7 @@ export interface ProviderAdapter {
     merchantId?: string
     network?: string
     providerApiKey?: string
+    stripeConnectedAccountId?: string
   }): Promise<{
     providerReference: string
     paymentUrl?: string

@@ -276,6 +276,7 @@ export default function PayClient() {
 
   // ── Stripe inline card payment state ──────────────────────────────────────
   const [stripeClientSecret, setStripeClientSecret] = useState("")
+  const [stripeAccountId, setStripeAccountId] = useState("")
   const [stripeLoading, setStripeLoading] = useState(false)
   const [stripeError, setStripeError] = useState("")
 
@@ -397,12 +398,14 @@ export default function PayClient() {
       setSelectedAssetId("")
       setShift4Error("")
       setStripeClientSecret("")
+      setStripeAccountId("")
       setStripeError("")
       return
     }
     setSelectedAssetId(assetId)
     setShift4Error("")
     setStripeClientSecret("")
+    setStripeAccountId("")
     setStripeError("")
   }
 
@@ -474,13 +477,21 @@ export default function PayClient() {
         const err = (await res.json()) as { error?: string }
         throw new Error(err.error || "Failed to prepare Stripe checkout")
       }
-      const result = (await res.json()) as { clientSecret?: string; paymentId?: string }
+      const result = (await res.json()) as {
+        clientSecret?: string
+        paymentId?: string
+        provider?: string
+        network?: string
+        stripeAccountId?: string
+      }
       if (result.paymentId) {
         void loadIntentCallback()
       }
       const secret = String(result.clientSecret || "").trim()
-      if (!secret) throw new Error("Stripe checkout is not available right now. Please try again.")
+      const accountId = String(result.stripeAccountId || "").trim()
+      if (!secret || !accountId) throw new Error("Stripe checkout is not available right now. Please try again.")
       setStripeClientSecret(secret)
+      setStripeAccountId(accountId)
     } catch (err) {
       setStripeError((err as Error).message || "Failed to start Stripe checkout")
     } finally {
@@ -1479,6 +1490,7 @@ export default function PayClient() {
                             {stripeClientSecret ? (
                               <StripeCardPayment
                                 clientSecret={stripeClientSecret}
+                                stripeAccountId={stripeAccountId}
                                 onSuccess={() => {
                                   setStripeError("")
                                   void loadIntentCallback()

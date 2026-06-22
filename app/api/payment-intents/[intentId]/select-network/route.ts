@@ -103,7 +103,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     console.info("[api/select-network] returning paymentUrl", {
       intentId,
-      network: result.network || result.selectedNetwork,
+      network: result.network,
       paymentId: result.paymentId,
       paymentUrl: result.paymentUrl
     })
