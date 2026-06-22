@@ -315,10 +315,13 @@ type DocSection =
   | "authentication"
   | "api-keys"
   | "checkout-sessions"
+  | "browser-checkout"
   | "payments"
+  | "session-statuses"
   | "rails-assets"
   | "payment-states"
   | "webhooks"
+  | "webhook-payload"
   | "webhook-events"
   | "webhook-deliveries"
   | "errors"
@@ -326,6 +329,8 @@ type DocSection =
   | "sdks"
   | "testing"
   | "go-live"
+  | "not-yet-supported"
+  | "support"
 
 const docNav: { id: DocSection; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -333,10 +338,13 @@ const docNav: { id: DocSection; label: string }[] = [
   { id: "authentication", label: "Authentication" },
   { id: "api-keys", label: "API Keys" },
   { id: "checkout-sessions", label: "Checkout Sessions" },
+  { id: "browser-checkout", label: "Browser Checkout" },
   { id: "payments", label: "Payments" },
+  { id: "session-statuses", label: "Session Statuses" },
   { id: "rails-assets", label: "Rails & Assets" },
   { id: "payment-states", label: "Payment States" },
   { id: "webhooks", label: "Webhooks" },
+  { id: "webhook-payload", label: "Webhook Payload" },
   { id: "webhook-events", label: "Webhook Events" },
   { id: "webhook-deliveries", label: "Webhook Deliveries" },
   { id: "errors", label: "Errors" },
@@ -344,6 +352,8 @@ const docNav: { id: DocSection; label: string }[] = [
   { id: "sdks", label: "SDKs" },
   { id: "testing", label: "Testing" },
   { id: "go-live", label: "Go Live" },
+  { id: "not-yet-supported", label: "Not Yet Supported" },
+  { id: "support", label: "Support" },
 ]
 
 function CodeBlock({ children }: { children: string }) {
@@ -407,6 +417,11 @@ function DocTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
           {cell}
         </span>
       )
+    }
+
+    const textCols = ["description", "meaning", "notes", "grants", "when", "use", "terminal", "capability"]
+    if (textCols.includes(normalizedHeader)) {
+      return <span className="text-[12.5px] leading-5 text-gray-600">{cell}</span>
     }
 
     return <code className="font-mono text-[11px] font-semibold text-blue-800">{cell}</code>
@@ -488,7 +503,7 @@ function DocSectionOverview() {
           ["ETH on Base", "base", "Ready"],
           ["USDC on Base", "base", "Ready"],
           ["BTC over Lightning", "bitcoin_lightning", "Ready"],
-          ["Cards / Shift4", "shift4", "Ready"],
+          ["Cards / Shift4", "shift4", "Approved merchants"],
         ]}
       />
       <DocH2>Core concepts</DocH2>
@@ -587,7 +602,9 @@ Content-Type: application/json`}</CodeBlock>
         rows={[
           ["checkout.sessions:create", "Create checkout sessions"],
           ["checkout.sessions:read", "List and retrieve sessions"],
+          ["checkout.sessions:write", "Cancel or expire sessions"],
           ["payments:read", "Retrieve payment objects"],
+          ["checkout.links:create", "Create payment links where enabled"],
           ["webhooks:read", "List webhook deliveries"],
           ["webhooks:write", "Retry webhook deliveries"],
         ]}
@@ -621,6 +638,7 @@ function DocSectionApiKeys() {
           ["checkout.sessions:read", "List and retrieve sessions"],
           ["checkout.sessions:write", "Cancel or expire sessions"],
           ["payments:read", "Retrieve payments"],
+          ["checkout.links:create", "Create payment links where enabled"],
           ["webhooks:read", "List webhook deliveries"],
           ["webhooks:write", "Retry webhook deliveries"],
         ]}
@@ -643,6 +661,11 @@ function DocSectionCheckoutSessions() {
       <RouteRow method="GET" path="/checkout/sessions/{id}" description="Retrieve a single session by ID." />
       <RouteRow method="POST" path="/checkout/sessions/{id}/cancel" description="Cancel an open session." />
       <RouteRow method="POST" path="/checkout/sessions/{id}/expire" description="Immediately expire a session." />
+      <RouteRow method="POST" path="/browser/checkout/sessions" description="Create a session from browser code. Authenticate with X-PineTree-Public-Key: pk_live_* (no secret key)." />
+      <div className="my-3 rounded-2xl border border-blue-200/80 bg-blue-50/60 p-3.5 text-xs leading-5 text-blue-800">
+        <strong>checkoutUrl is opaque.</strong> Always redirect customers directly to the <code className="rounded bg-blue-100 px-1 text-xs">checkoutUrl</code> value returned in the response.
+        Do not construct checkout URLs manually — the format is an internal token path that may change between API versions.
+      </div>
       <DocH2>Create session example</DocH2>
       <CodeBlock>{`const session = await pinetree.checkout.sessions.create(
   {
@@ -696,7 +719,10 @@ function DocSectionPayments() {
       <CodeBlock>{`CREATED → PENDING → PROCESSING → CONFIRMED (status: "paid")
                              └→ FAILED    (status: "failed")
               └→ INCOMPLETE               (status: "incomplete")`}</CodeBlock>
-      <p className="mt-3 text-xs leading-5 text-gray-600">Terminal states are permanent. Use <code className="rounded-lg bg-blue-50 px-1 text-xs text-blue-800 ring-1 ring-blue-100">payment.confirmed</code> webhook for order fulfillment.</p>
+      <div className="mt-3 rounded-2xl border border-amber-200/80 bg-amber-50/70 p-3.5 text-xs leading-5 text-amber-800">
+        <strong>Status naming:</strong> The API returns <code className="rounded bg-amber-100 px-1 text-xs">status: &quot;paid&quot;</code> when a payment is confirmed — not <code className="rounded bg-amber-100 px-1 text-xs">&quot;confirmed&quot;</code>.
+        The visible merchant state is called <strong>Confirmed</strong>. For fulfillment use the <code className="rounded bg-amber-100 px-1 text-xs">payment.confirmed</code> webhook. For polling, check <code className="rounded bg-amber-100 px-1 text-xs">status === &quot;paid&quot;</code>.
+      </div>
     </div>
   )
 }
@@ -713,7 +739,7 @@ function DocSectionRailsAssets() {
           ["solana", "SOL on Solana, USDC on Solana"],
           ["base", "ETH on Base, USDC on Base"],
           ["bitcoin_lightning", "BTC over Lightning"],
-          ["shift4", "Card/USD through Shift4 where enabled"],
+          ["shift4", "Card/USD through Shift4 — approved merchants only"],
         ]}
       />
       <DocH2>Hosted checkout selections</DocH2>
@@ -766,6 +792,7 @@ function DocSectionWebhooks() {
           ["PineTree-Timestamp", "ISO 8601 — must be within 5 minutes"],
           ["PineTree-Event-Id", "Unique event ID for deduplication"],
           ["PineTree-Event-Schema", "payments-v1"],
+          ["PineTree-Webhook-Version", "Legacy compatibility — also payments-v1. Prefer PineTree-Event-Schema."],
         ]}
       />
       <DocH2>Signature verification</DocH2>
@@ -864,6 +891,11 @@ function DocSectionWebhookDeliveries() {
           ["dead_letter", "Delivery requires operator attention"],
         ]}
       />
+      <DocH2>Retry schedule</DocH2>
+      <p className="mb-2 text-xs leading-5 text-gray-600">
+        Failed deliveries are retried with exponential backoff. After 10 attempts the delivery moves to <code className="rounded-lg bg-blue-50 px-1 text-xs text-blue-800 ring-1 ring-blue-100">dead_letter</code>.
+        Delay sequence: 60s → 120s → 240s → 480s → 960s → 1800s → 3600s (×4).
+      </p>
       <DocH2>Retry a failed delivery</DocH2>
       <CodeBlock>{`const delivery = await pinetree.webhookDeliveries.retry("wdel_01abc...")
 console.log(delivery.status)       // "delivered" if retry succeeded
@@ -972,7 +1004,7 @@ function DocSectionTesting() {
       <DocH2>Platform test suite</DocH2>
       <CodeBlock>{`npm run lint       # 0 errors
 npm run typecheck  # 0 errors
-npx vitest run     # 506 tests pass
+npx vitest run     # all tests pass
 npm run build      # clean build`}</CodeBlock>
       <DocH2>Test webhooks locally</DocH2>
       <CodeBlock>{`ngrok http 3000
@@ -1038,16 +1070,194 @@ function DocSectionGoLive() {
   )
 }
 
+function DocSectionBrowserCheckout() {
+  return (
+    <div>
+      <DocH1 eyebrow="Frontend Integration" description="Create checkout sessions from browser code using a pk_live_* public key. Never use secret keys in the browser.">
+        Browser Checkout
+      </DocH1>
+      <div className="mb-4 rounded-2xl border border-amber-200/80 bg-amber-50/70 p-3.5 text-xs leading-5 text-amber-800">
+        <strong>Public keys only.</strong> Never use <code className="rounded bg-amber-100 px-1 text-xs">pt_live_*</code> secret keys in browser code.
+        Use <code className="rounded bg-amber-100 px-1 text-xs">pk_live_*</code> public keys for all frontend checkout flows. Public keys can only create checkout sessions.
+      </div>
+      <RouteRow method="POST" path="/browser/checkout/sessions" description="Create a checkout session using a pk_live_* public key. Authenticate with X-PineTree-Public-Key header." />
+      <DocH2>Browser header</DocH2>
+      <CodeBlock>{`X-PineTree-Public-Key: pk_live_your_public_key_here
+Content-Type: application/json`}</CodeBlock>
+      <DocH2>JavaScript SDK</DocH2>
+      <CodeBlock>{`import { PineTreeJS } from "@pinetreepayments/js"
+
+const ptjs = new PineTreeJS("pk_live_your_public_key_here")
+
+const session = await ptjs.checkout.createSession({
+  amount: 2500,
+  currency: "USD",
+  reference: "order_1042",
+  successUrl: window.location.origin + "/paid",
+  cancelUrl:  window.location.origin + "/cancel",
+})
+ptjs.checkout.open(session)  // redirects to hosted checkout`}</CodeBlock>
+      <DocH2>React SDK</DocH2>
+      <CodeBlock>{`import { PineTreeProvider, PineTreeCheckoutButton } from "@pinetreepayments/react"
+
+<PineTreeProvider publicKey="pk_live_your_public_key_here">
+  <PineTreeCheckoutButton
+    amount={2500}
+    currency="USD"
+    reference="order_1042"
+    successUrl={window.location.origin + "/paid"}
+    cancelUrl={window.location.origin + "/cancel"}
+  >
+    Pay with Crypto
+  </PineTreeCheckoutButton>
+</PineTreeProvider>`}</CodeBlock>
+    </div>
+  )
+}
+
+function DocSectionSessionStatuses() {
+  return (
+    <div>
+      <DocH1 eyebrow="Checkout Sessions" description="Session status tracks the aggregate lifecycle of a checkout session. Session and Payment statuses use similar but not identical labels.">
+        Session Statuses
+      </DocH1>
+      <DocTable
+        headers={["Status", "Meaning", "Terminal"]}
+        rows={[
+          ["open", "Session created — waiting for customer to begin payment", "No"],
+          ["processing", "Customer submitted payment — awaiting on-chain confirmation", "No"],
+          ["paid", "Payment confirmed — fulfill order on payment.confirmed event", "Yes"],
+          ["failed", "Payment attempt failed", "Yes"],
+          ["expired", "Session expired after 24 hours without confirmed payment", "Yes"],
+          ["canceled", "Session canceled by merchant via API or dashboard", "Yes"],
+        ]}
+      />
+      <div className="mt-4 rounded-2xl border border-blue-200/80 bg-blue-50/60 p-3.5 text-xs leading-5 text-blue-800">
+        <strong>Prefer webhooks over polling.</strong> Use the <code className="rounded bg-blue-100 px-1 text-xs">checkout.session.completed</code> or <code className="rounded bg-blue-100 px-1 text-xs">payment.confirmed</code> webhook event for fulfillment.
+        Session status <code className="rounded bg-blue-100 px-1 text-xs">paid</code> maps to the <code className="rounded bg-blue-100 px-1 text-xs">payment.confirmed</code> event.
+      </div>
+    </div>
+  )
+}
+
+function DocSectionWebhookPayload() {
+  return (
+    <div>
+      <DocH1 eyebrow="Event Structure" description="Every PineTree webhook is a JSON object with a standard payments-v1 envelope. The event type, schema, and event ID are at the top level.">
+        Webhook Payload
+      </DocH1>
+      <DocH2>Event envelope</DocH2>
+      <CodeBlock>{`{
+  "eventId":   "evt_01abc...",           // store for deduplication
+  "object":    "event",
+  "type":      "payment.confirmed",
+  "schema":    "payments-v1",
+  "createdAt": "2026-06-22T18:00:00.000Z",
+  "livemode":  true,
+  "data": {
+    "object": { /* payment or checkout.session or payment_link */ }
+  }
+}`}</CodeBlock>
+      <DocH2>Payment event — data.object</DocH2>
+      <CodeBlock>{`{
+  "id":             "pay_01abc",
+  "object":         "payment",
+  "merchantId":     "mer_01abc",
+  "amount":         2500,
+  "currency":       "USD",
+  "status":         "paid",
+  "network":        "solana",      // rail identifier in webhook events
+  "reference":      "order_1042",
+  "checkoutLinkId": "cs_01abc",
+  "confirmedAt":    "2026-06-22T18:00:05.000Z",
+  "metadata":       {}
+}`}</CodeBlock>
+      <div className="mt-3 rounded-2xl border border-amber-200/80 bg-amber-50/70 p-3.5 text-xs leading-5 text-amber-800">
+        <strong>network vs rail:</strong> Webhook payment events use <code className="rounded bg-amber-100 px-1 text-xs">network</code> for the rail identifier.
+        The REST API Payment object uses <code className="rounded bg-amber-100 px-1 text-xs">rail</code> for the same value (e.g., <code className="rounded bg-amber-100 px-1 text-xs">solana</code>, <code className="rounded bg-amber-100 px-1 text-xs">base</code>).
+        Use <code className="rounded bg-amber-100 px-1 text-xs">event.data.object.network</code> in webhook handlers.
+      </div>
+    </div>
+  )
+}
+
+function DocSectionNotYetSupported() {
+  return (
+    <div>
+      <DocH1 eyebrow="Roadmap" description="These capabilities are planned but not yet available. None are required for the current hosted checkout and webhook integration.">
+        Not Yet Supported
+      </DocH1>
+      <DocTable
+        headers={["Capability", "Notes"]}
+        rows={[
+          ["Refund API", "Refunds processed via dashboard. REST endpoint planned."],
+          ["Payout / settlement API", "Settlement configured in dashboard. API planned."],
+          ["Disputes API", "Available after card processing is generally available."],
+          ["Sandbox / test-mode keys", "Live keys only. A test environment is on the roadmap."],
+          ["Advanced reporting API", "Reports available for download from dashboard."],
+          ["Stripe card processing", "In early access. Contact support for access."],
+          ["Fluid Pay card processing", "In early access. Contact support for access."],
+          ["Recurring billing", "One-time sessions only. Subscriptions are planned."],
+          ["Customer objects API", "Customer data lives on sessions/payments as metadata."],
+          ["Invoice API", "Not yet available."],
+        ]}
+      />
+    </div>
+  )
+}
+
+function DocSectionSupport() {
+  return (
+    <div>
+      <DocH1 eyebrow="Help" description="Contact PineTree for integration help, API access, and merchant onboarding.">
+        Support
+      </DocH1>
+      <div className="mb-5 grid gap-3 sm:grid-cols-2">
+        {[
+          ["Email", "info@pinetree-payments.com"],
+          ["Phone", "417-718-2692"],
+        ].map(([label, value]) => (
+          <div key={label} className="rounded-2xl border border-gray-200/80 bg-white p-3.5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">{label}</p>
+            <p className="text-sm font-semibold text-gray-950">{value}</p>
+          </div>
+        ))}
+      </div>
+      <DocH2>Include in support requests</DocH2>
+      <div className="rounded-2xl border border-gray-200/80 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+        {[
+          "Merchant account email or ID",
+          "API endpoint and HTTP method",
+          "requestId from the error response JSON",
+          "Checkout Session ID (cs_...)",
+          "Payment ID (pay_...)",
+          "Webhook Event ID (eventId from event envelope)",
+          "Error type and code",
+          "Approximate timestamp (UTC)",
+        ].map((item, i) => (
+          <div key={i} className="flex items-start gap-3 border-b border-gray-100 px-4 py-3 text-xs leading-5 text-gray-700 last:border-0">
+            <span className="mt-0.5 shrink-0 text-gray-300">•</span>
+            {item}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 const docSectionComponents: Record<DocSection, () => ReactNode> = {
   "overview": DocSectionOverview,
   "quickstart": DocSectionQuickstart,
   "authentication": DocSectionAuthentication,
   "api-keys": DocSectionApiKeys,
   "checkout-sessions": DocSectionCheckoutSessions,
+  "browser-checkout": DocSectionBrowserCheckout,
   "payments": DocSectionPayments,
+  "session-statuses": DocSectionSessionStatuses,
   "rails-assets": DocSectionRailsAssets,
   "payment-states": DocSectionPaymentStates,
   "webhooks": DocSectionWebhooks,
+  "webhook-payload": DocSectionWebhookPayload,
   "webhook-events": DocSectionWebhookEvents,
   "webhook-deliveries": DocSectionWebhookDeliveries,
   "errors": DocSectionErrors,
@@ -1055,6 +1265,8 @@ const docSectionComponents: Record<DocSection, () => ReactNode> = {
   "sdks": DocSectionSdks,
   "testing": DocSectionTesting,
   "go-live": DocSectionGoLive,
+  "not-yet-supported": DocSectionNotYetSupported,
+  "support": DocSectionSupport,
 }
 
 const headerChipClass =

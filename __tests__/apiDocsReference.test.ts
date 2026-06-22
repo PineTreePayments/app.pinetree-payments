@@ -99,10 +99,13 @@ describe("API reference documentation", () => {
       "Authentication",
       "API Keys",
       "Checkout Sessions",
+      "Browser Checkout",
       "Payments",
+      "Session Statuses",
       "Rails & Assets",
       "Payment States",
       "Webhooks",
+      "Webhook Payload",
       "Webhook Events",
       "Webhook Deliveries",
       "Errors",
@@ -110,6 +113,8 @@ describe("API reference documentation", () => {
       "SDKs",
       "Testing",
       "Go Live",
+      "Not Yet Supported",
+      "Support",
     ])
 
     for (const label of labels) {
