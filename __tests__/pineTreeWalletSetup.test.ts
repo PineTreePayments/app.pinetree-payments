@@ -18,7 +18,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(layout).toContain("</PineTreeDynamicProvider>")
     expect(layout).toContain('/dashboard/wallet-setup')
     expect(provider).toContain("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID")
-    expect(provider).toContain('appName: "PineTree Wallets"')
+    expect(provider).toContain('appName: "PineTree Wallet"')
   })
 
   it("registers EVM, Solana, Bitcoin, and Spark wallet connectors", () => {
@@ -28,15 +28,25 @@ describe("PineTree embedded wallet setup", () => {
     expect(provider).toContain("SparkWalletConnectors")
   })
 
-  it("uses PineTree branding and exposes all requested wallet groups", () => {
-    expect(page).toContain("PineTree Wallet Setup")
-    expect(page).toContain("Create PineTree Wallets")
-    expect(page).toContain("Connect Wallet")
-    expect(page).toContain("PineTree Solana Wallet")
-    expect(page).toContain("PineTree Base Wallet")
-    expect(page).toContain("PineTree Bitcoin Wallet")
-    expect(page).toContain("PineTree Lightning Wallet")
+  it("presents one merchant PineTree Wallet profile", () => {
+    expect(page).toContain(">PineTree Wallet</h1>")
+    expect(page).toContain(">PineTree Wallet</h2>")
+    expect(page).toContain("one business wallet profile")
+    expect(page).toContain("Create PineTree Wallet")
+    expect(page).toContain("Open PineTree Wallet")
+    expect(page).toContain('{hasAddresses ? "Open PineTree Wallet" : "Create PineTree Wallet"}')
     expect(page).not.toContain("Sign up with Dynamic")
+  })
+
+  it("uses network address rows instead of separate wallet labels", () => {
+    expect(page).toContain('label: "Base address"')
+    expect(page).toContain('label: "Solana address"')
+    expect(page).toContain('label: "Bitcoin address"')
+    expect(page).toContain('label: "Lightning/Spark address"')
+    expect(page).toContain("Network addresses")
+    expect(page).toContain("Each network uses its own address format")
+    expect(page).not.toContain("PineTree Base Wallet")
+    expect(page).not.toContain("PineTree Solana Wallet")
   })
 
   it("reads wallet addresses without adding payment or backend calls", () => {
@@ -44,7 +54,6 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("wallet.address")
     expect(page).toContain("wallet.additionalAddresses")
     expect(page).not.toContain("/api/")
-    expect(page).toContain("Payments are not enabled through these wallets yet.")
   })
 
   it("handles missing configuration, unavailable SDK, disconnected users, and empty wallets", () => {
@@ -52,8 +61,11 @@ describe("PineTree embedded wallet setup", () => {
     expect(provider).toContain("WalletInfrastructureErrorBoundary")
     expect(page).toContain('kind="missing-env"')
     expect(page).toContain('kind="sdk"')
-    expect(page).toContain("Not connected")
-    expect(page).toContain("Wallets not created yet.")
+    expect(page).toContain('"Not created"')
+    expect(page).toContain('"Ready"')
+    expect(page).toContain('"Needs attention"')
+    expect(page).toContain('status="Loading"')
+    expect(page).toContain("Advanced wallet options")
   })
 
   it("does not expose wallet infrastructure as a merchant provider", () => {

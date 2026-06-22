@@ -65,7 +65,7 @@ export default function PineTreeDynamicProvider({ children }: { children: ReactN
       <DynamicContextProvider
         settings={{
           environmentId,
-          appName: "PineTree Wallets",
+          appName: "PineTree Wallet",
           walletConnectors: [
             EthereumWalletConnectors,
             SolanaWalletConnectors,
