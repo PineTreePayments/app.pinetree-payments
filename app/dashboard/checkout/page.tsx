@@ -1503,7 +1503,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                   className={`min-w-0 ${index === 0 ? "pr-3" : index === 2 ? "pl-3" : "px-3"}`}
                 >
                   <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.11em] text-gray-500">{label}</p>
-                  <p className="mt-1 text-xl font-semibold leading-tight text-gray-950 sm:text-2xl">{value}</p>
+                  <p className="mt-1 text-xl font-semibold leading-tight text-gray-950">{value}</p>
                 </div>
               ))}
             </div>

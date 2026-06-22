@@ -29,6 +29,8 @@ describe("mobile dashboard hero cleanup", () => {
     expect(metrics).toContain("border-t")
     expect(metrics).not.toContain("overflow-hidden")
     expect(metrics).not.toContain("rounded-full")
+    expect(checkout).toContain('className="mt-1 text-xl font-semibold leading-tight text-gray-950">{value}</p>')
+    expect(checkout).not.toContain('text-gray-950 sm:text-2xl">{value}</p>')
     expect(checkout).not.toContain("BUTTON S...")
     expect(checkout).not.toContain("RECENT ACTI...")
   })
