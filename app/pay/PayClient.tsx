@@ -11,6 +11,7 @@ import BaseWalletPayment from "@/components/payment/BaseWalletPayment"
 import BasePosCheckoutMirror from "@/components/payment/BasePosCheckoutMirror"
 import SolanaWalletPayment from "@/components/payment/SolanaWalletPayment"
 import LightningPayment from "@/components/payment/LightningPayment"
+import { StripeCardPayment } from "@/components/payment/StripeCardPayment"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import {
   getHostedCheckoutTerminalEvent,
@@ -273,6 +274,11 @@ export default function PayClient() {
   const [shift4Loading, setShift4Loading] = useState(false)
   const [shift4Error, setShift4Error] = useState("")
 
+  // ── Stripe inline card payment state ──────────────────────────────────────
+  const [stripeClientSecret, setStripeClientSecret] = useState("")
+  const [stripeLoading, setStripeLoading] = useState(false)
+  const [stripeError, setStripeError] = useState("")
+
   // ── Base execution: once Base payment starts, collapse asset selector ──────
   const [baseExecutionActive, setBaseExecutionActive] = useState(false)
   const [solanaExecutionActive, setSolanaExecutionActive] = useState(false)
@@ -390,10 +396,14 @@ export default function PayClient() {
     if (selectedAssetId === assetId) {
       setSelectedAssetId("")
       setShift4Error("")
+      setStripeClientSecret("")
+      setStripeError("")
       return
     }
     setSelectedAssetId(assetId)
     setShift4Error("")
+    setStripeClientSecret("")
+    setStripeError("")
   }
 
   // Shift4: create payment + redirect to hosted checkout on button click
@@ -435,6 +445,46 @@ export default function PayClient() {
       setShift4Error((err as Error).message || "Failed to redirect to checkout")
     } finally {
       setShift4Loading(false)
+    }
+  }, [intentId, loadIntentCallback])
+
+  // Stripe: create PaymentIntent via select-network, receive clientSecret
+  const handleStripePay = useCallback(async () => {
+    if (!intentId) return
+    const token = checkoutTokenRef.current
+    if (!token) {
+      setStripeError("Checkout session unavailable. Please refresh and try again.")
+      return
+    }
+    setStripeLoading(true)
+    setStripeError("")
+    try {
+      const res = await fetch(
+        `/api/payment-intents/${encodeURIComponent(intentId)}/select-network`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ network: "stripe" }),
+        }
+      )
+      if (!res.ok) {
+        const err = (await res.json()) as { error?: string }
+        throw new Error(err.error || "Failed to prepare Stripe checkout")
+      }
+      const result = (await res.json()) as { clientSecret?: string; paymentId?: string }
+      if (result.paymentId) {
+        void loadIntentCallback()
+      }
+      const secret = String(result.clientSecret || "").trim()
+      if (!secret) throw new Error("Stripe checkout is not available right now. Please try again.")
+      setStripeClientSecret(secret)
+    } catch (err) {
+      setStripeError((err as Error).message || "Failed to start Stripe checkout")
+    } finally {
+      setStripeLoading(false)
     }
   }, [intentId, loadIntentCallback])
 
@@ -1423,6 +1473,45 @@ export default function PayClient() {
                           </div>
                         ) : null}
 
+                        {/* ── Stripe: inline card payment via Stripe Elements ── */}
+                        {asset.network === "stripe" ? (
+                          <div className="space-y-3">
+                            {stripeClientSecret ? (
+                              <StripeCardPayment
+                                clientSecret={stripeClientSecret}
+                                onSuccess={() => {
+                                  setStripeError("")
+                                  void loadIntentCallback()
+                                }}
+                                onError={(msg) => setStripeError(msg)}
+                              />
+                            ) : (
+                              <>
+                                <p className="text-sm text-gray-700">
+                                  Enter your card details to pay securely via Stripe.
+                                </p>
+                                {stripeError ? (
+                                  <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                                    {stripeError}
+                                  </div>
+                                ) : null}
+                                <Button
+                                  fullWidth
+                                  disabled={stripeLoading}
+                                  onClick={() => void handleStripePay()}
+                                >
+                                  {stripeLoading ? (
+                                    <>
+                                      <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
+                                      Preparing…
+                                    </>
+                                  ) : "Continue to Card Payment"}
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        ) : null}
+
                         {/* ── Base: POS-owned WC mirror or customer-owned WC ── */}
                         {asset.network === "base" ? (
                           intentPayload?.terminalId ? (
@@ -1488,6 +1577,7 @@ export default function PayClient() {
                         ) : null}
 
                         {asset.network !== "shift4" &&
+                          asset.network !== "stripe" &&
                           asset.network !== "base" &&
                           asset.network !== "solana" &&
                           asset.network !== "bitcoin_lightning" ? (

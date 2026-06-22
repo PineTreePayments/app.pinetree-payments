@@ -161,6 +161,7 @@ export async function getConnectedHostedCheckoutNetworks(merchantId: string): Pr
   // Maps provider key → the WalletNetwork it serves in hosted checkout.
   const hostedCheckoutProviders: Record<string, string> = {
     "shift4": "shift4",
+    "stripe": "stripe",
     "lightning_speed": "bitcoin_lightning",
     "lightning_nwc": "bitcoin_lightning"
   }

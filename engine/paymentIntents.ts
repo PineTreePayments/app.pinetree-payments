@@ -18,7 +18,7 @@ import { getMerchantProviders } from "@/database/merchants"
 import { getLightningNwcReadiness, SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { getProviderMetadata, isProviderHealthy, providerSupportsFeeAtPaymentTime } from "./providerRegistry"
 
-const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base", "shift4", "bitcoin_lightning"]
+const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base", "shift4", "stripe", "bitcoin_lightning"]
 const PAYMENT_DETAILS_TIMEOUT_MS = Number(process.env.PAYMENT_DETAILS_TIMEOUT_MS || 12000)
 
 async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -101,6 +101,7 @@ function walletNetworkToProviderKey(network: WalletNetwork): string | null {
   if (network === "solana") return "solana"
   if (network === "base") return "base"
   if (network === "shift4") return "shift4"
+  if (network === "stripe") return "stripe"
   if (network === "bitcoin_lightning") return "lightning"
   return null
 }
@@ -389,7 +390,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
       const existingNetwork = String(existingPayment.network || "").toLowerCase().trim()
       const existingMeta = (existingPayment.metadata ?? null) as {
         selectedAsset?: string
-        split?: { baseUsdcStrategy?: string; splitContract?: string }
+        split?: { baseUsdcStrategy?: string; splitContract?: string; stripeClientSecret?: string }
       } | null
       const existingSelectedAsset = String(existingMeta?.selectedAsset || "").toUpperCase()
       const isSameNetwork = existingNetwork === normalizedNetwork
@@ -416,6 +417,10 @@ export async function selectPaymentIntentNetworkEngine(input: {
           durationMs: Date.now() - startedAt
         })
 
+        const reuseClientSecret = normalizedNetwork === "stripe"
+          ? String(existingMeta?.split?.stripeClientSecret || "").trim() || undefined
+          : undefined
+
         return {
           intentId: intent.id,
           paymentId: existingPayment.id,
@@ -433,6 +438,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
           nativeSymbol: undefined,
           estimatedSats: reuseEstimatedSats,
           baseUsdcStrategy: reuseStrategy,
+          clientSecret: reuseClientSecret,
           metadata: {
             split: {
               baseUsdcStrategy: reuseStrategy,
@@ -540,6 +546,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
       nativeSymbol: payment.nativeSymbol,
       estimatedSats,
       baseUsdcStrategy: persistedBaseUsdcStrategy,
+      clientSecret: payment.clientSecret,
       metadata: {
         split: {
           baseUsdcStrategy: persistedBaseUsdcStrategy,

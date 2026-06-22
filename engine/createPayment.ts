@@ -116,6 +116,7 @@ type CreatePaymentResult = {
   nativeSymbol?: string
   asset?: string
   baseUsdcStrategy?: string
+  clientSecret?: string
 }
 
 export type BuildCreatePaymentRequestInput = {
@@ -642,6 +643,10 @@ export async function createPayment(
     paymentUrl: canonicalPaymentUrl
   })
 
+  const stripeClientSecret = network === "stripe"
+    ? String((providerPayment as { clientSecret?: string } | null)?.clientSecret || "").trim() || undefined
+    : undefined
+
   return {
     id: paymentId,
     provider: providerName,
@@ -652,7 +657,8 @@ export async function createPayment(
     nativeAmount: Number(splitPayment.nativeAmount || 0),
     nativeSymbol: String(splitPayment.nativeSymbol || "").toUpperCase() || undefined,
     asset: network === "solana" || network === "base" ? requestedAsset : input.asset,
-    baseUsdcStrategy
+    baseUsdcStrategy,
+    clientSecret: stripeClientSecret
   }
   } catch (error) {
     if (claimedIdempotencyKey && input.idempotencyKey) {
