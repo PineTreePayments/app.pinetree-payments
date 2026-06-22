@@ -31,22 +31,42 @@ describe("PineTree embedded wallet setup", () => {
   it("presents one merchant PineTree Wallet profile", () => {
     expect(page).toContain(">PineTree Wallet</h1>")
     expect(page).toContain(">PineTree Wallet</h2>")
-    expect(page).toContain("one business wallet profile")
+    expect(page).toContain("One merchant wallet profile")
     expect(page).toContain("Create PineTree Wallet")
     expect(page).toContain("Open PineTree Wallet")
     expect(page).toContain('{hasAddresses ? "Open PineTree Wallet" : "Create PineTree Wallet"}')
     expect(page).not.toContain("Sign up with Dynamic")
   })
 
-  it("uses network address rows instead of separate wallet labels", () => {
-    expect(page).toContain('label: "Base address"')
-    expect(page).toContain('label: "Solana address"')
-    expect(page).toContain('label: "Bitcoin address"')
-    expect(page).toContain('label: "Lightning/Spark address"')
-    expect(page).toContain("Network addresses")
-    expect(page).toContain("Each network uses its own address format")
+  it("keeps raw address details off the main setup summary", () => {
+    expect(page).toContain('label="Base address"')
+    expect(page).toContain('label="Solana address"')
+    expect(page).toContain('label="Bitcoin Lightning/Spark address"')
+    expect(page).not.toContain("Network addresses")
     expect(page).not.toContain("PineTree Base Wallet")
     expect(page).not.toContain("PineTree Solana Wallet")
+  })
+
+  it("opens a PineTree wallet modal with wallet-style sections", () => {
+    expect(page).toContain("setWalletOpen(true)")
+    expect(page).toContain('role="dialog"')
+    expect(page).toContain('aria-modal="true"')
+    expect(page).toContain('label: "Overview"')
+    expect(page).toContain('label: "Balances"')
+    expect(page).toContain('label: "Receive"')
+    expect(page).toContain('label: "Withdraw"')
+    expect(page).toContain('label: "Activity"')
+  })
+
+  it("prioritizes Base, Solana, and Bitcoin Lightning/Spark", () => {
+    expect(page).toContain('const primaryRails = ["Base", "Solana", "Bitcoin Lightning"]')
+    expect(page).toContain("Bitcoin Lightning / Spark")
+    expect(page).toContain("Bitcoin on-chain address")
+  })
+
+  it("removes external wallet controls from this page", () => {
+    expect(page).not.toContain("Advanced wallet options")
+    expect(page).not.toContain("Connect external wallet")
   })
 
   it("reads wallet addresses without adding payment or backend calls", () => {
@@ -65,7 +85,8 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('"Ready"')
     expect(page).toContain('"Needs attention"')
     expect(page).toContain('status="Loading"')
-    expect(page).toContain("Advanced wallet options")
+    expect(page).toContain("Withdrawals coming soon")
+    expect(page).toContain("Wallet activity will appear here.")
   })
 
   it("does not expose wallet infrastructure as a merchant provider", () => {
