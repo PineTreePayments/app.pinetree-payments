@@ -395,7 +395,7 @@ export default function POSPage() {
           <button
             onClick={startCreatingTerminal}
             style={{ boxShadow: "0 10px 24px rgba(0,82,255,0.18)" }}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-[18px] bg-[#1652f0] px-[18px] py-2.5 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.98]"
+            className="inline-flex shrink-0 self-end items-center gap-1.5 rounded-full bg-[#1652f0] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.98]"
           >
             + New Terminal
           </button>

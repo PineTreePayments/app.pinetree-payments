@@ -26,10 +26,9 @@ import {
 } from "@/lib/lightningDashboardLinks"
 import { getSpeedDashboardLinks } from "@/lib/speedDashboardLinks"
 import {
-  CompactMetricTile,
   DashboardHeroCard,
   DashboardSection,
-  MetricGrid,
+  InlineMetric,
   NetworkStatusPill,
   PineTreeInsightsCard,
   dashboardPageTitleClass
@@ -2863,16 +2862,23 @@ export default function WalletsPage() {
         }
       />
 
-      <MetricGrid columns="two">
-        <CompactMetricTile
-          label="Connections"
-          value={totalConnections}
-          tone="blue"
-          interactive
+      <div
+        data-wallet-summary
+        className="grid grid-cols-2 divide-x divide-blue-100 rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5"
+      >
+        <button
+          type="button"
           onClick={() => setConnectionsOpen(true)}
+          className="min-w-0 rounded-xl pr-4 text-left transition hover:bg-blue-50/60 focus:outline-none focus:ring-4 focus:ring-blue-100 sm:pr-6"
+        >
+          <InlineMetric label="Connections" value={totalConnections} />
+        </button>
+        <InlineMetric
+          label="Total Value"
+          value={`$${totalBalance.toFixed(2)}`}
+          className="pl-4 sm:pl-6"
         />
-        <CompactMetricTile label="Total Value" value={`$${totalBalance.toFixed(2)}`} tone="slate" />
-      </MetricGrid>
+      </div>
 
       <PineTreeInsightsCard
         insights={walletInsights}

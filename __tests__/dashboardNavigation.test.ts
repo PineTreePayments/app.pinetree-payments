@@ -29,7 +29,7 @@ describe("dashboard checkout and developer navigation", () => {
     expect(checkout).toContain("Create and share hosted checkout links.")
     expect(checkout).toContain("Add a checkout button to your website.")
     expect(checkout).toContain("checkoutReadinessStatus")
-    expect(checkout).toContain("Ready to set up")
+    expect(checkout).toContain("Set up checkout")
     expect(checkout).toContain("Getting paid online")
     expect(checkout).toContain("Payment Link Organization")
     expect(checkout).toContain("openMerchantDialog(card.target)")

@@ -1136,19 +1136,15 @@ export function CheckoutWorkspace({
         ? "Live"
         : activeLinks > 0
           ? "Configured"
-          : nonArchivedLinks.length > 0
-            ? "Needs attention"
-            : "Ready to set up"
+          : "Set up checkout"
   const checkoutReadinessCopy =
     checkoutReadinessStatus === "Live"
       ? "Hosted checkout and payment links are accepting payments."
       : checkoutReadinessStatus === "Configured"
         ? "Hosted checkout is configured. Share an active link to start seeing volume."
-        : checkoutReadinessStatus === "Needs attention"
-          ? "Review expired or disabled links before sharing checkout."
-          : checkoutReadinessStatus === "..."
+        : checkoutReadinessStatus === "..."
             ? "Loading hosted checkout readiness."
-            : "Create an active payment link to start accepting online payments."
+            : "Create a payment link or add a checkout button to start accepting online payments."
 
   const insights: string[] = []
 

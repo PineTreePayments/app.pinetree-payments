@@ -216,26 +216,30 @@ export function DashboardHeroCard({
 }: {
   eyebrow: string
   title: string
-  value: ReactNode
+  value?: ReactNode
   detail?: ReactNode
   action?: ReactNode
   secondary?: ReactNode
 }) {
+  const hasValue = value !== undefined && value !== null
+
   return (
     <div className="relative overflow-hidden rounded-[1.35rem] border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.16),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] p-4 shadow-[0_18px_60px_rgba(37,99,235,0.13)] sm:p-5 md:p-6">
       <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/80 to-transparent" />
-      <div className="relative flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className={cx("relative flex gap-4", hasValue ? "flex-col sm:flex-row sm:items-end sm:justify-between" : "flex-col")}>
         <div className="min-w-0">
           <p className={dashboardSectionLabelClass}>
             {eyebrow}
           </p>
           <h2 className={cx("mt-2 font-medium", dashboardSupportingTextClass)}>{title}</h2>
-          <div className={cx("mt-1", dashboardHeroValueClass)}>
-            {value}
-          </div>
+          {hasValue && (
+            <div className={cx("mt-1", dashboardHeroValueClass)}>
+              {value}
+            </div>
+          )}
           {detail && <div className={cx("mt-2", dashboardSupportingTextClass)}>{detail}</div>}
         </div>
-        <div className="flex flex-col gap-3 sm:items-end">
+        <div className={cx("flex flex-col gap-3", hasValue ? "sm:items-end" : "w-full")}>
           {secondary}
           {action}
         </div>
