@@ -305,17 +305,19 @@ export default function TransactionsPage() {
           <div className={`mt-2 ${dashboardHeroValueClass}`}>
             {formatUsd(todayVolume)}
           </div>
-          <div className="mt-4 grid grid-cols-2 divide-x divide-blue-100 rounded-xl border border-blue-100/80 bg-white/72">
-            <InlineMetric
-              label="Transactions"
-              value={todayTransactions.toString()}
-              className="p-3 sm:p-3.5"
-            />
-            <InlineMetric
-              label="Success Rate"
-              value={`${confirmedRate}%`}
-              className="p-3 sm:p-3.5"
-            />
+          <p className="mt-2 text-sm leading-5 text-gray-600">Gross transaction volume for today.</p>
+          <div
+            data-transactions-hero-metrics
+            className="mt-4 grid grid-cols-2 divide-x divide-blue-200/80 border-t border-blue-200/80 pt-3"
+          >
+            <div className="min-w-0 pr-4">
+              <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">Transactions</p>
+              <p className="mt-1 text-xl font-semibold leading-tight text-gray-950 sm:text-2xl">{todayTransactions.toString()}</p>
+            </div>
+            <div className="min-w-0 pl-4">
+              <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">Success Rate</p>
+              <p className="mt-1 text-xl font-semibold leading-tight text-gray-950 sm:text-2xl">{confirmedRate}%</p>
+            </div>
           </div>
         </button>
 

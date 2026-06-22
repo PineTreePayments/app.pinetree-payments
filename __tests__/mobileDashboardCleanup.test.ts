@@ -15,7 +15,7 @@ describe("mobile dashboard hero cleanup", () => {
     expect(checkout).not.toContain('? "Needs attention"')
   })
 
-  it("shows readable Online Checkout metrics in compact pills", () => {
+  it("shows readable Online Checkout metrics in an integrated split row", () => {
     const checkout = read("app/dashboard/checkout/page.tsx")
     const metrics = checkout.match(/data-checkout-hero-metrics[\s\S]*?\.map/)?.[0] ?? ""
 
@@ -24,11 +24,25 @@ describe("mobile dashboard hero cleanup", () => {
     expect(metrics).toContain('"Activity", isLoading ? "—" : String(stats?.confirmedPayments ?? 0)')
     expect(metrics).not.toContain("truncate")
     expect(metrics).not.toContain("text-ellipsis")
-    expect(checkout).toContain('className="inline-flex min-w-[96px] flex-1 items-center justify-between gap-2 rounded-full')
+    expect(metrics).toContain("grid-cols-3")
+    expect(metrics).toContain("divide-x")
+    expect(metrics).toContain("border-t")
     expect(metrics).not.toContain("overflow-hidden")
-    expect(metrics).not.toContain("divide-")
+    expect(metrics).not.toContain("rounded-full")
     expect(checkout).not.toContain("BUTTON S...")
     expect(checkout).not.toContain("RECENT ACTI...")
+  })
+
+  it("integrates Transactions hero metrics without an inner box", () => {
+    const transactions = read("app/dashboard/transactions/page.tsx")
+    const metrics = transactions.match(/data-transactions-hero-metrics[\s\S]*?<\/div>\s*<\/div>/)?.[0] ?? ""
+
+    expect(metrics).toContain("Transactions")
+    expect(metrics).toContain("Success Rate")
+    expect(metrics).toContain("divide-x")
+    expect(metrics).toContain("border-t")
+    expect(metrics).not.toContain("rounded-xl")
+    expect(metrics).not.toContain("bg-white")
   })
 
   it("keeps the POS terminal action compact", () => {

@@ -1491,19 +1491,19 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           secondary={
             <div
               data-checkout-hero-metrics
-              className="flex w-full flex-wrap gap-2 sm:min-w-[340px]"
+              className="grid w-full grid-cols-3 divide-x divide-blue-200/80 border-t border-blue-200/80 pt-3 sm:w-auto sm:min-w-[340px] sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0"
             >
               {[
                 ["Active links", isLoading ? "—" : String(activeLinks)],
                 ["Button", activeLinks > 0 ? "Ready" : "Set up"],
                 ["Activity", isLoading ? "—" : String(stats?.confirmedPayments ?? 0)],
-              ].map(([label, value]) => (
+              ].map(([label, value], index) => (
                 <div
                   key={label}
-                  className="inline-flex min-w-[96px] flex-1 items-center justify-between gap-2 rounded-full bg-white/65 px-3 py-2 shadow-sm ring-1 ring-blue-100/70"
+                  className={`min-w-0 ${index === 0 ? "pr-3" : index === 2 ? "pl-3" : "px-3"}`}
                 >
-                  <span className="text-xs font-semibold text-gray-600">{label}</span>
-                  <span className="text-sm font-semibold text-gray-950">{value}</span>
+                  <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.11em] text-gray-500">{label}</p>
+                  <p className="mt-1 text-xl font-semibold leading-tight text-gray-950 sm:text-2xl">{value}</p>
                 </div>
               ))}
             </div>
