@@ -232,22 +232,32 @@ export async function createPosPaymentIntentEngine(input: CreatePosPaymentInput)
   if (!terminalId) throw Object.assign(new Error("Missing terminal id"), { status: 400 })
   const totals = await calculatePosTotalsForTerminal(merchantId, terminalId, subtotalAmount)
   const merchantAmount = totals.subtotalAmount + totals.taxAmount
+  const preferredNetwork = normalizeWalletNetwork(input.terminal.preferredNetwork)
 
-  const intent = await createPaymentIntentEngine({
-    merchantId,
-    amount: merchantAmount,
-    currency: input.currency || "USD",
-    terminalId: input.terminal.terminalId,
-    metadata: {
-      subtotalAmount,
-      taxAmount: totals.taxAmount,
-      taxRate: totals.taxRate,
-      serviceFee: totals.serviceFee,
-      totalAmount: totals.totalAmount,
-      channel: "pos",
-      amountsPrecomputed: true
+  let intent: Awaited<ReturnType<typeof createPaymentIntentEngine>>
+  try {
+    intent = await createPaymentIntentEngine({
+      merchantId,
+      amount: merchantAmount,
+      currency: input.currency || "USD",
+      terminalId: input.terminal.terminalId,
+      allowedNetworks: preferredNetwork ? [preferredNetwork] : undefined,
+      metadata: {
+        subtotalAmount,
+        taxAmount: totals.taxAmount,
+        taxRate: totals.taxRate,
+        serviceFee: totals.serviceFee,
+        totalAmount: totals.totalAmount,
+        channel: "pos",
+        amountsPrecomputed: true
+      }
+    })
+  } catch (error) {
+    if (preferredNetwork === "stripe") {
+      throw Object.assign(new Error("Card payments are not ready yet."), { status: 400 })
     }
-  })
+    throw error
+  }
 
   return {
     paymentId: intent.intentId,

@@ -41,6 +41,8 @@ type AvailableMethods = {
   card: boolean
 }
 
+type PaymentMode = "crypto" | "card" | null
+
 type Breakdown = {
   subtotalAmount: number
   taxAmount: number
@@ -281,6 +283,9 @@ export default function POSLayout({ terminalContext }: Props) {
   const [intentId, setIntentId] = useState("")
   const [activePaymentId, setActivePaymentId] = useState("")
   const [paymentError, setPaymentError] = useState("")
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>(null)
+  const [cardCheckoutUrl, setCardCheckoutUrl] = useState("")
+  const [cardLoading, setCardLoading] = useState(false)
   const [breakdown, setBreakdown] = useState<Breakdown | null>(null)
   const [breakdownLoading, setBreakdownLoading] = useState(false)
   const [availableMethods, setAvailableMethods] = useState<AvailableMethods>({ cash: true, crypto: false, card: false })
@@ -318,6 +323,9 @@ export default function POSLayout({ terminalContext }: Props) {
     setActivePaymentId("")
     activePaymentIdRef.current = ""
     setPaymentError("")
+    setPaymentMode(null)
+    setCardCheckoutUrl("")
+    setCardLoading(false)
     setBreakdown(null)
     setCashDigits("")
     setCashRecording(false)
@@ -918,6 +926,7 @@ export default function POSLayout({ terminalContext }: Props) {
     if (!digits || subtotalNum <= 0) return
 
     try {
+      setPaymentMode("crypto")
       setStatus("waiting")
 
       const res = await fetch("/api/pos/payment", {
@@ -960,6 +969,60 @@ export default function POSLayout({ terminalContext }: Props) {
 
     } catch {
       setStatus("failed")
+    }
+  }
+
+  async function startCard() {
+    if (!digits || subtotalNum <= 0) return
+    if (!availableMethods.card) {
+      setPaymentError("Card payments are not ready yet.")
+      setStatus("failed")
+      return
+    }
+
+    const checkoutWindow = window.open("about:blank", "_blank")
+    if (checkoutWindow) checkoutWindow.opener = null
+
+    try {
+      setPaymentError("")
+      setPaymentMode("card")
+      setCardCheckoutUrl("")
+      setCardLoading(true)
+      setStatus("waiting")
+
+      const res = await fetch("/api/pos/payment", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...posAuthHeaders(terminalContext?.sessionToken),
+        },
+        body: JSON.stringify({
+          amount: subtotalNum,
+          currency: "USD",
+          network: "stripe",
+        }),
+      })
+      const data = await res.json().catch(() => null)
+
+      if (!res.ok || !data) {
+        throw new Error(data?.error || "Card payments are not ready yet.")
+      }
+
+      const returnedIntentId = String(data.intentId || "").trim()
+      const checkoutUrl = String(data.paymentUrl || "").trim()
+      if (!returnedIntentId || !checkoutUrl) {
+        throw new Error("Unable to prepare secure card checkout.")
+      }
+
+      setIntentId(returnedIntentId)
+      setCardCheckoutUrl(checkoutUrl)
+      if (checkoutWindow) checkoutWindow.location.href = checkoutUrl
+    } catch (error) {
+      checkoutWindow?.close()
+      setPaymentError(error instanceof Error ? error.message : "Unable to prepare secure card checkout.")
+      setStatus("failed")
+    } finally {
+      setCardLoading(false)
     }
   }
 
@@ -1056,9 +1119,10 @@ export default function POSLayout({ terminalContext }: Props) {
                   <Button
                     variant="secondary"
                     fullWidth
-                    disabled={!availableMethods.card}
+                    disabled={!availableMethods.card || cardLoading}
+                    onClick={() => void startCard()}
                   >
-                    Card
+                    {cardLoading ? "Preparing card payment…" : "Card"}
                   </Button>
                 </div>
                 <Button variant="danger" fullWidth onClick={resetSale}>
@@ -1190,7 +1254,22 @@ export default function POSLayout({ terminalContext }: Props) {
         {(status === "waiting" || status === "processing") && (
           <div className="space-y-3">
 
-            {qrCodeUrl ? (
+            {paymentMode === "card" && cardCheckoutUrl ? (
+              <div className="space-y-3 rounded-2xl border border-blue-100/70 bg-blue-50/50 px-4 py-4 text-center">
+                <p className="text-sm font-semibold text-gray-950">Secure card checkout is ready</p>
+                <p className="text-sm text-gray-600">
+                  Complete the card form in the secure checkout window. This screen will update when payment is confirmed.
+                </p>
+                <a
+                  href={cardCheckoutUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+                >
+                  Open secure card checkout
+                </a>
+              </div>
+            ) : qrCodeUrl ? (
               <div className="flex flex-col items-center rounded-2xl border border-blue-100/70 bg-gradient-to-br from-white to-blue-50/40 px-4 py-4 shadow-[0_12px_32px_rgba(0,82,255,0.08)]">
                 <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
                   Scan to Pay
@@ -1214,7 +1293,9 @@ export default function POSLayout({ terminalContext }: Props) {
             ) : (
               <div className="rounded-2xl border border-blue-100/70 bg-blue-50/50 px-4 py-4 text-center">
                 <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
-                <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Preparing payment…</p>
+                <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
+                  {paymentMode === "card" ? "Preparing card payment…" : "Preparing payment…"}
+                </p>
               </div>
             )}
 

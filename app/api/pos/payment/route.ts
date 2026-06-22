@@ -57,7 +57,11 @@ export async function POST(req: NextRequest) {
     const result = await createPosPaymentIntentEngine({
       amount: Number(amount),
       currency: String(currency || "USD"),
-      terminal: { merchantId, terminalId },
+      terminal: {
+        merchantId,
+        terminalId,
+        preferredNetwork: normalizedNetwork === "stripe" ? "stripe" : undefined,
+      },
     })
 
     console.info("[api/pos/payment] returning paymentUrl", {
