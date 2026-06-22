@@ -1,19 +1,16 @@
 import { createPayment } from "@/engine/createPayment"
 import { getMerchantTaxSettings } from "@/database/merchants"
 import { hasAnyWalletConnected, selectBestWallet } from "@/database/merchantWallets"
-import { getPaymentById } from "@/database"
+import { getPaymentById, supabase, supabaseAdmin } from "@/database"
 import { createPaymentIntentEngine } from "./paymentIntents"
 import {
   normalizeWalletNetwork
 } from "./providerMappings"
 import { PINETREE_FEE } from "./config"
-import { calculateTax } from "./fees"
 import { chooseBestAdapter } from "./providerSelector"
+import { calculatePosTotals, type PosTotalBreakdown, type TerminalTaxConfig } from "./posTotals"
 
-export type PosTaxSettings = {
-  taxEnabled: boolean
-  taxRate: number
-}
+const db = supabaseAdmin || supabase
 
 export type PosTerminalContext = {
   merchantId: string
@@ -90,12 +87,37 @@ async function resolvePosRouting(merchantId: string, networkHint?: string) {
   }
 }
 
-export async function getPosTaxSettingsEngine(merchantId: string): Promise<PosTaxSettings> {
-  const settings = await getMerchantTaxSettings(merchantId)
-  return {
-    taxEnabled: Boolean(settings?.taxEnabled),
-    taxRate: Number(settings?.taxRate || 0)
+export async function calculatePosTotalsForTerminal(
+  merchantId: string,
+  terminalId: string,
+  subtotalAmount: number
+): Promise<PosTotalBreakdown> {
+  const { data: terminal, error } = await db
+    .from("terminals")
+    .select("tax_mode,tax_rate,tax_label")
+    .eq("id", terminalId)
+    .eq("merchant_id", merchantId)
+    .maybeSingle()
+
+  if (error || !terminal) {
+    throw Object.assign(new Error("Terminal tax configuration not found"), { status: 404 })
   }
+
+  const terminalTax: TerminalTaxConfig = {
+    taxMode: terminal.tax_mode === "merchant_default" || terminal.tax_mode === "custom" ? terminal.tax_mode : "none",
+    taxRate: terminal.tax_rate === null ? null : Number(terminal.tax_rate),
+    taxLabel: String(terminal.tax_label || "Sales tax")
+  }
+  const merchantTax = terminalTax.taxMode === "merchant_default"
+    ? await getMerchantTaxSettings(merchantId)
+    : null
+
+  return calculatePosTotals({
+    subtotalAmount,
+    terminalTax,
+    merchantDefaultTaxRate: merchantTax?.taxEnabled ? merchantTax.taxRate : null,
+    serviceFee: PINETREE_FEE
+  })
 }
 
 export async function hasConnectedWalletForPosEngine(merchantId: string) {
@@ -141,15 +163,14 @@ export async function createPosPaymentEngine(
     throw err
   }
 
-  const tax = await getPosTaxSettingsEngine(merchantId)
-  const taxAmount = tax.taxEnabled ? calculateTax(subtotalAmount, tax.taxRate) : 0
-  const merchantAmount = subtotalAmount + taxAmount
-  const serviceFee = PINETREE_FEE
-  const totalAmount = merchantAmount + serviceFee
+  const terminalId = String(input.terminal.terminalId || "").trim()
+  if (!terminalId) throw Object.assign(new Error("Missing terminal id"), { status: 400 })
+  const totals = await calculatePosTotalsForTerminal(merchantId, terminalId, subtotalAmount)
+  const merchantAmount = totals.subtotalAmount + totals.taxAmount
   const routing = await resolvePosRouting(merchantId, input.terminal.preferredNetwork)
 
   const payment = await createPayment({
-    amount: totalAmount,
+    amount: merchantAmount,
     currency: input.currency || "USD",
     adapterId: routing.adapterId,
     merchantId,
@@ -163,14 +184,15 @@ export async function createPosPaymentEngine(
       network: routing.network,
       subtotalAmount,
       merchantAmount,
-      taxAmount,
-      serviceFee,
-      totalAmount
+      taxAmount: totals.taxAmount,
+      taxRate: totals.taxRate,
+      serviceFee: totals.serviceFee,
+      pinetreeFee: totals.serviceFee,
+      totalAmount: totals.totalAmount,
+      amountsPrecomputed: true
     },
     idempotencyKey: input.idempotencyKey
   })
-
-  const grossAmount = totalAmount
 
   return {
     paymentId: payment.id,
@@ -186,11 +208,7 @@ export async function createPosPaymentEngine(
       walletAddress: routing.wallet.wallet_address
     },
     breakdown: {
-      subtotalAmount,
-      taxAmount,
-      serviceFee,
-      grossAmount,
-      totalAmount
+      ...totals
     }
   }
 }
@@ -210,10 +228,10 @@ export async function createPosPaymentIntentEngine(input: CreatePosPaymentInput)
     throw err
   }
 
-  const tax = await getPosTaxSettingsEngine(merchantId)
-  const taxAmount = tax.taxEnabled ? calculateTax(subtotalAmount, tax.taxRate) : 0
-  const merchantAmount = subtotalAmount + taxAmount
-  const serviceFee = PINETREE_FEE
+  const terminalId = String(input.terminal.terminalId || "").trim()
+  if (!terminalId) throw Object.assign(new Error("Missing terminal id"), { status: 400 })
+  const totals = await calculatePosTotalsForTerminal(merchantId, terminalId, subtotalAmount)
+  const merchantAmount = totals.subtotalAmount + totals.taxAmount
 
   const intent = await createPaymentIntentEngine({
     merchantId,
@@ -222,10 +240,12 @@ export async function createPosPaymentIntentEngine(input: CreatePosPaymentInput)
     terminalId: input.terminal.terminalId,
     metadata: {
       subtotalAmount,
-      taxAmount,
-      serviceFee,
-      totalAmount: merchantAmount + serviceFee,
-      channel: "pos"
+      taxAmount: totals.taxAmount,
+      taxRate: totals.taxRate,
+      serviceFee: totals.serviceFee,
+      totalAmount: totals.totalAmount,
+      channel: "pos",
+      amountsPrecomputed: true
     }
   })
 
@@ -238,11 +258,7 @@ export async function createPosPaymentIntentEngine(input: CreatePosPaymentInput)
     qrCodeUrl: intent.qrCodeUrl,
     availableNetworks: intent.availableNetworks,
     breakdown: {
-      subtotalAmount,
-      taxAmount,
-      serviceFee,
-      grossAmount: merchantAmount + serviceFee,
-      totalAmount: merchantAmount + serviceFee
+      ...totals
     }
   }
 }
@@ -255,39 +271,12 @@ export async function getPosPaymentStatusEngine(paymentId: string) {
   }
 }
 
-export type PosBreakdown = {
-  subtotalAmount: number
-  taxAmount: number
-  taxRate: number
-  taxEnabled: boolean
-  serviceFee: number
-  grossAmount: number
-  totalAmount: number
-}
+export type PosBreakdown = PosTotalBreakdown
 
 export async function previewPosBreakdownEngine(
   merchantId: string,
+  terminalId: string,
   subtotalAmount: number
 ): Promise<PosBreakdown> {
-  if (!subtotalAmount || subtotalAmount <= 0) {
-    const err = new Error("Invalid amount") as Error & { status?: number }
-    err.status = 400
-    throw err
-  }
-
-  const tax = await getPosTaxSettingsEngine(merchantId)
-  const taxAmount = tax.taxEnabled ? calculateTax(subtotalAmount, tax.taxRate) : 0
-  const merchantAmount = subtotalAmount + taxAmount
-  const serviceFee = PINETREE_FEE
-  const grossAmount = merchantAmount + serviceFee
-
-  return {
-    subtotalAmount,
-    taxAmount,
-    taxRate: tax.taxRate,
-    taxEnabled: tax.taxEnabled,
-    serviceFee,
-    grossAmount,
-    totalAmount: grossAmount
-  }
+  return calculatePosTotalsForTerminal(merchantId, terminalId, subtotalAmount)
 }

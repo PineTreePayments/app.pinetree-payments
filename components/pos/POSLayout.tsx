@@ -1016,7 +1016,7 @@ export default function POSLayout({ terminalContext }: Props) {
                   </div>
                 )}
                 <div className="flex justify-between text-gray-700">
-                  <span>Service Fee</span>
+                  <span>Service fee</span>
                   <span>{fmtUsd(breakdown.serviceFee)}</span>
                 </div>
                 <div className="flex justify-between font-semibold text-gray-900 border-t border-gray-200 pt-2">
@@ -1166,9 +1166,7 @@ export default function POSLayout({ terminalContext }: Props) {
                     body: JSON.stringify({
                       saleTotal: totalDue,
                       cashTendered,
-                      changeGiven: Math.max(0, changeDue),
                       subtotalAmount: breakdown?.subtotalAmount ?? totalDue,
-                      serviceFee: breakdown?.serviceFee ?? 0,
                     }),
                   })
                   const payload = await res.json().catch(() => null)
@@ -1233,7 +1231,7 @@ export default function POSLayout({ terminalContext }: Props) {
                   </div>
                 )}
                 <div className="flex justify-between text-gray-700">
-                  <span>Service Fee</span>
+                  <span>Service fee</span>
                   <span>{fmtUsd(breakdown.serviceFee)}</span>
                 </div>
                 <div className="flex justify-between font-semibold text-gray-900 border-t border-gray-200 pt-1.5">

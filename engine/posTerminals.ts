@@ -1,5 +1,7 @@
 import { supabaseAdmin, supabase } from "@/database"
 import { createHash } from "crypto"
+import { getMerchantTaxSettings } from "@/database/merchants"
+import { normalizeTerminalTaxConfig, type TerminalTaxMode } from "./posTotals"
 
 const db = supabaseAdmin || supabase
 
@@ -10,6 +12,9 @@ export type TerminalRecord = {
   autolock: string
   merchant_id: string
   drawer_starting_amount: number
+  tax_mode: TerminalTaxMode
+  tax_rate: number | null
+  tax_label: string
   created_at?: string
 }
 
@@ -19,6 +24,9 @@ export type CreateTerminalInput = {
   autolock: string
   recoveryPhrase: string
   drawer_starting_amount?: number
+  taxMode: TerminalTaxMode
+  taxRate?: number | null
+  taxLabel?: string
 }
 
 type ErrorWithStatus = Error & { status?: number }
@@ -30,7 +38,7 @@ function hashRecoveryPhrase(phrase: string) {
 export async function getPosTerminalsEngine(merchantId: string): Promise<TerminalRecord[]> {
   const { data, error } = await db
     .from("terminals")
-    .select("id,name,pin,autolock,merchant_id,drawer_starting_amount,created_at")
+    .select("id,name,pin,autolock,merchant_id,drawer_starting_amount,tax_mode,tax_rate,tax_label,created_at")
     .eq("merchant_id", merchantId)
     .order("created_at", { ascending: false })
 
@@ -45,6 +53,14 @@ export async function createPosTerminalEngine(
   merchantId: string,
   input: CreateTerminalInput
 ): Promise<TerminalRecord> {
+  const terminalTax = normalizeTerminalTaxConfig(input)
+  if (terminalTax.taxMode === "merchant_default") {
+    const merchantTax = await getMerchantTaxSettings(merchantId)
+    if (!merchantTax.taxEnabled || !Number.isFinite(merchantTax.taxRate) || merchantTax.taxRate <= 0 || merchantTax.taxRate > 100) {
+      throw Object.assign(new Error("No valid default tax rate is configured"), { status: 400 })
+    }
+  }
+
   const { data, error } = await db
     .from("terminals")
     .insert({
@@ -52,9 +68,12 @@ export async function createPosTerminalEngine(
       name: input.name,
       pin: input.pin,
       autolock: input.autolock,
-      drawer_starting_amount: Number(input.drawer_starting_amount ?? 0)
+      drawer_starting_amount: Number(input.drawer_starting_amount ?? 0),
+      tax_mode: terminalTax.taxMode,
+      tax_rate: terminalTax.taxRate,
+      tax_label: terminalTax.taxLabel
     })
-    .select("id,name,pin,autolock,merchant_id,drawer_starting_amount,created_at")
+    .select("id,name,pin,autolock,merchant_id,drawer_starting_amount,tax_mode,tax_rate,tax_label,created_at")
     .single()
 
   if (error) {

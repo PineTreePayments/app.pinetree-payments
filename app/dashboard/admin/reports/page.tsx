@@ -451,7 +451,7 @@ export default function AdminReportsPage() {
               <CompactMetricTile label="Total"            value={r ? fmt(r.totalTransactions) : "—"} />
               <CompactMetricTile label="Success"        value={r ? fmt(r.confirmedTransactions) : "—"}  tone="green" />
               <CompactMetricTile label="Success Volume" value={r ? fmtUSD(r.confirmedVolume) : "—"}     tone="blue" />
-              <CompactMetricTile label="PineTree Fees"    value={r ? fmtUSD(r.pinetreeFees) : "—"}        tone="blue" />
+              <CompactMetricTile label="Service fees"     value={r ? fmtUSD(r.pinetreeFees) : "—"}        tone="blue" />
               <CompactMetricTile label="Processing"       value={r ? fmt(r.processingTransactions) : "—"} tone="amber" detail="In-flight on-chain" />
               <CompactMetricTile label="Waiting"          value={r ? fmt(r.awaitingTransactions) : "—"}   detail="Waiting for customer action" />
               <CompactMetricTile label="Incomplete"       value={r ? fmt(r.incompleteTransactions) : "—"} tone="amber" detail="Customer abandoned" />

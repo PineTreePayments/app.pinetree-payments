@@ -5,14 +5,14 @@ import { getRouteErrorStatus } from "@/lib/api/merchantAuth"
 
 export async function GET(req: NextRequest) {
   try {
-    const { mid: merchantId } = requireTerminalSession(req)
+    const { mid: merchantId, tid: terminalId } = requireTerminalSession(req)
 
     const amount = Number(req.nextUrl.searchParams.get("amount") || 0)
     if (!amount || amount <= 0) {
       return NextResponse.json({ error: "Invalid amount" }, { status: 400 })
     }
 
-    const breakdown = await previewPosBreakdownEngine(merchantId, amount)
+    const breakdown = await previewPosBreakdownEngine(merchantId, terminalId, amount)
     return NextResponse.json(breakdown)
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal server error"

@@ -1,7 +1,6 @@
 import { supabaseAdmin, supabase } from "@/database"
 import { getDrawerState } from "./cashDrawer"
 import { signTerminalSession } from "@/lib/api/terminalAuth"
-import { getMerchantSettingsReadiness } from "./settingsDashboard"
 
 const db = supabaseAdmin || supabase
 
@@ -12,6 +11,9 @@ export type TerminalDisplayData = {
     autolock: string
     merchant_id: string
     drawer_starting_amount: number
+    tax_mode: "none" | "merchant_default" | "custom"
+    tax_rate: number | null
+    tax_label: string
     created_at?: string
   }
   provider: string
@@ -32,20 +34,12 @@ export type TerminalDisplayData = {
 export async function getPosTerminalDisplayEngine(terminalId: string): Promise<TerminalDisplayData> {
   const { data: terminal, error: terminalError } = await db
     .from("terminals")
-    .select("id,name,autolock,merchant_id,drawer_starting_amount,created_at")
+    .select("id,name,autolock,merchant_id,drawer_starting_amount,tax_mode,tax_rate,tax_label,created_at")
     .eq("id", terminalId)
     .single()
 
   if (terminalError || !terminal) {
     throw new Error("Terminal not found")
-  }
-
-  const readiness = await getMerchantSettingsReadiness(terminal.merchant_id)
-  if (!readiness.complete) {
-    throw Object.assign(
-      new Error("Settings required before using a terminal."),
-      { status: 409, readiness }
-    )
   }
 
   const { data: wallet } = await db
@@ -65,6 +59,9 @@ export async function getPosTerminalDisplayEngine(terminalId: string): Promise<T
       autolock: terminal.autolock,
       merchant_id: terminal.merchant_id,
       drawer_starting_amount: Number(terminal.drawer_starting_amount ?? 0),
+      tax_mode: terminal.tax_mode || "none",
+      tax_rate: terminal.tax_rate === null ? null : Number(terminal.tax_rate),
+      tax_label: terminal.tax_label || "Sales tax",
       created_at: terminal.created_at
     },
     provider: wallet?.network || "solana",
@@ -94,14 +91,6 @@ export async function verifyPosTerminalPinEngine(
 
   if (error || !terminal) {
     throw Object.assign(new Error("Terminal not found"), { status: 404 })
-  }
-
-  const readiness = await getMerchantSettingsReadiness(terminal.merchant_id)
-  if (!readiness.complete) {
-    throw Object.assign(
-      new Error("Settings required before using a terminal."),
-      { status: 409, readiness }
-    )
   }
 
   if (!pin || pin.length !== 4 || pin !== String(terminal.pin)) {

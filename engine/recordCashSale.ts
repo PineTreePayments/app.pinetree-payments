@@ -25,6 +25,8 @@ export type RecordCashSaleInput = {
   changeGiven: number
   subtotalAmount?: number
   serviceFee?: number
+  taxAmount?: number
+  taxRate?: number
 }
 
 export type RecordCashSaleResult = {
@@ -37,6 +39,8 @@ export async function recordCashSale(input: RecordCashSaleInput): Promise<Record
   const { terminalId, merchantId, saleTotal, cashTendered, changeGiven } = input
   const subtotalAmount = input.subtotalAmount ?? saleTotal
   const serviceFee = input.serviceFee ?? 0
+  const taxAmount = input.taxAmount ?? 0
+  const taxRate = input.taxRate ?? 0
   const merchantAmount = saleTotal - serviceFee
 
   // Step 1: persist the payment row first — the transaction FK requires it to exist.
@@ -49,7 +53,7 @@ export async function recordCashSale(input: RecordCashSaleInput): Promise<Record
     currency: "USD",
     provider: "cash",
     status: "CONFIRMED",
-    metadata: { channel: "pos", terminalId, subtotalAmount, cashTendered, changeGiven }
+    metadata: { channel: "pos", terminalId, subtotalAmount, taxAmount, taxRate, serviceFee, cashTendered, changeGiven }
   })
 
   const paymentId = payment.id

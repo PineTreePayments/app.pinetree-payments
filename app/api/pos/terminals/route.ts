@@ -4,7 +4,8 @@ import {
   deletePosTerminalEngine,
   getPosTerminalsEngine
 } from "@/engine/posTerminals"
-import { getMerchantSettingsReadiness } from "@/engine/settingsDashboard"
+import { getMerchantTaxSettings } from "@/database/merchants"
+import { normalizeTerminalTaxConfig, type TerminalTaxMode } from "@/engine/posTotals"
 import {
   getRouteErrorStatus,
   requireMerchantIdFromRequest
@@ -18,11 +19,15 @@ export async function GET(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
 
-    const [terminals, readiness] = await Promise.all([
+    const [terminals, merchantTax] = await Promise.all([
       getPosTerminalsEngine(merchantId),
-      getMerchantSettingsReadiness(merchantId)
+      getMerchantTaxSettings(merchantId)
     ])
-    return NextResponse.json({ success: true, terminals, readiness })
+    const defaultTax = {
+      available: Boolean(merchantTax.taxEnabled && merchantTax.taxRate > 0 && merchantTax.taxRate <= 100),
+      rate: merchantTax.taxEnabled ? merchantTax.taxRate : null
+    }
+    return NextResponse.json({ success: true, terminals, defaultTax })
   } catch (error: unknown) {
     return NextResponse.json(
       { error: getErrorMessage(error, "Failed to load terminals") },
@@ -34,25 +39,15 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
-    const readiness = await getMerchantSettingsReadiness(merchantId)
-
-    if (!readiness.complete) {
-      return NextResponse.json(
-        {
-          error: "Settings required before creating a terminal.",
-          message: "Complete your business and tax settings before enabling POS terminals.",
-          readiness
-        },
-        { status: 409 }
-      )
-    }
-
     const body = (await req.json()) as {
       name?: string
       pin?: string
       autolock?: string
       recoveryPhrase?: string
       drawer_starting_amount?: number
+      taxMode?: TerminalTaxMode
+      taxRate?: number | null
+      taxLabel?: string
     }
 
     if (!body.name?.trim()) {
@@ -70,12 +65,29 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    let terminalTax
+    try {
+      terminalTax = normalizeTerminalTaxConfig({
+        taxMode: body.taxMode || "none",
+        taxRate: body.taxRate,
+        taxLabel: body.taxLabel
+      })
+    } catch (error) {
+      return NextResponse.json(
+        { error: getErrorMessage(error, "Invalid terminal tax configuration") },
+        { status: 400 }
+      )
+    }
+
     const terminal = await createPosTerminalEngine(merchantId, {
       name: body.name.trim(),
       pin: body.pin,
       autolock: body.autolock || "5",
       recoveryPhrase: body.recoveryPhrase.trim(),
-      drawer_starting_amount: Number(body.drawer_starting_amount ?? 0)
+      drawer_starting_amount: Number(body.drawer_starting_amount ?? 0),
+      taxMode: terminalTax.taxMode,
+      taxRate: terminalTax.taxRate,
+      taxLabel: terminalTax.taxLabel
     })
 
     return NextResponse.json({ success: true, terminal })

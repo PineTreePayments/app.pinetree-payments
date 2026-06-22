@@ -9,6 +9,9 @@ export interface Terminal {
   pin: string
   autolock?: string
   status?: string
+  tax_mode?: "none" | "merchant_default" | "custom"
+  tax_rate?: number | null
+  tax_label?: string
   created_at?: Date
 }
 

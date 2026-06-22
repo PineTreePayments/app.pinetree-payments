@@ -247,7 +247,7 @@ export async function generateReportPdfFromSummary(report: ReportSummary) {
   drawPremiumSummaryGrid(ctx, [
     { label: "Gross Volume",    value: currency(report.grossVolume),    accent: "blue" },
     { label: "Net Settlements", value: currency(report.netSettlements), accent: "green" },
-    { label: "PineTree Fees",   value: currency(report.pineTreeFees),   accent: "neutral" },
+    { label: "Service fees",    value: currency(report.pineTreeFees),   accent: "neutral" },
     { label: "Taxes Collected", value: currency(report.taxesCollected), accent: "neutral" },
     { label: "Transactions",    value: String(report.transactionCount), accent: "neutral" },
     { label: "Confirmed",        value: String(report.confirmedCount),   accent: "green" },

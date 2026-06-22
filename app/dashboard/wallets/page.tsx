@@ -5635,7 +5635,7 @@ export default function WalletsPage() {
                             />
                             <CapabilityRow
                               enabled={nwcStatus.canPayInvoice}
-                              label="Pay PineTree service fee"
+                              label="Pay service fee"
                               detail="Required — pays PineTree's $0.15 fee after each customer payment. PineTree only pays its own service-fee invoice, nothing else."
                             />
                           </div>
@@ -5650,7 +5650,7 @@ export default function WalletsPage() {
                       <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
                         <p className="text-sm font-semibold text-gray-950">Connect a different wallet</p>
                         <p className="mt-1 text-sm leading-6 text-gray-600">
-                          Paste a new connection string to replace the current wallet. The wallet must allow creating invoices, checking payment status, and paying the PineTree service fee.
+                          Paste a new connection string to replace the current wallet. The wallet must allow creating invoices, checking payment status, and paying the service fee.
                         </p>
                         <div className="mt-3 space-y-2">
                           <input
@@ -5702,7 +5702,7 @@ export default function WalletsPage() {
                                 />
                                 <CapabilityRow
                                   enabled={Boolean(nwcTestResult.canPayInvoice)}
-                                  label="Pay PineTree service fee"
+                                  label="Pay service fee"
                                   detail="Required — pays PineTree's $0.15 fee after each customer payment. PineTree only pays its own fee invoice."
                                 />
                               </div>
@@ -5972,7 +5972,7 @@ export default function WalletsPage() {
                             />
                             <CapabilityRow
                               enabled={Boolean(nwcTestResult.canPayInvoice)}
-                              label="Pay PineTree service fee"
+                              label="Pay service fee"
                               detail="Required for PineTree's $0.15 service fee. PineTree only uses this permission to pay PineTree's own service-fee invoice after a customer payment."
                             />
                           </div>
@@ -5987,7 +5987,7 @@ export default function WalletsPage() {
                           )}
                           {nwcTestResult.connected && !nwcTestResult.canPayInvoice && (
                             <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
-                              <p className="text-xs font-semibold text-amber-900">Missing: Pay PineTree service fee</p>
+                              <p className="text-xs font-semibold text-amber-900">Missing: Pay service fee</p>
                               <p className="mt-1 text-xs leading-5 text-amber-800">
                                 Required for PineTree&apos;s $0.15 service fee. PineTree only uses this permission to pay PineTree&apos;s own service-fee invoice after a customer payment.
                                 {nwcSetupWallet === "alby" && " In Alby Hub, set a monthly spending budget to limit PineTree to service fees only."}

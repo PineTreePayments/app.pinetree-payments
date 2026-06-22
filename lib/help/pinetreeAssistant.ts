@@ -480,7 +480,7 @@ function withContextAnswer(
         body: "Here are the steps to take your first POS payment end-to-end.",
         bullets: [
           `Step 1 — Check your terminal: ${terminalStep}`,
-          "Step 2 — Enter the sale amount: Type the customer's total. Review the PineTree fee and the amount you will receive, then proceed.",
+          "Step 2 — Enter the sale amount: Type the customer's total. Review the service fee and the amount you will receive, then proceed.",
           `Step 3 — Choose a payment rail: ${railStep}`,
           "Step 4 — Let the customer pay: The customer approves the wallet or provider step on their device. PineTree watches for the transaction.",
           "Step 5 — Wait for CONFIRMED: Do not treat PENDING or PROCESSING as a completed payment. Only CONFIRMED means PineTree has finalized the payment.",
@@ -621,7 +621,7 @@ function railAnswer(): Omit<PineTreeAssistantAnswer, "matchedArticles"> {
 function posAnswer(): Omit<PineTreeAssistantAnswer, "matchedArticles"> {
   return {
     title: "Run your first PineTree POS payment",
-    body: "In PineTree POS, create or launch a terminal, enter the sale amount, review the PineTree fee and total, then let the customer choose an available payment method.",
+    body: "In PineTree POS, create or launch a terminal, enter the sale amount, review the service fee and total, then let the customer choose an available payment method.",
     bullets: [
       "For crypto POS, PineTree creates the payment request and watches for status changes.",
       "Use a small test amount before using a new terminal with customers.",

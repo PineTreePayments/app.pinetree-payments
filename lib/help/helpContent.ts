@@ -73,7 +73,7 @@ export const helpArticles: HelpArticle[] = [
     title: "What to test before accepting real payments",
     category: "Getting Started",
     description: "Run a small test through each payment path you plan to offer.",
-    body: "Use a small amount to test each payment method you plan to show customers. For POS, create or open a terminal and complete a test flow. For hosted checkout, create a payment link or test checkout session. For wallet rails, verify that the wallet opens, the amount looks right, and the payment status updates.\n\nWhat this means: A provider can appear configured while a specific customer path still needs verification on your device, wallet, or account.\n\nWhat to check: Amount breakdown, PineTree service fee line, wallet opening behavior, provider redirect, final status, transaction row, and report export.",
+    body: "Use a small amount to test each payment method you plan to show customers. For POS, create or open a terminal and complete a test flow. For hosted checkout, create a payment link or test checkout session. For wallet rails, verify that the wallet opens, the amount looks right, and the payment status updates.\n\nWhat this means: A provider can appear configured while a specific customer path still needs verification on your device, wallet, or account.\n\nWhat to check: Amount breakdown, service fee line, wallet opening behavior, provider redirect, final status, transaction row, and report export.",
     tags: ["testing", "go live", "checkout", "pos"],
     keywords: ["before going live", "test checkout"]
   },
@@ -91,7 +91,7 @@ export const helpArticles: HelpArticle[] = [
     title: "How hosted checkout works",
     category: "Accepting Payments",
     description: "Hosted checkout sends customers to a PineTree payment page where they choose an available asset or provider path.",
-    body: "Hosted checkout uses PineTree pages to guide a customer through payment. A checkout link resolves to a payment intent, then redirects to the PineTree payment screen. The customer sees the amount, PineTree service fee, total, and available payment assets based on the configured networks.\n\nWhat this means: The checkout page does not complete payment by itself. The customer still needs to choose a payment method and approve the provider or wallet step.\n\nWhat to check: Link status, expiration, selected asset, wallet/provider handoff, success or cancel URL, and final payment status.",
+    body: "Hosted checkout uses PineTree pages to guide a customer through payment. A checkout link resolves to a payment intent, then redirects to the PineTree payment screen. The customer sees the amount, service fee, total, and available payment assets based on the configured networks.\n\nWhat this means: The checkout page does not complete payment by itself. The customer still needs to choose a payment method and approve the provider or wallet step.\n\nWhat to check: Link status, expiration, selected asset, wallet/provider handoff, success or cancel URL, and final payment status.",
     tags: ["hosted checkout", "checkout", "pay page", "customer"],
     keywords: ["checkout link", "payment intent", "success url", "cancel url"]
   },
@@ -109,7 +109,7 @@ export const helpArticles: HelpArticle[] = [
     title: "What customers see during checkout",
     category: "Accepting Payments",
     description: "Customers see a PineTree Checkout card with amount details and payment asset choices.",
-    body: "During hosted checkout, customers see PineTree Checkout, subtotal, PineTree Service Fee, total, and supported asset choices such as SOL, USDC on Solana, ETH on Base, USDC on Base, Shift4, or Bitcoin Lightning when those rails are available.\n\nWhat this means: The visible choices depend on merchant configuration and the networks available for the payment intent.\n\nWhat to check: If a customer does not see the expected option, review Providers and Wallets first. Then check whether the selected rail supports the asset you expect.",
+    body: "During hosted checkout, customers see PineTree Checkout, subtotal, Service fee, total, and supported asset choices such as SOL, USDC on Solana, ETH on Base, USDC on Base, Shift4, or Bitcoin Lightning when those rails are available.\n\nWhat this means: The visible choices depend on merchant configuration and the networks available for the payment intent.\n\nWhat to check: If a customer does not see the expected option, review Providers and Wallets first. Then check whether the selected rail supports the asset you expect.",
     tags: ["customer", "checkout", "assets", "service fee"],
     keywords: ["customer view", "asset selector", "fee display"]
   },
@@ -124,12 +124,12 @@ export const helpArticles: HelpArticle[] = [
   },
   {
     id: "fee-display",
-    title: "How PineTree fee display works",
+    title: "How service fee display works",
     category: "Accepting Payments",
     description: "Checkout and POS can show subtotal, taxes when configured, service fee, and total.",
-    body: "PineTree calculates a merchant amount and PineTree service fee when creating payment requests. POS can also include tax settings when available. Hosted checkout displays the subtotal, PineTree Service Fee, and total before the customer chooses a payment asset.\n\nWhat this means: The customer-facing total may be higher than the merchant amount because it includes the service fee and any applicable tax from merchant settings.\n\nWhat to check: Subtotal, tax line, service fee line, total due, and the report row after confirmation.",
+    body: "PineTree calculates a merchant amount and service fee when creating payment requests. POS can also include terminal tax settings when configured. Hosted checkout displays the subtotal, Service fee, and total before the customer chooses a payment asset.\n\nWhat this means: The customer-facing total may be higher than the merchant amount because it includes the service fee and any applicable tax.\n\nWhat to check: Subtotal, tax line, service fee line, total due, and the report row after confirmation.",
     tags: ["fees", "service fee", "tax", "amount"],
-    keywords: ["pinetree fee", "gross amount", "subtotal"]
+    keywords: ["service fee", "gross amount", "subtotal"]
   },
   {
     id: "when-to-retry-payment",
@@ -217,7 +217,7 @@ export const helpArticles: HelpArticle[] = [
     title: "Bitcoin Lightning provider status",
     category: "Provider Connections",
     description: "Lightning setup connects a compatible NWC wallet using a nostr+walletconnect:// connection string.",
-    body: "Bitcoin Lightning setup in PineTree uses NWC (Nostr Wallet Connect). Paste the nostr+walletconnect:// connection string from a compatible wallet app such as Mutiny, Alby, or any NWC-compatible wallet. PineTree tests the connection and saves the wallet label. The connection string is stored server-side only and is never returned to the browser after saving.\n\nWhat this means: Merchants provide a connection string from their own Lightning wallet. PineTree then creates invoices on the merchant wallet and collects the platform fee after payment confirmation.\n\nWhat to check: NWC connection string, wallet label, test result, provider status, and whether invoice creation succeeds in a small test payment.",
+    body: "Bitcoin Lightning setup in PineTree uses NWC (Nostr Wallet Connect). Paste the nostr+walletconnect:// connection string from a compatible wallet app such as Mutiny, Alby, or any NWC-compatible wallet. PineTree tests the connection and saves the wallet label. The connection string is stored server-side only and is never returned to the browser after saving.\n\nWhat this means: Merchants provide a connection string from their own Lightning wallet. PineTree then creates invoices on the merchant wallet and collects the service fee after payment confirmation.\n\nWhat to check: NWC connection string, wallet label, test result, provider status, and whether invoice creation succeeds in a small test payment.",
     tags: ["lightning", "nwc", "bitcoin", "btc"],
     keywords: ["NWC", "nostr walletconnect", "Lightning wallet", "connection string"]
   },
@@ -316,7 +316,7 @@ export const helpArticles: HelpArticle[] = [
     title: "Payment mismatch or incorrect amount",
     category: "Transaction Statuses",
     description: "PineTree validates expected payment references, amounts, and fee evidence for wallet rails where applicable.",
-    body: "Some wallet payments require PineTree to match the expected payment ID, amount, merchant leg, and PineTree fee leg. For Solana split payments, the watcher looks for matching wallet activity and a memo/reference. For split EVM payments, PineTree requires enough evidence before final confirmation.\n\nWhat this means: A transaction can be real on-chain activity but still not be enough to confirm the PineTree payment if the amount or reference does not match.\n\nWhat to check: Exact amount, selected asset, payment ID or memo, receiving wallet, fee capture evidence, and transaction hash.",
+    body: "Some wallet payments require PineTree to match the expected payment ID, amount, merchant leg, and service fee leg. For Solana split payments, the watcher looks for matching wallet activity and a memo/reference. For split EVM payments, PineTree requires enough evidence before final confirmation.\n\nWhat this means: A transaction can be real on-chain activity but still not be enough to confirm the PineTree payment if the amount or reference does not match.\n\nWhat to check: Exact amount, selected asset, payment ID or memo, receiving wallet, fee capture evidence, and transaction hash.",
     tags: ["mismatch", "incorrect amount", "reference", "fee"],
     keywords: ["underpaid", "wrong amount", "memo", "fee capture"]
   },

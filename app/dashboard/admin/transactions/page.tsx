@@ -633,7 +633,7 @@ export default function AdminTransactionsPage() {
             tone="blue"
           />
           <CompactMetricTile
-            label="PineTree Fees"
+            label="Service fees"
             value={s ? fmtUSD(s.totalFees) : "—"}
             tone="blue"
           />
@@ -1009,7 +1009,7 @@ export default function AdminTransactionsPage() {
                           </p>
                         </div>
                         <div>
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">PineTree Fee</p>
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">Service fee</p>
                           <p className="mt-1 text-lg font-bold text-[#0052FF]">
                             {fmtUSD(Number(txDetail.payment.pinetree_fee ?? 0))}
                           </p>

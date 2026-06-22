@@ -1308,7 +1308,7 @@ export default function PayClient() {
           <span className="font-semibold">{formatUsd(Number(intentPayload?.amount || 0))}</span>
         </div>
         <div className="mt-2 flex items-center justify-between">
-          <span className="text-gray-600">PineTree Service Fee</span>
+          <span className="text-gray-600">Service fee</span>
           <span className="font-semibold">{formatUsd(Number(intentPayload?.pinetreeFee || 0))}</span>
         </div>
         <div className="mt-3 flex items-center justify-between border-t border-[#0052FF]/10 pt-3">

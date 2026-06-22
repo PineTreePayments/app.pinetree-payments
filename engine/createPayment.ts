@@ -163,6 +163,38 @@ export async function buildCreatePaymentRequest(
 
   let taxAmount = 0
 
+  if (input.metadata?.amountsPrecomputed === true) {
+    taxAmount = Number(input.metadata.taxAmount || 0)
+    const pinetreeFee = Number(input.metadata.serviceFee ?? PINETREE_FEE)
+    const grossAmount = merchantAmount + pinetreeFee
+
+    return {
+      createPaymentInput: {
+        amount: grossAmount,
+        currency,
+        adapterId: input.adapterId,
+        merchantId,
+        preferredNetwork: input.preferredNetwork,
+        asset: input.asset,
+        channel,
+        metadata: {
+          ...(input.metadata || {}),
+          terminalId: input.terminalId,
+          merchantAmount,
+          taxAmount,
+          pinetreeFee,
+          totalAmount: merchantAmount + pinetreeFee
+        }
+      },
+      breakdown: {
+        merchantAmount,
+        taxAmount,
+        pinetreeFee,
+        grossAmount
+      }
+    }
+  }
+
   try {
     const { getMerchantTaxSettings } = await import("@/database/merchants")
     const { calculateTax, calculateGrossAmount } = await import("./fees")

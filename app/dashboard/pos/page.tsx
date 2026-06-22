@@ -23,6 +23,9 @@ type Terminal = {
   merchant_id?: string
   drawer_starting_amount?: number
   created_at?: string
+  tax_mode: "none" | "merchant_default" | "custom"
+  tax_rate: number | null
+  tax_label: string
 }
 
 type DrawerEntry = {
@@ -45,11 +48,7 @@ type DrawerBalance = {
   log: DrawerEntry[]
 }
 
-type MerchantSettingsReadiness = {
-  complete: boolean
-  missing: string[]
-  reason?: string
-}
+type TerminalTaxMode = "none" | "merchant_default" | "custom"
 
 function fmtUsd(n: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
@@ -74,9 +73,11 @@ export default function POSPage() {
   const [recoveryPhrase,setRecoveryPhrase] = useState("")
   const [autoLock,setAutoLock] = useState("5")
   const [drawerStartingAmount, setDrawerStartingAmount] = useState("")
+  const [taxMode, setTaxMode] = useState<TerminalTaxMode>("none")
+  const [customTaxRate, setCustomTaxRate] = useState("")
+  const [defaultTax, setDefaultTax] = useState<{ available: boolean; rate: number | null }>({ available: false, rate: null })
 
   const [drawerBalances, setDrawerBalances] = useState<Record<string, DrawerBalance>>({})
-  const [settingsReadiness, setSettingsReadiness] = useState<MerchantSettingsReadiness | null>(null)
   const [closeoutTerminalId, setCloseoutTerminalId] = useState<string | null>(null)
   const [closeoutAmount, setCloseoutAmount] = useState("")
   const [closeoutResult, setCloseoutResult] = useState<{ expected: number; actual: number; discrepancy: number } | null>(null)
@@ -111,13 +112,7 @@ export default function POSPage() {
 
       const payload = await res.json().catch(() => null)
       if (!res.ok) {
-        const error = new Error(payload?.error || "Terminal request failed") as Error & {
-          readiness?: MerchantSettingsReadiness
-          messageDetail?: string
-        }
-        error.readiness = payload?.readiness
-        error.messageDetail = payload?.message
-        throw error
+        throw new Error(payload?.error || "Terminal request failed")
       }
 
     return payload
@@ -127,11 +122,11 @@ export default function POSPage() {
     try {
       const payload = await callPosTerminalsApi("GET") as {
         terminals?: Terminal[]
-        readiness?: MerchantSettingsReadiness
+        defaultTax?: { available: boolean; rate: number | null }
       }
       const list = payload.terminals || []
       setTerminals(list)
-      if (payload.readiness) setSettingsReadiness(payload.readiness)
+      if (payload.defaultTax) setDefaultTax(payload.defaultTax)
       void loadDrawerBalances(list)
     } catch (error) {
       console.error(error)
@@ -226,33 +221,11 @@ export default function POSPage() {
 
   /* CREATE TERMINAL */
 
-  function showSettingsRequired(readiness = settingsReadiness) {
-    toast.warning("Settings required before creating a terminal.", {
-      description: "Complete your business and tax settings before enabling POS terminals.",
-      action: {
-        label: "Go to Settings",
-        onClick: () => {
-          window.location.href = "/dashboard/settings"
-        }
-      }
-    })
-    if (readiness) setSettingsReadiness(readiness)
-  }
-
   function startCreatingTerminal() {
-    if (settingsReadiness && !settingsReadiness.complete) {
-      showSettingsRequired(settingsReadiness)
-      return
-    }
     setCreating(true)
   }
 
   async function createTerminal(){
-    if (settingsReadiness && !settingsReadiness.complete) {
-      showSettingsRequired(settingsReadiness)
-      return
-    }
-
     if(!name){
       toast.error("Register name required")
       return
@@ -268,13 +241,26 @@ export default function POSPage() {
       return
     }
 
+    const parsedCustomTaxRate = Number(customTaxRate)
+    if (taxMode === "merchant_default" && !defaultTax.available) {
+      toast.error("No default tax rate configured")
+      return
+    }
+    if (taxMode === "custom" && (!Number.isFinite(parsedCustomTaxRate) || parsedCustomTaxRate <= 0 || parsedCustomTaxRate > 100)) {
+      toast.error("Enter a custom tax rate greater than 0 and no more than 100")
+      return
+    }
+
     try {
       const payload = await callPosTerminalsApi("POST", {
         name,
         pin,
         recoveryPhrase,
         autolock: autoLock,
-        drawer_starting_amount: drawerStartingAmount ? Number(drawerStartingAmount) : 0
+        drawer_starting_amount: drawerStartingAmount ? Number(drawerStartingAmount) : 0,
+        taxMode,
+        taxRate: taxMode === "custom" ? parsedCustomTaxRate : null,
+        taxLabel: "Sales tax"
       }) as { terminal?: Terminal }
 
       if (payload.terminal) {
@@ -286,14 +272,12 @@ export default function POSPage() {
       setRecoveryPhrase("")
       setAutoLock("5")
       setDrawerStartingAmount("")
+      setTaxMode("none")
+      setCustomTaxRate("")
       setCreating(false)
       toast.success("Terminal created")
     } catch (error) {
       console.error(error)
-      if (error instanceof Error && error.message === "Settings required before creating a terminal.") {
-        showSettingsRequired((error as Error & { readiness?: MerchantSettingsReadiness }).readiness)
-        return
-      }
       toast.error(error instanceof Error ? error.message : "Failed to create terminal")
     }
 
@@ -519,11 +503,68 @@ export default function POSPage() {
 
             </div>
 
+            <fieldset className="rounded-2xl border border-gray-200 bg-gray-50/60 p-4 md:col-span-2">
+              <legend className="px-1 text-sm font-semibold text-gray-700">Tax configuration</legend>
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                {([
+                  ["none", "No tax", "Do not add tax at this terminal."],
+                  ["merchant_default", "Use default tax rate", defaultTax.available && defaultTax.rate ? `${defaultTax.rate}% merchant default` : "No default tax rate configured."],
+                  ["custom", "Custom tax rate", "Set a rate for this terminal."],
+                ] as Array<[TerminalTaxMode, string, string]>).map(([value, label, detail]) => (
+                  <label
+                    key={value}
+                    className={`rounded-xl border p-3 ${taxMode === value ? "border-blue-300 bg-blue-50/70" : "border-gray-200 bg-white"} ${value === "merchant_default" && !defaultTax.available ? "cursor-not-allowed opacity-55" : "cursor-pointer"}`}
+                  >
+                    <span className="flex items-start gap-2">
+                      <input
+                        type="radio"
+                        name="terminal-tax-mode"
+                        value={value}
+                        checked={taxMode === value}
+                        disabled={value === "merchant_default" && !defaultTax.available}
+                        onChange={() => setTaxMode(value)}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <span className="block text-sm font-semibold text-gray-900">{label}</span>
+                        <span className="mt-1 block text-xs leading-5 text-gray-500">{detail}</span>
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+
+              {taxMode === "custom" && (
+                <div className="mt-4 max-w-xs">
+                  <label className="block text-sm font-medium text-gray-700" htmlFor="terminal-custom-tax-rate">
+                    Tax rate (%)
+                  </label>
+                  <input
+                    id="terminal-custom-tax-rate"
+                    type="number"
+                    min="0.01"
+                    max="100"
+                    step="0.01"
+                    value={customTaxRate}
+                    onChange={(event) => setCustomTaxRate(event.target.value)}
+                    placeholder="e.g. 8.25"
+                    className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-gray-900 focus:border-blue-400 focus:outline-none"
+                  />
+                  {(!Number.isFinite(Number(customTaxRate)) || Number(customTaxRate) <= 0 || Number(customTaxRate) > 100) && (
+                    <p className="mt-1.5 text-xs text-red-600">Enter a rate greater than 0 and no more than 100.</p>
+                  )}
+                </div>
+              )}
+            </fieldset>
+
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3 mt-6">
 
-            <Button onClick={createTerminal}>
+            <Button
+              onClick={createTerminal}
+              disabled={taxMode === "merchant_default" ? !defaultTax.available : taxMode === "custom" && (!Number.isFinite(Number(customTaxRate)) || Number(customTaxRate) <= 0 || Number(customTaxRate) > 100)}
+            >
               Create Terminal
             </Button>
 
@@ -712,6 +753,28 @@ export default function POSPage() {
                   <span className="text-gray-500">Merchant</span>
                   <span className="truncate font-medium text-gray-900">{selectedTerminal.merchant_id || "-"}</span>
                 </div>
+                <div className="flex justify-between gap-4 border-t border-gray-100 py-1 pt-2">
+                  <span className="text-gray-500">Tax mode</span>
+                  <span className="font-medium text-gray-900">
+                    {selectedTerminal.tax_mode === "merchant_default"
+                      ? "Merchant default"
+                      : selectedTerminal.tax_mode === "custom"
+                        ? "Custom"
+                        : "No tax"}
+                  </span>
+                </div>
+                {selectedTerminal.tax_mode !== "none" && (
+                  <div className="flex justify-between gap-4 py-1">
+                    <span className="text-gray-500">Tax rate</span>
+                    <span className="font-medium text-gray-900">
+                      {selectedTerminal.tax_mode === "custom"
+                        ? `${selectedTerminal.tax_rate}%`
+                        : defaultTax.rate
+                          ? `${defaultTax.rate}%`
+                          : "Default rate"}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
