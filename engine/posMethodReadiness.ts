@@ -1,6 +1,7 @@
 import { getMerchantProviders } from "@/database/merchants"
 import { getMerchantAvailableNetworks } from "./paymentIntents"
 import type { WalletNetwork } from "./providerMappings"
+import { canCardProviderProcessPayments } from "@/lib/providers/cardProviderReadiness"
 
 const CRYPTO_RAILS: WalletNetwork[] = ["solana", "base", "bitcoin_lightning"]
 
@@ -37,9 +38,7 @@ export async function getPosMethodReadinessEngine(merchantId: string): Promise<P
   const availableCryptoRails = CRYPTO_RAILS.filter((network) => availableNetworkSet.has(network))
   const unavailableCryptoRails = CRYPTO_RAILS.filter((network) => !availableNetworkSet.has(network))
   const cryptoAvailable = availableCryptoRails.length > 0
-  const card = providers.some(
-    (provider) => normalizeProviderId(provider.provider) === "shift4" && isEnabledProvider(provider)
-  )
+  const card = providers.some(canCardProviderProcessPayments)
 
   const result: PosMethodReadiness = {
     cash: true,

@@ -20,6 +20,7 @@ import {
   getShift4DisplayStatus,
   type Shift4DisplayStatus
 } from "@/lib/shift4DisplayStatus"
+import { isStripeConnectReady } from "@/lib/providers/cardProviderReadiness"
 
 const providerAlbyHubAppsUrl = process.env.NEXT_PUBLIC_ALBY_HUB_APPS_URL || "https://getalby.com/hub/apps"
 const providerAlbyNwcDocsUrl = process.env.NEXT_PUBLIC_ALBY_NWC_DOCS_URL || "https://guides.getalby.com/user-guide/alby-account-and-browser-extension/alby-hub/nwc"
@@ -659,6 +660,16 @@ export default function ProvidersPage() {
 
     const p = getProvider(provider)
     if (isManagedCardProvider(provider)) {
+      if (provider === "stripe") {
+        if (isStripeConnectReady(p || { provider: "stripe" })) return "Connected"
+        const credentials = p?.credentials
+        const setupInProgress = Boolean(
+          p?.enabled &&
+          p.status === "active" &&
+          (credentials?.details_submitted || credentials?.stripe_account_id)
+        )
+        return setupInProgress ? "Pending" : "Not connected"
+      }
       const applicationStatus = getCardProviderApplicationStatus(provider, p)
       if (applicationStatus === "Approved") return "Connected"
       if (applicationStatus === "Pending") return "Pending"
@@ -1737,9 +1748,19 @@ function EngineSettingStatus({
               <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                 Provider Status
               </span>
-              <span className="mt-1 block text-sm font-medium leading-snug text-gray-950">
-                Application: {cardApplicationStatus || "Not started"}
-              </span>
+              {provider === "stripe" ? (
+                <span className="mt-1 block text-sm font-medium leading-snug text-gray-950">
+                  {connected
+                    ? "Card processing enabled"
+                    : p?.credentials?.stripe_account_id
+                      ? "Stripe account needs setup"
+                      : "Stripe account not connected"}
+                </span>
+              ) : (
+                <span className="mt-1 block text-sm font-medium leading-snug text-gray-950">
+                  Application: {cardApplicationStatus || "Not started"}
+                </span>
+              )}
               <span className="block text-xs leading-5 text-gray-500">
                 Managed by PineTree / {getCardProviderName(provider)}
               </span>

@@ -17,6 +17,7 @@ import { loadProviders } from "./loadProviders"
 import { getMerchantProviders } from "@/database/merchants"
 import { getLightningNwcReadiness, SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { getProviderMetadata, isProviderHealthy, providerSupportsFeeAtPaymentTime } from "./providerRegistry"
+import { merchantProviderCanProcessPayments } from "@/lib/providers/cardProviderReadiness"
 
 const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base", "shift4", "stripe", "bitcoin_lightning"]
 const PAYMENT_DETAILS_TIMEOUT_MS = Number(process.env.PAYMENT_DETAILS_TIMEOUT_MS || 12000)
@@ -179,7 +180,7 @@ export async function getMerchantAvailableNetworks(merchantId: string): Promise<
   // to preserve backward compatibility for existing merchants.
   const enabledProviders = new Set(
     providers
-      .filter((p) => p.enabled !== false)
+      .filter(merchantProviderCanProcessPayments)
       .map((p) => String(p.provider || "").toLowerCase().trim())
   )
 

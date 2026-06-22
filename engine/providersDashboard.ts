@@ -180,7 +180,7 @@ function getLightningDashboardStatus(row?: ProviderRow | null): LightningDashboa
   return "connected"
 }
 
-function sanitizeManagedCardProviderRow(row: ProviderRow): ProviderRow {
+function sanitizeApplicationCardProviderRow(row: ProviderRow): ProviderRow {
   const credentials = row.credentials || {}
   return {
     ...row,
@@ -189,6 +189,20 @@ function sanitizeManagedCardProviderRow(row: ProviderRow): ProviderRow {
       setup_started_at: String(credentials.setup_started_at || ""),
       setup_submitted_at: String(credentials.setup_submitted_at || ""),
       setup_returned_at: String(credentials.setup_returned_at || ""),
+      provider_model: String(credentials.provider_model || "")
+    }
+  }
+}
+
+function sanitizeStripeProviderRow(row: ProviderRow): ProviderRow {
+  const credentials = row.credentials || {}
+  return {
+    ...row,
+    credentials: {
+      stripe_account_id: String(credentials.stripe_account_id || ""),
+      details_submitted: credentials.details_submitted === true,
+      charges_enabled: credentials.charges_enabled === true,
+      payouts_enabled: credentials.payouts_enabled === true,
       provider_model: String(credentials.provider_model || "")
     }
   }
@@ -211,8 +225,12 @@ function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
         row.provider !== SPEED_PROVIDER_NAME
     )
     .map((row) => {
-      if (row.provider === "stripe" || row.provider === "fluidpay") {
-        return sanitizeManagedCardProviderRow(row)
+      if (row.provider === "stripe") {
+        return sanitizeStripeProviderRow(row)
+      }
+
+      if (row.provider === "fluidpay") {
+        return sanitizeApplicationCardProviderRow(row)
       }
 
       if (row.provider !== "shift4") return row

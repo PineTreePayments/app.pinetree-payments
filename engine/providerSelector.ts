@@ -11,39 +11,12 @@ import { normalizeProvider, normalizeWalletNetwork } from "./providerMappings"
 import { getProviderMetadata, isProviderHealthy, providerSupportsFeeAtPaymentTime } from "./providerRegistry"
 import { loadProviders } from "./loadProviders"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
+import { merchantProviderCanProcessPayments } from "@/lib/providers/cardProviderReadiness"
 
 // Wallet-rail adapter per network — used when merchant_providers has no rows yet
 const NETWORK_DEFAULT_ADAPTER: Partial<Record<string, PaymentAdapterId>> = {
   solana: "solana",
   base: "base"
-}
-
-function getApplicationStatus(credentials: unknown): string {
-  if (!credentials || typeof credentials !== "object") return ""
-  return String((credentials as Record<string, unknown>).application_status || "")
-    .toLowerCase()
-    .trim()
-}
-
-function merchantProviderCanProcessPayments(provider: {
-  provider?: string
-  enabled?: boolean
-  credentials?: unknown
-}): boolean {
-  if (provider.enabled === false) return false
-
-  const adapterId = normalizeProvider(provider.provider)
-  if (adapterId === "stripe") {
-    const credentials = provider.credentials && typeof provider.credentials === "object"
-      ? provider.credentials as Record<string, unknown>
-      : {}
-    return provider.enabled === true && credentials.charges_enabled === true
-  }
-  if (adapterId === "fluidpay") {
-    return getApplicationStatus(provider.credentials) === "approved"
-  }
-
-  return true
 }
 
 function adapterMeetsNetworkRequirements(adapterId: PaymentAdapterId, network: string): boolean {
