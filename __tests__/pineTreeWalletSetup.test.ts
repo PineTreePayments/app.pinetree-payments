@@ -113,7 +113,8 @@ describe("PineTree embedded wallet setup", () => {
     // lightningReady comes from the merchant_lightning_profiles record, not a Dynamic Spark address
     expect(page).toContain('const lightningReady = lightningProfile?.status === "ready"')
     expect(page).toContain("const allPrimaryRailsReady = baseReady && solanaReady && lightningReady")
-    expect(page).toContain('allPrimaryRailsReady ? "Ready" : "Needs attention"')
+    expect(page).toContain('"Setup pending"')
+    expect(page).toContain("baseAndSolanaReady && !lightningNeedsAttention")
   })
 
   it("syncs Dynamic wallet addresses to the merchant profile on creation only when explicitly triggered", () => {
@@ -126,11 +127,13 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("user.userId")
   })
 
-  it("provides a Refresh wallet addresses action that only updates the current merchant profile", () => {
+  it("keeps address refresh as a Receive-tab troubleshooting action, not a main-card CTA", () => {
     // Refresh is gated by canRefresh — only enabled when Dynamic session matches the saved profile
     expect(page).toContain("canRefresh")
     expect(page).toContain("dynamicSessionMatchesProfile")
-    expect(page).toContain("Refresh wallet addresses")
+    expect(page).not.toContain("Refresh wallet addresses")
+    expect(page).toContain("Refresh Base/Solana addresses")
+    expect(page).toContain('aria-label="Refresh Base and Solana addresses"')
     expect(page).toContain("handleRefreshAddresses")
     // Refresh calls the same sync path — POST to pinetree-profile
     expect(page).toContain("syncProfileFromDynamic")
@@ -164,7 +167,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('label="Solana address"')
     // Lightning is PineTree-managed — no address row to copy, a dedicated section instead
     expect(page).not.toContain('<ReceiveRow label="Bitcoin Lightning/Spark address"')
-    expect(page).toContain("Bitcoin Lightning is powered by PineTree")
+    expect(page).toContain("Powered by PineTree")
     expect(page).not.toContain("Network addresses")
     expect(page).not.toContain("PineTree Base Wallet")
     expect(page).not.toContain("PineTree Solana Wallet")
@@ -189,8 +192,21 @@ describe("PineTree embedded wallet setup", () => {
 
   it("requires Base, Solana, and Lightning before marking the wallet Ready", () => {
     expect(page).toContain("const allPrimaryRailsReady = baseReady && solanaReady && lightningReady")
-    expect(page).toContain('allPrimaryRailsReady ? "Ready" : "Needs attention"')
-    expect(page).toContain("Bitcoin Lightning setup pending")
+    expect(page).toContain('"Setup pending"')
+    expect(page).toContain("Bitcoin Lightning is being prepared through PineTree. Base and Solana are ready.")
+  })
+
+  it("shows Setup pending when Base and Solana are ready but Lightning is still pending", () => {
+    expect(page).toContain("const baseAndSolanaReady = baseReady && solanaReady")
+    expect(page).toContain("baseAndSolanaReady && !lightningNeedsAttention")
+    expect(page).toContain('? "Setup pending"')
+    expect(page).toContain('const lightningPending = lightningProfile?.status === "pending"')
+  })
+
+  it("keeps Needs attention for missing Base/Solana or explicit Lightning needs_attention", () => {
+    expect(page).toContain('const lightningNeedsAttention = lightningProfile?.status === "needs_attention"')
+    expect(page).toContain(': "Needs attention"')
+    expect(page).toContain('if (lightningNeedsAttention) return "Needs attention"')
   })
 
   it("shows receive readiness for Base and Solana, and a PineTree-managed section for Bitcoin Lightning", () => {
@@ -198,7 +214,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('<ReceiveRow label="Solana address"')
     // Lightning is PineTree-managed — no address to copy, section explains the rail
     expect(page).not.toContain('<ReceiveRow label="Bitcoin Lightning/Spark address"')
-    expect(page).toContain("Bitcoin Lightning is powered by PineTree")
+    expect(page).toContain("Powered by PineTree")
     expect(page).toContain('No external merchant wallet connection is required')
     // Base/Solana ReceiveRow still shows Setup pending when address is missing
     expect(page).toContain('label={ready ? "Ready" : "Setup pending"}')
@@ -400,6 +416,8 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("TrySpeed")
     expect(page).not.toContain("speed.com")
     expect(page).not.toContain("Connect NWC")
+    expect(page).not.toContain("Connect Spark")
+    expect(page).not.toContain("Spark setup")
     expect(page).not.toContain("nostr+walletconnect")
     expect(page).not.toContain("Paste your")
     expect(page).not.toContain("Speed API key")

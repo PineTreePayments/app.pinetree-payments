@@ -456,15 +456,29 @@ function PineTreeWalletRuntime() {
   // A Dynamic Spark address is NOT required for Lightning readiness.
   const lightningReady = lightningProfile?.status === "ready"
   const lightningPending = lightningProfile?.status === "pending"
-  const lightningEnabled = lightningReady || lightningPending
+  const lightningNeedsAttention = lightningProfile?.status === "needs_attention"
+  const lightningEnabled = lightningReady || lightningPending || lightningNeedsAttention
 
   const allPrimaryRailsReady = baseReady && solanaReady && lightningReady
+  const baseAndSolanaReady = baseReady && solanaReady
 
   // Wallet exists once Dynamic wallet (Base or Solana) or Lightning profile is active
   const hasWallet = profileState.kind === "loaded" && (baseReady || solanaReady || lightningReady)
 
-  const walletStatus = !hasWallet ? "Not created" : allPrimaryRailsReady ? "Ready" : "Needs attention"
-  const statusTone = !hasWallet ? "slate" : allPrimaryRailsReady ? "green" : "amber"
+  const walletStatus = !hasWallet
+    ? "Not created"
+    : allPrimaryRailsReady
+      ? "Ready"
+      : baseAndSolanaReady && !lightningNeedsAttention
+        ? "Setup pending"
+        : "Needs attention"
+  const statusTone = !hasWallet
+    ? "slate"
+    : allPrimaryRailsReady
+      ? "green"
+      : baseAndSolanaReady && !lightningNeedsAttention
+        ? "blue"
+        : "amber"
 
   // ---------------------------------------------------------------------------
   // Dynamic session mismatch guard
@@ -570,20 +584,20 @@ function PineTreeWalletRuntime() {
 
   function lightningStatusLabel() {
     if (lightningReady) return "Ready"
-    if (lightningPending) return "Pending"
+    if (lightningNeedsAttention) return "Needs attention"
     return "Setup pending"
   }
 
-  function lightningStatusTone(): "green" | "blue" | "amber" {
+  function lightningStatusTone(): "green" | "blue" | "amber" | "red" {
     if (lightningReady) return "green"
-    if (lightningPending) return "blue"
-    return "amber"
+    if (lightningNeedsAttention) return "red"
+    return "blue"
   }
 
   function lightningOverviewCopy() {
-    if (lightningReady) return "Bitcoin Lightning payments are active through PineTree."
-    if (lightningPending) return "PineTree is enabling your Lightning rail. This may take a moment."
-    return "Bitcoin Lightning is powered by PineTree's backend Lightning rail. No external merchant wallet connection is required."
+    if (lightningReady) return "Powered by PineTree. Bitcoin Lightning payments are active."
+    if (lightningNeedsAttention) return "Powered by PineTree. Bitcoin Lightning needs PineTree review before it can be marked ready."
+    return "Powered by PineTree. Bitcoin Lightning is being prepared for this merchant account."
   }
 
   // ---------------------------------------------------------------------------
@@ -599,7 +613,7 @@ function PineTreeWalletRuntime() {
               <h2 className="text-base font-semibold text-gray-950">PineTree Wallet</h2>
               <ProviderStatusPill
                 label={syncing ? "Saving…" : walletStatus}
-                tone={syncing ? "blue" : (statusTone as "green" | "amber" | "slate")}
+                tone={syncing ? "blue" : (statusTone as "green" | "blue" | "amber" | "slate")}
               />
             </div>
             <p className="text-sm leading-6 text-gray-600">
@@ -613,9 +627,9 @@ function PineTreeWalletRuntime() {
               ))}
             </div>
 
-            {!lightningReady && hasWallet ? (
+            {baseAndSolanaReady && !lightningReady && !lightningNeedsAttention ? (
               <p className="text-xs font-semibold text-amber-700">
-                Bitcoin Lightning setup pending
+                Bitcoin Lightning is being prepared through PineTree. Base and Solana are ready.
               </p>
             ) : null}
 
@@ -663,18 +677,6 @@ function PineTreeWalletRuntime() {
               </button>
             ) : null}
 
-            {canRefresh ? (
-              <button
-                type="button"
-                onClick={() => void handleRefreshAddresses()}
-                disabled={refreshing}
-                aria-label="Refresh wallet addresses"
-                className="flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-600 shadow-sm transition hover:text-blue-700 disabled:opacity-50"
-              >
-                <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
-                Refresh wallet addresses
-              </button>
-            ) : null}
           </div>
         </div>
       </article>
@@ -701,7 +703,7 @@ function PineTreeWalletRuntime() {
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 id="pinetree-wallet-modal-title" className="text-lg font-semibold text-gray-950">PineTree Wallet</h2>
-                  <ProviderStatusPill label={walletStatus} tone={statusTone as "green" | "amber" | "slate"} />
+                  <ProviderStatusPill label={walletStatus} tone={statusTone as "green" | "blue" | "amber" | "slate"} />
                 </div>
                 <p className="mt-1 text-xs text-gray-500">One merchant wallet profile</p>
               </div>
@@ -808,6 +810,19 @@ function PineTreeWalletRuntime() {
                   <ReceiveRow label="Base address" entries={profileAddresses.base} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
                   <ReceiveRow label="Solana address" entries={profileAddresses.solana} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
 
+                  {canRefresh ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleRefreshAddresses()}
+                      disabled={refreshing}
+                      aria-label="Refresh Base and Solana addresses"
+                      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-600 shadow-sm transition hover:text-blue-700 disabled:opacity-50"
+                    >
+                      <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
+                      Refresh Base/Solana addresses
+                    </button>
+                  ) : null}
+
                   {/* Bitcoin Lightning: PineTree-managed, no merchant-side address to copy */}
                   <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.05)] sm:px-5 sm:py-5">
                     <div className="flex items-center justify-between gap-3">
@@ -815,7 +830,7 @@ function PineTreeWalletRuntime() {
                       <ProviderStatusPill label={lightningStatusLabel()} tone={lightningStatusTone()} />
                     </div>
                     <p className="mt-2 text-xs leading-5 text-gray-500">
-                      Bitcoin Lightning is powered by PineTree&apos;s backend Lightning rail. No external merchant wallet connection is required.
+                      Powered by PineTree. Bitcoin Lightning is prepared through PineTree&apos;s backend Lightning rail. No external merchant wallet connection is required.
                     </p>
                     {lightningReady ? (
                       <p className="mt-1 text-xs font-semibold text-green-700">Active — customers can pay Lightning invoices.</p>
