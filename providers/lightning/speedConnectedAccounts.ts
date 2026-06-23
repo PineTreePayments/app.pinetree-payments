@@ -31,6 +31,7 @@ export type SpeedConnectedAccountSummary = {
   owner_email_present: boolean
   status: string | null
   type: string | null
+  setup_url_present?: boolean
   source: "existing_connected_account" | "invite_account_link" | "not_configured" | "error"
 }
 
@@ -105,6 +106,22 @@ function summarizeConnectedAccount(
 
 function emptySummary(source: SpeedConnectedAccountSummary["source"]): SpeedConnectedAccountSummary {
   return summarizeConnectedAccount(null, source)
+}
+
+function inviteLinkSummary(setupUrl: string): SpeedConnectedAccountSummary {
+  return {
+    ...emptySummary("invite_account_link"),
+    setup_url_present: Boolean(setupUrl),
+  }
+}
+
+function safeProviderErrorMessage(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : String(error || "")
+  const safe = (message || fallback)
+    .replace(/sk_(test|live)_[A-Za-z0-9_-]+/g, "sk_$1_[redacted]")
+    .replace(/Basic\s+[A-Za-z0-9+/=]+/gi, "Basic [redacted]")
+    .slice(0, 500)
+  return safe || fallback
 }
 
 export function normalizeSpeedConnectedAccountReadiness(input: {
@@ -217,12 +234,24 @@ export async function createOrLinkSpeedConnectedAccountForMerchant(
     })
   }
 
-  if (!config.configured) {
+  const apiKeyPresent = Boolean(String(process.env.SPEED_API_KEY || "").trim())
+  if (!apiKeyPresent) {
     return result({
-      status: "pending",
-      speedConnectedAccountStatus: "speed_platform_configuration_pending",
+      status: "needs_attention",
+      speedConnectedAccountStatus: "speed_api_key_missing",
       summary: emptySummary("not_configured"),
-      errorMessage: `Speed platform configuration is incomplete: ${config.missing.join(", ") || "unknown"}.`,
+      errorMessage: "PineTree Speed platform is missing SPEED_API_KEY.",
+      mode: config.mode,
+      usedLiveApi: false,
+    })
+  }
+
+  if (config.environmentKeyMismatch) {
+    return result({
+      status: "needs_attention",
+      speedConnectedAccountStatus: "speed_platform_configuration_invalid",
+      summary: emptySummary("not_configured"),
+      errorMessage: "Speed platform configuration has an environment/key mismatch.",
       mode: config.mode,
       usedLiveApi: false,
     })
@@ -256,7 +285,7 @@ export async function createOrLinkSpeedConnectedAccountForMerchant(
   const returnUrl = getSpeedConnectReturnUrl(input.merchant_id)
   if (!returnUrl) {
     return result({
-      status: "pending",
+      status: "needs_attention",
       speedConnectedAccountStatus: "speed_connect_return_url_missing",
       summary: emptySummary("not_configured"),
       errorMessage: "SPEED_CONNECT_RETURN_URL must be configured before creating a Speed Connect invite.",
@@ -283,17 +312,16 @@ export async function createOrLinkSpeedConnectedAccountForMerchant(
       status: "pending",
       speedConnectedAccountStatus: "speed_connect_invite_created",
       setupUrl,
-      summary: emptySummary("invite_account_link"),
+      summary: inviteLinkSummary(setupUrl),
       mode: config.mode,
       usedLiveApi: true,
     })
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Speed Connect invite creation failed."
     return result({
       status: "needs_attention",
       speedConnectedAccountStatus: "speed_connect_invite_failed",
       summary: emptySummary("error"),
-      errorMessage: message,
+      errorMessage: safeProviderErrorMessage(error, "Speed Connect invite creation failed."),
       mode: config.mode,
       usedLiveApi: true,
     })

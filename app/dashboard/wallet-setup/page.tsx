@@ -484,7 +484,7 @@ function PineTreeWalletRuntime() {
   const lightningReady = lightningProfile?.status === "ready"
   const lightningPending = lightningProfile?.status === "pending"
   const lightningNeedsAttention = lightningProfile?.status === "needs_attention"
-  const lightningEnabled = lightningReady || lightningPending || lightningNeedsAttention
+  const lightningRetryable = !lightningReady
 
   const allPrimaryRailsReady = baseReady && solanaReady && lightningReady
   const baseAndSolanaReady = baseReady && solanaReady
@@ -678,7 +678,7 @@ function PineTreeWalletRuntime() {
               </button>
             )}
 
-            {hasWallet && !lightningEnabled ? (
+            {hasWallet && lightningRetryable ? (
               <button
                 type="button"
                 onClick={() => void handleEnableLightning()}
@@ -791,7 +791,7 @@ function PineTreeWalletRuntime() {
                         <ProviderStatusPill label={lightningStatusLabel()} tone={lightningStatusTone()} />
                       </div>
                       <p className="mt-2 text-xs text-blue-700">{lightningOverviewCopy()}</p>
-                      {!lightningEnabled ? (
+                      {lightningRetryable ? (
                         <button
                           type="button"
                           onClick={() => void handleEnableLightning()}
@@ -852,7 +852,18 @@ function PineTreeWalletRuntime() {
                     {lightningReady ? (
                       <p className="mt-1 text-xs font-semibold text-green-700">Active — customers can pay Lightning invoices.</p>
                     ) : lightningPending ? (
-                      <p className="mt-1 text-xs font-semibold text-blue-700">PineTree is enabling your Lightning rail.</p>
+                      <>
+                        <p className="mt-1 text-xs font-semibold text-blue-700">PineTree is enabling your Lightning rail.</p>
+                        <button
+                          type="button"
+                          onClick={() => void handleEnableLightning()}
+                          disabled={enablingLightning}
+                          className="mt-2 flex items-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-semibold text-orange-700 transition hover:bg-orange-100 disabled:opacity-50"
+                        >
+                          <Zap size={11} />
+                          {enablingLightning ? "Preparing Bitcoin Lightning" : "Enable Bitcoin Lightning"}
+                        </button>
+                      </>
                     ) : (
                       <button
                         type="button"

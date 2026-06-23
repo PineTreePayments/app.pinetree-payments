@@ -409,7 +409,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("baseReady || solanaReady || lightningReady")
     // lightningPending is a valid state for an active wallet
     expect(page).toContain("lightningPending")
-    expect(page).toContain("const lightningEnabled = lightningReady || lightningPending")
+    expect(page).toContain("const lightningRetryable = !lightningReady")
   })
 
   it("Enable Bitcoin Lightning button calls POST /api/wallets/lightning/pinetree-managed and does not redirect", () => {
@@ -420,6 +420,15 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("speed.com")
     expect(page).not.toContain("tryspeed.com")
     expect(page).not.toContain("router.push")
+  })
+
+  it("Enable Bitcoin Lightning remains available as a retry for pending profiles", () => {
+    expect(page).toContain("const lightningRetryable = !lightningReady")
+    expect(page).toContain("hasWallet && lightningRetryable")
+    expect(page).toContain("{lightningRetryable ?")
+    expect(page).toContain("lightningPending ?")
+    expect(page).toContain("handleEnableLightning")
+    expect(page).toContain("/api/wallets/lightning/pinetree-managed")
   })
 
   it("does not ask the merchant to sign up for Speed, paste keys, or connect NWC", () => {
@@ -441,8 +450,10 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("speed_secret")
     // The lightning API route response only contains a safe profile shape, not secrets
     expect(lightningApiRoute).toContain("safeLightningProfile")
-    expect(lightningApiRoute).not.toContain("SPEED_API_KEY")
+    expect(lightningApiRoute).toContain("SPEED_API_KEY_present")
     expect(lightningApiRoute).not.toContain("speed_account_secret")
+    expect(lightningApiRoute).not.toContain("sk_live_")
+    expect(lightningApiRoute).not.toContain("sk_test_")
     // API route comments confirm security intent
     expect(lightningApiRoute).toContain("No Speed API keys or secrets are returned to the browser")
     expect(speedConnectedAccountHelper).not.toContain("NEXT_PUBLIC_SPEED")
@@ -484,7 +495,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(lightningApiRoute).toContain("upsertMerchantLightningProfile")
     expect(lightningApiRoute).toContain("createOrLinkSpeedConnectedAccountForMerchant")
     expect(lightningApiRoute).toContain("mapSpeedReadinessToLightningStatus")
-    expect(lightningApiRoute).not.toContain("SPEED_API_KEY")
+    expect(lightningApiRoute).toContain("SPEED_API_KEY_present")
   })
 
   it("Speed connected-account helper is server-side and uses documented Speed Connect account links", () => {
@@ -510,6 +521,7 @@ describe("PineTree embedded wallet setup", () => {
   it("Speed Connect env vars are server-only and minimal", () => {
     expect(speedConnectedAccountHelper).toContain("SPEED_CONNECT_ENABLED")
     expect(speedConnectedAccountHelper).toContain("SPEED_CONNECT_RETURN_URL")
+    expect(speedConnectedAccountHelper).toContain("speed_api_key_missing")
     expect(speedConnectedAccountHelper).not.toContain("NEXT_PUBLIC_SPEED_CONNECT")
     expect(page).not.toContain("SPEED_CONNECT_ENABLED")
     expect(page).not.toContain("SPEED_CONNECT_RETURN_URL")
@@ -537,6 +549,20 @@ describe("PineTree embedded wallet setup", () => {
     expect(lightningApiRoute).toContain("bitcoinLightningAccountId")
   })
 
+  it("managed Lightning POST records every Speed attempt and logs safe provisioning state", () => {
+    expect(lightningApiRoute).toContain("[pinetree-managed-lightning] POST start")
+    expect(lightningApiRoute).toContain("SPEED_CONNECT_ENABLED")
+    expect(lightningApiRoute).toContain("SPEED_API_KEY_present")
+    expect(lightningApiRoute).toContain("SPEED_API_BASE_URL")
+    expect(lightningApiRoute).toContain("SPEED_CONNECT_RETURN_URL_present")
+    expect(lightningApiRoute).toContain("helper_result_status")
+    expect(lightningApiRoute).toContain("setup_url_returned")
+    expect(lightningApiRoute).toContain("connected_account_id_returned")
+    expect(lightningApiRoute).toContain("final_saved_profile_status")
+    expect(lightningApiRoute).toContain("failedSpeedSetupResult")
+    expect(lightningApiRoute).toContain('status: "needs_attention"')
+  })
+
   it("Lightning is ready only when Speed reports an active ready connected account", () => {
     expect(speedConnectedAccountHelper).toContain("READY_SPEED_ACCOUNT_STATUSES")
     expect(speedConnectedAccountHelper).toContain('"active"')
@@ -556,7 +582,7 @@ describe("PineTree embedded wallet setup", () => {
   it("Lightning stays pending and does not fake ready on missing endpoint or missing account id", () => {
     expect(speedConnectedAccountHelper).toContain('return "pending"')
     expect(speedConnectedAccountHelper).toContain("speed_connect_disabled")
-    expect(speedConnectedAccountHelper).toContain("speed_platform_configuration_pending")
+    expect(speedConnectedAccountHelper).toContain("speed_api_key_missing")
     expect(speedConnectedAccountHelper).toContain("speed_connect_return_url_missing")
     expect(speedConnectedAccountHelper).toContain("Speed connected account was not found")
     expect(lightningApiRoute).toContain('return "pending"')
