@@ -17,6 +17,9 @@ export type MerchantLightningProfile = {
   status: MerchantLightningProfileStatus
   speed_connected_account_id: string | null
   speed_connected_account_status: string | null
+  speed_connect_setup_url: string | null
+  provider_response_summary: Record<string, unknown> | null
+  provider_error_message: string | null
   receive_mode: "invoice"
   setup_source: "pinetree_managed"
   last_checked_at: string | null
@@ -29,6 +32,9 @@ export type UpsertLightningProfileInput = {
   status?: MerchantLightningProfileStatus
   speedConnectedAccountId?: string | null
   speedConnectedAccountStatus?: string | null
+  speedConnectSetupUrl?: string | null
+  providerResponseSummary?: Record<string, unknown> | null
+  providerErrorMessage?: string | null
 }
 
 export type LightningReadiness = {
@@ -84,6 +90,15 @@ export async function upsertMerchantLightningProfile(
     speed_connected_account_status: input.speedConnectedAccountStatus !== undefined
       ? input.speedConnectedAccountStatus
       : existing?.speed_connected_account_status ?? null,
+    speed_connect_setup_url: input.speedConnectSetupUrl !== undefined
+      ? input.speedConnectSetupUrl
+      : existing?.speed_connect_setup_url ?? null,
+    provider_response_summary: input.providerResponseSummary !== undefined
+      ? input.providerResponseSummary
+      : existing?.provider_response_summary ?? null,
+    provider_error_message: input.providerErrorMessage !== undefined
+      ? input.providerErrorMessage
+      : existing?.provider_error_message ?? null,
     receive_mode: "invoice" as const,
     setup_source: "pinetree_managed" as const,
     last_checked_at: now,

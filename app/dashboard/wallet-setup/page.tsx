@@ -609,7 +609,7 @@ function PineTreeWalletRuntime() {
 
   function lightningOverviewCopy() {
     if (lightningReady) return "Powered by PineTree. Bitcoin Lightning payments are active."
-    if (lightningNeedsAttention) return "Powered by PineTree. Bitcoin Lightning needs PineTree review before it can be marked ready."
+    if (lightningNeedsAttention) return "Powered by PineTree. Bitcoin Lightning needs PineTree review."
     if (enablingLightning) return "Powered by PineTree. Preparing Bitcoin Lightning."
     return "Powered by PineTree. Bitcoin Lightning is being prepared through PineTree."
   }

@@ -46,6 +46,8 @@ SPEED_API_KEY=<PineTree Speed live secret key>
 SPEED_API_BASE_URL=https://api.tryspeed.com
 SPEED_WEBHOOK_SECRET=<Speed webhook endpoint secret>
 SPEED_ENVIRONMENT=production
+SPEED_CONNECT_ENABLED=true
+SPEED_CONNECT_RETURN_URL=https://app.pinetree-payments.com/api/wallets/lightning/speed/connect-return
 ```
 
 Recommended/optional Speed env vars:
@@ -96,6 +98,8 @@ Live Speed Lightning flow:
 - Webhooks from `/api/webhooks/speed` or the on-demand Lightning status check confirm the PineTree payment.
 
 Speed readiness requires PineTree platform env, a successful platform test, and a merchant Speed account ID. Merchant-owned Speed API keys are not accepted.
+
+PineTree-managed Lightning setup uses Speed Connect account links when direct connected-account creation is not available. `SPEED_CONNECT_ENABLED` and `SPEED_CONNECT_RETURN_URL` are server-side only and must not be prefixed with `NEXT_PUBLIC_`.
 
 Speed webhook setup:
 

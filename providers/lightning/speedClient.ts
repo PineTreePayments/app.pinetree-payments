@@ -83,6 +83,30 @@ export type SpeedPaymentObject = {
   modified?: number
 }
 
+export type SpeedConnectedAccountObject = {
+  id?: string
+  object?: string
+  type?: string
+  status?: string
+  account_id?: string
+  account_name?: string
+  country?: string
+  owner_email?: string
+  total_fee_collected?: number
+  created?: number
+  modified?: number
+}
+
+export type SpeedConnectedAccountList = {
+  has_more?: boolean
+  object?: string
+  data?: SpeedConnectedAccountObject[]
+}
+
+export type SpeedConnectAccountLink = {
+  link?: string
+}
+
 export type CreateSpeedLightningPaymentParams = {
   amount: number
   currency: string
@@ -429,6 +453,33 @@ export async function retrieveSpeedPayment(paymentId: string): Promise<SpeedPaym
   const id = String(paymentId || "").trim()
   if (!id) throw new Error("Missing Speed payment ID")
   return speedRequest<SpeedPaymentObject>(`/payments/${encodeURIComponent(id)}`, { method: "GET" })
+}
+
+export async function createSpeedConnectAccountLink(params: {
+  returnUrl?: string | null
+} = {}): Promise<SpeedConnectAccountLink> {
+  const body: Record<string, unknown> = { account_type: "Standard" }
+  const returnUrl = String(params.returnUrl || "").trim()
+  if (returnUrl) body.return_url = returnUrl
+
+  return speedRequest<SpeedConnectAccountLink>("/connect/generate/account-link", {
+    method: "POST",
+    body: JSON.stringify(body)
+  })
+}
+
+export async function retrieveSpeedConnectedAccount(
+  connectedAccountId: string
+): Promise<SpeedConnectedAccountObject> {
+  const id = String(connectedAccountId || "").trim()
+  if (!id) throw new Error("Missing Speed connected account ID")
+  return speedRequest<SpeedConnectedAccountObject>(`/connect/${encodeURIComponent(id)}`, {
+    method: "GET"
+  })
+}
+
+export async function listSpeedConnectedAccounts(): Promise<SpeedConnectedAccountList> {
+  return speedRequest<SpeedConnectedAccountList>("/connect", { method: "GET" })
 }
 
 export function verifySpeedWebhookSignature(

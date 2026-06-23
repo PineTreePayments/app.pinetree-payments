@@ -13,6 +13,7 @@ import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/mer
 import { getMerchantById } from "@/database/merchants"
 import {
   getMerchantLightningProfile,
+  type MerchantLightningProfile,
   upsertMerchantLightningProfile,
   type MerchantLightningProfileStatus,
 } from "@/database/merchantLightningProfiles"
@@ -30,6 +31,24 @@ function mapSpeedReadinessToLightningStatus(
   return "pending"
 }
 
+function safeLightningProfile(profile: MerchantLightningProfile | null) {
+  if (!profile) return null
+  return {
+    id: profile.id,
+    merchant_id: profile.merchant_id,
+    provider: profile.provider,
+    status: profile.status,
+    speed_connected_account_id: profile.speed_connected_account_id,
+    speed_connected_account_status: profile.speed_connected_account_status,
+    setup_url: profile.speed_connect_setup_url,
+    receive_mode: profile.receive_mode,
+    setup_source: profile.setup_source,
+    last_checked_at: profile.last_checked_at,
+    created_at: profile.created_at,
+    updated_at: profile.updated_at,
+  }
+}
+
 /**
  * GET /api/wallets/lightning/pinetree-managed
  * Returns the current merchant's PineTree-managed Lightning profile, or { profile: null } if none.
@@ -38,7 +57,7 @@ export async function GET(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
     const profile = await getMerchantLightningProfile(merchantId)
-    return NextResponse.json({ profile })
+    return NextResponse.json({ profile: safeLightningProfile(profile) })
   } catch (error) {
     return NextResponse.json(
       { error: "Failed to load Lightning profile" },
@@ -76,6 +95,9 @@ export async function POST(req: NextRequest) {
       status: nextStatus,
       speedConnectedAccountId: speedSetup.speed_connected_account_id,
       speedConnectedAccountStatus: speedSetup.speed_connected_account_status,
+      speedConnectSetupUrl: speedSetup.setup_url,
+      providerResponseSummary: speedSetup.provider_response_summary,
+      providerErrorMessage: speedSetup.error_message,
     })
 
     // Sync lightning status into the wallet profile if one exists, so overall readiness
@@ -91,7 +113,7 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    return NextResponse.json({ profile: lightningProfile })
+    return NextResponse.json({ profile: safeLightningProfile(lightningProfile) })
   } catch (error) {
     return NextResponse.json(
       { error: "Failed to enable Lightning" },
