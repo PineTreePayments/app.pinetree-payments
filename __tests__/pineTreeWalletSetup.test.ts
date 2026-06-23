@@ -34,8 +34,27 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("One merchant wallet profile")
     expect(page).toContain("Create PineTree Wallet")
     expect(page).toContain("Open PineTree Wallet")
-    expect(page).toContain('{hasAddresses ? "Open PineTree Wallet" : "Create PineTree Wallet"}')
+    expect(page).toContain('{hasAnyAddress ? "Open PineTree Wallet" : "Create PineTree Wallet"}')
     expect(page).not.toContain("Sign up with Dynamic")
+  })
+
+  it("does not show external wallet choices or Dynamic branding in merchant wallet setup", () => {
+    for (const forbidden of [
+      "Connect external wallet",
+      "Connect Wallet",
+      "MetaMask",
+      "Coinbase Wallet",
+      "WalletConnect",
+      "Phantom",
+      "Solflare",
+      "Trust Wallet",
+      "View all wallets",
+    ]) {
+      expect(page).not.toContain(forbidden)
+    }
+    expect(page).not.toContain(">Dynamic<")
+    expect(page).not.toContain("Sign in with Dynamic")
+    expect(page).not.toContain("Powered by Dynamic")
   })
 
   it("keeps raw address details off the main setup summary", () => {
@@ -64,9 +83,50 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("Bitcoin on-chain address")
   })
 
+  it("requires Base, Solana, and Lightning before marking the wallet Ready", () => {
+    expect(page).toContain("const allPrimaryRailsReady = baseReady && solanaReady && lightningReady")
+    expect(page).toContain('allPrimaryRailsReady ? "Ready" : "Needs attention"')
+    expect(page).toContain("Bitcoin Lightning setup pending")
+  })
+
+  it("shows receive readiness for Base, Solana, and Bitcoin Lightning", () => {
+    expect(page).toContain('<ReceiveRow label="Base address"')
+    expect(page).toContain('<ReceiveRow label="Solana address"')
+    expect(page).toContain('<ReceiveRow label="Bitcoin Lightning/Spark address"')
+    expect(page).toContain('label={ready ? "Ready" : "Setup pending"}')
+    expect(page).toContain(">Setup pending</p>")
+  })
+
+  it("scaffolds a disabled withdrawal review without fund movement", () => {
+    expect(page).toContain('aria-label="Select withdrawal rail"')
+    expect(page).toContain('aria-label="Destination address"')
+    expect(page).toContain('aria-label="Withdrawal amount"')
+    expect(page).toContain("Review withdrawal — coming soon")
+    expect(page).toContain("Withdrawals are not enabled yet")
+    expect(page).toContain("disabled")
+    expect(page).not.toContain("fetch(")
+  })
+
   it("removes external wallet controls from this page", () => {
     expect(page).not.toContain("Advanced wallet options")
     expect(page).not.toContain("Connect external wallet")
+  })
+
+  it("filters Dynamic wallet setup to embedded PineTree wallet options only", () => {
+    expect(provider).toContain("walletsFilter: filterPineTreeMerchantWalletOptions")
+    expect(provider).toContain("isEmbeddedWallet")
+    expect(provider).toContain('"dynamicwaas"')
+    expect(provider).toContain('"turnkey"')
+    for (const blocked of [
+      '"metamask"',
+      '"coinbase"',
+      '"walletconnect"',
+      '"phantom"',
+      '"solflare"',
+      '"trust"',
+    ]) {
+      expect(provider).toContain(blocked)
+    }
   })
 
   it("reads wallet addresses without adding payment or backend calls", () => {
@@ -85,7 +145,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('"Ready"')
     expect(page).toContain('"Needs attention"')
     expect(page).toContain('status="Loading"')
-    expect(page).toContain("Withdrawals coming soon")
+    expect(page).toContain("Review withdrawal — coming soon")
     expect(page).toContain("Wallet activity will appear here.")
   })
 

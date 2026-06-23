@@ -1,7 +1,7 @@
 "use client"
 
 import { Component, createContext, useContext, type ErrorInfo, type ReactNode } from "react"
-import { DynamicContextProvider } from "@dynamic-labs/sdk-react-core"
+import { DynamicContextProvider, type WalletOption } from "@dynamic-labs/sdk-react-core"
 import { EthereumWalletConnectors } from "@dynamic-labs/ethereum"
 import { SolanaWalletConnectors } from "@dynamic-labs/solana"
 import { BitcoinWalletConnectors } from "@dynamic-labs/bitcoin"
@@ -10,6 +10,69 @@ import { SparkWalletConnectors } from "@dynamic-labs/spark"
 type PineTreeWalletInfrastructureStatus = {
   configured: boolean
   sdkUnavailable: boolean
+}
+
+const blockedMerchantWalletConnectorTokens = [
+  "metamask",
+  "coinbase",
+  "walletconnect",
+  "phantom",
+  "solflare",
+  "trust",
+]
+
+const embeddedMerchantWalletConnectorTokens = [
+  "dynamicwaas",
+  "turnkey",
+]
+
+function normalizeWalletToken(value: unknown) {
+  return String(value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "")
+}
+
+function isEmbeddedMerchantWalletOption(option: WalletOption) {
+  const connector = option.walletConnector
+  if (connector.isEmbeddedWallet) return true
+
+  const tokens = [
+    normalizeWalletToken(option.key),
+    normalizeWalletToken(option.name),
+    normalizeWalletToken(connector.key),
+    normalizeWalletToken(connector.name),
+  ]
+
+  return tokens.some((token) =>
+    embeddedMerchantWalletConnectorTokens.some((allowed) => token.includes(allowed))
+  )
+}
+
+function isBlockedMerchantExternalWalletOption(option: WalletOption) {
+  const connector = option.walletConnector
+  if (connector.isWalletConnect) return true
+
+  const tokens = [
+    normalizeWalletToken(option.key),
+    normalizeWalletToken(option.name),
+    normalizeWalletToken(connector.key),
+    normalizeWalletToken(connector.name),
+  ]
+
+  return tokens.some((token) =>
+    blockedMerchantWalletConnectorTokens.some((blocked) => token.includes(blocked))
+  )
+}
+
+export function filterPineTreeMerchantWalletOptions(options: WalletOption[]): WalletOption[] {
+  return options.flatMap((option) => {
+    const groupedWallets: WalletOption[] | undefined = option.groupedWallets
+      ? filterPineTreeMerchantWalletOptions(option.groupedWallets)
+      : undefined
+
+    if (groupedWallets?.length) return [{ ...option, groupedWallets }]
+    if (isEmbeddedMerchantWalletOption(option)) return [option]
+    if (isBlockedMerchantExternalWalletOption(option)) return []
+    return []
+  })
 }
 
 const PineTreeWalletInfrastructureContext = createContext<PineTreeWalletInfrastructureStatus>({
@@ -72,6 +135,7 @@ export default function PineTreeDynamicProvider({ children }: { children: ReactN
             BitcoinWalletConnectors,
             SparkWalletConnectors,
           ],
+          walletsFilter: filterPineTreeMerchantWalletOptions,
         }}
       >
         <PineTreeWalletInfrastructureContext.Provider value={{ configured: true, sdkUnavailable: false }}>
