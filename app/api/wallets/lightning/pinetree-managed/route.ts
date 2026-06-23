@@ -3,18 +3,32 @@
  *
  * Manages the PineTree-owned Lightning backend profile for a merchant.
  * Merchants do not need to sign up for Speed, connect NWC, or paste any keys.
- * PineTree provisions the Speed connected account in a future pass.
+ * PineTree provisions or links the Speed connected account server-side.
  *
  * SECURITY: No Speed API keys or secrets are returned to the browser.
  */
 
 import { type NextRequest, NextResponse } from "next/server"
 import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
+import { getMerchantById } from "@/database/merchants"
 import {
   getMerchantLightningProfile,
-  markMerchantLightningPending,
+  upsertMerchantLightningProfile,
+  type MerchantLightningProfileStatus,
 } from "@/database/merchantLightningProfiles"
 import { getPineTreeWalletProfile, upsertPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
+import {
+  createOrLinkSpeedConnectedAccountForMerchant,
+  type SpeedConnectedAccountReadiness,
+} from "@/providers/lightning/speedConnectedAccounts"
+
+function mapSpeedReadinessToLightningStatus(
+  readiness: SpeedConnectedAccountReadiness
+): MerchantLightningProfileStatus {
+  if (readiness === "ready") return "ready"
+  if (readiness === "needs_attention") return "needs_attention"
+  return "pending"
+}
 
 /**
  * GET /api/wallets/lightning/pinetree-managed
@@ -36,23 +50,33 @@ export async function GET(req: NextRequest) {
 /**
  * POST /api/wallets/lightning/pinetree-managed
  * Enables the PineTree-managed Lightning rail for the merchant.
- * Creates the Lightning profile with status "pending" if it does not already exist.
+ * Creates or links the merchant's Speed connected account when the live Speed
+ * Connect API is available. Otherwise keeps the profile safely pending.
  * Also syncs the lightning status into pinetree_wallet_profiles if one exists.
  *
- * No Speed sub-account creation is performed in this pass.
  * No secrets are returned to the caller.
  */
 export async function POST(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
 
-    const existing = await getMerchantLightningProfile(merchantId)
+    const merchant = await getMerchantById(merchantId)
 
-    // Only transition from not_configured → pending. Ready/needs_attention states are preserved.
-    let lightningProfile = existing
-    if (!existing || existing.status === "not_configured") {
-      lightningProfile = await markMerchantLightningPending(merchantId)
-    }
+    const speedSetup = await createOrLinkSpeedConnectedAccountForMerchant({
+      merchant_id: merchantId,
+      business_name: merchant?.business_name ?? null,
+      merchant_email: merchant?.email ?? null,
+      pinetree_reference_id: `pinetree-merchant:${merchantId}`,
+    })
+
+    const nextStatus = mapSpeedReadinessToLightningStatus(speedSetup.readiness)
+
+    const lightningProfile = await upsertMerchantLightningProfile({
+      merchantId,
+      status: nextStatus,
+      speedConnectedAccountId: speedSetup.speed_connected_account_id,
+      speedConnectedAccountStatus: speedSetup.speed_connected_account_status,
+    })
 
     // Sync lightning status into the wallet profile if one exists, so overall readiness
     // can be derived from a single pinetree_wallet_profiles row.
@@ -60,8 +84,10 @@ export async function POST(req: NextRequest) {
     if (walletProfile) {
       await upsertPineTreeWalletProfile({
         merchantId,
-        bitcoinLightningStatus: lightningProfile!.status,
+        bitcoinLightningStatus: lightningProfile.status,
         bitcoinLightningProvider: "speed",
+        bitcoinLightningAccountId: lightningProfile.speed_connected_account_id,
+        bitcoinLightningReceiveMode: "invoice",
       })
     }
 

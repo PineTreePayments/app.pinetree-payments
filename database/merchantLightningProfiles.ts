@@ -86,6 +86,7 @@ export async function upsertMerchantLightningProfile(
       : existing?.speed_connected_account_status ?? null,
     receive_mode: "invoice" as const,
     setup_source: "pinetree_managed" as const,
+    last_checked_at: now,
     updated_at: now,
     ...(existing ? {} : { created_at: now }),
   }

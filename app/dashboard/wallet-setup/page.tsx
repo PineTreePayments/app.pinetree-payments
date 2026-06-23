@@ -44,6 +44,8 @@ type MerchantLightningProfile = {
   merchant_id: string
   provider: "speed"
   status: "not_configured" | "pending" | "ready" | "needs_attention"
+  speed_connected_account_id: string | null
+  speed_connected_account_status: string | null
   setup_source: "pinetree_managed"
 }
 
@@ -377,11 +379,30 @@ function PineTreeWalletRuntime() {
     return extractDynamicWalletAddresses(wallets as DynamicWalletAddressSource[])
   }, [wallets])
 
-  // --- Sync Dynamic wallet addresses (Base/Solana) to the merchant profile DB record ---
-  const syncProfileFromDynamic = useCallback(async () => {
+  const enablePineTreeManagedLightning = useCallback(async () => {
     const token = accessTokenRef.current
-    if (!token || !user) return
-    if (dynamicNetworkAddresses.base.length === 0 && dynamicNetworkAddresses.solana.length === 0) return
+    if (!token || enablingLightning) return null
+    setEnablingLightning(true)
+    try {
+      const res = await fetch("/api/wallets/lightning/pinetree-managed", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      })
+      if (!res.ok) return null
+      const json = (await res.json()) as { profile: MerchantLightningProfile }
+      setLightningProfileState({ kind: "loaded", profile: json.profile })
+      return json.profile
+    } finally {
+      setEnablingLightning(false)
+    }
+  }, [enablingLightning])
+
+  // --- Sync Dynamic wallet addresses (Base/Solana) to the merchant profile DB record ---
+  const syncProfileFromDynamic = useCallback(async (options?: { autoEnableLightning?: boolean }) => {
+    const token = accessTokenRef.current
+    if (!token || !user) return null
+    if (dynamicNetworkAddresses.base.length === 0 && dynamicNetworkAddresses.solana.length === 0) return null
 
     setSyncing(true)
     try {
@@ -405,18 +426,24 @@ function PineTreeWalletRuntime() {
       if (res.ok) {
         const json = (await res.json()) as { profile: PineTreeWalletProfile }
         setProfileState({ kind: "loaded", profile: json.profile })
+        if (options?.autoEnableLightning && json.profile.base_address && json.profile.solana_address) {
+          setPendingSync(false)
+          await enablePineTreeManagedLightning()
+        }
+        return json.profile
       }
+      return null
     } finally {
       setSyncing(false)
       setPendingSync(false)
     }
-  }, [user, dynamicNetworkAddresses])
+  }, [user, dynamicNetworkAddresses, enablePineTreeManagedLightning])
 
   // --- After wallet creation: auto-sync addresses to DB ---
   useEffect(() => {
     if (!pendingSync) return
     if (!sdkHasLoaded || !user || wallets.length === 0) return
-    void syncProfileFromDynamic()
+    void syncProfileFromDynamic({ autoEnableLightning: true })
   }, [pendingSync, sdkHasLoaded, user, wallets, syncProfileFromDynamic])
 
   // --- After Dynamic logout: open auth flow for the new merchant's wallet creation ---
@@ -534,22 +561,7 @@ function PineTreeWalletRuntime() {
   }
 
   async function handleEnableLightning() {
-    const token = accessTokenRef.current
-    if (!token || enablingLightning) return
-    setEnablingLightning(true)
-    try {
-      const res = await fetch("/api/wallets/lightning/pinetree-managed", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      })
-      if (res.ok) {
-        const json = (await res.json()) as { profile: MerchantLightningProfile }
-        setLightningProfileState({ kind: "loaded", profile: json.profile })
-      }
-    } finally {
-      setEnablingLightning(false)
-    }
+    await enablePineTreeManagedLightning()
   }
 
   // ---------------------------------------------------------------------------
@@ -583,7 +595,8 @@ function PineTreeWalletRuntime() {
   // ---------------------------------------------------------------------------
 
   function lightningStatusLabel() {
-    if (lightningReady) return "Ready"
+    if (enablingLightning) return "Preparing Bitcoin Lightning"
+    if (lightningReady) return "Bitcoin Lightning Ready"
     if (lightningNeedsAttention) return "Needs attention"
     return "Setup pending"
   }
@@ -597,7 +610,8 @@ function PineTreeWalletRuntime() {
   function lightningOverviewCopy() {
     if (lightningReady) return "Powered by PineTree. Bitcoin Lightning payments are active."
     if (lightningNeedsAttention) return "Powered by PineTree. Bitcoin Lightning needs PineTree review before it can be marked ready."
-    return "Powered by PineTree. Bitcoin Lightning is being prepared for this merchant account."
+    if (enablingLightning) return "Powered by PineTree. Preparing Bitcoin Lightning."
+    return "Powered by PineTree. Bitcoin Lightning is being prepared through PineTree."
   }
 
   // ---------------------------------------------------------------------------
@@ -612,8 +626,8 @@ function PineTreeWalletRuntime() {
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base font-semibold text-gray-950">PineTree Wallet</h2>
               <ProviderStatusPill
-                label={syncing ? "Saving…" : walletStatus}
-                tone={syncing ? "blue" : (statusTone as "green" | "blue" | "amber" | "slate")}
+                label={enablingLightning ? "Preparing Bitcoin Lightning" : syncing ? "Saving…" : walletStatus}
+                tone={enablingLightning || syncing ? "blue" : (statusTone as "green" | "blue" | "amber" | "slate")}
               />
             </div>
             <p className="text-sm leading-6 text-gray-600">
@@ -673,7 +687,7 @@ function PineTreeWalletRuntime() {
                 className="flex h-9 items-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3 text-xs font-semibold text-orange-700 shadow-sm transition hover:bg-orange-100 disabled:opacity-50"
               >
                 <Zap size={12} />
-                {enablingLightning ? "Enabling…" : "Enable Bitcoin Lightning"}
+                {enablingLightning ? "Preparing Bitcoin Lightning" : "Enable Bitcoin Lightning"}
               </button>
             ) : null}
 
@@ -703,7 +717,10 @@ function PineTreeWalletRuntime() {
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 id="pinetree-wallet-modal-title" className="text-lg font-semibold text-gray-950">PineTree Wallet</h2>
-                  <ProviderStatusPill label={walletStatus} tone={statusTone as "green" | "blue" | "amber" | "slate"} />
+                  <ProviderStatusPill
+                    label={enablingLightning ? "Preparing Bitcoin Lightning" : walletStatus}
+                    tone={enablingLightning ? "blue" : (statusTone as "green" | "blue" | "amber" | "slate")}
+                  />
                 </div>
                 <p className="mt-1 text-xs text-gray-500">One merchant wallet profile</p>
               </div>
@@ -770,7 +787,7 @@ function PineTreeWalletRuntime() {
 
                     <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-4 shadow-sm">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm font-semibold text-blue-900">Bitcoin Lightning / Spark</p>
+                        <p className="text-sm font-semibold text-blue-900">Bitcoin Lightning</p>
                         <ProviderStatusPill label={lightningStatusLabel()} tone={lightningStatusTone()} />
                       </div>
                       <p className="mt-2 text-xs text-blue-700">{lightningOverviewCopy()}</p>
@@ -782,7 +799,7 @@ function PineTreeWalletRuntime() {
                           className="mt-3 flex items-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-semibold text-orange-700 transition hover:bg-orange-100 disabled:opacity-50"
                         >
                           <Zap size={11} />
-                          {enablingLightning ? "Enabling…" : "Enable Bitcoin Lightning"}
+                          {enablingLightning ? "Preparing Bitcoin Lightning" : "Enable Bitcoin Lightning"}
                         </button>
                       ) : null}
                     </div>
@@ -844,7 +861,7 @@ function PineTreeWalletRuntime() {
                         className="mt-2 flex items-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-semibold text-orange-700 transition hover:bg-orange-100 disabled:opacity-50"
                       >
                         <Zap size={11} />
-                        {enablingLightning ? "Enabling…" : "Enable Bitcoin Lightning"}
+                        {enablingLightning ? "Preparing Bitcoin Lightning" : "Enable Bitcoin Lightning"}
                       </button>
                     )}
                   </div>

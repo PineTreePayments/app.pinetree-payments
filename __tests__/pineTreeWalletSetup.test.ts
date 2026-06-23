@@ -18,6 +18,10 @@ describe("PineTree embedded wallet setup", () => {
   const lightningMigration = read("database/migrations/20260622_create_merchant_lightning_profiles.sql")
   const lightningDbHelper = read("database/merchantLightningProfiles.ts")
   const lightningApiRoute = read("app/api/wallets/lightning/pinetree-managed/route.ts")
+  const speedConnectedAccountHelper = read("providers/lightning/speedConnectedAccounts.ts")
+  const speedClient = read("providers/lightning/speedClient.ts")
+  const speedAdapter = read("providers/lightning/speedAdapter.ts")
+  const paymentsRoute = read("app/api/payments/route.ts")
   const packageJson = JSON.parse(read("package.json")) as { dependencies: Record<string, string> }
 
   // -------------------------------------------------------------------------
@@ -125,6 +129,9 @@ describe("PineTree embedded wallet setup", () => {
     // POST to pinetree-profile route includes dynamic_user_id to lock the profile to this session
     expect(page).toContain("dynamic_user_id")
     expect(page).toContain("user.userId")
+    // Once Base/Solana sync succeeds after Create PineTree Wallet, Lightning setup starts automatically.
+    expect(page).toContain("autoEnableLightning")
+    expect(page).toContain("enablePineTreeManagedLightning")
   })
 
   it("keeps address refresh as a Receive-tab troubleshooting action, not a main-card CTA", () => {
@@ -184,9 +191,9 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('label: "Activity"')
   })
 
-  it("prioritizes Base, Solana, and Bitcoin Lightning/Spark", () => {
+  it("prioritizes Base, Solana, and Bitcoin Lightning", () => {
     expect(page).toContain('const primaryRails = ["Base", "Solana", "Bitcoin Lightning"]')
-    expect(page).toContain("Bitcoin Lightning / Spark")
+    expect(page).toContain("Bitcoin Lightning")
     expect(page).toContain("Bitcoin on-chain address")
   })
 
@@ -216,6 +223,8 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain('<ReceiveRow label="Bitcoin Lightning/Spark address"')
     expect(page).toContain("Powered by PineTree")
     expect(page).toContain('No external merchant wallet connection is required')
+    expect(page).toContain("Preparing Bitcoin Lightning")
+    expect(page).toContain("Bitcoin Lightning Ready")
     // Base/Solana ReceiveRow still shows Setup pending when address is missing
     expect(page).toContain('label={ready ? "Ready" : "Setup pending"}')
     expect(page).toContain(">Setup pending</p>")
@@ -434,6 +443,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(lightningApiRoute).not.toContain("speed_account_secret")
     // API route comments confirm security intent
     expect(lightningApiRoute).toContain("No Speed API keys or secrets are returned to the browser")
+    expect(speedConnectedAccountHelper).not.toContain("NEXT_PUBLIC_SPEED")
   })
 
   it("merchant_lightning_profiles migration creates the correct table shape", () => {
@@ -463,11 +473,64 @@ describe("PineTree embedded wallet setup", () => {
     expect(lightningApiRoute).toContain("GET")
     expect(lightningApiRoute).toContain("POST")
     expect(lightningApiRoute).toContain("getMerchantLightningProfile")
-    expect(lightningApiRoute).toContain("markMerchantLightningPending")
-    // No Speed sub-account creation in this pass
-    expect(lightningApiRoute).not.toContain("speedClient")
-    expect(lightningApiRoute).not.toContain("createConnectedAccount")
+    expect(lightningApiRoute).toContain("upsertMerchantLightningProfile")
+    expect(lightningApiRoute).toContain("createOrLinkSpeedConnectedAccountForMerchant")
+    expect(lightningApiRoute).toContain("mapSpeedReadinessToLightningStatus")
     expect(lightningApiRoute).not.toContain("SPEED_API_KEY")
+  })
+
+  it("Speed connected-account helper is server-side and safely pending until the live API is wired", () => {
+    expect(speedConnectedAccountHelper).toContain("createOrLinkSpeedConnectedAccountForMerchant")
+    expect(speedConnectedAccountHelper).toContain("CreateOrLinkSpeedConnectedAccountInput")
+    expect(speedConnectedAccountHelper).toContain("merchant_id")
+    expect(speedConnectedAccountHelper).toContain("business_name")
+    expect(speedConnectedAccountHelper).toContain("merchant_email")
+    expect(speedConnectedAccountHelper).toContain("pinetree_reference_id")
+    expect(speedConnectedAccountHelper).toContain("speed_connected_account_id")
+    expect(speedConnectedAccountHelper).toContain("speed_connected_account_status")
+    expect(speedConnectedAccountHelper).toContain("raw_provider_status")
+    expect(speedConnectedAccountHelper).toContain("TODO(speed-connect)")
+    expect(speedConnectedAccountHelper).toContain("pending_speed_connect_endpoint_not_wired")
+    expect(speedConnectedAccountHelper).toContain("Do not fake a ready Lightning rail")
+  })
+
+  it("Speed connected account id and status are saved when the helper returns them", () => {
+    expect(lightningApiRoute).toContain("speedSetup.speed_connected_account_id")
+    expect(lightningApiRoute).toContain("speedSetup.speed_connected_account_status")
+    expect(lightningApiRoute).toContain("speedConnectedAccountId")
+    expect(lightningApiRoute).toContain("speedConnectedAccountStatus")
+    expect(lightningApiRoute).toContain("bitcoinLightningAccountId")
+  })
+
+  it("Lightning is ready only when Speed reports an active ready connected account", () => {
+    expect(speedConnectedAccountHelper).toContain("READY_SPEED_ACCOUNT_STATUSES")
+    expect(speedConnectedAccountHelper).toContain('"active"')
+    expect(speedConnectedAccountHelper).toContain('"ready"')
+    expect(speedConnectedAccountHelper).toContain('"ready_for_payments"')
+    expect(speedConnectedAccountHelper).toContain("speedConnectedAccountId && READY_SPEED_ACCOUNT_STATUSES.has(status)")
+    expect(lightningApiRoute).toContain('if (readiness === "ready") return "ready"')
+  })
+
+  it("Lightning stays pending when Speed connected account creation is not fully active", () => {
+    expect(speedConnectedAccountHelper).toContain('return "pending"')
+    expect(lightningApiRoute).toContain('return "pending"')
+    expect(lightningApiRoute).toContain("const nextStatus = mapSpeedReadinessToLightningStatus(speedSetup.readiness)")
+  })
+
+  it("syncs PineTree Wallet Lightning fields from the managed Lightning profile", () => {
+    expect(lightningApiRoute).toContain('bitcoinLightningProvider: "speed"')
+    expect(lightningApiRoute).toContain('bitcoinLightningReceiveMode: "invoice"')
+    expect(lightningApiRoute).toContain("bitcoinLightningStatus: lightningProfile.status")
+    expect(dbHelper).toContain("bitcoinLightningReceiveMode")
+  })
+
+  it("existing POS and checkout payment creation remain unchanged", () => {
+    expect(speedClient).toContain("createSpeedLightningPayment")
+    expect(speedAdapter).toContain("createLightningInvoice")
+    expect(speedAdapter).toContain("getMerchantSpeedProvider")
+    expect(paymentsRoute).toContain("getSafeSpeedCustomerErrorMessage")
+    expect(page).not.toContain("/api/payments")
+    expect(page).not.toContain("createSpeedLightningPayment")
   })
 
   it("existing legacy Speed route still compiles (backward compat)", () => {

@@ -34,6 +34,7 @@ export type UpsertWalletProfileInput = {
   bitcoinLightningStatus?: "not_configured" | "pending" | "ready" | "needs_attention"
   bitcoinLightningProvider?: string | null
   bitcoinLightningAccountId?: string | null
+  bitcoinLightningReceiveMode?: "invoice"
 }
 
 function deriveProfileStatus(fields: {
@@ -82,7 +83,7 @@ export async function upsertPineTreeWalletProfile(
     bitcoin_lightning_status: input.bitcoinLightningStatus !== undefined ? input.bitcoinLightningStatus : existing?.bitcoin_lightning_status ?? "not_configured",
     bitcoin_lightning_provider: input.bitcoinLightningProvider !== undefined ? input.bitcoinLightningProvider : existing?.bitcoin_lightning_provider ?? null,
     bitcoin_lightning_account_id: input.bitcoinLightningAccountId !== undefined ? input.bitcoinLightningAccountId : existing?.bitcoin_lightning_account_id ?? null,
-    bitcoin_lightning_receive_mode: existing?.bitcoin_lightning_receive_mode ?? "invoice",
+    bitcoin_lightning_receive_mode: input.bitcoinLightningReceiveMode !== undefined ? input.bitcoinLightningReceiveMode : existing?.bitcoin_lightning_receive_mode ?? "invoice",
   }
 
   const status = deriveProfileStatus(merged)
