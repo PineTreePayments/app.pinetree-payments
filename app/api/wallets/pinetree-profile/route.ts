@@ -43,6 +43,9 @@ export async function POST(req: NextRequest) {
       solanaAddress: "solana_address" in body ? (body.solana_address as string | null) : undefined,
       bitcoinLightningAddress: "bitcoin_lightning_address" in body ? (body.bitcoin_lightning_address as string | null) : undefined,
       bitcoinOnchainAddress: "bitcoin_onchain_address" in body ? (body.bitcoin_onchain_address as string | null) : undefined,
+      bitcoinLightningStatus: "bitcoin_lightning_status" in body ? (body.bitcoin_lightning_status as "not_configured" | "pending" | "ready" | "needs_attention" | undefined) : undefined,
+      bitcoinLightningProvider: "bitcoin_lightning_provider" in body ? (body.bitcoin_lightning_provider as string | null) : undefined,
+      bitcoinLightningAccountId: "bitcoin_lightning_account_id" in body ? (body.bitcoin_lightning_account_id as string | null) : undefined,
     })
 
     return NextResponse.json({ profile })

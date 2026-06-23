@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useDynamicContext, useUserWallets } from "@dynamic-labs/sdk-react-core"
-import { AlertTriangle, CheckCircle2, Copy, RefreshCw, X } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Copy, RefreshCw, X, Zap } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import {
   extractDynamicWalletAddresses,
@@ -33,13 +33,30 @@ type PineTreeWalletProfile = {
   solana_address: string | null
   bitcoin_lightning_address: string | null
   bitcoin_onchain_address: string | null
+  bitcoin_lightning_status: "not_configured" | "pending" | "ready" | "needs_attention"
+  bitcoin_lightning_provider: string | null
+  bitcoin_lightning_account_id: string | null
   status: "not_created" | "needs_attention" | "ready"
+}
+
+type MerchantLightningProfile = {
+  id: string
+  merchant_id: string
+  provider: "speed"
+  status: "not_configured" | "pending" | "ready" | "needs_attention"
+  setup_source: "pinetree_managed"
 }
 
 type ProfileState =
   | { kind: "loading" }
   | { kind: "none" }
   | { kind: "loaded"; profile: PineTreeWalletProfile }
+  | { kind: "error" }
+
+type LightningProfileState =
+  | { kind: "loading" }
+  | { kind: "none" }
+  | { kind: "loaded"; profile: MerchantLightningProfile }
   | { kind: "error" }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +230,7 @@ function WalletDiagnosticsPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Receive row (inside modal)
+// Receive row (inside modal, used for Base and Solana)
 // ---------------------------------------------------------------------------
 
 function ReceiveRow({
@@ -269,8 +286,9 @@ function ReceiveRow({
 // ---------------------------------------------------------------------------
 
 function PineTreeWalletRuntime() {
-  // --- Supabase session & DB profile ---
+  // --- Supabase session & DB profiles ---
   const [profileState, setProfileState] = useState<ProfileState>({ kind: "loading" })
+  const [lightningProfileState, setLightningProfileState] = useState<LightningProfileState>({ kind: "loading" })
   const accessTokenRef = useRef<string | null>(null)
 
   // --- Dynamic SDK ---
@@ -287,6 +305,7 @@ function PineTreeWalletRuntime() {
   const [logoutPending, setLogoutPending] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [enablingLightning, setEnablingLightning] = useState(false)
   const [copiedAddress, setCopiedAddress] = useState("")
 
   // --- SDK load timeout ---
@@ -306,42 +325,59 @@ function PineTreeWalletRuntime() {
     return () => window.removeEventListener("keydown", closeOnEscape)
   }, [walletOpen])
 
-  // --- Load profile from DB on mount ---
-  const fetchProfile = useCallback(async () => {
+  // --- Load both profiles from DB on mount ---
+  const fetchAllProfiles = useCallback(async () => {
     setProfileState({ kind: "loading" })
+    setLightningProfileState({ kind: "loading" })
     try {
       const { data: sessionData } = await supabase.auth.getSession()
       const token = sessionData.session?.access_token
       if (!token) {
         setProfileState({ kind: "none" })
+        setLightningProfileState({ kind: "none" })
         return
       }
       accessTokenRef.current = token
 
-      const res = await fetch("/api/wallets/pinetree-profile", {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!res.ok) {
+      const [walletRes, lightningRes] = await Promise.all([
+        fetch("/api/wallets/pinetree-profile", {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch("/api/wallets/lightning/pinetree-managed", {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ])
+
+      if (!walletRes.ok) {
         setProfileState({ kind: "error" })
-        return
+      } else {
+        const json = (await walletRes.json()) as { profile: PineTreeWalletProfile | null }
+        setProfileState(json.profile ? { kind: "loaded", profile: json.profile } : { kind: "none" })
       }
-      const json = (await res.json()) as { profile: PineTreeWalletProfile | null }
-      setProfileState(json.profile ? { kind: "loaded", profile: json.profile } : { kind: "none" })
+
+      // Lightning profile is non-critical; don't block wallet display on failure
+      if (lightningRes.ok) {
+        const json = (await lightningRes.json()) as { profile: MerchantLightningProfile | null }
+        setLightningProfileState(json.profile ? { kind: "loaded", profile: json.profile } : { kind: "none" })
+      } else {
+        setLightningProfileState({ kind: "none" })
+      }
     } catch {
       setProfileState({ kind: "error" })
+      setLightningProfileState({ kind: "none" })
     }
   }, [])
 
   useEffect(() => {
-    void fetchProfile()
-  }, [fetchProfile])
+    void fetchAllProfiles()
+  }, [fetchAllProfiles])
 
   // --- Live Dynamic wallet addresses — used only for sync, never for display ---
   const dynamicNetworkAddresses = useMemo(() => {
     return extractDynamicWalletAddresses(wallets as DynamicWalletAddressSource[])
   }, [wallets])
 
-  // --- Sync Dynamic wallet addresses to the merchant profile DB record ---
+  // --- Sync Dynamic wallet addresses (Base/Solana) to the merchant profile DB record ---
   const syncProfileFromDynamic = useCallback(async () => {
     const token = accessTokenRef.current
     if (!token || !user) return
@@ -349,6 +385,8 @@ function PineTreeWalletRuntime() {
 
     setSyncing(true)
     try {
+      // Lightning readiness is managed by merchant_lightning_profiles, not by Dynamic Spark addresses.
+      // We still store any Spark address returned by Dynamic for reference, but it does not drive readiness.
       const body = {
         dynamic_user_id: user.userId,
         base_address: dynamicNetworkAddresses.base[0]?.address ?? null,
@@ -391,26 +429,38 @@ function PineTreeWalletRuntime() {
   }, [logoutPending, user, setShowAuthFlow])
 
   // ---------------------------------------------------------------------------
-  // Derived state from DB profile (NOT from Dynamic session)
+  // Derived state — wallet profile (Base/Solana from Dynamic, DB-backed)
   // ---------------------------------------------------------------------------
 
   const profile = profileState.kind === "loaded" ? profileState.profile : null
 
-  // Addresses come from the DB profile — the source of truth for which wallet belongs to this merchant
-  const profileAddresses = useMemo((): Record<"base" | "solana" | "lightning" | "bitcoin", AddressEntry[]> => {
-    if (!profile) return { base: [], solana: [], lightning: [], bitcoin: [] }
+  const profileAddresses = useMemo((): Record<"base" | "solana" | "bitcoin", AddressEntry[]> => {
+    if (!profile) return { base: [], solana: [], bitcoin: [] }
     return {
       base: profile.base_address ? [{ id: "base", address: profile.base_address }] : [],
       solana: profile.solana_address ? [{ id: "solana", address: profile.solana_address }] : [],
-      lightning: profile.bitcoin_lightning_address ? [{ id: "lightning", address: profile.bitcoin_lightning_address }] : [],
       bitcoin: profile.bitcoin_onchain_address ? [{ id: "bitcoin-onchain", address: profile.bitcoin_onchain_address }] : [],
     }
   }, [profile])
 
   const baseReady = profileAddresses.base.length > 0
   const solanaReady = profileAddresses.solana.length > 0
-  const lightningReady = profileAddresses.lightning.length > 0
+
+  // ---------------------------------------------------------------------------
+  // Derived state — Lightning (PineTree-managed backend, NOT Dynamic Spark)
+  // ---------------------------------------------------------------------------
+
+  const lightningProfile = lightningProfileState.kind === "loaded" ? lightningProfileState.profile : null
+
+  // Bitcoin Lightning readiness is driven by the merchant_lightning_profiles record.
+  // A Dynamic Spark address is NOT required for Lightning readiness.
+  const lightningReady = lightningProfile?.status === "ready"
+  const lightningPending = lightningProfile?.status === "pending"
+  const lightningEnabled = lightningReady || lightningPending
+
   const allPrimaryRailsReady = baseReady && solanaReady && lightningReady
+
+  // Wallet exists once Dynamic wallet (Base or Solana) or Lightning profile is active
   const hasWallet = profileState.kind === "loaded" && (baseReady || solanaReady || lightningReady)
 
   const walletStatus = !hasWallet ? "Not created" : allPrimaryRailsReady ? "Ready" : "Needs attention"
@@ -419,19 +469,15 @@ function PineTreeWalletRuntime() {
   // ---------------------------------------------------------------------------
   // Dynamic session mismatch guard
   // ---------------------------------------------------------------------------
-  // If the current Dynamic user does not match the saved profile's dynamic_user_id,
-  // the browser holds a stale session from a different PineTree merchant.
-  // We must not show those wallet addresses or treat them as belonging to this merchant.
   const dynamicSessionMatchesProfile =
-    !profile?.dynamic_user_id ||   // no linked Dynamic user yet → no mismatch
-    !user ||                        // no live Dynamic session → no mismatch
+    !profile?.dynamic_user_id ||
+    !user ||
     profile.dynamic_user_id === user.userId
 
   const hasStaleDynamicSession =
     user !== null &&
-    profileState.kind === "none" // Dynamic has a user but this merchant has no profile
+    profileState.kind === "none"
 
-  // Refresh is safe only when the Dynamic session belongs to this merchant's profile
   const canRefresh = sdkHasLoaded && dynamicSessionMatchesProfile && user !== null && hasWallet
 
   // ---------------------------------------------------------------------------
@@ -455,8 +501,6 @@ function PineTreeWalletRuntime() {
 
   function handleCreateWallet() {
     if (hasStaleDynamicSession && user) {
-      // Clear the stale Dynamic session that belongs to a different PineTree merchant,
-      // then open the auth flow once the session is cleared.
       setLogoutPending(true)
       void handleLogOut?.()
       return
@@ -475,13 +519,32 @@ function PineTreeWalletRuntime() {
     }
   }
 
+  async function handleEnableLightning() {
+    const token = accessTokenRef.current
+    if (!token || enablingLightning) return
+    setEnablingLightning(true)
+    try {
+      const res = await fetch("/api/wallets/lightning/pinetree-managed", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      })
+      if (res.ok) {
+        const json = (await res.json()) as { profile: MerchantLightningProfile }
+        setLightningProfileState({ kind: "loaded", profile: json.profile })
+      }
+    } finally {
+      setEnablingLightning(false)
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Early returns
   // ---------------------------------------------------------------------------
 
   if (sdkTimedOut && !sdkHasLoaded) return <WalletSetupUnavailable kind="sdk" />
 
-  if (profileState.kind === "loading" || (!sdkHasLoaded && profileState.kind !== "error")) {
+  if (profileState.kind === "loading" || lightningProfileState.kind === "loading" || (!sdkHasLoaded && profileState.kind !== "error")) {
     return (
       <WalletProfileShell
         status="Loading"
@@ -499,6 +562,28 @@ function PineTreeWalletRuntime() {
         message="Could not load the wallet profile. Refresh the page and try again."
       />
     )
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lightning status copy helpers
+  // ---------------------------------------------------------------------------
+
+  function lightningStatusLabel() {
+    if (lightningReady) return "Ready"
+    if (lightningPending) return "Pending"
+    return "Setup pending"
+  }
+
+  function lightningStatusTone(): "green" | "blue" | "amber" {
+    if (lightningReady) return "green"
+    if (lightningPending) return "blue"
+    return "amber"
+  }
+
+  function lightningOverviewCopy() {
+    if (lightningReady) return "Bitcoin Lightning payments are active through PineTree."
+    if (lightningPending) return "PineTree is enabling your Lightning rail. This may take a moment."
+    return "Bitcoin Lightning is powered by PineTree's backend Lightning rail. No external merchant wallet connection is required."
   }
 
   // ---------------------------------------------------------------------------
@@ -527,9 +612,10 @@ function PineTreeWalletRuntime() {
                 </span>
               ))}
             </div>
+
             {!lightningReady && hasWallet ? (
               <p className="text-xs font-semibold text-amber-700">
-                Bitcoin Lightning setup is pending. Base and Solana are ready.
+                Bitcoin Lightning setup pending
               </p>
             ) : null}
 
@@ -563,6 +649,19 @@ function PineTreeWalletRuntime() {
                 {logoutPending ? "Preparing…" : "Create PineTree Wallet"}
               </button>
             )}
+
+            {hasWallet && !lightningEnabled ? (
+              <button
+                type="button"
+                onClick={() => void handleEnableLightning()}
+                disabled={enablingLightning}
+                aria-label="Enable Bitcoin Lightning"
+                className="flex h-9 items-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3 text-xs font-semibold text-orange-700 shadow-sm transition hover:bg-orange-100 disabled:opacity-50"
+              >
+                <Zap size={12} />
+                {enablingLightning ? "Enabling…" : "Enable Bitcoin Lightning"}
+              </button>
+            ) : null}
 
             {canRefresh ? (
               <button
@@ -647,25 +746,44 @@ function PineTreeWalletRuntime() {
                     </p>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-3">
-                    {[
-                      { label: "Base", ready: baseReady },
-                      { label: "Solana", ready: solanaReady },
-                      { label: "Bitcoin Lightning / Spark", ready: lightningReady },
-                    ].map((rail) => (
-                      <div key={rail.label} className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-4 shadow-sm">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="text-sm font-semibold text-blue-900">{rail.label}</p>
-                          <ProviderStatusPill label={rail.ready ? "Ready" : "Setup pending"} tone={rail.ready ? "green" : "amber"} />
-                        </div>
-                        <p className="mt-2 text-xs text-blue-700">
-                          {rail.ready
-                            ? "Address available"
-                            : rail.label.startsWith("Bitcoin")
-                              ? "Bitcoin Lightning setup pending"
-                              : "Address setup pending"}
-                        </p>
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-4 shadow-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-blue-900">Base</p>
+                        <ProviderStatusPill label={baseReady ? "Ready" : "Setup pending"} tone={baseReady ? "green" : "amber"} />
                       </div>
-                    ))}
+                      <p className="mt-2 text-xs text-blue-700">
+                        {baseReady ? "Address available" : "Address setup pending"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-4 shadow-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-blue-900">Solana</p>
+                        <ProviderStatusPill label={solanaReady ? "Ready" : "Setup pending"} tone={solanaReady ? "green" : "amber"} />
+                      </div>
+                      <p className="mt-2 text-xs text-blue-700">
+                        {solanaReady ? "Address available" : "Address setup pending"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-4 shadow-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-blue-900">Bitcoin Lightning / Spark</p>
+                        <ProviderStatusPill label={lightningStatusLabel()} tone={lightningStatusTone()} />
+                      </div>
+                      <p className="mt-2 text-xs text-blue-700">{lightningOverviewCopy()}</p>
+                      {!lightningEnabled ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleEnableLightning()}
+                          disabled={enablingLightning}
+                          className="mt-3 flex items-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-semibold text-orange-700 transition hover:bg-orange-100 disabled:opacity-50"
+                        >
+                          <Zap size={11} />
+                          {enablingLightning ? "Enabling…" : "Enable Bitcoin Lightning"}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -689,7 +807,33 @@ function PineTreeWalletRuntime() {
                 <div className="space-y-3">
                   <ReceiveRow label="Base address" entries={profileAddresses.base} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
                   <ReceiveRow label="Solana address" entries={profileAddresses.solana} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
-                  <ReceiveRow label="Bitcoin Lightning/Spark address" entries={profileAddresses.lightning} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
+
+                  {/* Bitcoin Lightning: PineTree-managed, no merchant-side address to copy */}
+                  <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.05)] sm:px-5 sm:py-5">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-gray-800">Bitcoin Lightning</p>
+                      <ProviderStatusPill label={lightningStatusLabel()} tone={lightningStatusTone()} />
+                    </div>
+                    <p className="mt-2 text-xs leading-5 text-gray-500">
+                      Bitcoin Lightning is powered by PineTree&apos;s backend Lightning rail. No external merchant wallet connection is required.
+                    </p>
+                    {lightningReady ? (
+                      <p className="mt-1 text-xs font-semibold text-green-700">Active — customers can pay Lightning invoices.</p>
+                    ) : lightningPending ? (
+                      <p className="mt-1 text-xs font-semibold text-blue-700">PineTree is enabling your Lightning rail.</p>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void handleEnableLightning()}
+                        disabled={enablingLightning}
+                        className="mt-2 flex items-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-semibold text-orange-700 transition hover:bg-orange-100 disabled:opacity-50"
+                      >
+                        <Zap size={11} />
+                        {enablingLightning ? "Enabling…" : "Enable Bitcoin Lightning"}
+                      </button>
+                    )}
+                  </div>
+
                   {profileAddresses.bitcoin.length ? (
                     <div className="pt-2">
                       <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Secondary</p>

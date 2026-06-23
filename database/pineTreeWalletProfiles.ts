@@ -14,6 +14,11 @@ export type PineTreeWalletProfile = {
   solana_address: string | null
   bitcoin_lightning_address: string | null
   bitcoin_onchain_address: string | null
+  // PineTree-managed Lightning backend fields (added via migration 20260622_add_lightning_fields_to_wallet_profile)
+  bitcoin_lightning_status: "not_configured" | "pending" | "ready" | "needs_attention"
+  bitcoin_lightning_provider: string | null
+  bitcoin_lightning_receive_mode: string
+  bitcoin_lightning_account_id: string | null
   status: PineTreeWalletProfileStatus
   created_at: string
   updated_at: string
@@ -26,18 +31,22 @@ export type UpsertWalletProfileInput = {
   solanaAddress?: string | null
   bitcoinLightningAddress?: string | null
   bitcoinOnchainAddress?: string | null
+  bitcoinLightningStatus?: "not_configured" | "pending" | "ready" | "needs_attention"
+  bitcoinLightningProvider?: string | null
+  bitcoinLightningAccountId?: string | null
 }
 
 function deriveProfileStatus(fields: {
   base_address: string | null | undefined
   solana_address: string | null | undefined
-  bitcoin_lightning_address: string | null | undefined
+  bitcoin_lightning_status: string | null | undefined
 }): PineTreeWalletProfileStatus {
   const hasBase = Boolean(fields.base_address)
   const hasSolana = Boolean(fields.solana_address)
-  const hasLightning = Boolean(fields.bitcoin_lightning_address)
-  if (!hasBase && !hasSolana && !hasLightning) return "not_created"
-  if (hasBase && hasSolana && hasLightning) return "ready"
+  const lightningReady = fields.bitcoin_lightning_status === "ready"
+
+  if (!hasBase && !hasSolana) return "not_created"
+  if (hasBase && hasSolana && lightningReady) return "ready"
   return "needs_attention"
 }
 
@@ -70,6 +79,10 @@ export async function upsertPineTreeWalletProfile(
     solana_address: input.solanaAddress !== undefined ? input.solanaAddress : existing?.solana_address ?? null,
     bitcoin_lightning_address: input.bitcoinLightningAddress !== undefined ? input.bitcoinLightningAddress : existing?.bitcoin_lightning_address ?? null,
     bitcoin_onchain_address: input.bitcoinOnchainAddress !== undefined ? input.bitcoinOnchainAddress : existing?.bitcoin_onchain_address ?? null,
+    bitcoin_lightning_status: input.bitcoinLightningStatus !== undefined ? input.bitcoinLightningStatus : existing?.bitcoin_lightning_status ?? "not_configured",
+    bitcoin_lightning_provider: input.bitcoinLightningProvider !== undefined ? input.bitcoinLightningProvider : existing?.bitcoin_lightning_provider ?? null,
+    bitcoin_lightning_account_id: input.bitcoinLightningAccountId !== undefined ? input.bitcoinLightningAccountId : existing?.bitcoin_lightning_account_id ?? null,
+    bitcoin_lightning_receive_mode: existing?.bitcoin_lightning_receive_mode ?? "invoice",
   }
 
   const status = deriveProfileStatus(merged)

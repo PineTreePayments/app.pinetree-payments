@@ -14,6 +14,10 @@ describe("PineTree embedded wallet setup", () => {
   const apiRoute = read("app/api/wallets/pinetree-profile/route.ts")
   const dbHelper = read("database/pineTreeWalletProfiles.ts")
   const migration = read("database/migrations/20260622_create_pinetree_wallet_profile.sql")
+  // PineTree-managed Lightning backend files
+  const lightningMigration = read("database/migrations/20260622_create_merchant_lightning_profiles.sql")
+  const lightningDbHelper = read("database/merchantLightningProfiles.ts")
+  const lightningApiRoute = read("app/api/wallets/lightning/pinetree-managed/route.ts")
   const packageJson = JSON.parse(read("package.json")) as { dependencies: Record<string, string> }
 
   // -------------------------------------------------------------------------
@@ -71,10 +75,13 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("only shows wallet addresses that are linked to the current PineTree merchant profile", () => {
-    // Addresses rendered in the modal come from profileAddresses, which is derived from the DB profile
+    // Addresses rendered in the modal come from profileAddresses (DB-backed), for Base/Solana/Bitcoin on-chain
     expect(page).toContain("profileAddresses.base")
     expect(page).toContain("profileAddresses.solana")
-    expect(page).toContain("profileAddresses.lightning")
+    expect(page).toContain("profileAddresses.bitcoin")
+    // Lightning readiness comes from the separate lightningProfile, not from profileAddresses
+    expect(page).toContain("lightningProfileState")
+    expect(page).toContain("lightningProfile")
     // Raw Dynamic wallet addresses (dynamicNetworkAddresses) are used only for syncing, not for display
     expect(page).toContain("dynamicNetworkAddresses")
     expect(page).not.toContain("networkAddresses.base")
@@ -100,10 +107,11 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("wallet status is derived from the DB profile, not the Dynamic browser session", () => {
-    // baseReady, solanaReady, lightningReady all come from profileAddresses (DB-backed)
+    // baseReady and solanaReady come from profileAddresses (DB-backed addresses)
     expect(page).toContain("const baseReady = profileAddresses.base.length > 0")
     expect(page).toContain("const solanaReady = profileAddresses.solana.length > 0")
-    expect(page).toContain("const lightningReady = profileAddresses.lightning.length > 0")
+    // lightningReady comes from the merchant_lightning_profiles record, not a Dynamic Spark address
+    expect(page).toContain('const lightningReady = lightningProfile?.status === "ready"')
     expect(page).toContain("const allPrimaryRailsReady = baseReady && solanaReady && lightningReady")
     expect(page).toContain('allPrimaryRailsReady ? "Ready" : "Needs attention"')
   })
@@ -154,7 +162,9 @@ describe("PineTree embedded wallet setup", () => {
   it("keeps raw address details off the main setup summary", () => {
     expect(page).toContain('label="Base address"')
     expect(page).toContain('label="Solana address"')
-    expect(page).toContain('label="Bitcoin Lightning/Spark address"')
+    // Lightning is PineTree-managed — no address row to copy, a dedicated section instead
+    expect(page).not.toContain('<ReceiveRow label="Bitcoin Lightning/Spark address"')
+    expect(page).toContain("Bitcoin Lightning is powered by PineTree")
     expect(page).not.toContain("Network addresses")
     expect(page).not.toContain("PineTree Base Wallet")
     expect(page).not.toContain("PineTree Solana Wallet")
@@ -180,13 +190,17 @@ describe("PineTree embedded wallet setup", () => {
   it("requires Base, Solana, and Lightning before marking the wallet Ready", () => {
     expect(page).toContain("const allPrimaryRailsReady = baseReady && solanaReady && lightningReady")
     expect(page).toContain('allPrimaryRailsReady ? "Ready" : "Needs attention"')
-    expect(page).toContain("Bitcoin Lightning setup is pending. Base and Solana are ready.")
+    expect(page).toContain("Bitcoin Lightning setup pending")
   })
 
-  it("shows receive readiness for Base, Solana, and Bitcoin Lightning", () => {
+  it("shows receive readiness for Base and Solana, and a PineTree-managed section for Bitcoin Lightning", () => {
     expect(page).toContain('<ReceiveRow label="Base address"')
     expect(page).toContain('<ReceiveRow label="Solana address"')
-    expect(page).toContain('<ReceiveRow label="Bitcoin Lightning/Spark address"')
+    // Lightning is PineTree-managed — no address to copy, section explains the rail
+    expect(page).not.toContain('<ReceiveRow label="Bitcoin Lightning/Spark address"')
+    expect(page).toContain("Bitcoin Lightning is powered by PineTree")
+    expect(page).toContain('No external merchant wallet connection is required')
+    // Base/Solana ReceiveRow still shows Setup pending when address is missing
     expect(page).toContain('label={ready ? "Ready" : "Setup pending"}')
     expect(page).toContain(">Setup pending</p>")
   })
@@ -297,8 +311,9 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("wallet setup page does not call payment routing, POS, or checkout APIs", () => {
-    // Profile fetch is the only allowed API call from this page
+    // Wallet setup only calls wallet-scoped API routes
     expect(page).toContain("/api/wallets/pinetree-profile")
+    expect(page).toContain("/api/wallets/lightning/pinetree-managed")
     expect(page).not.toContain("/api/wallets/settlement")
     expect(page).not.toContain("/api/wallets/send-sessions")
     expect(page).not.toContain("/api/providers")
@@ -338,5 +353,108 @@ describe("PineTree embedded wallet setup", () => {
     ]) {
       expect(packageJson.dependencies[dependency]).toBe("^4.90.0")
     }
+  })
+
+  // -------------------------------------------------------------------------
+  // PineTree-managed Lightning backend (Session 2)
+  // -------------------------------------------------------------------------
+
+  it("loads lightning profile in parallel with the wallet profile", () => {
+    expect(page).toContain("/api/wallets/lightning/pinetree-managed")
+    expect(page).toContain("lightningProfileState")
+    expect(page).toContain("LightningProfileState")
+    // Both fetched in a single Promise.all so neither blocks the other
+    expect(page).toContain("Promise.all")
+  })
+
+  it("lightningReady comes from merchant_lightning_profiles.status, not a Dynamic Spark address", () => {
+    // Readiness is driven by the DB record, not any Spark address returned by Dynamic
+    expect(page).toContain('const lightningReady = lightningProfile?.status === "ready"')
+    expect(page).toContain('const lightningPending = lightningProfile?.status === "pending"')
+    // No old pattern that checked Spark address length
+    expect(page).not.toContain("profileAddresses.lightning.length > 0")
+    expect(page).not.toContain("lightningAddress.length")
+  })
+
+  it("PineTree Wallet can be created with Base/Solana active while Lightning profile is pending", () => {
+    // hasWallet is true once Base or Solana is active — Lightning pending does not block it
+    expect(page).toContain("const hasWallet = profileState.kind")
+    expect(page).toContain("baseReady || solanaReady || lightningReady")
+    // lightningPending is a valid state for an active wallet
+    expect(page).toContain("lightningPending")
+    expect(page).toContain("const lightningEnabled = lightningReady || lightningPending")
+  })
+
+  it("Enable Bitcoin Lightning button calls POST /api/wallets/lightning/pinetree-managed and does not redirect", () => {
+    expect(page).toContain("Enable Bitcoin Lightning")
+    expect(page).toContain("handleEnableLightning")
+    // Uses a POST fetch to the internal route — no redirect to Speed sign-up
+    expect(page).toContain("/api/wallets/lightning/pinetree-managed")
+    expect(page).not.toContain("speed.com")
+    expect(page).not.toContain("tryspeed.com")
+    expect(page).not.toContain("router.push")
+  })
+
+  it("does not ask the merchant to sign up for Speed, paste keys, or connect NWC", () => {
+    expect(page).not.toContain("Sign up for Speed")
+    expect(page).not.toContain("TrySpeed")
+    expect(page).not.toContain("speed.com")
+    expect(page).not.toContain("Connect NWC")
+    expect(page).not.toContain("nostr+walletconnect")
+    expect(page).not.toContain("Paste your")
+    expect(page).not.toContain("Speed API key")
+    expect(page).toContain("No external merchant wallet connection is required")
+  })
+
+  it("does not expose Speed API keys or secrets to the browser", () => {
+    expect(page).not.toContain("SPEED_API_KEY")
+    expect(page).not.toContain("SPEED_SECRET")
+    expect(page).not.toContain("speed_secret")
+    // The lightning API route response only contains the profile object, not secrets
+    expect(lightningApiRoute).toContain("return NextResponse.json({ profile: lightningProfile })")
+    expect(lightningApiRoute).not.toContain("SPEED_API_KEY")
+    expect(lightningApiRoute).not.toContain("speed_account_secret")
+    // API route comments confirm security intent
+    expect(lightningApiRoute).toContain("No Speed API keys or secrets are returned to the browser")
+  })
+
+  it("merchant_lightning_profiles migration creates the correct table shape", () => {
+    expect(lightningMigration).toContain("merchant_lightning_profiles")
+    expect(lightningMigration).toContain("merchant_id")
+    expect(lightningMigration).toContain("provider")
+    expect(lightningMigration).toContain("status")
+    expect(lightningMigration).toContain("speed_connected_account_id")
+    expect(lightningMigration).toContain("setup_source")
+    expect(lightningMigration).toContain("UNIQUE")
+  })
+
+  it("lightning DB helper exposes readiness derivation and safe mutation functions only", () => {
+    expect(lightningDbHelper).toContain("deriveLightningReadiness")
+    expect(lightningDbHelper).toContain("getMerchantLightningProfile")
+    expect(lightningDbHelper).toContain("markMerchantLightningPending")
+    expect(lightningDbHelper).toContain("markMerchantLightningReady")
+    // Readiness comes from profile.status
+    expect(lightningDbHelper).toContain('"pending"')
+    expect(lightningDbHelper).toContain('"ready"')
+    // No secrets stored here
+    expect(lightningDbHelper).not.toContain("SPEED_API_KEY")
+  })
+
+  it("pinetree-managed lightning API route requires merchant JWT and returns profile only", () => {
+    expect(lightningApiRoute).toContain("requireMerchantIdFromRequest")
+    expect(lightningApiRoute).toContain("GET")
+    expect(lightningApiRoute).toContain("POST")
+    expect(lightningApiRoute).toContain("getMerchantLightningProfile")
+    expect(lightningApiRoute).toContain("markMerchantLightningPending")
+    // No Speed sub-account creation in this pass
+    expect(lightningApiRoute).not.toContain("speedClient")
+    expect(lightningApiRoute).not.toContain("createConnectedAccount")
+    expect(lightningApiRoute).not.toContain("SPEED_API_KEY")
+  })
+
+  it("existing legacy Speed route still compiles (backward compat)", () => {
+    const legacySpeedRoute = read("app/api/wallets/lightning/speed/connect/route.ts")
+    // The legacy route that requires a merchant-supplied speedAccountId must still exist
+    expect(legacySpeedRoute).toContain("speedAccountId")
   })
 })
