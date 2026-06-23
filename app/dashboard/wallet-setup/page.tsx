@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useDynamicContext, useUserWallets } from "@dynamic-labs/sdk-react-core"
-import { CheckCircle2, Copy, X } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Copy, RefreshCw, X } from "lucide-react"
+import { supabase } from "@/lib/supabaseClient"
 import { type NetworkId, networkForWallet, shortAddress } from "@/lib/wallets/sparkDetection"
 import {
   DashboardSection,
@@ -11,8 +12,32 @@ import {
 } from "@/components/dashboard/DashboardPrimitives"
 import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/PineTreeDynamicProvider"
 
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
 type WalletTab = "overview" | "balances" | "receive" | "withdraw" | "activity"
 type AddressEntry = { id: string; address: string; detail?: string }
+
+type PineTreeWalletProfile = {
+  id: string
+  dynamic_user_id: string | null
+  base_address: string | null
+  solana_address: string | null
+  bitcoin_lightning_address: string | null
+  bitcoin_onchain_address: string | null
+  status: "not_created" | "needs_attention" | "ready"
+}
+
+type ProfileState =
+  | { kind: "loading" }
+  | { kind: "none" }
+  | { kind: "loaded"; profile: PineTreeWalletProfile }
+  | { kind: "error" }
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
 const walletTabs: Array<{ id: WalletTab; label: string }> = [
   { id: "overview", label: "Overview" },
@@ -24,65 +49,9 @@ const walletTabs: Array<{ id: WalletTab; label: string }> = [
 
 const primaryRails = ["Base", "Solana", "Bitcoin Lightning"] as const
 
-function WalletDiagnosticsPanel({
-  wallets,
-  networkAddresses,
-}: {
-  wallets: ReturnType<typeof useUserWallets>
-  networkAddresses: Record<NetworkId, AddressEntry[]>
-}) {
-  const rows = wallets.map((w) => ({
-    key: w.key,
-    connectorName: w.connector.name,
-    connectorKey: String((w.connector as unknown as Record<string, unknown>)["key"] ?? ""),
-    chain: w.chain,
-    detectedNetwork: networkForWallet(w.chain, w.key, w.connector.name),
-    hasAddress: Boolean(w.address),
-    addressPrefix: w.address ? `${w.address.slice(0, 6)}…` : "—",
-    extraAddressCount: (w.additionalAddresses ?? []).length,
-  }))
-
-  useEffect(() => {
-    console.debug("[pinetree-wallets] sdk diagnostics", {
-      walletCount: wallets.length,
-      wallets: rows,
-      networkSummary: {
-        base: networkAddresses.base.length,
-        solana: networkAddresses.solana.length,
-        lightning: networkAddresses.lightning.length,
-        bitcoin: networkAddresses.bitcoin.length,
-      },
-    })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wallets])
-
-  return (
-    <div className="rounded-xl border border-dashed border-yellow-300 bg-yellow-50/60 px-4 py-3 text-[11px] font-mono">
-      <p className="mb-2 font-sans text-xs font-semibold text-yellow-700">DEV — wallet SDK diagnostics (hidden in production)</p>
-      {rows.length === 0 ? (
-        <p className="text-yellow-700">No wallet objects returned by useUserWallets() yet</p>
-      ) : (
-        <div className="space-y-1 text-yellow-900">
-          {rows.map((row, idx) => (
-            <div key={idx} className="flex flex-wrap gap-x-3 rounded bg-yellow-100/70 px-2 py-1">
-              <span><span className="text-yellow-600">net:</span> {row.detectedNetwork ?? "undetected"}</span>
-              <span><span className="text-yellow-600">chain:</span> {row.chain}</span>
-              <span><span className="text-yellow-600">connector:</span> {row.connectorName}{row.connectorKey ? ` [${row.connectorKey}]` : ""}</span>
-              <span><span className="text-yellow-600">addr:</span> {row.addressPrefix}</span>
-              {row.extraAddressCount > 0 ? <span><span className="text-yellow-600">+extra:</span> {row.extraAddressCount}</span> : null}
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="mt-2 flex flex-wrap gap-3 text-yellow-700">
-        <span>lightning: {networkAddresses.lightning.length}</span>
-        <span>base: {networkAddresses.base.length}</span>
-        <span>solana: {networkAddresses.solana.length}</span>
-        <span>btc: {networkAddresses.bitcoin.length}</span>
-      </div>
-    </div>
-  )
-}
+// ---------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------
 
 function WalletProfileShell({
   status,
@@ -111,9 +80,11 @@ function WalletSetupUnavailable({ kind }: { kind: "missing-env" | "sdk" }) {
     <WalletProfileShell
       status="Needs attention"
       tone="amber"
-      message={kind === "missing-env"
-        ? "PineTree Wallet setup is not configured for this deployment."
-        : "PineTree Wallet setup could not load. Refresh the page and try again."}
+      message={
+        kind === "missing-env"
+          ? "PineTree Wallet setup is not configured for this deployment."
+          : "PineTree Wallet setup could not load. Refresh the page and try again."
+      }
     />
   )
 }
@@ -127,105 +98,95 @@ function EmptyWalletPanel({ title, detail }: { title: string; detail: string }) 
   )
 }
 
-function PineTreeWalletRuntime() {
-  const { user, sdkHasLoaded, setShowAuthFlow } = useDynamicContext()
-  const wallets = useUserWallets()
-  const [loadTimedOut, setLoadTimedOut] = useState(false)
-  const [copiedAddress, setCopiedAddress] = useState("")
-  const [walletOpen, setWalletOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<WalletTab>("overview")
+// ---------------------------------------------------------------------------
+// Dev diagnostics (hidden in production)
+// ---------------------------------------------------------------------------
+
+function WalletDiagnosticsPanel({
+  wallets,
+  sdkNetworkGroups,
+}: {
+  wallets: ReturnType<typeof useUserWallets>
+  sdkNetworkGroups: Record<NetworkId, AddressEntry[]>
+}) {
+  const rows = wallets.map((w) => ({
+    key: w.key,
+    connectorName: w.connector.name,
+    connectorKey: String((w.connector as unknown as Record<string, unknown>)["key"] ?? ""),
+    chain: w.chain,
+    detectedNetwork: networkForWallet(w.chain, w.key, w.connector.name),
+    hasAddress: Boolean(w.address),
+    addressPrefix: w.address ? `${w.address.slice(0, 6)}…` : "—",
+    extraAddressCount: (w.additionalAddresses ?? []).length,
+  }))
 
   useEffect(() => {
-    if (sdkHasLoaded) return
-    const timer = window.setTimeout(() => setLoadTimedOut(true), 12000)
-    return () => window.clearTimeout(timer)
-  }, [sdkHasLoaded])
-
-  useEffect(() => {
-    if (!walletOpen) return
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setWalletOpen(false)
-    }
-    window.addEventListener("keydown", closeOnEscape)
-    return () => window.removeEventListener("keydown", closeOnEscape)
-  }, [walletOpen])
-
-  const networkAddresses = useMemo(() => {
-    const groups: Record<NetworkId, AddressEntry[]> = {
-      base: [],
-      solana: [],
-      bitcoin: [],
-      lightning: [],
-    }
-
-    for (const wallet of wallets) {
-      const network = networkForWallet(wallet.chain, wallet.key, wallet.connector.name)
-      if (!network) continue
-      groups[network].push({ id: wallet.id, address: wallet.address })
-
-      if (network === "bitcoin") {
-        for (const extra of wallet.additionalAddresses || []) {
-          if (!extra.address || extra.address === wallet.address) continue
-          groups.bitcoin.push({
-            id: `${wallet.id}-${extra.type}`,
-            address: extra.address,
-            detail: String(extra.type).replaceAll("_", " "),
-          })
-        }
-      }
-    }
-
-    return groups
+    console.debug("[pinetree-wallets] sdk diagnostics", {
+      walletCount: wallets.length,
+      wallets: rows,
+      sdkSummary: {
+        base: sdkNetworkGroups.base.length,
+        solana: sdkNetworkGroups.solana.length,
+        lightning: sdkNetworkGroups.lightning.length,
+        bitcoin: sdkNetworkGroups.bitcoin.length,
+      },
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallets])
 
-  async function copyAddress(address: string) {
-    try {
-      await navigator.clipboard.writeText(address)
-      setCopiedAddress(address)
-      window.setTimeout(() => setCopiedAddress(""), 1800)
-    } catch {
-      setCopiedAddress("")
-    }
-  }
-
-  if (loadTimedOut && !sdkHasLoaded) return <WalletSetupUnavailable kind="sdk" />
-  if (!sdkHasLoaded) {
-    return (
-      <WalletProfileShell
-        status="Loading"
-        tone="blue"
-        message="Loading this merchant’s PineTree Wallet profile."
-      />
-    )
-  }
-
-  const hasAnyAddress = Object.values(networkAddresses).some((entries) => entries.length > 0)
-  const baseReady = networkAddresses.base.length > 0
-  const solanaReady = networkAddresses.solana.length > 0
-  const lightningReady = networkAddresses.lightning.length > 0
-  const allPrimaryRailsReady = baseReady && solanaReady && lightningReady
-  const walletStatus = !hasAnyAddress ? "Not created" : allPrimaryRailsReady ? "Ready" : "Needs attention"
-  const statusTone = !hasAnyAddress ? "slate" : allPrimaryRailsReady ? "green" : "amber"
-
-  function handlePrimaryAction() {
-    if (!hasAnyAddress) {
-      setShowAuthFlow(true)
-      return
-    }
-    setActiveTab("overview")
-    setWalletOpen(true)
-  }
-
-  function ReceiveRow({ label, entries }: { label: string; entries: AddressEntry[] }) {
-    const ready = entries.length > 0
-    return (
-      <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.05)] sm:px-5 sm:py-5">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-sm font-semibold text-gray-800">{label}</p>
-          <ProviderStatusPill label={ready ? "Ready" : "Setup pending"} tone={ready ? "green" : "amber"} />
+  return (
+    <div className="rounded-xl border border-dashed border-yellow-300 bg-yellow-50/60 px-4 py-3 text-[11px] font-mono">
+      <p className="mb-2 font-sans text-xs font-semibold text-yellow-700">DEV — wallet SDK diagnostics (hidden in production)</p>
+      {rows.length === 0 ? (
+        <p className="text-yellow-700">No wallet objects returned by useUserWallets() yet</p>
+      ) : (
+        <div className="space-y-1 text-yellow-900">
+          {rows.map((row, idx) => (
+            <div key={idx} className="flex flex-wrap gap-x-3 rounded bg-yellow-100/70 px-2 py-1">
+              <span><span className="text-yellow-600">net:</span> {row.detectedNetwork ?? "undetected"}</span>
+              <span><span className="text-yellow-600">chain:</span> {row.chain}</span>
+              <span><span className="text-yellow-600">connector:</span> {row.connectorName}{row.connectorKey ? ` [${row.connectorKey}]` : ""}</span>
+              <span><span className="text-yellow-600">addr:</span> {row.addressPrefix}</span>
+              {row.extraAddressCount > 0 ? <span><span className="text-yellow-600">+extra:</span> {row.extraAddressCount}</span> : null}
+            </div>
+          ))}
         </div>
-        <div className="mt-3 space-y-3">
-          {ready ? entries.map((entry) => (
+      )}
+      <div className="mt-2 flex flex-wrap gap-3 text-yellow-700">
+        <span>lightning: {sdkNetworkGroups.lightning.length}</span>
+        <span>base: {sdkNetworkGroups.base.length}</span>
+        <span>solana: {sdkNetworkGroups.solana.length}</span>
+        <span>btc: {sdkNetworkGroups.bitcoin.length}</span>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Receive row (inside modal)
+// ---------------------------------------------------------------------------
+
+function ReceiveRow({
+  label,
+  entries,
+  copiedAddress,
+  onCopy,
+}: {
+  label: string
+  entries: AddressEntry[]
+  copiedAddress: string
+  onCopy: (address: string) => void
+}) {
+  const ready = entries.length > 0
+  return (
+    <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.05)] sm:px-5 sm:py-5">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-semibold text-gray-800">{label}</p>
+        <ProviderStatusPill label={ready ? "Ready" : "Setup pending"} tone={ready ? "green" : "amber"} />
+      </div>
+      <div className="mt-3 space-y-3">
+        {ready ? (
+          entries.map((entry) => (
             <div key={entry.id} className="flex min-w-0 items-center gap-2">
               <div className="min-w-0 flex-1">
                 {entry.detail ? (
@@ -237,20 +198,283 @@ function PineTreeWalletRuntime() {
               </div>
               <button
                 type="button"
-                onClick={() => void copyAddress(entry.address)}
+                onClick={() => onCopy(entry.address)}
                 aria-label={`Copy ${label}`}
                 className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:text-blue-700"
               >
                 {copiedAddress === entry.address ? <CheckCircle2 size={15} /> : <Copy size={15} />}
               </button>
             </div>
-          )) : (
-            <p className="text-sm text-amber-700">Setup pending</p>
-          )}
-        </div>
+          ))
+        ) : (
+          <p className="text-sm text-amber-700">Setup pending</p>
+        )}
       </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Main runtime component
+// ---------------------------------------------------------------------------
+
+function PineTreeWalletRuntime() {
+  // --- Supabase session & DB profile ---
+  const [profileState, setProfileState] = useState<ProfileState>({ kind: "loading" })
+  const accessTokenRef = useRef<string | null>(null)
+
+  // --- Dynamic SDK ---
+  const { user, sdkHasLoaded, setShowAuthFlow, handleLogOut } = useDynamicContext()
+  const wallets = useUserWallets()
+
+  // --- UI state ---
+  const [sdkTimedOut, setSdkTimedOut] = useState(false)
+  const [walletOpen, setWalletOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState<WalletTab>("overview")
+  // pendingSync: merchant explicitly clicked "Create PineTree Wallet"
+  const [pendingSync, setPendingSync] = useState(false)
+  // logoutPending: waiting for Dynamic logout to complete before opening auth flow
+  const [logoutPending, setLogoutPending] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [copiedAddress, setCopiedAddress] = useState("")
+
+  // --- SDK load timeout ---
+  useEffect(() => {
+    if (sdkHasLoaded) return
+    const timer = window.setTimeout(() => setSdkTimedOut(true), 12000)
+    return () => window.clearTimeout(timer)
+  }, [sdkHasLoaded])
+
+  // --- Escape key closes modal ---
+  useEffect(() => {
+    if (!walletOpen) return
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setWalletOpen(false)
+    }
+    window.addEventListener("keydown", closeOnEscape)
+    return () => window.removeEventListener("keydown", closeOnEscape)
+  }, [walletOpen])
+
+  // --- Load profile from DB on mount ---
+  const fetchProfile = useCallback(async () => {
+    setProfileState({ kind: "loading" })
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData.session?.access_token
+      if (!token) {
+        setProfileState({ kind: "none" })
+        return
+      }
+      accessTokenRef.current = token
+
+      const res = await fetch("/api/wallets/pinetree-profile", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) {
+        setProfileState({ kind: "error" })
+        return
+      }
+      const json = (await res.json()) as { profile: PineTreeWalletProfile | null }
+      setProfileState(json.profile ? { kind: "loaded", profile: json.profile } : { kind: "none" })
+    } catch {
+      setProfileState({ kind: "error" })
+    }
+  }, [])
+
+  useEffect(() => {
+    void fetchProfile()
+  }, [fetchProfile])
+
+  // --- Live Dynamic wallet addresses — used only for sync, never for display ---
+  const dynamicNetworkAddresses = useMemo(() => {
+    const groups: Record<NetworkId, AddressEntry[]> = {
+      base: [],
+      solana: [],
+      bitcoin: [],
+      lightning: [],
+    }
+    for (const wallet of wallets) {
+      const network = networkForWallet(wallet.chain, wallet.key, wallet.connector.name)
+      if (!network) continue
+      groups[network].push({ id: wallet.id, address: wallet.address })
+      if (network === "bitcoin") {
+        for (const extra of wallet.additionalAddresses || []) {
+          if (!extra.address || extra.address === wallet.address) continue
+          groups.bitcoin.push({
+            id: `${wallet.id}-${extra.type}`,
+            address: extra.address,
+            detail: String(extra.type).replaceAll("_", " "),
+          })
+        }
+      }
+    }
+    return groups
+  }, [wallets])
+
+  // --- Sync Dynamic wallet addresses to the merchant profile DB record ---
+  const syncProfileFromDynamic = useCallback(async () => {
+    const token = accessTokenRef.current
+    if (!token || !user) return
+    if (dynamicNetworkAddresses.base.length === 0 && dynamicNetworkAddresses.solana.length === 0) return
+
+    setSyncing(true)
+    try {
+      const body = {
+        dynamic_user_id: user.userId,
+        base_address: dynamicNetworkAddresses.base[0]?.address ?? null,
+        solana_address: dynamicNetworkAddresses.solana[0]?.address ?? null,
+        bitcoin_lightning_address: dynamicNetworkAddresses.lightning[0]?.address ?? null,
+        bitcoin_onchain_address: dynamicNetworkAddresses.bitcoin[0]?.address ?? null,
+      }
+      const res = await fetch("/api/wallets/pinetree-profile", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      })
+      if (res.ok) {
+        const json = (await res.json()) as { profile: PineTreeWalletProfile }
+        setProfileState({ kind: "loaded", profile: json.profile })
+      }
+    } finally {
+      setSyncing(false)
+      setPendingSync(false)
+    }
+  }, [user, dynamicNetworkAddresses])
+
+  // --- After wallet creation: auto-sync addresses to DB ---
+  useEffect(() => {
+    if (!pendingSync) return
+    if (!sdkHasLoaded || !user || wallets.length === 0) return
+    void syncProfileFromDynamic()
+  }, [pendingSync, sdkHasLoaded, user, wallets, syncProfileFromDynamic])
+
+  // --- After Dynamic logout: open auth flow for the new merchant's wallet creation ---
+  useEffect(() => {
+    if (!logoutPending) return
+    if (user !== null) return // still waiting for logout to clear the user
+    setLogoutPending(false)
+    setPendingSync(true)
+    setShowAuthFlow(true)
+  }, [logoutPending, user, setShowAuthFlow])
+
+  // ---------------------------------------------------------------------------
+  // Derived state from DB profile (NOT from Dynamic session)
+  // ---------------------------------------------------------------------------
+
+  const profile = profileState.kind === "loaded" ? profileState.profile : null
+
+  // Addresses come from the DB profile — the source of truth for which wallet belongs to this merchant
+  const profileAddresses = useMemo((): Record<"base" | "solana" | "lightning" | "bitcoin", AddressEntry[]> => {
+    if (!profile) return { base: [], solana: [], lightning: [], bitcoin: [] }
+    return {
+      base: profile.base_address ? [{ id: "base", address: profile.base_address }] : [],
+      solana: profile.solana_address ? [{ id: "solana", address: profile.solana_address }] : [],
+      lightning: profile.bitcoin_lightning_address ? [{ id: "lightning", address: profile.bitcoin_lightning_address }] : [],
+      bitcoin: profile.bitcoin_onchain_address ? [{ id: "bitcoin-onchain", address: profile.bitcoin_onchain_address }] : [],
+    }
+  }, [profile])
+
+  const baseReady = profileAddresses.base.length > 0
+  const solanaReady = profileAddresses.solana.length > 0
+  const lightningReady = profileAddresses.lightning.length > 0
+  const allPrimaryRailsReady = baseReady && solanaReady && lightningReady
+  const hasWallet = profileState.kind === "loaded" && (baseReady || solanaReady || lightningReady)
+
+  const walletStatus = !hasWallet ? "Not created" : allPrimaryRailsReady ? "Ready" : "Needs attention"
+  const statusTone = !hasWallet ? "slate" : allPrimaryRailsReady ? "green" : "amber"
+
+  // ---------------------------------------------------------------------------
+  // Dynamic session mismatch guard
+  // ---------------------------------------------------------------------------
+  // If the current Dynamic user does not match the saved profile's dynamic_user_id,
+  // the browser holds a stale session from a different PineTree merchant.
+  // We must not show those wallet addresses or treat them as belonging to this merchant.
+  const dynamicSessionMatchesProfile =
+    !profile?.dynamic_user_id ||   // no linked Dynamic user yet → no mismatch
+    !user ||                        // no live Dynamic session → no mismatch
+    profile.dynamic_user_id === user.userId
+
+  const hasStaleDynamicSession =
+    user !== null &&
+    profileState.kind === "none" // Dynamic has a user but this merchant has no profile
+
+  // Refresh is safe only when the Dynamic session belongs to this merchant's profile
+  const canRefresh = sdkHasLoaded && dynamicSessionMatchesProfile && user !== null && hasWallet
+
+  // ---------------------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------------------
+
+  async function copyAddress(address: string) {
+    try {
+      await navigator.clipboard.writeText(address)
+      setCopiedAddress(address)
+      window.setTimeout(() => setCopiedAddress(""), 1800)
+    } catch {
+      setCopiedAddress("")
+    }
+  }
+
+  function handleOpenWallet() {
+    setActiveTab("overview")
+    setWalletOpen(true)
+  }
+
+  function handleCreateWallet() {
+    if (hasStaleDynamicSession && user) {
+      // Clear the stale Dynamic session that belongs to a different PineTree merchant,
+      // then open the auth flow once the session is cleared.
+      setLogoutPending(true)
+      void handleLogOut?.()
+      return
+    }
+    setPendingSync(true)
+    setShowAuthFlow(true)
+  }
+
+  async function handleRefreshAddresses() {
+    if (!canRefresh) return
+    setRefreshing(true)
+    try {
+      await syncProfileFromDynamic()
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Early returns
+  // ---------------------------------------------------------------------------
+
+  if (sdkTimedOut && !sdkHasLoaded) return <WalletSetupUnavailable kind="sdk" />
+
+  if (profileState.kind === "loading" || (!sdkHasLoaded && profileState.kind !== "error")) {
+    return (
+      <WalletProfileShell
+        status="Loading"
+        tone="blue"
+        message="Loading this merchant's PineTree Wallet profile."
+      />
     )
   }
+
+  if (profileState.kind === "error") {
+    return (
+      <WalletProfileShell
+        status="Needs attention"
+        tone="amber"
+        message="Could not load the wallet profile. Refresh the page and try again."
+      />
+    )
+  }
+
+  // ---------------------------------------------------------------------------
+  // Main card
+  // ---------------------------------------------------------------------------
 
   return (
     <>
@@ -260,12 +484,12 @@ function PineTreeWalletRuntime() {
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base font-semibold text-gray-950">PineTree Wallet</h2>
               <ProviderStatusPill
-                label={walletStatus}
-                tone={statusTone as "green" | "amber" | "slate"}
+                label={syncing ? "Saving…" : walletStatus}
+                tone={syncing ? "blue" : (statusTone as "green" | "amber" | "slate")}
               />
             </div>
             <p className="text-sm leading-6 text-gray-600">
-              One merchant wallet for receiving funds and managing PineTree’s supported payment rails.
+              One merchant wallet for receiving funds and managing PineTree&apos;s supported payment rails.
             </p>
             <div className="flex flex-wrap gap-2.5" aria-label="Supported rails">
               {primaryRails.map((rail) => (
@@ -274,22 +498,59 @@ function PineTreeWalletRuntime() {
                 </span>
               ))}
             </div>
-            {!lightningReady && hasAnyAddress ? (
+            {!lightningReady && hasWallet ? (
               <p className="text-xs font-semibold text-amber-700">Bitcoin Lightning setup pending</p>
             ) : null}
+
+            {!dynamicSessionMatchesProfile ? (
+              <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
+                <p className="text-xs leading-5 text-amber-800">
+                  PineTree Wallet session not active for this account. Click &ldquo;Open PineTree Wallet&rdquo; to reconnect.
+                </p>
+              </div>
+            ) : null}
           </div>
-          <button
-            type="button"
-            onClick={handlePrimaryAction}
-            className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-          >
-            {hasAnyAddress ? "Open PineTree Wallet" : "Create PineTree Wallet"}
-          </button>
+
+          <div className="flex flex-col items-end gap-2">
+            {hasWallet ? (
+              <button
+                type="button"
+                onClick={handleOpenWallet}
+                disabled={syncing}
+                className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+              >
+                Open PineTree Wallet
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleCreateWallet}
+                disabled={syncing || logoutPending}
+                className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+              >
+                {logoutPending ? "Preparing…" : "Create PineTree Wallet"}
+              </button>
+            )}
+
+            {canRefresh ? (
+              <button
+                type="button"
+                onClick={() => void handleRefreshAddresses()}
+                disabled={refreshing}
+                aria-label="Refresh wallet addresses"
+                className="flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-600 shadow-sm transition hover:text-blue-700 disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
+                Refresh wallet addresses
+              </button>
+            ) : null}
+          </div>
         </div>
       </article>
 
       {process.env.NODE_ENV !== "production" ? (
-        <WalletDiagnosticsPanel wallets={wallets} networkAddresses={networkAddresses} />
+        <WalletDiagnosticsPanel wallets={wallets} sdkNetworkGroups={dynamicNetworkAddresses} />
       ) : null}
 
       {walletOpen ? (
@@ -312,7 +573,7 @@ function PineTreeWalletRuntime() {
                   <h2 id="pinetree-wallet-modal-title" className="text-lg font-semibold text-gray-950">PineTree Wallet</h2>
                   <ProviderStatusPill label={walletStatus} tone={statusTone as "green" | "amber" | "slate"} />
                 </div>
-                <p className="mt-1 text-xs text-gray-500">Merchant wallet profile</p>
+                <p className="mt-1 text-xs text-gray-500">One merchant wallet profile</p>
               </div>
               <button
                 type="button"
@@ -324,14 +585,19 @@ function PineTreeWalletRuntime() {
               </button>
             </header>
 
-            <nav className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-gray-100 px-4 py-3 sm:px-6" aria-label="PineTree Wallet sections">
+            <nav
+              className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-gray-100 px-4 py-3 sm:px-6"
+              aria-label="PineTree Wallet sections"
+            >
               {walletTabs.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
                   className={`shrink-0 rounded-xl px-4 py-2.5 text-xs font-semibold transition ${
-                    activeTab === tab.id ? "bg-[#0052FF] text-white" : "text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                    activeTab === tab.id
+                      ? "bg-[#0052FF] text-white"
+                      : "text-gray-500 hover:bg-gray-100 hover:text-gray-800"
                   }`}
                 >
                   {tab.label}
@@ -340,6 +606,7 @@ function PineTreeWalletRuntime() {
             </nav>
 
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-7 sm:py-7">
+
               {activeTab === "overview" ? (
                 <div className="space-y-4">
                   <div>
@@ -389,13 +656,13 @@ function PineTreeWalletRuntime() {
 
               {activeTab === "receive" ? (
                 <div className="space-y-3">
-                  <ReceiveRow label="Base address" entries={networkAddresses.base} />
-                  <ReceiveRow label="Solana address" entries={networkAddresses.solana} />
-                  <ReceiveRow label="Bitcoin Lightning/Spark address" entries={networkAddresses.lightning} />
-                  {networkAddresses.bitcoin.length ? (
+                  <ReceiveRow label="Base address" entries={profileAddresses.base} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
+                  <ReceiveRow label="Solana address" entries={profileAddresses.solana} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
+                  <ReceiveRow label="Bitcoin Lightning/Spark address" entries={profileAddresses.lightning} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
+                  {profileAddresses.bitcoin.length ? (
                     <div className="pt-2">
                       <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Secondary</p>
-                      <ReceiveRow label="Bitcoin on-chain address" entries={networkAddresses.bitcoin} />
+                      <ReceiveRow label="Bitcoin on-chain address" entries={profileAddresses.bitcoin} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
                     </div>
                   ) : null}
                 </div>
@@ -406,7 +673,7 @@ function PineTreeWalletRuntime() {
                   <div>
                     <p className="text-sm font-semibold text-gray-950">Prepare a withdrawal</p>
                     <p className="mt-1 text-xs leading-5 text-gray-500">
-                      Withdrawals are not enabled yet. This screen is a safe preview of the merchant withdrawal flow.
+                      Withdrawals are being prepared. No funds will move from this screen yet.
                     </p>
                   </div>
 
@@ -453,15 +720,19 @@ function PineTreeWalletRuntime() {
                       disabled
                       className="h-11 cursor-not-allowed rounded-xl bg-gray-200 px-4 text-sm font-semibold text-gray-500"
                     >
-                      Review withdrawal — coming soon
+                      Review withdrawal — disabled
                     </button>
                   </div>
                 </div>
               ) : null}
 
               {activeTab === "activity" ? (
-                <EmptyWalletPanel title="Wallet activity will appear here." detail="Wallet activity syncing is not enabled yet." />
+                <EmptyWalletPanel
+                  title="Wallet activity will appear here."
+                  detail="Wallet activity syncing is not enabled yet."
+                />
               ) : null}
+
             </div>
           </section>
         </div>
@@ -469,6 +740,10 @@ function PineTreeWalletRuntime() {
     </>
   )
 }
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
 
 export default function PineTreeWalletPage() {
   const infrastructure = usePineTreeWalletInfrastructureStatus()
