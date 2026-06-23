@@ -112,6 +112,7 @@ describe("PineTree embedded wallet setup", () => {
     // pendingSync is the guard: only set when the merchant explicitly clicks Create
     expect(page).toContain("pendingSync")
     expect(page).toContain("syncProfileFromDynamic")
+    expect(page).toContain("extractDynamicWalletAddresses")
     // POST to pinetree-profile route includes dynamic_user_id to lock the profile to this session
     expect(page).toContain("dynamic_user_id")
     expect(page).toContain("user.userId")
@@ -179,7 +180,7 @@ describe("PineTree embedded wallet setup", () => {
   it("requires Base, Solana, and Lightning before marking the wallet Ready", () => {
     expect(page).toContain("const allPrimaryRailsReady = baseReady && solanaReady && lightningReady")
     expect(page).toContain('allPrimaryRailsReady ? "Ready" : "Needs attention"')
-    expect(page).toContain("Bitcoin Lightning setup pending")
+    expect(page).toContain("Bitcoin Lightning setup is pending. Base and Solana are ready.")
   })
 
   it("shows receive readiness for Base, Solana, and Bitcoin Lightning", () => {

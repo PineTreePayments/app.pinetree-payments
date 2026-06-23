@@ -4,7 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useDynamicContext, useUserWallets } from "@dynamic-labs/sdk-react-core"
 import { AlertTriangle, CheckCircle2, Copy, RefreshCw, X } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
-import { type NetworkId, networkForWallet, shortAddress } from "@/lib/wallets/sparkDetection"
+import {
+  extractDynamicWalletAddresses,
+  type DynamicAddressMetadata,
+  type DynamicWalletAddressSource,
+  type NetworkId,
+  networkForWallet,
+  shortAddress,
+} from "@/lib/wallets/sparkDetection"
 import {
   DashboardSection,
   ProviderStatusPill,
@@ -109,15 +116,40 @@ function WalletDiagnosticsPanel({
   wallets: ReturnType<typeof useUserWallets>
   sdkNetworkGroups: Record<NetworkId, AddressEntry[]>
 }) {
+  function sanitizeAdditionalAddress(extra: DynamicAddressMetadata, index: number) {
+    const address = typeof extra.address === "string" ? extra.address : ""
+    return {
+      index,
+      hasAddress: Boolean(address),
+      addressPrefix: address ? shortAddress(address) : "none",
+      addressType: extra.addressType ? String(extra.addressType) : "",
+      type: extra.type ? String(extra.type) : "",
+      chain: extra.chain ? String(extra.chain) : "",
+      network: extra.network ? String(extra.network) : "",
+      label: extra.label ? String(extra.label) : "",
+      name: extra.name ? String(extra.name) : "",
+      key: extra.key ? String(extra.key) : "",
+    }
+  }
+
   const rows = wallets.map((w) => ({
+    walletId: w.id,
     key: w.key,
     connectorName: w.connector.name,
     connectorKey: String((w.connector as unknown as Record<string, unknown>)["key"] ?? ""),
     chain: w.chain,
-    detectedNetwork: networkForWallet(w.chain, w.key, w.connector.name),
+    detectedNetwork: networkForWallet(
+      w.chain,
+      w.key,
+      w.connector.name,
+      String((w.connector as unknown as Record<string, unknown>)["key"] ?? "")
+    ),
     hasAddress: Boolean(w.address),
     addressPrefix: w.address ? `${w.address.slice(0, 6)}…` : "—",
     extraAddressCount: (w.additionalAddresses ?? []).length,
+    additionalAddresses: (w.additionalAddresses ?? []).map((extra, index) =>
+      sanitizeAdditionalAddress(extra as DynamicAddressMetadata, index)
+    ),
   }))
 
   useEffect(() => {
@@ -144,10 +176,28 @@ function WalletDiagnosticsPanel({
           {rows.map((row, idx) => (
             <div key={idx} className="flex flex-wrap gap-x-3 rounded bg-yellow-100/70 px-2 py-1">
               <span><span className="text-yellow-600">net:</span> {row.detectedNetwork ?? "undetected"}</span>
+              <span><span className="text-yellow-600">id:</span> {row.walletId}</span>
+              <span><span className="text-yellow-600">key:</span> {row.key}</span>
               <span><span className="text-yellow-600">chain:</span> {row.chain}</span>
               <span><span className="text-yellow-600">connector:</span> {row.connectorName}{row.connectorKey ? ` [${row.connectorKey}]` : ""}</span>
               <span><span className="text-yellow-600">addr:</span> {row.addressPrefix}</span>
-              {row.extraAddressCount > 0 ? <span><span className="text-yellow-600">+extra:</span> {row.extraAddressCount}</span> : null}
+              {row.extraAddressCount > 0 ? (
+                <span>
+                  <span className="text-yellow-600">+extra:</span>{" "}
+                  {row.additionalAddresses.map((extra) => (
+                    <span key={extra.index}>
+                      #{extra.index} {extra.addressPrefix}
+                      {extra.addressType ? ` addressType=${extra.addressType}` : ""}
+                      {extra.type ? ` type=${extra.type}` : ""}
+                      {extra.chain ? ` chain=${extra.chain}` : ""}
+                      {extra.network ? ` network=${extra.network}` : ""}
+                      {extra.label ? ` label=${extra.label}` : ""}
+                      {extra.name ? ` name=${extra.name}` : ""}
+                      {extra.key ? ` key=${extra.key}` : ""}
+                    </span>
+                  ))}
+                </span>
+              ) : null}
             </div>
           ))}
         </div>
@@ -288,28 +338,7 @@ function PineTreeWalletRuntime() {
 
   // --- Live Dynamic wallet addresses — used only for sync, never for display ---
   const dynamicNetworkAddresses = useMemo(() => {
-    const groups: Record<NetworkId, AddressEntry[]> = {
-      base: [],
-      solana: [],
-      bitcoin: [],
-      lightning: [],
-    }
-    for (const wallet of wallets) {
-      const network = networkForWallet(wallet.chain, wallet.key, wallet.connector.name)
-      if (!network) continue
-      groups[network].push({ id: wallet.id, address: wallet.address })
-      if (network === "bitcoin") {
-        for (const extra of wallet.additionalAddresses || []) {
-          if (!extra.address || extra.address === wallet.address) continue
-          groups.bitcoin.push({
-            id: `${wallet.id}-${extra.type}`,
-            address: extra.address,
-            detail: String(extra.type).replaceAll("_", " "),
-          })
-        }
-      }
-    }
-    return groups
+    return extractDynamicWalletAddresses(wallets as DynamicWalletAddressSource[])
   }, [wallets])
 
   // --- Sync Dynamic wallet addresses to the merchant profile DB record ---
@@ -499,7 +528,9 @@ function PineTreeWalletRuntime() {
               ))}
             </div>
             {!lightningReady && hasWallet ? (
-              <p className="text-xs font-semibold text-amber-700">Bitcoin Lightning setup pending</p>
+              <p className="text-xs font-semibold text-amber-700">
+                Bitcoin Lightning setup is pending. Base and Solana are ready.
+              </p>
             ) : null}
 
             {!dynamicSessionMatchesProfile ? (
