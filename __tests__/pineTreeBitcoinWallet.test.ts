@@ -278,7 +278,7 @@ describe("PineTree Wallet setup card rail pills", () => {
   const page = read("app/dashboard/wallet-setup/page.tsx")
 
   it("renders compact blue rail pills without a ready dot", () => {
-    expect(page).toContain('aria-label="Supported rails"')
+    expect(page).toContain('aria-label="Enabled payment rails"')
     expect(page).toContain("border border-blue-100 bg-blue-50/80")
     expect(page).not.toContain("bg-emerald-500")
   })

@@ -247,12 +247,21 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("prioritizes Base, Solana, and Bitcoin", () => {
-    expect(page).toContain('const primaryRails = ["Base", "Solana", "Bitcoin"]')
-    expect(page).toContain('<SettlementAddressSummary rows={settlementAddressRows} />')
-    expect(page).toContain('rail: "Base" as const')
-    expect(page).toContain('rail: "Solana" as const')
-    expect(page).toContain('rail: "Bitcoin" as const')
+    expect(page).toContain("const walletRailRows = [")
+    expect(page).toContain('label: "Base" as const')
+    expect(page).toContain('label: "Solana" as const')
+    expect(page).toContain('label: "Bitcoin" as const')
     expect(page).not.toContain("PineTree Bitcoin wallet")
+  })
+
+  it("front-card rail chips only show configured and enabled rails", () => {
+    expect(page).toContain("function EnabledRailChips")
+    expect(page).toContain("const enabledRows = rows.filter((row) => row.enabled)")
+    expect(page).toContain('aria-label="Enabled payment rails"')
+    expect(page).toContain("Manage rails in Providers")
+    expect(page).toContain("enabled: baseReady && enabledRails.base")
+    expect(page).toContain("enabled: solanaReady && enabledRails.solana")
+    expect(page).toContain("enabled: bitcoinReady && enabledRails.bitcoin")
   })
 
   it("marks the merchant wallet Connected only when Base, Solana, and Bitcoin addresses exist", () => {
@@ -262,8 +271,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("Bitcoin address pending")
   })
 
-  it("uses Not configured instead of partial setup states when a settlement address is missing", () => {
-    expect(page).toContain('row.connected ? "Connected" : "Not configured"')
+  it("uses Not configured instead of partial setup states when a wallet address is missing", () => {
     expect(page).toContain('walletStatus = allPrimaryRailsConnected ? "Connected" : "Not configured"')
     expect(page).not.toContain('"Setup pending"')
     expect(page).not.toContain('const lightningPending = lightningProfile?.status === "pending"')
@@ -292,30 +300,43 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain(">Setup pending</p>")
   })
 
-  it("overview shows a compact settlement address summary", () => {
-    expect(page).toContain("function SettlementAddressSummary")
-    expect(page).toContain(">Settlement addresses</p>")
-    expect(page).toContain('row.connected ? "Connected" : "Not configured"')
+  it("overview shows wallet summary balances instead of duplicating receive addresses", () => {
+    expect(page).toContain("function WalletOverviewSummary")
+    expect(page).toContain(">Total balance</p>")
+    expect(page).toContain("$0.00")
+    expect(page).toContain("Balances will update as wallet activity is indexed.")
+    expect(page).toContain("visibleRows.map((row)")
+    expect(page).not.toContain("Settlement addresses")
+    expect(page).not.toContain("address: profileAddresses.base[0]?.address")
     expect(page).not.toContain("RailStatusCard")
     expect(page).not.toContain(">Available</p>")
+  })
+
+  it("balances tab shows zero placeholders instead of unavailable copy", () => {
+    expect(page).toContain("function BalanceRows")
+    expect(page).toContain("$0.00")
+    expect(page).toContain("Base balance")
+    expect(page).toContain("Solana balance")
+    expect(page).toContain("Bitcoin balance")
+    expect(page).not.toContain("Not available yet")
   })
 
   // -------------------------------------------------------------------------
   // Withdrawal scaffold — no real fund movement
   // -------------------------------------------------------------------------
 
-  it("scaffolds a disabled withdrawal review without fund movement", () => {
-    expect(page).toContain('aria-label="Select withdrawal rail"')
-    expect(page).toContain('aria-label="Destination address"')
-    expect(page).toContain('aria-label="Withdrawal amount"')
+  it("shows a disabled withdrawals coming soon state without an active-looking form", () => {
+    expect(page).toContain("Withdrawals coming soon")
+    expect(page).toContain("Withdrawals disabled")
+    expect(page).toContain("once withdrawal signing is enabled")
     // Updated message per spec
-    expect(page).toContain("Withdrawals are being prepared")
-    expect(page).toContain("No funds will move from this screen yet")
+    expect(page).not.toContain('aria-label="Select withdrawal rail"')
+    expect(page).not.toContain('aria-label="Destination address"')
+    expect(page).not.toContain('aria-label="Withdrawal amount"')
     expect(page).toContain("disabled")
     // The Review button is disabled — no API calls for withdrawal execution
     expect(page).not.toContain("/api/wallets/settlement")
     expect(page).not.toContain("/api/wallets/send-sessions")
-    expect(page).not.toContain("/api/providers")
   })
 
   it("withdrawal request DB scaffold exists with correct fields and safe-only statuses", () => {
@@ -418,13 +439,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(providerPage).not.toMatch(/name=["']Dynamic["']/)
   })
 
-  it("wallet setup page does not call payment routing, POS, or checkout APIs", () => {
-    // Wallet setup only calls wallet-scoped API routes
+  it("wallet setup page only calls wallet APIs and provider rail enablement, not POS or checkout APIs", () => {
     expect(page).toContain("/api/wallets/pinetree-profile")
     expect(page).toContain("/api/wallets/lightning/pinetree-managed")
+    expect(page).toContain("/api/providers")
     expect(page).not.toContain("/api/wallets/settlement")
     expect(page).not.toContain("/api/wallets/send-sessions")
-    expect(page).not.toContain("/api/providers")
     expect(page).not.toContain("/api/pos")
     expect(page).not.toContain("/api/dashboard/checkout")
   })
@@ -478,7 +498,7 @@ describe("PineTree embedded wallet setup", () => {
   it("Bitcoin display readiness is not derived from a Dynamic Spark address", () => {
     // Readiness is driven by the DB record, not any Spark address returned by Dynamic
     expect(page).toContain("const btcPayoutReady = Boolean(profile?.btc_address && profile.btc_payout_enabled)")
-    expect(page).toContain("function SettlementAddressSummary")
+    expect(page).toContain("function WalletOverviewSummary")
     // No old pattern that checked Spark address length
     expect(page).not.toContain("profileAddresses.lightning.length > 0")
     expect(page).not.toContain("lightningAddress.length")

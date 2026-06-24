@@ -119,6 +119,11 @@ type ProvidersApiResponse = {
   success?: boolean
   providers?: ProviderRecord[]
   wallets?: WalletRecord[]
+  pineTreeWalletProfile?: {
+    baseAddressPresent: boolean
+    solanaAddressPresent: boolean
+    bitcoinAddressPresent: boolean
+  } | null
   settings?: {
     smart_routing_enabled: boolean
     auto_conversion_enabled: boolean
@@ -159,6 +164,7 @@ function formatWalletLabel(
 export default function ProvidersPage() {
   const [providers, setProviders] = useState<ProviderRecord[]>([])
   const [wallets, setWallets] = useState<WalletRecord[]>([])
+  const [pineTreeWalletProfile, setPineTreeWalletProfile] = useState<ProvidersApiResponse["pineTreeWalletProfile"]>(null)
   const [activeProvider, setActiveProvider] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState("")
   const [shift4ApplicationStatusOverride, setShift4ApplicationStatusOverride] = useState<"Pending" | null>(null)
@@ -211,6 +217,7 @@ export default function ProvidersPage() {
   const applyProvidersPayload = useCallback((payload: ProvidersApiResponse) => {
     setProviders(payload.providers || [])
     setWallets(payload.wallets || [])
+    setPineTreeWalletProfile(payload.pineTreeWalletProfile || null)
     setSmartRouting(Boolean(payload.settings?.smart_routing_enabled))
     setAutoConversion(Boolean(payload.settings?.auto_conversion_enabled))
   }, [])
@@ -633,6 +640,12 @@ function EngineSettingStatus({
     }
   }
 
+  function isCanonicalRailConfigured(provider: "solana" | "base" | "lightning") {
+    if (provider === "solana") return Boolean(pineTreeWalletProfile?.solanaAddressPresent)
+    if (provider === "base") return Boolean(pineTreeWalletProfile?.baseAddressPresent)
+    return Boolean(pineTreeWalletProfile?.bitcoinAddressPresent)
+  }
+
   function shift4StatusBadgeClass(tone: Shift4DisplayStatus["tone"]) {
     if (tone === "blue") return "border-blue-200 bg-blue-50 text-blue-700"
     if (tone === "amber") return "border-amber-200 bg-amber-50 text-amber-800"
@@ -680,11 +693,7 @@ function EngineSettingStatus({
     networks: string
     description: string
   }) {
-    const speedProvider = getProvider("lightning_speed")
-    const connected =
-      provider === "lightning"
-        ? speedProvider?.status === "connected" || speedProvider?.status === "active"
-        : Boolean(getWallet(provider))
+    const connected = isCanonicalRailConfigured(provider)
     const enabled = isEnabled(provider)
 
     return (

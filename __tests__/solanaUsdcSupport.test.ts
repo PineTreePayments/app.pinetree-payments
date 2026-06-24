@@ -99,6 +99,10 @@ vi.mock("@/database/merchants", () => ({
   getMerchantProviders: vi.fn(),
 }))
 
+vi.mock("@/database/pineTreeWalletProfiles", () => ({
+  getPineTreeWalletProfile: vi.fn(),
+}))
+
 vi.mock("@/database/merchantProviders", () => ({
   getLightningNwcReadiness: vi.fn(),
   SPEED_PROVIDER_NAME: "speed",

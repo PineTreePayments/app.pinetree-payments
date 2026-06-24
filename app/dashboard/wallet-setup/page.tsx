@@ -66,6 +66,20 @@ type LightningProfileState =
   | { kind: "loaded"; profile: MerchantLightningProfile }
   | { kind: "error" }
 
+type EnabledRailState = {
+  base: boolean
+  solana: boolean
+  bitcoin: boolean
+}
+
+type ProvidersDashboardResponse = {
+  providers?: Array<{
+    provider: string
+    status?: string
+    enabled?: boolean
+  }>
+}
+
 type WalletCreationStep =
   | "idle"
   | "opening_dynamic"
@@ -91,7 +105,7 @@ const walletTabs: Array<{ id: WalletTab; label: string }> = [
   { id: "activity", label: "Activity" },
 ]
 
-const primaryRails = ["Base", "Solana", "Bitcoin"] as const
+const defaultEnabledRails: EnabledRailState = { base: false, solana: false, bitcoin: false }
 const walletCreationTimeoutMs = 30_000
 const walletCreationDebugEnabled =
   process.env.NODE_ENV !== "production" ||
@@ -346,35 +360,80 @@ function ReceiveRow({
   )
 }
 
-function SettlementAddressSummary({
+function WalletOverviewSummary({
   rows,
 }: {
-  rows: Array<{ rail: "Base" | "Solana" | "Bitcoin"; connected: boolean; address?: string }>
+  rows: Array<{ label: "Base" | "Solana" | "Bitcoin"; enabled: boolean }>
 }) {
+  const visibleRows = rows.filter((row) => row.enabled)
   return (
-    <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-      <div className="border-b border-gray-100 px-4 py-3 sm:px-5">
-        <p className="text-sm font-semibold text-gray-950">Settlement addresses</p>
+    <div className="space-y-3">
+      <div className="rounded-2xl border border-gray-200 bg-white px-4 py-5 shadow-sm sm:px-5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Total balance</p>
+        <p className="mt-1 text-3xl font-semibold text-gray-950">$0.00</p>
+        <p className="mt-2 text-xs leading-5 text-gray-500">Balances will update as wallet activity is indexed.</p>
       </div>
-      <div className="divide-y divide-gray-100">
-        {rows.map((row) => (
-          <div key={row.rail} className="flex items-center justify-between gap-4 px-4 py-3 sm:px-5">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-gray-800">{row.rail}</p>
-              {row.address ? (
-                <p className="mt-0.5 truncate font-mono text-xs text-gray-500" title={row.address}>
-                  {row.address}
-                </p>
-              ) : null}
-            </div>
-            <ProviderStatusPill
-              label={row.connected ? "Connected" : "Not configured"}
-              tone={row.connected ? "green" : "slate"}
-              className="shrink-0"
-            />
+      {visibleRows.length > 0 ? (
+        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <div className="divide-y divide-gray-100">
+            {visibleRows.map((row) => (
+              <div key={row.label} className="flex items-center justify-between gap-4 px-4 py-3 sm:px-5">
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">{row.label}</p>
+                  <ProviderStatusPill label="Connected" tone="green" className="mt-1" />
+                </div>
+                <span className="text-sm font-semibold text-gray-950">$0.00</span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-500">
+          Manage rails in Providers
+        </div>
+      )}
+    </div>
+  )
+}
+
+function BalanceRows({
+  rows,
+}: {
+  rows: Array<{ label: string; enabled: boolean }>
+}) {
+  const visibleRows = rows.filter((row) => row.enabled)
+  return (
+    <div className="divide-y divide-gray-100 overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-sm">
+      {(visibleRows.length > 0 ? visibleRows : [{ label: "Total balance", enabled: true }]).map((row) => (
+        <div key={row.label} className="flex items-center justify-between gap-4 px-4 py-5 text-sm sm:px-5">
+          <span className="font-semibold text-gray-800">{row.label}</span>
+          <span className="font-semibold text-gray-950">$0.00</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function EnabledRailChips({
+  rows,
+}: {
+  rows: Array<{ label: "Base" | "Solana" | "Bitcoin"; enabled: boolean }>
+}) {
+  const enabledRows = rows.filter((row) => row.enabled)
+  if (enabledRows.length === 0) {
+    return <p className="text-xs font-semibold text-gray-500">Manage rails in Providers</p>
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2.5" aria-label="Enabled payment rails">
+      {enabledRows.map((rail) => (
+        <span
+          key={rail.label}
+          className="inline-flex items-center rounded-full border border-blue-100 bg-blue-50/80 px-2.5 py-1 text-xs font-semibold text-blue-700 shadow-[0_1px_0_rgba(37,99,235,0.06)]"
+        >
+          {rail.label}
+        </span>
+      ))}
     </div>
   )
 }
@@ -405,6 +464,7 @@ function PineTreeWalletRuntime() {
   const [syncing, setSyncing] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [copiedAddress, setCopiedAddress] = useState("")
+  const [enabledRails, setEnabledRails] = useState<EnabledRailState>(defaultEnabledRails)
 
   // --- SDK load timeout ---
   useEffect(() => {
@@ -423,7 +483,35 @@ function PineTreeWalletRuntime() {
     return () => window.removeEventListener("keydown", closeOnEscape)
   }, [walletOpen])
 
-  // --- Load both profiles from DB on mount ---
+  const fetchProviderRailState = useCallback(async (token: string) => {
+    try {
+      const res = await fetch("/api/providers", {
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+        cache: "no-store",
+      })
+      if (!res.ok) {
+        setEnabledRails(defaultEnabledRails)
+        return
+      }
+      const json = (await res.json()) as ProvidersDashboardResponse
+      const providerRows = json.providers || []
+      const providerEnabled = (provider: string) => {
+        const row = providerRows.find((item) => item.provider === provider)
+        const status = String(row?.status || "").toLowerCase().trim()
+        return Boolean(row?.enabled === true && (status === "connected" || status === "active"))
+      }
+      setEnabledRails({
+        base: providerEnabled("base"),
+        solana: providerEnabled("solana"),
+        bitcoin: providerEnabled("lightning_speed"),
+      })
+    } catch {
+      setEnabledRails(defaultEnabledRails)
+    }
+  }, [])
+
+  // --- Load profiles and provider rail enablement from DB on mount ---
   const fetchAllProfiles = useCallback(async () => {
     setProfileState({ kind: "loading" })
     setLightningProfileState({ kind: "loading" })
@@ -445,6 +533,7 @@ function PineTreeWalletRuntime() {
           headers: { Authorization: `Bearer ${token}` },
         }),
       ])
+      void fetchProviderRailState(token)
 
       if (!walletRes.ok) {
         setProfileState({ kind: "error" })
@@ -464,7 +553,7 @@ function PineTreeWalletRuntime() {
       setProfileState({ kind: "error" })
       setLightningProfileState({ kind: "none" })
     }
-  }, [])
+  }, [fetchProviderRailState])
 
   useEffect(() => {
     void fetchAllProfiles()
@@ -579,7 +668,7 @@ function PineTreeWalletRuntime() {
         void fetch("/api/wallets/pinetree-wallet/rail-sync", {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
-        })
+        }).then(() => fetchProviderRailState(token)).catch(() => undefined)
         return json.profile
       }
       logWalletCreationStep("failed", { profile_sync_response_status: res.status })
@@ -588,7 +677,7 @@ function PineTreeWalletRuntime() {
       setSyncing(false)
       setPendingSync(false)
     }
-  }, [user, wallets, dynamicNetworkAddresses, syncPineTreeManagedLightning, logWalletCreationStep])
+  }, [user, wallets, dynamicNetworkAddresses, syncPineTreeManagedLightning, logWalletCreationStep, fetchProviderRailState])
 
   // --- After wallet creation: auto-sync addresses to DB ---
   useEffect(() => {
@@ -675,10 +764,10 @@ function PineTreeWalletRuntime() {
   const walletStatus = allPrimaryRailsConnected ? "Connected" : "Not configured"
   const statusTone = allPrimaryRailsConnected ? "green" : "slate"
 
-  const settlementAddressRows = [
-    { rail: "Base" as const, connected: baseReady, address: profileAddresses.base[0]?.address },
-    { rail: "Solana" as const, connected: solanaReady, address: profileAddresses.solana[0]?.address },
-    { rail: "Bitcoin" as const, connected: bitcoinReady, address: bitcoinPayoutEntries[0]?.address },
+  const walletRailRows = [
+    { label: "Base" as const, balanceLabel: "Base balance", configured: baseReady, enabled: baseReady && enabledRails.base },
+    { label: "Solana" as const, balanceLabel: "Solana balance", configured: solanaReady, enabled: solanaReady && enabledRails.solana },
+    { label: "Bitcoin" as const, balanceLabel: "Bitcoin balance", configured: bitcoinReady, enabled: bitcoinReady && enabledRails.bitcoin },
   ]
 
   // ---------------------------------------------------------------------------
@@ -799,16 +888,7 @@ function PineTreeWalletRuntime() {
             <p className="text-sm leading-6 text-gray-600">
               One merchant wallet for receiving funds and managing PineTree&apos;s supported payment rails.
             </p>
-            <div className="flex flex-wrap items-center gap-2.5" aria-label="Supported rails">
-              {primaryRails.map((rail) => (
-                <span
-                  key={rail}
-                  className="inline-flex items-center rounded-full border border-blue-100 bg-blue-50/80 px-2.5 py-1 text-xs font-semibold text-blue-700 shadow-[0_1px_0_rgba(37,99,235,0.06)]"
-                >
-                  {rail}
-                </span>
-              ))}
-            </div>
+            <EnabledRailChips rows={walletRailRows} />
 
             {!dynamicSessionMatchesProfile ? (
               <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
@@ -934,28 +1014,17 @@ function PineTreeWalletRuntime() {
               {activeTab === "overview" ? (
                 <div className="space-y-4">
                   <div>
-                    <p className="text-sm font-semibold text-gray-950">One merchant wallet profile</p>
+                    <p className="text-sm font-semibold text-gray-950">Wallet summary</p>
                     <p className="mt-1 text-xs leading-5 text-gray-500">
-                      PineTree Wallet keeps each supported rail organized under one business wallet experience.
+                      Enabled payment rails are shown here with placeholder balances.
                     </p>
                   </div>
-                  <SettlementAddressSummary rows={settlementAddressRows} />
+                  <WalletOverviewSummary rows={walletRailRows} />
                 </div>
               ) : null}
 
               {activeTab === "balances" ? (
-                <div className="divide-y divide-gray-100 overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-sm">
-                  {[
-                    ["Base balance", "Not available yet"],
-                    ["Solana balance", "Not available yet"],
-                    ["Bitcoin balance", "Not available yet"],
-                  ].map(([label, value]) => (
-                    <div key={label} className="flex items-center justify-between gap-4 px-4 py-5 text-sm sm:px-5">
-                      <span className="font-semibold text-gray-800">{label}</span>
-                      <span className="text-gray-400">{value}</span>
-                    </div>
-                  ))}
-                </div>
+                <BalanceRows rows={walletRailRows.map((row) => ({ label: row.balanceLabel, enabled: row.enabled }))} />
               ) : null}
 
               {activeTab === "receive" ? (
@@ -980,60 +1049,18 @@ function PineTreeWalletRuntime() {
               ) : null}
 
               {activeTab === "withdraw" ? (
-                <div className="space-y-5">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-950">Prepare a withdrawal</p>
-                    <p className="mt-1 text-xs leading-5 text-gray-500">
-                      Withdrawals are being prepared. No funds will move from this screen yet.
-                    </p>
-                  </div>
-
-                  <div className="grid gap-4 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4 shadow-inner shadow-white sm:p-5">
-                    <label className="block">
-                      <span className="text-xs font-semibold text-gray-700">Select rail</span>
-                      <select
-                        defaultValue="base"
-                        aria-label="Select withdrawal rail"
-                        className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                      >
-                        <option value="base">Base</option>
-                        <option value="solana">Solana</option>
-                        <option value="bitcoin_lightning">Bitcoin</option>
-                      </select>
-                    </label>
-
-                    <label className="block">
-                      <span className="text-xs font-semibold text-gray-700">Destination address</span>
-                      <input
-                        type="text"
-                        inputMode="text"
-                        placeholder="Enter destination address"
-                        aria-label="Destination address"
-                        className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                      />
-                    </label>
-
-                    <label className="block">
-                      <span className="text-xs font-semibold text-gray-700">Amount</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        inputMode="decimal"
-                        placeholder="0.00"
-                        aria-label="Withdrawal amount"
-                        className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                      />
-                    </label>
-
-                    <button
-                      type="button"
-                      disabled
-                      className="h-11 cursor-not-allowed rounded-xl bg-gray-200 px-4 text-sm font-semibold text-gray-500"
-                    >
-                      Review withdrawal — disabled
-                    </button>
-                  </div>
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-8 text-center sm:px-6">
+                  <p className="text-sm font-semibold text-gray-950">Withdrawals coming soon</p>
+                  <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-gray-500">
+                    You&apos;ll be able to review and send funds from PineTree Wallet once withdrawal signing is enabled.
+                  </p>
+                  <button
+                    type="button"
+                    disabled
+                    className="mt-5 h-10 cursor-not-allowed rounded-lg bg-gray-200 px-4 text-sm font-semibold text-gray-500"
+                  >
+                    Withdrawals disabled
+                  </button>
                 </div>
               ) : null}
 

@@ -88,7 +88,8 @@ describe("paymentReadiness canonical wallet mode", () => {
   it("requires Speed config, BTC address, and merchant enablement for Lightning readiness", () => {
     expect(engine).toContain("const merchantLightningEnabled = speedProvider?.enabled !== false")
     expect(engine).toContain("const speedReady = Boolean(speedConfig.configured && merchantLightningEnabled)")
-    expect(engine).toContain("connected: Boolean(btcAddress)")
+    expect(engine).toContain("const btcPayoutReady = Boolean(btcAddress && pineTreeWalletProfile?.btc_payout_enabled)")
+    expect(engine).toContain("connected: btcPayoutReady")
   })
 })
 
@@ -109,6 +110,9 @@ describe("payment intent rail filtering", () => {
     expect(engine).toContain("enabledProviders.has(SPEED_PROVIDER_NAME)")
     expect(engine).toContain('enabledProviders.has("lightning")')
     expect(engine).toContain('enabledProviders.has("lightning_nwc")')
+    expect(engine).toContain("getPineTreeWalletProfile")
+    expect(engine).toContain("const btcPayoutReady = Boolean(pineTreeWalletProfile?.btc_address && pineTreeWalletProfile.btc_payout_enabled)")
+    expect(engine).toContain("return Boolean(speedConfig.configured && btcPayoutReady)")
   })
 })
 
@@ -147,6 +151,25 @@ describe("Providers page canonical wallet mode", () => {
     expect(page).toContain(">Enabled</span>")
     expect(page).toContain("onChange={(v) => toggleProvider(provider, v)}")
     expect(page).toContain("disabled={!connected}")
+  })
+
+  it("calculates canonical rail connection from PineTree Wallet profile address presence", () => {
+    const engine = read("engine/providersDashboard.ts")
+    expect(engine).toContain("getPineTreeWalletProfile")
+    expect(engine).toContain("baseAddressPresent: Boolean(pineTreeWalletProfile.base_address)")
+    expect(engine).toContain("solanaAddressPresent: Boolean(pineTreeWalletProfile.solana_address)")
+    expect(engine).toContain("pineTreeWalletProfile.btc_address || pineTreeWalletProfile.bitcoin_onchain_address")
+    expect(page).toContain("function isCanonicalRailConfigured")
+    expect(page).toContain("pineTreeWalletProfile?.solanaAddressPresent")
+    expect(page).toContain("pineTreeWalletProfile?.baseAddressPresent")
+    expect(page).toContain("pineTreeWalletProfile?.bitcoinAddressPresent")
+  })
+
+  it("keeps Connected/Not configured independent from the Enabled toggle", () => {
+    expect(page).toContain("const connected = isCanonicalRailConfigured(provider)")
+    expect(page).toContain("const enabled = isEnabled(provider)")
+    expect(page).toContain('label={connected ? "Connected" : "Not configured"}')
+    expect(page).toContain("checked={enabled}")
   })
 
   it("does not let the legacy Bitcoin Lightning setup card render in canonical wallet mode", () => {

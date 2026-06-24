@@ -16,6 +16,8 @@ import { markPaymentIncomplete, markPaymentIncompleteIfAbandoned } from "./payme
 import { loadProviders } from "./loadProviders"
 import { getMerchantProviders } from "@/database/merchants"
 import { getLightningNwcReadiness, SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
+import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
+import { getPineTreeSpeedConfigStatus, isSpeedPlatformTreasurySweepEnabled } from "@/providers/lightning/speedClient"
 import { getProviderMetadata, isProviderHealthy, providerSupportsFeeAtPaymentTime } from "./providerRegistry"
 import { merchantProviderCanProcessPayments } from "@/lib/providers/cardProviderReadiness"
 
@@ -169,10 +171,11 @@ function buildWalletOptions(walletUrl: string, network?: string): WalletOption[]
 export async function getMerchantAvailableNetworks(merchantId: string): Promise<WalletNetwork[]> {
   await loadProviders()
 
-  const [wallets, hostedNetworks, providers] = await Promise.all([
+  const [wallets, hostedNetworks, providers, pineTreeWalletProfile] = await Promise.all([
     getMerchantWallets(merchantId),
     getConnectedHostedCheckoutNetworks(merchantId),
-    getMerchantProviders(merchantId)
+    getMerchantProviders(merchantId),
+    getPineTreeWalletProfile(merchantId)
   ])
 
   // Build the set of provider keys that are both connected and enabled.
@@ -219,6 +222,11 @@ export async function getMerchantAvailableNetworks(merchantId: string): Promise<
       if (!isProviderHealthy(providerId)) return false
       // NWC uses polling and post-payment fee — does not require webhook or atomic fee capture
       if (providerId === SPEED_PROVIDER_NAME) {
+        if (isSpeedPlatformTreasurySweepEnabled()) {
+          const speedConfig = getPineTreeSpeedConfigStatus()
+          const btcPayoutReady = Boolean(pineTreeWalletProfile?.btc_address && pineTreeWalletProfile.btc_payout_enabled)
+          return Boolean(speedConfig.configured && btcPayoutReady)
+        }
         const credentials = (provider.credentials || {}) as {
           speed_account_id?: string
           setup_status?: string

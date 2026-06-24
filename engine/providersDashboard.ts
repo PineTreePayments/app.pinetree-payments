@@ -3,6 +3,7 @@ import { refreshWalletBalancesEngine } from "./walletOverview"
 import { loadProviders } from "./loadProviders"
 import { getProviderMetadata } from "./providerRegistry"
 import { getLightningNwcReadiness, SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
+import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
 
 const db = supabaseAdmin || supabase
@@ -59,6 +60,11 @@ function oneWalletPerRail(wallets: WalletRow[]): WalletRow[] {
 export type ProvidersDashboardData = {
   providers: ProviderRow[]
   wallets: WalletRow[]
+  pineTreeWalletProfile: {
+    baseAddressPresent: boolean
+    solanaAddressPresent: boolean
+    bitcoinAddressPresent: boolean
+  } | null
   settings: {
     smart_routing_enabled: boolean
     auto_conversion_enabled: boolean
@@ -433,9 +439,10 @@ export async function getProvidersDashboardEngine(merchantId: string): Promise<P
   await loadProviders()
   await ensureMerchant(merchantId)
 
-  const [providersRes, walletsRes, settings] = await Promise.all([
+  const [providersRes, walletsRes, pineTreeWalletProfile, settings] = await Promise.all([
     db.from("merchant_providers").select("*").eq("merchant_id", merchantId),
     db.from("merchant_wallets").select("*").eq("merchant_id", merchantId),
+    getPineTreeWalletProfile(merchantId),
     ensureMerchantSettings(merchantId)
   ])
 
@@ -450,6 +457,15 @@ export async function getProvidersDashboardEngine(merchantId: string): Promise<P
   return {
     providers: decorateProviderRows((providersRes.data || []) as ProviderRow[]),
     wallets: oneWalletPerRail((walletsRes.data || []) as WalletRow[]),
+    pineTreeWalletProfile: pineTreeWalletProfile
+      ? {
+          baseAddressPresent: Boolean(pineTreeWalletProfile.base_address),
+          solanaAddressPresent: Boolean(pineTreeWalletProfile.solana_address),
+          bitcoinAddressPresent: Boolean(
+            pineTreeWalletProfile.btc_address || pineTreeWalletProfile.bitcoin_onchain_address
+          )
+        }
+      : null,
     settings
   }
 }
