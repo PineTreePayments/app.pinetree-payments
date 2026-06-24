@@ -319,6 +319,28 @@ describe("internal PineTree BTC address setter route", () => {
   })
 })
 
+describe("internal PineTree wallet debug profile route", () => {
+  const route = read("app/api/internal/wallets/pinetree/debug-profile/route.ts")
+
+  it("is protected by INTERNAL_API_SECRET", () => {
+    expect(route).toContain("INTERNAL_API_SECRET")
+    expect(route).toContain("return bearer === secret")
+    expect(route).toContain("Unauthorized")
+  })
+
+  it("returns only safe profile diagnostics", () => {
+    expect(route).toContain("profile_exists")
+    expect(route).toContain("base_address_present")
+    expect(route).toContain("solana_address_present")
+    expect(route).toContain("btc_address_present")
+    expect(route).toContain("btc_wallet_provisioning_status")
+    expect(route).toContain("btc_wallet_provisioning_error")
+    expect(route).not.toContain("base_address:")
+    expect(route).not.toContain("solana_address:")
+    expect(route).not.toContain("btc_address:")
+  })
+})
+
 // ---------------------------------------------------------------------------
 // DB and migration references include the new address type values
 // ---------------------------------------------------------------------------

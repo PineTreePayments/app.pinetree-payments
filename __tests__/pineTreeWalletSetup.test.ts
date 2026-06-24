@@ -116,7 +116,7 @@ describe("PineTree embedded wallet setup", () => {
     // logoutPending flow: detect stale session → call handleLogOut → wait → open auth flow
     expect(page).toContain("logoutPending")
     expect(page).toContain("handleLogOut")
-    expect(page).toContain("Preparing…")
+    expect(page).toContain("Preparing...")
   })
 
   it("wallet status is derived from the DB profile, not the Dynamic browser session", () => {
@@ -141,6 +141,36 @@ describe("PineTree embedded wallet setup", () => {
     // Once Base/Solana sync succeeds after Create PineTree Wallet, Lightning setup starts automatically.
     expect(page).toContain("autoEnableLightning")
     expect(page).toContain("syncPineTreeManagedLightning")
+  })
+
+  it("tracks wallet creation steps and times out instead of waiting forever", () => {
+    expect(page).toContain("type WalletCreationStep")
+    expect(page).toContain("walletCreationTimeoutMs = 30_000")
+    expect(page).toContain('logWalletCreationStep("waiting_for_dynamic_auth")')
+    expect(page).toContain('logWalletCreationStep("waiting_for_embedded_wallets")')
+    expect(page).toContain('step: "timeout"')
+    expect(page).toContain("Wallet setup is taking longer than expected. Please try again.")
+  })
+
+  it("retry clears local setup state and reopens Dynamic without deleting rows", () => {
+    expect(page).toContain("function handleRetryWalletSetup()")
+    expect(page).toContain("setPendingSync(false)")
+    expect(page).toContain("setLogoutPending(false)")
+    expect(page).toContain("setShowAuthFlow(false)")
+    expect(page).toContain("setShowAuthFlow(true)")
+    expect(page).not.toContain("delete Dynamic")
+  })
+
+  it("logs only safe wallet creation diagnostics in debug mode", () => {
+    expect(page).toContain("safeWalletSetupDiagnostics")
+    expect(page).toContain("dynamic_user_exists")
+    expect(page).toContain("wallet_count")
+    expect(page).toContain("wallet_addresses_present")
+    expect(page).toContain("profile_sync_response_status")
+    expect(page).not.toContain("dynamic_jwt")
+    expect(page).not.toContain("session_token")
+    expect(page).not.toContain("privateKey")
+    expect(page).not.toContain("recoveryPhrase")
   })
 
   it("sync payload omits btc_address when Dynamic does not return a Bitcoin wallet", () => {

@@ -66,6 +66,19 @@ type LightningProfileState =
   | { kind: "loaded"; profile: MerchantLightningProfile }
   | { kind: "error" }
 
+type WalletCreationStep =
+  | "idle"
+  | "opening_dynamic"
+  | "waiting_for_dynamic_auth"
+  | "dynamic_authenticated"
+  | "waiting_for_embedded_wallets"
+  | "wallets_detected"
+  | "extracting_addresses"
+  | "syncing_pinetree_profile"
+  | "profile_synced"
+  | "failed"
+  | "timeout"
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -79,6 +92,10 @@ const walletTabs: Array<{ id: WalletTab; label: string }> = [
 ]
 
 const primaryRails = ["Base", "Solana", "Bitcoin"] as const
+const walletCreationTimeoutMs = 30_000
+const walletCreationDebugEnabled =
+  process.env.NODE_ENV !== "production" ||
+  process.env.NEXT_PUBLIC_PINE_TREE_WALLET_DEBUG === "true"
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -127,6 +144,49 @@ function EmptyWalletPanel({ title, detail }: { title: string; detail: string }) 
       <p className="mt-1 text-xs leading-5 text-gray-500">{detail}</p>
     </div>
   )
+}
+
+function walletCreationStepMessage(step: WalletCreationStep) {
+  if (step === "opening_dynamic") return "Creating wallet..."
+  if (step === "waiting_for_dynamic_auth") return "Waiting for wallet login..."
+  if (step === "dynamic_authenticated") return "Wallet login complete..."
+  if (step === "waiting_for_embedded_wallets") return "Waiting for wallet addresses..."
+  if (step === "wallets_detected" || step === "extracting_addresses") return "Preparing wallet addresses..."
+  if (step === "syncing_pinetree_profile") return "Syncing PineTree Wallet..."
+  if (step === "profile_synced") return "PineTree Wallet synced."
+  if (step === "timeout") return "Wallet setup is taking longer than expected. Please try again."
+  if (step === "failed") return "Wallet setup could not finish. Please try again."
+  return ""
+}
+
+function safeWalletSetupDiagnostics({
+  userExists,
+  wallets,
+  sdkNetworkGroups,
+  profileSyncRequestSent,
+  profileSyncResponseStatus,
+}: {
+  userExists: boolean
+  wallets: ReturnType<typeof useUserWallets>
+  sdkNetworkGroups: Record<NetworkId, AddressEntry[]>
+  profileSyncRequestSent?: boolean
+  profileSyncResponseStatus?: number
+}) {
+  return {
+    dynamic_user_exists: userExists,
+    wallet_count: wallets.length,
+    wallet_connector_keys: wallets.map((wallet) =>
+      String((wallet.connector as unknown as Record<string, unknown>)["key"] ?? "")
+    ),
+    wallet_connector_names: wallets.map((wallet) => String(wallet.connector.name || "")),
+    wallet_chain_names: wallets.map((wallet) => String(wallet.chain || "")),
+    wallet_addresses_present: wallets.map((wallet) => Boolean(wallet.address)),
+    base_address_present: sdkNetworkGroups.base.length > 0,
+    solana_address_present: sdkNetworkGroups.solana.length > 0,
+    bitcoin_address_present: sdkNetworkGroups.bitcoin.length > 0,
+    profile_sync_request_sent: profileSyncRequestSent,
+    profile_sync_response_status: profileSyncResponseStatus,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -318,6 +378,7 @@ function PineTreeWalletRuntime() {
   const [activeTab, setActiveTab] = useState<WalletTab>("overview")
   // pendingSync: merchant explicitly clicked "Create PineTree Wallet"
   const [pendingSync, setPendingSync] = useState(false)
+  const [walletCreationStep, setWalletCreationStep] = useState<WalletCreationStep>("idle")
   // logoutPending: waiting for Dynamic logout to complete before opening auth flow
   const [logoutPending, setLogoutPending] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -393,6 +454,20 @@ function PineTreeWalletRuntime() {
     return extractDynamicWalletAddresses(wallets as DynamicWalletAddressSource[])
   }, [wallets])
 
+  const logWalletCreationStep = useCallback((step: WalletCreationStep, extra?: Record<string, unknown>) => {
+    setWalletCreationStep(step)
+    if (!walletCreationDebugEnabled) return
+    console.debug("[pinetree-wallets] wallet_creation_step", {
+      step,
+      ...safeWalletSetupDiagnostics({
+        userExists: Boolean(user),
+        wallets,
+        sdkNetworkGroups: dynamicNetworkAddresses,
+      }),
+      ...(extra || {}),
+    })
+  }, [user, wallets, dynamicNetworkAddresses])
+
   const syncPineTreeManagedLightning = useCallback(async () => {
     const token = accessTokenRef.current
     if (!token) return null
@@ -413,14 +488,21 @@ function PineTreeWalletRuntime() {
   // --- Sync Dynamic wallet addresses (Base/Solana) to the merchant profile DB record ---
   const syncProfileFromDynamic = useCallback(async (options?: { autoEnableLightning?: boolean }) => {
     const token = accessTokenRef.current
-    if (!token || !user) return null
+    if (!token || !user) {
+      logWalletCreationStep("failed", { reason: "missing_auth_context" })
+      return null
+    }
     if (
       dynamicNetworkAddresses.base.length === 0 &&
       dynamicNetworkAddresses.solana.length === 0 &&
       dynamicNetworkAddresses.bitcoin.length === 0
-    ) return null
+    ) {
+      logWalletCreationStep("waiting_for_embedded_wallets", { reason: "no_wallet_addresses_detected" })
+      return null
+    }
 
     setSyncing(true)
+    logWalletCreationStep("extracting_addresses")
     try {
       const bitcoinAddress = dynamicNetworkAddresses.bitcoin[0]?.address ?? null
       // Only include btc_address when Dynamic actually returned a Bitcoin wallet.
@@ -436,6 +518,9 @@ function PineTreeWalletRuntime() {
           btc_address: bitcoinAddress,
         }),
       }
+      logWalletCreationStep("syncing_pinetree_profile", {
+        profile_sync_request_sent: true,
+      })
       const res = await fetch("/api/wallets/pinetree-profile", {
         method: "POST",
         headers: {
@@ -444,9 +529,26 @@ function PineTreeWalletRuntime() {
         },
         body: JSON.stringify(body),
       })
+      if (walletCreationDebugEnabled) {
+        console.debug("[pinetree-wallets] profile_sync_response", {
+          ...safeWalletSetupDiagnostics({
+            userExists: Boolean(user),
+            wallets,
+            sdkNetworkGroups: dynamicNetworkAddresses,
+            profileSyncRequestSent: true,
+            profileSyncResponseStatus: res.status,
+          }),
+        })
+      }
       if (res.ok) {
         const json = (await res.json()) as { profile: PineTreeWalletProfile }
         setProfileState({ kind: "loaded", profile: json.profile })
+        logWalletCreationStep("profile_synced", {
+          profile_sync_response_status: res.status,
+          profile_has_base: Boolean(json.profile.base_address),
+          profile_has_solana: Boolean(json.profile.solana_address),
+          profile_has_btc: Boolean(json.profile.btc_address),
+        })
         if (options?.autoEnableLightning && json.profile.base_address && json.profile.solana_address) {
           setPendingSync(false)
           await syncPineTreeManagedLightning()
@@ -459,28 +561,59 @@ function PineTreeWalletRuntime() {
         })
         return json.profile
       }
+      logWalletCreationStep("failed", { profile_sync_response_status: res.status })
       return null
     } finally {
       setSyncing(false)
       setPendingSync(false)
     }
-  }, [user, dynamicNetworkAddresses, syncPineTreeManagedLightning])
+  }, [user, wallets, dynamicNetworkAddresses, syncPineTreeManagedLightning, logWalletCreationStep])
 
   // --- After wallet creation: auto-sync addresses to DB ---
   useEffect(() => {
     if (!pendingSync) return
-    if (!sdkHasLoaded || !user || wallets.length === 0) return
+    if (!sdkHasLoaded) {
+      logWalletCreationStep("opening_dynamic", { reason: "sdk_not_loaded" })
+      return
+    }
+    if (!user) {
+      logWalletCreationStep("waiting_for_dynamic_auth")
+      return
+    }
+    logWalletCreationStep("dynamic_authenticated")
+    if (wallets.length === 0) {
+      logWalletCreationStep("waiting_for_embedded_wallets")
+      return
+    }
+    logWalletCreationStep("wallets_detected")
     void syncProfileFromDynamic({ autoEnableLightning: true })
-  }, [pendingSync, sdkHasLoaded, user, wallets, syncProfileFromDynamic])
+  }, [pendingSync, sdkHasLoaded, user, wallets, syncProfileFromDynamic, logWalletCreationStep])
+
+  useEffect(() => {
+    if (!pendingSync) return
+    const timer = window.setTimeout(() => {
+      setPendingSync(false)
+      setSyncing(false)
+      setWalletCreationStep("timeout")
+      if (walletCreationDebugEnabled) {
+        console.debug("[pinetree-wallets] wallet_creation_step", {
+          step: "timeout",
+          timeout_ms: walletCreationTimeoutMs,
+        })
+      }
+    }, walletCreationTimeoutMs)
+    return () => window.clearTimeout(timer)
+  }, [pendingSync])
 
   // --- After Dynamic logout: open auth flow for the new merchant's wallet creation ---
   useEffect(() => {
     if (!logoutPending) return
     if (user !== null) return // still waiting for logout to clear the user
     setLogoutPending(false)
+    logWalletCreationStep("waiting_for_dynamic_auth", { reason: "reopening_after_logout" })
     setPendingSync(true)
     setShowAuthFlow(true)
-  }, [logoutPending, user, setShowAuthFlow])
+  }, [logoutPending, user, setShowAuthFlow, logWalletCreationStep])
 
   // ---------------------------------------------------------------------------
   // Derived state — wallet profile (Base/Solana from Dynamic, DB-backed)
@@ -550,6 +683,12 @@ function PineTreeWalletRuntime() {
     profileState.kind === "none"
 
   const canRefresh = sdkHasLoaded && dynamicSessionMatchesProfile && user !== null && hasWallet
+  const walletCreationMessage = walletCreationStepMessage(walletCreationStep)
+  const walletCreationInProgress =
+    walletCreationStep !== "idle" &&
+    walletCreationStep !== "profile_synced" &&
+    walletCreationStep !== "failed" &&
+    walletCreationStep !== "timeout"
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -572,12 +711,26 @@ function PineTreeWalletRuntime() {
 
   function handleCreateWallet() {
     if (hasStaleDynamicSession && user) {
+      logWalletCreationStep("opening_dynamic", { reason: "stale_dynamic_session_logout" })
       setLogoutPending(true)
       void handleLogOut?.()
       return
     }
+    logWalletCreationStep("opening_dynamic")
     setPendingSync(true)
     setShowAuthFlow(true)
+  }
+
+  function handleRetryWalletSetup() {
+    setPendingSync(false)
+    setLogoutPending(false)
+    setSyncing(false)
+    setShowAuthFlow(false)
+    logWalletCreationStep("opening_dynamic", { retry: true })
+    window.setTimeout(() => {
+      setPendingSync(true)
+      setShowAuthFlow(true)
+    }, 0)
   }
 
   async function handleRefreshAddresses() {
@@ -655,6 +808,31 @@ function PineTreeWalletRuntime() {
                 </p>
               </div>
             ) : null}
+
+            {walletCreationMessage ? (
+              <div className={`flex flex-wrap items-center gap-3 rounded-xl border px-3 py-2.5 ${
+                walletCreationStep === "failed" || walletCreationStep === "timeout"
+                  ? "border-amber-200 bg-amber-50/80"
+                  : "border-blue-100 bg-blue-50/70"
+              }`}>
+                <p className={`text-xs font-semibold leading-5 ${
+                  walletCreationStep === "failed" || walletCreationStep === "timeout"
+                    ? "text-amber-800"
+                    : "text-blue-800"
+                }`}>
+                  {walletCreationMessage}
+                </p>
+                {(walletCreationStep === "failed" || walletCreationStep === "timeout") ? (
+                  <button
+                    type="button"
+                    onClick={handleRetryWalletSetup}
+                    className="inline-flex h-8 items-center justify-center rounded-lg border border-amber-200 bg-white px-3 text-xs font-semibold text-amber-800 shadow-sm transition hover:bg-amber-50"
+                  >
+                    Try again
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <div className="flex flex-col items-end gap-2">
@@ -671,10 +849,10 @@ function PineTreeWalletRuntime() {
               <button
                 type="button"
                 onClick={handleCreateWallet}
-                disabled={syncing || logoutPending}
+                disabled={syncing || logoutPending || walletCreationInProgress}
                 className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
               >
-                {logoutPending ? "Preparing…" : "Create PineTree Wallet"}
+                {logoutPending || walletCreationInProgress ? "Preparing..." : "Create PineTree Wallet"}
               </button>
             )}
 
