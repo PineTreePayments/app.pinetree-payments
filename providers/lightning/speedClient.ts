@@ -49,8 +49,14 @@ export type SpeedConnectionResult = {
 
 export const SPEED_PLATFORM_TREASURY_SWEEP_MODE = "speed_platform_treasury_sweep" as const
 
+// speed_merchant_account: PineTree creates/links a Speed sub-account per merchant
+// internally and routes Lightning invoices through that account. Merchant never
+// sees Speed. Status: stub — pending Speed API permission confirmation.
+export const SPEED_MERCHANT_ACCOUNT_MODE = "speed_merchant_account" as const
+
 export type SpeedLightningSettlementMode =
   | typeof SPEED_PLATFORM_TREASURY_SWEEP_MODE
+  | typeof SPEED_MERCHANT_ACCOUNT_MODE
   | "speed_connect_split"
   | "legacy"
   | string
@@ -177,6 +183,7 @@ export function getLightningProviderConfig(): {
   provider: string
   settlementMode: SpeedLightningSettlementMode
   speedPlatformTreasurySweepEnabled: boolean
+  speedMerchantAccountModeEnabled: boolean
 } {
   const provider = String(process.env.PINE_TREE_LIGHTNING_PROVIDER || "").trim().toLowerCase()
   const settlementMode = String(process.env.PINE_TREE_LIGHTNING_SETTLEMENT_MODE || "").trim()
@@ -185,12 +192,23 @@ export function getLightningProviderConfig(): {
     provider,
     settlementMode,
     speedPlatformTreasurySweepEnabled:
-      provider === "speed" && settlementMode === SPEED_PLATFORM_TREASURY_SWEEP_MODE
+      provider === "speed" && settlementMode === SPEED_PLATFORM_TREASURY_SWEEP_MODE,
+    speedMerchantAccountModeEnabled:
+      provider === "speed" && settlementMode === SPEED_MERCHANT_ACCOUNT_MODE,
   }
 }
 
 export function isSpeedPlatformTreasurySweepEnabled(): boolean {
   return getLightningProviderConfig().speedPlatformTreasurySweepEnabled
+}
+
+/**
+ * Returns true when PINE_TREE_LIGHTNING_SETTLEMENT_MODE=speed_merchant_account.
+ * In this mode PineTree provisions Speed sub-accounts per merchant internally.
+ * Merchant never configures Speed. Status: stub pending Speed API confirmation.
+ */
+export function isSpeedMerchantAccountModeEnabled(): boolean {
+  return getLightningProviderConfig().speedMerchantAccountModeEnabled
 }
 
 /**

@@ -19,7 +19,13 @@ describe("PineTree embedded wallet setup", () => {
   const speedConnectMigration = read("database/migrations/20260623_add_speed_connect_fields_to_merchant_lightning_profiles.sql")
   const lightningDbHelper = read("database/merchantLightningProfiles.ts")
   const lightningApiRoute = read("app/api/wallets/lightning/pinetree-managed/route.ts")
-  const speedConnectReturnRoute = read("app/api/wallets/lightning/speed/connect-return/route.ts")
+  // connect-return was deleted when merchant-facing Speed Connect was removed.
+  // Tests below assert it is absent instead of reading it.
+  const speedConnectReturnRouteExists = (() => {
+    const fs = require("node:fs")
+    const path = require("node:path")
+    return fs.existsSync(path.join(process.cwd(), "app/api/wallets/lightning/speed/connect-return/route.ts"))
+  })()
   const speedConnectedAccountHelper = read("providers/lightning/speedConnectedAccounts.ts")
   const speedClient = read("providers/lightning/speedClient.ts")
   const speedAdapter = read("providers/lightning/speedAdapter.ts")
@@ -624,13 +630,11 @@ describe("PineTree embedded wallet setup", () => {
     expect(dbHelper).toContain("bitcoinLightningReceiveMode")
   })
 
-  it("Speed Connect return route safely refreshes connected account status and redirects to wallet setup", () => {
-    expect(speedConnectReturnRoute).toContain("getSpeedConnectedAccountSetupStatus")
-    expect(speedConnectReturnRoute).toContain("upsertMerchantLightningProfile")
-    expect(speedConnectReturnRoute).toContain("upsertPineTreeWalletProfile")
-    expect(speedConnectReturnRoute).toContain("/dashboard/wallet-setup")
-    expect(speedConnectReturnRoute).not.toContain("SPEED_API_KEY")
-    expect(speedConnectReturnRoute).not.toContain("NextResponse.json")
+  it("Speed Connect return route is removed (canonical treasury-sweep mode, no merchant Speed OAuth)", () => {
+    // The connect-return route was part of the merchant-facing Speed Connect OAuth flow.
+    // In canonical mode, Lightning is managed through PineTree's platform account, so this
+    // merchant-facing OAuth callback route has been intentionally deleted.
+    expect(speedConnectReturnRouteExists).toBe(false)
   })
 
   it("existing POS and checkout payment creation remain unchanged", () => {
@@ -642,9 +646,13 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("createSpeedLightningPayment")
   })
 
-  it("existing legacy Speed route still compiles (backward compat)", () => {
-    const legacySpeedRoute = read("app/api/wallets/lightning/speed/connect/route.ts")
-    // The legacy route that requires a merchant-supplied speedAccountId must still exist
-    expect(legacySpeedRoute).toContain("speedAccountId")
+  it("legacy merchant-facing Speed Connect route is removed (canonical mode only)", () => {
+    // The Speed Connect merchant account setup flow has been replaced by the
+    // canonical PineTree treasury-sweep mode. The route is intentionally deleted.
+    const fs = require("node:fs")
+    const path = require("node:path")
+    expect(
+      fs.existsSync(path.join(process.cwd(), "app/api/wallets/lightning/speed/connect/route.ts"))
+    ).toBe(false)
   })
 })

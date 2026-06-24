@@ -20,6 +20,7 @@ export default defineConfig({
     exclude: [
       ...configDefaults.exclude,
       "packages/pinetree-node/test/integration/**",
+      ".claude/worktrees/**",
     ],
   },
 })

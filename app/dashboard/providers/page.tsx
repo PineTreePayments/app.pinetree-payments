@@ -1,13 +1,10 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import Image from "next/image"
+import { useCallback, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
-import { speedLoginUrl, speedSignupUrl, speedAccountSetupUrl } from "@/lib/speedDashboardLinks"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
 import { toast } from "sonner"
-import QRCode from "qrcode"
 import { ChevronRight, X } from "lucide-react"
 import {
   DashboardHeroCard,
@@ -22,11 +19,6 @@ import {
 } from "@/lib/shift4DisplayStatus"
 import { isStripeConnectReady } from "@/lib/providers/cardProviderReadiness"
 
-const providerAlbyHubAppsUrl = process.env.NEXT_PUBLIC_ALBY_HUB_APPS_URL || "https://getalby.com/hub/apps"
-const providerAlbyNwcDocsUrl = process.env.NEXT_PUBLIC_ALBY_NWC_DOCS_URL || "https://guides.getalby.com/user-guide/alby-account-and-browser-extension/alby-hub/nwc"
-const providerZeusIosUrl = process.env.NEXT_PUBLIC_ZEUS_IOS_URL || "https://apps.apple.com/us/app/zeus-ln/id1456038895"
-const providerZeusAndroidUrl = process.env.NEXT_PUBLIC_ZEUS_ANDROID_URL || "https://play.google.com/store/apps/details?id=app.zeusln"
-const providerZeusDocsUrl = process.env.NEXT_PUBLIC_ZEUS_DOCS_URL || "https://zeusln.app"
 const shift4ApplicationUrl =
   process.env.NEXT_PUBLIC_SHIFT4_APPLICATION_URL ||
   process.env.SHIFT4_APPLICATION_URL ||
@@ -94,21 +86,6 @@ type ProviderCredentials = {
   [key: string]: unknown
 }
 
-type SolanaProviderLike = {
-  isPhantom?: boolean
-  isSolflare?: boolean
-  connect: () => Promise<{ publicKey: { toString: () => string } }>
-}
-
-type Eip1193ProviderLike = {
-  isCoinbaseWallet?: boolean
-  isBaseWallet?: boolean
-  isMetaMask?: boolean
-  isTrust?: boolean
-  isTrustWallet?: boolean
-  providers?: Eip1193ProviderLike[]
-  request: (args: { method: string }) => Promise<unknown>
-}
 
 type ProviderRecord = {
   provider: string
@@ -138,17 +115,6 @@ type WalletRecord = {
   wallet_type?: string | null
 }
 
-type WalletConnectSession = {
-  session_id: string
-  merchant_id?: string | null
-  provider: string
-  wallet_type?: string | null
-  wallet_address?: string | null
-  status: "pending" | "connected" | "cancelled" | "expired" | string
-  created_at?: string
-  updated_at?: string
-}
-
 type ProvidersApiResponse = {
   success?: boolean
   providers?: ProviderRecord[]
@@ -160,13 +126,6 @@ type ProvidersApiResponse = {
   error?: string
 }
 
-function getInjectedSolanaProvider() {
-  return window.solana as SolanaProviderLike | undefined
-}
-
-function getInjectedEthereumProvider() {
-  return window.ethereum as Eip1193ProviderLike | undefined
-}
 
 function getConnectedAndEnabledProvidersCount(providers: ProviderRecord[]) {
   return providers.filter(
@@ -196,42 +155,6 @@ function formatWalletLabel(
   return ""
 }
 
-function getInjectedBaseProvider(preferredType?: string | null) {
-  const eth = getInjectedEthereumProvider()
-  if (!eth) return null
-
-  const providers =
-    Array.isArray(eth.providers) && eth.providers.length > 0
-      ? eth.providers
-      : [eth]
-
-  if (preferredType === "BASEAPP") {
-    return (
-      providers.find((p) => p?.isCoinbaseWallet) ||
-      providers.find((p) => p?.isBaseWallet) ||
-      null
-    )
-  }
-
-  if (preferredType === "METAMASK") {
-    return (
-      providers.find((p) => p?.isMetaMask && !p?.isCoinbaseWallet) || null
-    )
-  }
-
-  if (preferredType === "TRUST") {
-    return providers.find((p) => p?.isTrust || p?.isTrustWallet) || null
-  }
-
-  return providers[0] || null
-}
-
-function getDetectedBaseWalletType(provider: Eip1193ProviderLike, fallback?: string | null) {
-  if (provider?.isCoinbaseWallet || provider?.isBaseWallet) return "BASEAPP"
-  if (provider?.isMetaMask && !provider?.isCoinbaseWallet) return "METAMASK"
-  if (provider?.isTrust || provider?.isTrustWallet) return "TRUST"
-  return fallback || "BASEAPP"
-}
 
 export default function ProvidersPage() {
   const [providers, setProviders] = useState<ProviderRecord[]>([])
@@ -244,87 +167,17 @@ export default function ProvidersPage() {
   const [setupLoadingProvider, setSetupLoadingProvider] = useState<CardOnboardingProvider | null>(null)
   const [setupErrors, setSetupErrors] = useState<Partial<Record<CardOnboardingProvider, string>>>({})
   const [setupReturnNotice, setSetupReturnNotice] = useState("")
-  const [nwcUri, setNwcUri] = useState("")
-  const [nwcWalletLabel, setNwcWalletLabel] = useState("")
-  const [nwcTestResult, setNwcTestResult] = useState<{
-    success: boolean
-    connected?: boolean
-    ready?: boolean
-    missingPermissions?: string[]
-    readinessReason?: string
-    canMakeInvoice?: boolean
-    canPayInvoice?: boolean
-    canLookupInvoice?: boolean
-    canCollectFee?: boolean
-    walletAlias?: string
-    error?: string
-  } | null>(null)
-  const [nwcTesting, setNwcTesting] = useState(false)
-  const [nwcWalletReadyOpen, setNwcWalletReadyOpen] = useState(false)
   const [loading, setLoading] = useState(false)
-
-  // Speed Lightning setup state
-  const [speedAccountId, setSpeedAccountId] = useState("")
-  const [lightningSetupTab, setLightningSetupTab] = useState<"speed" | "nwc">("speed")
-  const [speedSetupStep, setSpeedSetupStep] = useState<1 | 2>(1)
-  const [speedTestResult, setSpeedTestResult] = useState<{
-    success: boolean
-    connected?: boolean
-    mode?: string
-    notes?: string[]
-    error?: string
-  } | null>(null)
-  const [speedTesting, setSpeedTesting] = useState(false)
 
   const [smartRouting, setSmartRouting] = useState(false)
   const [autoConversion, setAutoConversion] = useState(false)
   const [engineSettingsPanel, setEngineSettingsPanel] = useState<"routing" | "conversion" | null>(null)
   const [providerFilter, setProviderFilter] = useState<"all" | "card" | "crypto">("all")
 
-  const [selectedWalletType, setSelectedWalletType] = useState<string | null>(null)
-  const [showMobileConnect, setShowMobileConnect] = useState(false)
-  const [walletQrCode, setWalletQrCode] = useState<string | null>(null)
-
-  const [walletSessionId, setWalletSessionId] = useState<string | null>(null)
-  const [walletSessionStatus, setWalletSessionStatus] = useState<string | null>(null)
-  const [walletMobileDeeplink, setWalletMobileDeeplink] = useState<string | null>(null)
-  const [connectedWalletAddress, setConnectedWalletAddress] = useState<string | null>(null)
-
-  const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const didToastSyncRef = useRef(false)
-  const pollStopAtRef = useRef<number | null>(null)
-  const walletSetupRequestRef = useRef<{
-    provider: "solana" | "base"
-    walletType: string
-  } | null>(null)
-
   const closeProviderModal = useCallback(() => {
     setActiveProvider(null)
     setInputValue("")
-    setNwcUri("")
-    setNwcWalletLabel("")
-    setNwcTestResult(null)
-    setNwcTesting(false)
-    setShowMobileConnect(false)
-    setWalletQrCode(null)
-    setSelectedWalletType(null)
-    setWalletSessionId(null)
-    setWalletSessionStatus(null)
-    setWalletMobileDeeplink(null)
-    setConnectedWalletAddress(null)
-    didToastSyncRef.current = false
-    setSpeedAccountId("")
-    setLightningSetupTab("speed")
-    setSpeedTestResult(null)
-    setSpeedTesting(false)
-    setSpeedSetupStep(1)
-    setNwcWalletReadyOpen(false)
     setSetupErrors({})
-
-    if (pollerRef.current) {
-      clearInterval(pollerRef.current)
-      pollerRef.current = null
-    }
   }, [])
 
   const callProvidersApi = useCallback(async (method: "GET" | "POST", body?: unknown) => {
@@ -429,62 +282,6 @@ export default function ProvidersPage() {
   useDashboardAutoRefresh({ refresh: loadAll, refreshOnMount: false })
 
   useEffect(() => {
-    return () => {
-      if (pollerRef.current) clearInterval(pollerRef.current)
-    }
-  }, [])
-
-  async function startWalletSetupSession(
-    provider: "solana" | "base",
-    walletType: string
-  ) {
-    if (!walletType) return null
-
-    const existingRequest = walletSetupRequestRef.current
-    if (
-      existingRequest?.provider === provider &&
-      existingRequest.walletType === walletType &&
-      walletSessionId &&
-      walletMobileDeeplink &&
-      walletQrCode
-    ) {
-      return {
-        sessionId: walletSessionId,
-        deeplink: walletMobileDeeplink,
-      }
-    }
-
-    walletSetupRequestRef.current = { provider, walletType }
-    setWalletQrCode(null)
-    setShowMobileConnect(false)
-
-    const sessionId = await createWalletConnectSession(provider, walletType)
-    const returnUrl = buildMobileBridgeUrl(provider, walletType, sessionId)
-    const deeplink = buildWalletDeepLink(provider, walletType, returnUrl)
-    const qr = await QRCode.toDataURL(deeplink, {
-      errorCorrectionLevel: "M",
-      margin: 2,
-      width: 320,
-    })
-
-    const latestRequest = walletSetupRequestRef.current
-    if (
-      latestRequest?.provider !== provider ||
-      latestRequest.walletType !== walletType
-    ) {
-      return null
-    }
-
-    setWalletMobileDeeplink(deeplink)
-    setWalletQrCode(qr)
-
-    return {
-      sessionId,
-      deeplink,
-    }
-  }
-
-  useEffect(() => {
     if (!activeProvider) return
 
     function onKeyDown(event: KeyboardEvent) {
@@ -494,132 +291,6 @@ export default function ProvidersPage() {
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [activeProvider, closeProviderModal])
-
-  useEffect(() => {
-    if (
-      !walletSessionId ||
-      !activeProvider ||
-      (activeProvider !== "solana" && activeProvider !== "base")
-    ) return
-
-    pollStopAtRef.current = Date.now() + 15 * 60 * 1000
-    let lastPollAt = 0
-    let animationFrameId: number | null = null
-
-    const poll = async () => {
-      if (!walletSessionId || pollStopAtRef.current === null) return
-      if (Date.now() > pollStopAtRef.current) return
-
-      const now = Date.now()
-      if (now - lastPollAt < 1200) {
-        animationFrameId = requestAnimationFrame(poll)
-        return
-      }
-
-      lastPollAt = now
-
-      try {
-        const { data: { session: authSession } } = await supabase.auth.getSession()
-        const authToken = authSession?.access_token
-
-        const res = await fetch(
-          `/api/wallet-connect-session?session_id=${encodeURIComponent(walletSessionId)}`,
-          {
-            cache: "no-store",
-            ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
-          }
-        )
-
-        if (!res.ok) {
-          animationFrameId = requestAnimationFrame(poll)
-          return
-        }
-
-        const session: WalletConnectSession | null = await res.json()
-        if (!session) {
-          animationFrameId = requestAnimationFrame(poll)
-          return
-        }
-
-        setWalletSessionStatus(session.status)
-
-        if (session.status === "connected" && session.wallet_address) {
-          setInputValue(session.wallet_address)
-          setConnectedWalletAddress(session.wallet_address)
-
-          if (session.wallet_type) {
-            setSelectedWalletType(session.wallet_type)
-          } else {
-            if (activeProvider === "solana") {
-              setSelectedWalletType("PHANTOM")
-            }
-
-            if (activeProvider === "base") {
-              setSelectedWalletType("BASEAPP")
-            }
-          }
-
-          if (!didToastSyncRef.current) {
-            toast.success("Mobile wallet connected. Review and save.")
-            didToastSyncRef.current = true
-          }
-
-          setShowMobileConnect(false)
-          setWalletQrCode(null)
-          pollStopAtRef.current = null
-          await loadAll()
-          return
-        }
-
-        animationFrameId = requestAnimationFrame(poll)
-      } catch (err) {
-        console.error("Polling session failed:", err)
-        animationFrameId = requestAnimationFrame(poll)
-      }
-    }
-
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "visible" && walletSessionId && pollStopAtRef.current) {
-        lastPollAt = 0
-        if (animationFrameId === null) {
-          animationFrameId = requestAnimationFrame(poll)
-        }
-      }
-    }
-
-    document.addEventListener("visibilitychange", onVisibilityChange)
-    animationFrameId = requestAnimationFrame(poll)
-
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibilityChange)
-      if (animationFrameId !== null) cancelAnimationFrame(animationFrameId)
-      pollStopAtRef.current = null
-    }
-  }, [walletSessionId, activeProvider, loadAll])
-
-  useEffect(() => {
-    if (activeProvider !== "solana" && activeProvider !== "base") {
-      walletSetupRequestRef.current = null
-      return
-    }
-
-    if (!selectedWalletType) {
-      walletSetupRequestRef.current = null
-      setWalletQrCode(null)
-      setWalletSessionId(null)
-      setWalletSessionStatus(null)
-      setWalletMobileDeeplink(null)
-      return
-    }
-
-    startWalletSetupSession(activeProvider, selectedWalletType).catch((err) => {
-      console.error("Wallet setup QR error:", err)
-      toast.error(err instanceof Error ? err.message : "Failed to generate wallet QR")
-    })
-    // startWalletSetupSession reads the latest setup state and is intentionally
-    // keyed by modal provider plus selected wallet to avoid duplicate sessions.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProvider, selectedWalletType])
 
   async function updateSettings(field: string, value: boolean) {
     try {
@@ -714,40 +385,6 @@ export default function ProvidersPage() {
     return p?.enabled ?? false
   }
 
-  function getOrigin() {
-    if (typeof window !== "undefined") return window.location.origin
-    return "https://pinetree-payments.com"
-  }
-
-  function getDesktopProvidersUrl() {
-    return `${getOrigin()}/dashboard/providers`
-  }
-
- function buildMobileBridgeUrl(
-  provider: "solana" | "base",
-  walletType: string,
-  sessionId: string
-) {
-  // Each callback page handles its own wallet protocol:
-  //   /solana-return       — Solana (window.solana.connect())
-  //   /base-wallet-setup   — EVM / Base (window.ethereum eth_requestAccounts)
-  // Both pages POST the resolved wallet address back to /api/wallet-connect-session
-  // and redirect to return_to so the Providers dashboard polling picks it up.
-  const path =
-    provider === "solana"
-      ? "/solana-return"
-      : "/base-wallet-setup"
-
-  const url = new URL(`${getOrigin()}${path}`)
-
-  url.searchParams.set("provider", provider)
-  url.searchParams.set("wallet_type", walletType)
-  url.searchParams.set("session_id", sessionId)
-  url.searchParams.set("return_to", getDesktopProvidersUrl())
-
-  return url.toString()
-}
-
 function EngineSettingStatus({
   label,
   value,
@@ -769,247 +406,12 @@ function EngineSettingStatus({
   )
 }
 
-  function buildWalletDeepLink(
-    provider: "solana" | "base",
-    walletType: string,
-    returnUrl: string
-  ) {
-    if (provider === "solana") {
-      if (walletType === "PHANTOM") {
-        return `https://phantom.app/ul/browse/${encodeURIComponent(returnUrl)}`
-      }
-
-      if (walletType === "SOLFLARE") {
-        return `https://solflare.com/ul/v1/browse/${encodeURIComponent(returnUrl)}`
-      }
-
-      throw new Error("Select Phantom or Solflare first")
-    }
-
-    if (walletType === "METAMASK") {
-      return `metamask://dapp?url=${encodeURIComponent(returnUrl)}`
-    }
-
-    if (walletType === "TRUST") {
-      return `trust://dapp?url=${encodeURIComponent(returnUrl)}`
-    }
-
-    if (walletType === "BASEAPP") {
-      return `cbwallet://dapp?url=${encodeURIComponent(returnUrl)}`
-    }
-
-    throw new Error("Select Base Wallet, MetaMask, or Trust Wallet first")
-  }
-
-  async function createWalletConnectSession(
-    provider: "solana" | "base",
-    walletType?: string | null
-  ) {
-    const sessionId =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `session_${Date.now()}_${Math.random().toString(36).slice(2)}`
-
-    const res = await fetch("/api/wallet-connect-session", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        session_id: sessionId,
-        provider,
-        wallet_type: walletType || null,
-        status: "pending",
-      }),
-    })
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "")
-      console.error("Failed creating wallet session:", text)
-      throw new Error("Failed to create wallet connect session")
-    }
-
-    setWalletSessionId(sessionId)
-    setWalletSessionStatus("pending")
-    setConnectedWalletAddress(null)
-    didToastSyncRef.current = false
-
-    return sessionId
-  }
-
-  async function connectSolanaWallet(preferredType?: string | null) {
-    let provider = getInjectedSolanaProvider()
-
-    if (!provider) {
-      await new Promise((resolve) => setTimeout(resolve, 500))
-      provider = getInjectedSolanaProvider()
-    }
-
-    if (!provider) return null
-
-    const detectedType = provider?.isPhantom
-      ? "PHANTOM"
-      : provider?.isSolflare
-        ? "SOLFLARE"
-        : null
-
-    if (preferredType && detectedType && preferredType !== detectedType) {
-      toast.error(
-        preferredType === "PHANTOM"
-          ? "Phantom was selected, but a different Solana wallet is injected on this device"
-          : "Solflare was selected, but a different Solana wallet is injected on this device"
-      )
-      return null
-    }
-
-    try {
-      const response = await provider.connect()
-
-      let walletType = "MANUAL"
-      if (provider.isPhantom) walletType = "PHANTOM"
-      else if (provider.isSolflare) walletType = "SOLFLARE"
-      else if (preferredType) walletType = preferredType
-
-      return {
-        walletAddress: response.publicKey.toString(),
-        walletType,
-      }
-    } catch (err) {
-      console.error("Solana wallet connect error:", err)
-      return null
-    }
-  }
-
-  async function connectBaseWallet(preferredType?: string | null) {
-    const provider = getInjectedBaseProvider(preferredType)
-
-    if (!provider) return null
-
-    try {
-      const accountsResponse = await provider.request({
-        method: "eth_requestAccounts",
-      })
-
-      const accounts = Array.isArray(accountsResponse)
-        ? accountsResponse.map((value) => String(value))
-        : []
-
-      if (!accounts?.[0]) return null
-
-      return {
-        walletAddress: accounts[0],
-        walletType: getDetectedBaseWalletType(provider, preferredType),
-      }
-    } catch (err) {
-      console.error("Base wallet connect error:", err)
-      return null
-    }
-  }
-
-  async function openSolanaMobileWallet(walletType?: string | null) {
-    try {
-      if (!walletType) {
-        toast.error("Select Phantom or Solflare first")
-        return
-      }
-
-      const setup = await startWalletSetupSession("solana", walletType)
-      const deeplink = setup?.deeplink || walletMobileDeeplink
-
-      if (!deeplink) {
-        throw new Error("Failed to create Solana wallet link")
-      }
-
-      setShowMobileConnect(true)
-      window.location.href = deeplink
-    } catch (err) {
-      console.error("Solana mobile wallet error:", err)
-      toast.error("Failed to open Solana wallet")
-    }
-  }
-
-  async function openBaseMobileWallet() {
-    try {
-      if (!selectedWalletType) {
-        toast.error("Select a wallet first")
-        return
-      }
-
-      const setup = await startWalletSetupSession("base", selectedWalletType)
-      const deeplink = setup?.deeplink || walletMobileDeeplink
-
-      if (!deeplink) {
-        throw new Error("Failed to create wallet link")
-      }
-
-      setShowMobileConnect(true)
-      window.location.href = deeplink
-    } catch (err) {
-      console.error("Base mobile wallet error:", err)
-      toast.error("Failed to open wallet. Make sure the wallet app is installed.")
-    }
-  }
-
-  async function connectWalletOnThisDevice() {
-    if (activeProvider !== "solana" && activeProvider !== "base") return
-
-    if (!selectedWalletType) {
-      toast.error(
-        activeProvider === "solana"
-          ? "Select Phantom or Solflare first"
-          : "Select Base Wallet, MetaMask, or Trust Wallet first"
-      )
-      return
-    }
-
-    setLoading(true)
-
-    try {
-      const result =
-        activeProvider === "solana"
-          ? await connectSolanaWallet(selectedWalletType)
-          : await connectBaseWallet(selectedWalletType)
-
-      if (!result?.walletAddress) {
-        toast.error(
-          activeProvider === "solana"
-            ? "No wallet detected - install Phantom or Solflare, or paste address"
-            : "No wallet detected - install the selected wallet or paste address"
-        )
-        return
-      }
-
-      setInputValue(result.walletAddress)
-      setConnectedWalletAddress(result.walletAddress)
-      setSelectedWalletType(result.walletType)
-      setWalletSessionStatus("connected")
-      toast.success("Wallet connected. Review and save.")
-    } finally {
-      setLoading(false)
-    }
-  }
-
   function openProvider(provider: string) {
-    const existingWallet = getWallet(provider)
     const p = getProvider(provider)
+    const existingWallet = getWallet(provider)
     const modalProvider = provider === "speed" ? "lightning" : provider
 
-    if ((provider === "solana" || provider === "base") && existingWallet) {
-      toast.success("Wallet already connected")
-      return
-    }
-
-    if (provider === "lightning" || provider === "speed") {
-      setInputValue("")
-      setNwcUri("")
-      setNwcWalletLabel("")
-      setNwcTestResult(null)
-      setLightningSetupTab("speed")
-      setSpeedTestResult(null)
-      setSpeedAccountId(String(getProvider("lightning_speed")?.credentials?.account_id || ""))
-      // Start at step 1 if no account ID saved, step 2 if already configured
-      setSpeedSetupStep(getProvider("lightning_speed")?.credentials?.account_id ? 2 : 1)
-    } else if (provider === "shift4") {
+    if (provider === "shift4") {
       setInputValue("")
     } else if (p?.credentials?.api_key) {
       setInputValue(p.credentials.api_key)
@@ -1021,376 +423,29 @@ function EngineSettingStatus({
       setInputValue("")
     }
 
-    setShowMobileConnect(false)
-    setWalletQrCode(null)
-    setSelectedWalletType(null)
-    setWalletSessionId(null)
-    setWalletSessionStatus(null)
-    setWalletMobileDeeplink(null)
-    setConnectedWalletAddress(null)
-    walletSetupRequestRef.current = null
-    didToastSyncRef.current = false
-
-    if (pollerRef.current) {
-      clearInterval(pollerRef.current)
-      pollerRef.current = null
-    }
-
     setActiveProvider(modalProvider)
-  }
-
-  function selectWalletType(walletType: string) {
-    if (selectedWalletType === walletType) return
-
-    walletSetupRequestRef.current = null
-    setSelectedWalletType(walletType)
-    setShowMobileConnect(false)
-    setWalletQrCode(null)
-    setWalletSessionId(null)
-    setWalletSessionStatus(null)
-    setWalletMobileDeeplink(null)
-
-    if (connectedWalletAddress) {
-      setConnectedWalletAddress(null)
-    }
-  }
-
-  async function testNwcConnection() {
-    const uri = nwcUri.trim()
-    if (!uri) {
-      toast.error("Paste your NWC connection string first")
-      return
-    }
-
-    setNwcTesting(true)
-    setNwcTestResult(null)
-
-    try {
-      const { data: { session: authSession } } = await supabase.auth.getSession()
-      const authToken = authSession?.access_token
-      if (!authToken) {
-        toast.error("Please sign in again")
-        return
-      }
-
-      const res = await fetch("/api/wallets/lightning/test", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ nwcUri: uri })
-      })
-
-      const data = await res.json().catch(() => null)
-
-      if (!res.ok) {
-        setNwcTestResult({ success: false, connected: false, error: data?.error || "Connection test failed" })
-        return
-      }
-
-      setNwcTestResult({
-        success: Boolean(data?.success),
-        connected: Boolean(data?.connected),
-        ready: Boolean(data?.ready),
-        missingPermissions: Array.isArray(data?.missingPermissions) ? data.missingPermissions : [],
-        readinessReason: data?.readinessReason || undefined,
-        canMakeInvoice: Boolean(data?.canMakeInvoice),
-        canLookupInvoice: Boolean(data?.canLookupInvoice),
-        canPayInvoice: Boolean(data?.canPayInvoice),
-        canCollectFee: Boolean(data?.canCollectFee),
-        walletAlias: data?.walletAlias || ""
-      })
-    } catch (err) {
-      setNwcTestResult({ success: false, connected: false, error: err instanceof Error ? err.message : "Test failed" })
-    } finally {
-      setNwcTesting(false)
-    }
-  }
-
-  async function testPineTreeSpeedPlatform() {
-    setSpeedTesting(true)
-    setSpeedTestResult(null)
-
-    try {
-      const { data: { session: authSession } } = await supabase.auth.getSession()
-      const authToken = authSession?.access_token
-      if (!authToken) { toast.error("Please sign in again"); return }
-
-      const res = await fetch("/api/wallets/lightning/speed/test", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" }
-      })
-
-      const data = await res.json().catch(() => null)
-
-      if (!res.ok) {
-        setSpeedTestResult({ success: false, connected: false, error: data?.error || "Test request failed" })
-        return
-      }
-
-      setSpeedTestResult({
-        success: Boolean(data?.success),
-        connected: Boolean(data?.connected),
-        mode: data?.mode || "unknown",
-        notes: Array.isArray(data?.notes) ? data.notes : [],
-        error: data?.error || undefined
-      })
-    } catch (err) {
-      setSpeedTestResult({
-        success: false,
-        connected: false,
-        error: err instanceof Error ? err.message : "Test failed"
-      })
-    } finally {
-      setSpeedTesting(false)
-    }
-  }
-
-  async function saveSpeedSetup() {
-    setLoading(true)
-
-    try {
-      const { data: { session: authSession } } = await supabase.auth.getSession()
-      const authToken = authSession?.access_token
-      if (!authToken) { toast.error("Please sign in again"); return }
-
-      const res = await fetch("/api/wallets/lightning/speed/connect", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "connect",
-          speedAccountId: speedAccountId.trim()
-        })
-      })
-
-      const data = await res.json().catch(() => null)
-
-      if (!res.ok || !data?.success) {
-        toast.error(data?.error || "Failed to connect Speed")
-        return
-      }
-
-      toast.success(data?.message || "Speed platform setup saved")
-      closeProviderModal()
-      await loadAll()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Unexpected error")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function disconnectSpeed() {
-    try {
-      const { data: { session: authSession } } = await supabase.auth.getSession()
-      const authToken = authSession?.access_token
-      if (!authToken) { toast.error("Please sign in again"); return }
-
-      const res = await fetch("/api/wallets/lightning/speed/connect", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "disconnect" })
-      })
-
-      const data = await res.json().catch(() => null)
-
-      if (!res.ok || !data?.success) {
-        toast.error(data?.error || "Failed to disconnect Speed")
-        return
-      }
-
-      toast.success("Speed Lightning disconnected")
-      await loadAll()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Unexpected error")
-    }
   }
 
   async function saveProvider(provider: string) {
     setLoading(true)
 
     try {
-      let walletAddress = (inputValue || "").trim()
-      let walletType: string | null = selectedWalletType
-
-      if (!walletAddress && walletSessionStatus === "connected") {
-        toast.error("Wallet detected but not yet loaded. Try again.")
-        return
-      }
-
-      if (provider === "solana" || provider === "base") {
-        walletType = provider === "solana"
-          ? selectedWalletType || "MANUAL"
-          : selectedWalletType || "BASEAPP"
-
-        if (!walletAddress) {
-          toast.error(
-            provider === "solana"
-              ? "Connect a wallet or paste a Solana address"
-              : "Connect a wallet or paste a Base address"
-          )
-          return
-        }
-
-        const payload = await callProvidersApi("POST", {
-          action: "saveProvider",
-          provider,
-          walletAddress,
-          walletType,
-        })
-
-        applyProvidersPayload(payload)
-
-        if (walletSessionId) {
-          const { data: { session: wcsSession } } = await supabase.auth.getSession()
-          const wcsToken = wcsSession?.access_token
-          await fetch("/api/wallet-connect-session", {
-            method: "DELETE",
-            headers: {
-              "Content-Type": "application/json",
-              ...(wcsToken ? { Authorization: `Bearer ${wcsToken}` } : {}),
-            },
-            body: JSON.stringify({ session_id: walletSessionId }),
-          })
-        }
-
-        closeProviderModal()
-        toast.success(provider === "solana" ? "Solana wallet connected" : "Base wallet connected")
-        return
-      }
-
-      if (provider === "solana") {
-        walletType = selectedWalletType || "MANUAL"
-
-        if (selectedWalletType === "PHANTOM" || selectedWalletType === "SOLFLARE") {
-          const result = await connectSolanaWallet(selectedWalletType)
-
-          if (result?.walletAddress) {
-            walletAddress = result.walletAddress
-            walletType = result.walletType
-          } else if (!walletAddress) {
-            toast.error("No wallet detected — install Phantom or Solflare, or paste address")
-            return
-          }
-        } else if (!walletAddress) {
-          toast.error("Choose a wallet or paste a Solana address")
-          return
-        }
-      } else if (provider === "base") {
-        walletType = selectedWalletType || "BASEAPP"
-
-        if (
-          selectedWalletType === "BASEAPP" ||
-          selectedWalletType === "METAMASK" ||
-          selectedWalletType === "TRUST"
-        ) {
-          const result = await connectBaseWallet(walletType)
-
-          if (result?.walletAddress) {
-            walletAddress = result.walletAddress
-            walletType = result.walletType
-          } else if (!walletAddress) {
-            toast.error("No wallet detected — install the selected wallet or paste address")
-            return
-          }
-        } else if (!walletAddress) {
-          toast.error("Choose a wallet or paste a Base address")
-          return
-        }
-
-        walletAddress = walletAddress.trim()
-      } else if (provider === "coinbase") {
-        if (!walletAddress) {
+      if (provider === "coinbase") {
+        if (!inputValue.trim()) {
           toast.error("Required field missing")
           return
         }
-      } else if (provider === "lightning") {
-        const uri = nwcUri.trim()
-        if (!uri) {
-          toast.error("NWC connection string is required")
-          return
-        }
-
-        const { data: { session: authSession } } = await supabase.auth.getSession()
-        const authToken = authSession?.access_token
-        if (!authToken) {
-          toast.error("Please sign in again")
-          return
-        }
-
-        const res = await fetch("/api/wallets/lightning/connect", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${authToken}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ nwcUri: uri, walletLabel: nwcWalletLabel.trim() || "Lightning Wallet" })
-        })
-
-        const data = await res.json().catch(() => null)
-        if (!res.ok) {
-          toast.error(data?.error || "Failed to connect Lightning wallet")
-          return
-        }
-
-        toast.success(data?.message || "Lightning wallet connected")
-        closeProviderModal()
-        await loadAll()
-        return
       }
 
       const payload = await callProvidersApi("POST", {
         action: "saveProvider",
         provider,
-        walletAddress: provider === "solana" || provider === "base" ? walletAddress : undefined,
-        walletType: provider === "solana" || provider === "base" ? walletType : undefined,
-        apiKey: provider === "coinbase" ? walletAddress : undefined
+        apiKey: provider === "coinbase" ? inputValue.trim() : undefined
       })
 
       applyProvidersPayload(payload)
-
-      if (walletSessionId) {
-        const { data: { session: wcsSession } } = await supabase.auth.getSession()
-        const wcsToken = wcsSession?.access_token
-        await fetch("/api/wallet-connect-session", {
-          method: "DELETE",
-          headers: {
-            "Content-Type": "application/json",
-            ...(wcsToken ? { Authorization: `Bearer ${wcsToken}` } : {}),
-          },
-          body: JSON.stringify({ session_id: walletSessionId }),
-        })
-      }
-
-      setActiveProvider(null)
-      setInputValue("")
-      setNwcUri("")
-      setNwcWalletLabel("")
-      setNwcTestResult(null)
-      setNwcTesting(false)
-      setShowMobileConnect(false)
-      setWalletQrCode(null)
-      setSelectedWalletType(null)
-      setWalletSessionId(null)
-      setWalletSessionStatus(null)
-      setWalletMobileDeeplink(null)
-      didToastSyncRef.current = false
-
-      if (pollerRef.current) {
-        clearInterval(pollerRef.current)
-        pollerRef.current = null
-      }
-
-      toast.success(
-        provider === "solana"
-          ? "Solana wallet connected"
-          : provider === "base"
-            ? "Base wallet connected"
-            : provider === "lightning"
-              ? "Bitcoin Lightning setup verified"
-              : "Provider connected"
-      )
+      closeProviderModal()
+      toast.success("Provider connected")
     } catch (err: unknown) {
       console.error("SaveProvider crash:", err)
       toast.error(err instanceof Error ? err.message : "Unexpected error")
@@ -2240,11 +1295,7 @@ function EngineSettingStatus({
                       <button
                         onClick={() => {
                           if (lightningCard.status === "Connected") {
-                            if (lightningCard.connectionType === "speed") {
-                              void disconnectSpeed()
-                            } else {
-                              void disconnect("lightning")
-                            }
+                            void disconnect("lightning")
                           } else {
                             openProvider("lightning")
                           }
@@ -2329,419 +1380,12 @@ function EngineSettingStatus({
             </div>
 
             {activeProvider === "lightning" && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    onClick={() => setLightningSetupTab("speed")}
-                    className={`rounded-xl border px-3 py-3 text-left transition ${
-                      lightningSetupTab === "speed"
-                        ? "border-blue-500 bg-blue-50 text-blue-900"
-                        : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-                    }`}
-                  >
-                    <span className="block text-sm font-semibold">Recommended: Speed Lightning</span>
-                    <span className="mt-1 block text-xs leading-5 text-gray-600">Merchant Speed Account ID setup</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setLightningSetupTab("nwc")}
-                    className={`rounded-xl border px-3 py-3 text-left transition ${
-                      lightningSetupTab === "nwc"
-                        ? "border-blue-500 bg-blue-50 text-blue-900"
-                        : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-                    }`}
-                  >
-                    <span className="block text-sm font-semibold">Advanced NWC Wallet</span>
-                    <span className="mt-1 block text-xs leading-5 text-gray-600">NWC wallet connection</span>
-                  </button>
-                </div>
-
-                {lightningSetupTab === "speed" ? (
-                  <div className="mb-2">
-                    {/* Step progress bars */}
-                    <div className="mb-5 grid grid-cols-2 gap-2">
-                      {[1, 2].map((step) => (
-                        <div
-                          key={step}
-                          className={`h-1.5 rounded-full transition-colors ${
-                            speedSetupStep >= step ? "bg-blue-600" : "bg-gray-200"
-                          }`}
-                        />
-                      ))}
-                    </div>
-
-                    <div className="rounded-2xl border border-gray-200 bg-gray-50/80 p-4 shadow-inner sm:p-5">
-                      {/* ── Step 1: Open Speed ── */}
-                      {speedSetupStep === 1 && (
-                        <div className="space-y-5">
-                          <div>
-                            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
-                              Step 1 of 2
-                            </p>
-                            <h3 className="mt-2 text-xl font-semibold leading-tight text-gray-950">
-                              Open Speed
-                            </h3>
-                            <p className="mt-2 text-sm leading-6 text-gray-600">
-                              Create or open your TrySpeed account. Speed handles Lightning invoices, auto-swap, and merchant settlement.
-                            </p>
-                          </div>
-
-                          {/* Login + Signup buttons */}
-                          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                            {speedLoginUrl ? (
-                              <a
-                                href={speedLoginUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className={`${primaryButtonClass()} w-full text-center sm:w-auto`}
-                              >
-                                Open Speed Login
-                              </a>
-                            ) : (
-                              <div className="flex flex-col gap-1">
-                                <button
-                                  type="button"
-                                  disabled
-                                  className={`${primaryButtonClass()} w-full cursor-not-allowed sm:w-auto`}
-                                >
-                                  Open Speed Login
-                                </button>
-                                <p className="text-xs text-gray-500">Speed login link is not configured yet.</p>
-                              </div>
-                            )}
-                            {speedSignupUrl ? (
-                              <a
-                                href={speedSignupUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className={`${secondaryButtonClass()} w-full text-center sm:w-auto`}
-                              >
-                                Create Speed Account
-                              </a>
-                            ) : null}
-                          </div>
-
-                          {/* Navigation */}
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <button
-                              type="button"
-                              onClick={closeProviderModal}
-                              className="py-1.5 text-sm font-medium text-gray-400 transition hover:text-gray-600 sm:px-1"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setSpeedSetupStep(2)}
-                              className={`${secondaryButtonClass()} w-full sm:w-auto`}
-                            >
-                              I have a Speed account →
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* ── Step 2: Enter Account ID ── */}
-                      {speedSetupStep === 2 && (
-                        <div className="space-y-5">
-                          <div>
-                            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
-                              Step 2 of 2
-                            </p>
-                            <h3 className="mt-2 text-xl font-semibold leading-tight text-gray-950">
-                              Enter Account ID
-                            </h3>
-                            <p className="mt-2 text-sm leading-6 text-gray-600">
-                              Add your Merchant Speed Account ID. PineTree uses it to route Lightning payments to your Speed account.
-                            </p>
-                          </div>
-
-                          <label className="block">
-                            <span className="text-sm font-semibold text-gray-900">Merchant Speed Account ID</span>
-                            <input
-                              value={speedAccountId}
-                              onChange={(e) => setSpeedAccountId(e.target.value)}
-                              placeholder="Merchant Speed Account ID"
-                              className={lightningInputClass()}
-                              autoComplete="off"
-                            />
-                          </label>
-
-                          <p className="text-xs text-gray-500">
-                            Find this under Settings &rarr; Associated Accounts in your Speed dashboard.
-                          </p>
-
-                          <div className="hidden sm:flex sm:items-center sm:justify-between sm:gap-3">
-                            <button
-                              type="button"
-                              onClick={() => setSpeedSetupStep(1)}
-                              className={quietButtonClass()}
-                            >
-                              Back
-                            </button>
-                            <div className="flex items-center gap-2">
-                              {speedAccountSetupUrl ? (
-                                <a
-                                  href={speedAccountSetupUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className={compactSecondaryButtonClass()}
-                                  aria-label="Open Speed Associated Accounts"
-                                  title="Open Speed Associated Accounts"
-                                >
-                                  Open Speed Associated Accounts
-                                </a>
-                              ) : (
-                                <div className="flex flex-col gap-0.5">
-                                  <button
-                                    type="button"
-                                    disabled
-                                    className="inline-flex h-10 cursor-not-allowed items-center justify-center rounded-lg border border-gray-200 bg-white px-3.5 text-sm font-semibold text-gray-400"
-                                    aria-label="Open Speed Associated Accounts"
-                                    title="Open Speed Associated Accounts"
-                                  >
-                                    Open Speed Associated Accounts
-                                  </button>
-                                  <p className="text-xs text-gray-400">Speed account ID link is not configured yet.</p>
-                                </div>
-                              )}
-                              <button
-                                type="button"
-                                onClick={saveSpeedSetup}
-                                disabled={loading || !speedAccountId.trim()}
-                                className={compactPrimaryButtonClass()}
-                              >
-                                {loading ? "Saving..." : "Save Setup"}
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Mobile footer: Associated Accounts / Save Setup / Back */}
-                          <div className="flex flex-col gap-2 sm:hidden">
-                            {speedAccountSetupUrl ? (
-                              <a
-                                href={speedAccountSetupUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className={`${compactSecondaryButtonClass()} w-full text-center`}
-                                aria-label="Open Speed Associated Accounts"
-                                title="Open Speed Associated Accounts"
-                              >
-                                Open Speed Associated Accounts
-                              </a>
-                            ) : (
-                              <div className="flex flex-col gap-0.5">
-                                <button
-                                  type="button"
-                                  disabled
-                                  className="inline-flex h-10 w-full cursor-not-allowed items-center justify-center rounded-lg border border-gray-200 bg-white px-3.5 text-sm font-semibold text-gray-400"
-                                  aria-label="Open Speed Associated Accounts"
-                                  title="Open Speed Associated Accounts"
-                                >
-                                  Open Speed Associated Accounts
-                                </button>
-                                <p className="text-center text-xs text-gray-400">Speed account ID link is not configured yet.</p>
-                              </div>
-                            )}
-                            <button
-                              type="button"
-                              onClick={saveSpeedSetup}
-                              disabled={loading || !speedAccountId.trim()}
-                              className={`${compactPrimaryButtonClass()} w-full`}
-                            >
-                              {loading ? "Saving..." : "Save Setup"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setSpeedSetupStep(1)}
-                              className={`${quietButtonClass()} w-full`}
-                            >
-                              Back
-                            </button>
-                          </div>
-
-                          {getLightningCardState().status === "Connected" && (
-                            <div className="border-t border-gray-100 pt-3">
-                              <button
-                                type="button"
-                                onClick={async () => { await disconnectSpeed(); closeProviderModal() }}
-                                className="text-sm text-red-600 hover:text-red-700"
-                              >
-                                Disconnect Speed setup
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : null}
-
-                <div className={lightningSetupTab === "nwc" ? "space-y-4" : "hidden"}>
-                <div className="rounded-xl border border-gray-200 bg-gray-50/60 px-4 py-3">
-                  <p className="text-sm font-semibold text-gray-900">Advanced NWC Wallet</p>
-                  <p className="mt-1 text-sm leading-5 text-gray-600">
-                    Connect a direct Lightning wallet only if you manage your own NWC connection.
-                  </p>
-                </div>
-
-                {/* Get your wallet ready — collapsed accordion */}
-                <div className="rounded-xl border border-gray-200 bg-white">
-                  <button
-                    type="button"
-                    onClick={() => setNwcWalletReadyOpen((v) => !v)}
-                    className="flex w-full items-center justify-between px-4 py-3 text-left"
-                  >
-                    <div>
-                      <span className="block text-sm font-semibold text-gray-900">Get your wallet ready</span>
-                      {!nwcWalletReadyOpen && (
-                        <span className="block text-xs text-gray-500">Open setup links for Alby Hub and Zeus.</span>
-                      )}
-                    </div>
-                    <svg
-                      className={`ml-2 h-4 w-4 shrink-0 text-gray-400 transition-transform ${nwcWalletReadyOpen ? "rotate-180" : ""}`}
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      aria-hidden="true"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-                  {nwcWalletReadyOpen && (
-                    <div className="border-t border-gray-100 px-4 pb-4 pt-3">
-                      <div className="flex flex-wrap gap-2">
-                        <a href={providerAlbyHubAppsUrl} target="_blank" rel="noopener noreferrer" className={actionButtonClass()}>
-                          Open Alby Hub Apps
-                        </a>
-                        <a href={providerZeusIosUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                          Zeus iOS
-                        </a>
-                        <a href={providerZeusAndroidUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                          Zeus Android
-                        </a>
-                        <a href={providerAlbyNwcDocsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                          Alby Setup Guide
-                        </a>
-                        <a href={providerZeusDocsUrl} target="_blank" rel="noopener noreferrer" className={secondaryButtonClass()}>
-                          Zeus Guide
-                        </a>
-                      </div>
-                      <p className="mt-2 text-xs leading-5 text-gray-500">
-                        Enable three permissions: create invoices, check payment status, and pay out. For step-by-step instructions, open the <strong>Wallets</strong> page and use the Manage Wallet tab.
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <label className="block">
-                  <span className="text-sm font-semibold text-gray-900">NWC connection string</span>
-                  <span className="mt-0.5 block text-xs text-gray-500">
-                    Found in your wallet under &ldquo;Nostr Wallet Connect&rdquo; or &ldquo;NWC&rdquo;. Starts with <span className="font-mono">nostr+walletconnect://</span>
-                  </span>
-                  <input
-                    type="password"
-                    value={nwcUri}
-                    onChange={(e) => { setNwcUri(e.target.value); setNwcTestResult(null) }}
-                    placeholder="NWC connection string"
-                    className={lightningInputClass()}
-                    autoComplete="off"
-                  />
-                  <span className="mt-1 block text-xs text-gray-400">
-                    Stored securely on PineTree servers. Never shown again after saving.
-                  </span>
-                </label>
-
-                <label className="block">
-                  <span className="text-sm font-semibold text-gray-900">
-                    Wallet label
-                  </span>
-                  <input
-                    value={nwcWalletLabel}
-                    onChange={(e) => setNwcWalletLabel(e.target.value)}
-                    placeholder="Wallet label"
-                    className={lightningInputClass()}
-                  />
-                </label>
-
-                {nwcTestResult && (
-                  <div className={`rounded-xl border px-4 py-3 ${nwcTestResult.ready ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}`}>
-                    <p className={`text-sm font-semibold ${nwcTestResult.ready ? "text-green-800" : "text-amber-900"}`}>
-                      {nwcTestResult.ready
-                        ? `Ready for live Lightning payments${nwcTestResult.walletAlias ? ` — ${nwcTestResult.walletAlias}` : ""}`
-                        : nwcTestResult.connected
-                          ? "Connected, but not ready for live payments"
-                          : "Could not connect to wallet"}
-                    </p>
-                    {nwcTestResult.connected && !nwcTestResult.ready && (
-                      <div className="mt-2 space-y-1">
-                        {(nwcTestResult.missingPermissions || []).map((perm) => (
-                          <p key={perm} className="text-xs text-amber-800">
-                            Missing:{" "}
-                            {perm === "make_invoice"
-                              ? "Create invoices"
-                              : perm === "lookup_invoice"
-                                ? "Check payment status"
-                                : perm === "pay_invoice"
-                                  ? "Pay invoice (pay_invoice)"
-                                  : perm}
-                          </p>
-                        ))}
-                      </div>
-                    )}
-                    {!nwcTestResult.connected && nwcTestResult.error && (
-                      <p className="mt-1 text-xs text-amber-800">{nwcTestResult.error}</p>
-                    )}
-                  </div>
-                )}
-
-                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
-                  <button
-                    type="button"
-                    onClick={closeProviderModal}
-                    className={`${secondaryButtonClass()} w-full sm:w-auto`}
-                  >
-                    Cancel
-                  </button>
-
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <button
-                      type="button"
-                      onClick={testNwcConnection}
-                      disabled={nwcTesting || !nwcUri.trim()}
-                      className={`hidden ${secondaryButtonClass()} w-full sm:w-auto`}
-                    >
-                      {nwcTesting ? "Testing..." : "Test Connection"}
-                    </button>
-
-                    <button
-                      onClick={() => saveProvider("lightning")}
-                      disabled={loading || !nwcUri.trim()}
-                      className={`${primaryButtonClass()} w-full sm:w-auto`}
-                    >
-                      {loading ? "Connecting..." : "Connect NWC Wallet"}
-                    </button>
-                  </div>
-                </div>
-                </div>
-              </div>
-            )}
-
-
-            {(activeProvider === "solana" || activeProvider === "base") && (
-              <div className="mb-5 space-y-1">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-600">
-                  <span className="font-semibold text-gray-950">
-                    {activeProvider === "solana" ? "Solana Pay" : "Base Pay"}
-                  </span>
-                  <span className="text-gray-400">·</span>
-                  <span>Settlement: <span className="font-semibold text-gray-950">Connected wallet</span></span>
-                </div>
-                <p className="text-sm leading-5 text-gray-500">
-                  Connect the wallet that will receive payments. Funds go directly to this address when customers pay.
+              <div className="rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-5 text-center">
+                <p className="text-sm font-semibold text-blue-900">
+                  Bitcoin Lightning is managed through PineTree Wallet
+                </p>
+                <p className="mt-1.5 text-xs leading-5 text-blue-700">
+                  Lightning payments are routed automatically. No manual setup is required.
                 </p>
               </div>
             )}
@@ -2784,221 +1428,11 @@ function EngineSettingStatus({
               </div>
             )}
 
-            {(activeProvider === "solana" || activeProvider === "base") && (
-              <div className="mb-4 space-y-4">
-
-                {/* Step 1 — wallet selection */}
-                <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    {activeProvider === "solana" ? "Choose wallet" : "Choose wallet"}
-                  </p>
-                  {activeProvider === "solana" && (
-                    <div className="grid grid-cols-2 gap-2">
-                      {(["PHANTOM", "SOLFLARE"] as const).map((wt) => (
-                        <button
-                          key={wt}
-                          type="button"
-                          onClick={() => selectWalletType(wt)}
-                          className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
-                            selectedWalletType === wt
-                              ? "border-[#0052FF] bg-[#0052FF]/5 text-[#0052FF]"
-                              : "border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
-                          }`}
-                        >
-                          {wt === "PHANTOM" ? "Phantom" : "Solflare"}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {activeProvider === "base" && (
-                    <div className="grid grid-cols-3 gap-2">
-                      {(["BASEAPP", "METAMASK", "TRUST"] as const).map((wt) => (
-                        <button
-                          key={wt}
-                          type="button"
-                          onClick={() => selectWalletType(wt)}
-                          className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
-                            selectedWalletType === wt
-                              ? "border-[#0052FF] bg-[#0052FF]/5 text-[#0052FF]"
-                              : "border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
-                          }`}
-                        >
-                          {wt === "BASEAPP" ? "Base Wallet" : wt === "METAMASK" ? "MetaMask" : "Trust Wallet"}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Wallet address review */}
-                <div className="rounded-xl border border-gray-200 bg-white p-4">
-                  <label className="block">
-                    <span className="text-sm font-semibold text-gray-950">Wallet address</span>
-                    <span className="mt-1 block text-xs leading-5 text-gray-500">
-                      Review the connected wallet address, or paste an address manually before saving.
-                    </span>
-                    <input
-                      value={inputValue}
-                      onChange={(e) => {
-                        const nextValue = e.target.value
-                        setInputValue(nextValue)
-                        if (connectedWalletAddress && nextValue.trim() !== connectedWalletAddress.trim()) {
-                          setConnectedWalletAddress(null)
-                          setWalletSessionStatus(null)
-                        }
-                      }}
-                      placeholder={activeProvider === "solana" ? "Solana wallet address" : "Base wallet address (0x...)"}
-                      className="mt-2 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none focus:border-[#0052FF] focus:ring-4 focus:ring-blue-50"
-                    />
-                  </label>
-
-                  {connectedWalletAddress && (
-                    <p className="mt-2 text-xs font-semibold text-[#0052FF]">
-                      Wallet connected: {formatCredentialPart(connectedWalletAddress, 6, 4)}
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Setup options
-                  </p>
-                  {!selectedWalletType && (
-                    <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
-                      Choose a wallet to generate the setup QR.
-                    </p>
-                  )}
-                  {selectedWalletType && (!walletSessionId || !walletQrCode) && (
-                    <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
-                      Preparing setup QR...
-                    </p>
-                  )}
-                </div>
-
-                {/* Primary — scan QR with mobile wallet */}
-                {selectedWalletType && walletSessionId && walletQrCode && (
-                  <div className="rounded-xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-gray-950">Scan QR with mobile wallet</p>
-                        <p className="mt-1 text-sm leading-5 text-gray-600">
-                          Scan this QR from your selected wallet to connect and approve.
-                        </p>
-                      </div>
-                      {walletSessionStatus === "pending" && (
-                        <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-[#0052FF] shadow-sm ring-1 ring-blue-100">
-                          Waiting
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="mt-3 flex flex-col items-center gap-3 rounded-lg bg-white/80 p-3">
-                        <Image
-                          src={walletQrCode}
-                          alt="Wallet setup QR code"
-                          width={208}
-                          height={208}
-                          className="h-52 w-52 rounded-lg bg-white p-2 shadow-sm"
-                          unoptimized
-                        />
-                        {walletSessionStatus === "pending" && (
-                          <p className="text-center text-xs text-gray-600">
-                            Waiting for mobile wallet approval...
-                          </p>
-                        )}
-                        {walletSessionStatus === "connected" && (
-                          <p className="text-center text-xs font-semibold text-[#0052FF]">
-                            Mobile wallet connected. Review and save below.
-                          </p>
-                        )}
-                        {walletMobileDeeplink && (
-                          <a
-                            href={walletMobileDeeplink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs font-semibold text-blue-600 underline"
-                          >
-                            Open wallet manually
-                          </a>
-                        )}
-                      </div>
-                  </div>
-                )}
-
-                {/* Secondary — open mobile wallet (works now via deep-link) */}
-                <div className="rounded-xl border border-gray-200 bg-white p-4">
-                  <p className="text-sm font-semibold text-gray-950">Open in mobile wallet</p>
-                  <p className="mt-1 text-sm leading-5 text-gray-600">
-                    Tap to open your selected wallet app and approve the connection from your phone.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (activeProvider === "solana") {
-                        await openSolanaMobileWallet(selectedWalletType)
-                      } else {
-                        await openBaseMobileWallet()
-                      }
-                    }}
-                    className="mt-3 rounded-lg border border-[#0052FF] bg-[#0052FF] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={!selectedWalletType}
-                  >
-                    Open Mobile Wallet
-                  </button>
-
-                  {(showMobileConnect || walletSessionStatus === "connected") && (
-                    <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50/80 p-3 text-center">
-                      {walletSessionStatus === "pending" && (
-                        <p className="text-xs text-gray-600">Waiting for mobile wallet approval…</p>
-                      )}
-                      {walletSessionStatus === "connected" && (
-                        <p className="text-xs font-semibold text-[#0052FF]">Mobile wallet connected — review and save below.</p>
-                      )}
-                      {activeProvider === "base" && walletMobileDeeplink && (
-                        <a
-                          href={walletMobileDeeplink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="mt-1 inline-block text-xs text-blue-600 underline"
-                        >
-                          Open wallet manually
-                        </a>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Tertiary — connect on this device */}
-                <div className="rounded-xl border border-gray-200 bg-white p-4">
-                  <p className="text-sm font-semibold text-gray-950">Connect on this device</p>
-                  <p className="mt-1 text-sm leading-5 text-gray-600">
-                    If your wallet browser extension is installed, connect directly from this page.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={connectWalletOnThisDevice}
-                    className="mt-3 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={loading || !selectedWalletType}
-                  >
-                    {loading ? "Connecting..." : "Connect on This Device"}
-                  </button>
-                </div>
-
-              </div>
-            )}
-
-            {activeProvider !== "solana" &&
-              activeProvider !== "base" &&
-              !isManagedCardProvider(activeProvider) &&
-              activeProvider !== "lightning" && (
+            {activeProvider === "coinbase" && (
                 <input
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
-                  placeholder={
-                    activeProvider === "coinbase"
-                      ? "Enter Coinbase API Key"
-                      : "Enter Wallet Address"
-                  }
+                  placeholder="Enter Coinbase API Key"
                   className="w-full border border-gray-300 rounded p-2 mb-4 text-black bg-white"
                 />
               )}
@@ -3035,7 +1469,7 @@ function EngineSettingStatus({
             </div>
             )}
 
-            {activeProvider !== "lightning" && !isManagedCardProvider(activeProvider) && (
+            {activeProvider === "coinbase" && (
             <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
               <button
                 onClick={closeProviderModal}
@@ -3049,7 +1483,7 @@ function EngineSettingStatus({
                 disabled={loading}
                 className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded w-full sm:w-auto"
               >
-                {loading ? "Saving..." : "Save Wallet"}
+                {loading ? "Saving..." : "Save"}
               </button>
             </div>
             )}

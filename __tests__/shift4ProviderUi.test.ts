@@ -7,8 +7,10 @@ function read(relativePath: string) {
 }
 
 function shift4ModalSource(source: string) {
+  // Extract from the managed-card checklist block.
+  // Bounded by the second isManagedCardProvider occurrence (the sticky footer).
   const start = source.indexOf("isManagedCardProvider(activeProvider) && (")
-  const end = source.indexOf('{(activeProvider === "solana" || activeProvider === "base")', start)
+  const end = source.indexOf("isManagedCardProvider(activeProvider) && (", start + 1)
   expect(start).toBeGreaterThanOrEqual(0)
   expect(end).toBeGreaterThan(start)
   return source.slice(start, end)
