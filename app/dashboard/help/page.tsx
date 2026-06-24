@@ -119,7 +119,7 @@ const supportHubSections = [
   },
   {
     title: "Wallets & Providers",
-    description: "Connect Solana Pay, Base payments, Shift4, Bitcoin Lightning via NWC, and wallet rails.",
+    description: "Manage Solana Pay, Base Pay, Bitcoin Lightning, Shift4, and wallet rails.",
     icon: WalletCards,
     articleIds: ["providers-page-overview", "solana-provider-behavior", "base-wallet-payment-behavior"]
   },

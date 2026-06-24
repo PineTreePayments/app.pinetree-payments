@@ -128,7 +128,7 @@ function buildNwcConnectionStatus(
       connected: false,
       ready: false,
       missingPermissions: ["make_invoice", "lookup_invoice", "pay_invoice"],
-      readinessReason: "Connect an NWC wallet before enabling Bitcoin Lightning.",
+      readinessReason: "Bitcoin Lightning is managed through PineTree Wallet.",
       walletLabel: null,
       canMakeInvoice: false,
       canLookupInvoice: false,

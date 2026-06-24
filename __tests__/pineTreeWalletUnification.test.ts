@@ -100,7 +100,35 @@ describe("Providers page canonical wallet mode", () => {
 
   it("shows managed cards for Solana and Base when canonicalWalletMode is true", () => {
     expect(page).toContain("{canonicalWalletMode ? (")
+    expect(page).toContain('name="Solana Pay"')
+    expect(page).toContain('name="Base Pay"')
+    expect(page).toContain('name="Bitcoin Lightning"')
+    expect(page).toContain('description="Solana payments settle to the merchant\'s PineTree Wallet."')
+    expect(page).toContain('description="Base payments settle to the merchant\'s PineTree Wallet."')
+    expect(page).toContain('description="Bitcoin Lightning payments settle to the merchant\'s PineTree Wallet."')
     expect(page).toContain("Manage from PineTree Wallet")
+  })
+
+  it("uses PineTree Wallet settlement for every managed crypto rail", () => {
+    expect(page).toContain("function ManagedCryptoRailCard")
+    expect(page).toContain(">Settlement</span>")
+    expect(page).toContain(">PineTree Wallet</span>")
+  })
+
+  it("shows Bitcoin Lightning as Managed in canonical wallet mode", () => {
+    expect(page).toContain("if (canonicalWalletMode || canonicalLightningMode)")
+    expect(page).toContain('status: "Managed" as const')
+    expect(page).toContain('connectionType: "pinetree" as const')
+  })
+
+  it("does not let the legacy Bitcoin Lightning setup card render in canonical wallet mode", () => {
+    expect(page).toContain("{!canonicalWalletMode && (() => {")
+    expect(page).not.toContain("Setup needed: connect Speed Lightning or Advanced NWC.")
+    expect(page).not.toContain("Connect Speed")
+    expect(page).not.toContain("Advanced NWC")
+    expect(page).not.toContain("Speed Connect")
+    expect(page).not.toContain("Open Speed dashboard")
+    expect(page).not.toContain("Manual Lightning setup")
   })
 
   it("falls back to ProviderCard connect flow when not in canonical mode", () => {

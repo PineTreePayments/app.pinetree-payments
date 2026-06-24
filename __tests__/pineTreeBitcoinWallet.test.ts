@@ -254,6 +254,7 @@ describe("ReceiveRow status display", () => {
 
   it("ReceiveRow renders address entries and copy button only when isReady", () => {
     expect(page).toContain("{isReady ? (")
+    expect(page).toContain("{entry.address}")
     expect(page).toContain('aria-label={`Copy ${label}`}')
   })
 
@@ -261,6 +262,60 @@ describe("ReceiveRow status display", () => {
     expect(page).toContain("bitcoinPayoutEntries")
     expect(page).toContain("profile.btc_address")
     expect(page).toContain('<ReceiveRow label="Bitcoin wallet" entries={bitcoinPayoutEntries}')
+  })
+
+  it("Bitcoin receive row shows Address syncing only when btc_address is missing", () => {
+    expect(page).toContain("const bitcoinPayoutEntries: AddressEntry[] = profile?.btc_address")
+    expect(page).toContain('isReady ? "Ready" : "Address syncing"')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Main PineTree Wallet rail pills
+// ---------------------------------------------------------------------------
+
+describe("PineTree Wallet setup card rail pills", () => {
+  const page = read("app/dashboard/wallet-setup/page.tsx")
+
+  it("renders compact polished rail pills with a ready dot", () => {
+    expect(page).toContain('aria-label="Supported rails"')
+    expect(page).toContain("border border-blue-200/80 bg-blue-50/80")
+    expect(page).toContain("bg-emerald-500")
+    expect(page).toContain('aria-hidden="true"')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Internal BTC address setter route
+// ---------------------------------------------------------------------------
+
+describe("internal PineTree BTC address setter route", () => {
+  const route = read("app/api/internal/wallets/pinetree/btc-address/route.ts")
+
+  it("exists at the internal BTC address route and is protected by INTERNAL_API_SECRET", () => {
+    expect(route).toContain("POST /api/internal/wallets/pinetree/btc-address")
+    expect(route).toContain("INTERNAL_API_SECRET")
+    expect(route).toContain("return bearer === secret")
+  })
+
+  it("accepts merchant_id, btc_address, provider, and optional btc_address_type", () => {
+    expect(route).toContain("merchant_id is required")
+    expect(route).toContain("btc_address is required")
+    expect(route).toContain("btc_wallet_provider")
+    expect(route).toContain("btc_address_type")
+  })
+
+  it("saves btc_address and enables BTC payout", () => {
+    expect(route).toContain("btcAddress: rawAddress")
+    expect(route).toContain("btcWalletProvider")
+    expect(route).toContain("btcPayoutEnabled: true")
+    expect(route).toContain("btcPayoutVerifiedAt: new Date().toISOString()")
+  })
+
+  it("detects bc1p as taproot and bc1q as native_segwit through inferBtcAddressType", () => {
+    expect(route).toContain("inferBtcAddressType(rawAddress)")
+    expect(inferBtcAddressType("bc1pmerchantpayoutaddresstest")).toBe("taproot")
+    expect(inferBtcAddressType("bc1qmerchantpayoutaddresstest")).toBe("native_segwit")
   })
 })
 

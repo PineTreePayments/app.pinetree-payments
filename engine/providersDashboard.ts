@@ -113,7 +113,7 @@ export function buildOverviewRailReadiness(
           id,
           label,
           status: "Connected",
-          detail: speedConnected ? "Speed Lightning ready" : "NWC wallet ready"
+          detail: "PineTree Wallet managed rail ready"
         }
       }
       if (speed?.enabled === false || nwc?.enabled === false) {
@@ -125,7 +125,7 @@ export function buildOverviewRailReadiness(
         id,
         label,
         status: reason ? "Requires Configuration" : "Not Connected",
-        detail: reason || "Connect Speed or an NWC wallet"
+        detail: reason || "PineTree Wallet setup pending"
       }
     }
 
@@ -279,7 +279,7 @@ function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
       readiness: {
         ready: false,
         missingPermissions: ["make_invoice", "lookup_invoice", "pay_invoice"],
-        reason: "Connect an NWC wallet before enabling Bitcoin Lightning."
+        reason: "Bitcoin Lightning is managed through PineTree Wallet."
       }
     })
   }

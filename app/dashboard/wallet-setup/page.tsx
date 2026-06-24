@@ -267,7 +267,7 @@ function ReceiveRow({
                   <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">{entry.detail}</p>
                 ) : null}
                 <p className="truncate font-mono text-xs text-gray-800" title={entry.address}>
-                  {shortAddress(entry.address)}
+                  {entry.address}
                 </p>
               </div>
               <button
@@ -635,9 +635,13 @@ function PineTreeWalletRuntime() {
             <p className="text-sm leading-6 text-gray-600">
               One merchant wallet for receiving funds and managing PineTree&apos;s supported payment rails.
             </p>
-            <div className="flex flex-wrap gap-2.5" aria-label="Supported rails">
+            <div className="flex flex-wrap items-center gap-2.5" aria-label="Supported rails">
               {primaryRails.map((rail) => (
-                <span key={rail} className="rounded-full border border-blue-100 bg-blue-50/80 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                <span
+                  key={rail}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-blue-200/80 bg-blue-50/80 px-2.5 py-1 text-xs font-semibold text-blue-800 shadow-[0_1px_0_rgba(37,99,235,0.08)]"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_0_2px_rgba(16,185,129,0.14)]" aria-hidden="true" />
                   {rail}
                 </span>
               ))}
