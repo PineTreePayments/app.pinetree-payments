@@ -6,6 +6,7 @@ import {
   normalizeBtcAddressType,
   upsertPineTreeWalletProfile
 } from "@/database/pineTreeWalletProfiles"
+import { provisionMerchantBitcoinAddress } from "@/engine/pineTreeBitcoinAddressProvisioning"
 
 /**
  * GET /api/wallets/pinetree-profile
@@ -37,6 +38,10 @@ export async function GET(req: NextRequest) {
  *   bitcoin_onchain_address    string | null
  *   btc_address                string | null
  *   btc_address_type           "taproot" | "native_segwit" | "legacy" | "nested_segwit" | "unknown" | null
+ *
+ * Bitcoin payout address provisioning is completed server-side. A Dynamic BTC
+ * address from the client may be used, but a null client value never clears an
+ * existing btc_address.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -53,6 +58,19 @@ export async function POST(req: NextRequest) {
       : normalizedBtcAddress
         ? inferBtcAddressType(normalizedBtcAddress)
         : undefined
+    const existingProfile = await getPineTreeWalletProfile(merchantId)
+    const bitcoinProvisioning = await provisionMerchantBitcoinAddress({
+      merchantId,
+      existingProfile,
+      dynamicBtcAddress: normalizedBtcAddress,
+      dynamicBtcAddressType: btcAddressType,
+    })
+    const provisionedBtcAddress = bitcoinProvisioning.btcAddress
+      ? bitcoinProvisioning.btcAddress.trim()
+      : null
+    const now = new Date().toISOString()
+    const btcAddressAlreadyExists = bitcoinProvisioning.status === "already_exists"
+    const btcAddressIsReady = Boolean(provisionedBtcAddress)
 
     const profile = await upsertPineTreeWalletProfile({
       merchantId,
@@ -64,12 +82,20 @@ export async function POST(req: NextRequest) {
       bitcoinLightningStatus: "bitcoin_lightning_status" in body ? (body.bitcoin_lightning_status as "not_configured" | "pending" | "ready" | "needs_attention" | undefined) : undefined,
       bitcoinLightningProvider: "bitcoin_lightning_provider" in body ? (body.bitcoin_lightning_provider as string | null) : undefined,
       bitcoinLightningAccountId: "bitcoin_lightning_account_id" in body ? (body.bitcoin_lightning_account_id as string | null) : undefined,
-      btcAddress: bodyBtcAddress !== undefined ? normalizedBtcAddress : undefined,
-      btcAddressType,
-      btcWalletProvider: bodyBtcAddress !== undefined ? "dynamic_fireblocks" : undefined,
-      btcPayoutEnabled: bodyBtcAddress !== undefined ? Boolean(normalizedBtcAddress) : undefined,
-      btcPayoutVerifiedAt: bodyBtcAddress !== undefined
-        ? normalizedBtcAddress ? new Date().toISOString() : null
+      btcAddress: btcAddressIsReady && !btcAddressAlreadyExists ? provisionedBtcAddress : undefined,
+      btcAddressType: btcAddressIsReady && !btcAddressAlreadyExists ? bitcoinProvisioning.btcAddressType : undefined,
+      btcWalletProvider: btcAddressIsReady && !btcAddressAlreadyExists
+        ? bitcoinProvisioning.btcWalletProvider
+        : bitcoinProvisioning.status === "missing_provider" || bitcoinProvisioning.status === "provider_failed"
+          ? bitcoinProvisioning.btcWalletProvider
+          : undefined,
+      btcWalletProviderRef: btcAddressIsReady && !btcAddressAlreadyExists ? bitcoinProvisioning.providerRef ?? null : undefined,
+      btcWalletLastProvisionedAt: btcAddressIsReady && !btcAddressAlreadyExists ? now : undefined,
+      btcWalletProvisioningStatus: bitcoinProvisioning.status,
+      btcWalletProvisioningError: bitcoinProvisioning.error || null,
+      btcPayoutEnabled: btcAddressIsReady || btcAddressAlreadyExists ? true : undefined,
+      btcPayoutVerifiedAt: btcAddressIsReady || (btcAddressAlreadyExists && !existingProfile?.btc_payout_verified_at)
+        ? now
         : undefined,
     })
 

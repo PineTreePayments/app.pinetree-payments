@@ -345,6 +345,19 @@ describe("PineTree embedded wallet setup", () => {
     expect(apiRoute).toContain("upsertPineTreeWalletProfile")
   })
 
+  it("pinetree-profile API runs server-side BTC address provisioning during profile sync", () => {
+    expect(apiRoute).toContain("provisionMerchantBitcoinAddress")
+    expect(apiRoute).toContain("existingProfile")
+    expect(apiRoute).toContain("dynamicBtcAddress: normalizedBtcAddress")
+    expect(apiRoute).toContain("btcWalletProvisioningStatus: bitcoinProvisioning.status")
+    expect(apiRoute).toContain("btcWalletProvisioningError: bitcoinProvisioning.error || null")
+  })
+
+  it("pinetree-profile API does not overwrite an existing btc_address with null", () => {
+    expect(apiRoute).toContain('const btcAddressAlreadyExists = bitcoinProvisioning.status === "already_exists"')
+    expect(apiRoute).toContain("btcAddress: btcAddressIsReady && !btcAddressAlreadyExists ? provisionedBtcAddress : undefined")
+  })
+
   // -------------------------------------------------------------------------
   // Error / config states
   // -------------------------------------------------------------------------

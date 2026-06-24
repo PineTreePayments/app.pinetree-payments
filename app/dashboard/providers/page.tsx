@@ -620,7 +620,7 @@ function EngineSettingStatus({
       return {
         status: "Connected" as const,
         connectionType: "nwc" as const,
-        summary: "Bitcoin Lightning payments route through the connected NWC wallet.",
+        summary: "Bitcoin Lightning payments route through a legacy Lightning wallet.",
         detail: walletLabel
       }
     }
@@ -1240,7 +1240,7 @@ function EngineSettingStatus({
                     {lightningCard.connectionType === "speed"
                       ? "Speed account"
                       : lightningCard.connectionType === "nwc"
-                        ? "NWC wallet"
+                        ? "Legacy Lightning wallet"
                         : lightningCard.connectionType === "pinetree"
                           ? "PineTree Wallet"
                           : "PineTree Wallet"}
@@ -1267,8 +1267,8 @@ function EngineSettingStatus({
                 {lightningCard.connectionType === "nwc" && (
                   <div className="rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2.5">
                     <span className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Connected</span>
-                    <p className="mt-1 truncate text-sm font-semibold text-gray-950" title="NWC - Bitcoin Lightning">
-                      NWC &bull; Bitcoin Lightning
+                    <p className="mt-1 truncate text-sm font-semibold text-gray-950" title="Legacy Lightning - Bitcoin Lightning">
+                      Legacy Lightning &bull; Bitcoin Lightning
                     </p>
                     <p className="mt-0.5 truncate text-xs leading-5 text-gray-500" title={lightningCard.detail}>
                       {lightningCard.detail}

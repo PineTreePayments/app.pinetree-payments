@@ -440,7 +440,7 @@ export async function createPayment(
       } else {
         const speedSetup = await getMerchantSpeedProvider(input.merchantId)
         if (!speedSetup?.accountId || !speedSetup.readyForPayments) {
-          throw new Error("Speed Lightning is not ready. Save a merchant Speed Account ID and pass the PineTree Speed platform test.")
+          throw new Error("Bitcoin Lightning is not ready for this merchant.")
         }
         speedMerchantAccountId = speedSetup.accountId
         merchantWalletAddress = speedMerchantAccountId
@@ -448,10 +448,10 @@ export async function createPayment(
     } else {
       const nwcSetup = await getMerchantNwcUriForPayment(input.merchantId)
       if (!nwcSetup) {
-        throw new Error("Lightning wallet not connected. Please connect an NWC-compatible Lightning wallet in your dashboard.")
+        throw new Error("Bitcoin Lightning is not ready for this merchant.")
       }
       if (!nwcSetup.readiness.ready) {
-        throw new Error(nwcSetup.readiness.reason || "Lightning wallet is connected but not ready for live payments.")
+        throw new Error(nwcSetup.readiness.reason || "Bitcoin Lightning is not ready for live payments.")
       }
       nwcUri = nwcSetup.nwcUri
     }

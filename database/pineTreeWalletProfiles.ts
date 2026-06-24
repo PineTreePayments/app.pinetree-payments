@@ -23,6 +23,10 @@ export type PineTreeWalletProfile = {
   btc_address: string | null
   btc_address_type: BtcAddressType | null
   btc_wallet_provider: string | null
+  btc_wallet_provider_ref: string | null
+  btc_wallet_last_provisioned_at: string | null
+  btc_wallet_provisioning_status: string | null
+  btc_wallet_provisioning_error: string | null
   btc_payout_enabled: boolean
   btc_payout_verified_at: string | null
   status: PineTreeWalletProfileStatus
@@ -44,6 +48,10 @@ export type UpsertWalletProfileInput = {
   btcAddress?: string | null
   btcAddressType?: BtcAddressType | string | null
   btcWalletProvider?: string | null
+  btcWalletProviderRef?: string | null
+  btcWalletLastProvisionedAt?: string | null
+  btcWalletProvisioningStatus?: string | null
+  btcWalletProvisioningError?: string | null
   btcPayoutEnabled?: boolean
   btcPayoutVerifiedAt?: string | null
 }
@@ -129,6 +137,10 @@ export async function upsertPineTreeWalletProfile(
       ? normalizeBtcAddressType(input.btcAddressType)
       : existing?.btc_address_type ?? null,
     btc_wallet_provider: input.btcWalletProvider !== undefined ? input.btcWalletProvider : existing?.btc_wallet_provider ?? null,
+    btc_wallet_provider_ref: input.btcWalletProviderRef !== undefined ? input.btcWalletProviderRef : existing?.btc_wallet_provider_ref ?? null,
+    btc_wallet_last_provisioned_at: input.btcWalletLastProvisionedAt !== undefined ? input.btcWalletLastProvisionedAt : existing?.btc_wallet_last_provisioned_at ?? null,
+    btc_wallet_provisioning_status: input.btcWalletProvisioningStatus !== undefined ? input.btcWalletProvisioningStatus : existing?.btc_wallet_provisioning_status ?? null,
+    btc_wallet_provisioning_error: input.btcWalletProvisioningError !== undefined ? input.btcWalletProvisioningError : existing?.btc_wallet_provisioning_error ?? null,
     btc_payout_enabled: input.btcPayoutEnabled !== undefined ? input.btcPayoutEnabled : existing?.btc_payout_enabled ?? false,
     btc_payout_verified_at: input.btcPayoutVerifiedAt !== undefined ? input.btcPayoutVerifiedAt : existing?.btc_payout_verified_at ?? null,
   }

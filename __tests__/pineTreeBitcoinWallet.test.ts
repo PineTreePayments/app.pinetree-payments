@@ -232,10 +232,10 @@ describe("upsertPineTreeWalletProfile merge safety", () => {
     expect(dbHelper).toContain("btc_address: input.btcAddress !== undefined ? input.btcAddress : existing?.btc_address ?? null,")
   })
 
-  it("btc_payout_enabled is true only when a btc_address is provided", () => {
-    // The route sets btcPayoutEnabled only when bodyBtcAddress is present
+  it("btc_payout_enabled is set by server-side BTC provisioning when an address exists", () => {
     const apiRoute = read("app/api/wallets/pinetree-profile/route.ts")
-    expect(apiRoute).toContain("btcPayoutEnabled: bodyBtcAddress !== undefined ? Boolean(normalizedBtcAddress) : undefined,")
+    expect(apiRoute).toContain("provisionMerchantBitcoinAddress")
+    expect(apiRoute).toContain("btcPayoutEnabled: btcAddressIsReady || btcAddressAlreadyExists ? true : undefined,")
   })
 })
 
