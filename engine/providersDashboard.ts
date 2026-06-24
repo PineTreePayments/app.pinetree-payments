@@ -482,6 +482,48 @@ export async function toggleProviderEngine(
 ) {
   await loadProviders()
 
+  const canonicalWalletMode =
+    process.env.PINE_TREE_WALLET_CANONICAL === "true" ||
+    process.env.NEXT_PUBLIC_PINE_TREE_WALLET_CANONICAL === "true"
+
+  if (provider === "lightning" && canonicalWalletMode) {
+    const { data: existingSpeed, error: existingSpeedError } = await db
+      .from("merchant_providers")
+      .select("credentials,status")
+      .eq("merchant_id", merchantId)
+      .eq("provider", SPEED_PROVIDER_NAME)
+      .maybeSingle()
+
+    if (existingSpeedError) {
+      throw new Error(`Failed checking Speed Lightning provider: ${existingSpeedError.message}`)
+    }
+
+    const existingCredentials = (existingSpeed?.credentials || {}) as JsonObject
+    const { error } = await db
+      .from("merchant_providers")
+      .upsert(
+        {
+          merchant_id: merchantId,
+          provider: SPEED_PROVIDER_NAME,
+          status: String(existingSpeed?.status || "connected"),
+          enabled,
+          credentials: {
+            ...existingCredentials,
+            provider_model: "pine_tree_speed_platform",
+            payout_destination: "pinetree_wallet",
+            setup_source: "pinetree_wallet"
+          }
+        },
+        { onConflict: "merchant_id,provider" }
+      )
+
+    if (error) {
+      throw new Error(`Failed to toggle provider: ${error.message}`)
+    }
+
+    return
+  }
+
   if (provider === "lightning" && enabled) {
     const { data, error: lookupError } = await db
       .from("merchant_providers")
@@ -650,6 +692,39 @@ export async function saveProviderEngine(args: {
     credentials = {
       wallet: address,
       wallet_type: walletType || null
+    }
+    const { data: existingProvider, error: existingProviderError } = await db
+      .from("merchant_providers")
+      .select("enabled")
+      .eq("merchant_id", merchantId)
+      .eq("provider", provider)
+      .maybeSingle()
+
+    if (existingProviderError) {
+      throw new Error(`Failed loading provider enabled state: ${existingProviderError.message}`)
+    }
+
+    enabled = existingProvider ? Boolean(existingProvider.enabled) : true
+  } else if (provider === SPEED_PROVIDER_NAME) {
+    const { data: existingSpeed, error: existingSpeedError } = await db
+      .from("merchant_providers")
+      .select("credentials,status,enabled")
+      .eq("merchant_id", merchantId)
+      .eq("provider", SPEED_PROVIDER_NAME)
+      .maybeSingle()
+
+    if (existingSpeedError) {
+      throw new Error(`Failed loading Speed Lightning provider: ${existingSpeedError.message}`)
+    }
+
+    const existingCredentials = (existingSpeed?.credentials || {}) as JsonObject
+    status = String(existingSpeed?.status || "connected")
+    enabled = existingSpeed ? Boolean(existingSpeed.enabled) : true
+    credentials = {
+      ...existingCredentials,
+      provider_model: "pine_tree_speed_platform",
+      payout_destination: "pinetree_wallet",
+      setup_source: "pinetree_wallet"
     }
   } else if (provider === "lightning") {
     // NWC Lightning is connected via /api/wallets/lightning/connect — not this path.

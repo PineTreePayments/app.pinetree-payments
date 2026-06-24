@@ -48,4 +48,16 @@ describe("POS card method readiness", () => {
     }])
     await expect(getPosMethodReadinessEngine("merchant_1")).resolves.toMatchObject({ card: false })
   })
+
+  it("only exposes crypto rails returned by checkout availability filtering", async () => {
+    mocks.getMerchantProviders.mockResolvedValue([])
+    mocks.getMerchantAvailableNetworks.mockResolvedValue(["base"])
+
+    await expect(getPosMethodReadinessEngine("merchant_1")).resolves.toMatchObject({
+      crypto: true,
+      cryptoAvailable: true,
+      availableCryptoRails: ["base"],
+      unavailableCryptoRails: ["solana", "bitcoin_lightning"]
+    })
+  })
 })

@@ -4,10 +4,12 @@ const supabase = supabaseAdmin || supabaseAnon
 
 const TABLE = "pinetree_wallet_rail_syncs"
 
+export type PineTreeWalletSyncedRail = "solana" | "base" | "bitcoin_lightning"
+
 export type WalletRailSyncRecord = {
   id: string
   merchant_id: string
-  rail: "solana" | "base"
+  rail: PineTreeWalletSyncedRail
   synced_address: string
   synced_at: string
 }
@@ -24,7 +26,7 @@ export async function getWalletRailSyncs(merchantId: string): Promise<WalletRail
 
 export async function upsertWalletRailSync(input: {
   merchantId: string
-  rail: "solana" | "base"
+  rail: PineTreeWalletSyncedRail
   syncedAddress: string
 }): Promise<WalletRailSyncRecord> {
   const row = {

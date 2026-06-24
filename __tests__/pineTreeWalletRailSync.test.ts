@@ -48,7 +48,7 @@ describe("syncPineTreeWalletRailsEngine", () => {
 
     const result = await syncPineTreeWalletRailsEngine("merchant-1")
 
-    expect(result.rails).toHaveLength(2)
+    expect(result.rails).toHaveLength(3)
     expect(result.rails.every((r) => r.status === "skipped")).toBe(true)
     expect(mockSaveProvider).not.toHaveBeenCalled()
   })
@@ -57,6 +57,7 @@ describe("syncPineTreeWalletRailsEngine", () => {
     mockGetProfile.mockResolvedValue({
       solana_address: null,
       base_address: "0xbaseaddress",
+      btc_address: null,
     })
     mockGetSyncs.mockResolvedValue([])
 
@@ -74,12 +75,13 @@ describe("syncPineTreeWalletRailsEngine", () => {
     mockGetProfile.mockResolvedValue({
       solana_address: "solana-addr-abc",
       base_address: "0xbaseaddr",
+      btc_address: "bc1merchantbtc",
     })
     mockGetSyncs.mockResolvedValue([])
 
     const result = await syncPineTreeWalletRailsEngine("merchant-1")
 
-    expect(mockSaveProvider).toHaveBeenCalledTimes(2)
+    expect(mockSaveProvider).toHaveBeenCalledTimes(3)
     expect(mockSaveProvider).toHaveBeenCalledWith(expect.objectContaining({
       merchantId: "merchant-1",
       provider: "solana",
@@ -90,19 +92,26 @@ describe("syncPineTreeWalletRailsEngine", () => {
       provider: "base",
       walletAddress: "0xbaseaddr",
     }))
+    expect(mockSaveProvider).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "lightning_speed",
+      walletAddress: "bc1merchantbtc",
+      walletType: "PINETREE_BTC",
+    }))
 
     expect(result.rails.every((r) => r.status === "synced")).toBe(true)
-    expect(mockUpsertSync).toHaveBeenCalledTimes(2)
+    expect(mockUpsertSync).toHaveBeenCalledTimes(3)
   })
 
   it("skips a rail when address matches the last synced address (idempotent)", async () => {
     mockGetProfile.mockResolvedValue({
       solana_address: "solana-addr-abc",
       base_address: "0xbaseaddr",
+      btc_address: "bc1merchantbtc",
     })
     mockGetSyncs.mockResolvedValue([
       { rail: "solana", synced_address: "solana-addr-abc" },
       { rail: "base", synced_address: "0xbaseaddr" },
+      { rail: "bitcoin_lightning", synced_address: "bc1merchantbtc" },
     ])
 
     const result = await syncPineTreeWalletRailsEngine("merchant-1")
@@ -115,6 +124,7 @@ describe("syncPineTreeWalletRailsEngine", () => {
     mockGetProfile.mockResolvedValue({
       solana_address: "solana-addr-NEW",
       base_address: null,
+      btc_address: null,
     })
     mockGetSyncs.mockResolvedValue([
       { rail: "solana", synced_address: "solana-addr-OLD" },
@@ -132,6 +142,7 @@ describe("syncPineTreeWalletRailsEngine", () => {
     mockGetProfile.mockResolvedValue({
       solana_address: "solana-addr-abc",
       base_address: null,
+      btc_address: null,
     })
     mockGetSyncs.mockResolvedValue([])
     mockSaveProvider.mockRejectedValue(new Error("DB write failed"))
@@ -176,10 +187,31 @@ describe("pineTreeWalletRailSync engine", () => {
 
   it("marks rails as PINETREE wallet type", () => {
     expect(engine).toContain("PINETREE")
+    expect(engine).toContain("PINETREE_BTC")
+  })
+
+  it("syncs Bitcoin Lightning through the Speed provider row", () => {
+    expect(engine).toContain("SPEED_PROVIDER_NAME")
+    expect(engine).toContain('rail: "bitcoin_lightning"')
+    expect(engine).toContain("profile.btc_address")
   })
 
   it("exports syncPineTreeWalletRailsEngine", () => {
     expect(engine).toContain("export async function syncPineTreeWalletRailsEngine")
+  })
+})
+
+describe("provider save preserves merchant enablement", () => {
+  const providerEngine = read("engine/providersDashboard.ts")
+
+  it("preserves existing enabled state for wallet-derived Solana/Base rails", () => {
+    expect(providerEngine).toContain('.select("enabled")')
+    expect(providerEngine).toContain("enabled = existingProvider ? Boolean(existingProvider.enabled) : true")
+  })
+
+  it("preserves existing enabled state for wallet-derived Speed Lightning", () => {
+    expect(providerEngine).toContain('.select("credentials,status,enabled")')
+    expect(providerEngine).toContain("enabled = existingSpeed ? Boolean(existingSpeed.enabled) : true")
   })
 })
 

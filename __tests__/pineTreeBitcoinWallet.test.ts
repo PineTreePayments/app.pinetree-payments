@@ -246,14 +246,14 @@ describe("upsertPineTreeWalletProfile merge safety", () => {
 describe("ReceiveRow status display", () => {
   const page = read("app/dashboard/wallet-setup/page.tsx")
 
-  it("ReceiveRow shows Ready only when entries are present", () => {
-    expect(page).toContain("const isReady = entries.length > 0")
-    expect(page).toContain('isReady ? "Ready" : "Address syncing"')
-    expect(page).toContain('isReady ? "green" : "blue"')
+  it("ReceiveRow shows Connected only when entries are present", () => {
+    expect(page).toContain("const isConnected = entries.length > 0")
+    expect(page).toContain('isConnected ? "Connected" : "Not configured"')
+    expect(page).toContain('isConnected ? "green" : "slate"')
   })
 
-  it("ReceiveRow renders address entries and copy button only when isReady", () => {
-    expect(page).toContain("{isReady ? (")
+  it("ReceiveRow renders address entries and copy button only when connected", () => {
+    expect(page).toContain("{isConnected ? (")
     expect(page).toContain("{entry.address}")
     expect(page).toContain('aria-label={`Copy ${label}`}')
   })
@@ -264,9 +264,9 @@ describe("ReceiveRow status display", () => {
     expect(page).toContain('<ReceiveRow label="Bitcoin wallet" entries={bitcoinPayoutEntries}')
   })
 
-  it("Bitcoin receive row shows Address syncing only when btc_address is missing", () => {
+  it("Bitcoin receive row shows Not configured only when btc_address is missing", () => {
     expect(page).toContain("const bitcoinPayoutEntries: AddressEntry[] = profile?.btc_address")
-    expect(page).toContain('isReady ? "Ready" : "Address syncing"')
+    expect(page).toContain('isConnected ? "Connected" : "Not configured"')
   })
 })
 
@@ -277,11 +277,10 @@ describe("ReceiveRow status display", () => {
 describe("PineTree Wallet setup card rail pills", () => {
   const page = read("app/dashboard/wallet-setup/page.tsx")
 
-  it("renders compact polished rail pills with a ready dot", () => {
+  it("renders compact blue rail pills without a ready dot", () => {
     expect(page).toContain('aria-label="Supported rails"')
-    expect(page).toContain("border border-blue-200/80 bg-blue-50/80")
-    expect(page).toContain("bg-emerald-500")
-    expect(page).toContain('aria-hidden="true"')
+    expect(page).toContain("border border-blue-100 bg-blue-50/80")
+    expect(page).not.toContain("bg-emerald-500")
   })
 })
 

@@ -102,14 +102,16 @@ export async function getPaymentReadinessEngine(input: { merchantId?: string }) 
       const speedConfig = getPineTreeSpeedConfigStatus()
       if (isSpeedPlatformTreasurySweepEnabled()) {
         const btcAddress = String(pineTreeWalletProfile?.btc_address || "").trim()
+        const merchantLightningEnabled = speedProvider?.enabled !== false
+        const speedReady = Boolean(speedConfig.configured && merchantLightningEnabled)
         return {
           network,
           adapters: {
-            available: speedConfig.configured,
-            connected: speedConfig.configured ? [SPEED_PROVIDER_NAME] : []
+            available: speedReady,
+            connected: speedReady ? [SPEED_PROVIDER_NAME] : []
           },
           wallet: {
-            connected: speedConfig.configured,
+            connected: Boolean(btcAddress),
             addressPreview: maskAddress(btcAddress) || "PineTree managed"
           },
           treasury: {

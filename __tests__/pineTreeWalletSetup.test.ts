@@ -125,9 +125,9 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("const solanaReady = profileAddresses.solana.length > 0")
     // Merchant display readiness is based on the PineTree Wallet rails, not BTC payout processing readiness.
     expect(page).toContain('const btcPayoutReady = Boolean(profile?.btc_address && profile.btc_payout_enabled)')
-    expect(page).toContain("const allPrimaryRailsReady = baseReady && solanaReady")
-    expect(page).toContain('"Setup pending"')
-    expect(page).toContain("baseAndSolanaReady && !lightningNeedsAttention")
+    expect(page).toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
+    expect(page).toContain("const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady")
+    expect(page).toContain('const walletStatus = allPrimaryRailsConnected ? "Connected" : "Not configured"')
   })
 
   it("syncs Dynamic wallet addresses to the merchant profile on creation only when explicitly triggered", () => {
@@ -150,6 +150,11 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('logWalletCreationStep("waiting_for_embedded_wallets")')
     expect(page).toContain('step: "timeout"')
     expect(page).toContain("Wallet setup is taking longer than expected. Please try again.")
+  })
+
+  it("does not render a persistent synced banner after profile sync succeeds", () => {
+    expect(page).toContain('if (step === "profile_synced") return ""')
+    expect(page).not.toContain("PineTree Wallet synced.")
   })
 
   it("retry clears local setup state and reopens Dynamic without deleting rows", () => {
@@ -243,29 +248,33 @@ describe("PineTree embedded wallet setup", () => {
 
   it("prioritizes Base, Solana, and Bitcoin", () => {
     expect(page).toContain('const primaryRails = ["Base", "Solana", "Bitcoin"]')
-    expect(page).toContain('<RailStatusCard rail="Base"')
-    expect(page).toContain('<RailStatusCard rail="Solana"')
-    expect(page).toContain('<RailStatusCard rail="Bitcoin"')
+    expect(page).toContain('<SettlementAddressSummary rows={settlementAddressRows} />')
+    expect(page).toContain('rail: "Base" as const')
+    expect(page).toContain('rail: "Solana" as const')
+    expect(page).toContain('rail: "Bitcoin" as const')
     expect(page).not.toContain("PineTree Bitcoin wallet")
   })
 
-  it("marks the merchant wallet Ready when Base and Solana are ready without waiting on BTC payout sync", () => {
-    expect(page).toContain("const allPrimaryRailsReady = baseReady && solanaReady")
-    expect(page).toContain('"Setup pending"')
+  it("marks the merchant wallet Connected only when Base, Solana, and Bitcoin addresses exist", () => {
+    expect(page).toContain("const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady")
+    expect(page).toContain('const walletStatus = allPrimaryRailsConnected ? "Connected" : "Not configured"')
     expect(page).not.toContain("Bitcoin Lightning is being prepared through PineTree")
     expect(page).not.toContain("Bitcoin address pending")
   })
 
-  it("does not downgrade Base and Solana ready state because BTC payout sync is missing", () => {
-    expect(page).toContain("const baseAndSolanaReady = baseReady && solanaReady")
-    expect(page).toContain("baseAndSolanaReady && !lightningNeedsAttention")
+  it("uses Not configured instead of partial setup states when a settlement address is missing", () => {
+    expect(page).toContain('row.connected ? "Connected" : "Not configured"')
+    expect(page).toContain('walletStatus = allPrimaryRailsConnected ? "Connected" : "Not configured"')
+    expect(page).not.toContain('"Setup pending"')
     expect(page).not.toContain('const lightningPending = lightningProfile?.status === "pending"')
     expect(page).not.toContain("lightningRetryable")
   })
 
-  it("keeps Needs attention for missing Base/Solana or explicit Lightning needs_attention", () => {
-    expect(page).toContain('const lightningNeedsAttention = lightningProfile?.status === "needs_attention"')
-    expect(page).toContain(': "Needs attention"')
+  it("does not use Ready, Not created, or Not connected copy in the PineTree Wallet UI", () => {
+    expect(page).not.toContain('"Ready"')
+    expect(page).not.toContain('"Not created"')
+    expect(page).not.toContain('"Not connected"')
+    expect(page).not.toContain('"Address syncing"')
   })
 
   it("shows simple receive rows for Base, Solana, and Bitcoin", () => {
@@ -279,21 +288,16 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("Bitcoin address pending")
     expect(page).not.toContain("Preparing Bitcoin Lightning")
     expect(page).not.toContain("Enable Bitcoin Lightning")
-    // RailStatusCard (overview tab) still shows Ready unconditionally for the three rails
-    expect(page).toContain('<ProviderStatusPill label="Ready" tone="green" />')
-    // ReceiveRow is conditional: "Ready" when entries present, "Address syncing" when empty
-    // This ensures Bitcoin wallet never shows "Ready" with a blank address
-    expect(page).toContain('"Address syncing"')
-    expect(page).toContain('isReady ? "Ready" : "Address syncing"')
+    expect(page).toContain('isConnected ? "Connected" : "Not configured"')
     expect(page).not.toContain(">Setup pending</p>")
   })
 
-  it("overview shows Base, Solana, and Bitcoin as Ready and Available", () => {
-    expect(page).toContain('function RailStatusCard({ rail }: { rail: "Base" | "Solana" | "Bitcoin" })')
-    expect(page).toContain('<ProviderStatusPill label="Ready" tone="green" />')
-    expect(page).toContain(">Available</p>")
-    expect(page).not.toContain("Address available")
-    expect(page).not.toContain("Address setup pending")
+  it("overview shows a compact settlement address summary", () => {
+    expect(page).toContain("function SettlementAddressSummary")
+    expect(page).toContain(">Settlement addresses</p>")
+    expect(page).toContain('row.connected ? "Connected" : "Not configured"')
+    expect(page).not.toContain("RailStatusCard")
+    expect(page).not.toContain(">Available</p>")
   })
 
   // -------------------------------------------------------------------------
@@ -398,8 +402,8 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('kind="missing-env"')
     expect(page).toContain('kind="sdk"')
     expect(page).toContain('{ kind: "error" }')
-    expect(page).toContain('"Not created"')
-    expect(page).toContain('"Ready"')
+    expect(page).toContain('"Not configured"')
+    expect(page).toContain('"Connected"')
     expect(page).toContain('"Needs attention"')
     expect(page).toContain('status="Loading"')
     expect(page).toContain("Wallet activity will appear here.")
@@ -474,7 +478,7 @@ describe("PineTree embedded wallet setup", () => {
   it("Bitcoin display readiness is not derived from a Dynamic Spark address", () => {
     // Readiness is driven by the DB record, not any Spark address returned by Dynamic
     expect(page).toContain("const btcPayoutReady = Boolean(profile?.btc_address && profile.btc_payout_enabled)")
-    expect(page).toContain('function RailStatusCard({ rail }: { rail: "Base" | "Solana" | "Bitcoin" })')
+    expect(page).toContain("function SettlementAddressSummary")
     // No old pattern that checked Spark address length
     expect(page).not.toContain("profileAddresses.lightning.length > 0")
     expect(page).not.toContain("lightningAddress.length")
@@ -483,7 +487,7 @@ describe("PineTree embedded wallet setup", () => {
   it("PineTree Wallet can be created with Base/Solana active while BTC payout sync is internal", () => {
     // hasWallet is true once Base or Solana is active — Lightning pending does not block it
     expect(page).toContain("const hasWallet = profileState.kind")
-    expect(page).toContain("baseReady || solanaReady || btcPayoutReady")
+    expect(page).toContain("baseReady || solanaReady || btcPayoutReady || bitcoinReady")
     // lightningPending is a valid state for an active wallet
     expect(page).not.toContain("lightningPending")
     expect(page).not.toContain("lightningRetryable")

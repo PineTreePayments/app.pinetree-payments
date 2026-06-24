@@ -153,7 +153,7 @@ function walletCreationStepMessage(step: WalletCreationStep) {
   if (step === "waiting_for_embedded_wallets") return "Waiting for wallet addresses..."
   if (step === "wallets_detected" || step === "extracting_addresses") return "Preparing wallet addresses..."
   if (step === "syncing_pinetree_profile") return "Syncing PineTree Wallet..."
-  if (step === "profile_synced") return "PineTree Wallet synced."
+  if (step === "profile_synced") return ""
   if (step === "timeout") return "Wallet setup is taking longer than expected. Please try again."
   if (step === "failed") return "Wallet setup could not finish. Please try again."
   return ""
@@ -311,14 +311,14 @@ function ReceiveRow({
   copiedAddress: string
   onCopy: (address: string) => void
 }) {
-  const isReady = entries.length > 0
+  const isConnected = entries.length > 0
   return (
     <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.05)] sm:px-5 sm:py-5">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-gray-800">{label}</p>
-        <ProviderStatusPill label={isReady ? "Ready" : "Address syncing"} tone={isReady ? "green" : "blue"} />
+        <ProviderStatusPill label={isConnected ? "Connected" : "Not configured"} tone={isConnected ? "green" : "slate"} />
       </div>
-      {isReady ? (
+      {isConnected ? (
         <div className="mt-3 space-y-3">
           {entries.map((entry) => (
             <div key={entry.id} className="flex min-w-0 items-center gap-2">
@@ -346,14 +346,35 @@ function ReceiveRow({
   )
 }
 
-function RailStatusCard({ rail }: { rail: "Base" | "Solana" | "Bitcoin" }) {
+function SettlementAddressSummary({
+  rows,
+}: {
+  rows: Array<{ rail: "Base" | "Solana" | "Bitcoin"; connected: boolean; address?: string }>
+}) {
   return (
-    <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-4 shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-blue-900">{rail}</p>
-        <ProviderStatusPill label="Ready" tone="green" />
+    <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+      <div className="border-b border-gray-100 px-4 py-3 sm:px-5">
+        <p className="text-sm font-semibold text-gray-950">Settlement addresses</p>
       </div>
-      <p className="mt-2 text-xs font-semibold text-blue-700">Available</p>
+      <div className="divide-y divide-gray-100">
+        {rows.map((row) => (
+          <div key={row.rail} className="flex items-center justify-between gap-4 px-4 py-3 sm:px-5">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-800">{row.rail}</p>
+              {row.address ? (
+                <p className="mt-0.5 truncate font-mono text-xs text-gray-500" title={row.address}>
+                  {row.address}
+                </p>
+              ) : null}
+            </div>
+            <ProviderStatusPill
+              label={row.connected ? "Connected" : "Not configured"}
+              tone={row.connected ? "green" : "slate"}
+              className="shrink-0"
+            />
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -637,8 +658,6 @@ function PineTreeWalletRuntime() {
   // Derived state — Lightning (PineTree-managed backend, NOT Dynamic Spark)
   // ---------------------------------------------------------------------------
 
-  const lightningProfile = lightningProfileState.kind === "loaded" ? lightningProfileState.profile : null
-
   const btcPayoutReady = Boolean(profile?.btc_address && profile.btc_payout_enabled)
   const bitcoinPayoutEntries: AddressEntry[] = profile?.btc_address
     ? [{
@@ -647,28 +666,20 @@ function PineTreeWalletRuntime() {
       }]
     : []
 
-  const lightningNeedsAttention = lightningProfile?.status === "needs_attention"
-
-  const allPrimaryRailsReady = baseReady && solanaReady
-  const baseAndSolanaReady = baseReady && solanaReady
+  const bitcoinReady = bitcoinPayoutEntries.length > 0
+  const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady
 
   // Wallet exists once a PineTree embedded wallet address is available.
-  const hasWallet = profileState.kind === "loaded" && (baseReady || solanaReady || btcPayoutReady)
+  const hasWallet = profileState.kind === "loaded" && (baseReady || solanaReady || btcPayoutReady || bitcoinReady)
 
-  const walletStatus = !hasWallet
-    ? "Not created"
-    : allPrimaryRailsReady
-      ? "Ready"
-      : baseAndSolanaReady && !lightningNeedsAttention
-        ? "Setup pending"
-        : "Needs attention"
-  const statusTone = !hasWallet
-    ? "slate"
-    : allPrimaryRailsReady
-      ? "green"
-      : baseAndSolanaReady && !lightningNeedsAttention
-        ? "blue"
-        : "amber"
+  const walletStatus = allPrimaryRailsConnected ? "Connected" : "Not configured"
+  const statusTone = allPrimaryRailsConnected ? "green" : "slate"
+
+  const settlementAddressRows = [
+    { rail: "Base" as const, connected: baseReady, address: profileAddresses.base[0]?.address },
+    { rail: "Solana" as const, connected: solanaReady, address: profileAddresses.solana[0]?.address },
+    { rail: "Bitcoin" as const, connected: bitcoinReady, address: bitcoinPayoutEntries[0]?.address },
+  ]
 
   // ---------------------------------------------------------------------------
   // Dynamic session mismatch guard
@@ -792,9 +803,8 @@ function PineTreeWalletRuntime() {
               {primaryRails.map((rail) => (
                 <span
                   key={rail}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-blue-200/80 bg-blue-50/80 px-2.5 py-1 text-xs font-semibold text-blue-800 shadow-[0_1px_0_rgba(37,99,235,0.08)]"
+                  className="inline-flex items-center rounded-full border border-blue-100 bg-blue-50/80 px-2.5 py-1 text-xs font-semibold text-blue-700 shadow-[0_1px_0_rgba(37,99,235,0.06)]"
                 >
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_0_2px_rgba(16,185,129,0.14)]" aria-hidden="true" />
                   {rail}
                 </span>
               ))}
@@ -929,11 +939,7 @@ function PineTreeWalletRuntime() {
                       PineTree Wallet keeps each supported rail organized under one business wallet experience.
                     </p>
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <RailStatusCard rail="Base" />
-                    <RailStatusCard rail="Solana" />
-                    <RailStatusCard rail="Bitcoin" />
-                  </div>
+                  <SettlementAddressSummary rows={settlementAddressRows} />
                 </div>
               ) : null}
 

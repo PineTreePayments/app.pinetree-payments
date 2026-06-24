@@ -474,7 +474,7 @@ function EngineSettingStatus({
       return
     }
 
-    if (value && provider === "lightning" && getLightningCardState().status !== "Connected") {
+    if (value && provider === "lightning" && !canonicalWalletMode && getLightningCardState().status !== "Connected") {
       toast.error("Connect a Lightning wallet first.")
       return
     }
@@ -671,18 +671,31 @@ function EngineSettingStatus({
 
   function ManagedCryptoRailCard({
     name,
+    provider,
     networks,
     description,
   }: {
     name: string
+    provider: "solana" | "base" | "lightning"
     networks: string
     description: string
   }) {
+    const speedProvider = getProvider("lightning_speed")
+    const connected =
+      provider === "lightning"
+        ? speedProvider?.status === "connected" || speedProvider?.status === "active"
+        : Boolean(getWallet(provider))
+    const enabled = isEnabled(provider)
+
     return (
       <div className="flex min-h-[226px] flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <h2 className="min-w-0 text-base font-semibold leading-tight text-gray-950">{name}</h2>
-          <ProviderStatusPill label="Managed" tone="blue" className="shrink-0" />
+          <ProviderStatusPill
+            label={connected ? "Connected" : "Not configured"}
+            tone={connected ? "blue" : "default"}
+            className="shrink-0"
+          />
         </div>
         <div className="mt-4 space-y-2.5">
           <div className="grid grid-cols-[92px_1fr] items-center gap-3">
@@ -695,8 +708,16 @@ function EngineSettingStatus({
           </div>
           <p className="pt-1 text-sm leading-5 text-gray-600">{description}</p>
         </div>
-        <div className="mt-auto border-t border-gray-100 pt-4">
+        <div className="mt-auto flex items-center justify-between gap-3 border-t border-gray-100 pt-4">
           <p className="text-xs font-semibold text-blue-700">Manage from PineTree Wallet</p>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="text-sm font-medium text-gray-700">Enabled</span>
+            <ToggleSwitch
+              checked={enabled}
+              disabled={!connected}
+              onChange={(v) => toggleProvider(provider, v)}
+            />
+          </div>
         </div>
       </div>
     )
@@ -1172,16 +1193,19 @@ function EngineSettingStatus({
           <>
             <ManagedCryptoRailCard
               name="Solana Pay"
+              provider="solana"
               networks="Solana"
               description="Solana payments settle to the merchant's PineTree Wallet."
             />
             <ManagedCryptoRailCard
               name="Base Pay"
+              provider="base"
               networks="Base"
               description="Base payments settle to the merchant's PineTree Wallet."
             />
             <ManagedCryptoRailCard
               name="Bitcoin Lightning"
+              provider="lightning"
               networks="Bitcoin Lightning"
               description="Bitcoin Lightning payments settle to the merchant's PineTree Wallet."
             />
