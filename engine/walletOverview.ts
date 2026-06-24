@@ -250,7 +250,7 @@ async function getLightningPaymentRails(
       Promise.resolve(getPineTreeSpeedConfigStatus())
     ])
     const btcAddress = String(profile?.btc_address || "").trim()
-    const ready = Boolean(speedConfig.configured && btcAddress && profile?.btc_payout_enabled)
+    const ready = Boolean(speedConfig.configured)
 
     return [{
       id: profile?.id || "pinetree-bitcoin-lightning",
@@ -259,7 +259,7 @@ async function getLightningPaymentRails(
       wallet_type: "pinetree",
       status: ready ? "Connected" : speedConfig.configured ? "Not Connected" : "Error",
       walletLabel: "Bitcoin Lightning",
-      wallet_address: btcAddress || "Bitcoin address pending",
+      wallet_address: btcAddress || "PineTree managed",
       assetSymbol: "BTC",
       nativeBalance: 0,
       usdValue: 0,

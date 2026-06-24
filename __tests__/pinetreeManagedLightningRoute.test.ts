@@ -150,7 +150,7 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
     expect(JSON.stringify(body)).not.toContain("sk_live")
   })
 
-  it("canonical mode stays pending when the PineTree BTC payout address is missing", async () => {
+  it("canonical mode stays merchant-ready and records an internal issue when the BTC payout address is missing", async () => {
     mocks.getPineTreeWalletProfile.mockResolvedValue({
       id: "wallet_1",
       merchant_id: merchantId,
@@ -166,19 +166,20 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
     expect(mocks.createOrLinkSpeedConnectedAccountForMerchant).not.toHaveBeenCalled()
     expect(mocks.upsertMerchantLightningProfile).toHaveBeenCalledWith(
       expect.objectContaining({
-        status: "pending",
+        status: "ready",
         speedConnectedAccountId: null,
-        speedConnectedAccountStatus: "btc_payout_address_pending",
+        speedConnectedAccountStatus: "btc_address_missing_internal",
         speedConnectSetupUrl: null,
-        providerErrorMessage: "Bitcoin address pending for PineTree Wallet.",
+        providerErrorMessage: null,
         providerResponseSummary: expect.objectContaining({
           source: "speed_platform_treasury_sweep",
           btc_address_present: false,
           btc_payout_enabled: false,
+          internal_readiness_issue: "btc_address_missing",
         }),
       })
     )
-    expect(body.profile.status).toBe("pending")
+    expect(body.profile.status).toBe("ready")
   })
 
   it("canonical mode needs attention when PineTree Speed platform config is missing", async () => {

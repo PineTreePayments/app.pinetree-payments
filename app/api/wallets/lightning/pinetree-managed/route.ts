@@ -124,12 +124,9 @@ export async function GET(req: NextRequest) {
     if (isSpeedPlatformTreasurySweepEnabled()) {
       const profile = await getPineTreeWalletProfile(merchantId)
       const speedConfig = getPineTreeSpeedConfigStatus()
-      const btcAddressReady = Boolean(profile?.btc_address && profile.btc_payout_enabled)
-      const status: MerchantLightningProfileStatus = speedConfig.configured && btcAddressReady
+      const status: MerchantLightningProfileStatus = speedConfig.configured
         ? "ready"
-        : speedConfig.configured
-          ? "pending"
-          : "needs_attention"
+        : "needs_attention"
 
       return NextResponse.json({
         profile: {
@@ -182,18 +179,16 @@ export async function POST(req: NextRequest) {
       const speedConfig = getPineTreeSpeedConfigStatus()
       const walletProfile = await getPineTreeWalletProfile(merchantId)
       const btcAddressReady = Boolean(walletProfile?.btc_address && walletProfile.btc_payout_enabled)
-      const nextStatus: MerchantLightningProfileStatus = speedConfig.configured && btcAddressReady
+      const nextStatus: MerchantLightningProfileStatus = speedConfig.configured
         ? "ready"
-        : speedConfig.configured
-          ? "pending"
-          : "needs_attention"
+        : "needs_attention"
 
       const lightningProfile = await upsertMerchantLightningProfile({
         merchantId,
         status: nextStatus,
         speedConnectedAccountId: null,
         speedConnectedAccountStatus: speedConfig.configured
-          ? btcAddressReady ? "pinetree_wallet_btc_payout_ready" : "btc_payout_address_pending"
+          ? btcAddressReady ? "pinetree_wallet_btc_payout_ready" : "btc_address_missing_internal"
           : "speed_platform_config_missing",
         speedConnectSetupUrl: null,
         providerResponseSummary: {
@@ -203,9 +198,10 @@ export async function POST(req: NextRequest) {
           speed_missing: speedConfig.missing,
           btc_address_present: Boolean(walletProfile?.btc_address),
           btc_payout_enabled: Boolean(walletProfile?.btc_payout_enabled),
+          internal_readiness_issue: btcAddressReady ? null : "btc_address_missing",
         },
         providerErrorMessage: speedConfig.configured
-          ? btcAddressReady ? null : "Bitcoin address pending for PineTree Wallet."
+          ? null
           : `PineTree Speed platform missing: ${speedConfig.missing.join(", ")}`,
       })
 

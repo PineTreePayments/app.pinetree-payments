@@ -89,7 +89,6 @@ export async function getPaymentReadinessEngine(input: { merchantId?: string }) 
       const speedConfig = getPineTreeSpeedConfigStatus()
       if (isSpeedPlatformTreasurySweepEnabled()) {
         const btcAddress = String(pineTreeWalletProfile?.btc_address || "").trim()
-        const btcPayoutReady = Boolean(btcAddress && pineTreeWalletProfile?.btc_payout_enabled)
         return {
           network,
           adapters: {
@@ -97,16 +96,14 @@ export async function getPaymentReadinessEngine(input: { merchantId?: string }) 
             connected: speedConfig.configured ? [SPEED_PROVIDER_NAME] : []
           },
           wallet: {
-            connected: btcPayoutReady,
-            addressPreview: maskAddress(btcAddress)
+            connected: speedConfig.configured,
+            addressPreview: maskAddress(btcAddress) || "PineTree managed"
           },
           treasury: {
             configured: speedConfig.configured,
             validFormat: speedConfig.configured,
             addressPreview: SPEED_PLATFORM_TREASURY_SWEEP_MODE,
-            error: speedConfig.configured
-              ? btcPayoutReady ? undefined : "Bitcoin address pending"
-              : speedConfig.missing.join(", ")
+            error: speedConfig.configured ? undefined : speedConfig.missing.join(", ")
           }
         }
       }

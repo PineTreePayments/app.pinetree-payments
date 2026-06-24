@@ -117,10 +117,9 @@ describe("PineTree embedded wallet setup", () => {
     // baseReady and solanaReady come from profileAddresses (DB-backed addresses)
     expect(page).toContain("const baseReady = profileAddresses.base.length > 0")
     expect(page).toContain("const solanaReady = profileAddresses.solana.length > 0")
-    // lightningReady comes from the merchant_lightning_profiles record plus BTC payout readiness.
+    // Merchant display readiness is based on the PineTree Wallet rails, not BTC payout processing readiness.
     expect(page).toContain('const btcPayoutReady = Boolean(profile?.btc_address && profile.btc_payout_enabled)')
-    expect(page).toContain('const lightningReady = lightningProfile?.status === "ready" && btcPayoutReady')
-    expect(page).toContain("const allPrimaryRailsReady = baseReady && solanaReady && lightningReady")
+    expect(page).toContain("const allPrimaryRailsReady = baseReady && solanaReady")
     expect(page).toContain('"Setup pending"')
     expect(page).toContain("baseAndSolanaReady && !lightningNeedsAttention")
   })
@@ -135,7 +134,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("user.userId")
     // Once Base/Solana sync succeeds after Create PineTree Wallet, Lightning setup starts automatically.
     expect(page).toContain("autoEnableLightning")
-    expect(page).toContain("enablePineTreeManagedLightning")
+    expect(page).toContain("syncPineTreeManagedLightning")
   })
 
   it("keeps address refresh as a Receive-tab troubleshooting action, not a main-card CTA", () => {
@@ -201,17 +200,18 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("PineTree Bitcoin wallet")
   })
 
-  it("requires Base, Solana, and Lightning before marking the wallet Ready", () => {
-    expect(page).toContain("const allPrimaryRailsReady = baseReady && solanaReady && lightningReady")
+  it("marks the merchant wallet Ready when Base and Solana are ready without waiting on BTC payout sync", () => {
+    expect(page).toContain("const allPrimaryRailsReady = baseReady && solanaReady")
     expect(page).toContain('"Setup pending"')
-    expect(page).toContain("Bitcoin Lightning is being prepared through PineTree. Base and Solana are ready.")
+    expect(page).not.toContain("Bitcoin Lightning is being prepared through PineTree")
+    expect(page).not.toContain("Bitcoin address pending")
   })
 
-  it("shows Setup pending when Base and Solana are ready but Lightning is still pending", () => {
+  it("does not downgrade Base and Solana ready state because BTC payout sync is missing", () => {
     expect(page).toContain("const baseAndSolanaReady = baseReady && solanaReady")
     expect(page).toContain("baseAndSolanaReady && !lightningNeedsAttention")
-    expect(page).toContain('? "Setup pending"')
-    expect(page).toContain('const lightningPending = lightningProfile?.status === "pending"')
+    expect(page).not.toContain('const lightningPending = lightningProfile?.status === "pending"')
+    expect(page).not.toContain("lightningRetryable")
   })
 
   it("keeps Needs attention for missing Base/Solana or explicit Lightning needs_attention", () => {
@@ -227,9 +227,10 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain('<ReceiveRow label="Bitcoin Lightning/Spark address"')
     expect(page).toContain("Powered by PineTree")
     expect(page).toContain("Bitcoin payouts route to your PineTree Bitcoin wallet")
-    expect(page).toContain("Bitcoin address pending")
-    expect(page).toContain("Preparing Bitcoin Lightning")
-    expect(page).toContain("Bitcoin Lightning Ready")
+    expect(page).toContain("Bitcoin receiving is managed automatically by PineTree.")
+    expect(page).not.toContain("Bitcoin address pending")
+    expect(page).not.toContain("Preparing Bitcoin Lightning")
+    expect(page).not.toContain("Enable Bitcoin Lightning")
     // Base/Solana ReceiveRow still shows Setup pending when address is missing
     expect(page).toContain('label={ready ? "Ready" : "Setup pending"}')
     expect(page).toContain(">Setup pending</p>")
@@ -397,27 +398,28 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("Promise.all")
   })
 
-  it("lightningReady comes from merchant_lightning_profiles.status, not a Dynamic Spark address", () => {
+  it("Bitcoin display readiness is not derived from a Dynamic Spark address", () => {
     // Readiness is driven by the DB record, not any Spark address returned by Dynamic
-    expect(page).toContain('const lightningReady = lightningProfile?.status === "ready" && btcPayoutReady')
-    expect(page).toContain('const lightningPending = lightningProfile?.status === "pending"')
+    expect(page).toContain("const bitcoinDisplayReady = Boolean(baseReady && solanaReady)")
+    expect(page).toContain("const btcPayoutReady = Boolean(profile?.btc_address && profile.btc_payout_enabled)")
     // No old pattern that checked Spark address length
     expect(page).not.toContain("profileAddresses.lightning.length > 0")
     expect(page).not.toContain("lightningAddress.length")
   })
 
-  it("PineTree Wallet can be created with Base/Solana active while Lightning profile is pending", () => {
+  it("PineTree Wallet can be created with Base/Solana active while BTC payout sync is internal", () => {
     // hasWallet is true once Base or Solana is active — Lightning pending does not block it
     expect(page).toContain("const hasWallet = profileState.kind")
-    expect(page).toContain("baseReady || solanaReady || btcPayoutReady || lightningReady")
+    expect(page).toContain("baseReady || solanaReady || btcPayoutReady")
     // lightningPending is a valid state for an active wallet
-    expect(page).toContain("lightningPending")
-    expect(page).toContain("const lightningRetryable = !lightningReady")
+    expect(page).not.toContain("lightningPending")
+    expect(page).not.toContain("lightningRetryable")
   })
 
-  it("Enable Bitcoin Lightning button calls POST /api/wallets/lightning/pinetree-managed and does not redirect", () => {
-    expect(page).toContain("Enable Bitcoin Lightning")
-    expect(page).toContain("handleEnableLightning")
+  it("syncs PineTree-managed Bitcoin automatically and does not render a merchant CTA", () => {
+    expect(page).not.toContain("Enable Bitcoin Lightning")
+    expect(page).not.toContain("handleEnableLightning")
+    expect(page).toContain("syncPineTreeManagedLightning")
     // Uses a POST fetch to the internal route — no redirect to Speed sign-up
     expect(page).toContain("/api/wallets/lightning/pinetree-managed")
     expect(page).not.toContain("speed.com")
@@ -425,13 +427,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("router.push")
   })
 
-  it("Enable Bitcoin Lightning remains available as a retry for pending profiles", () => {
-    expect(page).toContain("const lightningRetryable = !lightningReady")
-    expect(page).toContain("hasWallet && lightningRetryable")
-    expect(page).toContain("{lightningRetryable ?")
-    expect(page).toContain("lightningPending ?")
-    expect(page).toContain("handleEnableLightning")
-    expect(page).toContain("/api/wallets/lightning/pinetree-managed")
+  it("does not render Bitcoin setup pending copy or retry controls", () => {
+    expect(page).not.toContain("Bitcoin address pending")
+    expect(page).not.toContain("Bitcoin Lightning is being prepared through PineTree")
+    expect(page).not.toContain("Base and Solana can be used while PineTree prepares Bitcoin")
+    expect(page).not.toContain("PineTree is enabling your Lightning rail")
+    expect(page).not.toContain("lightningRetryable")
   })
 
   it("does not ask the merchant to sign up for Speed, paste keys, or connect NWC", () => {
@@ -548,7 +549,8 @@ describe("PineTree embedded wallet setup", () => {
   it("canonical mode does not save a merchant Speed connected account", () => {
     expect(lightningApiRoute).toContain('speedConnectedAccountId: null')
     expect(lightningApiRoute).toContain('"pinetree_wallet_btc_payout_ready"')
-    expect(lightningApiRoute).toContain('"btc_payout_address_pending"')
+    expect(lightningApiRoute).toContain('"btc_address_missing_internal"')
+    expect(lightningApiRoute).toContain('internal_readiness_issue: btcAddressReady ? null : "btc_address_missing"')
     expect(lightningApiRoute).toContain("bitcoinLightningAccountId: null")
     expect(lightningApiRoute).toContain("speedSetup.speed_connected_account_id")
   })
@@ -564,10 +566,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(lightningApiRoute).toContain("speed_platform_config_missing")
   })
 
-  it("Lightning is ready only when Speed treasury-sweep config and BTC payout address are ready", () => {
-    expect(lightningApiRoute).toContain("speedConfig.configured && btcAddressReady")
+  it("merchant Lightning profile is ready on Speed config while BTC payout readiness remains internal", () => {
+    expect(lightningApiRoute).toContain("const btcAddressReady = Boolean(walletProfile?.btc_address && walletProfile.btc_payout_enabled)")
     expect(lightningApiRoute).toContain("walletProfile?.btc_address && walletProfile.btc_payout_enabled")
-    expect(lightningApiRoute).toContain('"Bitcoin address pending for PineTree Wallet."')
+    expect(lightningApiRoute).toContain('const nextStatus: MerchantLightningProfileStatus = speedConfig.configured')
+    expect(lightningApiRoute).toContain('internal_readiness_issue: btcAddressReady ? null : "btc_address_missing"')
+    expect(lightningApiRoute).not.toContain('"Bitcoin address pending for PineTree Wallet."')
   })
 
   it("Lightning stays pending when Speed returns only an invite/setup link", () => {
@@ -583,7 +587,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(speedConnectedAccountHelper).toContain("speed_api_key_missing")
     expect(speedConnectedAccountHelper).toContain("speed_connect_return_url_missing")
     expect(speedConnectedAccountHelper).toContain("Speed connected account was not found")
-    expect(lightningApiRoute).toContain('"btc_payout_address_pending"')
+    expect(lightningApiRoute).toContain('"btc_address_missing_internal"')
     expect(lightningApiRoute).toContain("const nextStatus = mapSpeedReadinessToLightningStatus(speedSetup.readiness)")
   })
 
