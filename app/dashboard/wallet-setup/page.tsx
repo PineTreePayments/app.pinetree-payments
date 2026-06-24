@@ -78,7 +78,7 @@ const walletTabs: Array<{ id: WalletTab; label: string }> = [
   { id: "activity", label: "Activity" },
 ]
 
-const primaryRails = ["Base", "Solana", "Bitcoin Lightning"] as const
+const primaryRails = ["Base", "Solana", "Bitcoin"] as const
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -237,7 +237,7 @@ function WalletDiagnosticsPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Receive row (inside modal, used for Base and Solana)
+// Receive row (inside modal)
 // ---------------------------------------------------------------------------
 
 function ReceiveRow({
@@ -251,16 +251,15 @@ function ReceiveRow({
   copiedAddress: string
   onCopy: (address: string) => void
 }) {
-  const ready = entries.length > 0
   return (
     <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.05)] sm:px-5 sm:py-5">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-gray-800">{label}</p>
-        <ProviderStatusPill label={ready ? "Ready" : "Setup pending"} tone={ready ? "green" : "amber"} />
+        <ProviderStatusPill label="Ready" tone="green" />
       </div>
-      <div className="mt-3 space-y-3">
-        {ready ? (
-          entries.map((entry) => (
+      {entries.length > 0 ? (
+        <div className="mt-3 space-y-3">
+          {entries.map((entry) => (
             <div key={entry.id} className="flex min-w-0 items-center gap-2">
               <div className="min-w-0 flex-1">
                 {entry.detail ? (
@@ -279,11 +278,21 @@ function ReceiveRow({
                 {copiedAddress === entry.address ? <CheckCircle2 size={15} /> : <Copy size={15} />}
               </button>
             </div>
-          ))
-        ) : (
-          <p className="text-sm text-amber-700">Setup pending</p>
-        )}
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function RailStatusCard({ rail }: { rail: "Base" | "Solana" | "Bitcoin" }) {
+  return (
+    <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-4 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-blue-900">{rail}</p>
+        <ProviderStatusPill label="Ready" tone="green" />
       </div>
+      <p className="mt-2 text-xs font-semibold text-blue-700">Available</p>
     </div>
   )
 }
@@ -490,11 +499,9 @@ function PineTreeWalletRuntime() {
     ? [{
         id: "btc-payout",
         address: profile.btc_address,
-        detail: profile.btc_address_type ? profile.btc_address_type.replace("_", " ") : "Bitcoin payout"
       }]
     : []
 
-  const bitcoinDisplayReady = Boolean(baseReady && solanaReady)
   const lightningNeedsAttention = lightningProfile?.status === "needs_attention"
 
   const allPrimaryRailsReady = baseReady && solanaReady
@@ -595,26 +602,6 @@ function PineTreeWalletRuntime() {
         message="Could not load the wallet profile. Refresh the page and try again."
       />
     )
-  }
-
-  // ---------------------------------------------------------------------------
-  // Lightning status copy helpers
-  // ---------------------------------------------------------------------------
-
-  function lightningStatusLabel() {
-    if (bitcoinDisplayReady) return "Ready"
-    if (lightningNeedsAttention) return "Needs attention"
-    return "Ready"
-  }
-
-  function lightningStatusTone(): "green" | "blue" | "amber" | "red" {
-    if (lightningNeedsAttention) return "red"
-    return "green"
-  }
-
-  function lightningOverviewCopy() {
-    if (lightningNeedsAttention) return "Powered by PineTree. Bitcoin Lightning needs PineTree review."
-    return "Bitcoin payments are handled automatically by PineTree."
   }
 
   // ---------------------------------------------------------------------------
@@ -749,33 +736,9 @@ function PineTreeWalletRuntime() {
                     </p>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-4 shadow-sm">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm font-semibold text-blue-900">Base</p>
-                        <ProviderStatusPill label={baseReady ? "Ready" : "Setup pending"} tone={baseReady ? "green" : "amber"} />
-                      </div>
-                      <p className="mt-2 text-xs text-blue-700">
-                        {baseReady ? "Address available" : "Address setup pending"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-4 shadow-sm">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm font-semibold text-blue-900">Solana</p>
-                        <ProviderStatusPill label={solanaReady ? "Ready" : "Setup pending"} tone={solanaReady ? "green" : "amber"} />
-                      </div>
-                      <p className="mt-2 text-xs text-blue-700">
-                        {solanaReady ? "Address available" : "Address setup pending"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-4 shadow-sm">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm font-semibold text-blue-900">Bitcoin Lightning</p>
-                        <ProviderStatusPill label={lightningStatusLabel()} tone={lightningStatusTone()} />
-                      </div>
-                      <p className="mt-2 text-xs text-blue-700">{lightningOverviewCopy()}</p>
-                    </div>
+                    <RailStatusCard rail="Base" />
+                    <RailStatusCard rail="Solana" />
+                    <RailStatusCard rail="Bitcoin" />
                   </div>
                 </div>
               ) : null}
@@ -785,7 +748,7 @@ function PineTreeWalletRuntime() {
                   {[
                     ["Base balance", "Not available yet"],
                     ["Solana balance", "Not available yet"],
-                    ["Bitcoin Lightning balance", "Not available yet"],
+                    ["Bitcoin balance", "Not available yet"],
                   ].map(([label, value]) => (
                     <div key={label} className="flex items-center justify-between gap-4 px-4 py-5 text-sm sm:px-5">
                       <span className="font-semibold text-gray-800">{label}</span>
@@ -797,39 +760,21 @@ function PineTreeWalletRuntime() {
 
               {activeTab === "receive" ? (
                 <div className="space-y-3">
-                  <ReceiveRow label="Base address" entries={profileAddresses.base} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
-                  <ReceiveRow label="Solana address" entries={profileAddresses.solana} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
+                  <ReceiveRow label="Base wallet" entries={profileAddresses.base} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
+                  <ReceiveRow label="Solana wallet" entries={profileAddresses.solana} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
+                  <ReceiveRow label="Bitcoin wallet" entries={bitcoinPayoutEntries} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
 
                   {canRefresh ? (
                     <button
                       type="button"
                       onClick={() => void handleRefreshAddresses()}
                       disabled={refreshing}
-                      aria-label="Refresh Base and Solana addresses"
+                      aria-label="Refresh wallet addresses"
                       className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-600 shadow-sm transition hover:text-blue-700 disabled:opacity-50"
                     >
                       <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
-                      Refresh Base/Solana addresses
+                      Refresh wallet addresses
                     </button>
-                  ) : null}
-
-                  {/* Bitcoin Lightning: PineTree-managed, payout address is the PineTree Bitcoin wallet. */}
-                  <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.05)] sm:px-5 sm:py-5">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-semibold text-gray-800">Bitcoin Lightning</p>
-                      <ProviderStatusPill label={lightningStatusLabel()} tone={lightningStatusTone()} />
-                    </div>
-                    <p className="mt-2 text-xs leading-5 text-gray-500">
-                      Powered by PineTree. Bitcoin payouts route to your PineTree Bitcoin wallet.
-                    </p>
-                    <p className="mt-1 text-xs font-semibold text-green-700">Bitcoin receiving is managed automatically by PineTree.</p>
-                  </div>
-
-                  {bitcoinPayoutEntries.length ? (
-                    <div className="pt-2">
-                      <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Payout destination</p>
-                      <ReceiveRow label="PineTree Bitcoin wallet" entries={bitcoinPayoutEntries} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
-                    </div>
                   ) : null}
                 </div>
               ) : null}
@@ -853,7 +798,7 @@ function PineTreeWalletRuntime() {
                       >
                         <option value="base">Base</option>
                         <option value="solana">Solana</option>
-                        <option value="bitcoin_lightning">Bitcoin Lightning</option>
+                        <option value="bitcoin_lightning">Bitcoin</option>
                       </select>
                     </label>
 
@@ -920,7 +865,7 @@ export default function PineTreeWalletPage() {
         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Merchant wallet</p>
         <h1 className={`${dashboardPageTitleClass} mt-1`}>PineTree Wallet</h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-600">
-          Create and open one merchant wallet for Base, Solana, and Bitcoin Lightning payments.
+          Create and open one merchant wallet for Base, Solana, and Bitcoin.
         </p>
       </div>
 
