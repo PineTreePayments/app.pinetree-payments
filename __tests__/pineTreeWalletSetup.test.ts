@@ -326,8 +326,10 @@ describe("PineTree embedded wallet setup", () => {
   // -------------------------------------------------------------------------
 
   it("shows a disabled withdrawals coming soon state without an active-looking form", () => {
-    expect(page).toContain("Withdrawals coming soon")
-    expect(page).toContain("Withdrawals disabled")
+    expect(page).toContain("Withdrawal coming soon")
+    expect(page).toContain("Withdrawal disabled")
+    expect(page).not.toContain("Withdrawals coming soon")
+    expect(page).not.toContain("Withdrawals disabled")
     expect(page).toContain("once withdrawal signing is enabled")
     // Updated message per spec
     expect(page).not.toContain('aria-label="Select withdrawal rail"')

@@ -325,17 +325,17 @@ export default function ProvidersPage() {
   function getStatus(provider: string) {
     if (provider === "lightning") {
       const p = getProvider(provider)
-      if (!p || p.dashboard_status === "not_configured") return "Not configured"
+      if (!p || p.dashboard_status === "not_configured") return "Not connected"
       if (p.dashboard_status === "address_needs_verification") return "Needs verification"
       if (p.dashboard_status === "provider_unavailable") return "Provider unavailable"
       if (p.dashboard_status === "connected" && p.readiness && !p.readiness.ready) return "Needs permissions"
       if (p.dashboard_status === "connected") return "Connected"
-      return "Not configured"
+      return "Not connected"
     }
 
     if (provider === "lightning_speed") {
       const p = getProvider(provider)
-      if (!p || p.dashboard_status === "not_configured") return "Not configured"
+      if (!p || p.dashboard_status === "not_configured") return "Not connected"
       if (p.dashboard_status === "provider_unavailable") return "Missing env"
       if (p.readiness?.ready) return "Ready"
       if (p.dashboard_status === "connected") return "Needs account ID"
@@ -476,9 +476,14 @@ function EngineSettingStatus({
   }
 
   async function toggleProvider(provider: string, value: boolean) {
-    if (value && (provider === "solana" || provider === "base") && !getWallet(provider)) {
-      toast.error("Connect wallet first")
-      return
+    if (value && (provider === "solana" || provider === "base")) {
+      const railReady = canonicalWalletMode
+        ? isCanonicalRailConfigured(provider as "solana" | "base")
+        : Boolean(getWallet(provider))
+      if (!railReady) {
+        toast.error(canonicalWalletMode ? "Wallet address not provisioned" : "Connect wallet first")
+        return
+      }
     }
 
     if (value && provider === "lightning" && !canonicalWalletMode && getLightningCardState().status !== "Connected") {
@@ -695,14 +700,16 @@ function EngineSettingStatus({
   }) {
     const connected = isCanonicalRailConfigured(provider)
     const enabled = isEnabled(provider)
+    const statusLabel = (connected && enabled) ? "Connected" : "Not connected"
+    const statusPillTone = (connected && enabled) ? "blue" : ("default" as const)
 
     return (
       <div className="flex min-h-[226px] flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <h2 className="min-w-0 text-base font-semibold leading-tight text-gray-950">{name}</h2>
           <ProviderStatusPill
-            label={connected ? "Connected" : "Not configured"}
-            tone={connected ? "blue" : "default"}
+            label={statusLabel}
+            tone={statusPillTone}
             className="shrink-0"
           />
         </div>

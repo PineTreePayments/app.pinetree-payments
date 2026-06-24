@@ -296,6 +296,7 @@ function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
     const rawCreds = speedRow.credentials || {}
     const hasMerchantSpeedAccount = Boolean(String(rawCreds.speed_account_id || "").trim())
     const readyForPayments = platformStatus.configured && hasMerchantSpeedAccount && Boolean(speedRow.enabled)
+    const merchantEnabled = Boolean(speedRow.enabled)
     const safeSpeedCredentials: JsonObject = {
       mode: platformStatus.mode,
       account_id: (rawCreds.speed_account_id as string | null) ?? null,
@@ -318,7 +319,9 @@ function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
     decoratedRows.push({
       provider: SPEED_PROVIDER_NAME,
       status: speedRow.status,
-      enabled: readyForPayments,
+      // Reflect the merchant's toggle choice, not payment-system readiness.
+      // readiness.ready captures whether payments are actually live.
+      enabled: merchantEnabled,
       credentials: safeSpeedCredentials,
       dashboard_status: platformStatus.configured ? "connected" as LightningDashboardStatus : "provider_unavailable" as LightningDashboardStatus,
       capabilities: {
@@ -567,6 +570,35 @@ export async function toggleProviderEngine(
 
   // Map UI provider key "lightning" to the actual DB row key "lightning_nwc"
   const targetProvider = provider === "lightning" ? "lightning_nwc" : provider
+
+  // For solana/base in canonical wallet mode the provider row may not yet exist
+  // (if rail sync hasn't run). Use upsert to avoid a silent no-op.
+  if (provider === "solana" || provider === "base") {
+    const { data: existingRow } = await db
+      .from("merchant_providers")
+      .select("status, credentials")
+      .eq("merchant_id", merchantId)
+      .eq("provider", targetProvider)
+      .maybeSingle()
+
+    const { error } = await db
+      .from("merchant_providers")
+      .upsert(
+        {
+          merchant_id: merchantId,
+          provider: targetProvider,
+          status: (existingRow?.status as string | null) || "connected",
+          credentials: (existingRow?.credentials as JsonObject | null) || {},
+          enabled
+        },
+        { onConflict: "merchant_id,provider" }
+      )
+
+    if (error) {
+      throw new Error(`Failed to toggle provider: ${error.message}`)
+    }
+    return
+  }
 
   const { error } = await db
     .from("merchant_providers")

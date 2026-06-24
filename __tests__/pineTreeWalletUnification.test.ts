@@ -145,9 +145,10 @@ describe("Providers page canonical wallet mode", () => {
     expect(page).toContain(">PineTree Wallet</span>")
   })
 
-  it("shows managed crypto rails as Connected or Not configured with Enabled toggles", () => {
+  it("shows managed crypto rails as Connected or Not connected with Enabled toggles", () => {
     expect(page).toContain('provider: "solana" | "base" | "lightning"')
-    expect(page).toContain('label={connected ? "Connected" : "Not configured"}')
+    expect(page).toContain('"Connected" : "Not connected"')
+    expect(page).not.toContain('"Not configured"')
     expect(page).toContain(">Enabled</span>")
     expect(page).toContain("onChange={(v) => toggleProvider(provider, v)}")
     expect(page).toContain("disabled={!connected}")
@@ -165,10 +166,12 @@ describe("Providers page canonical wallet mode", () => {
     expect(page).toContain("pineTreeWalletProfile?.bitcoinAddressPresent")
   })
 
-  it("keeps Connected/Not configured independent from the Enabled toggle", () => {
+  it("keeps Connected/Not connected status independent from the Enabled toggle", () => {
     expect(page).toContain("const connected = isCanonicalRailConfigured(provider)")
     expect(page).toContain("const enabled = isEnabled(provider)")
-    expect(page).toContain('label={connected ? "Connected" : "Not configured"}')
+    // Status pill reflects both address presence AND merchant enabled choice
+    expect(page).toContain("const statusLabel = (connected && enabled)")
+    expect(page).toContain('"Connected" : "Not connected"')
     expect(page).toContain("checked={enabled}")
   })
 

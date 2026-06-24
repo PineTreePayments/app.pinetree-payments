@@ -1050,7 +1050,7 @@ function PineTreeWalletRuntime() {
 
               {activeTab === "withdraw" ? (
                 <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-8 text-center sm:px-6">
-                  <p className="text-sm font-semibold text-gray-950">Withdrawals coming soon</p>
+                  <p className="text-sm font-semibold text-gray-950">Withdrawal coming soon</p>
                   <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-gray-500">
                     You&apos;ll be able to review and send funds from PineTree Wallet once withdrawal signing is enabled.
                   </p>
@@ -1059,7 +1059,7 @@ function PineTreeWalletRuntime() {
                     disabled
                     className="mt-5 h-10 cursor-not-allowed rounded-lg bg-gray-200 px-4 text-sm font-semibold text-gray-500"
                   >
-                    Withdrawals disabled
+                    Withdrawal disabled
                   </button>
                 </div>
               ) : null}
