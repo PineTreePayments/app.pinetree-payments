@@ -38,6 +38,10 @@ const canonicalLightningMode =
     process.env.PINE_TREE_LIGHTNING_SETTLEMENT_MODE === "speed_platform_treasury_sweep"
   )
 
+// When true, Solana and Base rails are managed through PineTree Wallet.
+// The connect/disconnect UI is hidden; a read-only "Managed" card is shown instead.
+const canonicalWalletMode = process.env.NEXT_PUBLIC_PINE_TREE_WALLET_CANONICAL === "true"
+
 type CardOnboardingProvider = "shift4" | "stripe" | "fluidpay"
 type CardApplicationStatus = "Not started" | "Pending" | "Approved" | "Denied"
 
@@ -2076,21 +2080,69 @@ function EngineSettingStatus({
           Connect wallets and rails for crypto payment acceptance.
         </p>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
-        <ProviderCard
-          name="Solana Pay"
-          provider="solana"
-          networks="Solana"
-          settlement="Connected wallet"
-          description="Accept Solana wallet payments."
-        />
+        {canonicalWalletMode ? (
+          <>
+            <div className="flex min-h-[226px] flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+              <div className="flex items-start justify-between gap-3">
+                <h2 className="min-w-0 text-base font-semibold leading-tight text-gray-950">Solana Pay</h2>
+                <ProviderStatusPill label="Managed" tone="blue" className="shrink-0" />
+              </div>
+              <div className="mt-4 space-y-2.5">
+                <div className="grid grid-cols-[92px_1fr] items-center gap-3">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Networks</span>
+                  <span className="min-w-0 text-sm leading-snug text-gray-900">Solana</span>
+                </div>
+                <div className="grid grid-cols-[92px_1fr] items-center gap-3">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Settlement</span>
+                  <span className="min-w-0 text-sm leading-snug text-gray-900">PineTree Wallet</span>
+                </div>
+                <p className="pt-1 text-sm leading-5 text-gray-600">Solana payments settle to the merchant&apos;s PineTree Wallet.</p>
+              </div>
+              <div className="mt-auto border-t border-gray-100 pt-4">
+                <p className="text-xs font-semibold text-blue-700">Manage from PineTree Wallet</p>
+              </div>
+            </div>
 
-        <ProviderCard
-          name="Base Pay"
-          provider="base"
-          networks="Base"
-          settlement="Connected wallet"
-          description="Accept Base wallet payments."
-        />
+            <div className="flex min-h-[226px] flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+              <div className="flex items-start justify-between gap-3">
+                <h2 className="min-w-0 text-base font-semibold leading-tight text-gray-950">Base Pay</h2>
+                <ProviderStatusPill label="Managed" tone="blue" className="shrink-0" />
+              </div>
+              <div className="mt-4 space-y-2.5">
+                <div className="grid grid-cols-[92px_1fr] items-center gap-3">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Networks</span>
+                  <span className="min-w-0 text-sm leading-snug text-gray-900">Base</span>
+                </div>
+                <div className="grid grid-cols-[92px_1fr] items-center gap-3">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Settlement</span>
+                  <span className="min-w-0 text-sm leading-snug text-gray-900">PineTree Wallet</span>
+                </div>
+                <p className="pt-1 text-sm leading-5 text-gray-600">Base payments settle to the merchant&apos;s PineTree Wallet.</p>
+              </div>
+              <div className="mt-auto border-t border-gray-100 pt-4">
+                <p className="text-xs font-semibold text-blue-700">Manage from PineTree Wallet</p>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <ProviderCard
+              name="Solana Pay"
+              provider="solana"
+              networks="Solana"
+              settlement="Connected wallet"
+              description="Accept Solana wallet payments."
+            />
+
+            <ProviderCard
+              name="Base Pay"
+              provider="base"
+              networks="Base"
+              settlement="Connected wallet"
+              description="Accept Base wallet payments."
+            />
+          </>
+        )}
 
         <ProviderCard
           name="Coinbase Business"

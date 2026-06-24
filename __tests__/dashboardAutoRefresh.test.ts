@@ -74,49 +74,17 @@ describe("useDashboardAutoRefresh hook", () => {
   })
 })
 
-// ─── Wallets page ─────────────────────────────────────────────────────────────
+// ─── Wallets page (now a redirect to /dashboard/wallet-setup) ────────────────
 
-describe("Wallets page auto-refresh", () => {
+describe("Wallets page redirect", () => {
   const wallets = read("app/dashboard/wallets/page.tsx")
 
-  it("imports useDashboardAutoRefresh", () => {
-    expect(wallets).toContain("useDashboardAutoRefresh")
-    expect(wallets).toContain("@/hooks/useDashboardAutoRefresh")
+  it("redirects to /dashboard/wallet-setup (wallet experience unified)", () => {
+    expect(wallets).toContain('redirect("/dashboard/wallet-setup")')
   })
 
-  it("passes refresh=true so provider balances are synced on mount and focus", () => {
-    // The hook receives a callback that calls loadOverview(true), not false.
-    expect(wallets).toContain("loadOverview(true)")
-    // The stale no-refresh mount pattern should not be the only mount call.
-    // (loadOverview(false) may still exist for the manual Refresh button wiring
-    //  or internal re-loads, but must not be the sole mount trigger.)
-    const hookCall = wallets.indexOf("useDashboardAutoRefresh")
-    const trueCall = wallets.indexOf("loadOverview(true)")
-    expect(hookCall).toBeGreaterThan(-1)
-    expect(trueCall).toBeGreaterThan(-1)
-  })
-
-  it("passes isRefreshing as enabled guard to prevent concurrent syncs", () => {
-    expect(wallets).toContain("enabled: !isRefreshing")
-  })
-
-  it("does not show a manual Refresh Balances header button (auto-refresh handles it)", () => {
-    // The header-level "Refresh Balances" button was removed; the per-wallet inline
-    // "Refresh Balance" button inside the detail panel is intentionally kept.
-    const headerSection = wallets.slice(0, wallets.indexOf("DashboardHeroCard"))
-    expect(headerSection).not.toContain("Refresh Balances")
-  })
-
-  it("shows last wallet sync timestamp when available", () => {
-    expect(wallets).toContain("lastRefreshAt")
-    expect(wallets).toContain("Last wallet sync")
-  })
-
-  it("shows a merchant-friendly refresh error without raw internals", () => {
-    expect(wallets).toContain("refreshError")
-    // Error should be displayed to merchant but must not expose raw paths or stack traces
-    expect(wallets).not.toContain("stack")
-    expect(wallets).not.toContain("at Object.")
+  it("is a server component — no use client directive", () => {
+    expect(wallets).not.toContain('"use client"')
   })
 })
 

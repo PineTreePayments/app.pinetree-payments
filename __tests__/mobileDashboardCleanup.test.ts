@@ -68,14 +68,8 @@ describe("mobile dashboard hero cleanup", () => {
     expect(inventory).toContain('label="Inventory value"')
   })
 
-  it("combines Wallets metrics in one divided summary card", () => {
+  it("wallets route redirects to canonical wallet-setup page (experience unified)", () => {
     const wallets = read("app/dashboard/wallets/page.tsx")
-    const summary = wallets.match(/<div\s+data-wallet-summary[\s\S]*?<\/div>/)?.[0] ?? ""
-
-    expect(summary).toContain("grid-cols-2")
-    expect(summary).toContain("divide-x")
-    expect(summary).toContain('label="Connections"')
-    expect(summary).toContain('label="Total Value"')
-    expect(wallets).not.toContain("<CompactMetricTile")
+    expect(wallets).toContain('redirect("/dashboard/wallet-setup")')
   })
 })

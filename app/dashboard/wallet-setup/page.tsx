@@ -451,6 +451,12 @@ function PineTreeWalletRuntime() {
           setPendingSync(false)
           await syncPineTreeManagedLightning()
         }
+        // Fire rail sync in the background so merchant_wallets stays in sync with
+        // the PineTree Wallet profile without blocking the UI response.
+        void fetch("/api/wallets/pinetree-wallet/rail-sync", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        })
         return json.profile
       }
       return null

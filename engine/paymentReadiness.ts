@@ -74,6 +74,19 @@ export async function getPaymentReadinessEngine(input: { merchantId?: string }) 
     }
   }
 
+  // When canonical wallet mode is active, the PineTree Wallet profile is
+  // authoritative for solana/base — use it as a fallback if merchant_wallets
+  // hasn't been synced yet (e.g. first load before rail sync runs).
+  const canonicalWalletMode = process.env.PINE_TREE_WALLET_CANONICAL === "true"
+  if (canonicalWalletMode && pineTreeWalletProfile) {
+    if (!walletByNetwork.has("solana") && pineTreeWalletProfile.solana_address) {
+      walletByNetwork.set("solana", pineTreeWalletProfile.solana_address)
+    }
+    if (!walletByNetwork.has("base") && pineTreeWalletProfile.base_address) {
+      walletByNetwork.set("base", pineTreeWalletProfile.base_address)
+    }
+  }
+
   const details: NetworkReadiness[] = networks.map((network) => {
     const connectedAdaptersForNetwork = merchantId
       ? connectedAdapterIds.filter(
