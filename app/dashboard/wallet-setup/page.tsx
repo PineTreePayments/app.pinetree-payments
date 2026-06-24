@@ -36,6 +36,11 @@ type PineTreeWalletProfile = {
   bitcoin_lightning_status: "not_configured" | "pending" | "ready" | "needs_attention"
   bitcoin_lightning_provider: string | null
   bitcoin_lightning_account_id: string | null
+  btc_address: string | null
+  btc_address_type: "taproot" | "native_segwit" | "unknown" | null
+  btc_wallet_provider: string | null
+  btc_payout_enabled: boolean
+  btc_payout_verified_at: string | null
   status: "not_created" | "needs_attention" | "ready"
 }
 
@@ -402,18 +407,22 @@ function PineTreeWalletRuntime() {
   const syncProfileFromDynamic = useCallback(async (options?: { autoEnableLightning?: boolean }) => {
     const token = accessTokenRef.current
     if (!token || !user) return null
-    if (dynamicNetworkAddresses.base.length === 0 && dynamicNetworkAddresses.solana.length === 0) return null
+    if (
+      dynamicNetworkAddresses.base.length === 0 &&
+      dynamicNetworkAddresses.solana.length === 0 &&
+      dynamicNetworkAddresses.bitcoin.length === 0
+    ) return null
 
     setSyncing(true)
     try {
-      // Lightning readiness is managed by merchant_lightning_profiles, not by Dynamic Spark addresses.
-      // We still store any Spark address returned by Dynamic for reference, but it does not drive readiness.
+      const bitcoinAddress = dynamicNetworkAddresses.bitcoin[0]?.address ?? null
       const body = {
         dynamic_user_id: user.userId,
         base_address: dynamicNetworkAddresses.base[0]?.address ?? null,
         solana_address: dynamicNetworkAddresses.solana[0]?.address ?? null,
         bitcoin_lightning_address: dynamicNetworkAddresses.lightning[0]?.address ?? null,
-        bitcoin_onchain_address: dynamicNetworkAddresses.bitcoin[0]?.address ?? null,
+        bitcoin_onchain_address: bitcoinAddress,
+        btc_address: bitcoinAddress,
       }
       const res = await fetch("/api/wallets/pinetree-profile", {
         method: "POST",
@@ -479,9 +488,16 @@ function PineTreeWalletRuntime() {
 
   const lightningProfile = lightningProfileState.kind === "loaded" ? lightningProfileState.profile : null
 
-  // Bitcoin Lightning readiness is driven by the merchant_lightning_profiles record.
-  // A Dynamic Spark address is NOT required for Lightning readiness.
-  const lightningReady = lightningProfile?.status === "ready"
+  const btcPayoutReady = Boolean(profile?.btc_address && profile.btc_payout_enabled)
+  const bitcoinPayoutEntries: AddressEntry[] = profile?.btc_address
+    ? [{
+        id: "btc-payout",
+        address: profile.btc_address,
+        detail: profile.btc_address_type ? profile.btc_address_type.replace("_", " ") : "Bitcoin payout"
+      }]
+    : []
+
+  const lightningReady = lightningProfile?.status === "ready" && btcPayoutReady
   const lightningPending = lightningProfile?.status === "pending"
   const lightningNeedsAttention = lightningProfile?.status === "needs_attention"
   const lightningRetryable = !lightningReady
@@ -489,8 +505,8 @@ function PineTreeWalletRuntime() {
   const allPrimaryRailsReady = baseReady && solanaReady && lightningReady
   const baseAndSolanaReady = baseReady && solanaReady
 
-  // Wallet exists once Dynamic wallet (Base or Solana) or Lightning profile is active
-  const hasWallet = profileState.kind === "loaded" && (baseReady || solanaReady || lightningReady)
+  // Wallet exists once a PineTree embedded wallet address is available.
+  const hasWallet = profileState.kind === "loaded" && (baseReady || solanaReady || btcPayoutReady || lightningReady)
 
   const walletStatus = !hasWallet
     ? "Not created"
@@ -598,6 +614,7 @@ function PineTreeWalletRuntime() {
     if (enablingLightning) return "Preparing Bitcoin Lightning"
     if (lightningReady) return "Bitcoin Lightning Ready"
     if (lightningNeedsAttention) return "Needs attention"
+    if (!btcPayoutReady) return "Bitcoin address pending"
     return "Setup pending"
   }
 
@@ -610,6 +627,7 @@ function PineTreeWalletRuntime() {
   function lightningOverviewCopy() {
     if (lightningReady) return "Powered by PineTree. Bitcoin Lightning payments are active."
     if (lightningNeedsAttention) return "Powered by PineTree. Bitcoin Lightning needs PineTree review."
+    if (!btcPayoutReady) return "Bitcoin address pending. Base and Solana can be used while PineTree prepares Bitcoin."
     if (enablingLightning) return "Powered by PineTree. Preparing Bitcoin Lightning."
     return "Powered by PineTree. Bitcoin Lightning is being prepared through PineTree."
   }
@@ -840,17 +858,19 @@ function PineTreeWalletRuntime() {
                     </button>
                   ) : null}
 
-                  {/* Bitcoin Lightning: PineTree-managed, no merchant-side address to copy */}
+                  {/* Bitcoin Lightning: PineTree-managed, payout address is the PineTree Bitcoin wallet. */}
                   <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.05)] sm:px-5 sm:py-5">
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-sm font-semibold text-gray-800">Bitcoin Lightning</p>
                       <ProviderStatusPill label={lightningStatusLabel()} tone={lightningStatusTone()} />
                     </div>
                     <p className="mt-2 text-xs leading-5 text-gray-500">
-                      Powered by PineTree. Bitcoin Lightning is prepared through PineTree&apos;s backend Lightning rail. No external merchant wallet connection is required.
+                      Powered by PineTree. Bitcoin payouts route to your PineTree Bitcoin wallet.
                     </p>
                     {lightningReady ? (
                       <p className="mt-1 text-xs font-semibold text-green-700">Active — customers can pay Lightning invoices.</p>
+                    ) : !btcPayoutReady ? (
+                      <p className="mt-1 text-xs font-semibold text-amber-700">Bitcoin address pending. Base and Solana are available while PineTree prepares Bitcoin.</p>
                     ) : lightningPending ? (
                       <>
                         <p className="mt-1 text-xs font-semibold text-blue-700">PineTree is enabling your Lightning rail.</p>
@@ -877,10 +897,10 @@ function PineTreeWalletRuntime() {
                     )}
                   </div>
 
-                  {profileAddresses.bitcoin.length ? (
+                  {bitcoinPayoutEntries.length ? (
                     <div className="pt-2">
-                      <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Secondary</p>
-                      <ReceiveRow label="Bitcoin on-chain address" entries={profileAddresses.bitcoin} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
+                      <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Payout destination</p>
+                      <ReceiveRow label="PineTree Bitcoin wallet" entries={bitcoinPayoutEntries} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
                     </div>
                   ) : null}
                 </div>

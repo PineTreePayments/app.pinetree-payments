@@ -17,6 +17,8 @@ import {
 } from "@/database/transactions"
 import { syncTransactionProgressForPayment } from "./transactionProgress"
 
+const SPEED_PROVIDER_NAME = "lightning_speed"
+
 export type WebhookInput = {
   provider: string
   payload: unknown
@@ -86,6 +88,17 @@ function getProviderReferenceCandidates(payload: unknown): string[] {
   ]
 
   return [...new Set(candidates.map((value) => String(value || "").trim()).filter(Boolean))]
+}
+
+async function ensureSpeedTreasurySweepPayoutJob(paymentId: string, payload: unknown): Promise<void> {
+  const {
+    ensureLightningPayoutJobForConfirmedSpeedPayment,
+    processLightningPayoutJobByPayment
+  } = await import("./lightningPayouts")
+  const job = await ensureLightningPayoutJobForConfirmedSpeedPayment({ paymentId, payload })
+  if (job) {
+    await processLightningPayoutJobByPayment({ paymentId })
+  }
 }
 
 async function resolvePaymentIdFromEvent(input: {
@@ -292,6 +305,9 @@ export async function processWebhook({
     })
   }
   if (TERMINAL_STATES.has(currentStatus)) {
+    if (provider === SPEED_PROVIDER_NAME && event.event === "payment.confirmed") {
+      await ensureSpeedTreasurySweepPayoutJob(paymentId, payload)
+    }
     console.info("[eventProcessor] idempotent:terminal_state_skip", {
       provider,
       paymentId,
@@ -368,6 +384,10 @@ export async function processWebhook({
         direction: "INBOUND",
         status: "CONFIRMED"
       })
+
+      if (provider === SPEED_PROVIDER_NAME) {
+        await ensureSpeedTreasurySweepPayoutJob(paymentId, payload)
+      }
     }
 
     console.info("[eventProcessor] status applied", {

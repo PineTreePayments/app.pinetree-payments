@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   upsertPineTreeWalletProfile: vi.fn(),
   upsertMerchantLightningProfile: vi.fn(),
   createOrLinkSpeedConnectedAccountForMerchant: vi.fn(),
+  getPineTreeSpeedConfigStatus: vi.fn(),
+  isSpeedPlatformTreasurySweepEnabled: vi.fn(),
 }))
 
 vi.mock("@/lib/api/merchantAuth", () => ({
@@ -33,10 +35,9 @@ vi.mock("@/database/merchantLightningProfiles", () => ({
 }))
 
 vi.mock("@/providers/lightning/speedClient", () => ({
-  getPineTreeSpeedConfigStatus: () => ({
-    mode: "test",
-    apiBaseUrl: "https://api.tryspeed.test",
-  }),
+  getPineTreeSpeedConfigStatus: mocks.getPineTreeSpeedConfigStatus,
+  isSpeedPlatformTreasurySweepEnabled: mocks.isSpeedPlatformTreasurySweepEnabled,
+  SPEED_PLATFORM_TREASURY_SWEEP_MODE: "speed_platform_treasury_sweep",
 }))
 
 vi.mock("@/providers/lightning/speedConnectedAccounts", () => ({
@@ -53,6 +54,7 @@ function savedProfile(input: {
   status: "pending" | "ready" | "needs_attention"
   setupUrl?: string | null
   accountId?: string | null
+  accountStatus?: string | null
   errorMessage?: string | null
 }) {
   return {
@@ -61,9 +63,9 @@ function savedProfile(input: {
     provider: "speed",
     status: input.status,
     speed_connected_account_id: input.accountId ?? null,
-    speed_connected_account_status: input.status,
+    speed_connected_account_status: input.accountStatus ?? input.status,
     speed_connect_setup_url: input.setupUrl ?? null,
-    provider_response_summary: { source: input.setupUrl ? "invite_account_link" : "not_configured" },
+    provider_response_summary: {},
     provider_error_message: input.errorMessage ?? null,
     receive_mode: "invoice",
     setup_source: "pinetree_managed",
@@ -83,65 +85,131 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
       business_name: "PineTree Test Merchant",
       email: "merchant@example.test",
     })
-    mocks.getPineTreeWalletProfile.mockResolvedValue(null)
+    mocks.getPineTreeSpeedConfigStatus.mockReturnValue({
+      configured: true,
+      missing: [],
+      mode: "test",
+      apiBaseUrl: "https://api.tryspeed.test",
+    })
+    mocks.isSpeedPlatformTreasurySweepEnabled.mockReturnValue(true)
+    mocks.getPineTreeWalletProfile.mockResolvedValue({
+      id: "wallet_1",
+      merchant_id: merchantId,
+      btc_address: "bc1ptestmerchant",
+      btc_address_type: "taproot",
+      btc_payout_enabled: true,
+      created_at: "2026-06-23T12:00:00.000Z",
+      updated_at: "2026-06-23T12:00:00.000Z",
+    })
     mocks.upsertMerchantLightningProfile.mockImplementation(async (input) =>
       savedProfile({
         status: input.status,
         setupUrl: input.speedConnectSetupUrl,
         accountId: input.speedConnectedAccountId,
+        accountStatus: input.speedConnectedAccountStatus,
         errorMessage: input.providerErrorMessage,
       })
     )
     vi.spyOn(console, "info").mockImplementation(() => undefined)
-    delete process.env.SPEED_CONNECT_ENABLED
-    delete process.env.SPEED_API_KEY
-    delete process.env.SPEED_API_BASE_URL
-    delete process.env.SPEED_CONNECT_RETURN_URL
   })
 
-  it("re-runs Speed provisioning on every POST, including an existing pending retry", async () => {
-    mocks.createOrLinkSpeedConnectedAccountForMerchant.mockResolvedValue({
-      readiness: "pending",
-      speed_connected_account_id: null,
-      speed_connected_account_status: "speed_connect_disabled",
-      setup_url: null,
-      provider_response_summary: { source: "not_configured" },
-      error_message: "Speed Connect is disabled until SPEED_CONNECT_ENABLED=true is configured.",
-    })
-
+  it("canonical treasury-sweep mode does not create a merchant Speed Connect account", async () => {
     const { POST } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
-    await POST(request())
-    await POST(request())
+    const response = await POST(request())
+    const body = await response.json()
 
-    expect(mocks.createOrLinkSpeedConnectedAccountForMerchant).toHaveBeenCalledTimes(2)
-    expect(mocks.upsertMerchantLightningProfile).toHaveBeenCalledTimes(2)
+    expect(response.status).toBe(200)
+    expect(mocks.createOrLinkSpeedConnectedAccountForMerchant).not.toHaveBeenCalled()
+    expect(mocks.upsertMerchantLightningProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "ready",
+        speedConnectedAccountId: null,
+        speedConnectedAccountStatus: "pinetree_wallet_btc_payout_ready",
+        speedConnectSetupUrl: null,
+        providerErrorMessage: null,
+        providerResponseSummary: expect.objectContaining({
+          source: "speed_platform_treasury_sweep",
+          settlement_mode: "speed_platform_treasury_sweep",
+          speed_configured: true,
+          btc_address_present: true,
+          btc_payout_enabled: true,
+        }),
+      })
+    )
+    expect(mocks.upsertPineTreeWalletProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        merchantId,
+        bitcoinLightningStatus: "ready",
+        bitcoinLightningProvider: "speed",
+        bitcoinLightningAccountId: null,
+        bitcoinLightningReceiveMode: "invoice",
+      })
+    )
+    expect(body.profile.status).toBe("ready")
+    expect(JSON.stringify(body)).not.toContain("sk_test")
+    expect(JSON.stringify(body)).not.toContain("sk_live")
   })
 
-  it("always saves last_checked_at through the upsert path and stores config errors", async () => {
-    mocks.createOrLinkSpeedConnectedAccountForMerchant.mockResolvedValue({
-      readiness: "needs_attention",
-      speed_connected_account_id: null,
-      speed_connected_account_status: "speed_api_key_missing",
-      setup_url: null,
-      provider_response_summary: { source: "not_configured" },
-      error_message: "PineTree Speed platform is missing SPEED_API_KEY.",
+  it("canonical mode stays pending when the PineTree BTC payout address is missing", async () => {
+    mocks.getPineTreeWalletProfile.mockResolvedValue({
+      id: "wallet_1",
+      merchant_id: merchantId,
+      btc_address: null,
+      btc_payout_enabled: false,
     })
 
     const { POST } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
     const response = await POST(request())
     const body = await response.json()
 
+    expect(response.status).toBe(200)
+    expect(mocks.createOrLinkSpeedConnectedAccountForMerchant).not.toHaveBeenCalled()
+    expect(mocks.upsertMerchantLightningProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "pending",
+        speedConnectedAccountId: null,
+        speedConnectedAccountStatus: "btc_payout_address_pending",
+        speedConnectSetupUrl: null,
+        providerErrorMessage: "Bitcoin address pending for PineTree Wallet.",
+        providerResponseSummary: expect.objectContaining({
+          source: "speed_platform_treasury_sweep",
+          btc_address_present: false,
+          btc_payout_enabled: false,
+        }),
+      })
+    )
+    expect(body.profile.status).toBe("pending")
+  })
+
+  it("canonical mode needs attention when PineTree Speed platform config is missing", async () => {
+    mocks.getPineTreeSpeedConfigStatus.mockReturnValue({
+      configured: false,
+      missing: ["SPEED_API_KEY", "SPEED_WEBHOOK_SECRET"],
+      mode: "test",
+      apiBaseUrl: "https://api.tryspeed.test",
+    })
+
+    const { POST } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
+    const response = await POST(request())
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
     expect(mocks.upsertMerchantLightningProfile).toHaveBeenCalledWith(
       expect.objectContaining({
         status: "needs_attention",
-        providerErrorMessage: "PineTree Speed platform is missing SPEED_API_KEY.",
-        providerResponseSummary: { source: "not_configured" },
+        speedConnectedAccountStatus: "speed_platform_config_missing",
+        providerErrorMessage: "PineTree Speed platform missing: SPEED_API_KEY, SPEED_WEBHOOK_SECRET",
+        providerResponseSummary: expect.objectContaining({
+          speed_configured: false,
+          speed_missing: ["SPEED_API_KEY", "SPEED_WEBHOOK_SECRET"],
+        }),
       })
     )
-    expect(body.profile.last_checked_at).toBe("2026-06-23T12:00:00.000Z")
+    expect(body.profile.status).toBe("needs_attention")
   })
 
-  it("stores Speed Connect invite setup URLs as pending", async () => {
+  it("legacy Speed Connect behavior is isolated behind the disabled treasury-sweep flag", async () => {
+    mocks.isSpeedPlatformTreasurySweepEnabled.mockReturnValue(false)
     mocks.createOrLinkSpeedConnectedAccountForMerchant.mockResolvedValue({
       readiness: "pending",
       speed_connected_account_id: null,
@@ -152,63 +220,15 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
     })
 
     const { POST } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
-    await POST(request())
+    const response = await POST(request())
 
+    expect(response.status).toBe(200)
+    expect(mocks.createOrLinkSpeedConnectedAccountForMerchant).toHaveBeenCalledTimes(1)
     expect(mocks.upsertMerchantLightningProfile).toHaveBeenCalledWith(
       expect.objectContaining({
         status: "pending",
         speedConnectSetupUrl: "https://speed.test/connect/link_123",
         providerResponseSummary: { source: "invite_account_link", setup_url_present: true },
-      })
-    )
-  })
-
-  it("stores active Speed connected accounts as ready without exposing secrets", async () => {
-    mocks.createOrLinkSpeedConnectedAccountForMerchant.mockResolvedValue({
-      readiness: "ready",
-      speed_connected_account_id: "acct_123",
-      speed_connected_account_status: "active",
-      setup_url: null,
-      provider_response_summary: {
-        connected_account_id: "ca_123",
-        account_id: "acct_123",
-        source: "existing_connected_account",
-      },
-      error_message: null,
-    })
-
-    const { POST } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
-    const response = await POST(request())
-    const body = JSON.stringify(await response.json())
-
-    expect(mocks.upsertMerchantLightningProfile).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: "ready",
-        speedConnectedAccountId: "acct_123",
-        speedConnectedAccountStatus: "active",
-      })
-    )
-    expect(body).not.toContain("sk_test")
-    expect(body).not.toContain("sk_live")
-  })
-
-  it("converts unexpected Speed helper failures into saved needs_attention profiles", async () => {
-    mocks.createOrLinkSpeedConnectedAccountForMerchant.mockRejectedValue(
-      new Error("Speed API returned 500 with sk_test_should_not_leak")
-    )
-
-    const { POST } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
-    await POST(request())
-
-    expect(mocks.upsertMerchantLightningProfile).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: "needs_attention",
-        speedConnectedAccountStatus: "speed_connect_helper_failed",
-        providerErrorMessage: expect.stringContaining("sk_test_[redacted]"),
-        providerResponseSummary: expect.objectContaining({
-          source: "error",
-          status: "speed_connect_helper_failed",
-        }),
       })
     )
   })

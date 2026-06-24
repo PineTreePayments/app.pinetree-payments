@@ -110,6 +110,7 @@ PineTree charges a flat **$0.15 per transaction** fee. The adapter declares how 
 | `contract_split` | Fee split via Base ETH smart contract | Base ETH (base) |
 | `v7_eip3009_relayer` | Fee split via EIP-3009 meta-transaction relayer | USDC on Base (`base`) |
 | `invoice_split` | Fee included in the total invoice amount | Shift4 and Speed Lightning |
+| `collection_then_settle` | Customer payment lands in a PineTree-controlled provider account, fee is retained, and merchant net is paid out afterward | Speed treasury-sweep Lightning |
 | `post_payment_nwc` | Fee collected via a separate NWC `pay_invoice` after payment | NWC Lightning |
 
 Declare your fee capture method on the adapter class:
@@ -171,7 +172,7 @@ Your `translateEvent()` method must map provider-specific events to these normal
 |------|--------|---------|
 | `solana` | SOL on Solana, USDC on Solana | Alchemy watcher + Solana/SPL Token transaction request |
 | `base` | ETH on Base, USDC on Base | Alchemy watcher + split contract / EIP-3009 relayer |
-| `bitcoin_lightning` | BTC over Lightning | Speed or NWC |
+| `bitcoin_lightning` | BTC over Lightning | Speed treasury-sweep or legacy NWC |
 | `shift4` | Cards where enabled | Shift4 Payments REST API |
 
 ---
@@ -192,7 +193,7 @@ Relevant fields in `createPayment` input for POS:
 
 ## Settlement and payout
 
-PineTree does not manage custodial wallets for merchants. Funds go directly to merchant-configured wallet addresses (Solana, Base, Lightning). Provide the following to support settlement:
+For Solana and Base, funds go directly to merchant-configured wallet addresses. Canonical Bitcoin Lightning is different: Speed receives into PineTree's Speed account, PineTree retains its service fee, and the payout processor sends merchant net sats to the merchant's PineTree Bitcoin wallet address. Provide the following to support settlement:
 
 - **Settlement account setup** — how does the merchant connect their wallet or bank account?
 - **Split payment support** — does your SDK support atomic fee split at the transaction level?

@@ -31,6 +31,12 @@ const shift4ApplicationUrl =
   process.env.NEXT_PUBLIC_SHIFT4_APPLICATION_URL ||
   process.env.SHIFT4_APPLICATION_URL ||
   ""
+const canonicalLightningMode =
+  process.env.NEXT_PUBLIC_PINE_TREE_LIGHTNING_MODE === "speed_platform_treasury_sweep" ||
+  (
+    process.env.PINE_TREE_LIGHTNING_PROVIDER === "speed" &&
+    process.env.PINE_TREE_LIGHTNING_SETTLEMENT_MODE === "speed_platform_treasury_sweep"
+  )
 
 type CardOnboardingProvider = "shift4" | "stripe" | "fluidpay"
 type CardApplicationStatus = "Not started" | "Pending" | "Approved" | "Denied"
@@ -1526,6 +1532,15 @@ function EngineSettingStatus({
   }
 
   function getLightningCardState() {
+    if (canonicalLightningMode) {
+      return {
+        status: "Setup pending" as const,
+        connectionType: "pinetree" as const,
+        summary: "Bitcoin Lightning is managed from PineTree Wallet. Payment processing is powered by PineTree.",
+        detail: "PineTree Wallet"
+      }
+    }
+
     const speedProvider = getProvider("lightning_speed")
     const speedCredentials = speedProvider?.credentials || {}
     const hasMerchantSpeedAccount = Boolean(String(speedCredentials.account_id || "").trim())
@@ -2112,12 +2127,14 @@ function EngineSettingStatus({
                       ? "Speed account"
                       : lightningCard.connectionType === "nwc"
                         ? "NWC wallet"
-                        : "Speed account (recommended)"}
+                        : lightningCard.connectionType === "pinetree"
+                          ? "PineTree Wallet"
+                          : "PineTree Wallet"}
                   </span>
                 </div>
 
                 <p className="pt-1 text-sm leading-5 text-gray-600">
-                  Accept Bitcoin Lightning payments through PineTree&apos;s Speed setup.
+                  Accept Bitcoin Lightning payments through PineTree Wallet.
                 </p>
               </div>
 
@@ -2144,6 +2161,17 @@ function EngineSettingStatus({
                     </p>
                   </div>
                 )}
+                {lightningCard.connectionType === "pinetree" && (
+                  <div className="rounded-lg border border-blue-100 bg-blue-50/80 px-3 py-2.5">
+                    <span className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-500">Managed</span>
+                    <p className="mt-1 truncate text-sm font-semibold text-gray-950" title="PineTree Wallet - Bitcoin Lightning">
+                      PineTree Wallet &bull; Bitcoin Lightning
+                    </p>
+                    <p className="mt-0.5 text-xs leading-5 text-gray-600">
+                      Bitcoin payouts route to the merchant&apos;s PineTree Bitcoin wallet.
+                    </p>
+                  </div>
+                )}
                 {!lightningCard.connectionType && (
                   <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
                     <p className="text-sm leading-5 text-gray-600">{lightningCard.summary}</p>
@@ -2152,36 +2180,42 @@ function EngineSettingStatus({
               </div>
 
               <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={() => {
-                      if (lightningCard.status === "Connected") {
-                        if (lightningCard.connectionType === "speed") {
-                          void disconnectSpeed()
-                        } else {
-                          void disconnect("lightning")
-                        }
-                      } else {
-                        openProvider("lightning")
-                      }
-                    }}
-                    className={`h-8 rounded-md px-3 text-xs font-semibold shadow-sm transition ${
-                      lightningCard.status === "Connected"
-                        ? "border border-red-200 bg-white text-red-600 hover:border-red-300 hover:bg-red-50"
-                        : "border border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
-                    }`}
-                  >
-                    {lightningCard.status === "Connected" ? "Disconnect" : "Connect"}
-                  </button>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <span className="text-sm font-medium text-gray-700">Enabled</span>
-                  <ToggleSwitch
-                    checked={isEnabled("lightning")}
-                    disabled={lightningCard.status !== "Connected"}
-                    onChange={(v) => toggleProvider("lightning", v)}
-                  />
-                </div>
+                {lightningCard.connectionType === "pinetree" ? (
+                  <p className="text-xs font-semibold text-blue-700">Manage from PineTree Wallet</p>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => {
+                          if (lightningCard.status === "Connected") {
+                            if (lightningCard.connectionType === "speed") {
+                              void disconnectSpeed()
+                            } else {
+                              void disconnect("lightning")
+                            }
+                          } else {
+                            openProvider("lightning")
+                          }
+                        }}
+                        className={`h-8 rounded-md px-3 text-xs font-semibold shadow-sm transition ${
+                          lightningCard.status === "Connected"
+                            ? "border border-red-200 bg-white text-red-600 hover:border-red-300 hover:bg-red-50"
+                            : "border border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
+                        }`}
+                      >
+                        {lightningCard.status === "Connected" ? "Disconnect" : "Connect"}
+                      </button>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className="text-sm font-medium text-gray-700">Enabled</span>
+                      <ToggleSwitch
+                        checked={isEnabled("lightning")}
+                        disabled={lightningCard.status !== "Connected"}
+                        onChange={(v) => toggleProvider("lightning", v)}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )

@@ -5,6 +5,7 @@ const supabase = supabaseAdmin || supabaseAnon
 const PROFILES_TABLE = "pinetree_wallet_profiles"
 
 export type PineTreeWalletProfileStatus = "not_created" | "needs_attention" | "ready"
+export type BtcAddressType = "taproot" | "native_segwit" | "unknown"
 
 export type PineTreeWalletProfile = {
   id: string
@@ -19,6 +20,11 @@ export type PineTreeWalletProfile = {
   bitcoin_lightning_provider: string | null
   bitcoin_lightning_receive_mode: string
   bitcoin_lightning_account_id: string | null
+  btc_address: string | null
+  btc_address_type: BtcAddressType | null
+  btc_wallet_provider: string | null
+  btc_payout_enabled: boolean
+  btc_payout_verified_at: string | null
   status: PineTreeWalletProfileStatus
   created_at: string
   updated_at: string
@@ -35,6 +41,11 @@ export type UpsertWalletProfileInput = {
   bitcoinLightningProvider?: string | null
   bitcoinLightningAccountId?: string | null
   bitcoinLightningReceiveMode?: "invoice"
+  btcAddress?: string | null
+  btcAddressType?: BtcAddressType | string | null
+  btcWalletProvider?: string | null
+  btcPayoutEnabled?: boolean
+  btcPayoutVerifiedAt?: string | null
 }
 
 function deriveProfileStatus(fields: {
@@ -49,6 +60,25 @@ function deriveProfileStatus(fields: {
   if (!hasBase && !hasSolana) return "not_created"
   if (hasBase && hasSolana && lightningReady) return "ready"
   return "needs_attention"
+}
+
+export function normalizeBtcAddressType(value?: string | null): BtcAddressType {
+  const normalized = String(value || "").toLowerCase().trim().replace(/[\s-]+/g, "_")
+  if (normalized === "taproot" || normalized === "p2tr") return "taproot"
+  if (
+    normalized === "native_segwit" ||
+    normalized === "segwit" ||
+    normalized === "bech32" ||
+    normalized === "p2wpkh"
+  ) return "native_segwit"
+  return "unknown"
+}
+
+export function inferBtcAddressType(address?: string | null): BtcAddressType {
+  const value = String(address || "").trim().toLowerCase()
+  if (value.startsWith("bc1p") || value.startsWith("tb1p")) return "taproot"
+  if (value.startsWith("bc1q") || value.startsWith("tb1q")) return "native_segwit"
+  return "unknown"
 }
 
 export async function getPineTreeWalletProfile(
@@ -84,6 +114,13 @@ export async function upsertPineTreeWalletProfile(
     bitcoin_lightning_provider: input.bitcoinLightningProvider !== undefined ? input.bitcoinLightningProvider : existing?.bitcoin_lightning_provider ?? null,
     bitcoin_lightning_account_id: input.bitcoinLightningAccountId !== undefined ? input.bitcoinLightningAccountId : existing?.bitcoin_lightning_account_id ?? null,
     bitcoin_lightning_receive_mode: input.bitcoinLightningReceiveMode !== undefined ? input.bitcoinLightningReceiveMode : existing?.bitcoin_lightning_receive_mode ?? "invoice",
+    btc_address: input.btcAddress !== undefined ? input.btcAddress : existing?.btc_address ?? null,
+    btc_address_type: input.btcAddressType !== undefined
+      ? normalizeBtcAddressType(input.btcAddressType)
+      : existing?.btc_address_type ?? null,
+    btc_wallet_provider: input.btcWalletProvider !== undefined ? input.btcWalletProvider : existing?.btc_wallet_provider ?? null,
+    btc_payout_enabled: input.btcPayoutEnabled !== undefined ? input.btcPayoutEnabled : existing?.btc_payout_enabled ?? false,
+    btc_payout_verified_at: input.btcPayoutVerifiedAt !== undefined ? input.btcPayoutVerifiedAt : existing?.btc_payout_verified_at ?? null,
   }
 
   const status = deriveProfileStatus(merged)

@@ -35,83 +35,55 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
-## Speed Bitcoin Lightning (PineTree Platform Model)
+## Speed Bitcoin Lightning (PineTree Wallet Treasury Sweep)
 
-Default Speed Lightning uses PineTree's Speed/TrySpeed platform account. Merchants do **not** paste Speed secret API keys, publishable keys, or webhook secrets into PineTree.
+Canonical Bitcoin Lightning uses PineTree's Speed/TrySpeed platform account. Merchants do **not** connect Speed, NWC, Spark, or any external Lightning wallet. PineTree Wallet is the merchant-facing product; its Bitcoin payout address is stored on the merchant's `pinetree_wallet_profiles` row.
 
-PineTree server-only Speed env vars:
+Required server-only env vars:
 
 ```bash
+PINE_TREE_LIGHTNING_PROVIDER=speed
+PINE_TREE_LIGHTNING_SETTLEMENT_MODE=speed_platform_treasury_sweep
 SPEED_API_KEY=<PineTree Speed live secret key>
-SPEED_API_BASE_URL=https://api.tryspeed.com
 SPEED_WEBHOOK_SECRET=<Speed webhook endpoint secret>
+SPEED_API_BASE_URL=https://api.tryspeed.com
+INTERNAL_API_SECRET=<shared secret for internal payout processing>
+# or
+CRON_SECRET=<shared secret for cron-triggered payout processing>
+```
+
+Recommended/optional env vars:
+
+```bash
 SPEED_ENVIRONMENT=production
-SPEED_CONNECT_ENABLED=true
-SPEED_CONNECT_RETURN_URL=https://app.pinetree-payments.com/api/wallets/lightning/speed/connect-return
-```
-
-Recommended/optional Speed env vars:
-
-```bash
-SPEED_PLATFORM_ACCOUNT_ID=acct_mplomb77IViByQkA
+SPEED_PLATFORM_ACCOUNT_ID=<PineTree Speed platform/account id>
 SPEED_DASHBOARD_URL=https://app.tryspeed.com
-SPEED_PUBLISHABLE_KEY=<PineTree Speed live publishable key if future client/Speed.js flow needs it>
 ```
 
-Public dashboard links:
+Never expose `SPEED_API_KEY`, `SPEED_WEBHOOK_SECRET`, `INTERNAL_API_SECRET`, or `CRON_SECRET` to the browser. Speed Connect env vars are **not required** for `speed_platform_treasury_sweep`.
 
-```bash
-NEXT_PUBLIC_SPEED_LOGIN_URL=https://app.tryspeed.com
-NEXT_PUBLIC_SPEED_SIGNUP_URL=https://www.tryspeed.com
-NEXT_PUBLIC_SPEED_DASHBOARD_URL=https://app.tryspeed.com/dashboard
-NEXT_PUBLIC_SPEED_ACCOUNT_ID_URL=https://app.tryspeed.com/settings/associated-accounts
-NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL=https://app.tryspeed.com/settings/associated-accounts
-NEXT_PUBLIC_SPEED_AUTO_PAYOUT_URL=https://app.tryspeed.com/auto-payout
-NEXT_PUBLIC_SPEED_AUTO_SWAP_URL=https://app.tryspeed.com/auto-swap
-NEXT_PUBLIC_SPEED_API_KEYS_URL=<TrySpeed API keys URL>
-NEXT_PUBLIC_SPEED_WEBHOOKS_URL=<TrySpeed webhooks URL>
-NEXT_PUBLIC_SPEED_AUTOSWAP_URL=https://app.tryspeed.com/auto-swap
-NEXT_PUBLIC_SPEED_PAYOUTS_URL=<TrySpeed payout settings URL>
-NEXT_PUBLIC_SPEED_SETTLEMENTS_URL=<TrySpeed settlement settings URL>
-NEXT_PUBLIC_SPEED_DOCS_URL=<TrySpeed docs URL>
-```
+Canonical live Speed Lightning flow:
 
-Never expose `SPEED_API_KEY` or `SPEED_WEBHOOK_SECRET` to the browser. Use only `NEXT_PUBLIC_` variables for dashboard links. Older public aliases still supported by the UI are `NEXT_PUBLIC_SPEED_LOGIN_URL`, `NEXT_PUBLIC_SPEED_ASSOCIATED_ACCOUNTS_URL`, `NEXT_PUBLIC_SPEED_AUTO_SWAP_URL`, and `NEXT_PUBLIC_SPEED_AUTO_PAYOUT_URL`.
+- PineTree creates the Speed Lightning invoice with `SPEED_API_KEY`.
+- The customer pays the gross total into PineTree's Speed account.
+- PineTree records the service fee separately.
+- A confirmed Speed payment creates one `lightning_payout_jobs` row for the merchant net amount.
+- The payout processor calls Speed instant send (`POST /send`) to send merchant net sats to `pinetree_wallet_profiles.btc_address`.
+- Payout status, Speed references, and txid are tracked on `lightning_payout_jobs`.
 
-Merchant Speed setup in `merchant_providers.credentials` stores only safe settlement/onboarding fields:
+Bitcoin Lightning readiness requires:
 
-- `speed_account_id`, the merchant Speed account/destination account ID
-- `speed_account_status`
-- `payout_destination`, optional notes for the settlement destination
-- `payout_type`
-- `setup_status`
-- `last_tested_at`
-- `provider_model: "pine_tree_speed_platform"`
-
-Live Speed Lightning flow:
-
-- PineTree creates the Speed Lightning payment with `SPEED_API_KEY`.
-- The customer pays the gross total.
-- Speed receives the payment through PineTree's Speed account.
-- PineTree keeps the $0.15 service fee.
-- Speed routes the merchant portion to `speed_account_id` using the payment `transfers` split.
-- Webhooks from `/api/webhooks/speed` or the on-demand Lightning status check confirm the PineTree payment.
-
-Speed readiness requires PineTree platform env, a successful platform test, and a merchant Speed account ID. Merchant-owned Speed API keys are not accepted.
-
-PineTree-managed Lightning setup uses Speed Connect account links when direct connected-account creation is not available. `SPEED_CONNECT_ENABLED` and `SPEED_CONNECT_RETURN_URL` are server-side only and must not be prefixed with `NEXT_PUBLIC_`.
+- `PINE_TREE_LIGHTNING_PROVIDER=speed`
+- `PINE_TREE_LIGHTNING_SETTLEMENT_MODE=speed_platform_treasury_sweep`
+- PineTree Speed config present (`SPEED_API_KEY`, `SPEED_WEBHOOK_SECRET`, and Speed API base URL)
+- Merchant PineTree Wallet BTC payout address present
+- `btc_payout_enabled=true`
 
 Speed webhook setup:
 
 - Configure the Speed endpoint as `https://app.pinetree-payments.com/api/webhooks/speed`.
 - Configure this endpoint inside PineTree's Speed dashboard, not inside each merchant account.
-- Keep `/api/webhooks/lightning` in place for legacy/generic Lightning routing; Speed platform payments use `/api/webhooks/speed`.
-
-Account ID roles:
-
-- PineTree Platform Account ID comes from PineTree's Speed dashboard Associated Accounts/Profile and may be stored as `SPEED_PLATFORM_ACCOUNT_ID`.
-- Merchant Speed Account ID is the merchant destination account ID and is stored per merchant as `merchant_providers.credentials.speed_account_id`.
-- Do not use PineTree's platform account ID as a merchant destination account.
+- Keep `/api/webhooks/lightning` in place for legacy/generic Lightning routing; canonical Speed platform payments use `/api/webhooks/speed`.
 
 Environment/key safety:
 
@@ -123,9 +95,18 @@ Speed dashboard may warn about unrestricted API keys. Do not configure IP restri
 
 ---
 
-## NWC Direct Lightning Wallet (Advanced/Beta)
+## Legacy Lightning Modes
 
-Advanced/Beta option for technical merchants. Requires a Nostr Wallet Connect URI with `make_invoice`, `lookup_invoice`, and `pay_invoice` permissions. The NWC URI is stored server-side in `merchant_providers.credentials` and never returned to the browser.
+Legacy Speed Connect and NWC modules remain for old records and explicit non-canonical modes. They are not active or visible in the canonical PineTree Wallet treasury-sweep path.
+
+Speed Connect server-only env vars, if an old deployment explicitly enables that mode:
+
+```bash
+SPEED_CONNECT_ENABLED=true
+SPEED_CONNECT_RETURN_URL=https://app.pinetree-payments.com/api/wallets/lightning/speed/connect-return
+```
+
+NWC direct wallet mode requires a Nostr Wallet Connect URI with `make_invoice`, `lookup_invoice`, and `pay_invoice` permissions. The NWC URI is stored server-side in `merchant_providers.credentials` and never returned to the browser.
 
 Optional public NWC setup/help links:
 
@@ -139,7 +120,7 @@ NEXT_PUBLIC_ZEUS_NWC_GUIDE_URL=https://zeusln.app
 
 Do not add secret or private NWC connection values as `NEXT_PUBLIC_` variables.
 
-The optional PineTree treasury NWC URI used for post-payment fee collection is set as a server env var (not stored in the DB):
+The optional legacy PineTree treasury NWC URI used for post-payment fee collection is set as a server env var (not stored in the DB):
 
 ```bash
 PINETREE_TREASURY_NWC_URI=nostr+walletconnect://...

@@ -1,7 +1,12 @@
 import { getMerchantProviders } from "@/database/merchants"
 import { getMerchantWallets } from "@/database/merchantWallets"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
-import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
+import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
+import {
+  getPineTreeSpeedConfigStatus,
+  isSpeedPlatformTreasurySweepEnabled,
+  SPEED_PLATFORM_TREASURY_SWEEP_MODE
+} from "@/providers/lightning/speedClient"
 import {
   normalizePaymentAdapter,
   adapterSupportsNetwork,
@@ -57,6 +62,7 @@ export async function getPaymentReadinessEngine(input: { merchantId?: string }) 
     .filter((value): value is PaymentAdapterId => Boolean(value))
 
   const wallets = merchantId ? await getMerchantWallets(merchantId) : []
+  const pineTreeWalletProfile = merchantId ? await getPineTreeWalletProfile(merchantId) : null
   const walletByNetwork = new Map<WalletNetwork, string>()
 
   for (const wallet of wallets) {
@@ -81,6 +87,29 @@ export async function getPaymentReadinessEngine(input: { merchantId?: string }) 
     )
     if (network === "bitcoin_lightning") {
       const speedConfig = getPineTreeSpeedConfigStatus()
+      if (isSpeedPlatformTreasurySweepEnabled()) {
+        const btcAddress = String(pineTreeWalletProfile?.btc_address || "").trim()
+        const btcPayoutReady = Boolean(btcAddress && pineTreeWalletProfile?.btc_payout_enabled)
+        return {
+          network,
+          adapters: {
+            available: speedConfig.configured,
+            connected: speedConfig.configured ? [SPEED_PROVIDER_NAME] : []
+          },
+          wallet: {
+            connected: btcPayoutReady,
+            addressPreview: maskAddress(btcAddress)
+          },
+          treasury: {
+            configured: speedConfig.configured,
+            validFormat: speedConfig.configured,
+            addressPreview: SPEED_PLATFORM_TREASURY_SWEEP_MODE,
+            error: speedConfig.configured
+              ? btcPayoutReady ? undefined : "Bitcoin address pending"
+              : speedConfig.missing.join(", ")
+          }
+        }
+      }
       const speedCredentials = (speedProvider?.credentials || {}) as {
         speed_account_id?: string
         setup_status?: string

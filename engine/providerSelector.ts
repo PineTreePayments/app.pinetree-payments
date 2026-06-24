@@ -12,6 +12,10 @@ import { getProviderMetadata, isProviderHealthy, providerSupportsFeeAtPaymentTim
 import { loadProviders } from "./loadProviders"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { merchantProviderCanProcessPayments } from "@/lib/providers/cardProviderReadiness"
+import {
+  getPineTreeSpeedConfigStatus,
+  isSpeedPlatformTreasurySweepEnabled
+} from "@/providers/lightning/speedClient"
 
 // Wallet-rail adapter per network — used when merchant_providers has no rows yet
 const NETWORK_DEFAULT_ADAPTER: Partial<Record<string, PaymentAdapterId>> = {
@@ -65,6 +69,13 @@ export async function chooseBestAdapter(input: {
     .filter(merchantProviderCanProcessPayments)
     .map((provider) => normalizeProvider(provider.provider))
     .filter((value): value is PaymentAdapterId => Boolean(value))
+  const speedTreasurySweepReady =
+    network === "bitcoin_lightning" &&
+    isSpeedPlatformTreasurySweepEnabled() &&
+    getPineTreeSpeedConfigStatus().configured
+  if (speedTreasurySweepReady && !connectedAdapterIds.includes(SPEED_PROVIDER_NAME)) {
+    connectedAdapterIds.push(SPEED_PROVIDER_NAME)
+  }
 
   const defaultAdapterId = normalizeProvider(
     String(await getMerchantDefaultProvider(input.merchantId) || "")

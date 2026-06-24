@@ -1,6 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
-import { getPineTreeWalletProfile, upsertPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
+import {
+  getPineTreeWalletProfile,
+  inferBtcAddressType,
+  normalizeBtcAddressType,
+  upsertPineTreeWalletProfile
+} from "@/database/pineTreeWalletProfiles"
 
 /**
  * GET /api/wallets/pinetree-profile
@@ -30,11 +35,24 @@ export async function GET(req: NextRequest) {
  *   solana_address         string | null
  *   bitcoin_lightning_address  string | null
  *   bitcoin_onchain_address    string | null
+ *   btc_address                string | null
+ *   btc_address_type           "taproot" | "native_segwit" | "unknown" | null
  */
 export async function POST(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
     const body = (await req.json()) as Record<string, unknown>
+    const bodyBtcAddress = "btc_address" in body
+      ? (body.btc_address as string | null)
+      : "bitcoin_onchain_address" in body
+        ? (body.bitcoin_onchain_address as string | null)
+        : undefined
+    const normalizedBtcAddress = typeof bodyBtcAddress === "string" ? bodyBtcAddress.trim() || null : bodyBtcAddress
+    const btcAddressType = "btc_address_type" in body
+      ? normalizeBtcAddressType(body.btc_address_type as string | null)
+      : normalizedBtcAddress
+        ? inferBtcAddressType(normalizedBtcAddress)
+        : undefined
 
     const profile = await upsertPineTreeWalletProfile({
       merchantId,
@@ -46,6 +64,13 @@ export async function POST(req: NextRequest) {
       bitcoinLightningStatus: "bitcoin_lightning_status" in body ? (body.bitcoin_lightning_status as "not_configured" | "pending" | "ready" | "needs_attention" | undefined) : undefined,
       bitcoinLightningProvider: "bitcoin_lightning_provider" in body ? (body.bitcoin_lightning_provider as string | null) : undefined,
       bitcoinLightningAccountId: "bitcoin_lightning_account_id" in body ? (body.bitcoin_lightning_account_id as string | null) : undefined,
+      btcAddress: bodyBtcAddress !== undefined ? normalizedBtcAddress : undefined,
+      btcAddressType,
+      btcWalletProvider: bodyBtcAddress !== undefined ? "dynamic_fireblocks" : undefined,
+      btcPayoutEnabled: bodyBtcAddress !== undefined ? Boolean(normalizedBtcAddress) : undefined,
+      btcPayoutVerifiedAt: bodyBtcAddress !== undefined
+        ? normalizedBtcAddress ? new Date().toISOString() : null
+        : undefined,
     })
 
     return NextResponse.json({ profile })

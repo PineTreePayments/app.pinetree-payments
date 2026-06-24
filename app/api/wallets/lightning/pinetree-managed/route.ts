@@ -3,7 +3,8 @@
  *
  * Manages the PineTree-owned Lightning backend profile for a merchant.
  * Merchants do not need to sign up for Speed, connect NWC, or paste any keys.
- * PineTree provisions or links the Speed connected account server-side.
+ * Canonical treasury-sweep mode uses PineTree's Speed account and the merchant's
+ * PineTree Bitcoin wallet payout address.
  *
  * SECURITY: No Speed API keys or secrets are returned to the browser.
  */
@@ -23,7 +24,11 @@ import {
   type CreateOrLinkSpeedConnectedAccountResult,
   type SpeedConnectedAccountReadiness,
 } from "@/providers/lightning/speedConnectedAccounts"
-import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
+import {
+  getPineTreeSpeedConfigStatus,
+  isSpeedPlatformTreasurySweepEnabled,
+  SPEED_PLATFORM_TREASURY_SWEEP_MODE
+} from "@/providers/lightning/speedClient"
 
 function mapSpeedReadinessToLightningStatus(
   readiness: SpeedConnectedAccountReadiness
@@ -72,6 +77,18 @@ function getSafeSpeedConnectLogContext(merchantId: string) {
   }
 }
 
+function getSafeTreasurySweepLogContext(merchantId: string) {
+  const config = getPineTreeSpeedConfigStatus()
+  return {
+    merchant_id: merchantId,
+    lightning_provider: process.env.PINE_TREE_LIGHTNING_PROVIDER || "",
+    settlement_mode: process.env.PINE_TREE_LIGHTNING_SETTLEMENT_MODE || "",
+    SPEED_API_KEY_present: Boolean(String(process.env.SPEED_API_KEY || "").trim()),
+    SPEED_WEBHOOK_SECRET_present: Boolean(String(process.env.SPEED_WEBHOOK_SECRET || "").trim()),
+    SPEED_API_BASE_URL: config.apiBaseUrl,
+  }
+}
+
 function failedSpeedSetupResult(error: unknown): CreateOrLinkSpeedConnectedAccountResult {
   const config = getPineTreeSpeedConfigStatus()
   return {
@@ -104,6 +121,37 @@ function failedSpeedSetupResult(error: unknown): CreateOrLinkSpeedConnectedAccou
 export async function GET(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
+    if (isSpeedPlatformTreasurySweepEnabled()) {
+      const profile = await getPineTreeWalletProfile(merchantId)
+      const speedConfig = getPineTreeSpeedConfigStatus()
+      const btcAddressReady = Boolean(profile?.btc_address && profile.btc_payout_enabled)
+      const status: MerchantLightningProfileStatus = speedConfig.configured && btcAddressReady
+        ? "ready"
+        : speedConfig.configured
+          ? "pending"
+          : "needs_attention"
+
+      return NextResponse.json({
+        profile: {
+          id: profile?.id || `pinetree-wallet:${merchantId}:lightning`,
+          merchant_id: merchantId,
+          provider: "speed",
+          status,
+          speed_connected_account_id: null,
+          speed_connected_account_status: null,
+          setup_url: null,
+          receive_mode: "invoice",
+          setup_source: "pinetree_managed",
+          settlement_mode: SPEED_PLATFORM_TREASURY_SWEEP_MODE,
+          btc_address_present: Boolean(profile?.btc_address),
+          btc_payout_enabled: Boolean(profile?.btc_payout_enabled),
+          last_checked_at: new Date().toISOString(),
+          created_at: profile?.created_at || null,
+          updated_at: profile?.updated_at || null,
+        }
+      })
+    }
+
     const profile = await getMerchantLightningProfile(merchantId)
     return NextResponse.json({ profile: safeLightningProfile(profile) })
   } catch (error) {
@@ -126,6 +174,59 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
+
+    if (isSpeedPlatformTreasurySweepEnabled()) {
+      const logContext = getSafeTreasurySweepLogContext(merchantId)
+      console.info("[pinetree-managed-lightning] treasury_sweep_post_start", logContext)
+
+      const speedConfig = getPineTreeSpeedConfigStatus()
+      const walletProfile = await getPineTreeWalletProfile(merchantId)
+      const btcAddressReady = Boolean(walletProfile?.btc_address && walletProfile.btc_payout_enabled)
+      const nextStatus: MerchantLightningProfileStatus = speedConfig.configured && btcAddressReady
+        ? "ready"
+        : speedConfig.configured
+          ? "pending"
+          : "needs_attention"
+
+      const lightningProfile = await upsertMerchantLightningProfile({
+        merchantId,
+        status: nextStatus,
+        speedConnectedAccountId: null,
+        speedConnectedAccountStatus: speedConfig.configured
+          ? btcAddressReady ? "pinetree_wallet_btc_payout_ready" : "btc_payout_address_pending"
+          : "speed_platform_config_missing",
+        speedConnectSetupUrl: null,
+        providerResponseSummary: {
+          source: "speed_platform_treasury_sweep",
+          settlement_mode: SPEED_PLATFORM_TREASURY_SWEEP_MODE,
+          speed_configured: speedConfig.configured,
+          speed_missing: speedConfig.missing,
+          btc_address_present: Boolean(walletProfile?.btc_address),
+          btc_payout_enabled: Boolean(walletProfile?.btc_payout_enabled),
+        },
+        providerErrorMessage: speedConfig.configured
+          ? btcAddressReady ? null : "Bitcoin address pending for PineTree Wallet."
+          : `PineTree Speed platform missing: ${speedConfig.missing.join(", ")}`,
+      })
+
+      if (walletProfile) {
+        await upsertPineTreeWalletProfile({
+          merchantId,
+          bitcoinLightningStatus: nextStatus,
+          bitcoinLightningProvider: "speed",
+          bitcoinLightningAccountId: null,
+          bitcoinLightningReceiveMode: "invoice",
+        })
+      }
+
+      console.info("[pinetree-managed-lightning] treasury_sweep_profile_saved", {
+        merchant_id: merchantId,
+        final_saved_profile_status: lightningProfile.status,
+        btc_address_present: Boolean(walletProfile?.btc_address),
+      })
+
+      return NextResponse.json({ profile: safeLightningProfile(lightningProfile) })
+    }
 
     const logContext = getSafeSpeedConnectLogContext(merchantId)
     console.info("[pinetree-managed-lightning] POST start", logContext)

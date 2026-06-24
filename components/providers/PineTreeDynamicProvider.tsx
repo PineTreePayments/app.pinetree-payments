@@ -5,7 +5,6 @@ import { DynamicContextProvider, type WalletOption } from "@dynamic-labs/sdk-rea
 import { EthereumWalletConnectors } from "@dynamic-labs/ethereum"
 import { SolanaWalletConnectors } from "@dynamic-labs/solana"
 import { BitcoinWalletConnectors } from "@dynamic-labs/bitcoin"
-import { SparkWalletConnectors } from "@dynamic-labs/spark"
 
 type PineTreeWalletInfrastructureStatus = {
   configured: boolean
@@ -133,7 +132,6 @@ export default function PineTreeDynamicProvider({ children }: { children: ReactN
             EthereumWalletConnectors,
             SolanaWalletConnectors,
             BitcoinWalletConnectors,
-            SparkWalletConnectors,
           ],
           walletsFilter: filterPineTreeMerchantWalletOptions,
         }}

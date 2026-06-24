@@ -1,9 +1,9 @@
 /**
  * PineTree Speed Lightning Provider Adapter
  *
- * Default BTC Lightning path. PineTree creates the Speed payment with its own
- * platform API key, customer pays the gross total, and Speed routes the merchant
- * percentage to the merchant's configured Speed account ID.
+ * PineTree creates the Speed payment with its own platform API key. Legacy mode
+ * routes merchant proceeds to a merchant Speed account; treasury-sweep mode
+ * keeps Speed hidden and settles merchant net funds to PineTree Wallet BTC.
  */
 
 import type { ProviderAdapter, ProviderCapabilities, LightningInvoiceRequest } from "@/types/provider"
@@ -16,7 +16,9 @@ import {
   createSpeedLightningPayment,
   retrieveSpeedPayment,
   verifySpeedWebhookSignature,
-  isSpeedPaymentPaid
+  isSpeedPaymentPaid,
+  isSpeedPlatformTreasurySweepEnabled,
+  SPEED_PLATFORM_TREASURY_SWEEP_MODE
 } from "./speedClient"
 import QRCode from "qrcode"
 
@@ -85,13 +87,19 @@ export const speedAdapter: ProviderAdapter = {
   },
 
   async createLightningInvoice(input: LightningInvoiceRequest) {
-    const merchantSpeed = await getMerchantSpeedProvider(input.merchantId)
-    const merchantSpeedAccountId = merchantSpeed?.accountId || input.merchantWallet || ""
-    if (!merchantSpeedAccountId) {
-      throw new Error("Merchant Speed Account ID is required for Speed Lightning payments.")
-    }
-    if (!merchantSpeed?.readyForPayments) {
-      throw new Error("Speed Lightning is not ready for this merchant. Run the Speed setup test and save a Merchant Speed Account ID.")
+    const treasurySweepEnabled = isSpeedPlatformTreasurySweepEnabled()
+    const merchantSpeed = treasurySweepEnabled ? null : await getMerchantSpeedProvider(input.merchantId)
+    const merchantSpeedAccountId = treasurySweepEnabled
+      ? ""
+      : merchantSpeed?.accountId || input.merchantWallet || ""
+
+    if (!treasurySweepEnabled) {
+      if (!merchantSpeedAccountId) {
+        throw new Error("Merchant Speed Account ID is required for Speed Lightning payments.")
+      }
+      if (!merchantSpeed?.readyForPayments) {
+        throw new Error("Speed Lightning is not ready for this merchant. Run the Speed setup test and save a Merchant Speed Account ID.")
+      }
     }
 
     const speedPayment = await createSpeedLightningPayment({
@@ -103,6 +111,9 @@ export const speedAdapter: ProviderAdapter = {
       pineTreePaymentId: input.paymentId,
       pineTreePaymentIntentId: String(input.metadata?.paymentIntentId || ""),
       merchantId: input.merchantId,
+      settlementMode: treasurySweepEnabled
+        ? SPEED_PLATFORM_TREASURY_SWEEP_MODE
+        : "speed_connect_split",
       metadata: input.metadata
     })
 
@@ -116,15 +127,20 @@ export const speedAdapter: ProviderAdapter = {
       invoice: speedPayment.paymentRequest,
       paymentUrl: speedPayment.paymentUrl,
       qrCodeUrl,
-      feeCaptureMethod: "invoice_split",
+      feeCaptureMethod: treasurySweepEnabled ? "collection_then_settle" : "invoice_split",
       metadata: {
         provider: SPEED_ADAPTER_ID,
         speedPaymentId: speedPayment.speedPaymentId,
         speedStatus: speedPayment.status,
-        merchantSpeedAccountId,
+        settlementMode: treasurySweepEnabled
+          ? SPEED_PLATFORM_TREASURY_SWEEP_MODE
+          : "speed_connect_split",
+        ...(merchantSpeedAccountId ? { merchantSpeedAccountId } : {}),
         merchantTransferPercentage: speedPayment.merchantTransferPercentage,
         transfers: speedPayment.transfers,
-        feeStatus: speedPayment.transfers.length > 0 ? "split_configured" : "split_pending_verification",
+        feeStatus: treasurySweepEnabled
+          ? "platform_fee_retained_pending_sweep"
+          : speedPayment.transfers.length > 0 ? "split_configured" : "split_pending_verification",
         grossAmount: Number(input.grossAmount),
         merchantAmount: Number(input.merchantAmount),
         pineTreeFeeAmount: Number(input.pinetreeFee)

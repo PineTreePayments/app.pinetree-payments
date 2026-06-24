@@ -74,6 +74,9 @@ export * from "./settlementDestinations"
 // Settlement Withdrawals
 export * from "./settlementWithdrawals"
 
+// Lightning Payout Jobs
+export * from "./lightningPayoutJobs"
+
 // Settlement Preferences
 export * from "./settlementPreferences"
 

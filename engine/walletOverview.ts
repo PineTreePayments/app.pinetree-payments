@@ -12,6 +12,11 @@ import {
   getMerchantSpeedProvider,
   type MerchantNwcStatus
 } from "@/database/merchantProviders"
+import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
+import {
+  getPineTreeSpeedConfigStatus,
+  isSpeedPlatformTreasurySweepEnabled
+} from "@/providers/lightning/speedClient"
 import {
   listRecentWalletOperationsForMerchant,
   type WalletOperationRecord
@@ -20,6 +25,10 @@ import {
   listSettlementWithdrawalsForMerchant,
   type SettlementWithdrawalRecord
 } from "@/database/settlementWithdrawals"
+import {
+  listLightningPayoutJobsForMerchant,
+  type LightningPayoutJob
+} from "@/database/lightningPayoutJobs"
 
 // ─── NWC Types ────────────────────────────────────────────────────────────────
 
@@ -61,8 +70,8 @@ export type WalletOverviewItem = {
 export type WalletOverviewPaymentRail = {
   id: string
   type: "bitcoin_lightning"
-  provider: "Speed" | "NWC"
-  wallet_type: "speed" | "nwc"
+  provider: "PineTree" | "Speed" | "NWC"
+  wallet_type: "pinetree" | "speed" | "nwc"
   status: "Connected" | "Not Connected" | "Error"
   walletLabel: string
   wallet_address: string
@@ -183,10 +192,36 @@ function summarizeSettlementWithdrawal(row: SettlementWithdrawalRecord): WalletO
   }
 }
 
+function summarizeLightningPayoutJob(row: LightningPayoutJob): WalletOverviewOperation {
+  return {
+    id: row.id,
+    provider: row.provider,
+    operationType: "LIGHTNING_SETTLEMENT",
+    asset: "BTC",
+    network: "bitcoin",
+    amount: Number(row.merchant_net_sats || 0) / 100_000_000,
+    destinationType: "pinetree_btc_wallet",
+    destinationValue: row.btc_payout_address || null,
+    providerReference: row.txid || row.speed_payout_id || row.speed_withdraw_request_id,
+    status: row.status === "pending" || row.status === "processing"
+      ? "SETTLEMENT_PENDING"
+      : row.status === "completed"
+        ? "SETTLEMENT_COMPLETED"
+        : row.status === "failed"
+          ? "NEEDS_ATTENTION"
+          : row.status.toUpperCase(),
+    errorCode: row.status === "failed" ? "LIGHTNING_PAYOUT_FAILED" : null,
+    errorMessage: row.status === "failed" ? row.last_error : null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  }
+}
+
 async function listRecentWalletActivity(merchantId: string): Promise<WalletOverviewOperation[]> {
-  const [walletOperations, settlementWithdrawals] = await Promise.all([
+  const [walletOperations, settlementWithdrawals, lightningPayoutJobs] = await Promise.all([
     listRecentWalletOperationsForMerchant(merchantId, { limit: 25 }),
-    listSettlementWithdrawalsForMerchant(merchantId, { limit: 25 })
+    listSettlementWithdrawalsForMerchant(merchantId, { limit: 25 }),
+    listLightningPayoutJobsForMerchant(merchantId, { limit: 25 }).catch(() => [])
   ])
 
   const operationRows = walletOperations
@@ -198,7 +233,8 @@ async function listRecentWalletActivity(merchantId: string): Promise<WalletOverv
 
   return [
     ...operationRows,
-    ...settlementWithdrawals.map(summarizeSettlementWithdrawal)
+    ...settlementWithdrawals.map(summarizeSettlementWithdrawal),
+    ...lightningPayoutJobs.map(summarizeLightningPayoutJob)
   ]
     .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
     .slice(0, 8)
@@ -208,6 +244,29 @@ async function getLightningPaymentRails(
   merchantId: string,
   prices: { BTC: number }
 ): Promise<WalletOverviewPaymentRail[]> {
+  if (isSpeedPlatformTreasurySweepEnabled()) {
+    const [profile, speedConfig] = await Promise.all([
+      getPineTreeWalletProfile(merchantId),
+      Promise.resolve(getPineTreeSpeedConfigStatus())
+    ])
+    const btcAddress = String(profile?.btc_address || "").trim()
+    const ready = Boolean(speedConfig.configured && btcAddress && profile?.btc_payout_enabled)
+
+    return [{
+      id: profile?.id || "pinetree-bitcoin-lightning",
+      type: "bitcoin_lightning",
+      provider: "PineTree",
+      wallet_type: "pinetree",
+      status: ready ? "Connected" : speedConfig.configured ? "Not Connected" : "Error",
+      walletLabel: "Bitcoin Lightning",
+      wallet_address: btcAddress || "Bitcoin address pending",
+      assetSymbol: "BTC",
+      nativeBalance: 0,
+      usdValue: 0,
+      nwcConnectionStatus: null
+    }]
+  }
+
   const [speedStatus, nwcStatus] = await Promise.all([
     getMerchantSpeedProvider(merchantId),
     getMerchantNwcStatus(merchantId)

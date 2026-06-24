@@ -47,6 +47,14 @@ export type SpeedConnectionResult = {
   config: PineTreeSpeedConfigStatus
 }
 
+export const SPEED_PLATFORM_TREASURY_SWEEP_MODE = "speed_platform_treasury_sweep" as const
+
+export type SpeedLightningSettlementMode =
+  | typeof SPEED_PLATFORM_TREASURY_SWEEP_MODE
+  | "speed_connect_split"
+  | "legacy"
+  | string
+
 export type SpeedPaymentTransfer = {
   transfer_id?: string | null
   destination_account?: string | null
@@ -112,11 +120,12 @@ export type CreateSpeedLightningPaymentParams = {
   currency: string
   merchantAmount: number
   pineTreeFeeAmount: number
-  merchantSpeedAccountId: string
+  merchantSpeedAccountId?: string
   pineTreePaymentId: string
   pineTreePaymentIntentId?: string | null
   merchantId: string
   ttlSeconds?: number
+  settlementMode?: SpeedLightningSettlementMode
   metadata?: Record<string, unknown>
 }
 
@@ -132,11 +141,56 @@ export type CreateSpeedLightningPaymentResult = {
   raw: SpeedPaymentObject
 }
 
+export type CreateSpeedWithdrawRequestParams = {
+  merchantId?: string
+  paymentId?: string
+  amount: number
+  currency?: string
+  asset?: string
+  destinationBtcAddress: string
+  destinationAddressType?: string | null
+  metadata?: Record<string, unknown>
+  idempotencyKey?: string
+}
+
+export type SpeedWithdrawRequestObject = {
+  id?: string
+  object?: string
+  status?: string
+  payout_id?: string | null
+  txid?: string | null
+  transaction_hash?: string | null
+  withdraw_method?: string | null
+  withdraw_request?: string | null
+  metadata?: Record<string, unknown>
+  [key: string]: unknown
+}
+
 const SPEED_TRANSFER_SPLIT_ERROR =
   "Lightning invoice could not be created because the transfer split was invalid. Please retry or choose another payment method."
 
 function getSpeedApiBaseUrl(): string {
   return (process.env.SPEED_API_BASE_URL || DEFAULT_SPEED_API_BASE_URL).replace(/\/$/, "")
+}
+
+export function getLightningProviderConfig(): {
+  provider: string
+  settlementMode: SpeedLightningSettlementMode
+  speedPlatformTreasurySweepEnabled: boolean
+} {
+  const provider = String(process.env.PINE_TREE_LIGHTNING_PROVIDER || "").trim().toLowerCase()
+  const settlementMode = String(process.env.PINE_TREE_LIGHTNING_SETTLEMENT_MODE || "").trim()
+
+  return {
+    provider,
+    settlementMode,
+    speedPlatformTreasurySweepEnabled:
+      provider === "speed" && settlementMode === SPEED_PLATFORM_TREASURY_SWEEP_MODE
+  }
+}
+
+export function isSpeedPlatformTreasurySweepEnabled(): boolean {
+  return getLightningProviderConfig().speedPlatformTreasurySweepEnabled
 }
 
 /**
@@ -360,8 +414,10 @@ function getLightningPaymentRequest(payment: SpeedPaymentObject): string {
 export async function createSpeedLightningPayment(
   params: CreateSpeedLightningPaymentParams
 ): Promise<CreateSpeedLightningPaymentResult> {
+  const settlementMode = params.settlementMode || "speed_connect_split"
+  const useTreasurySweep = settlementMode === SPEED_PLATFORM_TREASURY_SWEEP_MODE
   const merchantSpeedAccountId = String(params.merchantSpeedAccountId || "").trim()
-  if (!merchantSpeedAccountId) {
+  if (!useTreasurySweep && !merchantSpeedAccountId) {
     throw new Error("Merchant Speed account ID is required for Speed Lightning payments.")
   }
 
@@ -404,8 +460,11 @@ export async function createSpeedLightningPayment(
     pineTreeFeeAmount,
     grossAmount,
     provider: "lightning_speed",
-    merchantSpeedAccountId,
-    merchantTransferPercentage
+    settlement_mode: settlementMode,
+    settlementMode,
+    platform_fee_usd: pineTreeFeeAmount,
+    merchant_net_usd: merchantAmount,
+    ...(merchantSpeedAccountId ? { merchantSpeedAccountId, merchantTransferPercentage } : {})
   }
 
   const body = {
@@ -414,13 +473,17 @@ export async function createSpeedLightningPayment(
     target_currency: "SATS",
     payment_methods: ["lightning"],
     metadata,
-    transfers: [
-      {
-        destination_account: merchantSpeedAccountId,
-        percentage: merchantTransferPercentage,
-        description: `Merchant settlement for PineTree payment ${params.pineTreePaymentId}`
-      }
-    ],
+    ...(useTreasurySweep
+      ? {}
+      : {
+          transfers: [
+            {
+              destination_account: merchantSpeedAccountId,
+              percentage: merchantTransferPercentage,
+              description: `Merchant settlement for PineTree payment ${params.pineTreePaymentId}`
+            }
+          ]
+        }),
     ...(params.ttlSeconds ? { ttl: params.ttlSeconds } : {})
   }
 
@@ -447,6 +510,51 @@ export async function createSpeedLightningPayment(
     metadata,
     raw: payment
   }
+}
+
+export async function createSpeedWithdrawRequest(
+  params: CreateSpeedWithdrawRequestParams
+): Promise<SpeedWithdrawRequestObject> {
+  const amount = Number(params.amount)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Speed withdraw amount must be greater than zero")
+  }
+
+  const destination = String(params.destinationBtcAddress || "").trim()
+  if (!destination) {
+    throw new Error("Destination BTC address is required for Speed withdraw request")
+  }
+
+  const metadata: Record<string, unknown> = {
+    ...(params.metadata || {}),
+    ...(params.merchantId ? { merchant_id: params.merchantId } : {}),
+    ...(params.paymentId ? { payment_id: params.paymentId } : {}),
+    ...(params.destinationAddressType ? { destination_address_type: params.destinationAddressType } : {})
+  }
+
+  const body = {
+    amount,
+    currency: params.currency || params.asset || "SATS",
+    target_currency: params.asset || params.currency || "SATS",
+    withdraw_method: "onchain",
+    withdraw_request: destination,
+    note: JSON.stringify({
+      source: "pinetree_lightning_payout",
+      merchant_id: params.merchantId || metadata.merchant_id,
+      payment_id: params.paymentId || metadata.payment_id,
+      settlement_mode: metadata.settlement_mode
+    })
+  }
+
+  const headers = params.idempotencyKey
+    ? { "Idempotency-Key": params.idempotencyKey }
+    : undefined
+
+  return speedRequest<SpeedWithdrawRequestObject>("/send", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body)
+  })
 }
 
 export async function retrieveSpeedPayment(paymentId: string): Promise<SpeedPaymentObject> {

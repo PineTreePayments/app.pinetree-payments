@@ -66,8 +66,8 @@ type NwcConnectionStatus = {
 type PaymentRailItem = {
   id: string
   type: "bitcoin_lightning"
-  provider: "Speed" | "NWC"
-  wallet_type: "speed" | "nwc"
+  provider: "PineTree" | "Speed" | "NWC"
+  wallet_type: "pinetree" | "speed" | "nwc"
   status: "Connected" | "Not Connected" | "Error"
   walletLabel: string
   wallet_address: string
@@ -2638,7 +2638,9 @@ export default function WalletsPage() {
       networkLabel: "Bitcoin Lightning",
       reference: formatWalletAddress(reference),
       referenceTitle: reference,
-      referenceLabel: rail.wallet_type === "speed" ? "Merchant Speed Account ID" : "Lightning account",
+      referenceLabel: rail.wallet_type === "pinetree"
+        ? "PineTree Bitcoin wallet"
+        : rail.wallet_type === "speed" ? "Merchant Speed Account ID" : "Lightning account",
       assetSymbol: "BTC",
       nativeBalance: rail.nativeBalance,
       usdValue: rail.usdValue,
@@ -2744,6 +2746,7 @@ export default function WalletsPage() {
   const cashOutUnavailable = selectedWallet?.isLightning || cashOutAssetOptions.length === 0
   const nwcStatus = selectedWallet?.nwcConnectionStatus || null
   const selectedLightningIsSpeed = selectedWallet?.isLightning && selectedWallet.walletType === "speed"
+  const selectedLightningIsPineTree = selectedWallet?.isLightning && selectedWallet.walletType === "pinetree"
   const lightningActivity = recentOperations
   const filteredLightningActivity = lightningActivity.filter((operation) => {
     if (activityFilter === "completed") return operation.status === "COMPLETED"
@@ -3585,7 +3588,28 @@ export default function WalletsPage() {
                   {selectedWallet.isLightning ? (
                     <>
                       <div className="grid grid-cols-2 gap-2 sm:gap-3">
-                        {selectedLightningIsSpeed ? (
+                        {selectedLightningIsPineTree ? (
+                          <>
+                            <StatTile
+                              label="Payment account"
+                              value="PineTree Wallet"
+                              helper="Payment processing is powered by PineTree."
+                              tone="blue"
+                            />
+                            <StatTile
+                              label="Payout wallet"
+                              value={selectedWallet.reference}
+                              helper="Merchant net payouts route to this Bitcoin address."
+                              tone="slate"
+                            />
+                            <StatTile
+                              label="Settlement"
+                              value="PineTree sweep"
+                              helper="PineTree retains the service fee and sweeps merchant net payouts."
+                              tone="blue"
+                            />
+                          </>
+                        ) : selectedLightningIsSpeed ? (
                           <>
                             <StatTile
                               label="Payment account"
@@ -5459,7 +5483,28 @@ export default function WalletsPage() {
 
               {activeTab === "lightning_wallet" && selectedWallet.isLightning && (
                 <div className={walletDetailPanelClass}>
-                  {selectedLightningIsSpeed ? (
+                  {selectedLightningIsPineTree ? (
+                    <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-gray-950">Bitcoin Lightning</p>
+                          <p className="mt-1 text-sm leading-6 text-gray-600">
+                            Lightning payments are processed by PineTree and merchant payouts route to this PineTree Bitcoin wallet.
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                          <NetworkStatusPill label="PineTree Wallet" tone="blue" className="min-h-5 px-2 text-[10px]" />
+                          <NetworkStatusPill label="Bitcoin Lightning" tone="slate" className="min-h-5 px-2 text-[10px]" />
+                        </div>
+                      </div>
+                      <div className="mt-4 rounded-xl border border-[#0052FF]/10 bg-white/70 px-3 py-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-400">PineTree Bitcoin wallet</p>
+                        <p className="mt-1 truncate font-mono text-sm font-semibold text-gray-950" title={selectedWallet.referenceTitle}>
+                          {selectedWallet.reference}
+                        </p>
+                      </div>
+                    </div>
+                  ) : selectedLightningIsSpeed ? (
                     <>
                       <div className="rounded-2xl border border-[#0052FF]/15 bg-[#0052FF]/5 p-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -5569,7 +5614,7 @@ export default function WalletsPage() {
                     </>
                   )}
 
-                  {!selectedLightningIsSpeed && (
+                  {!selectedLightningIsSpeed && !selectedLightningIsPineTree && (
                   <div className="rounded-2xl border border-gray-100 bg-white p-3">
                     <button
                       type="button"
@@ -5585,7 +5630,7 @@ export default function WalletsPage() {
                   </div>
                   )}
 
-                  <div className={cx("space-y-4", (selectedLightningIsSpeed || !nwcAdvancedOpen) && "hidden")}>
+                  <div className={cx("space-y-4", (selectedLightningIsSpeed || selectedLightningIsPineTree || !nwcAdvancedOpen) && "hidden")}>
                   {nwcStatus?.connected ? (
                     <>
                       <div className="flex items-center gap-2">
