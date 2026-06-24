@@ -5,7 +5,7 @@ const supabase = supabaseAdmin || supabaseAnon
 const PROFILES_TABLE = "pinetree_wallet_profiles"
 
 export type PineTreeWalletProfileStatus = "not_created" | "needs_attention" | "ready"
-export type BtcAddressType = "taproot" | "native_segwit" | "unknown"
+export type BtcAddressType = "taproot" | "native_segwit" | "legacy" | "nested_segwit" | "unknown"
 
 export type PineTreeWalletProfile = {
   id: string
@@ -71,6 +71,12 @@ export function normalizeBtcAddressType(value?: string | null): BtcAddressType {
     normalized === "bech32" ||
     normalized === "p2wpkh"
   ) return "native_segwit"
+  if (normalized === "legacy" || normalized === "p2pkh") return "legacy"
+  if (
+    normalized === "nested_segwit" ||
+    normalized === "p2sh" ||
+    normalized === "p2sh_p2wpkh"
+  ) return "nested_segwit"
   return "unknown"
 }
 
@@ -78,6 +84,10 @@ export function inferBtcAddressType(address?: string | null): BtcAddressType {
   const value = String(address || "").trim().toLowerCase()
   if (value.startsWith("bc1p") || value.startsWith("tb1p")) return "taproot"
   if (value.startsWith("bc1q") || value.startsWith("tb1q")) return "native_segwit"
+  // Legacy P2PKH (starts with 1) and Nested SegWit P2SH (starts with 3) are detected
+  // for completeness. Dynamic embedded wallets provision Taproot or Native SegWit.
+  if (value.startsWith("1")) return "legacy"
+  if (value.startsWith("3")) return "nested_segwit"
   return "unknown"
 }
 

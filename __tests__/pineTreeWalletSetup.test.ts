@@ -137,6 +137,16 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("syncPineTreeManagedLightning")
   })
 
+  it("sync payload omits btc_address when Dynamic does not return a Bitcoin wallet", () => {
+    // When Dynamic embedded wallet hasn't provisioned Bitcoin, bitcoinAddress is null.
+    // Including btc_address: null in the body would wipe a previously saved payout address.
+    // The conditional spread ensures btc_address is only sent when it is non-null.
+    expect(page).toContain("bitcoinAddress !== null && {")
+    expect(page).toContain("btc_address: bitcoinAddress,")
+    // The comment in code explains the safety rationale
+    expect(page).toContain("Omitting the field preserves a previously saved btc_address")
+  })
+
   it("keeps address refresh as a Receive-tab troubleshooting action, not a main-card CTA", () => {
     // Refresh is gated by canRefresh — only enabled when Dynamic session matches the saved profile
     expect(page).toContain("canRefresh")
@@ -233,7 +243,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("Bitcoin address pending")
     expect(page).not.toContain("Preparing Bitcoin Lightning")
     expect(page).not.toContain("Enable Bitcoin Lightning")
+    // RailStatusCard (overview tab) still shows Ready unconditionally for the three rails
     expect(page).toContain('<ProviderStatusPill label="Ready" tone="green" />')
+    // ReceiveRow is conditional: "Ready" when entries present, "Address syncing" when empty
+    // This ensures Bitcoin wallet never shows "Ready" with a blank address
+    expect(page).toContain('"Address syncing"')
+    expect(page).toContain('isReady ? "Ready" : "Address syncing"')
     expect(page).not.toContain(">Setup pending</p>")
   })
 

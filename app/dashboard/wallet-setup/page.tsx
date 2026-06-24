@@ -37,7 +37,7 @@ type PineTreeWalletProfile = {
   bitcoin_lightning_provider: string | null
   bitcoin_lightning_account_id: string | null
   btc_address: string | null
-  btc_address_type: "taproot" | "native_segwit" | "unknown" | null
+  btc_address_type: "taproot" | "native_segwit" | "legacy" | "nested_segwit" | "unknown" | null
   btc_wallet_provider: string | null
   btc_payout_enabled: boolean
   btc_payout_verified_at: string | null
@@ -251,13 +251,14 @@ function ReceiveRow({
   copiedAddress: string
   onCopy: (address: string) => void
 }) {
+  const isReady = entries.length > 0
   return (
     <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.05)] sm:px-5 sm:py-5">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-gray-800">{label}</p>
-        <ProviderStatusPill label="Ready" tone="green" />
+        <ProviderStatusPill label={isReady ? "Ready" : "Address syncing"} tone={isReady ? "green" : "blue"} />
       </div>
-      {entries.length > 0 ? (
+      {isReady ? (
         <div className="mt-3 space-y-3">
           {entries.map((entry) => (
             <div key={entry.id} className="flex min-w-0 items-center gap-2">
@@ -422,13 +423,18 @@ function PineTreeWalletRuntime() {
     setSyncing(true)
     try {
       const bitcoinAddress = dynamicNetworkAddresses.bitcoin[0]?.address ?? null
-      const body = {
+      // Only include btc_address when Dynamic actually returned a Bitcoin wallet.
+      // Omitting the field preserves a previously saved btc_address — a partial sync
+      // (base/solana returned, bitcoin not yet provisioned) must not clear payout config.
+      const body: Record<string, unknown> = {
         dynamic_user_id: user.userId,
         base_address: dynamicNetworkAddresses.base[0]?.address ?? null,
         solana_address: dynamicNetworkAddresses.solana[0]?.address ?? null,
         bitcoin_lightning_address: dynamicNetworkAddresses.lightning[0]?.address ?? null,
-        bitcoin_onchain_address: bitcoinAddress,
-        btc_address: bitcoinAddress,
+        ...(bitcoinAddress !== null && {
+          bitcoin_onchain_address: bitcoinAddress,
+          btc_address: bitcoinAddress,
+        }),
       }
       const res = await fetch("/api/wallets/pinetree-profile", {
         method: "POST",

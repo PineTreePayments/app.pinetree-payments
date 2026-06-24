@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
  *   bitcoin_lightning_address  string | null
  *   bitcoin_onchain_address    string | null
  *   btc_address                string | null
- *   btc_address_type           "taproot" | "native_segwit" | "unknown" | null
+ *   btc_address_type           "taproot" | "native_segwit" | "legacy" | "nested_segwit" | "unknown" | null
  */
 export async function POST(req: NextRequest) {
   try {
