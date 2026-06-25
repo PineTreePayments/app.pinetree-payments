@@ -23,7 +23,7 @@ import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/Pi
 // Types
 // ---------------------------------------------------------------------------
 
-type WalletTab = "overview" | "balances" | "receive" | "withdraw" | "activity"
+type WalletTab = "overview" | "balances" | "wallets" | "withdraw"
 type AddressEntry = { id: string; address: string; detail?: string }
 type WithdrawalRail = "base" | "solana" | "bitcoin"
 type WithdrawalAsset = "ETH" | "USDC" | "SOL" | "BTC"
@@ -51,6 +51,37 @@ type WithdrawalSubmitResponse = {
   request: WithdrawalReviewResponse["request"]
   merchantStatus: "Pending review" | "Processing" | "Withdrawal failed"
   message: string
+}
+
+type SyncedBalanceAsset = {
+  key: string
+  rail: "base" | "solana" | "bitcoin"
+  asset: "ETH" | "USDC" | "SOL" | "BTC"
+  balance: number | null
+  usdValue: number | null
+  lastSyncedAt: string | null
+  status: "synced" | "pending_sync"
+}
+
+type PineTreeWalletSyncResponse = {
+  readiness: {
+    base: boolean
+    solana: boolean
+    bitcoin: boolean
+  }
+  balances: {
+    base: SyncedBalanceAsset[]
+    solana: SyncedBalanceAsset[]
+    bitcoin: SyncedBalanceAsset[]
+  }
+  totalUsd: number | null
+  lastSyncedAt: string | null
+  recentActivity: Array<{
+    id: string
+    label: string
+    status: string
+    createdAt: string
+  }>
 }
 
 type PineTreeWalletProfile = {
@@ -127,12 +158,30 @@ type WalletCreationStep =
 const walletTabs: Array<{ id: WalletTab; label: string }> = [
   { id: "overview", label: "Overview" },
   { id: "balances", label: "Balances" },
-  { id: "receive", label: "Receive" },
+  { id: "wallets", label: "Wallets" },
   { id: "withdraw", label: "Withdraw" },
-  { id: "activity", label: "Activity" },
 ]
 
 const defaultEnabledRails: EnabledRailState = { base: false, solana: false, bitcoin: false }
+const defaultWalletSyncState: PineTreeWalletSyncResponse = {
+  readiness: { base: false, solana: false, bitcoin: false },
+  balances: {
+    base: [
+      { key: "BASE_ETH", rail: "base", asset: "ETH", balance: null, usdValue: null, lastSyncedAt: null, status: "pending_sync" },
+      { key: "BASE_USDC", rail: "base", asset: "USDC", balance: null, usdValue: null, lastSyncedAt: null, status: "pending_sync" },
+    ],
+    solana: [
+      { key: "SOLANA_SOL", rail: "solana", asset: "SOL", balance: null, usdValue: null, lastSyncedAt: null, status: "pending_sync" },
+      { key: "SOLANA_USDC", rail: "solana", asset: "USDC", balance: null, usdValue: null, lastSyncedAt: null, status: "pending_sync" },
+    ],
+    bitcoin: [
+      { key: "BTC", rail: "bitcoin", asset: "BTC", balance: null, usdValue: null, lastSyncedAt: null, status: "pending_sync" },
+    ],
+  },
+  totalUsd: null,
+  lastSyncedAt: null,
+  recentActivity: [],
+}
 const withdrawalAssetsByRail: Record<WithdrawalRail, WithdrawalAsset[]> = {
   base: ["ETH", "USDC"],
   solana: ["SOL", "USDC"],
@@ -586,18 +635,56 @@ function WithdrawalFormShell({
   )
 }
 
+function formatUsd(value: number | null) {
+  if (value === null) return "—"
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)
+}
+
+function formatBalance(value: number | null, asset: string) {
+  if (value === null) return "Pending sync"
+  const decimals = asset === "USDC" ? 2 : asset === "BTC" ? 8 : 6
+  return `${new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: value === 0 ? 0 : 0,
+    maximumFractionDigits: decimals,
+  }).format(value)} ${asset}`
+}
+
+function formatLastSynced(value: string | null) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  })
+}
+
 function WalletOverviewSummary({
   rows,
+  sync,
+  syncing,
 }: {
-  rows: Array<{ label: "Base" | "Solana" | "Bitcoin"; enabled: boolean }>
+  rows: Array<{ label: "Base" | "Solana" | "Bitcoin"; enabled: boolean; configured: boolean }>
+  sync: PineTreeWalletSyncResponse | null
+  syncing: boolean
 }) {
-  const visibleRows = rows.filter((row) => row.enabled)
+  const visibleRows = rows.filter((row) => row.configured || row.enabled)
+  const lastSynced = formatLastSynced(sync?.lastSyncedAt ?? null)
   return (
     <div className="space-y-3">
       <div className="rounded-2xl border border-gray-200 bg-white px-4 py-5 shadow-sm sm:px-5">
         <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Total balance</p>
-        <p className="mt-1 text-3xl font-semibold text-gray-950">$0.00</p>
-        <p className="mt-2 text-xs leading-5 text-gray-500">Balances will update as wallet activity is indexed.</p>
+        <p className="mt-1 text-3xl font-semibold text-gray-950">{formatUsd(sync?.totalUsd ?? null)}</p>
+        <p className="mt-2 text-xs leading-5 text-gray-500">
+          {syncing ? "Syncing..." : lastSynced ? `Last synced ${lastSynced}` : "Pending sync"}
+        </p>
       </div>
       {visibleRows.length > 0 ? (
         <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
@@ -606,9 +693,15 @@ function WalletOverviewSummary({
               <div key={row.label} className="flex items-center justify-between gap-4 px-4 py-3 sm:px-5">
                 <div>
                   <p className="text-sm font-semibold text-gray-800">{row.label}</p>
-                  <ProviderStatusPill label="Connected" tone="green" className="mt-1" />
+                  <ProviderStatusPill label={row.configured ? "Connected" : "Not connected"} tone="blue" className="mt-1" />
                 </div>
-                <span className="text-sm font-semibold text-gray-950">$0.00</span>
+                <span className="text-sm font-semibold text-gray-950">
+                  {row.label === "Base"
+                    ? formatUsd(sync?.balances.base.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) ?? null)
+                    : row.label === "Solana"
+                      ? formatUsd(sync?.balances.solana.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) ?? null)
+                      : formatUsd(sync?.balances.bitcoin.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) ?? null)}
+                </span>
               </div>
             ))}
           </div>
@@ -618,22 +711,59 @@ function WalletOverviewSummary({
           Manage rails in Providers
         </div>
       )}
+      {sync?.recentActivity && sync.recentActivity.length > 0 ? (
+        <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-sm sm:px-5">
+          <p className="text-sm font-semibold text-gray-950">Recent activity</p>
+          <div className="mt-3 divide-y divide-gray-100">
+            {sync.recentActivity.map((item) => (
+              <div key={item.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <span className="min-w-0 truncate text-gray-800">{item.label}</span>
+                <span className="shrink-0 text-xs font-semibold text-gray-500">{item.status}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
 
 function BalanceRows({
-  rows,
+  sync,
+  syncing,
 }: {
-  rows: Array<{ label: string; enabled: boolean }>
+  sync: PineTreeWalletSyncResponse | null
+  syncing: boolean
 }) {
-  const visibleRows = rows.filter((row) => row.enabled)
+  const groups: Array<{ title: string; rows: SyncedBalanceAsset[] }> = [
+    { title: "Base", rows: sync?.balances.base ?? [] },
+    { title: "Solana", rows: sync?.balances.solana ?? [] },
+    { title: "Bitcoin / Lightning / Spark", rows: sync?.balances.bitcoin ?? [] },
+  ]
   return (
-    <div className="divide-y divide-gray-100 overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-sm">
-      {(visibleRows.length > 0 ? visibleRows : [{ label: "Total balance", enabled: true }]).map((row) => (
-        <div key={row.label} className="flex items-center justify-between gap-4 px-4 py-5 text-sm sm:px-5">
-          <span className="font-semibold text-gray-800">{row.label}</span>
-          <span className="font-semibold text-gray-950">$0.00</span>
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-gray-200 bg-white px-4 py-5 shadow-sm sm:px-5">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-semibold text-gray-950">Total balance</p>
+          <span className="text-sm font-semibold text-gray-950">{formatUsd(sync?.totalUsd ?? null)}</span>
+        </div>
+        <p className="mt-1 text-xs text-gray-500">
+          {syncing ? "Syncing..." : sync?.lastSyncedAt ? `Last synced ${formatLastSynced(sync.lastSyncedAt)}` : "Pending sync"}
+        </p>
+      </div>
+      {groups.map((group) => (
+        <div key={group.title} className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-sm">
+          <p className="border-b border-gray-100 px-4 py-3 text-sm font-semibold text-gray-950 sm:px-5">{group.title}</p>
+          <div className="divide-y divide-gray-100">
+            {group.rows.map((row) => (
+              <div key={row.key} className="flex items-center justify-between gap-4 px-4 py-4 text-sm sm:px-5">
+                <span className="font-semibold text-gray-800">{row.asset}</span>
+                <span className={row.status === "synced" ? "font-semibold text-gray-950" : "font-semibold text-gray-400"}>
+                  {formatBalance(row.balance, row.asset)}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       ))}
     </div>
@@ -691,6 +821,8 @@ function PineTreeWalletRuntime() {
   const [refreshing, setRefreshing] = useState(false)
   const [copiedAddress, setCopiedAddress] = useState("")
   const [enabledRails, setEnabledRails] = useState<EnabledRailState>(defaultEnabledRails)
+  const [walletSync, setWalletSync] = useState<PineTreeWalletSyncResponse>(defaultWalletSyncState)
+  const [walletSyncing, setWalletSyncing] = useState(false)
   const [withdrawalRail, setWithdrawalRail] = useState<WithdrawalRail>("base")
   const [withdrawalAsset, setWithdrawalAsset] = useState<WithdrawalAsset>("ETH")
   const [withdrawalDestination, setWithdrawalDestination] = useState("")
@@ -717,6 +849,39 @@ function PineTreeWalletRuntime() {
     window.addEventListener("keydown", closeOnEscape)
     return () => window.removeEventListener("keydown", closeOnEscape)
   }, [walletOpen])
+
+  const syncPineTreeWallet = useCallback(async () => {
+    const token = accessTokenRef.current
+    if (!token) return
+    setWalletSyncing(true)
+    try {
+      const res = await fetch("/api/wallets/pinetree/sync", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+        cache: "no-store",
+      })
+      if (!res.ok) return
+      const json = (await res.json()) as PineTreeWalletSyncResponse
+      setWalletSync({
+        ...defaultWalletSyncState,
+        ...json,
+        balances: {
+          base: json.balances?.base?.length ? json.balances.base : defaultWalletSyncState.balances.base,
+          solana: json.balances?.solana?.length ? json.balances.solana : defaultWalletSyncState.balances.solana,
+          bitcoin: json.balances?.bitcoin?.length ? json.balances.bitcoin : defaultWalletSyncState.balances.bitcoin,
+        },
+        recentActivity: json.recentActivity || [],
+      })
+    } finally {
+      setWalletSyncing(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!walletOpen) return
+    void syncPineTreeWallet()
+  }, [walletOpen, syncPineTreeWallet])
 
   const fetchProviderRailState = useCallback(async (token: string) => {
     try {
@@ -999,9 +1164,9 @@ function PineTreeWalletRuntime() {
   const walletStatus = allPrimaryRailsConnected ? "Connected" : "Not connected"
 
   const walletRailRows = [
-    { label: "Base" as const, balanceLabel: "Base balance", configured: baseReady, enabled: baseReady && enabledRails.base },
-    { label: "Solana" as const, balanceLabel: "Solana balance", configured: solanaReady, enabled: solanaReady && enabledRails.solana },
-    { label: "Bitcoin" as const, balanceLabel: "Bitcoin balance", configured: bitcoinReady, enabled: bitcoinReady && enabledRails.bitcoin },
+    { label: "Base" as const, configured: baseReady, enabled: baseReady && enabledRails.base },
+    { label: "Solana" as const, configured: solanaReady, enabled: solanaReady && enabledRails.solana },
+    { label: "Bitcoin" as const, configured: bitcoinReady, enabled: bitcoinReady && enabledRails.bitcoin },
   ]
 
   // ---------------------------------------------------------------------------
@@ -1320,7 +1485,7 @@ function PineTreeWalletRuntime() {
             </header>
 
             <nav
-              className="grid shrink-0 grid-cols-3 gap-1.5 border-b border-gray-100 px-4 py-3 sm:flex sm:overflow-x-auto sm:px-6"
+              className="grid shrink-0 grid-cols-4 gap-1.5 border-b border-gray-100 px-4 py-3 sm:flex sm:overflow-x-auto sm:px-6"
               aria-label="PineTree Wallet sections"
             >
               {walletTabs.map((tab) => (
@@ -1349,21 +1514,29 @@ function PineTreeWalletRuntime() {
                       Enabled payment rails are shown here with placeholder balances.
                     </p>
                   </div>
-                  <WalletOverviewSummary rows={walletRailRows} />
+                  <WalletOverviewSummary rows={walletRailRows} sync={walletSync} syncing={walletSyncing} />
                 </div>
               ) : null}
 
               {activeTab === "balances" ? (
-                <BalanceRows rows={walletRailRows.map((row) => ({ label: row.balanceLabel, enabled: row.enabled }))} />
+                <BalanceRows sync={walletSync} syncing={walletSyncing} />
               ) : null}
 
-              {activeTab === "receive" ? (
+              {activeTab === "wallets" ? (
                 <div className="space-y-3">
                   <ReceiveRow label="Base wallet" entries={profileAddresses.base} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
                   <ReceiveRow label="Solana wallet" entries={profileAddresses.solana} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
                   <ReceiveRow label="Bitcoin wallet" entries={bitcoinPayoutEntries} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
+                  {profile?.bitcoin_lightning_address ? (
+                    <ReceiveRow
+                      label="Lightning/Spark wallet"
+                      entries={[{ id: "bitcoin-lightning", address: profile.bitcoin_lightning_address }]}
+                      copiedAddress={copiedAddress}
+                      onCopy={(a) => void copyAddress(a)}
+                    />
+                  ) : null}
 
-                  {canRefresh ? (
+                  {process.env.NODE_ENV !== "production" && canRefresh ? (
                     <button
                       type="button"
                       onClick={() => void handleRefreshAddresses()}
@@ -1410,13 +1583,6 @@ function PineTreeWalletRuntime() {
                   }}
                   onReview={() => void handleReviewWithdrawal()}
                   onSubmit={() => void handleSubmitWithdrawal()}
-                />
-              ) : null}
-
-              {activeTab === "activity" ? (
-                <EmptyWalletPanel
-                  title="Wallet activity will appear here."
-                  detail="Wallet activity syncing is not enabled yet."
                 />
               ) : null}
 

@@ -189,10 +189,11 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("Omitting the field preserves a previously saved btc_address")
   })
 
-  it("keeps address refresh as a Receive-tab troubleshooting action, not a main-card CTA", () => {
+  it("keeps address refresh hidden from production merchant UI", () => {
     // Refresh is gated by canRefresh — only enabled when Dynamic session matches the saved profile
     expect(page).toContain("canRefresh")
     expect(page).toContain("dynamicSessionMatchesProfile")
+    expect(page).toContain('process.env.NODE_ENV !== "production" && canRefresh')
     expect(page).toContain("Refresh wallet addresses")
     expect(page).toContain('aria-label="Refresh wallet addresses"')
     expect(page).not.toContain("Refresh Base/Solana addresses")
@@ -242,9 +243,10 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('aria-modal="true"')
     expect(page).toContain('label: "Overview"')
     expect(page).toContain('label: "Balances"')
-    expect(page).toContain('label: "Receive"')
+    expect(page).toContain('label: "Wallets"')
     expect(page).toContain('label: "Withdraw"')
-    expect(page).toContain('label: "Activity"')
+    expect(page).not.toContain('label: "Activity"')
+    expect(page).not.toContain('label: "Receive"')
   })
 
   it("prioritizes Base, Solana, and Bitcoin", () => {
@@ -304,21 +306,28 @@ describe("PineTree embedded wallet setup", () => {
   it("overview shows wallet summary balances instead of duplicating receive addresses", () => {
     expect(page).toContain("function WalletOverviewSummary")
     expect(page).toContain(">Total balance</p>")
-    expect(page).toContain("$0.00")
-    expect(page).toContain("Balances will update as wallet activity is indexed.")
+    expect(page).toContain("formatUsd(sync?.totalUsd ?? null)")
+    expect(page).toContain("Pending sync")
+    expect(page).toContain("Last synced")
     expect(page).toContain("visibleRows.map((row)")
+    expect(page).toContain("Recent activity")
     expect(page).not.toContain("Settlement addresses")
     expect(page).not.toContain("address: profileAddresses.base[0]?.address")
     expect(page).not.toContain("RailStatusCard")
     expect(page).not.toContain(">Available</p>")
+    expect(page).not.toContain("Balances will update as wallet activity is indexed.")
   })
 
-  it("balances tab shows zero placeholders instead of unavailable copy", () => {
+  it("balances tab shows synced grouped balances without fake unsynced zeroes", () => {
     expect(page).toContain("function BalanceRows")
-    expect(page).toContain("$0.00")
-    expect(page).toContain("Base balance")
-    expect(page).toContain("Solana balance")
-    expect(page).toContain("Bitcoin balance")
+    expect(page).toContain('title: "Base"')
+    expect(page).toContain('title: "Solana"')
+    expect(page).toContain('title: "Bitcoin / Lightning / Spark"')
+    expect(page).toContain("formatBalance(row.balance, row.asset)")
+    expect(page).toContain("Pending sync")
+    expect(page).not.toContain("Base balance")
+    expect(page).not.toContain("Solana balance")
+    expect(page).not.toContain("Bitcoin balance")
     expect(page).not.toContain("Not available yet")
   })
 
@@ -452,7 +461,8 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('"Connected"')
     expect(page).toContain('"Needs attention"')
     expect(page).toContain('status="Loading"')
-    expect(page).toContain("Wallet activity will appear here.")
+    expect(page).not.toContain("Wallet activity will appear here.")
+    expect(page).not.toContain("syncing is not enabled yet")
   })
 
   // -------------------------------------------------------------------------
@@ -466,6 +476,7 @@ describe("PineTree embedded wallet setup", () => {
 
   it("wallet setup page only calls wallet APIs and provider rail enablement, not POS or checkout APIs", () => {
     expect(page).toContain("/api/wallets/pinetree-profile")
+    expect(page).toContain("/api/wallets/pinetree/sync")
     expect(page).toContain("/api/wallets/lightning/pinetree-managed")
     expect(page).toContain("/api/providers")
     expect(page).not.toContain("/api/wallets/settlement")
