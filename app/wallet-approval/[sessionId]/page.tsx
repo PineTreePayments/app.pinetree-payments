@@ -664,7 +664,7 @@ export default function WalletApprovalPage({
       if (!freshTxBase64) {
         setStatusMessage("Transaction expired. Please return to the desktop and start a new send.")
         setPageStatus("failed")
-        await patchSessionStatus(sid, "failed", "refresh-tx failed — cannot sign stale blockhash")
+        await patchSessionStatus(sid, "failed", "refresh-tx failed: stale blockhash")
         return true
       }
 
@@ -847,7 +847,7 @@ export default function WalletApprovalPage({
       if (!freshTxBase64) {
         setStatusMessage("Transaction expired. Please return to the desktop and start a new send.")
         setPageStatus("failed")
-        await patchSessionStatus(sid, "failed", "refresh-tx failed — cannot sign stale blockhash")
+        await patchSessionStatus(sid, "failed", "refresh-tx failed: stale blockhash")
         return true
       }
 

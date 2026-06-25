@@ -47,10 +47,11 @@ function makeSigner(canSign: boolean): WithdrawalSigner & {
         destinationAddress: input.destinationAddress,
         amountDecimal: input.amountDecimal,
         signerEnabled: canSign,
+        approvalMethod: canSign ? "dynamic_browser" as const : "manual_review" as const,
         estimatedStatus,
         message: canSign
           ? "Withdrawal review available"
-          : "Withdrawal review available. Signing not enabled yet.",
+          : "Withdrawal request can be reviewed before processing.",
       }
     }),
     submitWithdrawal: vi.fn(async () => ({
@@ -136,6 +137,11 @@ describe("PineTree Wallet withdrawals", () => {
     mocks.getPineTreeWalletProfile.mockResolvedValue({
       id: "wallet_profile_1",
       merchant_id: "merchant_1",
+      base_address: "0x9999999999999999999999999999999999999999",
+      solana_address: "11111111111111111111111111111111",
+      btc_address: BTC_SOURCE,
+      bitcoin_onchain_address: null,
+      btc_address_type: "native_segwit",
     })
     mocks.createWalletWithdrawalRequest.mockImplementation(async (input) => ({
       id: "withdrawal_1",
@@ -702,7 +708,10 @@ describe("PineTree Wallet withdrawals", () => {
       approval_method: "dynamic_browser",
       provider: "dynamic",
       status: "pending",
-      unsigned_transaction_payload: { kind: "evm_transaction" },
+      unsigned_transaction_payload: {
+        kind: "evm_transaction",
+        from: "0x9999999999999999999999999999999999999999",
+      },
     }))
 
     const result = await completeDynamicWalletWithdrawal("merchant_1", "withdrawal_1", {
@@ -730,7 +739,10 @@ describe("PineTree Wallet withdrawals", () => {
       approval_method: "dynamic_browser",
       provider: "dynamic",
       status: "pending",
-      unsigned_transaction_payload: { kind: "evm_transaction" },
+      unsigned_transaction_payload: {
+        kind: "evm_transaction",
+        from: "0x9999999999999999999999999999999999999999",
+      },
     }))
 
     await expect(
@@ -758,6 +770,7 @@ describe("PineTree Wallet withdrawals", () => {
       unsigned_transaction_payload: {
         kind: "bitcoin_psbt",
         psbtBase64: "cHNidP8BAAo=",
+        from: BTC_SOURCE,
         sourceAddress: BTC_SOURCE,
         destinationAddress: BTC_DESTINATION,
         amountSats: 50_000,

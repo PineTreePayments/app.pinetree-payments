@@ -218,6 +218,7 @@ const defaultWalletSyncState: PineTreeWalletSyncResponse = {
 type DynamicWalletLike = {
   address?: string
   chain?: string
+  additionalAddresses?: Array<{ address?: string | null }>
   signPsbt?: (request: { unsignedPsbtBase64: string }) => Promise<{ signedPsbt?: string } | undefined>
   connector?: {
     getWalletClient?: (chainId?: string | number) => unknown | Promise<unknown>
@@ -243,7 +244,46 @@ function findDynamicWalletForSource(
 ): DynamicWalletLike | null {
   const normalizedSource = sourceAddress.toLowerCase()
   const walletsToSearch = [...candidates, primaryWallet].filter(Boolean) as DynamicWalletLike[]
-  return walletsToSearch.find((wallet) => String(wallet.address || "").toLowerCase() === normalizedSource) || null
+  return walletsToSearch.find((wallet) =>
+    getDynamicWalletAddresses(wallet).some((address) => address.toLowerCase() === normalizedSource)
+  ) || null
+}
+
+function getDynamicWalletAddresses(wallet: DynamicWalletLike) {
+  return [
+    wallet.address,
+    ...(wallet.additionalAddresses ?? []).map((entry) => entry.address),
+  ].flatMap((address) => {
+    const normalized = String(address || "").trim()
+    return normalized ? [normalized] : []
+  })
+}
+
+function dynamicWalletSupportsRail(wallet: DynamicWalletLike, rail: WithdrawalRail) {
+  if (rail === "base") return Boolean(wallet.getWalletClient || wallet.connector?.getWalletClient)
+  if (rail === "solana") return Boolean(wallet.connector?.signAndSendTransaction)
+  return Boolean(wallet.signPsbt || wallet.connector?.signPsbt)
+}
+
+function findDynamicApprovalWalletForSource(
+  candidates: unknown[],
+  primaryWallet: unknown,
+  rail: WithdrawalRail,
+  sourceAddress: string | null | undefined
+) {
+  if (!sourceAddress) return null
+  const wallet = findDynamicWalletForSource(candidates, primaryWallet, sourceAddress)
+  return wallet && dynamicWalletSupportsRail(wallet, rail) ? wallet : null
+}
+
+function getWithdrawalSourceAddress(
+  profile: PineTreeWalletProfile | null,
+  rail: WithdrawalRail
+) {
+  if (!profile) return null
+  if (rail === "base") return profile.base_address
+  if (rail === "solana") return profile.solana_address
+  return profile.btc_address || profile.bitcoin_onchain_address
 }
 
 async function sendDynamicPreparedWithdrawal(
@@ -569,6 +609,7 @@ function WithdrawalFormShell({
   reviewing,
   submitting,
   submitResult,
+  dynamicApprovalAvailable,
   onRailChange,
   onAssetChange,
   onDestinationChange,
@@ -585,6 +626,7 @@ function WithdrawalFormShell({
   reviewing: boolean
   submitting: boolean
   submitResult: WithdrawalSubmitResponse | null
+  dynamicApprovalAvailable: boolean
   onRailChange: (rail: WithdrawalRail) => void
   onAssetChange: (asset: WithdrawalAsset) => void
   onDestinationChange: (value: string) => void
@@ -596,7 +638,6 @@ function WithdrawalFormShell({
   const invalidAmount = amountDecimal.trim().length > 0 && !(Number(amountDecimal) > 0)
   const missingDestination = destinationAddress.trim().length === 0
   const reviewDisabled = reviewing || missingDestination || invalidAmount
-  const dynamicApprovalAvailable = review?.review.approvalMethod === "dynamic_browser" && review.canSubmit
 
   return (
     <div className="space-y-4">
@@ -1288,6 +1329,39 @@ function PineTreeWalletRuntime() {
     { label: "Bitcoin" as const, configured: bitcoinReady, enabled: bitcoinReady && enabledRails.bitcoin },
   ]
 
+  const dynamicApprovalAvailableForWithdrawal = useMemo(() => {
+    if (
+      !withdrawalReview?.canSubmit ||
+      withdrawalReview.review.approvalMethod !== "dynamic_browser"
+    ) {
+      return false
+    }
+    const sourceAddress = getWithdrawalSourceAddress(profile, withdrawalReview.review.rail)
+    return Boolean(
+      findDynamicApprovalWalletForSource(
+        wallets as unknown[],
+        primaryWallet,
+        withdrawalReview.review.rail,
+        sourceAddress
+      )
+    )
+  }, [primaryWallet, profile, wallets, withdrawalReview])
+
+  useEffect(() => {
+    if (!withdrawalReview) return
+    console.debug("[pinetree-wallets] withdrawal approval availability", {
+      rail: withdrawalReview.review.rail,
+      asset: withdrawalReview.review.asset,
+      server_dynamic_ready:
+        withdrawalReview.canSubmit &&
+        withdrawalReview.review.approvalMethod === "dynamic_browser",
+      browser_dynamic_ready: dynamicApprovalAvailableForWithdrawal,
+      source_address_present: Boolean(
+        getWithdrawalSourceAddress(profile, withdrawalReview.review.rail)
+      ),
+    })
+  }, [dynamicApprovalAvailableForWithdrawal, profile, withdrawalReview])
+
   // ---------------------------------------------------------------------------
   // Dynamic session mismatch guard
   // ---------------------------------------------------------------------------
@@ -1431,7 +1505,7 @@ function PineTreeWalletRuntime() {
     setWithdrawalError("")
     setWithdrawalSubmitResult(null)
     try {
-      if (withdrawalReview?.review.approvalMethod === "dynamic_browser" && withdrawalReview.canSubmit) {
+      if (dynamicApprovalAvailableForWithdrawal) {
         const prepareRes = await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/prepare`, {
           method: "POST",
           headers: {
@@ -1724,6 +1798,7 @@ function PineTreeWalletRuntime() {
                   reviewing={reviewingWithdrawal}
                   submitting={submittingWithdrawal}
                   submitResult={withdrawalSubmitResult}
+                  dynamicApprovalAvailable={dynamicApprovalAvailableForWithdrawal}
                   onRailChange={handleWithdrawalRailChange}
                   onAssetChange={(nextAsset) => {
                     setWithdrawalAsset(nextAsset)

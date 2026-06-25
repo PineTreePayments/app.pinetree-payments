@@ -414,6 +414,16 @@ export async function completeDynamicWalletWithdrawal(
   if (!request.unsigned_transaction_payload) {
     throw Object.assign(new Error("Withdrawal request has not been prepared for wallet approval."), { status: 409 })
   }
+  const profile = await getPineTreeWalletProfile(merchantId)
+  if (!profile || profile.id !== request.wallet_profile_id) {
+    throw Object.assign(new Error("PineTree Wallet profile not found."), { status: 404 })
+  }
+  const sourceAddress = getSourceAddressForRail(profile, request.rail)
+  assertPreparedPayloadUsesSavedSource(request.unsigned_transaction_payload, sourceAddress)
+  const dynamicWalletAddress = String(input.signedPayload?.dynamic_wallet_address || "").trim()
+  if (dynamicWalletAddress && dynamicWalletAddress.toLowerCase() !== sourceAddress.toLowerCase()) {
+    throw Object.assign(new Error("Wallet approval does not match the PineTree Wallet source address."), { status: 400 })
+  }
 
   if (request.rail === "bitcoin") {
     const signedPsbtBase64 = String(input.signedPsbtBase64 || input.signedPayload?.signedPsbt || "").trim()
@@ -654,6 +664,21 @@ function isValidTransactionHash(rail: WalletWithdrawalRail, hash: string) {
   if (rail === "base") return /^0x[a-fA-F0-9]{64}$/.test(hash)
   if (rail === "solana") return /^[1-9A-HJ-NP-Za-km-z]{64,96}$/.test(hash)
   return /^[a-fA-F0-9]{64}$/.test(hash)
+}
+
+function assertPreparedPayloadUsesSavedSource(payload: Record<string, unknown>, sourceAddress: string) {
+  const kind = String(payload.kind || "")
+  const preparedSource =
+    kind === "evm_transaction"
+      ? String(payload.from || "")
+      : kind === "solana_transaction"
+        ? String(payload.from || "")
+        : kind === "bitcoin_psbt"
+          ? String(payload.sourceAddress || payload.from || "")
+          : ""
+  if (!preparedSource || preparedSource.toLowerCase() !== sourceAddress.toLowerCase()) {
+    throw Object.assign(new Error("Prepared withdrawal source does not match the PineTree Wallet profile."), { status: 400 })
+  }
 }
 
 function getMerchantSafeWithdrawalError(error: unknown) {

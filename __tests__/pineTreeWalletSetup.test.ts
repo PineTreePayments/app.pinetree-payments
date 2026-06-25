@@ -342,14 +342,18 @@ describe("PineTree embedded wallet setup", () => {
   it("shows Dynamic approval copy only when wallet approval is available", () => {
     expect(page).toContain("Withdrawal review available")
     expect(page).toContain("Approve with PineTree Wallet")
-    expect(page).toContain("dynamicApprovalAvailable")
-    expect(page).toContain("review?.review.approvalMethod === \"dynamic_browser\"")
+    expect(page).toContain("dynamicApprovalAvailableForWithdrawal")
+    expect(page).toContain("findDynamicApprovalWalletForSource")
+    expect(page).toContain("dynamicWalletSupportsRail")
+    expect(page).toContain("signAndSendTransaction")
+    expect(page).toContain("signPsbt")
     expect(page).toContain("/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/prepare")
     expect(page).toContain("/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/submit")
   })
 
   it("shows pending review copy when Dynamic approval is not available", () => {
     expect(page).toContain("Submit withdrawal request")
+    expect(page).toContain("if (dynamicApprovalAvailableForWithdrawal)")
     expect(page).toContain("Withdrawal request submitted")
     expect(page).toContain("Status: {submitResult.merchantStatus}")
     expect(page).toContain("Pending review")
@@ -358,14 +362,31 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("does not show developer-facing signer disabled copy in the withdrawal UI", () => {
-    expect(page).not.toContain("Signing not enabled yet")
-    expect(page).not.toContain("Withdrawal signing not enabled")
-    expect(page).not.toContain("signing not enabled")
-    expect(page).not.toContain("cannot sign")
-    expect(page).not.toContain("broadcast disabled")
-    expect(page).not.toContain("provider signer unavailable")
+    expect(page).not.toContain(["Signing", "not enabled yet"].join(" "))
+    expect(page).not.toContain(["Withdrawal signing", "not enabled"].join(" "))
+    expect(page).not.toContain(["signing", "not enabled"].join(" "))
+    expect(page).not.toContain(["cannot", "sign"].join(" "))
+    expect(page).not.toContain(["broadcast", "disabled"].join(" "))
+    expect(page).not.toContain(["provider signer", "unavailable"].join(" "))
     expect(page).not.toContain("Withdrawals coming soon")
     expect(page).not.toContain("Withdrawals disabled")
+  })
+
+  it("does not retain stale disabled signer copy anywhere in withdrawal source", () => {
+    const withdrawalSource = [
+      page,
+      withdrawalApiRoute,
+      withdrawalPrepareRoute,
+      withdrawalSubmitRoute,
+      withdrawalEngine,
+      withdrawalSigner,
+      read("providers/wallets/bitcoinNetworkProvider.ts"),
+    ].join("\n")
+    expect(withdrawalSource).not.toContain(["Withdrawal signing", "not enabled"].join(" "))
+    expect(withdrawalSource).not.toContain(["Signing", "not enabled"].join(" "))
+    expect(withdrawalSource).not.toContain(["Cannot", "sign"].join(" "))
+    expect(withdrawalSource).not.toContain(["Broadcast", "disabled"].join(" "))
+    expect(withdrawalSource).not.toContain(["Provider signer", "unavailable"].join(" "))
   })
 
   it("keeps the withdrawal form shell without redesigning the controls", () => {
