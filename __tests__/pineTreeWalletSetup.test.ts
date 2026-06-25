@@ -127,7 +127,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('const btcPayoutReady = Boolean(profile?.btc_address && profile.btc_payout_enabled)')
     expect(page).toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
     expect(page).toContain("const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady")
-    expect(page).toContain('const walletStatus = allPrimaryRailsConnected ? "Connected" : "Not configured"')
+    expect(page).toContain('const walletStatus = allPrimaryRailsConnected ? "Connected" : "Not connected"')
   })
 
   it("syncs Dynamic wallet addresses to the merchant profile on creation only when explicitly triggered", () => {
@@ -266,22 +266,22 @@ describe("PineTree embedded wallet setup", () => {
 
   it("marks the merchant wallet Connected only when Base, Solana, and Bitcoin addresses exist", () => {
     expect(page).toContain("const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady")
-    expect(page).toContain('const walletStatus = allPrimaryRailsConnected ? "Connected" : "Not configured"')
+    expect(page).toContain('const walletStatus = allPrimaryRailsConnected ? "Connected" : "Not connected"')
     expect(page).not.toContain("Bitcoin Lightning is being prepared through PineTree")
     expect(page).not.toContain("Bitcoin address pending")
   })
 
-  it("uses Not configured instead of partial setup states when a wallet address is missing", () => {
-    expect(page).toContain('walletStatus = allPrimaryRailsConnected ? "Connected" : "Not configured"')
+  it("uses provider status vocabulary when a wallet address is missing", () => {
+    expect(page).toContain('walletStatus = allPrimaryRailsConnected ? "Connected" : "Not connected"')
     expect(page).not.toContain('"Setup pending"')
     expect(page).not.toContain('const lightningPending = lightningProfile?.status === "pending"')
     expect(page).not.toContain("lightningRetryable")
   })
 
-  it("does not use Ready, Not created, or Not connected copy in the PineTree Wallet UI", () => {
+  it("does not use Ready, Not created, or Not configured wallet status copy in the PineTree Wallet UI", () => {
     expect(page).not.toContain('"Ready"')
     expect(page).not.toContain('"Not created"')
-    expect(page).not.toContain('"Not connected"')
+    expect(page).not.toContain('"Not configured"')
     expect(page).not.toContain('"Address syncing"')
   })
 
@@ -296,7 +296,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("Bitcoin address pending")
     expect(page).not.toContain("Preparing Bitcoin Lightning")
     expect(page).not.toContain("Enable Bitcoin Lightning")
-    expect(page).toContain('isConnected ? "Connected" : "Not configured"')
+    expect(page).toContain('isConnected ? "Connected" : "Not connected"')
     expect(page).not.toContain(">Setup pending</p>")
   })
 
@@ -325,34 +325,42 @@ describe("PineTree embedded wallet setup", () => {
   // Withdrawal scaffold — no real fund movement
   // -------------------------------------------------------------------------
 
-  it("shows a disabled withdrawals coming soon state without an active-looking form", () => {
-    expect(page).toContain("Withdrawal coming soon")
-    expect(page).toContain("Withdrawal disabled")
+  it("shows a withdrawal form shell without enabling final signing", () => {
+    expect(page).toContain("Withdrawal review available")
+    expect(page).toContain("Signing not enabled yet")
+    expect(page).toContain("Withdrawal signing not enabled")
     expect(page).not.toContain("Withdrawals coming soon")
     expect(page).not.toContain("Withdrawals disabled")
-    expect(page).toContain("once withdrawal signing is enabled")
+    expect(page).toContain('aria-label="Select withdrawal asset"')
     // Updated message per spec
-    expect(page).not.toContain('aria-label="Select withdrawal rail"')
-    expect(page).not.toContain('aria-label="Destination address"')
-    expect(page).not.toContain('aria-label="Withdrawal amount"')
-    expect(page).toContain("disabled")
+    expect(page).toContain('aria-label="Select withdrawal rail"')
+    expect(page).toContain('aria-label="Destination address"')
+    expect(page).toContain('aria-label="Withdrawal amount"')
+    expect(page).toContain("Review withdrawal")
+    expect(page).toContain("/api/wallets/pinetree-wallet/withdrawals")
+    expect(page).not.toContain("Withdrawal coming soon")
+    expect(page).not.toContain("Withdrawal disabled")
     // The Review button is disabled — no API calls for withdrawal execution
     expect(page).not.toContain("/api/wallets/settlement")
     expect(page).not.toContain("/api/wallets/send-sessions")
   })
 
-  it("withdrawal request DB scaffold exists with correct fields and safe-only statuses", () => {
-    expect(migration).toContain("wallet_withdrawal_requests")
-    expect(migration).toContain("merchant_id")
-    expect(migration).toContain("wallet_profile_id")
-    expect(migration).toContain("rail")
-    expect(migration).toContain("destination_address")
-    expect(migration).toContain("amount")
-    expect(migration).toContain("status")
-    expect(migration).toContain("created_at")
-    expect(migration).toContain("updated_at")
-    // Comments confirm no fund movement
-    expect(migration).toContain("No fund movement")
+  it("withdrawal request DB scaffold exists with review fields and safe statuses", () => {
+    const withdrawalMigration = migration + read("database/migrations/20260625_expand_wallet_withdrawal_requests.sql")
+    expect(withdrawalMigration).toContain("wallet_withdrawal_requests")
+    expect(withdrawalMigration).toContain("merchant_id")
+    expect(withdrawalMigration).toContain("wallet_profile_id")
+    expect(withdrawalMigration).toContain("rail")
+    expect(withdrawalMigration).toContain("asset")
+    expect(withdrawalMigration).toContain("destination_address")
+    expect(withdrawalMigration).toContain("amount_decimal")
+    expect(withdrawalMigration).toContain("status")
+    expect(withdrawalMigration).toContain("provider")
+    expect(withdrawalMigration).toContain("provider_reference")
+    expect(withdrawalMigration).toContain("review_payload")
+    expect(withdrawalMigration).toContain("error_message")
+    expect(withdrawalMigration).toContain("'review_required'")
+    expect(withdrawalMigration).toContain("'blocked'")
   })
 
   // -------------------------------------------------------------------------
@@ -425,7 +433,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('kind="missing-env"')
     expect(page).toContain('kind="sdk"')
     expect(page).toContain('{ kind: "error" }')
-    expect(page).toContain('"Not configured"')
+    expect(page).toContain('"Not connected"')
     expect(page).toContain('"Connected"')
     expect(page).toContain('"Needs attention"')
     expect(page).toContain('status="Loading"')

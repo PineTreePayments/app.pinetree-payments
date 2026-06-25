@@ -248,8 +248,8 @@ describe("ReceiveRow status display", () => {
 
   it("ReceiveRow shows Connected only when entries are present", () => {
     expect(page).toContain("const isConnected = entries.length > 0")
-    expect(page).toContain('isConnected ? "Connected" : "Not configured"')
-    expect(page).toContain('isConnected ? "green" : "slate"')
+    expect(page).toContain('isConnected ? "Connected" : "Not connected"')
+    expect(page).toContain('tone="blue"')
   })
 
   it("ReceiveRow renders address entries and copy button only when connected", () => {
@@ -264,9 +264,9 @@ describe("ReceiveRow status display", () => {
     expect(page).toContain('<ReceiveRow label="Bitcoin wallet" entries={bitcoinPayoutEntries}')
   })
 
-  it("Bitcoin receive row shows Not configured only when btc_address is missing", () => {
+  it("Bitcoin receive row shows Not connected only when btc_address is missing", () => {
     expect(page).toContain("const bitcoinPayoutEntries: AddressEntry[] = profile?.btc_address")
-    expect(page).toContain('isConnected ? "Connected" : "Not configured"')
+    expect(page).toContain('isConnected ? "Connected" : "Not connected"')
   })
 })
 

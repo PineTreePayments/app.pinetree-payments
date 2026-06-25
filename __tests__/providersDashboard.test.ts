@@ -216,17 +216,17 @@ describe("managed crypto rail status vocabulary", () => {
 // ---------------------------------------------------------------------------
 
 describe("withdrawal tab copy", () => {
-  const HEADING = "Withdrawal coming soon"
-  const BUTTON = "Withdrawal disabled"
+  const HEADING = "Withdrawal review available"
+  const BUTTON = "Withdrawal signing not enabled"
 
-  it("heading uses singular Withdrawal", () => {
+  it("heading uses review-ready copy", () => {
     expect(HEADING).not.toMatch(/Withdrawals/)
-    expect(HEADING).toMatch(/Withdrawal coming soon/)
+    expect(HEADING).toMatch(/Withdrawal review available/)
   })
 
-  it("button label uses singular Withdrawal", () => {
+  it("button label uses singular disabled signing copy", () => {
     expect(BUTTON).not.toMatch(/Withdrawals/)
-    expect(BUTTON).toMatch(/Withdrawal disabled/)
+    expect(BUTTON).toMatch(/Withdrawal signing not enabled/)
   })
 })
 
