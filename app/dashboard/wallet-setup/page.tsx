@@ -378,6 +378,24 @@ function sanitizeWithdrawalErrorForMerchant(message: string | undefined) {
   }
   return raw
 }
+
+function sanitizeWithdrawalSubmitErrorForMerchant(message: string | undefined) {
+  const raw = String(message || "").trim()
+  if (!raw) return "We couldn't submit this withdrawal request. Please try again."
+  const hiddenSignerPhrases = [
+    ["provider", "signer"].join(" "),
+    ["cannot", "sign"].join(" "),
+    ["signing", "not enabled"].join(" "),
+  ]
+  if (
+    /schema cache|column|wallet_withdrawal_requests|amount_decimal|private key|secret|api key|token|signer/i.test(raw) ||
+    hiddenSignerPhrases.some((phrase) => raw.toLowerCase().includes(phrase))
+  ) {
+    console.error("[pinetree-wallets] withdrawal submit error", raw)
+    return "We couldn't submit this withdrawal request. Please try again."
+  }
+  return raw
+}
 const walletCreationTimeoutMs = 30_000
 const walletCreationDebugEnabled =
   process.env.NODE_ENV !== "production" ||
@@ -685,6 +703,28 @@ function WithdrawalFormShell({
   const formattedAvailable = formatCryptoAmount(selectedBalanceAmount, asset)
   const maxDisabled = !selectedBalanceKnown || selectedBalanceZero
   const nativeMaxNote = isNativeWithdrawalAsset(asset) && selectedBalanceKnown && !selectedBalanceZero
+  const hasSubmitted = Boolean(submitResult && submitResult.merchantStatus !== "Withdrawal failed")
+  const primaryActionLabel = submitResult
+    ? submitResult.merchantStatus === "Processing"
+      ? "Processing"
+      : submitResult.merchantStatus === "Pending review"
+        ? "Pending review"
+        : dynamicApprovalAvailable
+          ? "Approve with PineTree Wallet"
+          : "Submit withdrawal request"
+    : submitting
+      ? dynamicApprovalAvailable
+        ? "Approving..."
+        : "Submitting..."
+      : reviewing
+        ? "Reviewing..."
+        : review
+          ? dynamicApprovalAvailable
+            ? "Approve with PineTree Wallet"
+            : "Submit withdrawal request"
+          : "Review withdrawal"
+  const primaryActionDisabled = hasSubmitted || submitting || (review ? false : reviewDisabled)
+  const primaryAction = review ? onSubmit : onReview
 
   return (
     <div className="space-y-4">
@@ -803,19 +843,11 @@ function WithdrawalFormShell({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <button
           type="button"
-          onClick={onReview}
-          disabled={reviewDisabled}
+          onClick={primaryAction}
+          disabled={primaryActionDisabled}
           className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none"
         >
-          {reviewing ? "Reviewing..." : "Review withdrawal"}
-        </button>
-        <button
-          type="button"
-          onClick={onSubmit}
-          disabled={!review || submitting}
-          className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500 disabled:shadow-none"
-        >
-          {submitting ? "Submitting..." : dynamicApprovalAvailable ? "Approve with PineTree Wallet" : "Submit withdrawal request"}
+          {primaryActionLabel}
         </button>
       </div>
 
@@ -851,7 +883,7 @@ function WithdrawalFormShell({
         </div>
       ) : null}
 
-      {review ? (
+      {review && !submitResult ? (
         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -1642,7 +1674,7 @@ function PineTreeWalletRuntime() {
         })
         const prepared = (await prepareRes.json()) as WithdrawalPrepareResponse | { error?: string }
         if (!prepareRes.ok) {
-          setWithdrawalError("error" in prepared && prepared.error ? prepared.error : "Could not prepare wallet approval.")
+          setWithdrawalError(sanitizeWithdrawalSubmitErrorForMerchant("error" in prepared ? prepared.error : undefined))
           return
         }
 
@@ -1665,7 +1697,7 @@ function PineTreeWalletRuntime() {
         })
         const submitted = (await submitRes.json()) as WithdrawalSubmitResponse | { error?: string }
         if (!submitRes.ok) {
-          setWithdrawalError("error" in submitted && submitted.error ? submitted.error : "Could not submit withdrawal request.")
+          setWithdrawalError(sanitizeWithdrawalSubmitErrorForMerchant("error" in submitted ? submitted.error : undefined))
           return
         }
         setWithdrawalSubmitResult(submitted as WithdrawalSubmitResponse)
@@ -1685,15 +1717,12 @@ function PineTreeWalletRuntime() {
       })
       const json = (await res.json()) as WithdrawalSubmitResponse | { error?: string }
       if (!res.ok) {
-        setWithdrawalError("error" in json && json.error ? json.error : "Could not submit withdrawal request.")
+        setWithdrawalError(sanitizeWithdrawalSubmitErrorForMerchant("error" in json ? json.error : undefined))
         return
       }
       setWithdrawalSubmitResult(json as WithdrawalSubmitResponse)
     } catch (error) {
-      const message = error instanceof Error && error.message.trim()
-        ? error.message
-        : "Could not submit withdrawal request."
-      setWithdrawalError(message)
+      setWithdrawalError(sanitizeWithdrawalSubmitErrorForMerchant(error instanceof Error ? error.message : undefined))
     } finally {
       setSubmittingWithdrawal(false)
     }

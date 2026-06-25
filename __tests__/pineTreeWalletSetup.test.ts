@@ -352,6 +352,22 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/submit")
   })
 
+  it("uses one progressive withdrawal action button instead of stacked review and submit buttons", () => {
+    expect(page).toContain("const primaryActionLabel")
+    expect(page).toContain("const primaryAction = review ? onSubmit : onReview")
+    expect(page).toContain("onClick={primaryAction}")
+    expect(page).not.toContain("onClick={onSubmit}")
+  })
+
+  it("withdrawal primary action progresses through review, approval, pending, and processing states", () => {
+    expect(page).toContain(": \"Review withdrawal\"")
+    expect(page).toContain("\"Approve with PineTree Wallet\"")
+    expect(page).toContain("\"Submit withdrawal request\"")
+    expect(page).toContain("\"Pending review\"")
+    expect(page).toContain("\"Processing\"")
+    expect(page).toContain("const primaryActionDisabled = hasSubmitted")
+  })
+
   it("shows pending review copy when Dynamic approval is not available", () => {
     expect(page).toContain("Submit withdrawal request")
     expect(page).toContain("if (dynamicApprovalAvailableForWithdrawal)")
@@ -360,6 +376,13 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("Pending review")
     expect(page).toContain("Processing")
     expect(page).toContain("We&apos;ll review this withdrawal before processing.")
+  })
+
+  it("hides the editable review panel after withdrawal submission", () => {
+    expect(page).toContain("{review && !submitResult ? (")
+    expect(page).toContain("Withdrawal request submitted")
+    expect(page).toContain("Withdrawal submitted")
+    expect(page).toContain("Transaction reference:")
   })
 
   it("shows selected asset availability and USD value in the Withdraw tab", () => {
@@ -434,7 +457,9 @@ describe("PineTree embedded wallet setup", () => {
 
   it("maps raw schema/cache withdrawal errors to merchant-safe copy", () => {
     expect(page).toContain("sanitizeWithdrawalErrorForMerchant")
+    expect(page).toContain("sanitizeWithdrawalSubmitErrorForMerchant")
     expect(page).toContain("We couldn't create this withdrawal request. Please try again.")
+    expect(page).toContain("We couldn't submit this withdrawal request. Please try again.")
     expect(withdrawalApiRoute).toContain("getMerchantSafeWithdrawalRouteError")
     expect(withdrawalApiRoute).toContain("console.error")
     expect(withdrawalApiRoute).toContain("schema cache")
@@ -520,6 +545,16 @@ describe("PineTree embedded wallet setup", () => {
     expect(withdrawalEngine).toContain("SystemProgram.transfer")
     expect(withdrawalEngine).toContain("status: \"processing\"")
     expect(withdrawalEngine).not.toContain("status: \"confirmed\"")
+  })
+
+  it("Solana Dynamic approval remains reachable and unavailable Solana falls back without signing", () => {
+    expect(page).toContain("dynamicApprovalAvailableForWithdrawal")
+    expect(page).toContain("kind: \"solana_transaction\"")
+    expect(page).toContain("prepared.payload.transactionBase64")
+    expect(page).toContain("wallet.connector?.signAndSendTransaction")
+    expect(page).toContain("const dynamicSubmission = await sendDynamicPreparedWithdrawal")
+    expect(page).toContain("if (dynamicApprovalAvailableForWithdrawal)")
+    expect(page).toContain("action: \"submit\"")
   })
 
   it("BTC withdrawals use a Dynamic PSBT path instead of Speed, NWC, Spark, or Lightning", () => {
