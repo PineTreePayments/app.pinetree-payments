@@ -1,0 +1,31 @@
+import { type NextRequest, NextResponse } from "next/server"
+import { completeDynamicWalletWithdrawal } from "@/engine/withdrawals/walletWithdrawals"
+import { getRouteErrorStatus, requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const merchantId = await requireMerchantIdFromRequest(req)
+    const { id } = await params
+    const body = (await req.json()) as Record<string, unknown>
+    const result = await completeDynamicWalletWithdrawal(merchantId, id, {
+      txHash: String(body.tx_hash || body.txHash || "").trim(),
+      providerReference: body.provider_reference != null || body.providerReference != null
+        ? String(body.provider_reference || body.providerReference)
+        : null,
+      signedPayload:
+        typeof body.signed_payload === "object" && body.signed_payload !== null && !Array.isArray(body.signed_payload)
+          ? body.signed_payload as Record<string, unknown>
+          : null,
+    })
+    return NextResponse.json(result)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to submit wallet approval"
+    return NextResponse.json(
+      { error: message },
+      { status: getRouteErrorStatus(error) }
+    )
+  }
+}

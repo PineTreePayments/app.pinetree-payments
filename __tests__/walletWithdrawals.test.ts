@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { Keypair } from "@solana/web3.js"
 
 const mocks = vi.hoisted(() => ({
-  getPineTreeWalletProfile: vi.fn(),
-  createWalletWithdrawalRequest: vi.fn(),
-  getWalletWithdrawalRequest: vi.fn(),
-  updateWalletWithdrawalRequest: vi.fn(),
-}))
+    getPineTreeWalletProfile: vi.fn(),
+    createWalletWithdrawalRequest: vi.fn(),
+    getWalletWithdrawalRequest: vi.fn(),
+    updateWalletWithdrawalRequest: vi.fn(),
+    fetch: vi.fn(),
+  }))
 
 vi.mock("@/database/pineTreeWalletProfiles", () => ({
   getPineTreeWalletProfile: mocks.getPineTreeWalletProfile,
@@ -18,11 +20,14 @@ vi.mock("@/database/walletWithdrawalRequests", () => ({
 }))
 
 import {
+  completeDynamicWalletWithdrawal,
   createWalletWithdrawalReview,
+  prepareDynamicWalletWithdrawal,
   submitWalletWithdrawalRequest,
   validateWalletWithdrawalInput,
   WALLET_WITHDRAWAL_VALIDATION_PATHS,
 } from "@/engine/withdrawals/walletWithdrawals"
+import { createDefaultWithdrawalSigner } from "@/providers/wallets/withdrawalSigner"
 import type { WithdrawalSigner } from "@/providers/wallets/withdrawalSigner"
 
 function makeSigner(canSign: boolean): WithdrawalSigner & {
@@ -67,6 +72,12 @@ function makeWithdrawal(overrides: Record<string, unknown> = {}) {
     provider: null,
     provider_reference: null,
     tx_hash: null,
+    unsigned_transaction_payload: null,
+    signed_payload: null,
+    approval_method: null,
+    chain_id: null,
+    token_contract: null,
+    token_mint: null,
     review_payload: {},
     error_message: null,
     created_at: "2026-06-25T00:00:00.000Z",
@@ -94,6 +105,12 @@ describe("PineTree Wallet withdrawals", () => {
       provider: input.provider,
       provider_reference: null,
       tx_hash: null,
+      unsigned_transaction_payload: input.unsignedTransactionPayload || null,
+      signed_payload: input.signedPayload || null,
+      approval_method: input.approvalMethod || null,
+      chain_id: input.chainId || null,
+      token_contract: input.tokenContract || null,
+      token_mint: input.tokenMint || null,
       review_payload: input.reviewPayload,
       error_message: input.errorMessage,
       created_at: "2026-06-25T00:00:00.000Z",
@@ -106,9 +123,18 @@ describe("PineTree Wallet withdrawals", () => {
       ...("provider" in input ? { provider: input.provider } : {}),
       ...("providerReference" in input ? { provider_reference: input.providerReference } : {}),
       ...("txHash" in input ? { tx_hash: input.txHash } : {}),
+      ...("unsignedTransactionPayload" in input ? { unsigned_transaction_payload: input.unsignedTransactionPayload } : {}),
+      ...("signedPayload" in input ? { signed_payload: input.signedPayload } : {}),
+      ...("approvalMethod" in input ? { approval_method: input.approvalMethod } : {}),
+      ...("chainId" in input ? { chain_id: input.chainId } : {}),
+      ...("tokenContract" in input ? { token_contract: input.tokenContract } : {}),
+      ...("tokenMint" in input ? { token_mint: input.tokenMint } : {}),
       ...("errorMessage" in input ? { error_message: input.errorMessage } : {}),
       ...("reviewPayload" in input ? { review_payload: input.reviewPayload } : {}),
     }))
+    vi.unstubAllEnvs()
+    global.fetch = mocks.fetch
+    mocks.fetch.mockReset()
   })
 
   it("blocks invalid amount before review", () => {
@@ -250,5 +276,276 @@ describe("PineTree Wallet withdrawals", () => {
       decimals: 6,
     })
     expect(WALLET_WITHDRAWAL_VALIDATION_PATHS.bitcoinBtc).toMatchObject({ rail: "bitcoin", asset: "BTC" })
+  })
+
+  it("prefers Dynamic browser approval when Dynamic is configured", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
+
+    const result = await createWalletWithdrawalReview("merchant_1", {
+      rail: "base",
+      asset: "ETH",
+      destinationAddress: "0x1234567890abcdef1234567890abcdef12345678",
+      amountDecimal: "0.01",
+    }, createDefaultWithdrawalSigner())
+
+    expect(result.canSubmit).toBe(true)
+    expect(result.review.approvalMethod).toBe("dynamic_browser")
+    expect(result.review.message).toContain("Approve with PineTree Wallet")
+    expect(mocks.createWalletWithdrawalRequest).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "dynamic",
+      approvalMethod: "dynamic_browser",
+    }))
+  })
+
+  it("missing Dynamic config keeps withdrawals pending review", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "")
+
+    const result = await createWalletWithdrawalReview("merchant_1", {
+      rail: "base",
+      asset: "ETH",
+      destinationAddress: "0x1234567890abcdef1234567890abcdef12345678",
+      amountDecimal: "0.01",
+    }, createDefaultWithdrawalSigner())
+
+    expect(result.canSubmit).toBe(false)
+    expect(result.review.approvalMethod).toBe("manual_review")
+    expect(mocks.createWalletWithdrawalRequest).toHaveBeenCalledWith(expect.objectContaining({
+      provider: null,
+      approvalMethod: "manual_review",
+    }))
+  })
+
+  it("Bitcoin remains pending review with Dynamic configured", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
+
+    const result = await createWalletWithdrawalReview("merchant_1", {
+      rail: "bitcoin",
+      asset: "BTC",
+      destinationAddress: "bc1q1234567890abcdef1234567890abcdef1234567",
+      amountDecimal: "0.001",
+    }, createDefaultWithdrawalSigner())
+
+    expect(result.canSubmit).toBe(false)
+    expect(result.review.approvalMethod).toBe("manual_review")
+  })
+
+  it("validates the source wallet belongs to the merchant profile before preparing", async () => {
+    mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+      wallet_profile_id: "wallet_profile_other",
+    }))
+
+    await expect(
+      prepareDynamicWalletWithdrawal("merchant_1", "withdrawal_1")
+    ).rejects.toThrow("PineTree Wallet profile not found.")
+  })
+
+  it("prepares a Base ETH Dynamic transaction payload from the saved source wallet", async () => {
+    mocks.getPineTreeWalletProfile.mockResolvedValueOnce({
+      id: "wallet_profile_1",
+      merchant_id: "merchant_1",
+      base_address: "0x9999999999999999999999999999999999999999",
+      solana_address: null,
+    })
+    mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
+      rail: "base",
+      asset: "ETH",
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+      amount_decimal: "0.5",
+    }))
+
+    const result = await prepareDynamicWalletWithdrawal("merchant_1", "withdrawal_1")
+
+    expect(result.payload).toMatchObject({
+      kind: "evm_transaction",
+      chainId: 8453,
+      from: "0x9999999999999999999999999999999999999999",
+      to: "0x1234567890abcdef1234567890abcdef12345678",
+      value: "0x6f05b59d3b20000",
+      data: "0x",
+    })
+    expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
+      "merchant_1",
+      "withdrawal_1",
+      expect.objectContaining({ chainId: "8453", approvalMethod: "dynamic_browser" })
+    )
+  })
+
+  it("prepares a Base USDC Dynamic transaction payload with the Base token contract", async () => {
+    mocks.getPineTreeWalletProfile.mockResolvedValueOnce({
+      id: "wallet_profile_1",
+      merchant_id: "merchant_1",
+      base_address: "0x9999999999999999999999999999999999999999",
+      solana_address: null,
+    })
+    mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
+      rail: "base",
+      asset: "USDC",
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+      amount_decimal: "12.5",
+    }))
+
+    const result = await prepareDynamicWalletWithdrawal("merchant_1", "withdrawal_1")
+
+    expect(result.payload).toMatchObject({
+      kind: "evm_transaction",
+      chainId: 8453,
+      from: "0x9999999999999999999999999999999999999999",
+      to: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      value: "0x0",
+    })
+    expect("data" in result.payload ? result.payload.data : "").toMatch(/^0xa9059cbb/)
+    expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
+      "merchant_1",
+      "withdrawal_1",
+      expect.objectContaining({
+        tokenContract: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      })
+    )
+  })
+
+  it("prepares a Solana SOL Dynamic transaction payload", async () => {
+    const source = Keypair.generate().publicKey.toBase58()
+    const destination = Keypair.generate().publicKey.toBase58()
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        jsonrpc: "2.0",
+        id: "1",
+        result: {
+          context: { slot: 1 },
+          value: {
+            blockhash: "11111111111111111111111111111111",
+            lastValidBlockHeight: 123,
+          },
+        },
+      }),
+    } as Response)
+    mocks.getPineTreeWalletProfile.mockResolvedValueOnce({
+      id: "wallet_profile_1",
+      merchant_id: "merchant_1",
+      base_address: null,
+      solana_address: source,
+    })
+    mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
+      rail: "solana",
+      asset: "SOL",
+      destination_address: destination,
+      amount_decimal: "0.25",
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+    }))
+
+    const result = await prepareDynamicWalletWithdrawal("merchant_1", "withdrawal_1")
+
+    expect(result.payload).toMatchObject({
+      kind: "solana_transaction",
+      from: source,
+    })
+    expect("transactionBase64" in result.payload ? result.payload.transactionBase64 : "").toMatch(/^[A-Za-z0-9+/=]+$/)
+  })
+
+  it("prepares a Solana USDC Dynamic transaction payload with the USDC mint", async () => {
+    const source = Keypair.generate().publicKey.toBase58()
+    const destination = Keypair.generate().publicKey.toBase58()
+    mocks.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        jsonrpc: "2.0",
+        id: "1",
+        result: {
+          context: { slot: 1 },
+          value: {
+            blockhash: "11111111111111111111111111111111",
+            lastValidBlockHeight: 123,
+          },
+        },
+      }),
+    } as Response).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        jsonrpc: "2.0",
+        id: "2",
+        result: { context: { slot: 1 }, value: null },
+      }),
+    } as Response)
+    mocks.getPineTreeWalletProfile.mockResolvedValueOnce({
+      id: "wallet_profile_1",
+      merchant_id: "merchant_1",
+      base_address: null,
+      solana_address: source,
+    })
+    mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
+      rail: "solana",
+      asset: "USDC",
+      destination_address: destination,
+      amount_decimal: "1.25",
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+    }))
+
+    const result = await prepareDynamicWalletWithdrawal("merchant_1", "withdrawal_1")
+
+    expect(result.payload).toMatchObject({
+      kind: "solana_transaction",
+      from: source,
+    })
+    expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
+      "merchant_1",
+      "withdrawal_1",
+      expect.objectContaining({
+        tokenMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      })
+    )
+  })
+
+  it("stores Dynamic provider reference and tx hash after browser approval", async () => {
+    mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+      status: "pending",
+      unsigned_transaction_payload: { kind: "evm_transaction" },
+    }))
+
+    const result = await completeDynamicWalletWithdrawal("merchant_1", "withdrawal_1", {
+      txHash: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      providerReference: "dynamic_ref_1",
+      signedPayload: { dynamic_wallet_address: "0x9999999999999999999999999999999999999999" },
+    })
+
+    expect(result.merchantStatus).toBe("Processing")
+    expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
+      "merchant_1",
+      "withdrawal_1",
+      expect.objectContaining({
+        status: "processing",
+        provider: "dynamic",
+        providerReference: "dynamic_ref_1",
+        txHash: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        signedPayload: { dynamic_wallet_address: "0x9999999999999999999999999999999999999999" },
+      })
+    )
+  })
+
+  it("does not confirm a Dynamic withdrawal without a valid tx hash", async () => {
+    mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+      status: "pending",
+      unsigned_transaction_payload: { kind: "evm_transaction" },
+    }))
+
+    await expect(
+      completeDynamicWalletWithdrawal("merchant_1", "withdrawal_1", { txHash: "" })
+    ).rejects.toThrow("Transaction reference is invalid")
+
+    expect(mocks.updateWalletWithdrawalRequest).not.toHaveBeenCalledWith(
+      "merchant_1",
+      "withdrawal_1",
+      expect.objectContaining({ status: "confirmed" })
+    )
   })
 })

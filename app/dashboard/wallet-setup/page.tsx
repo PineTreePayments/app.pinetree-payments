@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useDynamicContext, useUserWallets } from "@dynamic-labs/sdk-react-core"
+import { Transaction } from "@solana/web3.js"
 import { AlertTriangle, CheckCircle2, Copy, RefreshCw, X } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import {
@@ -42,6 +43,7 @@ type WithdrawalReviewResponse = {
     destinationAddress: string
     amountDecimal: string
     estimatedStatus: "Withdrawal review available" | "Pending review" | "Processing"
+    approvalMethod?: "dynamic_browser" | "manual_review"
     message: string
   }
   canSubmit: boolean
@@ -51,6 +53,29 @@ type WithdrawalSubmitResponse = {
   request: WithdrawalReviewResponse["request"]
   merchantStatus: "Pending review" | "Processing" | "Withdrawal failed"
   message: string
+}
+
+type WithdrawalPrepareResponse = {
+  request: WithdrawalReviewResponse["request"]
+  approvalMethod: "dynamic_browser"
+  provider: "dynamic"
+  rail: WithdrawalRail
+  asset: WithdrawalAsset
+  sourceAddress: string
+  payload:
+    | {
+        kind: "evm_transaction"
+        chainId: 8453
+        from: string
+        to: string
+        value: `0x${string}`
+        data: `0x${string}`
+      }
+    | {
+        kind: "solana_transaction"
+        from: string
+        transactionBase64: string
+      }
 }
 
 type SyncedBalanceAsset = {
@@ -181,6 +206,75 @@ const defaultWalletSyncState: PineTreeWalletSyncResponse = {
   totalUsd: null,
   lastSyncedAt: null,
   recentActivity: [],
+}
+
+type DynamicWalletLike = {
+  address?: string
+  connector?: {
+    getWalletClient?: (chainId?: string | number) => unknown | Promise<unknown>
+    signAndSendTransaction?: (transaction: Transaction, options?: unknown) => Promise<string>
+  }
+  getWalletClient?: (chainId?: string | number) => unknown | Promise<unknown>
+}
+
+type DynamicEvmWalletClient = {
+  sendTransaction?: (args: {
+    account?: `0x${string}`
+    to: `0x${string}`
+    value?: bigint
+    data?: `0x${string}`
+  }) => Promise<`0x${string}` | string>
+}
+
+function findDynamicWalletForSource(
+  candidates: unknown[],
+  primaryWallet: unknown,
+  sourceAddress: string
+): DynamicWalletLike | null {
+  const normalizedSource = sourceAddress.toLowerCase()
+  const walletsToSearch = [...candidates, primaryWallet].filter(Boolean) as DynamicWalletLike[]
+  return walletsToSearch.find((wallet) => String(wallet.address || "").toLowerCase() === normalizedSource) || null
+}
+
+async function sendDynamicPreparedWithdrawal(
+  prepared: WithdrawalPrepareResponse,
+  wallets: unknown[],
+  primaryWallet: unknown
+) {
+  const wallet = findDynamicWalletForSource(wallets, primaryWallet, prepared.sourceAddress)
+  if (!wallet) {
+    throw new Error("Open PineTree Wallet to approve this withdrawal.")
+  }
+
+  if (prepared.payload.kind === "evm_transaction") {
+    const getWalletClient = wallet.getWalletClient || wallet.connector?.getWalletClient
+    const client = await getWalletClient?.(prepared.payload.chainId) as DynamicEvmWalletClient | undefined
+    if (!client?.sendTransaction) {
+      throw new Error("Open PineTree Wallet to approve this withdrawal.")
+    }
+    return client.sendTransaction({
+      account: prepared.payload.from as `0x${string}`,
+      to: prepared.payload.to as `0x${string}`,
+      value: BigInt(prepared.payload.value),
+      data: prepared.payload.data,
+    })
+  }
+
+  const signAndSendTransaction = wallet.connector?.signAndSendTransaction
+  if (!signAndSendTransaction) {
+    throw new Error("Open PineTree Wallet to approve this withdrawal.")
+  }
+  const transaction = Transaction.from(base64ToBytes(prepared.payload.transactionBase64))
+  return signAndSendTransaction(transaction)
+}
+
+function base64ToBytes(value: string) {
+  const binary = window.atob(value)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return bytes
 }
 const withdrawalAssetsByRail: Record<WithdrawalRail, WithdrawalAsset[]> = {
   base: ["ETH", "USDC"],
@@ -478,13 +572,14 @@ function WithdrawalFormShell({
   const invalidAmount = amountDecimal.trim().length > 0 && !(Number(amountDecimal) > 0)
   const missingDestination = destinationAddress.trim().length === 0
   const reviewDisabled = reviewing || missingDestination || invalidAmount
+  const dynamicApprovalAvailable = review?.review.approvalMethod === "dynamic_browser" && review.canSubmit
 
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-3">
         <p className="text-sm font-semibold text-blue-900">Withdrawal review available</p>
         <p className="mt-1 text-xs leading-5 text-blue-700">
-          Prepare a withdrawal request for PineTree review and processing.
+          Prepare a withdrawal request for wallet approval or PineTree review.
         </p>
       </div>
 
@@ -562,7 +657,7 @@ function WithdrawalFormShell({
           disabled={!review || submitting}
           className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500 disabled:shadow-none"
         >
-          {submitting ? "Submitting..." : "Submit withdrawal request"}
+          {submitting ? "Submitting..." : dynamicApprovalAvailable ? "Approve with PineTree Wallet" : "Submit withdrawal request"}
         </button>
       </div>
 
@@ -605,7 +700,7 @@ function WithdrawalFormShell({
               <p className="text-sm font-semibold text-gray-950">Review withdrawal</p>
               <p className="mt-1 text-xs leading-5 text-gray-500">{review.review.message}</p>
             </div>
-            <ProviderStatusPill label={review.canSubmit ? "Connected" : "Not connected"} tone="blue" />
+            <ProviderStatusPill label={dynamicApprovalAvailable ? "Wallet approval" : "Pending review"} tone="blue" />
           </div>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
             <div>
@@ -805,7 +900,7 @@ function PineTreeWalletRuntime() {
   const accessTokenRef = useRef<string | null>(null)
 
   // --- Dynamic SDK ---
-  const { user, sdkHasLoaded, setShowAuthFlow, handleLogOut } = useDynamicContext()
+  const { user, sdkHasLoaded, setShowAuthFlow, handleLogOut, primaryWallet } = useDynamicContext()
   const wallets = useUserWallets()
 
   // --- UI state ---
@@ -1312,6 +1407,42 @@ function PineTreeWalletRuntime() {
     setWithdrawalError("")
     setWithdrawalSubmitResult(null)
     try {
+      if (withdrawalReview?.review.approvalMethod === "dynamic_browser" && withdrawalReview.canSubmit) {
+        const prepareRes = await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/prepare`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        })
+        const prepared = (await prepareRes.json()) as WithdrawalPrepareResponse | { error?: string }
+        if (!prepareRes.ok) {
+          setWithdrawalError("error" in prepared && prepared.error ? prepared.error : "Could not prepare wallet approval.")
+          return
+        }
+
+        const txHash = await sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, wallets as unknown[], primaryWallet)
+        const submitRes = await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/submit`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tx_hash: txHash,
+            provider_reference: txHash,
+            signed_payload: { dynamic_wallet_address: (prepared as WithdrawalPrepareResponse).sourceAddress },
+          }),
+        })
+        const submitted = (await submitRes.json()) as WithdrawalSubmitResponse | { error?: string }
+        if (!submitRes.ok) {
+          setWithdrawalError("error" in submitted && submitted.error ? submitted.error : "Could not submit withdrawal request.")
+          return
+        }
+        setWithdrawalSubmitResult(submitted as WithdrawalSubmitResponse)
+        return
+      }
+
       const res = await fetch("/api/wallets/pinetree-wallet/withdrawals", {
         method: "POST",
         headers: {
@@ -1329,8 +1460,11 @@ function PineTreeWalletRuntime() {
         return
       }
       setWithdrawalSubmitResult(json as WithdrawalSubmitResponse)
-    } catch {
-      setWithdrawalError("Could not submit withdrawal request.")
+    } catch (error) {
+      const message = error instanceof Error && error.message.trim()
+        ? error.message
+        : "Could not submit withdrawal request."
+      setWithdrawalError(message)
     } finally {
       setSubmittingWithdrawal(false)
     }

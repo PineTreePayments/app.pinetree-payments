@@ -27,6 +27,12 @@ export type WalletWithdrawalRequestRecord = {
   provider: string | null
   provider_reference: string | null
   tx_hash: string | null
+  unsigned_transaction_payload: Record<string, unknown> | null
+  signed_payload: Record<string, unknown> | null
+  approval_method: string | null
+  chain_id: string | null
+  token_contract: string | null
+  token_mint: string | null
   review_payload: Record<string, unknown>
   error_message: string | null
   created_at: string
@@ -44,6 +50,12 @@ export type CreateWalletWithdrawalRequestInput = {
   provider?: string | null
   providerReference?: string | null
   txHash?: string | null
+  unsignedTransactionPayload?: Record<string, unknown> | null
+  signedPayload?: Record<string, unknown> | null
+  approvalMethod?: string | null
+  chainId?: string | null
+  tokenContract?: string | null
+  tokenMint?: string | null
   reviewPayload?: Record<string, unknown>
   errorMessage?: string | null
 }
@@ -53,12 +65,20 @@ export type UpdateWalletWithdrawalRequestInput = {
   provider?: string | null
   providerReference?: string | null
   txHash?: string | null
+  unsignedTransactionPayload?: Record<string, unknown> | null
+  signedPayload?: Record<string, unknown> | null
+  approvalMethod?: string | null
+  chainId?: string | null
+  tokenContract?: string | null
+  tokenMint?: string | null
   reviewPayload?: Record<string, unknown>
   errorMessage?: string | null
 }
 
 function normalize(row: Record<string, unknown>): WalletWithdrawalRequestRecord {
   const reviewPayload = row.review_payload
+  const unsignedPayload = row.unsigned_transaction_payload
+  const signedPayload = row.signed_payload
   return {
     id: String(row.id || ""),
     merchant_id: String(row.merchant_id || ""),
@@ -71,6 +91,18 @@ function normalize(row: Record<string, unknown>): WalletWithdrawalRequestRecord 
     provider: row.provider != null ? String(row.provider) : null,
     provider_reference: row.provider_reference != null ? String(row.provider_reference) : null,
     tx_hash: row.tx_hash != null ? String(row.tx_hash) : null,
+    unsigned_transaction_payload:
+      typeof unsignedPayload === "object" && unsignedPayload !== null && !Array.isArray(unsignedPayload)
+        ? unsignedPayload as Record<string, unknown>
+        : null,
+    signed_payload:
+      typeof signedPayload === "object" && signedPayload !== null && !Array.isArray(signedPayload)
+        ? signedPayload as Record<string, unknown>
+        : null,
+    approval_method: row.approval_method != null ? String(row.approval_method) : null,
+    chain_id: row.chain_id != null ? String(row.chain_id) : null,
+    token_contract: row.token_contract != null ? String(row.token_contract) : null,
+    token_mint: row.token_mint != null ? String(row.token_mint) : null,
     review_payload:
       typeof reviewPayload === "object" && reviewPayload !== null && !Array.isArray(reviewPayload)
         ? reviewPayload as Record<string, unknown>
@@ -98,6 +130,12 @@ export async function createWalletWithdrawalRequest(
       provider: input.provider || null,
       provider_reference: input.providerReference || null,
       tx_hash: input.txHash || null,
+      unsigned_transaction_payload: input.unsignedTransactionPayload || null,
+      signed_payload: input.signedPayload || null,
+      approval_method: input.approvalMethod || null,
+      chain_id: input.chainId || null,
+      token_contract: input.tokenContract || null,
+      token_mint: input.tokenMint || null,
       review_payload: input.reviewPayload || {},
       error_message: input.errorMessage || null,
       updated_at: now,
@@ -125,6 +163,12 @@ export async function updateWalletWithdrawalRequest(
   if (input.provider !== undefined) update.provider = input.provider
   if (input.providerReference !== undefined) update.provider_reference = input.providerReference
   if (input.txHash !== undefined) update.tx_hash = input.txHash
+  if (input.unsignedTransactionPayload !== undefined) update.unsigned_transaction_payload = input.unsignedTransactionPayload
+  if (input.signedPayload !== undefined) update.signed_payload = input.signedPayload
+  if (input.approvalMethod !== undefined) update.approval_method = input.approvalMethod
+  if (input.chainId !== undefined) update.chain_id = input.chainId
+  if (input.tokenContract !== undefined) update.token_contract = input.tokenContract
+  if (input.tokenMint !== undefined) update.token_mint = input.tokenMint
   if (input.reviewPayload !== undefined) update.review_payload = input.reviewPayload
   if (input.errorMessage !== undefined) update.error_message = input.errorMessage
 

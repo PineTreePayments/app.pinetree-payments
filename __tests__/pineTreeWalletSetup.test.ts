@@ -13,6 +13,10 @@ describe("PineTree embedded wallet setup", () => {
   const providerPage = read("app/dashboard/providers/page.tsx")
   const apiRoute = read("app/api/wallets/pinetree-profile/route.ts")
   const withdrawalApiRoute = read("app/api/wallets/pinetree-wallet/withdrawals/route.ts")
+  const withdrawalPrepareRoute = read("app/api/wallets/pinetree-wallet/withdrawals/[id]/prepare/route.ts")
+  const withdrawalSubmitRoute = read("app/api/wallets/pinetree-wallet/withdrawals/[id]/submit/route.ts")
+  const withdrawalEngine = read("engine/withdrawals/walletWithdrawals.ts")
+  const withdrawalSigner = read("providers/wallets/withdrawalSigner.ts")
   const dbHelper = read("database/pineTreeWalletProfiles.ts")
   const migration = read("database/migrations/20260622_create_pinetree_wallet_profile.sql")
   // PineTree-managed Lightning backend files
@@ -335,19 +339,38 @@ describe("PineTree embedded wallet setup", () => {
   // Withdrawal scaffold — no real fund movement
   // -------------------------------------------------------------------------
 
-  it("shows a withdrawal form shell without enabling final signing", () => {
+  it("shows Dynamic approval copy only when wallet approval is available", () => {
     expect(page).toContain("Withdrawal review available")
+    expect(page).toContain("Approve with PineTree Wallet")
+    expect(page).toContain("dynamicApprovalAvailable")
+    expect(page).toContain("review?.review.approvalMethod === \"dynamic_browser\"")
+    expect(page).toContain("/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/prepare")
+    expect(page).toContain("/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/submit")
+  })
+
+  it("shows pending review copy when Dynamic approval is not available", () => {
     expect(page).toContain("Submit withdrawal request")
     expect(page).toContain("Withdrawal request submitted")
     expect(page).toContain("Status: {submitResult.merchantStatus}")
     expect(page).toContain("Pending review")
     expect(page).toContain("Processing")
+    expect(page).toContain("We&apos;ll review this withdrawal before processing.")
+  })
+
+  it("does not show developer-facing signer disabled copy in the withdrawal UI", () => {
     expect(page).not.toContain("Signing not enabled yet")
     expect(page).not.toContain("Withdrawal signing not enabled")
+    expect(page).not.toContain("signing not enabled")
+    expect(page).not.toContain("cannot sign")
+    expect(page).not.toContain("broadcast disabled")
+    expect(page).not.toContain("provider signer unavailable")
     expect(page).not.toContain("Withdrawals coming soon")
     expect(page).not.toContain("Withdrawals disabled")
+  })
+
+  it("keeps the withdrawal form shell without redesigning the controls", () => {
+    expect(page).toContain("Withdrawal review available")
     expect(page).toContain('aria-label="Select withdrawal asset"')
-    // Updated message per spec
     expect(page).toContain('aria-label="Select withdrawal rail"')
     expect(page).toContain('aria-label="Destination address"')
     expect(page).toContain('aria-label="Withdrawal amount"')
@@ -361,7 +384,10 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("withdrawal request DB scaffold exists with review fields and safe statuses", () => {
-    const withdrawalMigration = migration + read("database/migrations/20260625_expand_wallet_withdrawal_requests.sql")
+    const withdrawalMigration =
+      migration +
+      read("database/migrations/20260625_expand_wallet_withdrawal_requests.sql") +
+      read("database/migrations/20260625_add_dynamic_withdrawal_payload_fields.sql")
     expect(withdrawalMigration).toContain("wallet_withdrawal_requests")
     expect(withdrawalMigration).toContain("merchant_id")
     expect(withdrawalMigration).toContain("wallet_profile_id")
@@ -373,6 +399,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(withdrawalMigration).toContain("provider")
     expect(withdrawalMigration).toContain("provider_reference")
     expect(withdrawalMigration).toContain("tx_hash")
+    expect(withdrawalMigration).toContain("unsigned_transaction_payload")
+    expect(withdrawalMigration).toContain("signed_payload")
+    expect(withdrawalMigration).toContain("approval_method")
+    expect(withdrawalMigration).toContain("chain_id")
+    expect(withdrawalMigration).toContain("token_contract")
+    expect(withdrawalMigration).toContain("token_mint")
     expect(withdrawalMigration).toContain("review_payload")
     expect(withdrawalMigration).toContain("error_message")
     expect(withdrawalMigration).toContain("'review_required'")
@@ -381,10 +413,38 @@ describe("PineTree embedded wallet setup", () => {
 
   it("withdrawal API does not expose provider secrets to the browser", () => {
     expect(withdrawalApiRoute).toContain("submitWalletWithdrawalRequest")
+    expect(withdrawalPrepareRoute).toContain("prepareDynamicWalletWithdrawal")
+    expect(withdrawalSubmitRoute).toContain("completeDynamicWalletWithdrawal")
     expect(withdrawalApiRoute).not.toContain("FIREBLOCKS_API_KEY")
     expect(withdrawalApiRoute).not.toContain("FIREBLOCKS_API_SECRET")
     expect(withdrawalApiRoute).not.toContain("PRIVATE_KEY")
     expect(withdrawalApiRoute).not.toContain("process.env")
+    expect(withdrawalPrepareRoute).not.toContain("DYNAMIC_API_KEY")
+    expect(withdrawalPrepareRoute).not.toContain("DYNAMIC_API_SECRET")
+    expect(withdrawalPrepareRoute).not.toContain("PRIVATE_KEY")
+    expect(withdrawalSubmitRoute).not.toContain("DYNAMIC_API_KEY")
+    expect(withdrawalSubmitRoute).not.toContain("DYNAMIC_API_SECRET")
+    expect(withdrawalSubmitRoute).not.toContain("PRIVATE_KEY")
+  })
+
+  it("prefers Dynamic browser approval without enabling backend Dynamic secrets", () => {
+    expect(withdrawalSigner).toContain("dynamicBrowserWithdrawalSigner")
+    expect(withdrawalSigner).toContain("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID")
+    expect(withdrawalSigner).toContain("Dynamic is the preferred execution path")
+    expect(withdrawalSigner).toContain("throw new Error(\"Dynamic browser approval requires merchant wallet signing\")")
+    expect(withdrawalSigner).not.toContain("DYNAMIC_API_KEY")
+    expect(withdrawalSigner).not.toContain("DYNAMIC_API_SECRET")
+  })
+
+  it("server builds constrained Dynamic payloads from the saved merchant wallet profile", () => {
+    expect(withdrawalEngine).toContain("profile.id !== request.wallet_profile_id")
+    expect(withdrawalEngine).toContain("getSourceAddressForRail(profile, validated.rail)")
+    expect(withdrawalEngine).toContain("BASE_USDC_TOKEN_ADDRESS")
+    expect(withdrawalEngine).toContain("SOLANA_USDC_MINT")
+    expect(withdrawalEngine).toContain("createTransferCheckedInstruction")
+    expect(withdrawalEngine).toContain("SystemProgram.transfer")
+    expect(withdrawalEngine).toContain("status: \"processing\"")
+    expect(withdrawalEngine).not.toContain("status: \"confirmed\"")
   })
 
   // -------------------------------------------------------------------------
