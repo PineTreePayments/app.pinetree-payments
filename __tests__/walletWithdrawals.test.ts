@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Keypair } from "@solana/web3.js"
+import { address as btcAddress, Psbt, networks } from "bitcoinjs-lib"
 
 const mocks = vi.hoisted(() => ({
     getPineTreeWalletProfile: vi.fn(),
@@ -28,6 +29,7 @@ import {
   WALLET_WITHDRAWAL_VALIDATION_PATHS,
 } from "@/engine/withdrawals/walletWithdrawals"
 import { createDefaultWithdrawalSigner } from "@/providers/wallets/withdrawalSigner"
+import * as bitcoinNetworkProvider from "@/providers/wallets/bitcoinNetworkProvider"
 import type { WithdrawalSigner } from "@/providers/wallets/withdrawalSigner"
 
 function makeSigner(canSign: boolean): WithdrawalSigner & {
@@ -84,6 +86,48 @@ function makeWithdrawal(overrides: Record<string, unknown> = {}) {
     updated_at: "2026-06-25T00:00:00.000Z",
     ...overrides,
   }
+}
+
+const BTC_SOURCE = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"
+const BTC_DESTINATION = "bc1qw5g6nan4y0p57nrmv69pyqk2xdgtghtm4uuta6"
+const BTC_TXID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+function configureBtcExecution() {
+  vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
+  vi.stubEnv("BITCOIN_NETWORK", "mainnet")
+  vi.stubEnv("BITCOIN_UTXO_PROVIDER", "esplora")
+  vi.stubEnv("BITCOIN_ESPLORA_BASE_URL", "https://mempool.test/api")
+  vi.stubEnv("BITCOIN_BROADCAST_ENABLED", "true")
+}
+
+function mockBtcProviderFetch(utxoValue = 100_000) {
+  mocks.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+    const target = String(url)
+    if (target.endsWith(`/address/${BTC_SOURCE}/utxo`)) {
+      return {
+        ok: true,
+        json: async () => ([{
+          txid: BTC_TXID,
+          vout: 0,
+          value: utxoValue,
+          status: { confirmed: true },
+        }]),
+      } as Response
+    }
+    if (target.endsWith("/fee-estimates")) {
+      return {
+        ok: true,
+        json: async () => ({ "1": 5, "3": 2, "6": 1, "144": 1, "504": 1 }),
+      } as Response
+    }
+    if (target.endsWith("/tx") && init?.method === "POST") {
+      return {
+        ok: true,
+        text: async () => "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      } as Response
+    }
+    throw new Error(`Unexpected fetch ${target}`)
+  })
 }
 
 describe("PineTree Wallet withdrawals", () => {
@@ -321,12 +365,60 @@ describe("PineTree Wallet withdrawals", () => {
     const result = await createWalletWithdrawalReview("merchant_1", {
       rail: "bitcoin",
       asset: "BTC",
-      destinationAddress: "bc1q1234567890abcdef1234567890abcdef1234567",
+      destinationAddress: BTC_DESTINATION,
       amountDecimal: "0.001",
     }, createDefaultWithdrawalSigner())
 
     expect(result.canSubmit).toBe(false)
     expect(result.review.approvalMethod).toBe("manual_review")
+  })
+
+  it("Bitcoin remains pending review if BTC provider env is missing", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
+
+    const result = await createWalletWithdrawalReview("merchant_1", {
+      rail: "bitcoin",
+      asset: "BTC",
+      destinationAddress: BTC_DESTINATION,
+      amountDecimal: "0.0001",
+    }, createDefaultWithdrawalSigner())
+
+    expect(result.canSubmit).toBe(false)
+    expect(result.review.approvalMethod).toBe("manual_review")
+  })
+
+  it("Bitcoin remains pending review when BTC broadcast is not enabled", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
+    vi.stubEnv("BITCOIN_NETWORK", "mainnet")
+    vi.stubEnv("BITCOIN_UTXO_PROVIDER", "esplora")
+    vi.stubEnv("BITCOIN_ESPLORA_BASE_URL", "https://mempool.test/api")
+    vi.stubEnv("BITCOIN_BROADCAST_ENABLED", "false")
+
+    const result = await createWalletWithdrawalReview("merchant_1", {
+      rail: "bitcoin",
+      asset: "BTC",
+      destinationAddress: BTC_DESTINATION,
+      amountDecimal: "0.0001",
+    }, createDefaultWithdrawalSigner())
+
+    expect(result.canSubmit).toBe(false)
+    expect(result.review.approvalMethod).toBe("manual_review")
+  })
+
+  it("rejects invalid and wrong-network BTC destination addresses", () => {
+    vi.stubEnv("BITCOIN_NETWORK", "mainnet")
+    expect(() => validateWalletWithdrawalInput({
+      rail: "bitcoin",
+      asset: "BTC",
+      destinationAddress: "not-a-btc-address",
+      amountDecimal: "0.001",
+    })).toThrow("Destination address is invalid")
+    expect(() => validateWalletWithdrawalInput({
+      rail: "bitcoin",
+      asset: "BTC",
+      destinationAddress: "tb1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjaq5ayy",
+      amountDecimal: "0.001",
+    })).toThrow("Destination address is invalid")
   })
 
   it("validates the source wallet belongs to the merchant profile before preparing", async () => {
@@ -502,6 +594,109 @@ describe("PineTree Wallet withdrawals", () => {
     )
   })
 
+  it("prepares a Bitcoin PSBT using server-fetched UTXOs and returns change to the merchant BTC address", async () => {
+    configureBtcExecution()
+    mockBtcProviderFetch(100_000)
+    mocks.getPineTreeWalletProfile.mockResolvedValueOnce({
+      id: "wallet_profile_1",
+      merchant_id: "merchant_1",
+      btc_address: BTC_SOURCE,
+      bitcoin_onchain_address: null,
+      btc_address_type: "native_segwit",
+    })
+    mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
+      rail: "bitcoin",
+      asset: "BTC",
+      destination_address: BTC_DESTINATION,
+      amount_decimal: "0.0005",
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+    }))
+
+    const result = await prepareDynamicWalletWithdrawal("merchant_1", "withdrawal_1")
+
+    expect(result.payload).toMatchObject({
+      kind: "bitcoin_psbt",
+      network: "mainnet",
+      from: BTC_SOURCE,
+      signInputs: [{ address: BTC_SOURCE, index: 0 }],
+    })
+    const psbt = Psbt.fromBase64(result.payload.kind === "bitcoin_psbt" ? result.payload.psbtBase64 : "", { network: networks.bitcoin })
+    const outputAddresses = psbt.txOutputs.map((output) => btcAddress.fromOutputScript(output.script, networks.bitcoin))
+    expect(outputAddresses).toContain(BTC_DESTINATION)
+    expect(outputAddresses).toContain(BTC_SOURCE)
+    expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
+      "merchant_1",
+      "withdrawal_1",
+      expect.objectContaining({
+        chainId: "bitcoin-mainnet",
+        unsignedTransactionPayload: expect.objectContaining({
+          kind: "bitcoin_psbt",
+          psbtBase64: expect.any(String),
+          sourceAddress: BTC_SOURCE,
+          destinationAddress: BTC_DESTINATION,
+          utxoCount: 1,
+        }),
+      })
+    )
+  })
+
+  it("rejects BTC amount greater than spendable balance after fees", async () => {
+    configureBtcExecution()
+    mockBtcProviderFetch(10_000)
+    mocks.getPineTreeWalletProfile.mockResolvedValueOnce({
+      id: "wallet_profile_1",
+      merchant_id: "merchant_1",
+      btc_address: BTC_SOURCE,
+      bitcoin_onchain_address: null,
+      btc_address_type: "native_segwit",
+    })
+    mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
+      rail: "bitcoin",
+      asset: "BTC",
+      destination_address: BTC_DESTINATION,
+      amount_decimal: "0.0005",
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+    }))
+
+    await expect(
+      prepareDynamicWalletWithdrawal("merchant_1", "withdrawal_1")
+    ).rejects.toThrow("Withdrawal amount exceeds spendable Bitcoin balance")
+  })
+
+  it("browser cannot choose BTC source address or provide UTXOs", async () => {
+    configureBtcExecution()
+    mockBtcProviderFetch(100_000)
+    mocks.getPineTreeWalletProfile.mockResolvedValueOnce({
+      id: "wallet_profile_1",
+      merchant_id: "merchant_1",
+      btc_address: BTC_SOURCE,
+      bitcoin_onchain_address: null,
+      btc_address_type: "native_segwit",
+    })
+    mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
+      rail: "bitcoin",
+      asset: "BTC",
+      destination_address: BTC_DESTINATION,
+      amount_decimal: "0.0005",
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+      review_payload: {
+        sourceAddress: "bc1qattacker0000000000000000000000000000000",
+        utxos: [{ txid: "bad", vout: 0, value: 999999 }],
+      },
+    }))
+
+    const result = await prepareDynamicWalletWithdrawal("merchant_1", "withdrawal_1")
+
+    expect(result.sourceAddress).toBe(BTC_SOURCE)
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      `https://mempool.test/api/address/${BTC_SOURCE}/utxo`,
+      expect.any(Object)
+    )
+  })
+
   it("stores Dynamic provider reference and tx hash after browser approval", async () => {
     mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
       approval_method: "dynamic_browser",
@@ -542,6 +737,54 @@ describe("PineTree Wallet withdrawals", () => {
       completeDynamicWalletWithdrawal("merchant_1", "withdrawal_1", { txHash: "" })
     ).rejects.toThrow("Transaction reference is invalid")
 
+    expect(mocks.updateWalletWithdrawalRequest).not.toHaveBeenCalledWith(
+      "merchant_1",
+      "withdrawal_1",
+      expect.objectContaining({ status: "confirmed" })
+    )
+  })
+
+  it("stores BTC txid after Dynamic signed PSBT broadcast without confirming immediately", async () => {
+    const finalizeSpy = vi.spyOn(bitcoinNetworkProvider, "finalizeAndBroadcastBitcoinPsbt").mockResolvedValueOnce({
+      txid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      rawTxHex: "020000000001",
+    })
+    mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
+      rail: "bitcoin",
+      asset: "BTC",
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+      status: "pending",
+      unsigned_transaction_payload: {
+        kind: "bitcoin_psbt",
+        psbtBase64: "cHNidP8BAAo=",
+        sourceAddress: BTC_SOURCE,
+        destinationAddress: BTC_DESTINATION,
+        amountSats: 50_000,
+      },
+    }))
+
+    const result = await completeDynamicWalletWithdrawal("merchant_1", "withdrawal_1", {
+      txHash: "",
+      signedPsbtBase64: "signed-psbt-base64",
+      providerReference: "dynamic:bitcoin-psbt",
+    })
+
+    expect(finalizeSpy).toHaveBeenCalledWith(expect.objectContaining({
+      signedPsbtBase64: "signed-psbt-base64",
+      preparedPayload: expect.objectContaining({ kind: "bitcoin_psbt" }),
+    }))
+    expect(result.merchantStatus).toBe("Processing")
+    expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
+      "merchant_1",
+      "withdrawal_1",
+      expect.objectContaining({
+        status: "processing",
+        provider: "dynamic",
+        providerReference: "dynamic:bitcoin-psbt",
+        txHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      })
+    )
     expect(mocks.updateWalletWithdrawalRequest).not.toHaveBeenCalledWith(
       "merchant_1",
       "withdrawal_1",

@@ -3,6 +3,7 @@ import type {
   WalletWithdrawalRail,
   WalletWithdrawalRequestRecord,
 } from "@/database/walletWithdrawalRequests"
+import { isBitcoinWithdrawalExecutionConfigured } from "@/providers/wallets/bitcoinNetworkProvider"
 
 export type WithdrawalSignerInput = {
   merchantId: string
@@ -62,7 +63,11 @@ function dynamicEnvironmentConfigured() {
 export function dynamicBrowserWithdrawalSigner(): WithdrawalSigner {
   return {
     async canSignWithdrawal(input) {
-      return dynamicEnvironmentConfigured() && (input.rail === "base" || input.rail === "solana")
+      return dynamicEnvironmentConfigured() && (
+        input.rail === "base" ||
+        input.rail === "solana" ||
+        (input.rail === "bitcoin" && input.asset === "BTC" && isBitcoinWithdrawalExecutionConfigured())
+      )
     },
     async createWithdrawalReview(input) {
       const canSign = await this.canSignWithdrawal(input)

@@ -447,6 +447,21 @@ describe("PineTree embedded wallet setup", () => {
     expect(withdrawalEngine).not.toContain("status: \"confirmed\"")
   })
 
+  it("BTC withdrawals use a Dynamic PSBT path instead of Speed, NWC, Spark, or Lightning", () => {
+    const bitcoinProvider = read("providers/wallets/bitcoinNetworkProvider.ts")
+    expect(withdrawalEngine).toContain("kind: \"bitcoin_psbt\"")
+    expect(withdrawalEngine).toContain("buildBitcoinWithdrawalPsbt")
+    expect(withdrawalEngine).toContain("finalizeAndBroadcastBitcoinPsbt")
+    expect(page).toContain("signPsbt")
+    expect(bitcoinProvider).toContain("BITCOIN_UTXO_PROVIDER")
+    expect(bitcoinProvider).toContain("BITCOIN_ESPLORA_BASE_URL")
+    expect(bitcoinProvider).toContain("BITCOIN_BROADCAST_ENABLED")
+    expect(withdrawalEngine).not.toContain("speed")
+    expect(withdrawalEngine).not.toContain("nwc")
+    expect(withdrawalEngine).not.toContain("spark")
+    expect(withdrawalEngine).not.toContain("lightning")
+  })
+
   // -------------------------------------------------------------------------
   // DB profile schema and helper
   // -------------------------------------------------------------------------

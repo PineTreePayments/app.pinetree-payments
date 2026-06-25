@@ -76,6 +76,13 @@ type WithdrawalPrepareResponse = {
         from: string
         transactionBase64: string
       }
+    | {
+        kind: "bitcoin_psbt"
+        network: "mainnet" | "testnet"
+        from: string
+        psbtBase64: string
+        signInputs: Array<{ address: string; index: number }>
+      }
 }
 
 type SyncedBalanceAsset = {
@@ -210,9 +217,12 @@ const defaultWalletSyncState: PineTreeWalletSyncResponse = {
 
 type DynamicWalletLike = {
   address?: string
+  chain?: string
+  signPsbt?: (request: { unsignedPsbtBase64: string }) => Promise<{ signedPsbt?: string } | undefined>
   connector?: {
     getWalletClient?: (chainId?: string | number) => unknown | Promise<unknown>
     signAndSendTransaction?: (transaction: Transaction, options?: unknown) => Promise<string>
+    signPsbt?: (request: { unsignedPsbtBase64: string }) => Promise<{ signedPsbt?: string } | undefined>
   }
   getWalletClient?: (chainId?: string | number) => unknown | Promise<unknown>
 }
@@ -240,7 +250,7 @@ async function sendDynamicPreparedWithdrawal(
   prepared: WithdrawalPrepareResponse,
   wallets: unknown[],
   primaryWallet: unknown
-) {
+): Promise<{ txHash?: string; signedPsbtBase64?: string; providerReference?: string }> {
   const wallet = findDynamicWalletForSource(wallets, primaryWallet, prepared.sourceAddress)
   if (!wallet) {
     throw new Error("Open PineTree Wallet to approve this withdrawal.")
@@ -252,12 +262,25 @@ async function sendDynamicPreparedWithdrawal(
     if (!client?.sendTransaction) {
       throw new Error("Open PineTree Wallet to approve this withdrawal.")
     }
-    return client.sendTransaction({
+    const txHash = await client.sendTransaction({
       account: prepared.payload.from as `0x${string}`,
       to: prepared.payload.to as `0x${string}`,
       value: BigInt(prepared.payload.value),
       data: prepared.payload.data,
     })
+    return { txHash: String(txHash), providerReference: String(txHash) }
+  }
+
+  if (prepared.payload.kind === "bitcoin_psbt") {
+    const signPsbt = wallet.signPsbt || wallet.connector?.signPsbt
+    if (!signPsbt) {
+      throw new Error("Open PineTree Wallet to approve this withdrawal.")
+    }
+    const signed = await signPsbt({ unsignedPsbtBase64: prepared.payload.psbtBase64 })
+    if (!signed?.signedPsbt) {
+      throw new Error("Open PineTree Wallet to approve this withdrawal.")
+    }
+    return { signedPsbtBase64: signed.signedPsbt, providerReference: "dynamic:bitcoin-psbt" }
   }
 
   const signAndSendTransaction = wallet.connector?.signAndSendTransaction
@@ -265,7 +288,8 @@ async function sendDynamicPreparedWithdrawal(
     throw new Error("Open PineTree Wallet to approve this withdrawal.")
   }
   const transaction = Transaction.from(base64ToBytes(prepared.payload.transactionBase64))
-  return signAndSendTransaction(transaction)
+  const txHash = await signAndSendTransaction(transaction)
+  return { txHash, providerReference: txHash }
 }
 
 function base64ToBytes(value: string) {
@@ -1421,7 +1445,7 @@ function PineTreeWalletRuntime() {
           return
         }
 
-        const txHash = await sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, wallets as unknown[], primaryWallet)
+        const dynamicSubmission = await sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, wallets as unknown[], primaryWallet)
         const submitRes = await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/submit`, {
           method: "POST",
           headers: {
@@ -1429,9 +1453,13 @@ function PineTreeWalletRuntime() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            tx_hash: txHash,
-            provider_reference: txHash,
-            signed_payload: { dynamic_wallet_address: (prepared as WithdrawalPrepareResponse).sourceAddress },
+            tx_hash: dynamicSubmission.txHash || "",
+            provider_reference: dynamicSubmission.providerReference || dynamicSubmission.txHash || "",
+            signed_psbt: dynamicSubmission.signedPsbtBase64 || undefined,
+            signed_payload: {
+              dynamic_wallet_address: (prepared as WithdrawalPrepareResponse).sourceAddress,
+              ...(dynamicSubmission.signedPsbtBase64 ? { signedPsbt: dynamicSubmission.signedPsbtBase64 } : {}),
+            },
           }),
         })
         const submitted = (await submitRes.json()) as WithdrawalSubmitResponse | { error?: string }

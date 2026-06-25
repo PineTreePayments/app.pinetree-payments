@@ -20,6 +20,11 @@ import {
 } from "@solana/web3.js"
 import { encodeFunctionData, parseEther, parseUnits } from "viem"
 import {
+  buildBitcoinWithdrawalPsbt,
+  finalizeAndBroadcastBitcoinPsbt,
+  validateBitcoinAddressForConfiguredNetwork,
+} from "@/providers/wallets/bitcoinNetworkProvider"
+import {
   createDefaultWithdrawalSigner,
   type WithdrawalReview,
   type WithdrawalSigner,
@@ -51,6 +56,12 @@ export type PreparedDynamicWithdrawal = {
   rail: WalletWithdrawalRail
   asset: WalletWithdrawalAsset
   sourceAddress: string
+  destinationAddress?: string
+  amountSats?: number
+  feeSats?: number
+  changeSats?: number
+  inputTotalSats?: number
+  utxoCount?: number
   payload:
     | {
         kind: "evm_transaction"
@@ -65,12 +76,30 @@ export type PreparedDynamicWithdrawal = {
         from: string
         transactionBase64: string
       }
+    | {
+        kind: "bitcoin_psbt"
+        network: "mainnet" | "testnet"
+        from: string
+        psbtBase64: string
+        signInputs: Array<{
+          address: string
+          index: number
+        }>
+        sourceAddress: string
+        destinationAddress: string
+        amountSats: number
+        feeSats: number
+        changeSats: number
+        inputTotalSats: number
+        utxoCount: number
+      }
 }
 
 export type CompleteDynamicWithdrawalInput = {
   txHash: string
   providerReference?: string | null
   signedPayload?: Record<string, unknown> | null
+  signedPsbtBase64?: string | null
 }
 
 const SUPPORTED_ASSETS: Record<WalletWithdrawalRail, WalletWithdrawalAsset[]> = {
@@ -159,7 +188,7 @@ export function validateWalletWithdrawalInput(input: CreateWalletWithdrawalRevie
 function isValidDestinationAddress(rail: WalletWithdrawalRail, address: string) {
   if (rail === "base") return /^0x[a-fA-F0-9]{40}$/.test(address)
   if (rail === "solana") return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)
-  return /^(bc1|tb1|[13mn2])[a-zA-HJ-NP-Z0-9]{20,90}$/i.test(address)
+  return validateBitcoinAddressForConfiguredNetwork(address)
 }
 
 export async function createWalletWithdrawalReview(
@@ -322,6 +351,7 @@ export async function prepareDynamicWalletWithdrawal(
   const prepared = await buildDynamicWithdrawalPayload({
     ...validated,
     sourceAddress: getSourceAddressForRail(profile, validated.rail),
+    sourceAddressType: validated.rail === "bitcoin" ? profile.btc_address_type : null,
   })
 
   const updated = await updateWalletWithdrawalRequest(merchantId, request.id, {
@@ -329,9 +359,26 @@ export async function prepareDynamicWalletWithdrawal(
     provider: "dynamic",
     unsignedTransactionPayload: prepared.payload,
     approvalMethod: "dynamic_browser",
-    chainId: prepared.rail === "base" ? BASE_CHAIN_ID : null,
+    chainId:
+      prepared.rail === "base"
+        ? BASE_CHAIN_ID
+        : prepared.payload.kind === "bitcoin_psbt"
+          ? `bitcoin-${prepared.payload.network}`
+          : null,
     tokenContract: prepared.rail === "base" && prepared.asset === "USDC" ? BASE_USDC_TOKEN_ADDRESS : null,
     tokenMint: prepared.rail === "solana" && prepared.asset === "USDC" ? SOLANA_USDC_MINT : null,
+    reviewPayload: {
+      ...request.review_payload,
+      ...(prepared.payload.kind === "bitcoin_psbt" ? {
+        fee_sats: prepared.feeSats,
+        change_sats: prepared.changeSats,
+        input_total_sats: prepared.inputTotalSats,
+        utxo_count: prepared.utxoCount,
+        source_address: prepared.sourceAddress,
+        destination_address: prepared.destinationAddress,
+        amount_sats: prepared.amountSats,
+      } : {}),
+    },
     errorMessage: null,
   })
 
@@ -342,6 +389,12 @@ export async function prepareDynamicWalletWithdrawal(
     rail: prepared.rail,
     asset: prepared.asset,
     sourceAddress: prepared.sourceAddress,
+    destinationAddress: prepared.destinationAddress,
+    amountSats: prepared.amountSats,
+    feeSats: prepared.feeSats,
+    changeSats: prepared.changeSats,
+    inputTotalSats: prepared.inputTotalSats,
+    utxoCount: prepared.utxoCount,
     payload: prepared.payload,
   }
 }
@@ -360,6 +413,33 @@ export async function completeDynamicWalletWithdrawal(
   }
   if (!request.unsigned_transaction_payload) {
     throw Object.assign(new Error("Withdrawal request has not been prepared for wallet approval."), { status: 409 })
+  }
+
+  if (request.rail === "bitcoin") {
+    const signedPsbtBase64 = String(input.signedPsbtBase64 || input.signedPayload?.signedPsbt || "").trim()
+    if (!signedPsbtBase64) {
+      throw Object.assign(new Error("Signed Bitcoin PSBT is required."), { status: 400 })
+    }
+    const broadcast = await finalizeAndBroadcastBitcoinPsbt({
+      signedPsbtBase64,
+      preparedPayload: request.unsigned_transaction_payload,
+    })
+    const updated = await updateWalletWithdrawalRequest(merchantId, request.id, {
+      status: "processing",
+      provider: "dynamic",
+      providerReference: input.providerReference?.trim() || broadcast.txid,
+      txHash: broadcast.txid,
+      signedPayload: {
+        signedPsbtBase64,
+        rawTxHex: broadcast.rawTxHex,
+      },
+      errorMessage: null,
+    })
+    return {
+      request: updated,
+      merchantStatus: "Processing",
+      message: "Withdrawal submitted.",
+    }
   }
 
   const txHash = input.txHash.trim()
@@ -407,9 +487,46 @@ async function buildDynamicWithdrawalPayload(input: {
   destinationAddress: string
   amountDecimal: string
   sourceAddress: string
+  sourceAddressType?: string | null
 }): Promise<Omit<PreparedDynamicWithdrawal, "request" | "approvalMethod" | "provider">> {
   if (input.rail === "bitcoin") {
-    throw Object.assign(new Error("Withdrawal request is pending review."), { status: 409 })
+    if (input.asset !== "BTC") {
+      throw Object.assign(new Error("Unsupported rail/asset combination."), { status: 400 })
+    }
+    const prepared = await buildBitcoinWithdrawalPsbt({
+      sourceAddress: input.sourceAddress,
+      sourceAddressType: input.sourceAddressType,
+      destinationAddress: input.destinationAddress,
+      amountDecimal: input.amountDecimal,
+    })
+    return {
+      rail: input.rail,
+      asset: input.asset,
+      sourceAddress: input.sourceAddress,
+      destinationAddress: input.destinationAddress,
+      amountSats: prepared.amountSats,
+      feeSats: prepared.feeSats,
+      changeSats: prepared.changeSats,
+      inputTotalSats: prepared.inputTotalSats,
+      utxoCount: prepared.utxoCount,
+      payload: {
+        kind: "bitcoin_psbt",
+        network: prepared.network,
+        from: input.sourceAddress,
+        psbtBase64: prepared.psbtBase64,
+        signInputs: prepared.selectedUtxos.map((_, index) => ({
+          address: input.sourceAddress,
+          index,
+        })),
+        sourceAddress: input.sourceAddress,
+        destinationAddress: input.destinationAddress,
+        amountSats: prepared.amountSats,
+        feeSats: prepared.feeSats,
+        changeSats: prepared.changeSats,
+        inputTotalSats: prepared.inputTotalSats,
+        utxoCount: prepared.utxoCount,
+      },
+    }
   }
   if (input.rail === "base") {
     return {

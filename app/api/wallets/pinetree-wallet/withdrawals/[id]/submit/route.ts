@@ -15,6 +15,9 @@ export async function POST(
       providerReference: body.provider_reference != null || body.providerReference != null
         ? String(body.provider_reference || body.providerReference)
         : null,
+      signedPsbtBase64: body.signed_psbt != null || body.signedPsbt != null
+        ? String(body.signed_psbt || body.signedPsbt)
+        : null,
       signedPayload:
         typeof body.signed_payload === "object" && body.signed_payload !== null && !Array.isArray(body.signed_payload)
           ? body.signed_payload as Record<string, unknown>
