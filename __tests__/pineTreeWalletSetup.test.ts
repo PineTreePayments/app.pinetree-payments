@@ -19,6 +19,7 @@ describe("PineTree embedded wallet setup", () => {
   const withdrawalSigner = read("providers/wallets/withdrawalSigner.ts")
   const dbHelper = read("database/pineTreeWalletProfiles.ts")
   const migration = read("database/migrations/20260622_create_pinetree_wallet_profile.sql")
+  const withdrawalProductionSchemaMigration = read("database/migrations/20260625_ensure_wallet_withdrawal_requests_production_schema.sql")
   // PineTree-managed Lightning backend files
   const lightningMigration = read("database/migrations/20260622_create_merchant_lightning_profiles.sql")
   const speedConnectMigration = read("database/migrations/20260623_add_speed_connect_fields_to_merchant_lightning_profiles.sql")
@@ -361,6 +362,33 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("We&apos;ll review this withdrawal before processing.")
   })
 
+  it("shows selected asset availability and USD value in the Withdraw tab", () => {
+    expect(page).toContain("selectedWithdrawalBalance")
+    expect(page).toContain("findWithdrawalBalance(walletSync, withdrawalRail, withdrawalAsset)")
+    expect(page).toContain("Available")
+    expect(page).toContain("formatCryptoAmount(selectedBalanceAmount, asset)")
+    expect(page).toContain("≈ ${formatUsd(selectedBalance.usdValue)}")
+  })
+
+  it("shows a Max button that fills the selected asset balance", () => {
+    expect(page).toContain("Max")
+    expect(page).toContain("function handleMaxWithdrawalAmount()")
+    expect(page).toContain("setWithdrawalAmount(String(selectedWithdrawalBalance.balance))")
+    expect(page).toContain("onMaxAmount={handleMaxWithdrawalAmount}")
+  })
+
+  it("blocks review when amount exceeds known available balance or selected balance is zero", () => {
+    expect(page).toContain("Amount exceeds available balance.")
+    expect(page).toContain("No available balance for this asset.")
+    expect(page).toContain("amountNumber > selectedWithdrawalBalance.balance")
+    expect(page).toContain("selectedWithdrawalBalance.balance <= 0")
+  })
+
+  it("allows unknown balances with a verification note", () => {
+    expect(page).toContain("Balance indexing pending")
+    expect(page).toContain("Balance will be verified before processing.")
+  })
+
   it("does not show developer-facing signer disabled copy in the withdrawal UI", () => {
     expect(page).not.toContain(["Signing", "not enabled yet"].join(" "))
     expect(page).not.toContain(["Withdrawal signing", "not enabled"].join(" "))
@@ -404,11 +432,21 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("/api/wallets/send-sessions")
   })
 
+  it("maps raw schema/cache withdrawal errors to merchant-safe copy", () => {
+    expect(page).toContain("sanitizeWithdrawalErrorForMerchant")
+    expect(page).toContain("We couldn't create this withdrawal request. Please try again.")
+    expect(withdrawalApiRoute).toContain("getMerchantSafeWithdrawalRouteError")
+    expect(withdrawalApiRoute).toContain("console.error")
+    expect(withdrawalApiRoute).toContain("schema cache")
+    expect(withdrawalApiRoute).toContain("amount_decimal")
+  })
+
   it("withdrawal request DB scaffold exists with review fields and safe statuses", () => {
     const withdrawalMigration =
       migration +
       read("database/migrations/20260625_expand_wallet_withdrawal_requests.sql") +
-      read("database/migrations/20260625_add_dynamic_withdrawal_payload_fields.sql")
+      read("database/migrations/20260625_add_dynamic_withdrawal_payload_fields.sql") +
+      withdrawalProductionSchemaMigration
     expect(withdrawalMigration).toContain("wallet_withdrawal_requests")
     expect(withdrawalMigration).toContain("merchant_id")
     expect(withdrawalMigration).toContain("wallet_profile_id")
@@ -428,8 +466,24 @@ describe("PineTree embedded wallet setup", () => {
     expect(withdrawalMigration).toContain("token_mint")
     expect(withdrawalMigration).toContain("review_payload")
     expect(withdrawalMigration).toContain("error_message")
+    expect(withdrawalMigration).toContain("updated_at")
     expect(withdrawalMigration).toContain("'review_required'")
     expect(withdrawalMigration).toContain("'blocked'")
+  })
+
+  it("production repair migration is idempotent and refreshes the schema cache", () => {
+    expect(withdrawalProductionSchemaMigration).toContain("ADD COLUMN IF NOT EXISTS asset")
+    expect(withdrawalProductionSchemaMigration).toContain("ADD COLUMN IF NOT EXISTS amount_decimal")
+    expect(withdrawalProductionSchemaMigration).toContain("ADD COLUMN IF NOT EXISTS tx_hash")
+    expect(withdrawalProductionSchemaMigration).toContain("ADD COLUMN IF NOT EXISTS unsigned_transaction_payload")
+    expect(withdrawalProductionSchemaMigration).toContain("ADD COLUMN IF NOT EXISTS signed_payload")
+    expect(withdrawalProductionSchemaMigration).toContain("ADD COLUMN IF NOT EXISTS approval_method")
+    expect(withdrawalProductionSchemaMigration).toContain("ADD COLUMN IF NOT EXISTS chain_id")
+    expect(withdrawalProductionSchemaMigration).toContain("ADD COLUMN IF NOT EXISTS token_contract")
+    expect(withdrawalProductionSchemaMigration).toContain("ADD COLUMN IF NOT EXISTS token_mint")
+    expect(withdrawalProductionSchemaMigration).toContain("ADD COLUMN IF NOT EXISTS error_message")
+    expect(withdrawalProductionSchemaMigration).toContain("ADD COLUMN IF NOT EXISTS updated_at")
+    expect(withdrawalProductionSchemaMigration).toContain("NOTIFY pgrst, 'reload schema'")
   })
 
   it("withdrawal API does not expose provider secrets to the browser", () => {

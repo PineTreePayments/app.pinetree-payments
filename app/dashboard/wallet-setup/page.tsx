@@ -345,6 +345,39 @@ const withdrawalAssetsByRail: Record<WithdrawalRail, WithdrawalAsset[]> = {
   solana: ["SOL", "USDC"],
   bitcoin: ["BTC"],
 }
+
+function findWithdrawalBalance(
+  sync: PineTreeWalletSyncResponse | null,
+  rail: WithdrawalRail,
+  asset: WithdrawalAsset
+) {
+  return (sync?.balances[rail] ?? []).find((row) => row.asset === asset) ?? null
+}
+
+function isNativeWithdrawalAsset(asset: WithdrawalAsset) {
+  return asset === "ETH" || asset === "SOL" || asset === "BTC"
+}
+
+function formatCryptoAmount(value: number | null, asset: string) {
+  if (value === null) return null
+  const decimals = asset === "USDC" ? 6 : asset === "BTC" ? 8 : 9
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: decimals,
+  }).format(value)
+}
+
+function sanitizeWithdrawalErrorForMerchant(message: string | undefined) {
+  const raw = String(message || "").trim()
+  if (!raw) return "We couldn't create this withdrawal request. Please try again."
+  if (
+    /schema cache|column|wallet_withdrawal_requests|amount_decimal|failed to create wallet withdrawal request/i.test(raw)
+  ) {
+    console.error("[pinetree-wallets] withdrawal request error", raw)
+    return "We couldn't create this withdrawal request. Please try again."
+  }
+  return raw
+}
 const walletCreationTimeoutMs = 30_000
 const walletCreationDebugEnabled =
   process.env.NODE_ENV !== "production" ||
@@ -610,10 +643,12 @@ function WithdrawalFormShell({
   submitting,
   submitResult,
   dynamicApprovalAvailable,
+  selectedBalance,
   onRailChange,
   onAssetChange,
   onDestinationChange,
   onAmountChange,
+  onMaxAmount,
   onReview,
   onSubmit,
 }: {
@@ -627,17 +662,29 @@ function WithdrawalFormShell({
   submitting: boolean
   submitResult: WithdrawalSubmitResponse | null
   dynamicApprovalAvailable: boolean
+  selectedBalance: SyncedBalanceAsset | null
   onRailChange: (rail: WithdrawalRail) => void
   onAssetChange: (asset: WithdrawalAsset) => void
   onDestinationChange: (value: string) => void
   onAmountChange: (value: string) => void
+  onMaxAmount: () => void
   onReview: () => void
   onSubmit: () => void
 }) {
   const availableAssets = withdrawalAssetsByRail[rail]
+  const amountTrimmed = amountDecimal.trim()
+  const selectedBalanceAmount = selectedBalance?.balance ?? null
+  const selectedBalanceKnown = selectedBalanceAmount !== null && selectedBalance?.status === "synced"
+  const selectedBalanceZero = selectedBalanceKnown && selectedBalanceAmount <= 0
+  const amountValue = Number(amountTrimmed)
+  const missingAmount = amountTrimmed.length === 0
   const invalidAmount = amountDecimal.trim().length > 0 && !(Number(amountDecimal) > 0)
+  const amountExceedsBalance = selectedBalanceKnown && amountValue > selectedBalanceAmount
   const missingDestination = destinationAddress.trim().length === 0
-  const reviewDisabled = reviewing || missingDestination || invalidAmount
+  const reviewDisabled = reviewing || missingDestination || missingAmount || invalidAmount || selectedBalanceZero || amountExceedsBalance
+  const formattedAvailable = formatCryptoAmount(selectedBalanceAmount, asset)
+  const maxDisabled = !selectedBalanceKnown || selectedBalanceZero
+  const nativeMaxNote = isNativeWithdrawalAsset(asset) && selectedBalanceKnown && !selectedBalanceZero
 
   return (
     <div className="space-y-4">
@@ -689,21 +736,67 @@ function WithdrawalFormShell({
         />
       </label>
 
-      <label className="block space-y-1.5">
-        <span className="text-xs font-semibold text-gray-700">Amount</span>
-        <input
-          value={amountDecimal}
-          onChange={(event) => onAmountChange(event.target.value)}
-          inputMode="decimal"
-          aria-label="Withdrawal amount"
-          placeholder="0.00"
-          className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-        />
-      </label>
+      <div className="space-y-2">
+        <div className="rounded-xl border border-gray-200 bg-gray-50/70 px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase text-gray-500">Available</span>
+            {selectedBalanceKnown ? (
+              <span className="text-sm font-semibold text-gray-950">
+                {formattedAvailable} {asset}
+              </span>
+            ) : (
+              <span className="text-sm font-semibold text-gray-500">Balance indexing pending</span>
+            )}
+          </div>
+          {selectedBalanceKnown ? (
+            <p className="mt-0.5 text-xs leading-5 text-gray-500">
+              {selectedBalance?.usdValue !== null && selectedBalance?.usdValue !== undefined
+                ? `≈ ${formatUsd(selectedBalance.usdValue)}`
+                : "USD value pending"}
+            </p>
+          ) : (
+            <p className="mt-0.5 text-xs leading-5 text-gray-500">Balance will be verified before processing.</p>
+          )}
+          {nativeMaxNote ? (
+            <p className="mt-0.5 text-xs leading-5 text-gray-500">Network fees may reduce the final withdrawable amount.</p>
+          ) : null}
+        </div>
 
-      {(error || invalidAmount || missingDestination) ? (
+        <label className="block space-y-1.5">
+          <span className="text-xs font-semibold text-gray-700">Amount</span>
+          <div className="flex gap-2">
+            <input
+              value={amountDecimal}
+              onChange={(event) => onAmountChange(event.target.value)}
+              inputMode="decimal"
+              aria-label="Withdrawal amount"
+              placeholder="0.00"
+              className="h-11 min-w-0 flex-1 rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+            />
+            <button
+              type="button"
+              onClick={onMaxAmount}
+              disabled={maxDisabled}
+              className="inline-flex h-11 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 disabled:shadow-none"
+            >
+              Max
+            </button>
+          </div>
+        </label>
+      </div>
+
+      {(error || invalidAmount || missingDestination || missingAmount || selectedBalanceZero || amountExceedsBalance) ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-800">
-          {error || (invalidAmount ? "Enter a positive withdrawal amount." : "Enter a destination address to review.")}
+          {error ||
+            (missingDestination
+              ? "Enter a destination address to review."
+              : missingAmount
+                ? "Enter an amount to review."
+                : invalidAmount
+                  ? "Enter a positive withdrawal amount."
+                  : selectedBalanceZero
+                    ? "No available balance for this asset."
+                    : "Amount exceeds available balance.")}
         </div>
       ) : null}
 
@@ -1329,6 +1422,11 @@ function PineTreeWalletRuntime() {
     { label: "Bitcoin" as const, configured: bitcoinReady, enabled: bitcoinReady && enabledRails.bitcoin },
   ]
 
+  const selectedWithdrawalBalance = useMemo(
+    () => findWithdrawalBalance(walletSync, withdrawalRail, withdrawalAsset),
+    [walletSync, withdrawalAsset, withdrawalRail]
+  )
+
   const dynamicApprovalAvailableForWithdrawal = useMemo(() => {
     if (
       !withdrawalReview?.canSubmit ||
@@ -1458,9 +1556,24 @@ function PineTreeWalletRuntime() {
       setWithdrawalError("Enter a destination address to review.")
       return
     }
-    if (!(Number(amount) > 0)) {
+    if (!amount) {
+      setWithdrawalError("Enter an amount to review.")
+      return
+    }
+    const amountNumber = Number(amount)
+    if (!(amountNumber > 0)) {
       setWithdrawalError("Enter a positive withdrawal amount.")
       return
+    }
+    if (selectedWithdrawalBalance?.status === "synced" && selectedWithdrawalBalance.balance !== null) {
+      if (selectedWithdrawalBalance.balance <= 0) {
+        setWithdrawalError("No available balance for this asset.")
+        return
+      }
+      if (amountNumber > selectedWithdrawalBalance.balance) {
+        setWithdrawalError("Amount exceeds available balance.")
+        return
+      }
     }
     if (!withdrawalAssetsByRail[withdrawalRail].includes(withdrawalAsset)) {
       setWithdrawalError("Unsupported rail/asset combination.")
@@ -1485,15 +1598,29 @@ function PineTreeWalletRuntime() {
       })
       const json = (await res.json()) as WithdrawalReviewResponse | { error?: string }
       if (!res.ok) {
-        setWithdrawalError("error" in json && json.error ? json.error : "Could not prepare withdrawal review.")
+        setWithdrawalError(sanitizeWithdrawalErrorForMerchant("error" in json ? json.error : undefined))
         return
       }
       setWithdrawalReview(json as WithdrawalReviewResponse)
     } catch {
-      setWithdrawalError("Could not prepare withdrawal review.")
+      setWithdrawalError("We couldn't create this withdrawal request. Please try again.")
     } finally {
       setReviewingWithdrawal(false)
     }
+  }
+
+  function handleMaxWithdrawalAmount() {
+    if (
+      selectedWithdrawalBalance?.status !== "synced" ||
+      selectedWithdrawalBalance.balance === null ||
+      selectedWithdrawalBalance.balance <= 0
+    ) {
+      return
+    }
+    setWithdrawalAmount(String(selectedWithdrawalBalance.balance))
+    setWithdrawalReview(null)
+    setWithdrawalSubmitResult(null)
+    setWithdrawalError("")
   }
 
   async function handleSubmitWithdrawal() {
@@ -1799,6 +1926,7 @@ function PineTreeWalletRuntime() {
                   submitting={submittingWithdrawal}
                   submitResult={withdrawalSubmitResult}
                   dynamicApprovalAvailable={dynamicApprovalAvailableForWithdrawal}
+                  selectedBalance={selectedWithdrawalBalance}
                   onRailChange={handleWithdrawalRailChange}
                   onAssetChange={(nextAsset) => {
                     setWithdrawalAsset(nextAsset)
@@ -1818,6 +1946,7 @@ function PineTreeWalletRuntime() {
                     setWithdrawalSubmitResult(null)
                     setWithdrawalError("")
                   }}
+                  onMaxAmount={handleMaxWithdrawalAmount}
                   onReview={() => void handleReviewWithdrawal()}
                   onSubmit={() => void handleSubmitWithdrawal()}
                 />

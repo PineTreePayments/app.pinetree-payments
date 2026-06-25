@@ -5,6 +5,15 @@ import {
 } from "@/engine/withdrawals/walletWithdrawals"
 import { getRouteErrorStatus, requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
 
+function getMerchantSafeWithdrawalRouteError(error: unknown) {
+  const message = error instanceof Error ? error.message : "Failed to prepare withdrawal review"
+  if (/schema cache|column|wallet_withdrawal_requests|amount_decimal|failed to create wallet withdrawal request/i.test(message)) {
+    console.error("[pinetree-wallet-withdrawals] internal withdrawal request error", error)
+    return "We couldn't create this withdrawal request. Please try again."
+  }
+  return message
+}
+
 export async function POST(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
@@ -29,7 +38,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(result)
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to prepare withdrawal review"
+    const message = getMerchantSafeWithdrawalRouteError(error)
     return NextResponse.json(
       { error: message },
       { status: getRouteErrorStatus(error) }
