@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ["18", "20", "22"]
+        node: ["20", "22"]
 
     steps:
       - uses: actions/checkout@v6
@@ -59,9 +59,8 @@ jobs:
       - name: SDK unit tests
         run: npm test --workspace packages/pinetree-node
 
-      # The root app uses Next.js 16, which requires Node 20.9 or newer.
-      # Keep app validation in this workflow without applying that runtime
-      # requirement to the SDK's Node 18 compatibility job.
+      # Next.js 16 and 256 transitive packages require Node >=20.9.0.
+      # Run root app validation only on the LTS node (20) to keep CI fast.
       - name: Root typecheck
         if: matrix.node == '20'
         run: npm run typecheck

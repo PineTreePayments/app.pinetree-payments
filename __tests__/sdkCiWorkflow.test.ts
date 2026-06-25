@@ -7,7 +7,7 @@ function read(relativePath: string) {
 }
 
 describe("SDK CI workflow", () => {
-  it("keeps SDK validation on Node 18, 20, and 22", () => {
+  it("keeps SDK validation on Node 20 and 22", () => {
     const workflow = read(".github/workflows/sdk-ci.yml")
     const packageJson = JSON.parse(read("package.json")) as {
       devDependencies: Record<string, string>
@@ -16,7 +16,9 @@ describe("SDK CI workflow", () => {
       engines: { node: string }
     }
 
-    expect(workflow).toContain('node: ["18", "20", "22"]')
+    // Node 18 removed: Next.js 16 and 256 transitive deps require node >=20.9.0.
+    expect(workflow).toContain('node: ["20", "22"]')
+    expect(workflow).not.toContain('"18"')
     expect(workflow).toContain("npm run typecheck --workspace packages/pinetree-node")
     expect(workflow).toContain("npm run build --workspace packages/pinetree-node")
     expect(workflow).toContain("npm test --workspace packages/pinetree-node")
@@ -26,7 +28,8 @@ describe("SDK CI workflow", () => {
   })
 
   it("runs root Next.js checks only on a supported Node version", () => {
-    const workflow = read(".github/workflows/sdk-ci.yml")
+    // Normalize CRLF → LF so assertions work on Windows and Linux alike.
+    const workflow = read(".github/workflows/sdk-ci.yml").replace(/\r\n/g, "\n")
 
     expect(workflow).toContain("- name: Root typecheck\n        if: matrix.node == '20'")
     expect(workflow).toContain("- name: Root tests\n        if: matrix.node == '20'")

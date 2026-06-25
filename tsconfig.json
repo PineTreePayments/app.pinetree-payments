@@ -35,5 +35,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "consumer-validation", ".claude/worktrees/**"]
+  "exclude": ["node_modules", "consumer-validation", ".claude/worktrees/**", "scripts/**"]
 }
