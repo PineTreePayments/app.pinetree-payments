@@ -5,6 +5,7 @@ ALTER TABLE wallet_withdrawal_requests
   ADD COLUMN IF NOT EXISTS amount_decimal TEXT,
   ADD COLUMN IF NOT EXISTS provider TEXT,
   ADD COLUMN IF NOT EXISTS provider_reference TEXT,
+  ADD COLUMN IF NOT EXISTS tx_hash TEXT,
   ADD COLUMN IF NOT EXISTS review_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
   ADD COLUMN IF NOT EXISTS error_message TEXT;
 

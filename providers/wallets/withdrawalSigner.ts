@@ -19,7 +19,7 @@ export type WithdrawalReview = {
   destinationAddress: string
   amountDecimal: string
   signerEnabled: boolean
-  estimatedStatus: "Withdrawal review available" | "Signing not enabled yet"
+  estimatedStatus: "Withdrawal review available" | "Pending review" | "Processing"
   message: string
 }
 
@@ -28,37 +28,34 @@ export interface WithdrawalSigner {
   createWithdrawalReview(input: WithdrawalSignerInput): Promise<WithdrawalReview>
   submitWithdrawal(input: {
     request: WalletWithdrawalRequestRecord
-  }): Promise<{ providerReference: string }>
+  }): Promise<{ provider: string; providerReference: string; txHash?: string | null }>
 }
 
-function signingEnabled() {
-  return process.env.PINETREE_WALLET_WITHDRAWAL_SIGNING_ENABLED === "true"
-}
-
-export function createDefaultWithdrawalSigner(): WithdrawalSigner {
+export function disabledWithdrawalSigner(): WithdrawalSigner {
   return {
     async canSignWithdrawal() {
-      return signingEnabled()
+      return false
     },
     async createWithdrawalReview(input) {
-      const signerEnabled = signingEnabled()
       return {
         rail: input.rail,
         asset: input.asset,
         destinationAddress: input.destinationAddress,
         amountDecimal: input.amountDecimal,
-        signerEnabled,
-        estimatedStatus: signerEnabled ? "Withdrawal review available" : "Signing not enabled yet",
-        message: signerEnabled
-          ? "Withdrawal review available"
-          : "Withdrawal review available. Signing not enabled yet.",
+        signerEnabled: false,
+        estimatedStatus: "Pending review",
+        message: "Withdrawal request can be reviewed before processing.",
       }
     },
     async submitWithdrawal() {
-      if (!signingEnabled()) {
-        throw new Error("Withdrawal signing not enabled")
-      }
-      throw new Error("Withdrawal signer provider is not configured")
+      throw new Error("Withdrawal signer is disabled")
     },
   }
+}
+
+export function createDefaultWithdrawalSigner(): WithdrawalSigner {
+  // Dynamic is configured only through the browser SDK in this repo, and the
+  // Fireblocks code currently provisions BTC addresses only. Keep execution
+  // disabled until a real backend signing provider is implemented and tested.
+  return disabledWithdrawalSigner()
 }

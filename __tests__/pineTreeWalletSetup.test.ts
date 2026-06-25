@@ -12,6 +12,7 @@ describe("PineTree embedded wallet setup", () => {
   const page = read("app/dashboard/wallet-setup/page.tsx")
   const providerPage = read("app/dashboard/providers/page.tsx")
   const apiRoute = read("app/api/wallets/pinetree-profile/route.ts")
+  const withdrawalApiRoute = read("app/api/wallets/pinetree-wallet/withdrawals/route.ts")
   const dbHelper = read("database/pineTreeWalletProfiles.ts")
   const migration = read("database/migrations/20260622_create_pinetree_wallet_profile.sql")
   // PineTree-managed Lightning backend files
@@ -327,8 +328,13 @@ describe("PineTree embedded wallet setup", () => {
 
   it("shows a withdrawal form shell without enabling final signing", () => {
     expect(page).toContain("Withdrawal review available")
-    expect(page).toContain("Signing not enabled yet")
-    expect(page).toContain("Withdrawal signing not enabled")
+    expect(page).toContain("Submit withdrawal request")
+    expect(page).toContain("Withdrawal request submitted")
+    expect(page).toContain("Status: {submitResult.merchantStatus}")
+    expect(page).toContain("Pending review")
+    expect(page).toContain("Processing")
+    expect(page).not.toContain("Signing not enabled yet")
+    expect(page).not.toContain("Withdrawal signing not enabled")
     expect(page).not.toContain("Withdrawals coming soon")
     expect(page).not.toContain("Withdrawals disabled")
     expect(page).toContain('aria-label="Select withdrawal asset"')
@@ -357,10 +363,19 @@ describe("PineTree embedded wallet setup", () => {
     expect(withdrawalMigration).toContain("status")
     expect(withdrawalMigration).toContain("provider")
     expect(withdrawalMigration).toContain("provider_reference")
+    expect(withdrawalMigration).toContain("tx_hash")
     expect(withdrawalMigration).toContain("review_payload")
     expect(withdrawalMigration).toContain("error_message")
     expect(withdrawalMigration).toContain("'review_required'")
     expect(withdrawalMigration).toContain("'blocked'")
+  })
+
+  it("withdrawal API does not expose provider secrets to the browser", () => {
+    expect(withdrawalApiRoute).toContain("submitWalletWithdrawalRequest")
+    expect(withdrawalApiRoute).not.toContain("FIREBLOCKS_API_KEY")
+    expect(withdrawalApiRoute).not.toContain("FIREBLOCKS_API_SECRET")
+    expect(withdrawalApiRoute).not.toContain("PRIVATE_KEY")
+    expect(withdrawalApiRoute).not.toContain("process.env")
   })
 
   // -------------------------------------------------------------------------

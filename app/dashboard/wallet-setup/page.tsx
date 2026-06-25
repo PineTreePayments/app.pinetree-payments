@@ -32,16 +32,25 @@ type WithdrawalReviewResponse = {
   request: {
     id: string
     status: "draft" | "review_required" | "blocked" | "pending" | "processing" | "confirmed" | "failed" | "canceled"
+    provider_reference: string | null
+    tx_hash: string | null
+    error_message: string | null
   }
   review: {
     rail: WithdrawalRail
     asset: WithdrawalAsset
     destinationAddress: string
     amountDecimal: string
-    estimatedStatus: "Withdrawal review available" | "Signing not enabled yet"
+    estimatedStatus: "Withdrawal review available" | "Pending review" | "Processing"
     message: string
   }
   canSubmit: boolean
+}
+
+type WithdrawalSubmitResponse = {
+  request: WithdrawalReviewResponse["request"]
+  merchantStatus: "Pending review" | "Processing" | "Withdrawal failed"
+  message: string
 }
 
 type PineTreeWalletProfile = {
@@ -391,11 +400,14 @@ function WithdrawalFormShell({
   review,
   error,
   reviewing,
+  submitting,
+  submitResult,
   onRailChange,
   onAssetChange,
   onDestinationChange,
   onAmountChange,
   onReview,
+  onSubmit,
 }: {
   rail: WithdrawalRail
   asset: WithdrawalAsset
@@ -404,11 +416,14 @@ function WithdrawalFormShell({
   review: WithdrawalReviewResponse | null
   error: string
   reviewing: boolean
+  submitting: boolean
+  submitResult: WithdrawalSubmitResponse | null
   onRailChange: (rail: WithdrawalRail) => void
   onAssetChange: (asset: WithdrawalAsset) => void
   onDestinationChange: (value: string) => void
   onAmountChange: (value: string) => void
   onReview: () => void
+  onSubmit: () => void
 }) {
   const availableAssets = withdrawalAssetsByRail[rail]
   const invalidAmount = amountDecimal.trim().length > 0 && !(Number(amountDecimal) > 0)
@@ -420,7 +435,7 @@ function WithdrawalFormShell({
       <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-3">
         <p className="text-sm font-semibold text-blue-900">Withdrawal review available</p>
         <p className="mt-1 text-xs leading-5 text-blue-700">
-          Signing not enabled yet. You can prepare a review, but PineTree will not send funds from this screen.
+          Prepare a withdrawal request for PineTree review and processing.
         </p>
       </div>
 
@@ -494,12 +509,45 @@ function WithdrawalFormShell({
         </button>
         <button
           type="button"
-          disabled
-          className="inline-flex h-10 cursor-not-allowed items-center justify-center rounded-lg border border-gray-200 bg-gray-100 px-4 text-sm font-semibold text-gray-500"
+          onClick={onSubmit}
+          disabled={!review || submitting}
+          className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500 disabled:shadow-none"
         >
-          Withdrawal signing not enabled
+          {submitting ? "Submitting..." : "Submit withdrawal request"}
         </button>
       </div>
+
+      {submitResult ? (
+        <div className={`rounded-2xl border px-4 py-3 ${
+          submitResult.merchantStatus === "Withdrawal failed"
+            ? "border-red-200 bg-red-50"
+            : submitResult.merchantStatus === "Processing"
+              ? "border-blue-200 bg-blue-50"
+              : "border-amber-200 bg-amber-50"
+        }`}>
+          <p className={`text-sm font-semibold ${
+            submitResult.merchantStatus === "Withdrawal failed"
+              ? "text-red-800"
+              : submitResult.merchantStatus === "Processing"
+                ? "text-blue-900"
+                : "text-amber-900"
+          }`}>
+            {submitResult.merchantStatus === "Processing" ? "Withdrawal submitted" : submitResult.merchantStatus === "Withdrawal failed" ? "Withdrawal failed" : "Withdrawal request submitted"}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-gray-700">Status: {submitResult.merchantStatus}</p>
+          {submitResult.merchantStatus === "Pending review" ? (
+            <p className="mt-1 text-xs leading-5 text-gray-700">We&apos;ll review this withdrawal before processing.</p>
+          ) : null}
+          {submitResult.request.provider_reference || submitResult.request.tx_hash ? (
+            <p className="mt-1 break-all text-xs leading-5 text-gray-700">
+              Transaction reference: {submitResult.request.tx_hash || submitResult.request.provider_reference}
+            </p>
+          ) : null}
+          {submitResult.merchantStatus === "Withdrawal failed" && submitResult.request.error_message ? (
+            <p className="mt-1 text-xs leading-5 text-red-700">{submitResult.request.error_message}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       {review ? (
         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
@@ -648,8 +696,10 @@ function PineTreeWalletRuntime() {
   const [withdrawalDestination, setWithdrawalDestination] = useState("")
   const [withdrawalAmount, setWithdrawalAmount] = useState("")
   const [withdrawalReview, setWithdrawalReview] = useState<WithdrawalReviewResponse | null>(null)
+  const [withdrawalSubmitResult, setWithdrawalSubmitResult] = useState<WithdrawalSubmitResponse | null>(null)
   const [withdrawalError, setWithdrawalError] = useState("")
   const [reviewingWithdrawal, setReviewingWithdrawal] = useState(false)
+  const [submittingWithdrawal, setSubmittingWithdrawal] = useState(false)
 
   // --- SDK load timeout ---
   useEffect(() => {
@@ -1031,6 +1081,7 @@ function PineTreeWalletRuntime() {
     setWithdrawalRail(nextRail)
     setWithdrawalAsset(withdrawalAssetsByRail[nextRail][0])
     setWithdrawalReview(null)
+    setWithdrawalSubmitResult(null)
     setWithdrawalError("")
   }
 
@@ -1040,6 +1091,7 @@ function PineTreeWalletRuntime() {
     const amount = withdrawalAmount.trim()
 
     setWithdrawalReview(null)
+    setWithdrawalSubmitResult(null)
     if (!token) {
       setWithdrawalError("Wallet session is not available. Refresh the page and try again.")
       return
@@ -1083,6 +1135,39 @@ function PineTreeWalletRuntime() {
       setWithdrawalError("Could not prepare withdrawal review.")
     } finally {
       setReviewingWithdrawal(false)
+    }
+  }
+
+  async function handleSubmitWithdrawal() {
+    const token = accessTokenRef.current
+    const withdrawalId = withdrawalReview?.request.id
+    if (!token || !withdrawalId) return
+
+    setSubmittingWithdrawal(true)
+    setWithdrawalError("")
+    setWithdrawalSubmitResult(null)
+    try {
+      const res = await fetch("/api/wallets/pinetree-wallet/withdrawals", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "submit",
+          withdrawal_id: withdrawalId,
+        }),
+      })
+      const json = (await res.json()) as WithdrawalSubmitResponse | { error?: string }
+      if (!res.ok) {
+        setWithdrawalError("error" in json && json.error ? json.error : "Could not submit withdrawal request.")
+        return
+      }
+      setWithdrawalSubmitResult(json as WithdrawalSubmitResponse)
+    } catch {
+      setWithdrawalError("Could not submit withdrawal request.")
+    } finally {
+      setSubmittingWithdrawal(false)
     }
   }
 
@@ -1302,23 +1387,29 @@ function PineTreeWalletRuntime() {
                   review={withdrawalReview}
                   error={withdrawalError}
                   reviewing={reviewingWithdrawal}
+                  submitting={submittingWithdrawal}
+                  submitResult={withdrawalSubmitResult}
                   onRailChange={handleWithdrawalRailChange}
                   onAssetChange={(nextAsset) => {
                     setWithdrawalAsset(nextAsset)
                     setWithdrawalReview(null)
+                    setWithdrawalSubmitResult(null)
                     setWithdrawalError("")
                   }}
                   onDestinationChange={(value) => {
                     setWithdrawalDestination(value)
                     setWithdrawalReview(null)
+                    setWithdrawalSubmitResult(null)
                     setWithdrawalError("")
                   }}
                   onAmountChange={(value) => {
                     setWithdrawalAmount(value)
                     setWithdrawalReview(null)
+                    setWithdrawalSubmitResult(null)
                     setWithdrawalError("")
                   }}
                   onReview={() => void handleReviewWithdrawal()}
+                  onSubmit={() => void handleSubmitWithdrawal()}
                 />
               ) : null}
 
