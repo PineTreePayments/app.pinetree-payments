@@ -33,8 +33,8 @@ describe("SDK CI workflow", () => {
 
     expect(workflow).toContain("- name: Root typecheck\n        if: matrix.node == '20'")
     expect(workflow).toContain("- name: Root tests\n        if: matrix.node == '20'")
-    expect(workflow).toContain("actions/checkout@v6")
-    expect(workflow).toContain("actions/setup-node@v6")
+    expect(workflow).toContain("actions/checkout@v4")
+    expect(workflow).toContain("actions/setup-node@v4")
     expect(workflow).toContain('"package-lock.json"')
     // Lockfile is committed and aligned; SDK validation runs explicit scripts below.
     expect(workflow.match(/run: npm ci --ignore-scripts/g)).toHaveLength(2)
