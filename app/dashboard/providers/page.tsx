@@ -622,7 +622,7 @@ function EngineSettingStatus({
       return {
         status: "Connected" as const,
         connectionType: "speed" as const,
-        summary: "Bitcoin Lightning payments route through the merchant Speed Account ID.",
+        summary: "Bitcoin Lightning payments settle through PineTree Wallet.",
         detail: formatCredentialPart(String(speedCredentials.account_id), 10, 4)
       }
     }
@@ -700,13 +700,7 @@ function EngineSettingStatus({
   }) {
     const connected = isCanonicalRailConfigured(provider)
     const enabled = isEnabled(provider)
-    const statusLabel = provider === "lightning"
-      ? enabled
-        ? "Enabled"
-        : connected
-          ? "Needs setup"
-          : "Not enabled"
-      : (connected && enabled) ? "Connected" : "Not connected"
+    const statusLabel = (connected && enabled) ? "Connected" : "Not connected"
     const statusPillTone = (connected && enabled) ? "blue" : ("default" as const)
     const isLightning = provider === "lightning"
 
@@ -727,7 +721,7 @@ function EngineSettingStatus({
           </div>
           <div className="grid grid-cols-[92px_1fr] items-center gap-3">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Settlement</span>
-            <span className="min-w-0 text-sm leading-snug text-gray-900">{isLightning ? "Automatic" : "PineTree Wallet"}</span>
+            <span className="min-w-0 text-sm leading-snug text-gray-900">PineTree Wallet</span>
           </div>
           {isLightning ? (
             <>
@@ -738,21 +732,12 @@ function EngineSettingStatus({
                 </span>
               </div>
               <div className="grid grid-cols-[92px_1fr] items-center gap-3">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Auto-settlement</span>
-                <span className="min-w-0 text-sm leading-snug text-gray-900">
-                  {enabled ? "Enabled" : "Not available"}
-                </span>
-              </div>
-              <div className="grid grid-cols-[92px_1fr] items-center gap-3">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Processor</span>
-                <span className="min-w-0 text-sm leading-snug text-gray-900">PineTree Lightning</span>
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Status</span>
+                <span className="min-w-0 text-sm leading-snug text-gray-900">{statusLabel}</span>
               </div>
             </>
           ) : null}
           <p className="pt-1 text-sm leading-5 text-gray-600">{description}</p>
-          {isLightning ? (
-            <p className="text-[11px] font-semibold text-gray-400">Powered by Speed</p>
-          ) : null}
         </div>
         <div className="mt-auto flex items-center justify-between gap-3 border-t border-gray-100 pt-4">
           <p className="text-xs font-semibold text-blue-700">Manage from PineTree Wallet</p>
@@ -1250,10 +1235,10 @@ function EngineSettingStatus({
               description="Base payments settle to the merchant's PineTree Wallet."
             />
             <ManagedCryptoRailCard
-              name="PineTree Lightning"
+              name="Bitcoin Lightning"
               provider="lightning"
               networks="Bitcoin Lightning"
-              description="Lightning payments settle through PineTree to the selected payout destination."
+              description="Accept Bitcoin Lightning payments and settle to the selected PineTree payout destination."
             />
           </>
         ) : (
@@ -1308,7 +1293,7 @@ function EngineSettingStatus({
                   <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Settlement</span>
                   <span className="min-w-0 text-sm leading-snug text-gray-900">
                     {lightningCard.connectionType === "speed"
-                      ? "Speed account"
+                      ? "PineTree Wallet"
                       : lightningCard.connectionType === "nwc"
                         ? "Legacy Lightning wallet"
                         : lightningCard.connectionType === "pinetree"
@@ -1326,11 +1311,11 @@ function EngineSettingStatus({
                 {lightningCard.connectionType === "speed" && (
                   <div className="rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2.5">
                     <span className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Connected</span>
-                    <p className="mt-1 truncate text-sm font-semibold text-gray-950" title="Speed - Bitcoin Lightning">
-                      Speed &bull; Bitcoin Lightning
+                    <p className="mt-1 truncate text-sm font-semibold text-gray-950" title="PineTree Wallet - Bitcoin Lightning">
+                      PineTree Wallet &bull; Bitcoin Lightning
                     </p>
                     <p className="mt-0.5 text-xs leading-5 text-gray-500">
-                      Merchant Speed Account ID connected{lightningCard.detail ? ` - ${lightningCard.detail}` : ""}
+                      PineTree Wallet settlement connected{lightningCard.detail ? ` - ${lightningCard.detail}` : ""}
                     </p>
                   </div>
                 )}

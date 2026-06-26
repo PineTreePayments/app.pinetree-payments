@@ -92,13 +92,13 @@ describe("buildOverviewRailReadiness — Solana Pay", () => {
     expect(solana.status).toBe("Connected")
   })
 
-  it("reports Disabled when wallet exists but row is enabled=false", () => {
+  it("reports Not Connected when wallet exists but row is enabled=false", () => {
     const result = buildOverviewRailReadiness({
       providers: [makeSolanaRow({ enabled: false })],
       wallets: [makeSolanaWallet()]
     })
     const solana = result.find((r) => r.id === "solana")!
-    expect(solana.status).toBe("Disabled")
+    expect(solana.status).toBe("Not Connected")
   })
 
   it("reports Not Connected when no wallet", () => {
@@ -121,13 +121,13 @@ describe("buildOverviewRailReadiness — Base Pay", () => {
     expect(base.status).toBe("Connected")
   })
 
-  it("reports Disabled when wallet exists but row is enabled=false", () => {
+  it("reports Not Connected when wallet exists but row is enabled=false", () => {
     const result = buildOverviewRailReadiness({
       providers: [makeBaseRow({ enabled: false })],
       wallets: [makeBaseWallet()]
     })
     const base = result.find((r) => r.id === "base")!
-    expect(base.status).toBe("Disabled")
+    expect(base.status).toBe("Not Connected")
   })
 })
 
@@ -143,14 +143,14 @@ describe("buildOverviewRailReadiness — Bitcoin Lightning", () => {
     expect(lightning.status).toBe("Connected")
   })
 
-  it("reports Disabled when speed row enabled=false and dashboard_status=connected", () => {
+  it("reports Not Connected when speed row enabled=false and dashboard_status=connected", () => {
     const speedRow: ProviderRow = {
       ...makeSpeedRow({ enabled: false }),
       dashboard_status: "connected"
     }
     const result = buildOverviewRailReadiness({ providers: [speedRow], wallets: [] })
     const lightning = result.find((r) => r.id === "lightning")!
-    expect(lightning.status).toBe("Disabled")
+    expect(lightning.status).toBe("Not Connected")
   })
 })
 

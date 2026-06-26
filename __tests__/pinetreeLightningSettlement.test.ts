@@ -28,36 +28,37 @@ describe("PineTree-native Lightning settlement", () => {
 
   it("keeps Lightning separate from normal wallet withdrawals", () => {
     expect(walletPage).toContain('type WithdrawalAsset = "ETH" | "USDC" | "SOL" | "BTC"')
-    expect(walletPage).toContain("Lightning settlement")
-    expect(walletPage).toContain("Managed by PineTree")
-    expect(walletPage).toContain("Powered by Speed")
+    expect(walletPage).toContain("Bitcoin Lightning settlement")
+    expect(walletPage).not.toContain("Powered by Speed")
+    expect(walletPage).not.toContain("Managed by Speed")
     expect(walletPage).not.toContain("Lightning/Spark wallet")
     expect(walletPage).not.toContain('asset: "LIGHTNING"')
   })
 
-  it("lets merchants choose PineTree BTC Wallet or external BTC wallet inside PineTree", () => {
-    expect(walletPage).toContain("Use PineTree BTC Wallet")
-    expect(walletPage).toContain("Add external BTC wallet")
+  it("lets merchants manage the PineTree BTC Wallet destination inside PineTree", () => {
+    expect(walletPage).toContain("Set destination")
+    expect(walletPage).toContain("Refresh")
     expect(walletPage).toContain("/api/wallets/lightning/settlement")
     expect(engine).toContain('destinationType: "pinetree_btc_wallet"')
     expect(engine).toContain('destinationType: "external_btc_wallet"')
     expect(engine).toContain("ensureDefaultPineTreeBtcPayoutDestination")
   })
 
-  it("shows auto-settlement status and avoids Speed dashboard primary flow", () => {
-    expect(walletPage).toContain("Auto-settlement")
-    expect(walletPage).toContain("Enable auto-settlement")
-    expect(walletPage).toContain("Refresh settlement status")
+  it("shows compact settlement status and avoids Speed dashboard primary flow", () => {
+    expect(walletPage).toContain("Destination")
+    expect(walletPage).not.toContain("Auto-settlement")
+    expect(walletPage).not.toContain("Enable auto-settlement")
+    expect(walletPage).not.toContain("Refresh settlement status")
     expect(walletPage).not.toContain("Go to Speed dashboard")
     expect(walletPage).not.toContain("Open Speed")
     expect(walletPage).not.toContain("Speed account setup")
   })
 
-  it("provider card says PineTree Lightning, not Speed setup", () => {
-    expect(providersPage).toContain('name="PineTree Lightning"')
-    expect(providersPage).toContain("Processor")
-    expect(providersPage).toContain("PineTree Lightning")
-    expect(providersPage).toContain("Powered by Speed")
+  it("provider card says Bitcoin Lightning without Speed setup copy", () => {
+    expect(providersPage).toContain('name="Bitcoin Lightning"')
+    expect(providersPage).not.toContain("Processor")
+    expect(providersPage).not.toContain("PineTree Lightning")
+    expect(providersPage).not.toContain("Powered by Speed")
     expect(providersPage).not.toContain("Merchant Speed account")
     expect(providersPage).not.toContain("Speed API keys")
   })

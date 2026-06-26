@@ -208,9 +208,13 @@ type WithdrawalDiagnostics = {
   asset: WithdrawalAsset
   railEnabled: boolean
   walletConnected: boolean
+  walletAddressExists: boolean
   walletProfileAddressPresent: boolean
+  savedSourceAddress: string | null
   matchingDynamicWallet: boolean
+  browserWalletAddresses: string[]
   dynamicMethodAvailable: boolean
+  addressMismatch: boolean
   btcBroadcastEnabled: boolean
   btcProviderConfigured: boolean
   speedPayoutAvailable: boolean
@@ -280,6 +284,7 @@ type DynamicWalletLike = {
   address?: string
   chain?: string
   additionalAddresses?: Array<{ address?: string | null }>
+  signAndSendTransaction?: (transaction: Transaction, options?: unknown) => Promise<string>
   signPsbt?: (request: { unsignedPsbtBase64: string }) => Promise<{ signedPsbt?: string } | undefined>
   connector?: {
     getWalletClient?: (chainId?: string | number) => unknown | Promise<unknown>
@@ -322,7 +327,7 @@ function getDynamicWalletAddresses(wallet: DynamicWalletLike) {
 
 function dynamicWalletSupportsRail(wallet: DynamicWalletLike, rail: WithdrawalRail) {
   if (rail === "base") return Boolean(wallet.getWalletClient || wallet.connector?.getWalletClient)
-  if (rail === "solana") return Boolean(wallet.connector?.signAndSendTransaction)
+  if (rail === "solana") return Boolean(wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction)
   return Boolean(wallet.signPsbt || wallet.connector?.signPsbt)
 }
 
@@ -384,7 +389,7 @@ async function sendDynamicPreparedWithdrawal(
     return { signedPsbtBase64: signed.signedPsbt, providerReference: "dynamic:bitcoin-psbt" }
   }
 
-  const signAndSendTransaction = wallet.connector?.signAndSendTransaction
+  const signAndSendTransaction = wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction
   if (!signAndSendTransaction) {
     throw new Error("Open PineTree Wallet to approve this withdrawal.")
   }
@@ -453,6 +458,7 @@ function getWithdrawalFallbackReason(input: WithdrawalDiagnostics) {
   if (!input.railEnabled) return "rail_disabled"
   if (!input.walletConnected) return "wallet_not_connected"
   if (!input.walletProfileAddressPresent) return "source_wallet_missing"
+  if (input.addressMismatch) return "address_mismatch"
   if (!input.matchingDynamicWallet) return "dynamic_wallet_unavailable"
   if (!input.dynamicMethodAvailable) return "dynamic_method_unavailable"
   if (input.rail === "bitcoin" && !input.btcProviderConfigured) return "btc_provider_missing"
@@ -706,7 +712,7 @@ function ReceiveRow({
 }: {
   label: string
   entries: AddressEntry[]
-  statusLabel?: "Connected" | "Not connected" | "Disabled"
+  statusLabel?: "Connected" | "Not connected" | "Pending" | "Needs attention"
   copiedAddress: string
   onCopy: (address: string) => void
 }) {
@@ -716,7 +722,10 @@ function ReceiveRow({
     <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.05)] sm:px-5 sm:py-5">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-gray-800">{label}</p>
-        <ProviderStatusPill label={status} tone={status === "Disabled" ? "amber" : "blue"} />
+        <ProviderStatusPill
+          label={status}
+          tone={status === "Connected" ? "blue" : status === "Pending" || status === "Needs attention" ? "amber" : "default"}
+        />
       </div>
       {isConnected ? (
         <div className="mt-3 space-y-3">
@@ -1079,7 +1088,7 @@ function WalletOverviewSummary({
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
 }) {
-  const visibleRows = rows.filter((row) => row.configured || row.enabled)
+  const visibleRows = rows
   const lastSynced = formatLastSynced(sync?.lastSyncedAt ?? null)
   return (
     <div className="space-y-3">
@@ -1098,8 +1107,8 @@ function WalletOverviewSummary({
                 <div>
                   <p className="text-sm font-semibold text-gray-800">{row.label}</p>
                   <ProviderStatusPill
-                    label={row.configured ? (row.enabled ? "Connected" : "Disabled") : "Not connected"}
-                    tone={row.configured && !row.enabled ? "amber" : "blue"}
+                    label={row.configured && row.enabled ? "Connected" : "Not connected"}
+                    tone={row.configured && row.enabled ? "blue" : "default"}
                     className="mt-1"
                   />
                 </div>
@@ -1139,11 +1148,9 @@ function WalletOverviewSummary({
 function BalanceRows({
   sync,
   syncing,
-  lightningEnabled,
 }: {
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
-  lightningEnabled: boolean
 }) {
   const groups: Array<{ title: string; rows: SyncedBalanceAsset[] }> = [
     { title: "Base", rows: sync?.balances.base ?? [] },
@@ -1176,15 +1183,6 @@ function BalanceRows({
           </div>
         </div>
       ))}
-      <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-sm sm:px-5">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-gray-950">Lightning settlement</p>
-            <p className="mt-1 text-xs text-gray-500">Managed by Speed</p>
-          </div>
-          <ProviderStatusPill label={lightningEnabled ? "Enabled" : "Not enabled"} tone={lightningEnabled ? "blue" : "default"} />
-        </div>
-      </div>
     </div>
   )
 }
@@ -1193,13 +1191,11 @@ function LightningSettlementPanel({
   overview,
   loading,
   onUsePineTreeBtcWallet,
-  onAddExternalBtcWallet,
   onRefresh,
 }: {
   overview: LightningSettlementOverview | null
   loading: boolean
   onUsePineTreeBtcWallet: () => void
-  onAddExternalBtcWallet: () => void
   onRefresh: () => void
 }) {
   const activeDestination = overview?.destinations.find((item) =>
@@ -1211,47 +1207,40 @@ function LightningSettlementPanel({
       ? "PineTree BTC Wallet"
       : activeDestination.destination_type === "external_btc_wallet"
         ? "External BTC wallet"
-        : "Speed connected account"
+        : "PineTree BTC Wallet"
     : "Not set"
-  const settlementStatus = overview?.settings?.enabled
-    ? activeDestination
-      ? "Enabled"
-      : "Needs setup"
-    : "Not enabled"
-  const autoswapStatus = overview?.settings?.autoswap_enabled
-    ? overview.settings.provider_sync_status === "not_available"
-      ? "Not available"
-      : "Enabled"
-    : "Not enabled"
+  const settlementConnected = Boolean(activeDestination && overview?.settings?.enabled && overview?.capabilities.payoutAvailable)
+  const settlementStatus = settlementConnected
+    ? "Connected"
+    : activeDestination
+      ? "Needs setup"
+      : "Not connected"
 
   return (
     <section className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-sm sm:px-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-gray-950">Lightning settlement</p>
-          <p className="mt-1 text-xs leading-5 text-gray-500">Managed by PineTree</p>
-          <p className="mt-0.5 text-[11px] font-semibold text-gray-400">Powered by Speed</p>
+          <p className="text-sm font-semibold text-gray-950">Bitcoin Lightning settlement</p>
         </div>
-        <ProviderStatusPill label={loading ? "Refreshing" : settlementStatus} tone={settlementStatus === "Enabled" ? "blue" : "amber"} />
+        <ProviderStatusPill
+          label={loading ? "Pending" : settlementStatus}
+          tone={settlementStatus === "Connected" ? "blue" : settlementStatus === "Needs setup" || loading ? "amber" : "default"}
+        />
       </div>
 
       <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
         <div>
           <p className="text-xs font-semibold uppercase text-gray-500">Settlement</p>
-          <p className="mt-1 font-semibold text-gray-950">{activeDestination ? "Automatic" : "Needs setup"}</p>
+          <p className="mt-1 font-semibold text-gray-950">{settlementConnected ? "Automatic" : settlementStatus}</p>
         </div>
         <div>
-          <p className="text-xs font-semibold uppercase text-gray-500">Payout destination</p>
+          <p className="text-xs font-semibold uppercase text-gray-500">Destination</p>
           <p className="mt-1 font-semibold text-gray-950">{destinationLabel}</p>
           {activeDestination ? (
             <p className="mt-0.5 truncate font-mono text-xs text-gray-500" title={activeDestination.destination_address}>
               {shortAddress(activeDestination.destination_address)}
             </p>
           ) : null}
-        </div>
-        <div>
-          <p className="text-xs font-semibold uppercase text-gray-500">Auto-settlement</p>
-          <p className="mt-1 font-semibold text-gray-950">{autoswapStatus}</p>
         </div>
         <div>
           <p className="text-xs font-semibold uppercase text-gray-500">Last settlement</p>
@@ -1264,16 +1253,10 @@ function LightningSettlementPanel({
 
       <div className="mt-4 flex flex-wrap gap-2">
         <button type="button" onClick={onUsePineTreeBtcWallet} className="h-9 rounded-lg bg-[#0052FF] px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700">
-          Use PineTree BTC Wallet
-        </button>
-        <button type="button" onClick={onAddExternalBtcWallet} className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50">
-          Add external BTC wallet
-        </button>
-        <button type="button" onClick={onUsePineTreeBtcWallet} className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50">
-          Enable auto-settlement
+          Set destination
         </button>
         <button type="button" onClick={onRefresh} className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50">
-          Refresh settlement status
+          Refresh
         </button>
       </div>
     </section>
@@ -1759,16 +1742,29 @@ function PineTreeWalletRuntime() {
   const withdrawalDiagnostics = useMemo((): WithdrawalDiagnostics => {
     const railState = walletRailRows.find((row) => row.rail === withdrawalRail)
     const sourceAddress = getWithdrawalSourceAddress(profile, withdrawalRail)
+    const browserWalletAddresses = [
+      ...(wallets as unknown[]),
+      primaryWallet,
+    ].filter(Boolean).flatMap((wallet) => getDynamicWalletAddresses(wallet as DynamicWalletLike))
     const matchingWallet = findDynamicWalletForSource(wallets as unknown[], primaryWallet, sourceAddress || "")
     const dynamicMethodAvailable = matchingWallet ? dynamicWalletSupportsRail(matchingWallet, withdrawalRail) : false
+    const addressMismatch = Boolean(
+      sourceAddress &&
+      browserWalletAddresses.length > 0 &&
+      !browserWalletAddresses.some((address) => address.toLowerCase() === sourceAddress.toLowerCase())
+    )
     const baseDiagnostics: WithdrawalDiagnostics = {
       rail: withdrawalRail,
       asset: withdrawalAsset,
       railEnabled: Boolean(railState?.enabled),
       walletConnected: Boolean(railState?.configured),
+      walletAddressExists: Boolean(sourceAddress),
       walletProfileAddressPresent: Boolean(sourceAddress),
+      savedSourceAddress: sourceAddress,
       matchingDynamicWallet: Boolean(matchingWallet),
+      browserWalletAddresses,
       dynamicMethodAvailable,
+      addressMismatch,
       btcBroadcastEnabled: false,
       btcProviderConfigured: false,
       speedPayoutAvailable: lightningProfileState.kind === "loaded" && lightningProfileState.profile.status === "ready",
@@ -1789,11 +1785,10 @@ function PineTreeWalletRuntime() {
         withdrawalReview.canSubmit &&
         withdrawalReview.review.approvalMethod === "dynamic_browser",
       browser_dynamic_ready: dynamicApprovalAvailableForWithdrawal,
-      source_address_present: Boolean(
-        getWithdrawalSourceAddress(profile, withdrawalReview.review.rail)
-      ),
+      fallbackReason: withdrawalDiagnostics.fallbackReason,
+      diagnostics: withdrawalDiagnostics,
     })
-  }, [dynamicApprovalAvailableForWithdrawal, profile, withdrawalReview])
+  }, [dynamicApprovalAvailableForWithdrawal, withdrawalDiagnostics, withdrawalReview])
 
   // ---------------------------------------------------------------------------
   // Dynamic session mismatch guard
@@ -1856,16 +1851,6 @@ function PineTreeWalletRuntime() {
     } finally {
       setLightningSettlementLoading(false)
     }
-  }
-
-  function handleAddExternalBtcWallet() {
-    const address = window.prompt("Enter external BTC wallet address")
-    if (!address?.trim()) return
-    void saveLightningSettlementDestination({
-      destinationType: "external_btc_wallet",
-      destinationAddress: address.trim(),
-      label: "External BTC wallet",
-    })
   }
 
   function handleOpenWallet() {
@@ -2295,13 +2280,11 @@ function PineTreeWalletRuntime() {
                   <BalanceRows
                     sync={walletSync}
                     syncing={walletSyncing}
-                    lightningEnabled={lightningProfileState.kind === "loaded" && lightningProfileState.profile.status === "ready"}
                   />
                   <LightningSettlementPanel
                     overview={lightningSettlement}
                     loading={lightningSettlementLoading}
                     onUsePineTreeBtcWallet={() => void saveLightningSettlementDestination({ destinationType: "pinetree_btc_wallet" })}
-                    onAddExternalBtcWallet={handleAddExternalBtcWallet}
                     onRefresh={() => void fetchLightningSettlement()}
                   />
                 </div>
@@ -2312,21 +2295,21 @@ function PineTreeWalletRuntime() {
                   <ReceiveRow
                     label="Base wallet"
                     entries={profileAddresses.base}
-                    statusLabel={baseReady ? (enabledRails.base ? "Connected" : "Disabled") : "Not connected"}
+                    statusLabel={baseReady && enabledRails.base ? "Connected" : "Not connected"}
                     copiedAddress={copiedAddress}
                     onCopy={(a) => void copyAddress(a)}
                   />
                   <ReceiveRow
                     label="Solana wallet"
                     entries={profileAddresses.solana}
-                    statusLabel={solanaReady ? (enabledRails.solana ? "Connected" : "Disabled") : "Not connected"}
+                    statusLabel={solanaReady && enabledRails.solana ? "Connected" : "Not connected"}
                     copiedAddress={copiedAddress}
                     onCopy={(a) => void copyAddress(a)}
                   />
                   <ReceiveRow
                     label="Bitcoin wallet"
                     entries={bitcoinPayoutEntries}
-                    statusLabel={bitcoinReady ? (enabledRails.bitcoin ? "Connected" : "Disabled") : "Not connected"}
+                    statusLabel={bitcoinReady && enabledRails.bitcoin ? "Connected" : "Not connected"}
                     copiedAddress={copiedAddress}
                     onCopy={(a) => void copyAddress(a)}
                   />
@@ -2334,7 +2317,6 @@ function PineTreeWalletRuntime() {
                     overview={lightningSettlement}
                     loading={lightningSettlementLoading}
                     onUsePineTreeBtcWallet={() => void saveLightningSettlementDestination({ destinationType: "pinetree_btc_wallet" })}
-                    onAddExternalBtcWallet={handleAddExternalBtcWallet}
                     onRefresh={() => void fetchLightningSettlement()}
                   />
 

@@ -74,7 +74,7 @@ export type ProvidersDashboardData = {
 export type OverviewRailReadiness = {
   id: string
   label: string
-  status: "Connected" | "Not Connected" | "Requires Configuration" | "Disabled"
+  status: "Connected" | "Not Connected" | "Requires Configuration"
   detail: string
 }
 
@@ -100,7 +100,7 @@ export function buildOverviewRailReadiness(
         return { id, label, status: "Not Connected", detail: `Connect a ${label} wallet` }
       }
       if (row?.enabled === false) {
-        return { id, label, status: "Disabled", detail: "Wallet connected; payment rail disabled" }
+        return { id, label, status: "Not Connected", detail: "Wallet connected; payment rail off" }
       }
       return { id, label, status: "Connected", detail: "Merchant wallet connected" }
     }
@@ -124,7 +124,7 @@ export function buildOverviewRailReadiness(
       }
       if (speed?.enabled === false || nwc?.enabled === false) {
         const hasConnection = speed?.dashboard_status === "connected" || nwc?.dashboard_status === "connected"
-        if (hasConnection) return { id, label, status: "Disabled", detail: "Lightning connection is disabled" }
+        if (hasConnection) return { id, label, status: "Not Connected", detail: "Bitcoin Lightning rail off" }
       }
       const reason = speed?.readiness?.reason || nwc?.readiness?.reason
       return {
@@ -150,7 +150,7 @@ export function buildOverviewRailReadiness(
         detail: row.readiness?.reason || "Provider is not connected"
       }
     }
-    if (!row.enabled) return { id, label, status: "Disabled", detail: "Provider connected; payments disabled" }
+    if (!row.enabled) return { id, label, status: "Not Connected", detail: "Provider connected; payments off" }
     if (row.readiness && !row.readiness.ready) {
       return {
         id,

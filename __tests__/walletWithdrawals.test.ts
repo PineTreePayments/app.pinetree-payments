@@ -379,7 +379,11 @@ describe("PineTree Wallet withdrawals", () => {
     expect(result.review.diagnostics).toMatchObject({
       rail: "solana",
       asset: "SOL",
+      walletAddressExists: true,
       walletProfileAddressPresent: true,
+      savedSourceAddress: expect.any(String),
+      browserWalletAddresses: [],
+      addressMismatch: false,
       fallbackReason: "dynamic_wallet_unavailable",
     })
     expect(JSON.stringify(result.review.diagnostics)).not.toMatch(/secret|api key|token|private/i)

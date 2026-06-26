@@ -49,9 +49,13 @@ type WithdrawalFallbackDiagnostics = {
   asset: WalletWithdrawalAsset
   railEnabled: boolean
   walletConnected: boolean
+  walletAddressExists: boolean
   walletProfileAddressPresent: boolean
+  savedSourceAddress: string | null
   matchingDynamicWallet: boolean
+  browserWalletAddresses: string[]
   dynamicMethodAvailable: boolean
+  addressMismatch: boolean
   btcBroadcastEnabled: boolean
   btcProviderConfigured: boolean
   speedPayoutAvailable: boolean
@@ -554,9 +558,13 @@ function buildWithdrawalDiagnostics(input: {
     asset: input.asset,
     railEnabled: true,
     walletConnected: Boolean(input.sourceAddress),
+    walletAddressExists: Boolean(input.sourceAddress),
     walletProfileAddressPresent: Boolean(input.sourceAddress),
+    savedSourceAddress: input.sourceAddress,
     matchingDynamicWallet: input.signerCanSign,
+    browserWalletAddresses: [],
     dynamicMethodAvailable: input.signerCanSign,
+    addressMismatch: false,
     btcBroadcastEnabled: input.bitcoinBroadcastEnabled,
     btcProviderConfigured: input.bitcoinProviderConfigured,
     speedPayoutAvailable: false,
