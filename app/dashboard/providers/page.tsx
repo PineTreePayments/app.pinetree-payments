@@ -700,8 +700,15 @@ function EngineSettingStatus({
   }) {
     const connected = isCanonicalRailConfigured(provider)
     const enabled = isEnabled(provider)
-    const statusLabel = (connected && enabled) ? "Connected" : "Not connected"
+    const statusLabel = provider === "lightning"
+      ? enabled
+        ? "Enabled"
+        : connected
+          ? "Needs setup"
+          : "Not enabled"
+      : (connected && enabled) ? "Connected" : "Not connected"
     const statusPillTone = (connected && enabled) ? "blue" : ("default" as const)
+    const isLightning = provider === "lightning"
 
     return (
       <div className="flex min-h-[226px] flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
@@ -720,9 +727,32 @@ function EngineSettingStatus({
           </div>
           <div className="grid grid-cols-[92px_1fr] items-center gap-3">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Settlement</span>
-            <span className="min-w-0 text-sm leading-snug text-gray-900">PineTree Wallet</span>
+            <span className="min-w-0 text-sm leading-snug text-gray-900">{isLightning ? "Automatic" : "PineTree Wallet"}</span>
           </div>
+          {isLightning ? (
+            <>
+              <div className="grid grid-cols-[92px_1fr] items-center gap-3">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Destination</span>
+                <span className="min-w-0 text-sm leading-snug text-gray-900">
+                  {connected ? "PineTree BTC Wallet" : "Not set"}
+                </span>
+              </div>
+              <div className="grid grid-cols-[92px_1fr] items-center gap-3">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Auto-settlement</span>
+                <span className="min-w-0 text-sm leading-snug text-gray-900">
+                  {enabled ? "Enabled" : "Not available"}
+                </span>
+              </div>
+              <div className="grid grid-cols-[92px_1fr] items-center gap-3">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Processor</span>
+                <span className="min-w-0 text-sm leading-snug text-gray-900">PineTree Lightning</span>
+              </div>
+            </>
+          ) : null}
           <p className="pt-1 text-sm leading-5 text-gray-600">{description}</p>
+          {isLightning ? (
+            <p className="text-[11px] font-semibold text-gray-400">Powered by Speed</p>
+          ) : null}
         </div>
         <div className="mt-auto flex items-center justify-between gap-3 border-t border-gray-100 pt-4">
           <p className="text-xs font-semibold text-blue-700">Manage from PineTree Wallet</p>
@@ -1220,10 +1250,10 @@ function EngineSettingStatus({
               description="Base payments settle to the merchant's PineTree Wallet."
             />
             <ManagedCryptoRailCard
-              name="Bitcoin Lightning"
+              name="PineTree Lightning"
               provider="lightning"
               networks="Bitcoin Lightning"
-              description="Bitcoin Lightning payments settle to the merchant's PineTree Wallet."
+              description="Lightning payments settle through PineTree to the selected payout destination."
             />
           </>
         ) : (

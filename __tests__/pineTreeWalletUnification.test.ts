@@ -132,17 +132,18 @@ describe("Providers page canonical wallet mode", () => {
     expect(page).toContain("{canonicalWalletMode ? (")
     expect(page).toContain('name="Solana Pay"')
     expect(page).toContain('name="Base Pay"')
-    expect(page).toContain('name="Bitcoin Lightning"')
+    expect(page).toContain('name="PineTree Lightning"')
     expect(page).toContain('description="Solana payments settle to the merchant\'s PineTree Wallet."')
     expect(page).toContain('description="Base payments settle to the merchant\'s PineTree Wallet."')
-    expect(page).toContain('description="Bitcoin Lightning payments settle to the merchant\'s PineTree Wallet."')
+    expect(page).toContain('description="Lightning payments settle through PineTree to the selected payout destination."')
     expect(page).toContain("Manage from PineTree Wallet")
   })
 
-  it("uses PineTree Wallet settlement for every managed crypto rail", () => {
+  it("uses PineTree Wallet settlement for managed rails and automatic Lightning settlement", () => {
     expect(page).toContain("function ManagedCryptoRailCard")
     expect(page).toContain(">Settlement</span>")
-    expect(page).toContain(">PineTree Wallet</span>")
+    expect(page).toContain('isLightning ? "Automatic" : "PineTree Wallet"')
+    expect(page).toContain("PineTree BTC Wallet")
   })
 
   it("shows managed crypto rails as Connected or Not connected with Enabled toggles", () => {
@@ -170,7 +171,9 @@ describe("Providers page canonical wallet mode", () => {
     expect(page).toContain("const connected = isCanonicalRailConfigured(provider)")
     expect(page).toContain("const enabled = isEnabled(provider)")
     // Status pill reflects both address presence AND merchant enabled choice
-    expect(page).toContain("const statusLabel = (connected && enabled)")
+    expect(page).toContain('provider === "lightning"')
+    expect(page).toContain('"Enabled"')
+    expect(page).toContain('"Needs setup"')
     expect(page).toContain('"Connected" : "Not connected"')
     expect(page).toContain("checked={enabled}")
   })

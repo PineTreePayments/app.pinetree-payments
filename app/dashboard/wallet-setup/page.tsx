@@ -146,6 +146,38 @@ type MerchantLightningProfile = {
   setup_source: "pinetree_managed"
 }
 
+type LightningSettlementDestination = {
+  id: string
+  destination_type: "pinetree_btc_wallet" | "external_btc_wallet" | "speed_connected_account"
+  destination_address: string
+  label: string | null
+  status: "active" | "disabled" | "pending_verification"
+}
+
+type LightningSettlementOverview = {
+  settings: {
+    enabled: boolean
+    autoswap_enabled: boolean
+    payout_destination_id: string | null
+    provider_sync_status: "not_synced" | "synced" | "pending" | "failed" | "not_available"
+  } | null
+  destinations: LightningSettlementDestination[]
+  capabilities: {
+    payoutAvailable: boolean
+    autoswapAvailable: boolean
+    connectAvailable: boolean
+    missing: string[]
+  }
+  recentPayouts: Array<{
+    id: string
+    status: "queued" | "processing" | "submitted" | "completed" | "failed" | "canceled"
+    merchant_net_amount_decimal: string
+    provider_reference: string | null
+    tx_hash: string | null
+    created_at: string
+  }>
+}
+
 type ProfileState =
   | { kind: "loading" }
   | { kind: "none" }
@@ -1157,6 +1189,106 @@ function BalanceRows({
   )
 }
 
+function LightningSettlementPanel({
+  overview,
+  loading,
+  onUsePineTreeBtcWallet,
+  onAddExternalBtcWallet,
+  onRefresh,
+}: {
+  overview: LightningSettlementOverview | null
+  loading: boolean
+  onUsePineTreeBtcWallet: () => void
+  onAddExternalBtcWallet: () => void
+  onRefresh: () => void
+}) {
+  const activeDestination = overview?.destinations.find((item) =>
+    item.id === overview.settings?.payout_destination_id
+  ) || overview?.destinations.find((item) => item.status === "active")
+  const lastSettlement = overview?.recentPayouts[0] || null
+  const destinationLabel = activeDestination
+    ? activeDestination.destination_type === "pinetree_btc_wallet"
+      ? "PineTree BTC Wallet"
+      : activeDestination.destination_type === "external_btc_wallet"
+        ? "External BTC wallet"
+        : "Speed connected account"
+    : "Not set"
+  const settlementStatus = overview?.settings?.enabled
+    ? activeDestination
+      ? "Enabled"
+      : "Needs setup"
+    : "Not enabled"
+  const autoswapStatus = overview?.settings?.autoswap_enabled
+    ? overview.settings.provider_sync_status === "not_available"
+      ? "Not available"
+      : "Enabled"
+    : "Not enabled"
+
+  return (
+    <section className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-sm sm:px-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-gray-950">Lightning settlement</p>
+          <p className="mt-1 text-xs leading-5 text-gray-500">Managed by PineTree</p>
+          <p className="mt-0.5 text-[11px] font-semibold text-gray-400">Powered by Speed</p>
+        </div>
+        <ProviderStatusPill label={loading ? "Refreshing" : settlementStatus} tone={settlementStatus === "Enabled" ? "blue" : "amber"} />
+      </div>
+
+      <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+        <div>
+          <p className="text-xs font-semibold uppercase text-gray-500">Settlement</p>
+          <p className="mt-1 font-semibold text-gray-950">{activeDestination ? "Automatic" : "Needs setup"}</p>
+        </div>
+        <div>
+          <p className="text-xs font-semibold uppercase text-gray-500">Payout destination</p>
+          <p className="mt-1 font-semibold text-gray-950">{destinationLabel}</p>
+          {activeDestination ? (
+            <p className="mt-0.5 truncate font-mono text-xs text-gray-500" title={activeDestination.destination_address}>
+              {shortAddress(activeDestination.destination_address)}
+            </p>
+          ) : null}
+        </div>
+        <div>
+          <p className="text-xs font-semibold uppercase text-gray-500">Auto-settlement</p>
+          <p className="mt-1 font-semibold text-gray-950">{autoswapStatus}</p>
+        </div>
+        <div>
+          <p className="text-xs font-semibold uppercase text-gray-500">Last settlement</p>
+          <p className="mt-1 font-semibold text-gray-950">{lastSettlement ? settlementStatusLabel(lastSettlement.status) : "No settlements yet"}</p>
+          {lastSettlement?.provider_reference || lastSettlement?.tx_hash ? (
+            <p className="mt-0.5 truncate font-mono text-xs text-gray-500">{lastSettlement.tx_hash || lastSettlement.provider_reference}</p>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button type="button" onClick={onUsePineTreeBtcWallet} className="h-9 rounded-lg bg-[#0052FF] px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700">
+          Use PineTree BTC Wallet
+        </button>
+        <button type="button" onClick={onAddExternalBtcWallet} className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50">
+          Add external BTC wallet
+        </button>
+        <button type="button" onClick={onUsePineTreeBtcWallet} className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50">
+          Enable auto-settlement
+        </button>
+        <button type="button" onClick={onRefresh} className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50">
+          Refresh settlement status
+        </button>
+      </div>
+    </section>
+  )
+}
+
+function settlementStatusLabel(status: string) {
+  if (status === "queued") return "Settlement pending"
+  if (status === "processing") return "Settlement processing"
+  if (status === "submitted") return "Settlement submitted"
+  if (status === "completed") return "Settlement complete"
+  if (status === "failed") return "Settlement failed"
+  return "Settlement pending"
+}
+
 function EnabledRailChips({
   rows,
 }: {
@@ -1210,6 +1342,8 @@ function PineTreeWalletRuntime() {
   const [enabledRails, setEnabledRails] = useState<EnabledRailState>(defaultEnabledRails)
   const [walletSync, setWalletSync] = useState<PineTreeWalletSyncResponse>(defaultWalletSyncState)
   const [walletSyncing, setWalletSyncing] = useState(false)
+  const [lightningSettlement, setLightningSettlement] = useState<LightningSettlementOverview | null>(null)
+  const [lightningSettlementLoading, setLightningSettlementLoading] = useState(false)
   const [withdrawalRail, setWithdrawalRail] = useState<WithdrawalRail>("base")
   const [withdrawalAsset, setWithdrawalAsset] = useState<WithdrawalAsset>("ETH")
   const [withdrawalDestination, setWithdrawalDestination] = useState("")
@@ -1265,10 +1399,28 @@ function PineTreeWalletRuntime() {
     }
   }, [])
 
+  const fetchLightningSettlement = useCallback(async () => {
+    const token = accessTokenRef.current
+    if (!token) return
+    setLightningSettlementLoading(true)
+    try {
+      const res = await fetch("/api/wallets/lightning/settlement", {
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+        cache: "no-store",
+      })
+      if (!res.ok) return
+      setLightningSettlement(await res.json() as LightningSettlementOverview)
+    } finally {
+      setLightningSettlementLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     if (!walletOpen) return
     void syncPineTreeWallet()
-  }, [walletOpen, syncPineTreeWallet])
+    void fetchLightningSettlement()
+  }, [fetchLightningSettlement, walletOpen, syncPineTreeWallet])
 
   const fetchProviderRailState = useCallback(async (token: string) => {
     try {
@@ -1675,6 +1827,45 @@ function PineTreeWalletRuntime() {
     } catch {
       setCopiedAddress("")
     }
+  }
+
+  async function saveLightningSettlementDestination(input: {
+    destinationType: "pinetree_btc_wallet" | "external_btc_wallet"
+    destinationAddress?: string
+    label?: string
+  }) {
+    const token = accessTokenRef.current
+    if (!token) return
+    setLightningSettlementLoading(true)
+    try {
+      const res = await fetch("/api/wallets/lightning/settlement", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          destination_type: input.destinationType,
+          destination_address: input.destinationAddress,
+          label: input.label,
+        }),
+      })
+      if (!res.ok) return
+      await fetchLightningSettlement()
+    } finally {
+      setLightningSettlementLoading(false)
+    }
+  }
+
+  function handleAddExternalBtcWallet() {
+    const address = window.prompt("Enter external BTC wallet address")
+    if (!address?.trim()) return
+    void saveLightningSettlementDestination({
+      destinationType: "external_btc_wallet",
+      destinationAddress: address.trim(),
+      label: "External BTC wallet",
+    })
   }
 
   function handleOpenWallet() {
@@ -2100,11 +2291,20 @@ function PineTreeWalletRuntime() {
               ) : null}
 
               {activeTab === "balances" ? (
-                <BalanceRows
-                  sync={walletSync}
-                  syncing={walletSyncing}
-                  lightningEnabled={lightningProfileState.kind === "loaded" && lightningProfileState.profile.status === "ready"}
-                />
+                <div className="space-y-4">
+                  <BalanceRows
+                    sync={walletSync}
+                    syncing={walletSyncing}
+                    lightningEnabled={lightningProfileState.kind === "loaded" && lightningProfileState.profile.status === "ready"}
+                  />
+                  <LightningSettlementPanel
+                    overview={lightningSettlement}
+                    loading={lightningSettlementLoading}
+                    onUsePineTreeBtcWallet={() => void saveLightningSettlementDestination({ destinationType: "pinetree_btc_wallet" })}
+                    onAddExternalBtcWallet={handleAddExternalBtcWallet}
+                    onRefresh={() => void fetchLightningSettlement()}
+                  />
+                </div>
               ) : null}
 
               {activeTab === "wallets" ? (
@@ -2130,14 +2330,13 @@ function PineTreeWalletRuntime() {
                     copiedAddress={copiedAddress}
                     onCopy={(a) => void copyAddress(a)}
                   />
-                  {profile?.bitcoin_lightning_address ? (
-                    <ReceiveRow
-                      label="Lightning settlement"
-                      entries={[{ id: "bitcoin-lightning", address: profile.bitcoin_lightning_address }]}
-                      copiedAddress={copiedAddress}
-                      onCopy={(a) => void copyAddress(a)}
-                    />
-                  ) : null}
+                  <LightningSettlementPanel
+                    overview={lightningSettlement}
+                    loading={lightningSettlementLoading}
+                    onUsePineTreeBtcWallet={() => void saveLightningSettlementDestination({ destinationType: "pinetree_btc_wallet" })}
+                    onAddExternalBtcWallet={handleAddExternalBtcWallet}
+                    onRefresh={() => void fetchLightningSettlement()}
+                  />
 
                   {process.env.NODE_ENV !== "production" && canRefresh ? (
                     <button

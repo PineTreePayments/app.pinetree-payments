@@ -101,6 +101,11 @@ async function ensureSpeedTreasurySweepPayoutJob(paymentId: string, payload: unk
   }
 }
 
+async function ensurePineTreeLightningSettlementJob(paymentId: string, payload: unknown): Promise<void> {
+  const { ensureLightningSettlementJobForConfirmedSpeedPayment } = await import("./lightningSettlement")
+  await ensureLightningSettlementJobForConfirmedSpeedPayment({ paymentId, payload })
+}
+
 async function resolvePaymentIdFromEvent(input: {
   translatedEvent: TranslatedEvent | null
   payload: unknown
@@ -307,6 +312,7 @@ export async function processWebhook({
   if (TERMINAL_STATES.has(currentStatus)) {
     if (provider === SPEED_PROVIDER_NAME && event.event === "payment.confirmed") {
       await ensureSpeedTreasurySweepPayoutJob(paymentId, payload)
+      await ensurePineTreeLightningSettlementJob(paymentId, payload)
     }
     console.info("[eventProcessor] idempotent:terminal_state_skip", {
       provider,
@@ -387,6 +393,7 @@ export async function processWebhook({
 
       if (provider === SPEED_PROVIDER_NAME) {
         await ensureSpeedTreasurySweepPayoutJob(paymentId, payload)
+        await ensurePineTreeLightningSettlementJob(paymentId, payload)
       }
     }
 
