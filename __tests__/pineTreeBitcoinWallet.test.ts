@@ -261,7 +261,8 @@ describe("ReceiveRow status display", () => {
   it("Bitcoin receive row uses btc_address (payout address), not bitcoin_onchain_address", () => {
     expect(page).toContain("bitcoinPayoutEntries")
     expect(page).toContain("profile.btc_address")
-    expect(page).toContain('<ReceiveRow label="Bitcoin wallet" entries={bitcoinPayoutEntries}')
+    expect(page).toContain('label="Bitcoin wallet"')
+    expect(page).toContain("entries={bitcoinPayoutEntries}")
   })
 
   it("Bitcoin receive row shows Not connected only when btc_address is missing", () => {

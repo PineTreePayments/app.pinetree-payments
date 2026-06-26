@@ -36,6 +36,7 @@ type WithdrawalReviewResponse = {
     provider_reference: string | null
     tx_hash: string | null
     error_message: string | null
+    review_payload?: Record<string, unknown>
   }
   review: {
     rail: WithdrawalRail
@@ -45,6 +46,7 @@ type WithdrawalReviewResponse = {
     estimatedStatus: "Withdrawal review available" | "Pending review" | "Processing"
     approvalMethod?: "dynamic_browser" | "manual_review"
     message: string
+    diagnostics?: WithdrawalDiagnostics
   }
   canSubmit: boolean
 }
@@ -160,6 +162,33 @@ type EnabledRailState = {
   base: boolean
   solana: boolean
   bitcoin: boolean
+}
+
+type WalletRailRow = {
+  rail: WithdrawalRail
+  label: "Base" | "Solana" | "Bitcoin"
+  enabled: boolean
+  configured: boolean
+}
+
+type WithdrawalDiagnostics = {
+  rail: WithdrawalRail
+  asset: WithdrawalAsset
+  railEnabled: boolean
+  walletConnected: boolean
+  walletProfileAddressPresent: boolean
+  matchingDynamicWallet: boolean
+  dynamicMethodAvailable: boolean
+  btcBroadcastEnabled: boolean
+  btcProviderConfigured: boolean
+  speedPayoutAvailable: boolean
+  fallbackReason: string | null
+}
+
+type WithdrawalAssetOption = {
+  rail: WithdrawalRail
+  asset: WithdrawalAsset
+  balance: SyncedBalanceAsset | null
 }
 
 type ProvidersDashboardResponse = {
@@ -365,6 +394,38 @@ function formatCryptoAmount(value: number | null, asset: string) {
     minimumFractionDigits: 0,
     maximumFractionDigits: decimals,
   }).format(value)
+}
+
+function railDisplayName(rail: WithdrawalRail) {
+  if (rail === "base") return "Base"
+  if (rail === "solana") return "Solana"
+  return "Bitcoin"
+}
+
+function assetOptionKey(option: Pick<WithdrawalAssetOption, "rail" | "asset">) {
+  return `${option.rail}:${option.asset}`
+}
+
+function formatBalanceLabel(balance: SyncedBalanceAsset | null, asset: WithdrawalAsset) {
+  if (!balance || balance.status !== "synced" || balance.balance === null) return "Balance indexing pending"
+  return `${formatCryptoAmount(balance.balance, asset)} ${asset}`
+}
+
+function formatUsdEstimate(balance: SyncedBalanceAsset | null) {
+  if (!balance || balance.status !== "synced") return "Balance will be verified before processing"
+  if (balance.usdValue === null || balance.usdValue === undefined) return "USD value pending"
+  return `~ ${formatUsd(balance.usdValue)}`
+}
+
+function getWithdrawalFallbackReason(input: WithdrawalDiagnostics) {
+  if (!input.railEnabled) return "rail_disabled"
+  if (!input.walletConnected) return "wallet_not_connected"
+  if (!input.walletProfileAddressPresent) return "source_wallet_missing"
+  if (!input.matchingDynamicWallet) return "dynamic_wallet_unavailable"
+  if (!input.dynamicMethodAvailable) return "dynamic_method_unavailable"
+  if (input.rail === "bitcoin" && !input.btcProviderConfigured) return "btc_provider_missing"
+  if (input.rail === "bitcoin" && !input.btcBroadcastEnabled) return "btc_broadcast_disabled"
+  return null
 }
 
 function sanitizeWithdrawalErrorForMerchant(message: string | undefined) {
@@ -607,20 +668,23 @@ function WalletDiagnosticsPanel({
 function ReceiveRow({
   label,
   entries,
+  statusLabel,
   copiedAddress,
   onCopy,
 }: {
   label: string
   entries: AddressEntry[]
+  statusLabel?: "Connected" | "Not connected" | "Disabled"
   copiedAddress: string
   onCopy: (address: string) => void
 }) {
   const isConnected = entries.length > 0
+  const status = statusLabel || (isConnected ? "Connected" : "Not connected")
   return (
     <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.05)] sm:px-5 sm:py-5">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-gray-800">{label}</p>
-        <ProviderStatusPill label={isConnected ? "Connected" : "Not connected"} tone="blue" />
+        <ProviderStatusPill label={status} tone={status === "Disabled" ? "amber" : "blue"} />
       </div>
       {isConnected ? (
         <div className="mt-3 space-y-3">
@@ -653,6 +717,7 @@ function ReceiveRow({
 function WithdrawalFormShell({
   rail,
   asset,
+  assetOptions,
   destinationAddress,
   amountDecimal,
   review,
@@ -662,8 +727,8 @@ function WithdrawalFormShell({
   submitResult,
   dynamicApprovalAvailable,
   selectedBalance,
-  onRailChange,
-  onAssetChange,
+  diagnostics,
+  onAssetSelect,
   onDestinationChange,
   onAmountChange,
   onMaxAmount,
@@ -672,6 +737,7 @@ function WithdrawalFormShell({
 }: {
   rail: WithdrawalRail
   asset: WithdrawalAsset
+  assetOptions: WithdrawalAssetOption[]
   destinationAddress: string
   amountDecimal: string
   review: WithdrawalReviewResponse | null
@@ -681,15 +747,14 @@ function WithdrawalFormShell({
   submitResult: WithdrawalSubmitResponse | null
   dynamicApprovalAvailable: boolean
   selectedBalance: SyncedBalanceAsset | null
-  onRailChange: (rail: WithdrawalRail) => void
-  onAssetChange: (asset: WithdrawalAsset) => void
+  diagnostics: WithdrawalDiagnostics
+  onAssetSelect: (rail: WithdrawalRail, asset: WithdrawalAsset) => void
   onDestinationChange: (value: string) => void
   onAmountChange: (value: string) => void
   onMaxAmount: () => void
   onReview: () => void
   onSubmit: () => void
 }) {
-  const availableAssets = withdrawalAssetsByRail[rail]
   const amountTrimmed = amountDecimal.trim()
   const selectedBalanceAmount = selectedBalance?.balance ?? null
   const selectedBalanceKnown = selectedBalanceAmount !== null && selectedBalance?.status === "synced"
@@ -699,11 +764,13 @@ function WithdrawalFormShell({
   const invalidAmount = amountDecimal.trim().length > 0 && !(Number(amountDecimal) > 0)
   const amountExceedsBalance = selectedBalanceKnown && amountValue > selectedBalanceAmount
   const missingDestination = destinationAddress.trim().length === 0
-  const reviewDisabled = reviewing || missingDestination || missingAmount || invalidAmount || selectedBalanceZero || amountExceedsBalance
+  const noWithdrawableAssets = assetOptions.length === 0
+  const reviewDisabled = reviewing || noWithdrawableAssets || missingDestination || missingAmount || invalidAmount || selectedBalanceZero || amountExceedsBalance
   const formattedAvailable = formatCryptoAmount(selectedBalanceAmount, asset)
   const maxDisabled = !selectedBalanceKnown || selectedBalanceZero
   const nativeMaxNote = isNativeWithdrawalAsset(asset) && selectedBalanceKnown && !selectedBalanceZero
   const hasSubmitted = Boolean(submitResult && submitResult.merchantStatus !== "Withdrawal failed")
+  const canResumeDynamicApproval = Boolean(review?.canSubmit && review.review.approvalMethod === "dynamic_browser" && dynamicApprovalAvailable)
   const primaryActionLabel = submitResult
     ? submitResult.merchantStatus === "Processing"
       ? "Processing"
@@ -719,8 +786,10 @@ function WithdrawalFormShell({
       : reviewing
         ? "Reviewing..."
         : review
-          ? dynamicApprovalAvailable
-            ? "Approve with PineTree Wallet"
+          ? canResumeDynamicApproval
+            ? review.request.status === "review_required"
+              ? "Continue approval"
+              : "Approve with PineTree Wallet"
             : "Submit withdrawal request"
           : "Review withdrawal"
   const primaryActionDisabled = hasSubmitted || submitting || (review ? false : reviewDisabled)
@@ -728,45 +797,53 @@ function WithdrawalFormShell({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-3">
-        <p className="text-sm font-semibold text-blue-900">Withdrawal review available</p>
-        <p className="mt-1 text-xs leading-5 text-blue-700">
-          Prepare a withdrawal request for wallet approval or PineTree review.
+      <div>
+        <p className="text-sm font-semibold text-gray-950">Send</p>
+        <p className="mt-1 text-xs leading-5 text-gray-500">
+          Choose an enabled PineTree Wallet asset, then review before approval.
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="space-y-1.5">
-          <span className="text-xs font-semibold text-gray-700">Rail</span>
-          <select
-            value={rail}
-            onChange={(event) => onRailChange(event.target.value as WithdrawalRail)}
-            aria-label="Select withdrawal rail"
-            className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-          >
-            <option value="base">Base</option>
-            <option value="solana">Solana</option>
-            <option value="bitcoin">Bitcoin</option>
-          </select>
-        </label>
-
-        <label className="space-y-1.5">
-          <span className="text-xs font-semibold text-gray-700">Asset</span>
-          <select
-            value={asset}
-            onChange={(event) => onAssetChange(event.target.value as WithdrawalAsset)}
-            aria-label="Select withdrawal asset"
-            className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-          >
-            {availableAssets.map((item) => (
-              <option key={item} value={item}>{item}</option>
-            ))}
-          </select>
-        </label>
+      <div className="space-y-2">
+        <p className="text-xs font-semibold uppercase text-gray-500">1. Choose asset</p>
+        {assetOptions.length > 0 ? (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {assetOptions.map((option) => {
+              const selected = option.rail === rail && option.asset === asset
+              return (
+                <button
+                  key={assetOptionKey(option)}
+                  type="button"
+                  onClick={() => onAssetSelect(option.rail, option.asset)}
+                  className={`rounded-2xl border px-4 py-3 text-left transition ${
+                    selected
+                      ? "border-blue-300 bg-blue-50 shadow-[0_8px_24px_rgba(37,99,235,0.10)]"
+                      : "border-gray-200 bg-white hover:border-blue-200 hover:bg-blue-50/40"
+                  }`}
+                >
+                  <span className="flex items-start justify-between gap-3">
+                    <span>
+                      <span className="block text-sm font-semibold text-gray-950">{option.asset}</span>
+                      <span className="mt-0.5 block text-xs font-semibold text-gray-500">{railDisplayName(option.rail)}</span>
+                    </span>
+                    <span className="text-right">
+                      <span className="block text-sm font-semibold text-gray-950">{formatBalanceLabel(option.balance, option.asset)}</span>
+                      <span className="mt-0.5 block text-xs text-gray-500">{formatUsdEstimate(option.balance)}</span>
+                    </span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-500">
+            Connect and enable a PineTree Wallet rail in Providers before withdrawing.
+          </div>
+        )}
       </div>
 
-      <label className="block space-y-1.5">
-        <span className="text-xs font-semibold text-gray-700">Destination address</span>
+      <div className="space-y-2">
+        <p className="text-xs font-semibold uppercase text-gray-500">2. Send to</p>
         <input
           value={destinationAddress}
           onChange={(event) => onDestinationChange(event.target.value)}
@@ -774,9 +851,10 @@ function WithdrawalFormShell({
           placeholder="Paste destination address"
           className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 font-mono text-sm text-gray-900 outline-none transition placeholder:font-sans placeholder:text-gray-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
         />
-      </label>
+      </div>
 
       <div className="space-y-2">
+        <p className="text-xs font-semibold uppercase text-gray-500">3. Amount</p>
         <div className="rounded-xl border border-gray-200 bg-gray-50/70 px-3 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase text-gray-500">Available</span>
@@ -825,7 +903,7 @@ function WithdrawalFormShell({
         </label>
       </div>
 
-      {(error || invalidAmount || missingDestination || missingAmount || selectedBalanceZero || amountExceedsBalance) ? (
+      {(error || invalidAmount || missingDestination || missingAmount || selectedBalanceZero || amountExceedsBalance || noWithdrawableAssets) ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-800">
           {error ||
             (missingDestination
@@ -836,7 +914,9 @@ function WithdrawalFormShell({
                   ? "Enter a positive withdrawal amount."
                   : selectedBalanceZero
                     ? "No available balance for this asset."
-                    : "Amount exceeds available balance.")}
+                    : noWithdrawableAssets
+                      ? "No enabled connected withdrawal assets are available."
+                      : "Amount exceeds available balance.")}
         </div>
       ) : null}
 
@@ -890,12 +970,12 @@ function WithdrawalFormShell({
               <p className="text-sm font-semibold text-gray-950">Review withdrawal</p>
               <p className="mt-1 text-xs leading-5 text-gray-500">{review.review.message}</p>
             </div>
-            <ProviderStatusPill label={dynamicApprovalAvailable ? "Wallet approval" : "Pending review"} tone="blue" />
+            <ProviderStatusPill label={canResumeDynamicApproval ? "Wallet approval" : "Pending review"} tone="blue" />
           </div>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
             <div>
               <dt className="text-xs font-semibold text-gray-500">Rail</dt>
-              <dd className="mt-1 font-semibold text-gray-950">{review.review.rail === "base" ? "Base" : review.review.rail === "solana" ? "Solana" : "Bitcoin"}</dd>
+              <dd className="mt-1 font-semibold text-gray-950">{railDisplayName(review.review.rail)}</dd>
             </div>
             <div>
               <dt className="text-xs font-semibold text-gray-500">Asset</dt>
@@ -915,6 +995,13 @@ function WithdrawalFormShell({
             </div>
           </dl>
         </div>
+      ) : null}
+
+      {process.env.NODE_ENV !== "production" ? (
+        <details className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-500">
+          <summary className="cursor-pointer font-semibold text-gray-600">Withdrawal diagnostics</summary>
+          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(diagnostics, null, 2)}</pre>
+        </details>
       ) : null}
     </div>
   )
@@ -956,7 +1043,7 @@ function WalletOverviewSummary({
   sync,
   syncing,
 }: {
-  rows: Array<{ label: "Base" | "Solana" | "Bitcoin"; enabled: boolean; configured: boolean }>
+  rows: WalletRailRow[]
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
 }) {
@@ -978,7 +1065,11 @@ function WalletOverviewSummary({
               <div key={row.label} className="flex items-center justify-between gap-4 px-4 py-3 sm:px-5">
                 <div>
                   <p className="text-sm font-semibold text-gray-800">{row.label}</p>
-                  <ProviderStatusPill label={row.configured ? "Connected" : "Not connected"} tone="blue" className="mt-1" />
+                  <ProviderStatusPill
+                    label={row.configured ? (row.enabled ? "Connected" : "Disabled") : "Not connected"}
+                    tone={row.configured && !row.enabled ? "amber" : "blue"}
+                    className="mt-1"
+                  />
                 </div>
                 <span className="text-sm font-semibold text-gray-950">
                   {row.label === "Base"
@@ -1016,14 +1107,16 @@ function WalletOverviewSummary({
 function BalanceRows({
   sync,
   syncing,
+  lightningEnabled,
 }: {
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
+  lightningEnabled: boolean
 }) {
   const groups: Array<{ title: string; rows: SyncedBalanceAsset[] }> = [
     { title: "Base", rows: sync?.balances.base ?? [] },
     { title: "Solana", rows: sync?.balances.solana ?? [] },
-    { title: "Bitcoin / Lightning / Spark", rows: sync?.balances.bitcoin ?? [] },
+    { title: "Bitcoin", rows: sync?.balances.bitcoin ?? [] },
   ]
   return (
     <div className="space-y-4">
@@ -1051,6 +1144,15 @@ function BalanceRows({
           </div>
         </div>
       ))}
+      <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-sm sm:px-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-gray-950">Lightning settlement</p>
+            <p className="mt-1 text-xs text-gray-500">Managed by Speed</p>
+          </div>
+          <ProviderStatusPill label={lightningEnabled ? "Enabled" : "Not enabled"} tone={lightningEnabled ? "blue" : "default"} />
+        </div>
+      </div>
     </div>
   )
 }
@@ -1058,9 +1160,9 @@ function BalanceRows({
 function EnabledRailChips({
   rows,
 }: {
-  rows: Array<{ label: "Base" | "Solana" | "Bitcoin"; enabled: boolean }>
+  rows: WalletRailRow[]
 }) {
-  const enabledRows = rows.filter((row) => row.enabled)
+  const enabledRows = rows.filter((row) => row.enabled && row.configured)
   if (enabledRows.length === 0) {
     return <p className="text-xs font-semibold text-gray-500">Manage rails in Providers</p>
   }
@@ -1448,11 +1550,36 @@ function PineTreeWalletRuntime() {
 
   const walletStatus = allPrimaryRailsConnected ? "Connected" : "Not connected"
 
-  const walletRailRows = [
-    { label: "Base" as const, configured: baseReady, enabled: baseReady && enabledRails.base },
-    { label: "Solana" as const, configured: solanaReady, enabled: solanaReady && enabledRails.solana },
-    { label: "Bitcoin" as const, configured: bitcoinReady, enabled: bitcoinReady && enabledRails.bitcoin },
-  ]
+  const walletRailRows = useMemo<WalletRailRow[]>(() => [
+    { rail: "base", label: "Base" as const, configured: baseReady, enabled: enabledRails.base },
+    { rail: "solana", label: "Solana" as const, configured: solanaReady, enabled: enabledRails.solana },
+    { rail: "bitcoin", label: "Bitcoin" as const, configured: bitcoinReady, enabled: enabledRails.bitcoin },
+  ], [baseReady, bitcoinReady, enabledRails.base, enabledRails.bitcoin, enabledRails.solana, solanaReady])
+
+  const withdrawableAssetOptions = useMemo((): WithdrawalAssetOption[] => {
+    return walletRailRows
+      .filter((row) => row.configured && row.enabled)
+      .flatMap((row) =>
+        withdrawalAssetsByRail[row.rail].map((item) => ({
+          rail: row.rail,
+          asset: item,
+          balance: findWithdrawalBalance(walletSync, row.rail, item),
+        }))
+      )
+  }, [walletRailRows, walletSync])
+
+  useEffect(() => {
+    if (withdrawableAssetOptions.some((option) => option.rail === withdrawalRail && option.asset === withdrawalAsset)) {
+      return
+    }
+    const first = withdrawableAssetOptions[0]
+    if (!first) return
+    setWithdrawalRail(first.rail)
+    setWithdrawalAsset(first.asset)
+    setWithdrawalReview(null)
+    setWithdrawalSubmitResult(null)
+    setWithdrawalError("")
+  }, [withdrawableAssetOptions, withdrawalAsset, withdrawalRail])
 
   const selectedWithdrawalBalance = useMemo(
     () => findWithdrawalBalance(walletSync, withdrawalRail, withdrawalAsset),
@@ -1476,6 +1603,30 @@ function PineTreeWalletRuntime() {
       )
     )
   }, [primaryWallet, profile, wallets, withdrawalReview])
+
+  const withdrawalDiagnostics = useMemo((): WithdrawalDiagnostics => {
+    const railState = walletRailRows.find((row) => row.rail === withdrawalRail)
+    const sourceAddress = getWithdrawalSourceAddress(profile, withdrawalRail)
+    const matchingWallet = findDynamicWalletForSource(wallets as unknown[], primaryWallet, sourceAddress || "")
+    const dynamicMethodAvailable = matchingWallet ? dynamicWalletSupportsRail(matchingWallet, withdrawalRail) : false
+    const baseDiagnostics: WithdrawalDiagnostics = {
+      rail: withdrawalRail,
+      asset: withdrawalAsset,
+      railEnabled: Boolean(railState?.enabled),
+      walletConnected: Boolean(railState?.configured),
+      walletProfileAddressPresent: Boolean(sourceAddress),
+      matchingDynamicWallet: Boolean(matchingWallet),
+      dynamicMethodAvailable,
+      btcBroadcastEnabled: false,
+      btcProviderConfigured: false,
+      speedPayoutAvailable: lightningProfileState.kind === "loaded" && lightningProfileState.profile.status === "ready",
+      fallbackReason: null,
+    }
+    return {
+      ...baseDiagnostics,
+      fallbackReason: getWithdrawalFallbackReason(baseDiagnostics),
+    }
+  }, [lightningProfileState, primaryWallet, profile, walletRailRows, wallets, withdrawalAsset, withdrawalRail])
 
   useEffect(() => {
     if (!withdrawalReview) return
@@ -1565,9 +1716,9 @@ function PineTreeWalletRuntime() {
     }
   }
 
-  function handleWithdrawalRailChange(nextRail: WithdrawalRail) {
+  function handleWithdrawalAssetSelect(nextRail: WithdrawalRail, nextAsset: WithdrawalAsset) {
     setWithdrawalRail(nextRail)
-    setWithdrawalAsset(withdrawalAssetsByRail[nextRail][0])
+    setWithdrawalAsset(nextAsset)
     setWithdrawalReview(null)
     setWithdrawalSubmitResult(null)
     setWithdrawalError("")
@@ -1609,6 +1760,10 @@ function PineTreeWalletRuntime() {
     }
     if (!withdrawalAssetsByRail[withdrawalRail].includes(withdrawalAsset)) {
       setWithdrawalError("Unsupported rail/asset combination.")
+      return
+    }
+    if (!withdrawableAssetOptions.some((option) => option.rail === withdrawalRail && option.asset === withdrawalAsset)) {
+      setWithdrawalError("No enabled connected withdrawal assets are available.")
       return
     }
 
@@ -1653,6 +1808,38 @@ function PineTreeWalletRuntime() {
     setWithdrawalReview(null)
     setWithdrawalSubmitResult(null)
     setWithdrawalError("")
+  }
+
+  async function pollWithdrawalRequest(withdrawalId: string, initial: WithdrawalSubmitResponse) {
+    const token = accessTokenRef.current
+    if (!token) return
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1600))
+      try {
+        const res = await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          credentials: "include",
+          cache: "no-store",
+        })
+        if (!res.ok) continue
+        const json = (await res.json()) as { request?: WithdrawalReviewResponse["request"] }
+        if (!json.request) continue
+        const nextStatus =
+          json.request.status === "processing"
+            ? "Processing"
+            : json.request.status === "failed"
+              ? "Withdrawal failed"
+              : initial.merchantStatus
+        setWithdrawalSubmitResult({
+          ...initial,
+          request: json.request,
+          merchantStatus: nextStatus,
+        })
+        if (json.request.status === "processing" || json.request.status === "failed") return
+      } catch {
+        return
+      }
+    }
   }
 
   async function handleSubmitWithdrawal() {
@@ -1701,6 +1888,7 @@ function PineTreeWalletRuntime() {
           return
         }
         setWithdrawalSubmitResult(submitted as WithdrawalSubmitResponse)
+        void pollWithdrawalRequest(withdrawalId, submitted as WithdrawalSubmitResponse)
         return
       }
 
@@ -1721,6 +1909,7 @@ function PineTreeWalletRuntime() {
         return
       }
       setWithdrawalSubmitResult(json as WithdrawalSubmitResponse)
+      void pollWithdrawalRequest(withdrawalId, json as WithdrawalSubmitResponse)
     } catch (error) {
       setWithdrawalError(sanitizeWithdrawalSubmitErrorForMerchant(error instanceof Error ? error.message : undefined))
     } finally {
@@ -1903,7 +2092,7 @@ function PineTreeWalletRuntime() {
                   <div>
                     <p className="text-sm font-semibold text-gray-950">Wallet summary</p>
                     <p className="mt-1 text-xs leading-5 text-gray-500">
-                      Enabled payment rails are shown here with placeholder balances.
+                      Enabled and connected rails with the latest indexed balance.
                     </p>
                   </div>
                   <WalletOverviewSummary rows={walletRailRows} sync={walletSync} syncing={walletSyncing} />
@@ -1911,17 +2100,39 @@ function PineTreeWalletRuntime() {
               ) : null}
 
               {activeTab === "balances" ? (
-                <BalanceRows sync={walletSync} syncing={walletSyncing} />
+                <BalanceRows
+                  sync={walletSync}
+                  syncing={walletSyncing}
+                  lightningEnabled={lightningProfileState.kind === "loaded" && lightningProfileState.profile.status === "ready"}
+                />
               ) : null}
 
               {activeTab === "wallets" ? (
                 <div className="space-y-3">
-                  <ReceiveRow label="Base wallet" entries={profileAddresses.base} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
-                  <ReceiveRow label="Solana wallet" entries={profileAddresses.solana} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
-                  <ReceiveRow label="Bitcoin wallet" entries={bitcoinPayoutEntries} copiedAddress={copiedAddress} onCopy={(a) => void copyAddress(a)} />
+                  <ReceiveRow
+                    label="Base wallet"
+                    entries={profileAddresses.base}
+                    statusLabel={baseReady ? (enabledRails.base ? "Connected" : "Disabled") : "Not connected"}
+                    copiedAddress={copiedAddress}
+                    onCopy={(a) => void copyAddress(a)}
+                  />
+                  <ReceiveRow
+                    label="Solana wallet"
+                    entries={profileAddresses.solana}
+                    statusLabel={solanaReady ? (enabledRails.solana ? "Connected" : "Disabled") : "Not connected"}
+                    copiedAddress={copiedAddress}
+                    onCopy={(a) => void copyAddress(a)}
+                  />
+                  <ReceiveRow
+                    label="Bitcoin wallet"
+                    entries={bitcoinPayoutEntries}
+                    statusLabel={bitcoinReady ? (enabledRails.bitcoin ? "Connected" : "Disabled") : "Not connected"}
+                    copiedAddress={copiedAddress}
+                    onCopy={(a) => void copyAddress(a)}
+                  />
                   {profile?.bitcoin_lightning_address ? (
                     <ReceiveRow
-                      label="Lightning/Spark wallet"
+                      label="Lightning settlement"
                       entries={[{ id: "bitcoin-lightning", address: profile.bitcoin_lightning_address }]}
                       copiedAddress={copiedAddress}
                       onCopy={(a) => void copyAddress(a)}
@@ -1947,6 +2158,7 @@ function PineTreeWalletRuntime() {
                 <WithdrawalFormShell
                   rail={withdrawalRail}
                   asset={withdrawalAsset}
+                  assetOptions={withdrawableAssetOptions}
                   destinationAddress={withdrawalDestination}
                   amountDecimal={withdrawalAmount}
                   review={withdrawalReview}
@@ -1956,13 +2168,8 @@ function PineTreeWalletRuntime() {
                   submitResult={withdrawalSubmitResult}
                   dynamicApprovalAvailable={dynamicApprovalAvailableForWithdrawal}
                   selectedBalance={selectedWithdrawalBalance}
-                  onRailChange={handleWithdrawalRailChange}
-                  onAssetChange={(nextAsset) => {
-                    setWithdrawalAsset(nextAsset)
-                    setWithdrawalReview(null)
-                    setWithdrawalSubmitResult(null)
-                    setWithdrawalError("")
-                  }}
+                  diagnostics={withdrawalDiagnostics}
+                  onAssetSelect={handleWithdrawalAssetSelect}
                   onDestinationChange={(value) => {
                     setWithdrawalDestination(value)
                     setWithdrawalReview(null)

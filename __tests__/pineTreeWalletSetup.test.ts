@@ -255,7 +255,7 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("prioritizes Base, Solana, and Bitcoin", () => {
-    expect(page).toContain("const walletRailRows = [")
+    expect(page).toContain("const walletRailRows = useMemo<WalletRailRow[]>(() => [")
     expect(page).toContain('label: "Base" as const')
     expect(page).toContain('label: "Solana" as const')
     expect(page).toContain('label: "Bitcoin" as const')
@@ -264,12 +264,12 @@ describe("PineTree embedded wallet setup", () => {
 
   it("front-card rail chips only show configured and enabled rails", () => {
     expect(page).toContain("function EnabledRailChips")
-    expect(page).toContain("const enabledRows = rows.filter((row) => row.enabled)")
+    expect(page).toContain("const enabledRows = rows.filter((row) => row.enabled && row.configured)")
     expect(page).toContain('aria-label="Enabled payment rails"')
     expect(page).toContain("Manage rails in Providers")
-    expect(page).toContain("enabled: baseReady && enabledRails.base")
-    expect(page).toContain("enabled: solanaReady && enabledRails.solana")
-    expect(page).toContain("enabled: bitcoinReady && enabledRails.bitcoin")
+    expect(page).toContain("configured: baseReady, enabled: enabledRails.base")
+    expect(page).toContain("configured: solanaReady, enabled: enabledRails.solana")
+    expect(page).toContain("configured: bitcoinReady, enabled: enabledRails.bitcoin")
   })
 
   it("marks the merchant wallet Connected only when Base, Solana, and Bitcoin addresses exist", () => {
@@ -294,9 +294,9 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("shows simple receive rows for Base, Solana, and Bitcoin", () => {
-    expect(page).toContain('<ReceiveRow label="Base wallet"')
-    expect(page).toContain('<ReceiveRow label="Solana wallet"')
-    expect(page).toContain('<ReceiveRow label="Bitcoin wallet"')
+    expect(page).toContain('label="Base wallet"')
+    expect(page).toContain('label="Solana wallet"')
+    expect(page).toContain('label="Bitcoin wallet"')
     expect(page).not.toContain('<ReceiveRow label="Bitcoin Lightning/Spark address"')
     expect(page).not.toContain("Powered by PineTree")
     expect(page).not.toContain("Bitcoin payouts route to your PineTree Bitcoin wallet")
@@ -304,7 +304,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("Bitcoin address pending")
     expect(page).not.toContain("Preparing Bitcoin Lightning")
     expect(page).not.toContain("Enable Bitcoin Lightning")
-    expect(page).toContain('isConnected ? "Connected" : "Not connected"')
+    expect(page).toContain('statusLabel?: "Connected" | "Not connected" | "Disabled"')
     expect(page).not.toContain(">Setup pending</p>")
   })
 
@@ -327,7 +327,9 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("function BalanceRows")
     expect(page).toContain('title: "Base"')
     expect(page).toContain('title: "Solana"')
-    expect(page).toContain('title: "Bitcoin / Lightning / Spark"')
+    expect(page).toContain('title: "Bitcoin"')
+    expect(page).toContain("Lightning settlement")
+    expect(page).toContain("Managed by Speed")
     expect(page).toContain("formatBalance(row.balance, row.asset)")
     expect(page).toContain("Pending sync")
     expect(page).not.toContain("Base balance")
@@ -441,9 +443,9 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("keeps the withdrawal form shell without redesigning the controls", () => {
-    expect(page).toContain("Withdrawal review available")
-    expect(page).toContain('aria-label="Select withdrawal asset"')
-    expect(page).toContain('aria-label="Select withdrawal rail"')
+    expect(page).toContain("1. Choose asset")
+    expect(page).toContain("assetOptions.map((option)")
+    expect(page).toContain("onAssetSelect(option.rail, option.asset)")
     expect(page).toContain('aria-label="Destination address"')
     expect(page).toContain('aria-label="Withdrawal amount"')
     expect(page).toContain("Review withdrawal")
@@ -566,10 +568,9 @@ describe("PineTree embedded wallet setup", () => {
     expect(bitcoinProvider).toContain("BITCOIN_UTXO_PROVIDER")
     expect(bitcoinProvider).toContain("BITCOIN_ESPLORA_BASE_URL")
     expect(bitcoinProvider).toContain("BITCOIN_BROADCAST_ENABLED")
-    expect(withdrawalEngine).not.toContain("speed")
+    expect(withdrawalEngine).toContain("speedPayoutAvailable: false")
     expect(withdrawalEngine).not.toContain("nwc")
     expect(withdrawalEngine).not.toContain("spark")
-    expect(withdrawalEngine).not.toContain("lightning")
   })
 
   // -------------------------------------------------------------------------

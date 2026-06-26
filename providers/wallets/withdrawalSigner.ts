@@ -23,6 +23,7 @@ export type WithdrawalReview = {
   approvalMethod?: "dynamic_browser" | "manual_review"
   estimatedStatus: "Withdrawal review available" | "Pending review" | "Processing"
   message: string
+  diagnostics?: Record<string, unknown>
 }
 
 export interface WithdrawalSigner {

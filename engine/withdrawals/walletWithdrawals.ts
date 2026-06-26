@@ -22,6 +22,7 @@ import { encodeFunctionData, parseEther, parseUnits } from "viem"
 import {
   buildBitcoinWithdrawalPsbt,
   finalizeAndBroadcastBitcoinPsbt,
+  getBitcoinProviderConfig,
   validateBitcoinAddressForConfiguredNetwork,
 } from "@/providers/wallets/bitcoinNetworkProvider"
 import {
@@ -41,6 +42,20 @@ export type CreateWalletWithdrawalReviewResult = {
   request: WalletWithdrawalRequestRecord
   review: WithdrawalReview
   canSubmit: boolean
+}
+
+type WithdrawalFallbackDiagnostics = {
+  rail: WalletWithdrawalRail
+  asset: WalletWithdrawalAsset
+  railEnabled: boolean
+  walletConnected: boolean
+  walletProfileAddressPresent: boolean
+  matchingDynamicWallet: boolean
+  dynamicMethodAvailable: boolean
+  btcBroadcastEnabled: boolean
+  btcProviderConfigured: boolean
+  speedPayoutAvailable: boolean
+  fallbackReason: string | null
 }
 
 export type SubmitWalletWithdrawalResult = {
@@ -207,10 +222,31 @@ export async function createWalletWithdrawalReview(
     walletProfileId: profile.id,
     ...validated,
   }
-  const [canSign, review] = await Promise.all([
+  const [signerCanSign, signerReview] = await Promise.all([
     signer.canSignWithdrawal(signerInput),
     signer.createWithdrawalReview(signerInput),
   ])
+  const sourceAddress = getSourceAddressForRailOrNull(profile, validated.rail)
+  const bitcoinConfig = getBitcoinProviderConfig()
+  const canSign = signerCanSign && Boolean(sourceAddress)
+  const diagnostics = buildWithdrawalDiagnostics({
+    rail: validated.rail,
+    asset: validated.asset,
+    sourceAddress,
+    signerCanSign,
+    bitcoinProviderConfigured: Boolean(bitcoinConfig),
+    bitcoinBroadcastEnabled: Boolean(bitcoinConfig?.broadcastEnabled),
+  })
+  const review: WithdrawalReview = {
+    ...signerReview,
+    signerEnabled: canSign,
+    approvalMethod: canSign ? "dynamic_browser" : "manual_review",
+    estimatedStatus: canSign ? "Withdrawal review available" : "Pending review",
+    message: canSign
+      ? "Approve with PineTree Wallet to submit this withdrawal."
+      : "Withdrawal request submitted. We'll review this withdrawal before processing.",
+    diagnostics,
+  }
 
   const request = await createWalletWithdrawalRequest({
     merchantId,
@@ -219,7 +255,10 @@ export async function createWalletWithdrawalReview(
     status: "review_required",
     provider: canSign && review.approvalMethod === "dynamic_browser" ? "dynamic" : null,
     approvalMethod: review.approvalMethod || (canSign ? "dynamic_browser" : "manual_review"),
-    reviewPayload: review,
+    reviewPayload: {
+      ...review,
+      diagnostics,
+    },
     errorMessage: null,
   })
 
@@ -489,6 +528,48 @@ function getSourceAddressForRail(
     throw Object.assign(new Error("PineTree Wallet source address is not available."), { status: 409 })
   }
   return sourceAddress
+}
+
+function getSourceAddressForRailOrNull(
+  profile: Awaited<ReturnType<typeof getPineTreeWalletProfile>>,
+  rail: WalletWithdrawalRail
+) {
+  try {
+    return getSourceAddressForRail(profile, rail)
+  } catch {
+    return null
+  }
+}
+
+function buildWithdrawalDiagnostics(input: {
+  rail: WalletWithdrawalRail
+  asset: WalletWithdrawalAsset
+  sourceAddress: string | null
+  signerCanSign: boolean
+  bitcoinProviderConfigured: boolean
+  bitcoinBroadcastEnabled: boolean
+}): WithdrawalFallbackDiagnostics {
+  const diagnostics: WithdrawalFallbackDiagnostics = {
+    rail: input.rail,
+    asset: input.asset,
+    railEnabled: true,
+    walletConnected: Boolean(input.sourceAddress),
+    walletProfileAddressPresent: Boolean(input.sourceAddress),
+    matchingDynamicWallet: input.signerCanSign,
+    dynamicMethodAvailable: input.signerCanSign,
+    btcBroadcastEnabled: input.bitcoinBroadcastEnabled,
+    btcProviderConfigured: input.bitcoinProviderConfigured,
+    speedPayoutAvailable: false,
+    fallbackReason: null,
+  }
+
+  if (!diagnostics.walletProfileAddressPresent) diagnostics.fallbackReason = "source_wallet_missing"
+  else if (input.rail === "bitcoin" && !diagnostics.btcProviderConfigured) diagnostics.fallbackReason = "btc_provider_missing"
+  else if (input.rail === "bitcoin" && !diagnostics.btcBroadcastEnabled) diagnostics.fallbackReason = "btc_broadcast_disabled"
+  else if (!diagnostics.matchingDynamicWallet) diagnostics.fallbackReason = "dynamic_wallet_unavailable"
+  else if (!diagnostics.dynamicMethodAvailable) diagnostics.fallbackReason = "dynamic_method_unavailable"
+
+  return diagnostics
 }
 
 async function buildDynamicWithdrawalPayload(input: {

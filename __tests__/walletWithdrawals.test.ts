@@ -365,6 +365,53 @@ describe("PineTree Wallet withdrawals", () => {
     }))
   })
 
+  it("stores non-secret fallback diagnostics when Dynamic is unavailable", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "")
+
+    const result = await createWalletWithdrawalReview("merchant_1", {
+      rail: "solana",
+      asset: "SOL",
+      destinationAddress: "11111111111111111111111111111111",
+      amountDecimal: "0.01",
+    }, createDefaultWithdrawalSigner())
+
+    expect(result.canSubmit).toBe(false)
+    expect(result.review.diagnostics).toMatchObject({
+      rail: "solana",
+      asset: "SOL",
+      walletProfileAddressPresent: true,
+      fallbackReason: "dynamic_wallet_unavailable",
+    })
+    expect(JSON.stringify(result.review.diagnostics)).not.toMatch(/secret|api key|token|private/i)
+  })
+
+  it("does not advertise Dynamic approval when the saved PineTree source wallet is missing", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
+    mocks.getPineTreeWalletProfile.mockResolvedValueOnce({
+      id: "wallet_profile_1",
+      merchant_id: "merchant_1",
+      base_address: null,
+      solana_address: null,
+      btc_address: BTC_SOURCE,
+      bitcoin_onchain_address: null,
+      btc_address_type: "native_segwit",
+    })
+
+    const result = await createWalletWithdrawalReview("merchant_1", {
+      rail: "base",
+      asset: "ETH",
+      destinationAddress: "0x1234567890abcdef1234567890abcdef12345678",
+      amountDecimal: "0.01",
+    }, createDefaultWithdrawalSigner())
+
+    expect(result.canSubmit).toBe(false)
+    expect(result.review.approvalMethod).toBe("manual_review")
+    expect(result.review.diagnostics).toMatchObject({
+      walletProfileAddressPresent: false,
+      fallbackReason: "source_wallet_missing",
+    })
+  })
+
   it("Bitcoin remains pending review with Dynamic configured", async () => {
     vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
 
