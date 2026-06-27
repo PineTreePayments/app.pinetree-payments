@@ -324,12 +324,9 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("Balances will update as wallet activity is indexed.")
   })
 
-  it("balances tab shows synced grouped balances without fake unsynced zeroes", () => {
+  it("balances tab shows asset-selector view without fake unsynced zeroes", () => {
     expect(page).toContain("function BalanceRows")
-    expect(page).toContain('title: "Base"')
-    expect(page).toContain('title: "Solana"')
-    expect(page).toContain('title: "Bitcoin"')
-    expect(page).toContain("Lightning settlement")
+    expect(page).toContain("Bitcoin Lightning payout")
     expect(page).not.toContain("Managed by Speed")
     expect(page).not.toContain("Powered by Speed")
     expect(page).toContain("formatBalance(row.balance, row.asset)")

@@ -93,7 +93,8 @@ describe("Solana rail enabled state", () => {
   })
 
   it("wallet overview summary uses configured && enabled for Connected status", () => {
-    expect(walletPage).toContain('row.configured && row.enabled ? "Connected" : "Not connected"')
+    expect(walletPage).toContain("row.configured && row.enabled")
+    expect(walletPage).toContain('"Connected" : "Not connected"')
   })
 
   it("wallets tab ReceiveRow for Solana derives status from solanaReady && enabledRails.solana", () => {
@@ -145,18 +146,17 @@ describe("Wallets tab — compact Lightning settlement card", () => {
     expect(walletsSection).toContain("LightningSettlementPanel")
   })
 
-  it("compact card title is Lightning settlement (not Bitcoin Lightning settlement)", () => {
-    expect(walletPage).toContain("Lightning settlement")
-    expect(walletPage).not.toContain("Bitcoin Lightning settlement")
+  it("compact payout row title is Bitcoin Lightning payout", () => {
+    expect(walletPage).toContain("Bitcoin Lightning payout")
   })
 
-  it("compact card shows Destination field", () => {
-    expect(walletPage).toContain("Destination")
+  it("compact payout row shows Destination field", () => {
+    expect(walletPage).toContain("Destination:")
   })
 
-  it("compact card has Set destination and Refresh actions", () => {
+  it("compact payout row has Set destination or Manage action", () => {
     expect(walletPage).toContain("Set destination")
-    expect(walletPage).toContain("Refresh")
+    expect(walletPage).toContain("Manage")
   })
 
   it("compact card does not show Last settlement or No settlements yet", () => {

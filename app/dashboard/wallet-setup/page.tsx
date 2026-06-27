@@ -1092,8 +1092,8 @@ function WalletOverviewSummary({
   const lastSynced = formatLastSynced(sync?.lastSyncedAt ?? null)
   return (
     <div className="space-y-3">
-      <div className="rounded-2xl border border-gray-200 bg-white px-4 py-5 shadow-sm sm:px-5">
-        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Total balance</p>
+      <div className="rounded-2xl border border-blue-100/80 bg-gradient-to-br from-blue-50/70 via-white to-white px-5 py-5 shadow-sm sm:px-6">
+        <p className="text-xs font-semibold uppercase tracking-wide text-blue-500">Total balance</p>
         <p className="mt-1 text-3xl font-semibold text-gray-950">{formatUsd(sync?.totalUsd ?? null)}</p>
         <p className="mt-2 text-xs leading-5 text-gray-500">
           {syncing ? "Syncing..." : lastSynced ? `Last synced ${lastSynced}` : "Pending sync"}
@@ -1101,26 +1101,26 @@ function WalletOverviewSummary({
       </div>
       {visibleRows.length > 0 ? (
         <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <p className="border-b border-gray-100 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500 sm:px-5">Wallet summary</p>
           <div className="divide-y divide-gray-100">
-            {visibleRows.map((row) => (
-              <div key={row.label} className="flex items-center justify-between gap-4 px-4 py-3 sm:px-5">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">{row.label}</p>
+            {visibleRows.map((row) => {
+              const railUsd = row.label === "Base"
+                ? sync?.balances.base.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) ?? null
+                : row.label === "Solana"
+                  ? sync?.balances.solana.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) ?? null
+                  : sync?.balances.bitcoin.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) ?? null
+              const connected = row.configured && row.enabled
+              return (
+                <div key={row.label} className="flex items-center gap-3 px-4 py-3 sm:px-5">
+                  <p className="min-w-0 flex-1 text-sm font-semibold text-gray-800">{row.label}</p>
                   <ProviderStatusPill
-                    label={row.configured && row.enabled ? "Connected" : "Not connected"}
-                    tone={row.configured && row.enabled ? "blue" : "default"}
-                    className="mt-1"
+                    label={connected ? "Connected" : "Not connected"}
+                    tone={connected ? "blue" : "default"}
                   />
+                  <span className="tabular-nums text-sm font-semibold text-gray-950">{formatUsd(railUsd)}</span>
                 </div>
-                <span className="text-sm font-semibold text-gray-950">
-                  {row.label === "Base"
-                    ? formatUsd(sync?.balances.base.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) ?? null)
-                    : row.label === "Solana"
-                      ? formatUsd(sync?.balances.solana.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) ?? null)
-                      : formatUsd(sync?.balances.bitcoin.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) ?? null)}
-                </span>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       ) : (
@@ -1152,37 +1152,79 @@ function BalanceRows({
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
 }) {
-  const groups: Array<{ title: string; rows: SyncedBalanceAsset[] }> = [
-    { title: "Base", rows: sync?.balances.base ?? [] },
-    { title: "Solana", rows: sync?.balances.solana ?? [] },
-    { title: "Bitcoin", rows: sync?.balances.bitcoin ?? [] },
+  const allAssets: SyncedBalanceAsset[] = [
+    ...(sync?.balances.base ?? defaultWalletSyncState.balances.base),
+    ...(sync?.balances.solana ?? defaultWalletSyncState.balances.solana),
+    ...(sync?.balances.bitcoin ?? defaultWalletSyncState.balances.bitcoin),
   ]
+  const [selectedKey, setSelectedKey] = useState(allAssets[0]?.key ?? "BASE_ETH")
+  const selectedAsset = allAssets.find((row) => row.key === selectedKey) ?? allAssets[0] ?? null
+  const assetRailLabel = (rail: SyncedBalanceAsset["rail"]) =>
+    rail === "base" ? "Base" : rail === "solana" ? "Solana" : "Bitcoin"
+  const lastSynced = formatLastSynced(sync?.lastSyncedAt ?? null)
+
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-gray-200 bg-white px-4 py-5 shadow-sm sm:px-5">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-sm font-semibold text-gray-950">Total balance</p>
-          <span className="text-sm font-semibold text-gray-950">{formatUsd(sync?.totalUsd ?? null)}</span>
-        </div>
-        <p className="mt-1 text-xs text-gray-500">
-          {syncing ? "Syncing..." : sync?.lastSyncedAt ? `Last synced ${formatLastSynced(sync.lastSyncedAt)}` : "Pending sync"}
-        </p>
-      </div>
-      {groups.map((group) => (
-        <div key={group.title} className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-sm">
-          <p className="border-b border-gray-100 px-4 py-3 text-sm font-semibold text-gray-950 sm:px-5">{group.title}</p>
-          <div className="divide-y divide-gray-100">
-            {group.rows.map((row) => (
-              <div key={row.key} className="flex items-center justify-between gap-4 px-4 py-4 text-sm sm:px-5">
-                <span className="font-semibold text-gray-800">{row.asset}</span>
-                <span className={row.status === "synced" ? "font-semibold text-gray-950" : "font-semibold text-gray-400"}>
-                  {formatBalance(row.balance, row.asset)}
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {allAssets.map((row) => {
+          const selected = row.key === selectedKey
+          return (
+            <button
+              key={row.key}
+              type="button"
+              onClick={() => setSelectedKey(row.key)}
+              className={`rounded-2xl border px-4 py-3 text-left transition ${
+                selected
+                  ? "border-blue-300 bg-blue-50 shadow-[0_8px_24px_rgba(37,99,235,0.10)]"
+                  : "border-gray-200 bg-white hover:border-blue-200 hover:bg-blue-50/40"
+              }`}
+            >
+              <span className="flex items-start justify-between gap-3">
+                <span>
+                  <span className="block text-sm font-semibold text-gray-950">{row.asset}</span>
+                  <span className="mt-0.5 block text-xs font-semibold text-gray-500">{assetRailLabel(row.rail)}</span>
                 </span>
-              </div>
-            ))}
-          </div>
+                <span className="text-right">
+                  <span className={`block text-sm font-semibold ${row.status === "synced" ? "text-gray-950" : "text-gray-400"}`}>
+                    {formatBalance(row.balance, row.asset)}
+                  </span>
+                  {row.usdValue !== null && row.status === "synced" ? (
+                    <span className="mt-0.5 block text-xs text-gray-500">≈ {formatUsd(row.usdValue)}</span>
+                  ) : null}
+                </span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      {selectedAsset ? (
+        <div className="rounded-2xl border border-gray-200 bg-white px-5 py-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Available balance</p>
+          <p className="mt-1 text-2xl font-semibold text-gray-950">
+            {formatBalance(selectedAsset.balance, selectedAsset.asset)}
+          </p>
+          {selectedAsset.usdValue !== null && selectedAsset.status === "synced" ? (
+            <p className="mt-0.5 text-sm text-gray-500">≈ {formatUsd(selectedAsset.usdValue)}</p>
+          ) : null}
+          <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+            <div>
+              <dt className="text-xs font-semibold text-gray-500">Rail</dt>
+              <dd className="mt-1 font-semibold text-gray-950">{assetRailLabel(selectedAsset.rail)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold text-gray-500">Asset</dt>
+              <dd className="mt-1 font-semibold text-gray-950">{selectedAsset.asset}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold text-gray-500">Last synced</dt>
+              <dd className="mt-1 font-semibold text-gray-950">
+                {syncing ? "Syncing..." : lastSynced ?? "Pending sync"}
+              </dd>
+            </div>
+          </dl>
         </div>
-      ))}
+      ) : null}
     </div>
   )
 }
@@ -1191,12 +1233,10 @@ function LightningSettlementPanel({
   overview,
   loading,
   onUsePineTreeBtcWallet,
-  onRefresh,
 }: {
   overview: LightningSettlementOverview | null
   loading: boolean
   onUsePineTreeBtcWallet: () => void
-  onRefresh: () => void
 }) {
   const activeDestination = overview?.destinations.find((item) =>
     item.id === overview.settings?.payout_destination_id
@@ -1212,34 +1252,27 @@ function LightningSettlementPanel({
   const settlementStatus = settlementConnected ? "Connected" : "Not connected"
 
   return (
-    <section className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-sm sm:px-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="text-sm font-semibold text-gray-950">Lightning settlement</p>
-        <ProviderStatusPill
-          label={loading ? "Pending" : settlementStatus}
-          tone={settlementConnected ? "blue" : loading ? "amber" : "default"}
-        />
+    <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-3.5 shadow-sm sm:px-5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-gray-800">Bitcoin Lightning payout</p>
+          <p className="mt-0.5 text-xs text-gray-500">Destination: {destinationLabel}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <ProviderStatusPill
+            label={loading ? "Pending" : settlementStatus}
+            tone={settlementConnected ? "blue" : loading ? "amber" : "default"}
+          />
+          <button
+            type="button"
+            onClick={onUsePineTreeBtcWallet}
+            className="h-8 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 hover:text-blue-700"
+          >
+            {activeDestination ? "Manage" : "Set destination"}
+          </button>
+        </div>
       </div>
-
-      <div className="mt-3 text-sm">
-        <p className="text-xs font-semibold uppercase text-gray-500">Destination</p>
-        <p className="mt-1 font-semibold text-gray-950">{destinationLabel}</p>
-        {activeDestination ? (
-          <p className="mt-0.5 truncate font-mono text-xs text-gray-500" title={activeDestination.destination_address}>
-            {shortAddress(activeDestination.destination_address)}
-          </p>
-        ) : null}
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button type="button" onClick={onUsePineTreeBtcWallet} className="h-9 rounded-lg bg-[#0052FF] px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700">
-          Set destination
-        </button>
-        <button type="button" onClick={onRefresh} className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50">
-          Refresh
-        </button>
-      </div>
-    </section>
+    </div>
   )
 }
 
@@ -2244,15 +2277,7 @@ function PineTreeWalletRuntime() {
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-7 sm:py-7">
 
               {activeTab === "overview" ? (
-                <div className="space-y-4">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-950">Wallet summary</p>
-                    <p className="mt-1 text-xs leading-5 text-gray-500">
-                      Enabled and connected rails with the latest indexed balance.
-                    </p>
-                  </div>
-                  <WalletOverviewSummary rows={walletRailRows} sync={walletSync} syncing={walletSyncing} />
-                </div>
+                <WalletOverviewSummary rows={walletRailRows} sync={walletSync} syncing={walletSyncing} />
               ) : null}
 
               {activeTab === "balances" ? (
@@ -2291,7 +2316,6 @@ function PineTreeWalletRuntime() {
                     overview={lightningSettlement}
                     loading={lightningSettlementLoading}
                     onUsePineTreeBtcWallet={() => void saveLightningSettlementDestination({ destinationType: "pinetree_btc_wallet" })}
-                    onRefresh={() => void fetchLightningSettlement()}
                   />
 
                   {process.env.NODE_ENV !== "production" && canRefresh ? (

@@ -28,7 +28,7 @@ describe("PineTree-native Lightning settlement", () => {
 
   it("keeps Lightning separate from normal wallet withdrawals", () => {
     expect(walletPage).toContain('type WithdrawalAsset = "ETH" | "USDC" | "SOL" | "BTC"')
-    expect(walletPage).toContain("Lightning settlement")
+    expect(walletPage).toContain("Bitcoin Lightning payout")
     expect(walletPage).not.toContain("Powered by Speed")
     expect(walletPage).not.toContain("Managed by Speed")
     expect(walletPage).not.toContain("Lightning/Spark wallet")
@@ -37,7 +37,6 @@ describe("PineTree-native Lightning settlement", () => {
 
   it("lets merchants manage the PineTree BTC Wallet destination inside PineTree", () => {
     expect(walletPage).toContain("Set destination")
-    expect(walletPage).toContain("Refresh")
     expect(walletPage).toContain("/api/wallets/lightning/settlement")
     expect(engine).toContain('destinationType: "pinetree_btc_wallet"')
     expect(engine).toContain('destinationType: "external_btc_wallet"')
