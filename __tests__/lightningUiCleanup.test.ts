@@ -97,8 +97,14 @@ describe("Solana rail enabled state", () => {
     expect(walletPage).toContain('"Connected" : "Not connected"')
   })
 
-  it("wallets tab ReceiveRow for Solana derives status from solanaReady && enabledRails.solana", () => {
-    expect(walletPage).toContain("solanaReady && enabledRails.solana ? \"Connected\" : \"Not connected\"")
+  it("wallets tab Solana wallet status derives from rail row configured && enabled via WalletRows", () => {
+    // WalletRows.railStatus() checks row.configured && row.enabled for all rails including Solana
+    const walletRowsSrc = walletPage.slice(
+      walletPage.indexOf("function WalletRows("),
+      walletPage.indexOf("function PineTreeWalletRuntime(")
+    )
+    expect(walletRowsSrc).toContain("row.configured && row.enabled")
+    expect(walletRowsSrc).toContain('"Connected" : "Not connected"')
   })
 })
 
@@ -138,12 +144,20 @@ describe("Balances tab — no duplicate Lightning settlement card", () => {
 // ---------------------------------------------------------------------------
 
 describe("Wallets tab — compact Lightning settlement card", () => {
-  it("Wallets tab renders LightningSettlementPanel", () => {
+  it("Wallets tab renders WalletRows (dropdown-driven wallet view)", () => {
     const walletsSection = walletPage.slice(
       walletPage.indexOf('activeTab === "wallets"'),
       walletPage.indexOf('activeTab === "withdraw"')
     )
-    expect(walletsSection).toContain("LightningSettlementPanel")
+    expect(walletsSection).toContain("WalletRows")
+  })
+
+  it("WalletRows renders LightningSettlementPanel as compact secondary row", () => {
+    const walletRowsSrc = walletPage.slice(
+      walletPage.indexOf("function WalletRows("),
+      walletPage.indexOf("function PineTreeWalletRuntime(")
+    )
+    expect(walletRowsSrc).toContain("LightningSettlementPanel")
   })
 
   it("compact payout row title is Bitcoin Lightning payout", () => {

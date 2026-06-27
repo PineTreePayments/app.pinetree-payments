@@ -1235,10 +1235,18 @@ function BalanceRows({
   sync,
   syncing,
   railRows,
+  profileAddresses,
+  bitcoinPayoutEntries,
+  copiedAddress,
+  onCopy,
 }: {
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
   railRows: WalletRailRow[]
+  profileAddresses: Record<"base" | "solana" | "bitcoin", AddressEntry[]>
+  bitcoinPayoutEntries: AddressEntry[]
+  copiedAddress: string
+  onCopy: (address: string) => void
 }) {
   const allAssets: SyncedBalanceAsset[] = [
     ...(sync?.balances.base ?? defaultWalletSyncState.balances.base),
@@ -1261,6 +1269,14 @@ function BalanceRows({
 
   const selectedRailRow = selectedAsset ? railRows.find((r) => r.rail === selectedAsset.rail) : null
   const selectedRailConnected = Boolean(selectedRailRow?.configured && selectedRailRow?.enabled)
+
+  const walletAddress = selectedAsset
+    ? selectedAsset.rail === "base"
+      ? profileAddresses.base[0]?.address ?? null
+      : selectedAsset.rail === "solana"
+        ? profileAddresses.solana[0]?.address ?? null
+        : bitcoinPayoutEntries[0]?.address ?? null
+    : null
 
   return (
     <div className="space-y-4">
@@ -1305,6 +1321,24 @@ function BalanceRows({
               </dd>
             </div>
           </dl>
+          {walletAddress !== null ? (
+            <div className="mt-3 border-t border-gray-100 pt-3">
+              <p className="text-xs font-semibold text-gray-500">Wallet address</p>
+              <div className="mt-1 flex min-w-0 items-center gap-2">
+                <p className="min-w-0 flex-1 truncate font-mono text-xs text-gray-800" title={walletAddress}>
+                  {walletAddress}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onCopy(walletAddress)}
+                  aria-label="Copy wallet address"
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:text-blue-700"
+                >
+                  {copiedAddress === walletAddress ? <CheckCircle2 size={15} /> : <Copy size={15} />}
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -1373,20 +1407,123 @@ function EnabledRailChips({
   rows: WalletRailRow[]
 }) {
   const enabledRows = rows.filter((row) => row.enabled && row.configured)
-  if (enabledRows.length === 0) {
-    return <p className="text-xs font-semibold text-gray-500">Manage rails in Providers</p>
-  }
 
   return (
-    <div className="flex flex-wrap items-center gap-2.5" aria-label="Enabled payment rails">
-      {enabledRows.map((rail) => (
-        <span
-          key={rail.label}
-          className="inline-flex items-center rounded-full border border-blue-100 bg-blue-50/80 px-2.5 py-1 text-xs font-semibold text-blue-700 shadow-[0_1px_0_rgba(37,99,235,0.06)]"
-        >
-          {rail.label}
-        </span>
-      ))}
+    <div>
+      <p className="mb-1.5 text-xs font-semibold text-gray-500">Connected rails</p>
+      {enabledRows.length === 0 ? (
+        <p className="text-xs text-gray-400">None connected yet</p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2.5" aria-label="Enabled payment rails">
+          {enabledRows.map((rail) => (
+            <span
+              key={rail.label}
+              className="inline-flex items-center rounded-full border border-blue-100 bg-blue-50/80 px-2.5 py-1 text-xs font-semibold text-blue-700 shadow-[0_1px_0_rgba(37,99,235,0.06)]"
+            >
+              {rail.label}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Wallet tab — dropdown-driven wallet view
+// ---------------------------------------------------------------------------
+
+function WalletRows({
+  railRows,
+  profileAddresses,
+  bitcoinPayoutEntries,
+  copiedAddress,
+  onCopy,
+  lightningSettlement,
+  lightningSettlementLoading,
+  onUsePineTreeBtcWallet,
+}: {
+  railRows: WalletRailRow[]
+  profileAddresses: Record<"base" | "solana" | "bitcoin", AddressEntry[]>
+  bitcoinPayoutEntries: AddressEntry[]
+  copiedAddress: string
+  onCopy: (address: string) => void
+  lightningSettlement: LightningSettlementOverview | null
+  lightningSettlementLoading: boolean
+  onUsePineTreeBtcWallet: () => void
+}) {
+  const [selectedKey, setSelectedKey] = useState<WithdrawalRail>("base")
+
+  const railStatus = (rail: WithdrawalRail): "Connected" | "Not connected" => {
+    const row = railRows.find((r) => r.rail === rail)
+    if (!row) return "Not connected"
+    return row.configured && row.enabled ? "Connected" : "Not connected"
+  }
+
+  const dropdownOptions: AssetDropdownOption[] = [
+    {
+      key: "base",
+      asset: "Base wallet",
+      railLabel: railStatus("base"),
+      balanceLabel: profileAddresses.base[0] ? shortAddress(profileAddresses.base[0].address) : "No address",
+      usdLabel: null,
+    },
+    {
+      key: "solana",
+      asset: "Solana wallet",
+      railLabel: railStatus("solana"),
+      balanceLabel: profileAddresses.solana[0] ? shortAddress(profileAddresses.solana[0].address) : "No address",
+      usdLabel: null,
+    },
+    {
+      key: "bitcoin",
+      asset: "Bitcoin wallet",
+      railLabel: railStatus("bitcoin"),
+      balanceLabel: bitcoinPayoutEntries[0] ? shortAddress(bitcoinPayoutEntries[0].address) : "No address",
+      usdLabel: null,
+    },
+  ]
+
+  return (
+    <div className="space-y-4">
+      <AssetSelectDropdown
+        label="Wallet"
+        options={dropdownOptions}
+        selectedKey={selectedKey}
+        onSelect={(key) => setSelectedKey(key as WithdrawalRail)}
+      />
+
+      {selectedKey === "base" ? (
+        <ReceiveRow
+          label="Base wallet"
+          entries={profileAddresses.base}
+          statusLabel={railStatus("base")}
+          copiedAddress={copiedAddress}
+          onCopy={onCopy}
+        />
+      ) : selectedKey === "solana" ? (
+        <ReceiveRow
+          label="Solana wallet"
+          entries={profileAddresses.solana}
+          statusLabel={railStatus("solana")}
+          copiedAddress={copiedAddress}
+          onCopy={onCopy}
+        />
+      ) : (
+        <ReceiveRow
+          label="Bitcoin wallet"
+          entries={bitcoinPayoutEntries}
+          statusLabel={railStatus("bitcoin")}
+          copiedAddress={copiedAddress}
+          onCopy={onCopy}
+        />
+      )}
+
+      <LightningSettlementPanel
+        overview={lightningSettlement}
+        loading={lightningSettlementLoading}
+        onUsePineTreeBtcWallet={onUsePineTreeBtcWallet}
+      />
     </div>
   )
 }
@@ -2364,36 +2501,24 @@ function PineTreeWalletRuntime() {
                     sync={walletSync}
                     syncing={walletSyncing}
                     railRows={walletRailRows}
+                    profileAddresses={profileAddresses}
+                    bitcoinPayoutEntries={bitcoinPayoutEntries}
+                    copiedAddress={copiedAddress}
+                    onCopy={(a) => void copyAddress(a)}
                   />
                 </div>
               ) : null}
 
               {activeTab === "wallets" ? (
                 <div className="space-y-3">
-                  <ReceiveRow
-                    label="Base wallet"
-                    entries={profileAddresses.base}
-                    statusLabel={baseReady && enabledRails.base ? "Connected" : "Not connected"}
+                  <WalletRows
+                    railRows={walletRailRows}
+                    profileAddresses={profileAddresses}
+                    bitcoinPayoutEntries={bitcoinPayoutEntries}
                     copiedAddress={copiedAddress}
                     onCopy={(a) => void copyAddress(a)}
-                  />
-                  <ReceiveRow
-                    label="Solana wallet"
-                    entries={profileAddresses.solana}
-                    statusLabel={solanaReady && enabledRails.solana ? "Connected" : "Not connected"}
-                    copiedAddress={copiedAddress}
-                    onCopy={(a) => void copyAddress(a)}
-                  />
-                  <ReceiveRow
-                    label="Bitcoin wallet"
-                    entries={bitcoinPayoutEntries}
-                    statusLabel={bitcoinReady && enabledRails.bitcoin ? "Connected" : "Not connected"}
-                    copiedAddress={copiedAddress}
-                    onCopy={(a) => void copyAddress(a)}
-                  />
-                  <LightningSettlementPanel
-                    overview={lightningSettlement}
-                    loading={lightningSettlementLoading}
+                    lightningSettlement={lightningSettlement}
+                    lightningSettlementLoading={lightningSettlementLoading}
                     onUsePineTreeBtcWallet={() => void saveLightningSettlementDestination({ destinationType: "pinetree_btc_wallet" })}
                   />
 

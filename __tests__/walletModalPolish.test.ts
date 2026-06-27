@@ -152,12 +152,13 @@ describe("Wallets tab — wallet addresses and Lightning payout row", () => {
     expect(walletPage).toContain("Bitcoin wallet")
   })
 
-  it("wallets tab renders LightningSettlementPanel as compact payout row", () => {
+  it("wallets tab renders WalletRows dropdown view (not stacked ReceiveRow cards)", () => {
     const walletsSection = walletPage.slice(
       walletPage.indexOf('activeTab === "wallets"'),
       walletPage.indexOf('activeTab === "withdraw"')
     )
-    expect(walletsSection).toContain("LightningSettlementPanel")
+    expect(walletsSection).toContain("WalletRows")
+    expect(walletsSection).not.toContain("<ReceiveRow")
   })
 
   it("compact payout row title is Bitcoin Lightning payout (not a big settlement card)", () => {
@@ -376,6 +377,127 @@ describe("Withdraw tab — Send header and subtitle", () => {
 })
 
 // ---------------------------------------------------------------------------
+// Connected rails label on wallet setup card
+// ---------------------------------------------------------------------------
+
+describe("Connected rails label on wallet setup card", () => {
+  it("EnabledRailChips renders Connected rails label above the pills", () => {
+    const chipsSrc = walletPage.slice(
+      walletPage.indexOf("function EnabledRailChips("),
+      walletPage.indexOf("function WalletRows(")
+    )
+    expect(chipsSrc).toContain("Connected rails")
+  })
+
+  it("EnabledRailChips shows None connected yet for empty state", () => {
+    const chipsSrc = walletPage.slice(
+      walletPage.indexOf("function EnabledRailChips("),
+      walletPage.indexOf("function WalletRows(")
+    )
+    expect(chipsSrc).toContain("None connected yet")
+  })
+
+  it("EnabledRailChips only shows connected (enabled && configured) rails as pills", () => {
+    const chipsSrc = walletPage.slice(
+      walletPage.indexOf("function EnabledRailChips("),
+      walletPage.indexOf("function WalletRows(")
+    )
+    expect(chipsSrc).toContain("row.enabled && row.configured")
+    expect(chipsSrc).toContain('aria-label="Enabled payment rails"')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Wallets tab — WalletRows dropdown view
+// ---------------------------------------------------------------------------
+
+describe("Wallets tab — WalletRows dropdown view", () => {
+  it("WalletRows renders AssetSelectDropdown with Wallet label", () => {
+    const walletRowsSrc = walletPage.slice(
+      walletPage.indexOf("function WalletRows("),
+      walletPage.indexOf("function PineTreeWalletRuntime(")
+    )
+    expect(walletRowsSrc).toContain('"Wallet"')
+    expect(walletRowsSrc).toContain("AssetSelectDropdown")
+  })
+
+  it("WalletRows renders ReceiveRow with explicit label props for each wallet", () => {
+    const walletRowsSrc = walletPage.slice(
+      walletPage.indexOf("function WalletRows("),
+      walletPage.indexOf("function PineTreeWalletRuntime(")
+    )
+    expect(walletRowsSrc).toContain('label="Base wallet"')
+    expect(walletRowsSrc).toContain('label="Solana wallet"')
+    expect(walletRowsSrc).toContain('label="Bitcoin wallet"')
+  })
+
+  it("WalletRows renders LightningSettlementPanel as compact secondary payout row", () => {
+    const walletRowsSrc = walletPage.slice(
+      walletPage.indexOf("function WalletRows("),
+      walletPage.indexOf("function PineTreeWalletRuntime(")
+    )
+    expect(walletRowsSrc).toContain("LightningSettlementPanel")
+  })
+
+  it("WalletRows shows wallet address and copy button via ReceiveRow (copiedAddress/onCopy)", () => {
+    const walletRowsSrc = walletPage.slice(
+      walletPage.indexOf("function WalletRows("),
+      walletPage.indexOf("function PineTreeWalletRuntime(")
+    )
+    expect(walletRowsSrc).toContain("onCopy")
+    expect(walletRowsSrc).toContain("copiedAddress")
+  })
+
+  it("WalletRows derives status from row.configured && row.enabled so disabled rails show Not connected", () => {
+    const walletRowsSrc = walletPage.slice(
+      walletPage.indexOf("function WalletRows("),
+      walletPage.indexOf("function PineTreeWalletRuntime(")
+    )
+    expect(walletRowsSrc).toContain("railStatus")
+    expect(walletRowsSrc).toContain("row.configured && row.enabled")
+  })
+
+  it("Bitcoin Lightning payout is compact secondary row in WalletRows, not a wallet dropdown option", () => {
+    const walletRowsSrc = walletPage.slice(
+      walletPage.indexOf("function WalletRows("),
+      walletPage.indexOf("function PineTreeWalletRuntime(")
+    )
+    // Lightning is not a wallet dropdown key
+    expect(walletRowsSrc).not.toContain('"lightning"')
+    expect(walletRowsSrc).not.toContain('"Lightning wallet"')
+    // It is rendered as LightningSettlementPanel
+    expect(walletRowsSrc).toContain("LightningSettlementPanel")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Balances tab — wallet address in detail card
+// ---------------------------------------------------------------------------
+
+describe("Balances tab — wallet address in detail card", () => {
+  it("BalanceRows detail card shows wallet address with copy button", () => {
+    const src = walletPage.slice(
+      walletPage.indexOf("function BalanceRows("),
+      walletPage.indexOf("function LightningSettlementPanel(")
+    )
+    expect(src).toContain("Wallet address")
+    expect(src).toContain("walletAddress")
+    expect(src).toContain("onCopy")
+    expect(src).toContain("copiedAddress")
+  })
+
+  it("BalanceRows walletAddress selects address from the correct rail profileAddresses entry", () => {
+    const src = walletPage.slice(
+      walletPage.indexOf("function BalanceRows("),
+      walletPage.indexOf("function LightningSettlementPanel(")
+    )
+    expect(src).toContain("profileAddresses.base[0]?.address")
+    expect(src).toContain("profileAddresses.solana[0]?.address")
+    expect(src).toContain("bitcoinPayoutEntries[0]?.address")
+  })
+})
+
+// ---------------------------------------------------------------------------
 // 16 — Provider connected/not connected behavior preserved
 // ---------------------------------------------------------------------------
 
@@ -385,12 +507,23 @@ describe("Provider connected/not connected behavior", () => {
     expect(walletPage).toContain('"Connected" : "Not connected"')
   })
 
-  it("solana status in wallets tab uses solanaReady && enabledRails.solana", () => {
-    expect(walletPage).toContain('solanaReady && enabledRails.solana ? "Connected" : "Not connected"')
+  it("solana status in wallets tab is derived from rail row configured && enabled (via WalletRows railStatus)", () => {
+    // WalletRows derives wallet status through railStatus() which checks row.configured && row.enabled
+    const walletRowsSrc = walletPage.slice(
+      walletPage.indexOf("function WalletRows("),
+      walletPage.indexOf("function PineTreeWalletRuntime(")
+    )
+    expect(walletRowsSrc).toContain("row.configured && row.enabled")
+    expect(walletRowsSrc).toContain('"Connected" : "Not connected"')
   })
 
-  it("bitcoin status in wallets tab uses bitcoinReady && enabledRails.bitcoin", () => {
-    expect(walletPage).toContain('bitcoinReady && enabledRails.bitcoin ? "Connected" : "Not connected"')
+  it("bitcoin status in wallets tab is derived from rail row configured && enabled (via WalletRows railStatus)", () => {
+    // Same railStatus() function handles all three rails including Bitcoin
+    const walletRowsSrc = walletPage.slice(
+      walletPage.indexOf("function WalletRows("),
+      walletPage.indexOf("function PineTreeWalletRuntime(")
+    )
+    expect(walletRowsSrc).toContain("row.configured && row.enabled")
   })
 
   it("providers page uses Connected/Not connected (no Disabled pill) for crypto rails", () => {
