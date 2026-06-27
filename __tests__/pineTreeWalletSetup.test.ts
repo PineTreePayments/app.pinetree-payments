@@ -459,9 +459,9 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("keeps the withdrawal form shell without redesigning the controls", () => {
-    expect(page).toContain("1. Choose asset")
+    expect(page).toContain("AssetSelectDropdown")
     expect(page).toContain("assetOptions.map((option)")
-    expect(page).toContain("onAssetSelect(option.rail, option.asset)")
+    expect(page).toContain("onAssetSelect(r as WithdrawalRail, a as WithdrawalAsset)")
     expect(page).toContain('aria-label="Destination address"')
     expect(page).toContain('aria-label="Withdrawal amount"')
     expect(page).toContain("Review withdrawal")

@@ -48,10 +48,10 @@ describe("Overview tab — polished hero and compact rail summary", () => {
 })
 
 // ---------------------------------------------------------------------------
-// 3-7 — Balances tab: asset-selector pattern
+// 3-7 — Balances tab: dropdown asset selector
 // ---------------------------------------------------------------------------
 
-describe("Balances tab — asset-selector view", () => {
+describe("Balances tab — dropdown asset selector", () => {
   it("BalanceRows uses selectedKey state for asset selection", () => {
     const src = walletPage.slice(
       walletPage.indexOf("function BalanceRows("),
@@ -61,13 +61,35 @@ describe("Balances tab — asset-selector view", () => {
     expect(src).toContain("setSelectedKey")
   })
 
-  it("BalanceRows renders all assets as selectable buttons with blue selected state", () => {
+  it("BalanceRows renders AssetSelectDropdown (not a button grid)", () => {
     const src = walletPage.slice(
       walletPage.indexOf("function BalanceRows("),
       walletPage.indexOf("function LightningSettlementPanel(")
     )
-    expect(src).toContain("border-blue-300 bg-blue-50")
-    expect(src).toContain("onClick={() => setSelectedKey(row.key)}")
+    expect(src).toContain("AssetSelectDropdown")
+    expect(src).toContain("dropdownOptions")
+    // No old button-grid per-asset onClick handler
+    expect(src).not.toContain("onClick={() => setSelectedKey(row.key)}")
+  })
+
+  it("AssetSelectDropdown uses blue highlight for selected item", () => {
+    const dropdownSrc = walletPage.slice(
+      walletPage.indexOf("function AssetSelectDropdown("),
+      walletPage.indexOf("function BalanceRows(")
+    )
+    expect(dropdownSrc).toContain("bg-blue-50")
+    expect(dropdownSrc).toContain("isSelected")
+  })
+
+  it("BalanceRows detail card shows Status field as Connected/Not connected pill (no yellow)", () => {
+    const src = walletPage.slice(
+      walletPage.indexOf("function BalanceRows("),
+      walletPage.indexOf("function LightningSettlementPanel(")
+    )
+    expect(src).toContain("selectedRailConnected")
+    expect(src).toContain('"Connected" : "Not connected"')
+    expect(src).not.toContain('"Disabled"')
+    expect(src).not.toContain('"Needs setup"')
   })
 
   it("Balances tab does not render LightningSettlementPanel", () => {
@@ -177,15 +199,49 @@ describe("Wallets tab — wallet addresses and Lightning payout row", () => {
 })
 
 // ---------------------------------------------------------------------------
-// 14-15 — Withdraw tab: default asset selection and single primary button
+// 14-15 — Withdraw tab: dropdown asset selector and single primary button
 // ---------------------------------------------------------------------------
 
-describe("Withdraw tab — default asset and single primary button", () => {
+describe("Withdraw tab — dropdown asset selector and single primary button", () => {
+  it("WithdrawalFormShell renders AssetSelectDropdown (not stacked asset cards)", () => {
+    const formSrc = walletPage.slice(
+      walletPage.indexOf("function WithdrawalFormShell("),
+      walletPage.indexOf("function formatUsd(")
+    )
+    expect(formSrc).toContain("AssetSelectDropdown")
+    expect(formSrc).not.toContain("grid-cols-3")
+  })
+
+  it("Withdraw asset dropdown maps assetOptions with railLabel/balanceLabel/usdLabel", () => {
+    const formSrc = walletPage.slice(
+      walletPage.indexOf("function WithdrawalFormShell("),
+      walletPage.indexOf("function formatUsd(")
+    )
+    expect(formSrc).toContain("assetOptions.map")
+    expect(formSrc).toContain("railLabel")
+    expect(formSrc).toContain("balanceLabel")
+    expect(formSrc).toContain("usdLabel")
+  })
+
+  it("Withdraw shows empty-state message when no enabled rails (no stacked cards)", () => {
+    const formSrc = walletPage.slice(
+      walletPage.indexOf("function WithdrawalFormShell("),
+      walletPage.indexOf("function formatUsd(")
+    )
+    expect(formSrc).toContain("Connect and enable a PineTree Wallet rail")
+  })
+
   it("withdraw auto-selects first enabled asset (never defaults to disabled rail)", () => {
     // The useEffect selects withdrawableAssetOptions[0] when current selection is no longer valid
     expect(walletPage).toContain("withdrawableAssetOptions[0]")
     // withdrawableAssetOptions filters for row.configured && row.enabled
     expect(walletPage).toContain(".filter((row) => row.configured && row.enabled)")
+  })
+
+  it("changing withdraw asset clears review and submit state", () => {
+    expect(walletPage).toContain("handleWithdrawalAssetSelect")
+    expect(walletPage).toContain("setWithdrawalReview(null)")
+    expect(walletPage).toContain("setWithdrawalSubmitResult(null)")
   })
 
   it("withdraw tab keeps one progressive primary button", () => {
@@ -199,6 +255,123 @@ describe("Withdraw tab — default asset and single primary button", () => {
     // Only one primary submit button (not multiple stacked actions)
     const buttonMatches = (formSrc.match(/onClick={primaryAction}/g) || []).length
     expect(buttonMatches).toBe(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Yellow pill removal — no Disabled/Needs setup inside wallet modal tabs
+// ---------------------------------------------------------------------------
+
+describe("No yellow pills inside PineTree Wallet modal tabs", () => {
+  it("ReceiveRow uses Connected/Not connected pills only (no amber)", () => {
+    const receiveSrc = walletPage.slice(
+      walletPage.indexOf("function ReceiveRow("),
+      walletPage.indexOf("function WithdrawalFormShell(")
+    )
+    expect(receiveSrc).toContain('"Connected" : "Not connected"')
+    expect(receiveSrc).not.toContain('tone="amber"')
+    expect(receiveSrc).not.toContain('"Disabled"')
+    expect(receiveSrc).not.toContain('"Needs setup"')
+  })
+
+  it("LightningSettlementPanel uses Connected/Not connected pills only (no amber)", () => {
+    const panelSrc = walletPage.slice(
+      walletPage.indexOf("function LightningSettlementPanel("),
+      walletPage.indexOf("function settlementStatusLabel(")
+    )
+    expect(panelSrc).toContain('settlementConnected ? "Connected" : "Not connected"')
+    expect(panelSrc).toContain('settlementConnected ? "blue" : "default"')
+    expect(panelSrc).not.toContain('"amber"')
+    expect(panelSrc).not.toContain('"Disabled"')
+    expect(panelSrc).not.toContain('"Needs setup"')
+  })
+
+  it("BalanceRows detail card does not show yellow Disabled or Needs setup pill", () => {
+    const src = walletPage.slice(
+      walletPage.indexOf("function BalanceRows("),
+      walletPage.indexOf("function LightningSettlementPanel(")
+    )
+    expect(src).not.toContain('"Disabled"')
+    expect(src).not.toContain('"Needs setup"')
+    expect(src).not.toContain('tone="amber"')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Wallet setup card — desktop layout correctness
+// ---------------------------------------------------------------------------
+
+describe("Wallet setup card — single-column compact layout", () => {
+  it("wallet setup card does not use the old stretched two-column layout", () => {
+    const cardSrc = walletPage.slice(
+      walletPage.indexOf("function PineTreeWalletRuntime("),
+      walletPage.indexOf("function PineTreeWalletPage(")
+    )
+    // Old layout: min-h-[230px] made the card unnecessarily tall on desktop
+    expect(cardSrc).not.toContain("min-h-[230px]")
+    // Old layout: sm:flex-row sm:items-start sm:justify-between put button far right
+    expect(cardSrc).not.toContain("sm:flex-row sm:items-start sm:justify-between")
+  })
+
+  it("Open/Create PineTree Wallet button is in the content flow (not a right-aligned column)", () => {
+    const cardSrc = walletPage.slice(
+      walletPage.indexOf("function PineTreeWalletRuntime("),
+      walletPage.indexOf("function PineTreeWalletPage(")
+    )
+    // Old layout: sm:items-end pushed button to far right
+    expect(cardSrc).not.toContain("sm:items-end")
+    // Button is present and in single-column content flow
+    expect(cardSrc).toContain("Open PineTree Wallet")
+    expect(cardSrc).toContain("Create PineTree Wallet")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Overview tab — Wallet Summary PineTree blue treatment
+// ---------------------------------------------------------------------------
+
+describe("Overview tab — Wallet Summary blue treatment", () => {
+  it("Wallet Summary card uses blue-tinted border (not plain gray)", () => {
+    const overviewSrc = walletPage.slice(
+      walletPage.indexOf("function WalletOverviewSummary("),
+      walletPage.indexOf("function AssetSelectDropdown(")
+    )
+    expect(overviewSrc).toContain("Wallet summary")
+    // Card container must use a blue border class
+    expect(overviewSrc).toContain("border-blue-")
+  })
+
+  it("Wallet Summary header row uses blue-tinted divider, not plain gray", () => {
+    const overviewSrc = walletPage.slice(
+      walletPage.indexOf("function WalletOverviewSummary("),
+      walletPage.indexOf("function AssetSelectDropdown(")
+    )
+    // border-b should be blue, not just border-gray-100
+    expect(overviewSrc).toContain("border-b border-blue-")
+  })
+
+  it("Total Balance card uses PineTree blue gradient (from-blue-50 family)", () => {
+    const overviewSrc = walletPage.slice(
+      walletPage.indexOf("function WalletOverviewSummary("),
+      walletPage.indexOf("function AssetSelectDropdown(")
+    )
+    expect(overviewSrc).toContain("Total balance")
+    expect(overviewSrc).toContain("from-blue-50")
+    expect(overviewSrc).toContain("border-blue-")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Withdraw tab — Send header
+// ---------------------------------------------------------------------------
+
+describe("Withdraw tab — Send header and subtitle", () => {
+  it("WithdrawalFormShell has a Send heading with descriptive subtitle", () => {
+    const formSrc = walletPage.slice(
+      walletPage.indexOf("function WithdrawalFormShell("),
+      walletPage.indexOf("function formatUsd(")
+    )
+    expect(formSrc).toContain("Choose an enabled PineTree Wallet asset")
   })
 })
 
