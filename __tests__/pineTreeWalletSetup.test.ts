@@ -329,7 +329,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('title: "Base"')
     expect(page).toContain('title: "Solana"')
     expect(page).toContain('title: "Bitcoin"')
-    expect(page).toContain("Bitcoin Lightning settlement")
+    expect(page).toContain("Lightning settlement")
     expect(page).not.toContain("Managed by Speed")
     expect(page).not.toContain("Powered by Speed")
     expect(page).toContain("formatBalance(row.balance, row.asset)")

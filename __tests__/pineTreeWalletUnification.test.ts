@@ -135,7 +135,7 @@ describe("Providers page canonical wallet mode", () => {
     expect(page).toContain('name="Bitcoin Lightning"')
     expect(page).toContain('description="Solana payments settle to the merchant\'s PineTree Wallet."')
     expect(page).toContain('description="Base payments settle to the merchant\'s PineTree Wallet."')
-    expect(page).toContain('description="Accept Bitcoin Lightning payments and settle to the selected PineTree payout destination."')
+    expect(page).toContain('description="Lightning payments settle to the merchant\'s PineTree Wallet."')
     expect(page).toContain("Manage from PineTree Wallet")
   })
 
@@ -143,7 +143,7 @@ describe("Providers page canonical wallet mode", () => {
     expect(page).toContain("function ManagedCryptoRailCard")
     expect(page).toContain(">Settlement</span>")
     expect(page).toContain(">PineTree Wallet</span>")
-    expect(page).toContain("PineTree BTC Wallet")
+    // Destination row was removed from the card; settlement label is sufficient
   })
 
   it("shows managed crypto rails as Connected or Not connected with Enabled toggles", () => {
@@ -170,8 +170,9 @@ describe("Providers page canonical wallet mode", () => {
   it("keeps Connected/Not connected status independent from the Enabled toggle", () => {
     expect(page).toContain("const connected = isCanonicalRailConfigured(provider)")
     expect(page).toContain("const enabled = isEnabled(provider)")
-    // Status pill reflects both address presence AND merchant enabled choice
-    expect(page).toContain("const statusLabel = (connected && enabled)")
+    // Status pill reflects address presence, merchant enabled choice, and platform readiness
+    expect(page).toContain("const usable = connected && enabled && lightningPlatformReady")
+    expect(page).toContain("const statusLabel = usable")
     expect(page).toContain('"Connected" : "Not connected"')
     expect(page).toContain("checked={enabled}")
   })

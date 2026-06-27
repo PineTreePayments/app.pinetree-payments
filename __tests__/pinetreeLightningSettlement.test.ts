@@ -28,7 +28,7 @@ describe("PineTree-native Lightning settlement", () => {
 
   it("keeps Lightning separate from normal wallet withdrawals", () => {
     expect(walletPage).toContain('type WithdrawalAsset = "ETH" | "USDC" | "SOL" | "BTC"')
-    expect(walletPage).toContain("Bitcoin Lightning settlement")
+    expect(walletPage).toContain("Lightning settlement")
     expect(walletPage).not.toContain("Powered by Speed")
     expect(walletPage).not.toContain("Managed by Speed")
     expect(walletPage).not.toContain("Lightning/Spark wallet")

@@ -1201,7 +1201,6 @@ function LightningSettlementPanel({
   const activeDestination = overview?.destinations.find((item) =>
     item.id === overview.settings?.payout_destination_id
   ) || overview?.destinations.find((item) => item.status === "active")
-  const lastSettlement = overview?.recentPayouts[0] || null
   const destinationLabel = activeDestination
     ? activeDestination.destination_type === "pinetree_btc_wallet"
       ? "PineTree BTC Wallet"
@@ -1210,45 +1209,26 @@ function LightningSettlementPanel({
         : "PineTree BTC Wallet"
     : "Not set"
   const settlementConnected = Boolean(activeDestination && overview?.settings?.enabled && overview?.capabilities.payoutAvailable)
-  const settlementStatus = settlementConnected
-    ? "Connected"
-    : activeDestination
-      ? "Needs setup"
-      : "Not connected"
+  const settlementStatus = settlementConnected ? "Connected" : "Not connected"
 
   return (
     <section className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-sm sm:px-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-gray-950">Bitcoin Lightning settlement</p>
-        </div>
+        <p className="text-sm font-semibold text-gray-950">Lightning settlement</p>
         <ProviderStatusPill
           label={loading ? "Pending" : settlementStatus}
-          tone={settlementStatus === "Connected" ? "blue" : settlementStatus === "Needs setup" || loading ? "amber" : "default"}
+          tone={settlementConnected ? "blue" : loading ? "amber" : "default"}
         />
       </div>
 
-      <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-        <div>
-          <p className="text-xs font-semibold uppercase text-gray-500">Settlement</p>
-          <p className="mt-1 font-semibold text-gray-950">{settlementConnected ? "Automatic" : settlementStatus}</p>
-        </div>
-        <div>
-          <p className="text-xs font-semibold uppercase text-gray-500">Destination</p>
-          <p className="mt-1 font-semibold text-gray-950">{destinationLabel}</p>
-          {activeDestination ? (
-            <p className="mt-0.5 truncate font-mono text-xs text-gray-500" title={activeDestination.destination_address}>
-              {shortAddress(activeDestination.destination_address)}
-            </p>
-          ) : null}
-        </div>
-        <div>
-          <p className="text-xs font-semibold uppercase text-gray-500">Last settlement</p>
-          <p className="mt-1 font-semibold text-gray-950">{lastSettlement ? settlementStatusLabel(lastSettlement.status) : "No settlements yet"}</p>
-          {lastSettlement?.provider_reference || lastSettlement?.tx_hash ? (
-            <p className="mt-0.5 truncate font-mono text-xs text-gray-500">{lastSettlement.tx_hash || lastSettlement.provider_reference}</p>
-          ) : null}
-        </div>
+      <div className="mt-3 text-sm">
+        <p className="text-xs font-semibold uppercase text-gray-500">Destination</p>
+        <p className="mt-1 font-semibold text-gray-950">{destinationLabel}</p>
+        {activeDestination ? (
+          <p className="mt-0.5 truncate font-mono text-xs text-gray-500" title={activeDestination.destination_address}>
+            {shortAddress(activeDestination.destination_address)}
+          </p>
+        ) : null}
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -2280,12 +2260,6 @@ function PineTreeWalletRuntime() {
                   <BalanceRows
                     sync={walletSync}
                     syncing={walletSyncing}
-                  />
-                  <LightningSettlementPanel
-                    overview={lightningSettlement}
-                    loading={lightningSettlementLoading}
-                    onUsePineTreeBtcWallet={() => void saveLightningSettlementDestination({ destinationType: "pinetree_btc_wallet" })}
-                    onRefresh={() => void fetchLightningSettlement()}
                   />
                 </div>
               ) : null}
