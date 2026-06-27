@@ -234,6 +234,15 @@ export async function createWalletWithdrawalReview(
   const sourceAddress = getSourceAddressForRailOrNull(profile, validated.rail)
   const bitcoinConfig = getBitcoinProviderConfig()
   const canSign = signerCanSign && Boolean(sourceAddress)
+  console.info("[wallet-withdrawal] review decision", {
+    merchantId,
+    rail: validated.rail,
+    asset: validated.asset,
+    signerCanSign,
+    sourceAddressPresent: Boolean(sourceAddress),
+    canSign,
+    approvalMethod: canSign ? "dynamic_browser" : "manual_review",
+  })
   const diagnostics = buildWithdrawalDiagnostics({
     rail: validated.rail,
     asset: validated.asset,
@@ -307,27 +316,19 @@ export async function submitWalletWithdrawalRequest(
   })
 
   if (request.approval_method === "dynamic_browser") {
-    const pendingReview = await updateWalletWithdrawalRequest(merchantId, request.id, {
-      status: "review_required",
-      errorMessage: null,
-      reviewPayload: {
-        ...request.review_payload,
-        merchant_status: "Pending review",
-      },
-    })
-    void insertWithdrawalAuditEvent({
-      merchantId,
-      eventType: "withdrawal.pending_review",
+    // This withdrawal requires browser-side wallet signing via the prepare → sign → complete path.
+    // submitWalletWithdrawalRequest must not be called for dynamic_browser requests; the client
+    // should POST to /prepare, sign with Dynamic, then POST to /submit.
+    console.info("[wallet-withdrawal] dynamic_browser submit rejected — use prepare/sign/complete path", {
       withdrawalId: request.id,
+      merchantId,
       rail: request.rail,
       asset: request.asset,
-      status: "review_required",
     })
-    return {
-      request: pendingReview,
-      merchantStatus: "Pending review",
-      message: "Withdrawal request submitted. We'll review this withdrawal before processing.",
-    }
+    throw Object.assign(
+      new Error("Wallet approval is required. Please approve this withdrawal with PineTree Wallet."),
+      { status: 409 }
+    )
   }
 
   if (!canSign) {

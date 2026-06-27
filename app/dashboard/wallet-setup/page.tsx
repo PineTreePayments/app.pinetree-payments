@@ -752,25 +752,28 @@ function WithdrawalFormShell({
   const maxDisabled = !selectedBalanceKnown || selectedBalanceZero
   const nativeMaxNote = isNativeWithdrawalAsset(asset) && selectedBalanceKnown && !selectedBalanceZero
   const hasSubmitted = Boolean(submitResult && submitResult.merchantStatus !== "Withdrawal failed")
-  const canResumeDynamicApproval = Boolean(review?.canSubmit && review.review.approvalMethod === "dynamic_browser" && dynamicApprovalAvailable)
+  // isDynamicBrowserApproval: server confirmed this withdrawal uses Dynamic browser signing.
+  // We route by the server's approvalMethod, not by client-side wallet discovery — wallet
+  // lookup happens at signing time and shows a clear error if the wallet isn't found.
+  const isDynamicBrowserApproval = Boolean(review?.canSubmit && review.review.approvalMethod === "dynamic_browser")
   const primaryActionLabel = submitResult
     ? submitResult.merchantStatus === "Processing"
       ? "Processing"
       : submitResult.merchantStatus === "Pending review"
         ? "Pending review"
-        : dynamicApprovalAvailable
+        : isDynamicBrowserApproval
           ? "Approve with PineTree Wallet"
           : "Submit withdrawal request"
     : submitting
-      ? dynamicApprovalAvailable
+      ? isDynamicBrowserApproval
         ? "Approving..."
         : "Submitting..."
       : reviewing
         ? "Reviewing..."
         : review
-          ? canResumeDynamicApproval
+          ? isDynamicBrowserApproval
             ? review.request.status === "review_required"
-              ? "Continue approval"
+              ? "Approve with PineTree Wallet"
               : "Approve with PineTree Wallet"
             : "Submit withdrawal request"
           : "Review withdrawal"
@@ -848,52 +851,40 @@ function WithdrawalFormShell({
 
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase text-gray-500">Amount</p>
-        <div className="rounded-[1.1rem] border border-blue-100/80 bg-[linear-gradient(135deg,rgba(239,246,255,0.72),rgba(255,255,255,0.96))] px-3 py-2.5 shadow-[0_10px_24px_rgba(37,99,235,0.06)]">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-xs font-semibold uppercase text-gray-500">Available</span>
-            {selectedBalanceKnown ? (
-              <span className="text-sm font-semibold text-gray-950">
-                {formattedAvailable} {asset}
-              </span>
-            ) : (
-              <span className="text-sm font-semibold text-gray-500">Balance indexing pending</span>
-            )}
-          </div>
-          {selectedBalanceKnown ? (
-            <p className="mt-0.5 text-xs leading-5 text-gray-500">
-              {selectedBalance?.usdValue !== null && selectedBalance?.usdValue !== undefined
-                ? `≈ ${formatUsd(selectedBalance.usdValue)}`
-                : "USD value pending"}
-            </p>
-          ) : (
-            <p className="mt-0.5 text-xs leading-5 text-gray-500">Balance will be verified before processing.</p>
-          )}
-          {nativeMaxNote ? (
-            <p className="mt-0.5 text-xs leading-5 text-gray-500">Network fees may reduce the final withdrawable amount.</p>
-          ) : null}
-        </div>
-
-        <label className="block space-y-1.5">
-          <span className="text-xs font-semibold text-gray-700">Amount</span>
-          <div className="flex gap-2">
+        <div className="flex gap-2">
+          <div className="relative min-w-0 flex-1">
             <input
               value={amountDecimal}
               onChange={(event) => onAmountChange(event.target.value)}
               inputMode="decimal"
               aria-label="Withdrawal amount"
               placeholder="0.00"
-              className="h-11 min-w-0 flex-1 rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+              className="h-11 w-full rounded-xl border border-gray-200 bg-white pl-3 pr-14 text-sm font-semibold text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
             />
-            <button
-              type="button"
-              onClick={onMaxAmount}
-              disabled={maxDisabled}
-              className="inline-flex h-11 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 disabled:shadow-none"
-            >
-              Max
-            </button>
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-gray-400">
+              {asset}
+            </span>
           </div>
-        </label>
+          <button
+            type="button"
+            onClick={onMaxAmount}
+            disabled={maxDisabled}
+            className="inline-flex h-11 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 disabled:shadow-none"
+          >
+            Max
+          </button>
+        </div>
+        <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
+          <span>
+            {selectedBalanceKnown
+              ? `Available: ${formattedAvailable} ${asset}`
+              : "Balance indexing pending"}
+            {selectedBalanceKnown && selectedBalance?.usdValue !== null && selectedBalance?.usdValue !== undefined
+              ? ` · ≈ ${formatUsd(selectedBalance.usdValue)}`
+              : null}
+          </span>
+          {!selectedBalanceKnown ? <span>Balance will be verified before processing.</span> : nativeMaxNote ? <span>Network fee may apply.</span> : null}
+        </div>
       </div>
 
       {(error || invalidAmount || missingDestination || missingAmount || selectedBalanceZero || amountExceedsBalance || noWithdrawableAssets) ? (
@@ -963,7 +954,7 @@ function WithdrawalFormShell({
               <p className="text-sm font-semibold text-gray-950">Review withdrawal</p>
               <p className="mt-1 text-xs leading-5 text-gray-500">{review.review.message}</p>
             </div>
-            <WalletStatusPill label={canResumeDynamicApproval ? "Wallet approval" : "Pending review"} tone="blue" />
+            <WalletStatusPill label={isDynamicBrowserApproval ? "Wallet approval" : "Pending review"} tone="blue" />
           </div>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
             <div>
@@ -2004,7 +1995,10 @@ function PineTreeWalletRuntime() {
     setWithdrawalError("")
     setWithdrawalSubmitResult(null)
     try {
-      if (dynamicApprovalAvailableForWithdrawal) {
+      // Route by the server's approvalMethod decision, not by client wallet-lookup state.
+      // When the server says dynamic_browser, always use prepare→sign→complete. If the
+      // Dynamic wallet is not found at signing time, the user gets a clear error to retry.
+      if (withdrawalReview?.review.approvalMethod === "dynamic_browser") {
         const prepareRes = await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/prepare`, {
           method: "POST",
           headers: {

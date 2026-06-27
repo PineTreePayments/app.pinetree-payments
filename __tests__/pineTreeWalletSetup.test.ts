@@ -396,7 +396,7 @@ describe("PineTree embedded wallet setup", () => {
 
   it("shows pending review copy when Dynamic approval is not available", () => {
     expect(page).toContain("Submit withdrawal request")
-    expect(page).toContain("if (dynamicApprovalAvailableForWithdrawal)")
+    expect(page).toContain("if (withdrawalReview?.review.approvalMethod === \"dynamic_browser\")")
     expect(page).toContain("Withdrawal request submitted")
     expect(page).toContain("Status: {submitResult.merchantStatus}")
     expect(page).toContain("Pending review")
@@ -581,7 +581,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("prepared.payload.transactionBase64")
     expect(page).toContain("wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction")
     expect(page).toContain("const dynamicSubmission = await sendDynamicPreparedWithdrawal")
-    expect(page).toContain("if (dynamicApprovalAvailableForWithdrawal)")
+    expect(page).toContain("if (withdrawalReview?.review.approvalMethod === \"dynamic_browser\")")
     expect(page).toContain("action: \"submit\"")
   })
 

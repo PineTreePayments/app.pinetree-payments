@@ -860,4 +860,132 @@ describe("PineTree Wallet withdrawals", () => {
       expect.objectContaining({ status: "confirmed" })
     )
   })
+
+  it("dynamic_browser withdrawal via direct submit path throws 409 instead of returning pending review", async () => {
+    const signer = makeSigner(true)
+    mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+    }))
+
+    await expect(
+      submitWalletWithdrawalRequest("merchant_1", "withdrawal_1", signer)
+    ).rejects.toThrow("Wallet approval is required")
+
+    expect(signer.submitWithdrawal).not.toHaveBeenCalled()
+  })
+
+  it("Solana withdrawal with Dynamic env configured returns dynamic_browser and no Pending review copy", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
+
+    const result = await createWalletWithdrawalReview("merchant_1", {
+      rail: "solana",
+      asset: "SOL",
+      destinationAddress: "11111111111111111111111111111111",
+      amountDecimal: "0.5",
+    }, createDefaultWithdrawalSigner())
+
+    expect(result.canSubmit).toBe(true)
+    expect(result.review.approvalMethod).toBe("dynamic_browser")
+    expect(result.review.estimatedStatus).toBe("Withdrawal review available")
+    expect(result.review.message).not.toContain("Pending review")
+    expect(result.request.approval_method).toBe("dynamic_browser")
+  })
+
+  it("Solana withdrawal without Dynamic env configured falls back to manual_review with merchant-safe message", async () => {
+    const result = await createWalletWithdrawalReview("merchant_1", {
+      rail: "solana",
+      asset: "SOL",
+      destinationAddress: "11111111111111111111111111111111",
+      amountDecimal: "0.5",
+    }, createDefaultWithdrawalSigner())
+
+    expect(result.canSubmit).toBe(false)
+    expect(result.review.approvalMethod).toBe("manual_review")
+    expect(result.review.message).toContain("We'll review this withdrawal before processing")
+    expect(result.review.estimatedStatus).toBe("Pending review")
+  })
+
+  it("Solana complete path stores transaction signature as tx hash and marks processing", async () => {
+    const solanaSource = "11111111111111111111111111111111"
+    // 88-character base58 Solana transaction signature
+    const solanaSig = "2222222222222222222222222222222222222222222222222222222222222222222222222222222222222222"
+    mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
+      rail: "solana",
+      asset: "SOL",
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+      status: "pending",
+      unsigned_transaction_payload: {
+        kind: "solana_transaction",
+        from: solanaSource,
+        transactionBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      },
+    }))
+
+    const result = await completeDynamicWalletWithdrawal("merchant_1", "withdrawal_1", {
+      txHash: solanaSig,
+      providerReference: "dynamic:solana-transfer",
+    })
+
+    expect(result.merchantStatus).toBe("Processing")
+    expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
+      "merchant_1",
+      "withdrawal_1",
+      expect.objectContaining({
+        status: "processing",
+        provider: "dynamic",
+        txHash: solanaSig,
+        providerReference: "dynamic:solana-transfer",
+      })
+    )
+    expect(mocks.updateWalletWithdrawalRequest).not.toHaveBeenCalledWith(
+      "merchant_1",
+      "withdrawal_1",
+      expect.objectContaining({ status: "confirmed" })
+    )
+  })
+
+  it("Base ETH and USDC prepare payloads use evm_transaction kind, not signed typed data", async () => {
+    mocks.getPineTreeWalletProfile.mockResolvedValue({
+      id: "wallet_profile_1",
+      merchant_id: "merchant_1",
+      base_address: "0x9999999999999999999999999999999999999999",
+      solana_address: null,
+    })
+
+    for (const { asset, amount } of [{ asset: "ETH", amount: "0.1" }, { asset: "USDC", amount: "5.00" }]) {
+      mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
+        rail: "base",
+        asset,
+        approval_method: "dynamic_browser",
+        provider: "dynamic",
+        amount_decimal: amount,
+      }))
+
+      const result = await prepareDynamicWalletWithdrawal("merchant_1", "withdrawal_1")
+
+      expect(result.payload.kind).toBe("evm_transaction")
+      expect(result.payload).not.toHaveProperty("types")
+      expect(result.payload).not.toHaveProperty("domain")
+      expect(result.payload).not.toHaveProperty("primaryType")
+    }
+  })
+
+  it("BTC withdrawal without BITCOIN_BROADCAST_ENABLED uses manual_review approval method", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
+    vi.stubEnv("BITCOIN_NETWORK", "mainnet")
+    vi.stubEnv("BITCOIN_UTXO_PROVIDER", "esplora")
+    vi.stubEnv("BITCOIN_ESPLORA_BASE_URL", "https://mempool.test/api")
+
+    const result = await createWalletWithdrawalReview("merchant_1", {
+      rail: "bitcoin",
+      asset: "BTC",
+      destinationAddress: BTC_DESTINATION,
+      amountDecimal: "0.0001",
+    }, createDefaultWithdrawalSigner())
+
+    expect(result.canSubmit).toBe(false)
+    expect(result.review.approvalMethod).toBe("manual_review")
+  })
 })
