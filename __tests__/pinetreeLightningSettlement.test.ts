@@ -28,23 +28,22 @@ describe("PineTree-native Lightning settlement", () => {
 
   it("keeps Lightning separate from normal wallet withdrawals", () => {
     expect(walletPage).toContain('type WithdrawalAsset = "ETH" | "USDC" | "SOL" | "BTC"')
-    expect(walletPage).toContain("Bitcoin Lightning payout")
+    expect(walletPage).not.toContain("Bitcoin Lightning payout")
     expect(walletPage).not.toContain("Powered by Speed")
     expect(walletPage).not.toContain("Managed by Speed")
     expect(walletPage).not.toContain("Lightning/Spark wallet")
     expect(walletPage).not.toContain('asset: "LIGHTNING"')
   })
 
-  it("lets merchants manage the PineTree BTC Wallet destination inside PineTree", () => {
-    expect(walletPage).toContain("Set destination")
-    expect(walletPage).toContain("/api/wallets/lightning/settlement")
+  it("keeps PineTree BTC Wallet settlement support in the backend without modal clutter", () => {
+    expect(walletPage).not.toContain("/api/wallets/lightning/settlement")
     expect(engine).toContain('destinationType: "pinetree_btc_wallet"')
     expect(engine).toContain('destinationType: "external_btc_wallet"')
     expect(engine).toContain("ensureDefaultPineTreeBtcPayoutDestination")
   })
 
-  it("shows compact settlement status and avoids Speed dashboard primary flow", () => {
-    expect(walletPage).toContain("Destination")
+  it("avoids Speed dashboard and settlement setup copy in the wallet modal", () => {
+    expect(walletPage).not.toContain("Set destination")
     expect(walletPage).not.toContain("Auto-settlement")
     expect(walletPage).not.toContain("Enable auto-settlement")
     expect(walletPage).not.toContain("Refresh settlement status")

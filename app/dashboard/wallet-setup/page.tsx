@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useDynamicContext, useUserWallets } from "@dynamic-labs/sdk-react-core"
 import { Transaction } from "@solana/web3.js"
-import { AlertTriangle, CheckCircle2, ChevronDown, Copy, RefreshCw, X } from "lucide-react"
+import { AlertTriangle, CheckCircle2, ChevronDown, Copy, X } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import {
   extractDynamicWalletAddresses,
@@ -24,7 +24,7 @@ import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/Pi
 // Types
 // ---------------------------------------------------------------------------
 
-type WalletTab = "overview" | "balances" | "wallets" | "withdraw"
+type WalletTab = "overview" | "balances" | "withdraw"
 type AddressEntry = { id: string; address: string; detail?: string }
 type WithdrawalRail = "base" | "solana" | "bitcoin"
 type WithdrawalAsset = "ETH" | "USDC" | "SOL" | "BTC"
@@ -146,38 +146,6 @@ type MerchantLightningProfile = {
   setup_source: "pinetree_managed"
 }
 
-type LightningSettlementDestination = {
-  id: string
-  destination_type: "pinetree_btc_wallet" | "external_btc_wallet" | "speed_connected_account"
-  destination_address: string
-  label: string | null
-  status: "active" | "disabled" | "pending_verification"
-}
-
-type LightningSettlementOverview = {
-  settings: {
-    enabled: boolean
-    autoswap_enabled: boolean
-    payout_destination_id: string | null
-    provider_sync_status: "not_synced" | "synced" | "pending" | "failed" | "not_available"
-  } | null
-  destinations: LightningSettlementDestination[]
-  capabilities: {
-    payoutAvailable: boolean
-    autoswapAvailable: boolean
-    connectAvailable: boolean
-    missing: string[]
-  }
-  recentPayouts: Array<{
-    id: string
-    status: "queued" | "processing" | "submitted" | "completed" | "failed" | "canceled"
-    merchant_net_amount_decimal: string
-    provider_reference: string | null
-    tx_hash: string | null
-    created_at: string
-  }>
-}
-
 type ProfileState =
   | { kind: "loading" }
   | { kind: "none" }
@@ -263,7 +231,6 @@ type WalletCreationStep =
 const walletTabs: Array<{ id: WalletTab; label: string }> = [
   { id: "overview", label: "Overview" },
   { id: "balances", label: "Balances" },
-  { id: "wallets", label: "Wallets" },
   { id: "withdraw", label: "Withdraw" },
 ]
 
@@ -707,62 +674,6 @@ function WalletDiagnosticsPanel({
   )
 }
 
-// ---------------------------------------------------------------------------
-// Receive row (inside modal)
-// ---------------------------------------------------------------------------
-
-function ReceiveRow({
-  label,
-  entries,
-  statusLabel,
-  copiedAddress,
-  onCopy,
-}: {
-  label: string
-  entries: AddressEntry[]
-  statusLabel?: "Connected" | "Not connected" | "Pending" | "Needs attention"
-  copiedAddress: string
-  onCopy: (address: string) => void
-}) {
-  const isConnected = entries.length > 0
-  const status = statusLabel || (isConnected ? "Connected" : "Not connected")
-  return (
-    <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.05)] sm:px-5 sm:py-5">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold text-gray-800">{label}</p>
-        <ProviderStatusPill
-          label={status}
-          tone={status === "Connected" ? "blue" : "default"}
-        />
-      </div>
-      {isConnected ? (
-        <div className="mt-3 space-y-3">
-          {entries.map((entry) => (
-            <div key={entry.id} className="flex min-w-0 items-center gap-2">
-              <div className="min-w-0 flex-1">
-                {entry.detail ? (
-                  <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">{entry.detail}</p>
-                ) : null}
-                <p className="truncate font-mono text-xs text-gray-800" title={entry.address}>
-                  {entry.address}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => onCopy(entry.address)}
-                aria-label={`Copy ${label}`}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:text-blue-700"
-              >
-                {copiedAddress === entry.address ? <CheckCircle2 size={15} /> : <Copy size={15} />}
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
 function WithdrawalFormShell({
   rail,
   asset,
@@ -846,7 +757,7 @@ function WithdrawalFormShell({
 
   return (
     <div className="space-y-4">
-      <div>
+      <div className="rounded-[1.2rem] border border-blue-100/80 bg-blue-50/40 px-4 py-3">
         <p className="text-base font-semibold text-gray-950">Send</p>
         <p className="mt-1 text-xs leading-5 text-gray-500">Choose an enabled PineTree Wallet asset, then review before approval.</p>
       </div>
@@ -888,7 +799,7 @@ function WithdrawalFormShell({
 
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase text-gray-500">Amount</p>
-        <div className="rounded-xl border border-gray-200 bg-gray-50/70 px-3 py-2">
+        <div className="rounded-[1.1rem] border border-blue-100/80 bg-[linear-gradient(135deg,rgba(239,246,255,0.72),rgba(255,255,255,0.96))] px-3 py-2.5 shadow-[0_10px_24px_rgba(37,99,235,0.06)]">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase text-gray-500">Available</span>
             {selectedBalanceKnown ? (
@@ -937,7 +848,7 @@ function WithdrawalFormShell({
       </div>
 
       {(error || invalidAmount || missingDestination || missingAmount || selectedBalanceZero || amountExceedsBalance || noWithdrawableAssets) ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-800">
+        <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-xs font-semibold leading-5 text-blue-800">
           {error ||
             (missingDestination
               ? "Enter a destination address to review."
@@ -968,16 +879,16 @@ function WithdrawalFormShell({
         <div className={`rounded-2xl border px-4 py-3 ${
           submitResult.merchantStatus === "Withdrawal failed"
             ? "border-red-200 bg-red-50"
-            : submitResult.merchantStatus === "Processing"
+          : submitResult.merchantStatus === "Processing"
               ? "border-blue-200 bg-blue-50"
-              : "border-amber-200 bg-amber-50"
+              : "border-gray-200 bg-gray-50"
         }`}>
           <p className={`text-sm font-semibold ${
             submitResult.merchantStatus === "Withdrawal failed"
               ? "text-red-800"
               : submitResult.merchantStatus === "Processing"
                 ? "text-blue-900"
-                : "text-amber-900"
+                : "text-gray-800"
           }`}>
             {submitResult.merchantStatus === "Processing" ? "Withdrawal submitted" : submitResult.merchantStatus === "Withdrawal failed" ? "Withdrawal failed" : "Withdrawal request submitted"}
           </p>
@@ -1083,18 +994,23 @@ function WalletOverviewSummary({
   const visibleRows = rows
   const lastSynced = formatLastSynced(sync?.lastSyncedAt ?? null)
   return (
-    <div className="space-y-3">
-      <div className="rounded-2xl border border-blue-200/70 bg-gradient-to-br from-blue-50 via-blue-50/30 to-white px-5 py-5 shadow-sm sm:px-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">Total balance</p>
-        <p className="mt-1 text-3xl font-semibold text-gray-950">{formatUsd(sync?.totalUsd ?? null)}</p>
-        <p className="mt-2 text-xs leading-5 text-gray-500">
+    <div className="space-y-4">
+      <div className="relative overflow-hidden rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_90%_8%,rgba(0,82,255,0.20),transparent_34%),linear-gradient(135deg,rgba(239,246,255,0.98),rgba(255,255,255,0.96))] px-5 py-5 shadow-[0_22px_50px_rgba(37,99,235,0.13)] sm:px-6 sm:py-6">
+        <div className="absolute -right-10 -top-12 h-32 w-32 rounded-full bg-blue-300/20 blur-2xl" />
+        <div className="relative">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">TOTAL BALANCE</p>
+          <p className="mt-2 text-[2.35rem] font-semibold leading-none tracking-normal text-gray-950 sm:text-5xl">{formatUsd(sync?.totalUsd ?? null)}</p>
+          <p className="mt-3 text-xs leading-5 text-blue-700/80">
           {syncing ? "Syncing..." : lastSynced ? `Last synced ${lastSynced}` : "Pending sync"}
-        </p>
+          </p>
+        </div>
       </div>
       {visibleRows.length > 0 ? (
-        <div className="overflow-hidden rounded-2xl border border-blue-200/60 bg-gradient-to-br from-blue-50/40 to-white shadow-sm">
-          <p className="border-b border-blue-100/60 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-blue-600 sm:px-5">Wallet summary</p>
-          <div className="divide-y divide-gray-100">
+        <div className="overflow-hidden rounded-[1.35rem] border border-blue-200/60 bg-white shadow-[0_18px_42px_rgba(15,23,42,0.07)]">
+          <div className="border-b border-blue-100/70 bg-blue-50/55 px-4 py-3 sm:px-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">WALLET SUMMARY</p>
+          </div>
+          <div className="divide-y divide-blue-50">
             {visibleRows.map((row) => {
               const railUsd = row.label === "Base"
                 ? sync?.balances.base.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) ?? null
@@ -1103,13 +1019,13 @@ function WalletOverviewSummary({
                   : sync?.balances.bitcoin.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) ?? null
               const connected = row.configured && row.enabled
               return (
-                <div key={row.label} className="flex items-center gap-3 px-4 py-3 sm:px-5">
-                  <p className="min-w-0 flex-1 text-sm font-semibold text-gray-800">{row.label}</p>
+                <div key={row.label} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 px-4 py-4 sm:px-5">
+                  <p className="min-w-0 text-sm font-semibold text-gray-900">{row.label}</p>
                   <ProviderStatusPill
                     label={connected ? "Connected" : "Not connected"}
                     tone={connected ? "blue" : "default"}
                   />
-                  <span className="tabular-nums text-sm font-semibold text-gray-950">{formatUsd(railUsd)}</span>
+                  <span className="min-w-[72px] text-right text-sm font-semibold tabular-nums text-gray-950 sm:min-w-[92px]">{formatUsd(railUsd)}</span>
                 </div>
               )
             })}
@@ -1169,22 +1085,22 @@ function AssetSelectDropdown({
 
   return (
     <div ref={containerRef} className="relative">
-      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</p>
+      <p className="mb-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">{label}</p>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 text-left shadow-sm transition hover:border-blue-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-100"
+        className="flex w-full items-center gap-3 rounded-[1.1rem] border border-blue-200/70 bg-[linear-gradient(135deg,rgba(239,246,255,0.82),rgba(255,255,255,0.98))] px-4 py-3.5 text-left shadow-[0_12px_30px_rgba(37,99,235,0.08)] transition hover:border-blue-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-100"
       >
         {selected ? (
           <span className="flex flex-1 items-start justify-between gap-3">
             <span>
               <span className="block text-sm font-semibold text-gray-950">{selected.asset}</span>
-              <span className="mt-0.5 block text-xs font-semibold text-gray-500">{selected.railLabel}</span>
+              <span className="mt-0.5 block text-xs font-semibold text-blue-700/75">{selected.railLabel}</span>
             </span>
             <span className="text-right">
               <span className="block text-sm font-semibold text-gray-950">{selected.balanceLabel}</span>
               {selected.usdLabel ? (
-                <span className="mt-0.5 block text-xs text-gray-500">{selected.usdLabel}</span>
+                <span className="mt-0.5 block text-xs text-blue-700/70">{selected.usdLabel}</span>
               ) : null}
             </span>
           </span>
@@ -1196,7 +1112,7 @@ function AssetSelectDropdown({
       </button>
 
       {open ? (
-        <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg">
+        <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-xl border border-blue-100 bg-white shadow-[0_20px_48px_rgba(15,23,42,0.16)]">
           {options.map((option) => {
             const isSelected = option.key === selectedKey
             return (
@@ -1205,21 +1121,21 @@ function AssetSelectDropdown({
                 type="button"
                 onClick={() => { onSelect(option.key); setOpen(false) }}
                 className={`flex w-full items-start justify-between gap-3 px-4 py-3 text-left transition ${
-                  isSelected ? "bg-blue-50" : "hover:bg-gray-50"
+                  isSelected ? "bg-blue-50" : "hover:bg-blue-50/50"
                 }`}
               >
                 <span>
                   <span className={`block text-sm font-semibold ${isSelected ? "text-blue-900" : "text-gray-950"}`}>
                     {option.asset}
                   </span>
-                  <span className="block text-xs text-gray-500">{option.railLabel}</span>
+                  <span className="block text-xs text-blue-700/70">{option.railLabel}</span>
                 </span>
                 <span className="text-right">
                   <span className={`block text-sm font-semibold ${isSelected ? "text-blue-900" : "text-gray-950"}`}>
                     {option.balanceLabel}
                   </span>
                   {option.usdLabel ? (
-                    <span className="block text-xs text-gray-500">{option.usdLabel}</span>
+                    <span className="block text-xs text-blue-700/70">{option.usdLabel}</span>
                   ) : null}
                 </span>
               </button>
@@ -1288,20 +1204,20 @@ function BalanceRows({
       />
 
       {selectedAsset ? (
-        <div className="rounded-2xl border border-gray-200 bg-white px-5 py-5 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Available balance</p>
+        <div className="rounded-[1.35rem] border border-blue-200/60 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.12),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(248,251,255,0.96))] px-5 py-5 shadow-[0_18px_42px_rgba(15,23,42,0.07)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">Available balance</p>
           <p className="mt-1 text-2xl font-semibold text-gray-950">
             {formatBalance(selectedAsset.balance, selectedAsset.asset)}
           </p>
           {selectedAsset.usdValue !== null && selectedAsset.status === "synced" ? (
-            <p className="mt-0.5 text-sm text-gray-500">≈ {formatUsd(selectedAsset.usdValue)}</p>
+            <p className="mt-0.5 text-sm text-blue-700/75">≈ {formatUsd(selectedAsset.usdValue)}</p>
           ) : null}
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-            <div>
+            <div className="rounded-xl border border-blue-100/70 bg-white/70 px-3 py-2.5">
               <dt className="text-xs font-semibold text-gray-500">Network</dt>
               <dd className="mt-1 font-semibold text-gray-950">{assetRailLabel(selectedAsset.rail)}</dd>
             </div>
-            <div>
+            <div className="rounded-xl border border-blue-100/70 bg-white/70 px-3 py-2.5">
               <dt className="text-xs font-semibold text-gray-500">Status</dt>
               <dd className="mt-1">
                 <ProviderStatusPill
@@ -1310,11 +1226,11 @@ function BalanceRows({
                 />
               </dd>
             </div>
-            <div>
+            <div className="rounded-xl border border-blue-100/70 bg-white/70 px-3 py-2.5">
               <dt className="text-xs font-semibold text-gray-500">Asset</dt>
               <dd className="mt-1 font-semibold text-gray-950">{selectedAsset.asset}</dd>
             </div>
-            <div>
+            <div className="rounded-xl border border-blue-100/70 bg-white/70 px-3 py-2.5">
               <dt className="text-xs font-semibold text-gray-500">Last synced</dt>
               <dd className="mt-1 font-semibold text-gray-950">
                 {syncing ? "Syncing..." : lastSynced ?? "Pending sync"}
@@ -1322,7 +1238,7 @@ function BalanceRows({
             </div>
           </dl>
           {walletAddress !== null ? (
-            <div className="mt-3 border-t border-gray-100 pt-3">
+            <div className="mt-3 rounded-xl border border-blue-100/70 bg-white/75 px-3 py-3">
               <p className="text-xs font-semibold text-gray-500">Wallet address</p>
               <div className="mt-1 flex min-w-0 items-center gap-2">
                 <p className="min-w-0 flex-1 truncate font-mono text-xs text-gray-800" title={walletAddress}>
@@ -1343,62 +1259,6 @@ function BalanceRows({
       ) : null}
     </div>
   )
-}
-
-function LightningSettlementPanel({
-  overview,
-  loading,
-  onUsePineTreeBtcWallet,
-}: {
-  overview: LightningSettlementOverview | null
-  loading: boolean
-  onUsePineTreeBtcWallet: () => void
-}) {
-  const activeDestination = overview?.destinations.find((item) =>
-    item.id === overview.settings?.payout_destination_id
-  ) || overview?.destinations.find((item) => item.status === "active")
-  const destinationLabel = activeDestination
-    ? activeDestination.destination_type === "pinetree_btc_wallet"
-      ? "PineTree BTC Wallet"
-      : activeDestination.destination_type === "external_btc_wallet"
-        ? "External BTC wallet"
-        : "PineTree BTC Wallet"
-    : "Not set"
-  const settlementConnected = Boolean(activeDestination && overview?.settings?.enabled && overview?.capabilities.payoutAvailable)
-  const settlementStatus = settlementConnected ? "Connected" : "Not connected"
-
-  return (
-    <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-3.5 shadow-sm sm:px-5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-gray-800">Bitcoin Lightning payout</p>
-          <p className="mt-0.5 text-xs text-gray-500">Destination: {destinationLabel}</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <ProviderStatusPill
-            label={loading ? "Pending" : settlementStatus}
-            tone={settlementConnected ? "blue" : "default"}
-          />
-          <button
-            type="button"
-            onClick={onUsePineTreeBtcWallet}
-            className="h-8 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 hover:text-blue-700"
-          >
-            {activeDestination ? "Manage" : "Set destination"}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function settlementStatusLabel(status: string) {
-  if (status === "queued") return "Settlement pending"
-  if (status === "processing") return "Settlement processing"
-  if (status === "submitted") return "Settlement submitted"
-  if (status === "completed") return "Settlement complete"
-  if (status === "failed") return "Settlement failed"
-  return "Settlement pending"
 }
 
 function EnabledRailChips({
@@ -1433,101 +1293,6 @@ function EnabledRailChips({
 // Wallet tab — dropdown-driven wallet view
 // ---------------------------------------------------------------------------
 
-function WalletRows({
-  railRows,
-  profileAddresses,
-  bitcoinPayoutEntries,
-  copiedAddress,
-  onCopy,
-  lightningSettlement,
-  lightningSettlementLoading,
-  onUsePineTreeBtcWallet,
-}: {
-  railRows: WalletRailRow[]
-  profileAddresses: Record<"base" | "solana" | "bitcoin", AddressEntry[]>
-  bitcoinPayoutEntries: AddressEntry[]
-  copiedAddress: string
-  onCopy: (address: string) => void
-  lightningSettlement: LightningSettlementOverview | null
-  lightningSettlementLoading: boolean
-  onUsePineTreeBtcWallet: () => void
-}) {
-  const [selectedKey, setSelectedKey] = useState<WithdrawalRail>("base")
-
-  const railStatus = (rail: WithdrawalRail): "Connected" | "Not connected" => {
-    const row = railRows.find((r) => r.rail === rail)
-    if (!row) return "Not connected"
-    return row.configured && row.enabled ? "Connected" : "Not connected"
-  }
-
-  const dropdownOptions: AssetDropdownOption[] = [
-    {
-      key: "base",
-      asset: "Base wallet",
-      railLabel: railStatus("base"),
-      balanceLabel: profileAddresses.base[0] ? shortAddress(profileAddresses.base[0].address) : "No address",
-      usdLabel: null,
-    },
-    {
-      key: "solana",
-      asset: "Solana wallet",
-      railLabel: railStatus("solana"),
-      balanceLabel: profileAddresses.solana[0] ? shortAddress(profileAddresses.solana[0].address) : "No address",
-      usdLabel: null,
-    },
-    {
-      key: "bitcoin",
-      asset: "Bitcoin wallet",
-      railLabel: railStatus("bitcoin"),
-      balanceLabel: bitcoinPayoutEntries[0] ? shortAddress(bitcoinPayoutEntries[0].address) : "No address",
-      usdLabel: null,
-    },
-  ]
-
-  return (
-    <div className="space-y-4">
-      <AssetSelectDropdown
-        label="Wallet"
-        options={dropdownOptions}
-        selectedKey={selectedKey}
-        onSelect={(key) => setSelectedKey(key as WithdrawalRail)}
-      />
-
-      {selectedKey === "base" ? (
-        <ReceiveRow
-          label="Base wallet"
-          entries={profileAddresses.base}
-          statusLabel={railStatus("base")}
-          copiedAddress={copiedAddress}
-          onCopy={onCopy}
-        />
-      ) : selectedKey === "solana" ? (
-        <ReceiveRow
-          label="Solana wallet"
-          entries={profileAddresses.solana}
-          statusLabel={railStatus("solana")}
-          copiedAddress={copiedAddress}
-          onCopy={onCopy}
-        />
-      ) : (
-        <ReceiveRow
-          label="Bitcoin wallet"
-          entries={bitcoinPayoutEntries}
-          statusLabel={railStatus("bitcoin")}
-          copiedAddress={copiedAddress}
-          onCopy={onCopy}
-        />
-      )}
-
-      <LightningSettlementPanel
-        overview={lightningSettlement}
-        loading={lightningSettlementLoading}
-        onUsePineTreeBtcWallet={onUsePineTreeBtcWallet}
-      />
-    </div>
-  )
-}
-
 // ---------------------------------------------------------------------------
 // Main runtime component
 // ---------------------------------------------------------------------------
@@ -1552,13 +1317,10 @@ function PineTreeWalletRuntime() {
   // logoutPending: waiting for Dynamic logout to complete before opening auth flow
   const [logoutPending, setLogoutPending] = useState(false)
   const [syncing, setSyncing] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
   const [copiedAddress, setCopiedAddress] = useState("")
   const [enabledRails, setEnabledRails] = useState<EnabledRailState>(defaultEnabledRails)
   const [walletSync, setWalletSync] = useState<PineTreeWalletSyncResponse>(defaultWalletSyncState)
   const [walletSyncing, setWalletSyncing] = useState(false)
-  const [lightningSettlement, setLightningSettlement] = useState<LightningSettlementOverview | null>(null)
-  const [lightningSettlementLoading, setLightningSettlementLoading] = useState(false)
   const [withdrawalRail, setWithdrawalRail] = useState<WithdrawalRail>("base")
   const [withdrawalAsset, setWithdrawalAsset] = useState<WithdrawalAsset>("ETH")
   const [withdrawalDestination, setWithdrawalDestination] = useState("")
@@ -1614,28 +1376,10 @@ function PineTreeWalletRuntime() {
     }
   }, [])
 
-  const fetchLightningSettlement = useCallback(async () => {
-    const token = accessTokenRef.current
-    if (!token) return
-    setLightningSettlementLoading(true)
-    try {
-      const res = await fetch("/api/wallets/lightning/settlement", {
-        headers: { Authorization: `Bearer ${token}` },
-        credentials: "include",
-        cache: "no-store",
-      })
-      if (!res.ok) return
-      setLightningSettlement(await res.json() as LightningSettlementOverview)
-    } finally {
-      setLightningSettlementLoading(false)
-    }
-  }, [])
-
   useEffect(() => {
     if (!walletOpen) return
     void syncPineTreeWallet()
-    void fetchLightningSettlement()
-  }, [fetchLightningSettlement, walletOpen, syncPineTreeWallet])
+  }, [walletOpen, syncPineTreeWallet])
 
   const fetchProviderRailState = useCallback(async (token: string) => {
     try {
@@ -2034,7 +1778,6 @@ function PineTreeWalletRuntime() {
     user !== null &&
     profileState.kind === "none"
 
-  const canRefresh = sdkHasLoaded && dynamicSessionMatchesProfile && user !== null && hasWallet
   const walletCreationMessage = walletCreationStepMessage(walletCreationStep)
   const walletCreationInProgress =
     walletCreationStep !== "idle" &&
@@ -2053,35 +1796,6 @@ function PineTreeWalletRuntime() {
       window.setTimeout(() => setCopiedAddress(""), 1800)
     } catch {
       setCopiedAddress("")
-    }
-  }
-
-  async function saveLightningSettlementDestination(input: {
-    destinationType: "pinetree_btc_wallet" | "external_btc_wallet"
-    destinationAddress?: string
-    label?: string
-  }) {
-    const token = accessTokenRef.current
-    if (!token) return
-    setLightningSettlementLoading(true)
-    try {
-      const res = await fetch("/api/wallets/lightning/settlement", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({
-          destination_type: input.destinationType,
-          destination_address: input.destinationAddress,
-          label: input.label,
-        }),
-      })
-      if (!res.ok) return
-      await fetchLightningSettlement()
-    } finally {
-      setLightningSettlementLoading(false)
     }
   }
 
@@ -2112,16 +1826,6 @@ function PineTreeWalletRuntime() {
       setPendingSync(true)
       setShowAuthFlow(true)
     }, 0)
-  }
-
-  async function handleRefreshAddresses() {
-    if (!canRefresh) return
-    setRefreshing(true)
-    try {
-      await syncProfileFromDynamic()
-    } finally {
-      setRefreshing(false)
-    }
   }
 
   function handleWithdrawalAssetSelect(nextRail: WithdrawalRail, nextAsset: WithdrawalAsset) {
@@ -2357,19 +2061,22 @@ function PineTreeWalletRuntime() {
 
   return (
     <>
-      <article className="rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-6 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:p-8">
-        <div className="flex items-start justify-between gap-3">
-          <h2 className="text-base font-semibold text-gray-950">PineTree Wallet</h2>
+      <article className="rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-5 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:p-6">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 max-w-xl">
+            <h2 className="text-base font-semibold text-gray-950">PineTree Wallet</h2>
+            <p className="mt-3 text-sm leading-6 text-gray-600">
+              One merchant wallet for receiving funds and managing PineTree&apos;s supported payment rails.
+            </p>
+            <div className="mt-4">
+              <EnabledRailChips rows={walletRailRows} />
+            </div>
+          </div>
           <ProviderStatusPill
-            label={syncing ? "Saving…" : walletStatus}
+            label={syncing ? "Saving..." : walletStatus}
             tone="blue"
+            className="self-start sm:self-auto"
           />
-        </div>
-        <p className="mt-3 text-sm leading-6 text-gray-600">
-          One merchant wallet for receiving funds and managing PineTree&apos;s supported payment rails.
-        </p>
-        <div className="mt-4">
-          <EnabledRailChips rows={walletRailRows} />
         </div>
 
         {!dynamicSessionMatchesProfile ? (
@@ -2406,7 +2113,7 @@ function PineTreeWalletRuntime() {
           </div>
         ) : null}
 
-        <div className="mt-6">
+        <div className="mt-6 flex justify-start">
           {hasWallet ? (
             <button
               type="button"
@@ -2445,7 +2152,7 @@ function PineTreeWalletRuntime() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="pinetree-wallet-modal-title"
-            className="flex max-h-[92dvh] w-full max-w-xl flex-col overflow-hidden rounded-[1.5rem] border border-white/70 bg-white/95 shadow-[0_32px_100px_rgba(15,23,42,0.30)] backdrop-blur-xl"
+            className="flex max-h-[92dvh] w-full max-w-[42rem] flex-col overflow-hidden rounded-[1.5rem] border border-white/70 bg-white/95 shadow-[0_32px_100px_rgba(15,23,42,0.30)] backdrop-blur-xl"
           >
             <header className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-5 sm:px-7 sm:py-6">
               <div className="min-w-0 flex-1">
@@ -2470,7 +2177,7 @@ function PineTreeWalletRuntime() {
             </header>
 
             <nav
-              className="grid shrink-0 grid-cols-4 gap-1.5 border-b border-gray-100 px-4 py-3 sm:flex sm:overflow-x-auto sm:px-6"
+              className="grid shrink-0 grid-cols-3 gap-1.5 border-b border-gray-100 px-4 py-3 sm:px-6"
               aria-label="PineTree Wallet sections"
             >
               {walletTabs.map((tab) => (
@@ -2506,34 +2213,6 @@ function PineTreeWalletRuntime() {
                     copiedAddress={copiedAddress}
                     onCopy={(a) => void copyAddress(a)}
                   />
-                </div>
-              ) : null}
-
-              {activeTab === "wallets" ? (
-                <div className="space-y-3">
-                  <WalletRows
-                    railRows={walletRailRows}
-                    profileAddresses={profileAddresses}
-                    bitcoinPayoutEntries={bitcoinPayoutEntries}
-                    copiedAddress={copiedAddress}
-                    onCopy={(a) => void copyAddress(a)}
-                    lightningSettlement={lightningSettlement}
-                    lightningSettlementLoading={lightningSettlementLoading}
-                    onUsePineTreeBtcWallet={() => void saveLightningSettlementDestination({ destinationType: "pinetree_btc_wallet" })}
-                  />
-
-                  {process.env.NODE_ENV !== "production" && canRefresh ? (
-                    <button
-                      type="button"
-                      onClick={() => void handleRefreshAddresses()}
-                      disabled={refreshing}
-                      aria-label="Refresh wallet addresses"
-                      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-600 shadow-sm transition hover:text-blue-700 disabled:opacity-50"
-                    >
-                      <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
-                      Refresh wallet addresses
-                    </button>
-                  ) : null}
                 </div>
               ) : null}
 

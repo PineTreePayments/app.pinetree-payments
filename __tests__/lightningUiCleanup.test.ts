@@ -9,35 +9,16 @@ function read(file: string) {
 const providersPage = read("app/dashboard/providers/page.tsx")
 const walletPage = read("app/dashboard/wallet-setup/page.tsx")
 
-// ---------------------------------------------------------------------------
-// 1 & 2 — Bitcoin Lightning provider card structure
-// ---------------------------------------------------------------------------
-
 describe("Bitcoin Lightning provider card cleanup", () => {
   it("ManagedCryptoRailCard no longer has the isLightning extra-rows branch", () => {
-    // isLightning was the flag that injected Destination and Status rows
     expect(providersPage).not.toContain("isLightning")
   })
 
-  it("provider card does not render a Destination row for Lightning", () => {
-    // "Destination" text was inside the removed isLightning block
+  it("provider card does not render old Lightning-specific details", () => {
     expect(providersPage).not.toContain(">Destination<")
-  })
-
-  it("provider card does not render a Status row for Lightning", () => {
-    // "Status" as a provider-card label was inside the removed isLightning block
     expect(providersPage).not.toContain(">Status<")
-  })
-
-  it("provider card does not render Auto-settlement", () => {
     expect(providersPage).not.toContain("Auto-settlement")
-  })
-
-  it("provider card does not render Processor label", () => {
     expect(providersPage).not.toContain(">Processor<")
-  })
-
-  it("provider card does not mention Powered by Speed", () => {
     expect(providersPage).not.toContain("Powered by Speed")
   })
 
@@ -47,9 +28,8 @@ describe("Bitcoin Lightning provider card cleanup", () => {
     expect(providersPage).not.toContain("Legacy Lightning")
   })
 
-  it("Bitcoin Lightning card renders Networks and Settlement rows (canonical mode)", () => {
+  it("Bitcoin Lightning card renders Networks and Settlement rows", () => {
     expect(providersPage).toContain('networks="Bitcoin Lightning"')
-    // Settlement row is present via the generic ManagedCryptoRailCard markup
     expect(providersPage).toContain(">Settlement<")
     expect(providersPage).toContain(">Networks<")
   })
@@ -60,35 +40,31 @@ describe("Bitcoin Lightning provider card cleanup", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// 3 — Disabled rails show Not connected, not a yellow Disabled pill
-// ---------------------------------------------------------------------------
-
-describe("rail status vocabulary — Connected / Not connected only", () => {
+describe("rail status vocabulary - Connected / Not connected only", () => {
   it("ManagedCryptoRailCard uses Connected or Not connected status labels", () => {
-    // The component computes statusLabel as one of two strings
     expect(providersPage).toContain('"Connected" : "Not connected"')
   })
 
   it("providers page does not use a yellow Disabled pill for crypto rails", () => {
-    // No amber/yellow "Disabled" label in the managed rail cards
     expect(providersPage).not.toContain('"Disabled"')
   })
 
   it("getLightningCardState returns Connected or Not connected, never Managed", () => {
-    // The function now derives status from actual BTC address + platform readiness
     expect(providersPage).not.toContain('"Managed" as const')
     expect(providersPage).toContain('"Connected" | "Not connected"')
   })
 })
 
-// ---------------------------------------------------------------------------
-// 4 — Solana toggled off does not show as active connected rail
-// ---------------------------------------------------------------------------
+describe("Wallet modal tabs and rail state", () => {
+  it("modal tabs are Overview, Balances, and Withdraw only", () => {
+    expect(walletPage).toContain('{ id: "overview", label: "Overview" }')
+    expect(walletPage).toContain('{ id: "balances", label: "Balances" }')
+    expect(walletPage).toContain('{ id: "withdraw", label: "Withdraw" }')
+    expect(walletPage).not.toContain('label: "Wallets"')
+    expect(walletPage).not.toContain('activeTab === "wallets"')
+  })
 
-describe("Solana rail enabled state", () => {
   it("wallet rail chip requires both configured AND enabled to show as active", () => {
-    // EnabledRailChips filters with row.enabled && row.configured
     expect(walletPage).toContain("row.enabled && row.configured")
   })
 
@@ -97,99 +73,54 @@ describe("Solana rail enabled state", () => {
     expect(walletPage).toContain('"Connected" : "Not connected"')
   })
 
-  it("wallets tab Solana wallet status derives from rail row configured && enabled via WalletRows", () => {
-    // WalletRows.railStatus() checks row.configured && row.enabled for all rails including Solana
-    const walletRowsSrc = walletPage.slice(
-      walletPage.indexOf("function WalletRows("),
-      walletPage.indexOf("function PineTreeWalletRuntime(")
-    )
-    expect(walletRowsSrc).toContain("row.configured && row.enabled")
-    expect(walletRowsSrc).toContain('"Connected" : "Not connected"')
-  })
-})
-
-// ---------------------------------------------------------------------------
-// 5 & 6 — Balances tab: one Bitcoin card, no duplicate Lightning settlement panel
-// ---------------------------------------------------------------------------
-
-describe("Balances tab — no duplicate Lightning settlement card", () => {
-  it("Balances tab renders BalanceRows (which has exactly one Bitcoin group)", () => {
-    // BalanceRows groups: Base, Solana, Bitcoin — only one Bitcoin group
+  it("balances detail status derives from the selected rail row", () => {
     const balanceRowsSrc = walletPage.slice(
       walletPage.indexOf("function BalanceRows("),
-      walletPage.indexOf("function LightningSettlementPanel(")
+      walletPage.indexOf("function EnabledRailChips(")
     )
-    expect(balanceRowsSrc).toContain('"Bitcoin"')
-    // Only one occurrence of "Bitcoin" as a group title in BalanceRows
-    const bitcoinGroupCount = (balanceRowsSrc.match(/"Bitcoin"/g) || []).length
-    expect(bitcoinGroupCount).toBe(1)
-  })
-
-  it("LightningSettlementPanel is not rendered inside the balances tab branch", () => {
-    const balancesSection = walletPage.slice(
-      walletPage.indexOf('activeTab === "balances"'),
-      walletPage.indexOf('activeTab === "wallets"')
-    )
-    expect(balancesSection).not.toContain("LightningSettlementPanel")
-  })
-
-  it("LightningSettlementPanel component appears exactly twice (definition + wallets tab)", () => {
-    const count = (walletPage.match(/LightningSettlementPanel/g) || []).length
-    expect(count).toBe(2)
+    expect(balanceRowsSrc).toContain("selectedRailRow?.configured && selectedRailRow?.enabled")
+    expect(balanceRowsSrc).toContain('"Connected" : "Not connected"')
   })
 })
 
-// ---------------------------------------------------------------------------
-// 7 — Wallets tab renders compact Lightning settlement configuration card
-// ---------------------------------------------------------------------------
-
-describe("Wallets tab — compact Lightning settlement card", () => {
-  it("Wallets tab renders WalletRows (dropdown-driven wallet view)", () => {
-    const walletsSection = walletPage.slice(
-      walletPage.indexOf('activeTab === "wallets"'),
-      walletPage.indexOf('activeTab === "withdraw"')
+describe("Balances tab wallet details", () => {
+  it("BalanceRows uses one selected asset detail view with wallet address details", () => {
+    const balanceRowsSrc = walletPage.slice(
+      walletPage.indexOf("function BalanceRows("),
+      walletPage.indexOf("function EnabledRailChips(")
     )
-    expect(walletsSection).toContain("WalletRows")
+    expect(balanceRowsSrc).toContain("AssetSelectDropdown")
+    expect(balanceRowsSrc).toContain('"Bitcoin"')
+    expect(balanceRowsSrc).toContain("Wallet address")
+    expect(balanceRowsSrc).toContain('aria-label="Copy wallet address"')
+    expect(balanceRowsSrc).not.toContain("Lightning settlement")
+    expect(balanceRowsSrc).not.toContain("groups.map")
   })
 
-  it("WalletRows renders LightningSettlementPanel as compact secondary row", () => {
-    const walletRowsSrc = walletPage.slice(
-      walletPage.indexOf("function WalletRows("),
-      walletPage.indexOf("function PineTreeWalletRuntime(")
+  it("BalanceRows selects the wallet address from the active rail", () => {
+    const balanceRowsSrc = walletPage.slice(
+      walletPage.indexOf("function BalanceRows("),
+      walletPage.indexOf("function EnabledRailChips(")
     )
-    expect(walletRowsSrc).toContain("LightningSettlementPanel")
+    expect(balanceRowsSrc).toContain("profileAddresses.base[0]?.address")
+    expect(balanceRowsSrc).toContain("profileAddresses.solana[0]?.address")
+    expect(balanceRowsSrc).toContain("bitcoinPayoutEntries[0]?.address")
   })
 
-  it("compact payout row title is Bitcoin Lightning payout", () => {
-    expect(walletPage).toContain("Bitcoin Lightning payout")
-  })
-
-  it("compact payout row shows Destination field", () => {
-    expect(walletPage).toContain("Destination:")
-  })
-
-  it("compact payout row has Set destination or Manage action", () => {
-    expect(walletPage).toContain("Set destination")
-    expect(walletPage).toContain("Manage")
-  })
-
-  it("compact card does not show Last settlement or No settlements yet", () => {
+  it("Lightning settlement panel is not part of the wallet modal", () => {
+    expect(walletPage).not.toContain("LightningSettlementPanel")
+    expect(walletPage).not.toContain("Bitcoin Lightning payout")
+    expect(walletPage).not.toContain("Destination:")
+    expect(walletPage).not.toContain("Set destination")
     expect(walletPage).not.toContain("Last settlement")
     expect(walletPage).not.toContain("No settlements yet")
-  })
-
-  it("compact card does not mention Auto-settlement", () => {
     expect(walletPage).not.toContain("Auto-settlement")
   })
 })
 
-// ---------------------------------------------------------------------------
-// 8 — Lightning connected state depends on real config/readiness
-// ---------------------------------------------------------------------------
-
 describe("Lightning connected state derives from real readiness", () => {
   it("getLightningCardState checks BTC address presence, platform config, and enabled flag", () => {
-    expect(providersPage).toContain("isCanonicalRailConfigured(\"lightning\")")
+    expect(providersPage).toContain('isCanonicalRailConfigured("lightning")')
     expect(providersPage).toContain('dashboard_status === "connected"')
     expect(providersPage).toContain('isEnabled("lightning")')
   })
@@ -198,51 +129,12 @@ describe("Lightning connected state derives from real readiness", () => {
     expect(providersPage).toContain("lightningPlatformReady")
     expect(providersPage).toContain('provider !== "lightning"')
   })
-
-  it("LightningSettlementPanel connected state requires destination, enabled, and payoutAvailable", () => {
-    expect(walletPage).toContain(
-      "Boolean(activeDestination && overview?.settings?.enabled && overview?.capabilities.payoutAvailable)"
-    )
-  })
-
-  it("LightningSettlementPanel status is only Connected or Not connected (no Needs setup)", () => {
-    expect(walletPage).toContain('settlementConnected ? "Connected" : "Not connected"')
-    expect(walletPage).not.toContain('"Needs setup"')
-  })
 })
 
-// ---------------------------------------------------------------------------
-// 9 & 10 — TrySpeed config paths (covered by providersDashboard.test.ts; mirror here)
-// ---------------------------------------------------------------------------
-
-describe("TrySpeed configuration path — merchant-facing status derivation", () => {
+describe("TrySpeed configuration path - merchant-facing status derivation", () => {
   it("platform not configured means lightning_speed dashboard_status is provider_unavailable", () => {
-    // In decorateProviderRows: dashboard_status = platformStatus.configured ? "connected" : "provider_unavailable"
-    // ManagedCryptoRailCard checks: dashboard_status === "connected" for lightningPlatformReady
-    // So provider_unavailable → lightningPlatformReady=false → statusLabel="Not connected"
-    const lightningPlatformReady = false // dashboard_status !== "connected"
-    const connected = true               // BTC address present
-    const enabled = true                 // merchant toggled on
-    const usable = connected && enabled && lightningPlatformReady
-    expect(usable).toBe(false)
-    // Merchant sees "Not connected"
-    const statusLabel = usable ? "Connected" : "Not connected"
-    expect(statusLabel).toBe("Not connected")
-  })
-
-  it("platform configured + BTC address + enabled → Connected", () => {
-    const lightningPlatformReady = true  // dashboard_status === "connected"
-    const connected = true               // BTC address present
-    const enabled = true                 // merchant toggled on
-    const usable = connected && enabled && lightningPlatformReady
-    expect(usable).toBe(true)
-    const statusLabel = usable ? "Connected" : "Not connected"
-    expect(statusLabel).toBe("Connected")
-  })
-
-  it("platform configured but no BTC address → Not connected", () => {
-    const lightningPlatformReady = true
-    const connected = false // no BTC address
+    const lightningPlatformReady = false
+    const connected = true
     const enabled = true
     const usable = connected && enabled && lightningPlatformReady
     expect(usable).toBe(false)
@@ -250,10 +142,30 @@ describe("TrySpeed configuration path — merchant-facing status derivation", ()
     expect(statusLabel).toBe("Not connected")
   })
 
-  it("platform configured + BTC address + disabled → Not connected", () => {
+  it("platform configured + BTC address + enabled is Connected", () => {
     const lightningPlatformReady = true
     const connected = true
-    const enabled = false // merchant toggled off
+    const enabled = true
+    const usable = connected && enabled && lightningPlatformReady
+    expect(usable).toBe(true)
+    const statusLabel = usable ? "Connected" : "Not connected"
+    expect(statusLabel).toBe("Connected")
+  })
+
+  it("platform configured but no BTC address is Not connected", () => {
+    const lightningPlatformReady = true
+    const connected = false
+    const enabled = true
+    const usable = connected && enabled && lightningPlatformReady
+    expect(usable).toBe(false)
+    const statusLabel = usable ? "Connected" : "Not connected"
+    expect(statusLabel).toBe("Not connected")
+  })
+
+  it("platform configured + BTC address + disabled is Not connected", () => {
+    const lightningPlatformReady = true
+    const connected = true
+    const enabled = false
     const usable = connected && enabled && lightningPlatformReady
     expect(usable).toBe(false)
     const statusLabel = usable ? "Connected" : "Not connected"
@@ -261,39 +173,18 @@ describe("TrySpeed configuration path — merchant-facing status derivation", ()
   })
 })
 
-// ---------------------------------------------------------------------------
-// 11 — No Powered by Speed or Managed by PineTree in wallet/provider cards
-// ---------------------------------------------------------------------------
-
-describe("merchant-facing copy — no internal provider jargon", () => {
+describe("merchant-facing copy - no internal provider jargon", () => {
   it("providers page does not mention Powered by Speed", () => {
     expect(providersPage).not.toContain("Powered by Speed")
   })
 
   it("providers page does not mention Managed by PineTree in crypto rail cards", () => {
-    // "Managed by PineTree" appears in card provider blocks only (shift4/stripe/fluidpay)
-    // It must NOT appear in Lightning or other crypto rail card surfaces
-    const cryptoRailsSection = providersPage.slice(
-      providersPage.indexOf("Crypto Rails")
-    )
+    const cryptoRailsSection = providersPage.slice(providersPage.indexOf("Crypto Rails"))
     expect(cryptoRailsSection).not.toContain("Managed by PineTree")
   })
 
-  it("wallet page does not mention Powered by Speed", () => {
+  it("wallet page does not mention Speed processor copy", () => {
     expect(walletPage).not.toContain("Powered by Speed")
-  })
-
-  it("wallet page does not mention Managed by Speed", () => {
     expect(walletPage).not.toContain("Managed by Speed")
-  })
-
-  it("Lightning settlement panel does not reference Speed or internal processor names", () => {
-    const panelSrc = walletPage.slice(
-      walletPage.indexOf("function LightningSettlementPanel("),
-      walletPage.indexOf("function settlementStatusLabel(")
-    )
-    expect(panelSrc).not.toContain("Speed")
-    expect(panelSrc).not.toContain("Powered by")
-    expect(panelSrc).not.toContain("Managed by")
   })
 })

@@ -243,31 +243,31 @@ describe("upsertPineTreeWalletProfile merge safety", () => {
 // ReceiveRow UI — does not show Ready when no address exists
 // ---------------------------------------------------------------------------
 
-describe("ReceiveRow status display", () => {
+describe("Balances wallet address status display", () => {
   const page = read("app/dashboard/wallet-setup/page.tsx")
 
-  it("ReceiveRow shows Connected only when entries are present", () => {
-    expect(page).toContain("const isConnected = entries.length > 0")
-    expect(page).toContain('isConnected ? "Connected" : "Not connected"')
-    expect(page).toContain('tone="blue"')
+  it("BalanceRows shows Connected only when the selected rail is configured and enabled", () => {
+    expect(page).toContain("const selectedRailConnected = Boolean(selectedRailRow?.configured && selectedRailRow?.enabled)")
+    expect(page).toContain('selectedRailConnected ? "Connected" : "Not connected"')
+    expect(page).toContain('selectedRailConnected ? "blue" : "default"')
   })
 
-  it("ReceiveRow renders address entries and copy button only when connected", () => {
-    expect(page).toContain("{isConnected ? (")
-    expect(page).toContain("{entry.address}")
-    expect(page).toContain('aria-label={`Copy ${label}`}')
+  it("BalanceRows renders wallet address and copy button only when an address exists", () => {
+    expect(page).toContain("{walletAddress !== null ? (")
+    expect(page).toContain("{walletAddress}")
+    expect(page).toContain('aria-label="Copy wallet address"')
   })
 
-  it("Bitcoin receive row uses btc_address (payout address), not bitcoin_onchain_address", () => {
+  it("Bitcoin balance detail uses btc_address payout entries", () => {
     expect(page).toContain("bitcoinPayoutEntries")
     expect(page).toContain("profile.btc_address")
-    expect(page).toContain('label="Bitcoin wallet"')
-    expect(page).toContain("entries={bitcoinPayoutEntries}")
+    expect(page).toContain("bitcoinPayoutEntries[0]?.address")
+    expect(page).not.toContain("function ReceiveRow(")
   })
 
-  it("Bitcoin receive row shows Not connected only when btc_address is missing", () => {
+  it("Bitcoin wallet address detail is absent when btc_address is missing", () => {
     expect(page).toContain("const bitcoinPayoutEntries: AddressEntry[] = profile?.btc_address")
-    expect(page).toContain('isConnected ? "Connected" : "Not connected"')
+    expect(page).toContain("bitcoinPayoutEntries[0]?.address ?? null")
   })
 })
 
