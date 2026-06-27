@@ -7,6 +7,7 @@ import {
   type WalletWithdrawalRail,
   type WalletWithdrawalRequestRecord,
 } from "@/database/walletWithdrawalRequests"
+import { insertWithdrawalAuditEvent } from "@/database/merchantAuditEvents"
 import {
   createAssociatedTokenAccountInstruction,
   createTransferCheckedInstruction,
@@ -266,6 +267,16 @@ export async function createWalletWithdrawalReview(
     errorMessage: null,
   })
 
+  void insertWithdrawalAuditEvent({
+    merchantId,
+    eventType: "withdrawal.review_created",
+    withdrawalId: request.id,
+    rail: validated.rail,
+    asset: validated.asset,
+    status: request.status,
+    metadata: { approval_method: review.approvalMethod, can_submit: canSign },
+  })
+
   return {
     request,
     review,
@@ -304,6 +315,14 @@ export async function submitWalletWithdrawalRequest(
         merchant_status: "Pending review",
       },
     })
+    void insertWithdrawalAuditEvent({
+      merchantId,
+      eventType: "withdrawal.pending_review",
+      withdrawalId: request.id,
+      rail: request.rail,
+      asset: request.asset,
+      status: "review_required",
+    })
     return {
       request: pendingReview,
       merchantStatus: "Pending review",
@@ -319,6 +338,14 @@ export async function submitWalletWithdrawalRequest(
         ...request.review_payload,
         merchant_status: "Pending review",
       },
+    })
+    void insertWithdrawalAuditEvent({
+      merchantId,
+      eventType: "withdrawal.pending_review",
+      withdrawalId: request.id,
+      rail: request.rail,
+      asset: request.asset,
+      status: "review_required",
     })
     return {
       request: pendingReview,
@@ -346,6 +373,15 @@ export async function submitWalletWithdrawalRequest(
       txHash: submitted.txHash || null,
       errorMessage: null,
     })
+    void insertWithdrawalAuditEvent({
+      merchantId,
+      eventType: "withdrawal.processing",
+      withdrawalId: request.id,
+      rail: request.rail,
+      asset: request.asset,
+      status: "processing",
+      metadata: { tx_hash: submitted.txHash || null, provider: submitted.provider },
+    })
     return {
       request: accepted,
       merchantStatus: "Processing",
@@ -355,6 +391,14 @@ export async function submitWalletWithdrawalRequest(
     const failed = await updateWalletWithdrawalRequest(merchantId, request.id, {
       status: "failed",
       errorMessage: getMerchantSafeWithdrawalError(error),
+    })
+    void insertWithdrawalAuditEvent({
+      merchantId,
+      eventType: "withdrawal.failed",
+      withdrawalId: request.id,
+      rail: request.rail,
+      asset: request.asset,
+      status: "failed",
     })
     return {
       request: failed,
@@ -488,6 +532,15 @@ export async function completeDynamicWalletWithdrawal(
       },
       errorMessage: null,
     })
+    void insertWithdrawalAuditEvent({
+      merchantId,
+      eventType: "withdrawal.processing",
+      withdrawalId: request.id,
+      rail: request.rail,
+      asset: request.asset,
+      status: "processing",
+      metadata: { tx_hash: broadcast.txid, provider: "dynamic" },
+    })
     return {
       request: updated,
       merchantStatus: "Processing",
@@ -507,6 +560,16 @@ export async function completeDynamicWalletWithdrawal(
     txHash,
     signedPayload: input.signedPayload || null,
     errorMessage: null,
+  })
+
+  void insertWithdrawalAuditEvent({
+    merchantId,
+    eventType: "withdrawal.processing",
+    withdrawalId: request.id,
+    rail: request.rail,
+    asset: request.asset,
+    status: "processing",
+    metadata: { tx_hash: txHash, provider: "dynamic" },
   })
 
   return {

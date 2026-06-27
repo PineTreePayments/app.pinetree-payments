@@ -124,9 +124,12 @@ export async function GET(req: NextRequest) {
     if (isSpeedPlatformTreasurySweepEnabled()) {
       const profile = await getPineTreeWalletProfile(merchantId)
       const speedConfig = getPineTreeSpeedConfigStatus()
-      const status: MerchantLightningProfileStatus = speedConfig.configured
-        ? "ready"
-        : "needs_attention"
+      const btcReady = Boolean(profile?.btc_address && profile.btc_payout_enabled)
+      const status: MerchantLightningProfileStatus = !speedConfig.configured
+        ? "needs_attention"
+        : !btcReady
+          ? "pending"
+          : "ready"
 
       return NextResponse.json({
         profile: {
@@ -179,9 +182,11 @@ export async function POST(req: NextRequest) {
       const speedConfig = getPineTreeSpeedConfigStatus()
       const walletProfile = await getPineTreeWalletProfile(merchantId)
       const btcAddressReady = Boolean(walletProfile?.btc_address && walletProfile.btc_payout_enabled)
-      const nextStatus: MerchantLightningProfileStatus = speedConfig.configured
-        ? "ready"
-        : "needs_attention"
+      const nextStatus: MerchantLightningProfileStatus = !speedConfig.configured
+        ? "needs_attention"
+        : !btcAddressReady
+          ? "pending"
+          : "ready"
 
       const lightningProfile = await upsertMerchantLightningProfile({
         merchantId,

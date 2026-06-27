@@ -913,10 +913,11 @@ describe("PineTree embedded wallet setup", () => {
     expect(lightningApiRoute).toContain("speed_platform_config_missing")
   })
 
-  it("merchant Lightning profile is ready on Speed config while BTC payout readiness remains internal", () => {
+  it("merchant Lightning profile requires BTC address to be ready before status is ready", () => {
     expect(lightningApiRoute).toContain("const btcAddressReady = Boolean(walletProfile?.btc_address && walletProfile.btc_payout_enabled)")
     expect(lightningApiRoute).toContain("walletProfile?.btc_address && walletProfile.btc_payout_enabled")
-    expect(lightningApiRoute).toContain('const nextStatus: MerchantLightningProfileStatus = speedConfig.configured')
+    expect(lightningApiRoute).toContain("const nextStatus: MerchantLightningProfileStatus = !speedConfig.configured")
+    expect(lightningApiRoute).toContain("!btcAddressReady")
     expect(lightningApiRoute).toContain('internal_readiness_issue: btcAddressReady ? null : "btc_address_missing"')
     expect(lightningApiRoute).not.toContain('"Bitcoin address pending for PineTree Wallet."')
   })

@@ -20,6 +20,11 @@ vi.mock("@/database/walletWithdrawalRequests", () => ({
   updateWalletWithdrawalRequest: mocks.updateWalletWithdrawalRequest,
 }))
 
+vi.mock("@/database/merchantAuditEvents", () => ({
+  insertWithdrawalAuditEvent: vi.fn().mockResolvedValue(undefined),
+  insertMerchantAuditEvent: vi.fn().mockResolvedValue(undefined),
+}))
+
 import {
   completeDynamicWalletWithdrawal,
   createWalletWithdrawalReview,

@@ -26,6 +26,7 @@ import {
   getSpeedLightningCapabilities,
   syncSpeedAutoswapSettings,
 } from "@/providers/speed/speedLightningSettlement"
+import { validateBitcoinAddressForConfiguredNetwork } from "@/providers/wallets/bitcoinNetworkProvider"
 
 type SettlementSummary = {
   scanned: number
@@ -140,8 +141,14 @@ export async function setLightningSettlementDestination(input: {
   destinationAddress?: string | null
   label?: string | null
 }) {
-  if (input.destinationType === "external_btc_wallet" && !String(input.destinationAddress || "").trim()) {
-    throw Object.assign(new Error("External BTC payout address is required."), { status: 400 })
+  if (input.destinationType === "external_btc_wallet") {
+    const addr = String(input.destinationAddress || "").trim()
+    if (!addr) {
+      throw Object.assign(new Error("External BTC payout address is required."), { status: 400 })
+    }
+    if (!validateBitcoinAddressForConfiguredNetwork(addr)) {
+      throw Object.assign(new Error("External BTC payout address is not a valid Bitcoin address."), { status: 400 })
+    }
   }
 
   const destination = input.destinationType === "pinetree_btc_wallet"

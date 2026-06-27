@@ -6,7 +6,15 @@ const supabase = supabaseAdmin || supabaseAnon
  * Merchant-scoped audit event types.
  * Extend this union as new auditable actions are added.
  */
-export type MerchantAuditEventType = "webhook.secret_regenerated"
+export type WithdrawalAuditEventType =
+  | "withdrawal.review_created"
+  | "withdrawal.pending_review"
+  | "withdrawal.processing"
+  | "withdrawal.confirmed"
+  | "withdrawal.failed"
+  | "withdrawal.canceled"
+
+export type MerchantAuditEventType = "webhook.secret_regenerated" | WithdrawalAuditEventType
 
 export type MerchantAuditEvent = {
   id: string
@@ -37,6 +45,28 @@ export type MerchantAuditEvent = {
  *
  * ─────────────────────────────────────────────────────────────────────────
  */
+export async function insertWithdrawalAuditEvent(input: {
+  merchantId: string
+  eventType: WithdrawalAuditEventType
+  withdrawalId: string
+  rail: string
+  asset: string
+  status: string
+  metadata?: Record<string, unknown>
+}): Promise<void> {
+  await insertMerchantAuditEvent({
+    merchantId: input.merchantId,
+    eventType: input.eventType,
+    metadata: {
+      withdrawal_id: input.withdrawalId,
+      rail: input.rail,
+      asset: input.asset,
+      status: input.status,
+      ...(input.metadata || {}),
+    },
+  })
+}
+
 export async function insertMerchantAuditEvent(input: {
   merchantId: string
   eventType: MerchantAuditEventType
