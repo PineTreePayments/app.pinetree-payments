@@ -240,16 +240,19 @@ describe("upsertPineTreeWalletProfile merge safety", () => {
 })
 
 // ---------------------------------------------------------------------------
-// ReceiveRow UI — does not show Ready when no address exists
+// Balances wallet address UI - does not show redundant status field
 // ---------------------------------------------------------------------------
 
-describe("Balances wallet address status display", () => {
+describe("Balances wallet address display", () => {
   const page = read("app/dashboard/wallet-setup/page.tsx")
 
-  it("BalanceRows shows Connected only when the selected rail is configured and enabled", () => {
-    expect(page).toContain("const selectedRailConnected = Boolean(selectedRailRow?.configured && selectedRailRow?.enabled)")
-    expect(page).toContain('selectedRailConnected ? "Connected" : "Not connected"')
-    expect(page).toContain('selectedRailConnected ? "blue" : "default"')
+  it("BalanceRows does not render the old visible status field", () => {
+    const balanceRowsSrc = page.slice(
+      page.indexOf("function BalanceRows("),
+      page.indexOf("function EnabledRailChips(")
+    )
+    expect(balanceRowsSrc).not.toContain(">Status<")
+    expect(balanceRowsSrc).not.toContain("selectedRailConnected")
   })
 
   it("BalanceRows renders wallet address and copy button only when an address exists", () => {

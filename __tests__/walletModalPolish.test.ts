@@ -60,6 +60,15 @@ describe("Overview tab - polished PineTree summary", () => {
     expect(src).toContain("border-b border-blue-")
   })
 
+  it("Wallet Summary rows keep rail, status, and amount aligned", () => {
+    const src = walletOverviewSrc()
+    expect(src).toContain("grid-cols-[minmax(0,1fr)_8.75rem_minmax(4.5rem,auto)]")
+    expect(src).toContain("sm:grid-cols-[minmax(0,1fr)_9.5rem_minmax(5.75rem,auto)]")
+    expect(src).toContain("className=\"flex justify-center\"")
+    expect(src).toContain("className=\"w-full justify-center\"")
+    expect(src).toContain("text-right")
+  })
+
   it("shows Last synced or Pending sync copy", () => {
     const src = walletOverviewSrc()
     expect(src).toContain("Last synced")
@@ -97,7 +106,6 @@ describe("Balances tab - dropdown asset selector and wallet detail", () => {
     expect(src).toContain("formatBalance(selectedAsset.balance, selectedAsset.asset)")
     expect(src).toContain("formatUsd(selectedAsset.usdValue)")
     expect(src).toContain("Network")
-    expect(src).toContain("Status")
     expect(src).toContain("Last synced")
     expect(src).toContain("Wallet address")
     expect(src).toContain('aria-label="Copy wallet address"')
@@ -110,10 +118,11 @@ describe("Balances tab - dropdown asset selector and wallet detail", () => {
     expect(src).toContain("bitcoinPayoutEntries[0]?.address")
   })
 
-  it("BalanceRows detail status uses Connected/Not connected with no yellow setup states", () => {
+  it("BalanceRows detail card does not render a Status field", () => {
     const src = balanceRowsSrc()
-    expect(src).toContain("selectedRailRow?.configured && selectedRailRow?.enabled")
-    expect(src).toContain('"Connected" : "Not connected"')
+    expect(src).not.toContain(">Status<")
+    expect(src).not.toContain("selectedRailConnected")
+    expect(src).not.toContain("selectedRailRow")
     expect(src).not.toContain('"Disabled"')
     expect(src).not.toContain('"Needs setup"')
     expect(src).not.toContain('tone="amber"')
@@ -198,8 +207,19 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     const src = runtimeSrc()
     expect(src).not.toContain("min-h-[230px]")
     expect(src).not.toContain("sm:items-end")
+    expect(src).not.toContain("sm:flex-row sm:items-start sm:justify-between")
     expect(src).toContain("p-5")
     expect(src).toContain("sm:p-6")
+    expect(src).toContain("max-w-2xl")
+    expect(src).toContain("max-w-xl")
+  })
+
+  it("main Connected pill renders in the wallet setup card header area", () => {
+    const src = runtimeSrc()
+    expect(src).toContain("flex items-start justify-between gap-4")
+    expect(src).toContain("<h2 className=\"min-w-0 text-base font-semibold text-gray-950\">PineTree Wallet</h2>")
+    expect(src).toContain("label={syncing ? \"Saving...\" : walletStatus}")
+    expect(src).toContain("className=\"shrink-0\"")
   })
 
   it("Open/Create PineTree Wallet button remains in the content flow", () => {
@@ -218,6 +238,17 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(chipsSrc).toContain("None connected yet")
     expect(chipsSrc).toContain("row.enabled && row.configured")
     expect(chipsSrc).toContain('aria-label="Enabled payment rails"')
+  })
+
+  it("Connected rails group only renders rail pills, not the main wallet status pill", () => {
+    const chipsSrc = walletPage.slice(
+      walletPage.indexOf("function EnabledRailChips("),
+      walletPage.indexOf("function PineTreeWalletRuntime(")
+    )
+    expect(chipsSrc).toContain("{enabledRows.map((rail) => (")
+    expect(chipsSrc).toContain("{rail.label}")
+    expect(chipsSrc).not.toContain("ProviderStatusPill")
+    expect(chipsSrc).not.toContain("walletStatus")
   })
 })
 

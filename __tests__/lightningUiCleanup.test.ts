@@ -73,13 +73,13 @@ describe("Wallet modal tabs and rail state", () => {
     expect(walletPage).toContain('"Connected" : "Not connected"')
   })
 
-  it("balances detail status derives from the selected rail row", () => {
+  it("balances detail does not render a redundant Status field", () => {
     const balanceRowsSrc = walletPage.slice(
       walletPage.indexOf("function BalanceRows("),
       walletPage.indexOf("function EnabledRailChips(")
     )
-    expect(balanceRowsSrc).toContain("selectedRailRow?.configured && selectedRailRow?.enabled")
-    expect(balanceRowsSrc).toContain('"Connected" : "Not connected"')
+    expect(balanceRowsSrc).not.toContain(">Status<")
+    expect(balanceRowsSrc).not.toContain("selectedRailConnected")
   })
 })
 

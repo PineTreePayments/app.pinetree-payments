@@ -1019,12 +1019,15 @@ function WalletOverviewSummary({
                   : sync?.balances.bitcoin.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) ?? null
               const connected = row.configured && row.enabled
               return (
-                <div key={row.label} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 px-4 py-4 sm:px-5">
+                <div key={row.label} className="grid grid-cols-[minmax(0,1fr)_8.75rem_minmax(4.5rem,auto)] items-center gap-3 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_9.5rem_minmax(5.75rem,auto)] sm:px-5">
                   <p className="min-w-0 text-sm font-semibold text-gray-900">{row.label}</p>
-                  <ProviderStatusPill
-                    label={connected ? "Connected" : "Not connected"}
-                    tone={connected ? "blue" : "default"}
-                  />
+                  <span className="flex justify-center">
+                    <ProviderStatusPill
+                      label={connected ? "Connected" : "Not connected"}
+                      tone={connected ? "blue" : "default"}
+                      className="w-full justify-center"
+                    />
+                  </span>
                   <span className="min-w-[72px] text-right text-sm font-semibold tabular-nums text-gray-950 sm:min-w-[92px]">{formatUsd(railUsd)}</span>
                 </div>
               )
@@ -1150,7 +1153,6 @@ function AssetSelectDropdown({
 function BalanceRows({
   sync,
   syncing,
-  railRows,
   profileAddresses,
   bitcoinPayoutEntries,
   copiedAddress,
@@ -1158,7 +1160,6 @@ function BalanceRows({
 }: {
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
-  railRows: WalletRailRow[]
   profileAddresses: Record<"base" | "solana" | "bitcoin", AddressEntry[]>
   bitcoinPayoutEntries: AddressEntry[]
   copiedAddress: string
@@ -1182,9 +1183,6 @@ function BalanceRows({
     balanceLabel: formatBalance(row.balance, row.asset),
     usdLabel: row.usdValue !== null && row.status === "synced" ? `≈ ${formatUsd(row.usdValue)}` : null,
   }))
-
-  const selectedRailRow = selectedAsset ? railRows.find((r) => r.rail === selectedAsset.rail) : null
-  const selectedRailConnected = Boolean(selectedRailRow?.configured && selectedRailRow?.enabled)
 
   const walletAddress = selectedAsset
     ? selectedAsset.rail === "base"
@@ -1216,15 +1214,6 @@ function BalanceRows({
             <div className="rounded-xl border border-blue-100/70 bg-white/70 px-3 py-2.5">
               <dt className="text-xs font-semibold text-gray-500">Network</dt>
               <dd className="mt-1 font-semibold text-gray-950">{assetRailLabel(selectedAsset.rail)}</dd>
-            </div>
-            <div className="rounded-xl border border-blue-100/70 bg-white/70 px-3 py-2.5">
-              <dt className="text-xs font-semibold text-gray-500">Status</dt>
-              <dd className="mt-1">
-                <ProviderStatusPill
-                  label={selectedRailConnected ? "Connected" : "Not connected"}
-                  tone={selectedRailConnected ? "blue" : "default"}
-                />
-              </dd>
             </div>
             <div className="rounded-xl border border-blue-100/70 bg-white/70 px-3 py-2.5">
               <dt className="text-xs font-semibold text-gray-500">Asset</dt>
@@ -2061,22 +2050,22 @@ function PineTreeWalletRuntime() {
 
   return (
     <>
-      <article className="rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-5 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:p-6">
-        <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0 max-w-xl">
-            <h2 className="text-base font-semibold text-gray-950">PineTree Wallet</h2>
-            <p className="mt-3 text-sm leading-6 text-gray-600">
-              One merchant wallet for receiving funds and managing PineTree&apos;s supported payment rails.
-            </p>
-            <div className="mt-4">
-              <EnabledRailChips rows={walletRailRows} />
-            </div>
-          </div>
+      <article className="max-w-2xl rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-5 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:p-6">
+        <div className="flex items-start justify-between gap-4">
+          <h2 className="min-w-0 text-base font-semibold text-gray-950">PineTree Wallet</h2>
           <ProviderStatusPill
             label={syncing ? "Saving..." : walletStatus}
             tone="blue"
-            className="self-start sm:self-auto"
+            className="shrink-0"
           />
+        </div>
+        <div className="mt-3 max-w-xl">
+          <p className="text-sm leading-6 text-gray-600">
+            One merchant wallet for receiving funds and managing PineTree&apos;s supported payment rails.
+          </p>
+          <div className="mt-4">
+            <EnabledRailChips rows={walletRailRows} />
+          </div>
         </div>
 
         {!dynamicSessionMatchesProfile ? (
@@ -2207,7 +2196,6 @@ function PineTreeWalletRuntime() {
                   <BalanceRows
                     sync={walletSync}
                     syncing={walletSyncing}
-                    railRows={walletRailRows}
                     profileAddresses={profileAddresses}
                     bitcoinPayoutEntries={bitcoinPayoutEntries}
                     copiedAddress={copiedAddress}
