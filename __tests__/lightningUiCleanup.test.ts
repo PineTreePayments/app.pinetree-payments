@@ -109,8 +109,9 @@ describe("Balances tab wallet details", () => {
 
   it("Lightning settlement panel is not part of the wallet modal", () => {
     expect(walletPage).not.toContain("LightningSettlementPanel")
-    expect(walletPage).not.toContain("Bitcoin Lightning payout")
-    expect(walletPage).not.toContain("Destination:")
+    expect(walletPage).toContain("Bitcoin Lightning payout")
+    expect(walletPage).toContain("Destination: {lightningPayout.destinationLabel}")
+    expect(walletPage).toContain("PineTree BTC Wallet")
     expect(walletPage).not.toContain("Set destination")
     expect(walletPage).not.toContain("Last settlement")
     expect(walletPage).not.toContain("No settlements yet")

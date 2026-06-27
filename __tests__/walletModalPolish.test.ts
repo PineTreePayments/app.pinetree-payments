@@ -62,11 +62,18 @@ describe("Overview tab - polished PineTree summary", () => {
 
   it("Wallet Summary rows keep rail, status, and amount aligned", () => {
     const src = walletOverviewSrc()
-    expect(src).toContain("grid-cols-[minmax(0,1fr)_8.75rem_minmax(4.5rem,auto)]")
-    expect(src).toContain("sm:grid-cols-[minmax(0,1fr)_9.5rem_minmax(5.75rem,auto)]")
+    expect(src).toContain("grid-cols-[minmax(0,1fr)_7.25rem_minmax(4.5rem,auto)]")
+    expect(src).toContain("sm:grid-cols-[minmax(0,1fr)_7.75rem_minmax(5.75rem,auto)]")
     expect(src).toContain("className=\"flex justify-center\"")
-    expect(src).toContain("className=\"w-full justify-center\"")
+    expect(src).toContain("className=\"min-w-[5.75rem] justify-center\"")
     expect(src).toContain("text-right")
+  })
+
+  it("PineTree Wallet status pills use compact wallet-local styling", () => {
+    expect(walletPage).toContain("function WalletStatusPill")
+    expect(walletPage).toContain("min-h-0 px-3 py-1 text-[11px] leading-none")
+    expect(walletOverviewSrc()).toContain("WalletStatusPill")
+    expect(runtimeSrc()).toContain("WalletStatusPill")
   })
 
   it("shows Last synced or Pending sync copy", () => {
@@ -128,6 +135,15 @@ describe("Balances tab - dropdown asset selector and wallet detail", () => {
     expect(src).not.toContain('tone="amber"')
   })
 
+  it("BTC wallet address can exist while BTC balance indexing remains pending", () => {
+    const src = balanceRowsSrc()
+    expect(walletPage).toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
+    expect(src).toContain("bitcoinPayoutEntries[0]?.address")
+    expect(src).toContain("formatBalance(row.balance, row.asset)")
+    expect(walletPage).toContain('{ key: "BTC", rail: "bitcoin", asset: "BTC", balance: null')
+    expect(src).not.toContain("Speed")
+  })
+
   it("Balances tab does not render Lightning settlement UI", () => {
     const balancesSection = walletPage.slice(
       walletPage.indexOf('activeTab === "balances"'),
@@ -155,7 +171,17 @@ describe("Wallets tab removed", () => {
     expect(walletPage).not.toContain("function WalletRows(")
     expect(walletPage).not.toContain("function ReceiveRow(")
     expect(walletPage).not.toContain("LightningSettlementPanel")
-    expect(walletPage).not.toContain("Bitcoin Lightning payout")
+  })
+
+  it("Bitcoin Lightning payout is compact and PineTree-facing", () => {
+    const src = walletOverviewSrc()
+    expect(src).toContain("Bitcoin Lightning payout")
+    expect(src).toContain("Destination: {lightningPayout.destinationLabel}")
+    expect(src).toContain('"PineTree BTC Wallet"')
+    expect(src).toContain('"Not set"')
+    expect(src).toContain("lightningPayout.connected ? \"Connected\" : \"Not connected\"")
+    expect(src).not.toContain("Speed")
+    expect(src).not.toContain("Auto-settlement")
   })
 })
 
@@ -174,9 +200,18 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     expect(src).toContain("usdLabel")
   })
 
-  it("withdraw auto-selects first enabled asset and clears review state on change", () => {
+  it("Withdraw helper copy is wallet-asset based, not enabled-rail based", () => {
+    const src = withdrawalFormSrc()
+    expect(src).toContain("Choose a PineTree Wallet asset, then review before approval.")
+    expect(src).not.toContain("Choose an enabled PineTree Wallet asset")
+    expect(src).toContain("Balance will be verified before processing.")
+  })
+
+  it("withdraw auto-selects first wallet-backed asset and clears review state on change", () => {
     expect(walletPage).toContain("withdrawableAssetOptions[0]")
-    expect(walletPage).toContain(".filter((row) => row.configured && row.enabled)")
+    expect(walletPage).toContain("const withdrawalWalletRows = useMemo(() => [")
+    expect(walletPage).toContain(".filter((row) => row.configured)")
+    expect(walletPage).not.toContain(".filter((row) => row.configured && row.enabled)")
     expect(walletPage).toContain("handleWithdrawalAssetSelect")
     expect(walletPage).toContain("setWithdrawalReview(null)")
     expect(walletPage).toContain("setWithdrawalSubmitResult(null)")

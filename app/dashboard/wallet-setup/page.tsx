@@ -430,7 +430,6 @@ function formatUsdEstimate(balance: SyncedBalanceAsset | null) {
 }
 
 function getWithdrawalFallbackReason(input: WithdrawalDiagnostics) {
-  if (!input.railEnabled) return "rail_disabled"
   if (!input.walletConnected) return "wallet_not_connected"
   if (!input.walletProfileAddressPresent) return "source_wallet_missing"
   if (input.addressMismatch) return "address_mismatch"
@@ -478,6 +477,24 @@ const walletCreationDebugEnabled =
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
+
+function WalletStatusPill({
+  label,
+  tone,
+  className = "",
+}: {
+  label: string
+  tone: "blue" | "default"
+  className?: string
+}) {
+  return (
+    <ProviderStatusPill
+      label={label}
+      tone={tone}
+      className={`min-h-0 px-3 py-1 text-[11px] leading-none ${className}`}
+    />
+  )
+}
 
 function WalletProfileShell({
   status,
@@ -759,7 +776,7 @@ function WithdrawalFormShell({
     <div className="space-y-4">
       <div className="rounded-[1.2rem] border border-blue-100/80 bg-blue-50/40 px-4 py-3">
         <p className="text-base font-semibold text-gray-950">Send</p>
-        <p className="mt-1 text-xs leading-5 text-gray-500">Choose an enabled PineTree Wallet asset, then review before approval.</p>
+        <p className="mt-1 text-xs leading-5 text-gray-500">Choose a PineTree Wallet asset, then review before approval.</p>
       </div>
       {assetOptions.length > 0 ? (
         <AssetSelectDropdown
@@ -782,7 +799,7 @@ function WithdrawalFormShell({
         />
       ) : (
         <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-500">
-          Connect and enable a PineTree Wallet rail in Providers before withdrawing.
+          Create or connect a PineTree Wallet address before withdrawing.
         </div>
       )}
 
@@ -859,7 +876,7 @@ function WithdrawalFormShell({
                   : selectedBalanceZero
                     ? "No available balance for this asset."
                     : noWithdrawableAssets
-                      ? "No enabled connected withdrawal assets are available."
+                      ? "No PineTree Wallet source address is available for withdrawals."
                       : "Amount exceeds available balance.")}
         </div>
       ) : null}
@@ -914,7 +931,7 @@ function WithdrawalFormShell({
               <p className="text-sm font-semibold text-gray-950">Review withdrawal</p>
               <p className="mt-1 text-xs leading-5 text-gray-500">{review.review.message}</p>
             </div>
-            <ProviderStatusPill label={canResumeDynamicApproval ? "Wallet approval" : "Pending review"} tone="blue" />
+            <WalletStatusPill label={canResumeDynamicApproval ? "Wallet approval" : "Pending review"} tone="blue" />
           </div>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
             <div>
@@ -986,10 +1003,15 @@ function WalletOverviewSummary({
   rows,
   sync,
   syncing,
+  lightningPayout,
 }: {
   rows: WalletRailRow[]
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
+  lightningPayout: {
+    connected: boolean
+    destinationLabel: "PineTree BTC Wallet" | "Not set"
+  }
 }) {
   const visibleRows = rows
   const lastSynced = formatLastSynced(sync?.lastSyncedAt ?? null)
@@ -1019,13 +1041,13 @@ function WalletOverviewSummary({
                   : sync?.balances.bitcoin.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) ?? null
               const connected = row.configured && row.enabled
               return (
-                <div key={row.label} className="grid grid-cols-[minmax(0,1fr)_8.75rem_minmax(4.5rem,auto)] items-center gap-3 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_9.5rem_minmax(5.75rem,auto)] sm:px-5">
+                <div key={row.label} className="grid grid-cols-[minmax(0,1fr)_7.25rem_minmax(4.5rem,auto)] items-center gap-3 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_7.75rem_minmax(5.75rem,auto)] sm:px-5">
                   <p className="min-w-0 text-sm font-semibold text-gray-900">{row.label}</p>
                   <span className="flex justify-center">
-                    <ProviderStatusPill
+                    <WalletStatusPill
                       label={connected ? "Connected" : "Not connected"}
                       tone={connected ? "blue" : "default"}
-                      className="w-full justify-center"
+                      className="min-w-[5.75rem] justify-center"
                     />
                   </span>
                   <span className="min-w-[72px] text-right text-sm font-semibold tabular-nums text-gray-950 sm:min-w-[92px]">{formatUsd(railUsd)}</span>
@@ -1052,6 +1074,21 @@ function WalletOverviewSummary({
           </div>
         </div>
       ) : null}
+      <div className="rounded-2xl border border-blue-100/70 bg-white px-4 py-3 shadow-sm sm:px-5">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-gray-950">Bitcoin Lightning payout</p>
+            <p className="mt-1 text-xs leading-5 text-gray-500">
+              Destination: {lightningPayout.destinationLabel}
+            </p>
+          </div>
+          <WalletStatusPill
+            label={lightningPayout.connected ? "Connected" : "Not connected"}
+            tone={lightningPayout.connected ? "blue" : "default"}
+            className="justify-center"
+          />
+        </div>
+      </div>
     </div>
   )
 }
@@ -1656,9 +1693,15 @@ function PineTreeWalletRuntime() {
     { rail: "bitcoin", label: "Bitcoin" as const, configured: bitcoinReady, enabled: enabledRails.bitcoin },
   ], [baseReady, bitcoinReady, enabledRails.base, enabledRails.bitcoin, enabledRails.solana, solanaReady])
 
+  const withdrawalWalletRows = useMemo(() => [
+    { rail: "base" as const, configured: baseReady },
+    { rail: "solana" as const, configured: solanaReady },
+    { rail: "bitcoin" as const, configured: bitcoinReady },
+  ], [baseReady, bitcoinReady, solanaReady])
+
   const withdrawableAssetOptions = useMemo((): WithdrawalAssetOption[] => {
-    return walletRailRows
-      .filter((row) => row.configured && row.enabled)
+    return withdrawalWalletRows
+      .filter((row) => row.configured)
       .flatMap((row) =>
         withdrawalAssetsByRail[row.rail].map((item) => ({
           rail: row.rail,
@@ -1666,7 +1709,7 @@ function PineTreeWalletRuntime() {
           balance: findWithdrawalBalance(walletSync, row.rail, item),
         }))
       )
-  }, [walletRailRows, walletSync])
+  }, [walletSync, withdrawalWalletRows])
 
   useEffect(() => {
     if (withdrawableAssetOptions.some((option) => option.rail === withdrawalRail && option.asset === withdrawalAsset)) {
@@ -1740,6 +1783,17 @@ function PineTreeWalletRuntime() {
       fallbackReason: getWithdrawalFallbackReason(baseDiagnostics),
     }
   }, [lightningProfileState, primaryWallet, profile, walletRailRows, wallets, withdrawalAsset, withdrawalRail])
+
+  const lightningPayoutSummary = useMemo(() => {
+    const connected =
+      btcPayoutReady &&
+      lightningProfileState.kind === "loaded" &&
+      lightningProfileState.profile.status === "ready"
+    return {
+      connected,
+      destinationLabel: btcPayoutReady ? "PineTree BTC Wallet" as const : "Not set" as const,
+    }
+  }, [btcPayoutReady, lightningProfileState])
 
   useEffect(() => {
     if (!withdrawalReview) return
@@ -1864,7 +1918,7 @@ function PineTreeWalletRuntime() {
       return
     }
     if (!withdrawableAssetOptions.some((option) => option.rail === withdrawalRail && option.asset === withdrawalAsset)) {
-      setWithdrawalError("No enabled connected withdrawal assets are available.")
+      setWithdrawalError("No PineTree Wallet source address is available for withdrawals.")
       return
     }
 
@@ -2053,7 +2107,7 @@ function PineTreeWalletRuntime() {
       <article className="max-w-2xl rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-5 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <h2 className="min-w-0 text-base font-semibold text-gray-950">PineTree Wallet</h2>
-          <ProviderStatusPill
+          <WalletStatusPill
             label={syncing ? "Saving..." : walletStatus}
             tone="blue"
             className="shrink-0"
@@ -2147,7 +2201,7 @@ function PineTreeWalletRuntime() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-3">
                   <h2 id="pinetree-wallet-modal-title" className="text-lg font-semibold text-gray-950">PineTree Wallet</h2>
-                  <ProviderStatusPill
+                  <WalletStatusPill
                     label={walletStatus}
                     tone="blue"
                     className="ml-auto"
@@ -2188,7 +2242,12 @@ function PineTreeWalletRuntime() {
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6 sm:py-6">
 
               {activeTab === "overview" ? (
-                <WalletOverviewSummary rows={walletRailRows} sync={walletSync} syncing={walletSyncing} />
+                <WalletOverviewSummary
+                  rows={walletRailRows}
+                  sync={walletSync}
+                  syncing={walletSyncing}
+                  lightningPayout={lightningPayoutSummary}
+                />
               ) : null}
 
               {activeTab === "balances" ? (
