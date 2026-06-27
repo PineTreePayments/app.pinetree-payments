@@ -36,16 +36,24 @@ describe("PineTree-native Lightning settlement", () => {
   })
 
   it("keeps PineTree BTC Wallet settlement support with only compact modal copy", () => {
+    const overviewSrc = walletPage.slice(
+      walletPage.indexOf("function WalletOverviewSummary("),
+      walletPage.indexOf("function AssetSelectDropdown(")
+    )
+    const withdrawSrc = walletPage.slice(
+      walletPage.indexOf("function WithdrawalFormShell("),
+      walletPage.indexOf("function formatUsd(")
+    )
     expect(walletPage).not.toContain("/api/wallets/lightning/settlement")
-    expect(walletPage).toContain("Destination: {lightningPayout.destinationLabel}")
-    expect(walletPage).toContain('"PineTree BTC Wallet"')
+    expect(overviewSrc).not.toContain("Bitcoin Lightning payout")
+    expect(withdrawSrc).toContain("Destination: {lightningPayout.destinationLabel}")
+    expect(withdrawSrc).toContain('"PineTree BTC Wallet"')
     expect(engine).toContain('destinationType: "pinetree_btc_wallet"')
     expect(engine).toContain('destinationType: "external_btc_wallet"')
     expect(engine).toContain("ensureDefaultPineTreeBtcPayoutDestination")
   })
 
   it("avoids Speed dashboard and settlement setup copy in the wallet modal", () => {
-    expect(walletPage).not.toContain("Set destination")
     expect(walletPage).not.toContain("Auto-settlement")
     expect(walletPage).not.toContain("Enable auto-settlement")
     expect(walletPage).not.toContain("Refresh settlement status")

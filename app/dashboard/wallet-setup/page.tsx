@@ -491,7 +491,7 @@ function WalletStatusPill({
     <ProviderStatusPill
       label={label}
       tone={tone}
-      className={`min-h-0 px-3 py-1 text-[11px] leading-none ${className}`}
+      className={`min-h-0 w-[6.75rem] justify-center px-3 py-1 text-center text-[11px] leading-none ${className}`}
     />
   )
 }
@@ -695,6 +695,7 @@ function WithdrawalFormShell({
   rail,
   asset,
   assetOptions,
+  lightningPayout,
   destinationAddress,
   amountDecimal,
   review,
@@ -715,6 +716,10 @@ function WithdrawalFormShell({
   rail: WithdrawalRail
   asset: WithdrawalAsset
   assetOptions: WithdrawalAssetOption[]
+  lightningPayout: {
+    connected: boolean
+    destinationLabel: "PineTree BTC Wallet" | "Not set"
+  }
   destinationAddress: string
   amountDecimal: string
   review: WithdrawalReviewResponse | null
@@ -771,6 +776,7 @@ function WithdrawalFormShell({
           : "Review withdrawal"
   const primaryActionDisabled = hasSubmitted || submitting || (review ? false : reviewDisabled)
   const primaryAction = review ? onSubmit : onReview
+  const showLightningPayout = rail === "bitcoin" && asset === "BTC"
 
   return (
     <div className="space-y-4">
@@ -802,6 +808,32 @@ function WithdrawalFormShell({
           Create or connect a PineTree Wallet address before withdrawing.
         </div>
       )}
+
+      {showLightningPayout ? (
+        <div className="rounded-2xl border border-blue-100/70 bg-white px-4 py-3 shadow-sm">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-950">Bitcoin Lightning payout</p>
+              <p className="mt-1 text-xs leading-5 text-gray-500">
+                Destination: {lightningPayout.destinationLabel}
+              </p>
+            </div>
+            <WalletStatusPill
+              label={lightningPayout.connected ? "Connected" : "Not connected"}
+              tone={lightningPayout.connected ? "blue" : "default"}
+            />
+          </div>
+          {!lightningPayout.connected ? (
+            <button
+              type="button"
+              disabled
+              className="mt-3 inline-flex h-8 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-400"
+            >
+              Set destination
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase text-gray-500">Send to</p>
@@ -1003,15 +1035,10 @@ function WalletOverviewSummary({
   rows,
   sync,
   syncing,
-  lightningPayout,
 }: {
   rows: WalletRailRow[]
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
-  lightningPayout: {
-    connected: boolean
-    destinationLabel: "PineTree BTC Wallet" | "Not set"
-  }
 }) {
   const visibleRows = rows
   const lastSynced = formatLastSynced(sync?.lastSyncedAt ?? null)
@@ -1047,7 +1074,6 @@ function WalletOverviewSummary({
                     <WalletStatusPill
                       label={connected ? "Connected" : "Not connected"}
                       tone={connected ? "blue" : "default"}
-                      className="min-w-[5.75rem] justify-center"
                     />
                   </span>
                   <span className="min-w-[72px] text-right text-sm font-semibold tabular-nums text-gray-950 sm:min-w-[92px]">{formatUsd(railUsd)}</span>
@@ -1061,34 +1087,6 @@ function WalletOverviewSummary({
           Manage rails in Providers
         </div>
       )}
-      {sync?.recentActivity && sync.recentActivity.length > 0 ? (
-        <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-sm sm:px-5">
-          <p className="text-sm font-semibold text-gray-950">Recent activity</p>
-          <div className="mt-3 divide-y divide-gray-100">
-            {sync.recentActivity.map((item) => (
-              <div key={item.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                <span className="min-w-0 truncate text-gray-800">{item.label}</span>
-                <span className="shrink-0 text-xs font-semibold text-gray-500">{item.status}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-      <div className="rounded-2xl border border-blue-100/70 bg-white px-4 py-3 shadow-sm sm:px-5">
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-gray-950">Bitcoin Lightning payout</p>
-            <p className="mt-1 text-xs leading-5 text-gray-500">
-              Destination: {lightningPayout.destinationLabel}
-            </p>
-          </div>
-          <WalletStatusPill
-            label={lightningPayout.connected ? "Connected" : "Not connected"}
-            tone={lightningPayout.connected ? "blue" : "default"}
-            className="justify-center"
-          />
-        </div>
-      </div>
     </div>
   )
 }
@@ -2246,7 +2244,6 @@ function PineTreeWalletRuntime() {
                   rows={walletRailRows}
                   sync={walletSync}
                   syncing={walletSyncing}
-                  lightningPayout={lightningPayoutSummary}
                 />
               ) : null}
 
@@ -2268,6 +2265,7 @@ function PineTreeWalletRuntime() {
                   rail={withdrawalRail}
                   asset={withdrawalAsset}
                   assetOptions={withdrawableAssetOptions}
+                  lightningPayout={lightningPayoutSummary}
                   destinationAddress={withdrawalDestination}
                   amountDecimal={withdrawalAmount}
                   review={withdrawalReview}

@@ -107,12 +107,21 @@ describe("Balances tab wallet details", () => {
     expect(balanceRowsSrc).toContain("bitcoinPayoutEntries[0]?.address")
   })
 
-  it("Lightning settlement panel is not part of the wallet modal", () => {
+  it("Lightning settlement panel is not part of the wallet modal and payout copy stays out of Overview", () => {
+    const overviewSrc = walletPage.slice(
+      walletPage.indexOf("function WalletOverviewSummary("),
+      walletPage.indexOf("function AssetSelectDropdown(")
+    )
+    const withdrawSrc = walletPage.slice(
+      walletPage.indexOf("function WithdrawalFormShell("),
+      walletPage.indexOf("function formatUsd(")
+    )
     expect(walletPage).not.toContain("LightningSettlementPanel")
-    expect(walletPage).toContain("Bitcoin Lightning payout")
-    expect(walletPage).toContain("Destination: {lightningPayout.destinationLabel}")
-    expect(walletPage).toContain("PineTree BTC Wallet")
-    expect(walletPage).not.toContain("Set destination")
+    expect(overviewSrc).not.toContain("Bitcoin Lightning payout")
+    expect(withdrawSrc).toContain("Bitcoin Lightning payout")
+    expect(withdrawSrc).toContain("Destination: {lightningPayout.destinationLabel}")
+    expect(withdrawSrc).toContain("PineTree BTC Wallet")
+    expect(withdrawSrc).toContain("Set destination")
     expect(walletPage).not.toContain("Last settlement")
     expect(walletPage).not.toContain("No settlements yet")
     expect(walletPage).not.toContain("Auto-settlement")

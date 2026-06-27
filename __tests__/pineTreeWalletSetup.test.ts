@@ -319,7 +319,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("Pending sync")
     expect(page).toContain("Last synced")
     expect(page).toContain("visibleRows.map((row)")
-    expect(page).toContain("Recent activity")
+    expect(page).not.toContain("Recent activity")
+    const overviewSource = page.slice(
+      page.indexOf("function WalletOverviewSummary("),
+      page.indexOf("function AssetSelectDropdown(")
+    )
+    expect(overviewSource).not.toContain("Bitcoin Lightning payout")
     expect(page).not.toContain("Settlement addresses")
     expect(page).not.toContain("address: profileAddresses.base[0]?.address")
     expect(page).not.toContain("RailStatusCard")

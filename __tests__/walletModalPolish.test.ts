@@ -65,15 +65,23 @@ describe("Overview tab - polished PineTree summary", () => {
     expect(src).toContain("grid-cols-[minmax(0,1fr)_7.25rem_minmax(4.5rem,auto)]")
     expect(src).toContain("sm:grid-cols-[minmax(0,1fr)_7.75rem_minmax(5.75rem,auto)]")
     expect(src).toContain("className=\"flex justify-center\"")
-    expect(src).toContain("className=\"min-w-[5.75rem] justify-center\"")
+    expect(walletPage).toContain("w-[6.75rem] justify-center")
     expect(src).toContain("text-right")
   })
 
   it("PineTree Wallet status pills use compact wallet-local styling", () => {
     expect(walletPage).toContain("function WalletStatusPill")
-    expect(walletPage).toContain("min-h-0 px-3 py-1 text-[11px] leading-none")
+    expect(walletPage).toContain("min-h-0 w-[6.75rem] justify-center px-3 py-1 text-center text-[11px] leading-none")
     expect(walletOverviewSrc()).toContain("WalletStatusPill")
     expect(runtimeSrc()).toContain("WalletStatusPill")
+  })
+
+  it("Overview only renders Total Balance and Wallet Summary wallet sections", () => {
+    const src = walletOverviewSrc()
+    expect(src).toContain("TOTAL BALANCE")
+    expect(src).toContain("WALLET SUMMARY")
+    expect(src).not.toContain("Bitcoin Lightning payout")
+    expect(src).not.toContain("Recent activity")
   })
 
   it("shows Last synced or Pending sync copy", () => {
@@ -84,6 +92,10 @@ describe("Overview tab - polished PineTree summary", () => {
 
   it("rail summary rows use configured && enabled for Connected / Not connected", () => {
     const src = walletOverviewSrc()
+    expect(src).toContain("{row.label}")
+    expect(walletPage).toContain('label: "Base" as const')
+    expect(walletPage).toContain('label: "Solana" as const')
+    expect(walletPage).toContain('label: "Bitcoin" as const')
     expect(src).toContain("row.configured && row.enabled")
     expect(src).toContain('"Connected" : "Not connected"')
     expect(src).not.toContain('"Disabled"')
@@ -173,13 +185,15 @@ describe("Wallets tab removed", () => {
     expect(walletPage).not.toContain("LightningSettlementPanel")
   })
 
-  it("Bitcoin Lightning payout is compact and PineTree-facing", () => {
-    const src = walletOverviewSrc()
+  it("Bitcoin Lightning payout is compact and PineTree-facing in Withdraw only", () => {
+    const src = withdrawalFormSrc()
+    expect(walletOverviewSrc()).not.toContain("Bitcoin Lightning payout")
     expect(src).toContain("Bitcoin Lightning payout")
     expect(src).toContain("Destination: {lightningPayout.destinationLabel}")
     expect(src).toContain('"PineTree BTC Wallet"')
     expect(src).toContain('"Not set"')
     expect(src).toContain("lightningPayout.connected ? \"Connected\" : \"Not connected\"")
+    expect(src).toContain('const showLightningPayout = rail === "bitcoin" && asset === "BTC"')
     expect(src).not.toContain("Speed")
     expect(src).not.toContain("Auto-settlement")
   })
@@ -205,6 +219,13 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     expect(src).toContain("Choose a PineTree Wallet asset, then review before approval.")
     expect(src).not.toContain("Choose an enabled PineTree Wallet asset")
     expect(src).toContain("Balance will be verified before processing.")
+  })
+
+  it("Bitcoin Lightning payout does not render for Base or Solana withdrawal assets", () => {
+    const src = withdrawalFormSrc()
+    expect(src).toContain('const showLightningPayout = rail === "bitcoin" && asset === "BTC"')
+    expect(src).not.toContain('rail === "base"')
+    expect(src).not.toContain('rail === "solana"')
   })
 
   it("withdraw auto-selects first wallet-backed asset and clears review state on change", () => {
