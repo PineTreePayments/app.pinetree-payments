@@ -28,6 +28,7 @@ vi.mock("@/database/merchantAuditEvents", () => ({
 import {
   completeDynamicWalletWithdrawal,
   createWalletWithdrawalReview,
+  normalizeWithdrawalAmount,
   prepareDynamicWalletWithdrawal,
   submitWalletWithdrawalRequest,
   validateWalletWithdrawalInput,
@@ -192,13 +193,87 @@ describe("PineTree Wallet withdrawals", () => {
     mocks.fetch.mockReset()
   })
 
-  it("blocks invalid amount before review", () => {
+  describe("normalizeWithdrawalAmount", () => {
+    it("normalizes leading-dot decimal (.01 → 0.01)", () => {
+      expect(normalizeWithdrawalAmount(".01")).toBe("0.01")
+    })
+
+    it("leaves canonical decimals unchanged (0.01 stays 0.01)", () => {
+      expect(normalizeWithdrawalAmount("0.01")).toBe("0.01")
+    })
+
+    it("accepts sub-1 amounts like 0.015 and 0.00001", () => {
+      expect(normalizeWithdrawalAmount("0.015")).toBe("0.015")
+      expect(normalizeWithdrawalAmount("0.00001")).toBe("0.00001")
+    })
+
+    it("accepts whole numbers", () => {
+      expect(normalizeWithdrawalAmount("1")).toBe("1")
+      expect(normalizeWithdrawalAmount("100")).toBe("100")
+    })
+
+    it("rejects zero", () => {
+      expect(normalizeWithdrawalAmount("0")).toBeNull()
+      expect(normalizeWithdrawalAmount("0.00")).toBeNull()
+    })
+
+    it("rejects negative values", () => {
+      expect(normalizeWithdrawalAmount("-1")).toBeNull()
+      expect(normalizeWithdrawalAmount("-0.01")).toBeNull()
+    })
+
+    it("rejects empty and whitespace-only", () => {
+      expect(normalizeWithdrawalAmount("")).toBeNull()
+      expect(normalizeWithdrawalAmount("   ")).toBeNull()
+    })
+
+    it("rejects non-numeric strings", () => {
+      expect(normalizeWithdrawalAmount("abc")).toBeNull()
+      expect(normalizeWithdrawalAmount("$1.00")).toBeNull()
+    })
+
+    it("rejects scientific notation", () => {
+      expect(normalizeWithdrawalAmount("1e-2")).toBeNull()
+      expect(normalizeWithdrawalAmount("1E10")).toBeNull()
+    })
+  })
+
+  it("blocks zero amount before review with 'Enter an amount greater than 0.'", () => {
     expect(() => validateWalletWithdrawalInput({
       rail: "base",
       asset: "ETH",
       destinationAddress: "0x1234567890abcdef1234567890abcdef12345678",
       amountDecimal: "0",
-    })).toThrow("Withdrawal amount must be positive.")
+    })).toThrow("Enter an amount greater than 0.")
+  })
+
+  it("blocks non-numeric amount before review with 'Enter a valid withdrawal amount.'", () => {
+    expect(() => validateWalletWithdrawalInput({
+      rail: "base",
+      asset: "ETH",
+      destinationAddress: "0x1234567890abcdef1234567890abcdef12345678",
+      amountDecimal: "abc",
+    })).toThrow("Enter a valid withdrawal amount.")
+  })
+
+  it("accepts .01 and normalizes to 0.01 in validateWalletWithdrawalInput", () => {
+    const result = validateWalletWithdrawalInput({
+      rail: "base",
+      asset: "ETH",
+      destinationAddress: "0x1234567890abcdef1234567890abcdef12345678",
+      amountDecimal: ".01",
+    })
+    expect(result.amountDecimal).toBe("0.01")
+  })
+
+  it("accepts 0.01 and returns it unchanged", () => {
+    const result = validateWalletWithdrawalInput({
+      rail: "solana",
+      asset: "SOL",
+      destinationAddress: "11111111111111111111111111111111",
+      amountDecimal: "0.01",
+    })
+    expect(result.amountDecimal).toBe("0.01")
   })
 
   it("blocks empty destination before review", () => {
@@ -217,6 +292,35 @@ describe("PineTree Wallet withdrawals", () => {
       destinationAddress: "bc1qdestination",
       amountDecimal: "1",
     })).toThrow("Unsupported rail/asset combination.")
+  })
+
+  it("createWalletWithdrawalReview normalizes .01 to 0.01 before storing", async () => {
+    const signer = makeSigner(true)
+
+    await createWalletWithdrawalReview("merchant_1", {
+      rail: "solana",
+      asset: "SOL",
+      destinationAddress: "11111111111111111111111111111111",
+      amountDecimal: ".01",
+    }, signer)
+
+    expect(mocks.createWalletWithdrawalRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ amountDecimal: "0.01" })
+    )
+  })
+
+  it("review card amount is the normalized value (0.01, not .01)", async () => {
+    const signer = makeSigner(true)
+
+    const result = await createWalletWithdrawalReview("merchant_1", {
+      rail: "solana",
+      asset: "SOL",
+      destinationAddress: "11111111111111111111111111111111",
+      amountDecimal: ".01",
+    }, signer)
+
+    expect(result.review.amountDecimal).toBe("0.01")
+    expect(result.review.amountDecimal).not.toBe(".01")
   })
 
   it("creates a pending review request and never submits when signer is disabled", async () => {
@@ -589,6 +693,48 @@ describe("PineTree Wallet withdrawals", () => {
       asset: "SOL",
       destination_address: destination,
       amount_decimal: "0.25",
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+    }))
+
+    const result = await prepareDynamicWalletWithdrawal("merchant_1", "withdrawal_1")
+
+    expect(result.payload).toMatchObject({
+      kind: "solana_transaction",
+      from: source,
+    })
+    expect("transactionBase64" in result.payload ? result.payload.transactionBase64 : "").toMatch(/^[A-Za-z0-9+/=]+$/)
+  })
+
+  it("Solana Dynamic prepare accepts .01 SOL (leading-dot amount) and builds a valid transaction", async () => {
+    const source = Keypair.generate().publicKey.toBase58()
+    const destination = Keypair.generate().publicKey.toBase58()
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        jsonrpc: "2.0",
+        id: "1",
+        result: {
+          context: { slot: 1 },
+          value: {
+            blockhash: "11111111111111111111111111111111",
+            lastValidBlockHeight: 123,
+          },
+        },
+      }),
+    } as Response)
+    mocks.getPineTreeWalletProfile.mockResolvedValueOnce({
+      id: "wallet_profile_1",
+      merchant_id: "merchant_1",
+      base_address: null,
+      solana_address: source,
+    })
+    // Database stored ".01" (un-normalized from a prior review) — prepare must still succeed
+    mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
+      rail: "solana",
+      asset: "SOL",
+      destination_address: destination,
+      amount_decimal: ".01",
       approval_method: "dynamic_browser",
       provider: "dynamic",
     }))

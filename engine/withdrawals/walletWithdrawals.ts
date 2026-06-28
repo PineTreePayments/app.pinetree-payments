@@ -176,6 +176,28 @@ export function normalizeWithdrawalAsset(value: string): WalletWithdrawalAsset |
   return null
 }
 
+/**
+ * Normalizes a user-supplied decimal amount string to a canonical form suitable
+ * for storage and blockchain unit conversion. Adds a leading zero when needed
+ * (.01 → 0.01) and rejects zero, negative, scientific notation, and non-numeric
+ * input. Returns null for any value that cannot be a valid positive amount.
+ */
+export function normalizeWithdrawalAmount(value: string): string | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  // Scientific notation is not safe for blockchain amounts
+  if (/[eE]/.test(trimmed)) return null
+  // Reject explicit negative sign
+  if (trimmed.startsWith("-")) return null
+  // Add leading zero for bare decimal values (.01 → 0.01)
+  const normalized = trimmed.startsWith(".") ? `0${trimmed}` : trimmed
+  // Must be digits optionally followed by a decimal fraction
+  if (!/^\d+(\.\d+)?$/.test(normalized)) return null
+  const n = Number(normalized)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return normalized
+}
+
 export function validateWalletWithdrawalInput(input: CreateWalletWithdrawalReviewInput): {
   rail: WalletWithdrawalRail
   asset: WalletWithdrawalAsset
@@ -185,8 +207,6 @@ export function validateWalletWithdrawalInput(input: CreateWalletWithdrawalRevie
   const rail = normalizeWithdrawalRail(input.rail)
   const asset = normalizeWithdrawalAsset(input.asset)
   const destinationAddress = input.destinationAddress.trim()
-  const amountDecimal = input.amountDecimal.trim()
-  const amount = Number(amountDecimal)
 
   if (!rail) throw Object.assign(new Error("Unsupported withdrawal rail."), { status: 400 })
   if (!asset || !SUPPORTED_ASSETS[rail].includes(asset)) {
@@ -198,8 +218,14 @@ export function validateWalletWithdrawalInput(input: CreateWalletWithdrawalRevie
   if (!isValidDestinationAddress(rail, destinationAddress)) {
     throw Object.assign(new Error("Destination address is invalid for the selected rail."), { status: 400 })
   }
-  if (!Number.isFinite(amount) || amount <= 0) {
-    throw Object.assign(new Error("Withdrawal amount must be positive."), { status: 400 })
+
+  const amountDecimal = normalizeWithdrawalAmount(input.amountDecimal)
+  if (amountDecimal === null) {
+    const raw = Number(String(input.amountDecimal).trim())
+    if (Number.isFinite(raw) && raw <= 0) {
+      throw Object.assign(new Error("Enter an amount greater than 0."), { status: 400 })
+    }
+    throw Object.assign(new Error("Enter a valid withdrawal amount."), { status: 400 })
   }
 
   return { rail, asset, destinationAddress, amountDecimal }
@@ -793,9 +819,11 @@ async function buildSolanaWithdrawalPayload(input: {
 }
 
 function parseSolanaUnits(value: string, decimals: number): bigint {
-  const trimmed = value.trim()
+  const raw = value.trim()
+  // Normalize leading-dot format (.01 → 0.01) before parsing
+  const trimmed = raw.startsWith(".") ? `0${raw}` : raw
   if (!/^\d+(\.\d+)?$/.test(trimmed)) {
-    throw Object.assign(new Error("Withdrawal amount must be positive."), { status: 400 })
+    throw Object.assign(new Error("Enter a valid withdrawal amount."), { status: 400 })
   }
   const [whole, fraction = ""] = trimmed.split(".")
   if (fraction.length > decimals) {

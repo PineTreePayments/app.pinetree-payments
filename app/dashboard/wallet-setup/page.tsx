@@ -743,11 +743,12 @@ function WithdrawalFormShell({
   const selectedBalanceZero = selectedBalanceKnown && selectedBalanceAmount <= 0
   const amountValue = Number(amountTrimmed)
   const missingAmount = amountTrimmed.length === 0
-  const invalidAmount = amountDecimal.trim().length > 0 && !(Number(amountDecimal) > 0)
+  const amountParseError = amountTrimmed.length > 0 && !Number.isFinite(amountValue)
+  const invalidAmount = amountTrimmed.length > 0 && Number.isFinite(amountValue) && !(amountValue > 0)
   const amountExceedsBalance = selectedBalanceKnown && amountValue > selectedBalanceAmount
   const missingDestination = destinationAddress.trim().length === 0
   const noWithdrawableAssets = assetOptions.length === 0
-  const reviewDisabled = reviewing || noWithdrawableAssets || missingDestination || missingAmount || invalidAmount || selectedBalanceZero || amountExceedsBalance
+  const reviewDisabled = reviewing || noWithdrawableAssets || missingDestination || missingAmount || amountParseError || invalidAmount || selectedBalanceZero || amountExceedsBalance
   const formattedAvailable = formatCryptoAmount(selectedBalanceAmount, asset)
   const maxDisabled = !selectedBalanceKnown || selectedBalanceZero
   const nativeMaxNote = isNativeWithdrawalAsset(asset) && selectedBalanceKnown && !selectedBalanceZero
@@ -887,20 +888,22 @@ function WithdrawalFormShell({
         </div>
       </div>
 
-      {(error || invalidAmount || missingDestination || missingAmount || selectedBalanceZero || amountExceedsBalance || noWithdrawableAssets) ? (
+      {(error || amountParseError || invalidAmount || missingDestination || missingAmount || selectedBalanceZero || amountExceedsBalance || noWithdrawableAssets) ? (
         <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-xs font-semibold leading-5 text-blue-800">
           {error ||
             (missingDestination
               ? "Enter a destination address to review."
               : missingAmount
                 ? "Enter an amount to review."
-                : invalidAmount
-                  ? "Enter a positive withdrawal amount."
-                  : selectedBalanceZero
-                    ? "No available balance for this asset."
-                    : noWithdrawableAssets
-                      ? "No PineTree Wallet source address is available for withdrawals."
-                      : "Amount exceeds available balance.")}
+                : amountParseError
+                  ? "Enter a valid withdrawal amount."
+                  : invalidAmount
+                    ? "Enter an amount greater than 0."
+                    : selectedBalanceZero
+                      ? "No available balance for this asset."
+                      : noWithdrawableAssets
+                        ? "No PineTree Wallet source address is available for withdrawals."
+                        : "Amount exceeds available balance.")}
         </div>
       ) : null}
 
@@ -1871,7 +1874,10 @@ function PineTreeWalletRuntime() {
   async function handleReviewWithdrawal() {
     const token = accessTokenRef.current
     const destination = withdrawalDestination.trim()
-    const amount = withdrawalAmount.trim()
+    const rawAmount = withdrawalAmount.trim()
+    // Normalize leading-dot input (.01 → 0.01) so the review card and API payload
+    // always receive a canonical decimal string.
+    const amount = rawAmount.startsWith(".") ? `0${rawAmount}` : rawAmount
 
     setWithdrawalReview(null)
     setWithdrawalSubmitResult(null)
@@ -1889,7 +1895,7 @@ function PineTreeWalletRuntime() {
     }
     const amountNumber = Number(amount)
     if (!(amountNumber > 0)) {
-      setWithdrawalError("Enter a positive withdrawal amount.")
+      setWithdrawalError("Enter an amount greater than 0.")
       return
     }
     if (selectedWithdrawalBalance?.status === "synced" && selectedWithdrawalBalance.balance !== null) {
