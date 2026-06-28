@@ -185,7 +185,7 @@ describe("Wallets tab removed", () => {
     expect(src).toContain('"Not set"')
     expect(src).toContain("lightningPayout.connected ? \"Connected\" : \"Not connected\"")
     expect(src).toContain('const showLightningPayoutSetup = rail === "bitcoin" && asset === "BTC" && !lightningPayout.connected')
-    expect(src).toContain("Set payout destination")
+    expect(src).toContain("Set Bitcoin payout destination")
     expect(src).not.toContain("Speed")
     expect(src).not.toContain("Auto-settlement")
   })

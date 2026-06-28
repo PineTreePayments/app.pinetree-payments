@@ -44,7 +44,7 @@ type WithdrawalReviewResponse = {
     asset: WithdrawalAsset
     destinationAddress: string
     amountDecimal: string
-    estimatedStatus: "Withdrawal review available" | "Pending review" | "Processing"
+    estimatedStatus: "Ready to submit" | "Signer unavailable" | "Processing"
     approvalMethod?: "dynamic_browser" | "manual_review"
     message: string
     diagnostics?: WithdrawalDiagnostics
@@ -54,7 +54,7 @@ type WithdrawalReviewResponse = {
 
 type WithdrawalSubmitResponse = {
   request: WithdrawalReviewResponse["request"]
-  merchantStatus: "Pending review" | "Processing" | "Withdrawal failed"
+  merchantStatus: "Processing" | "Withdrawal failed"
   message: string
 }
 
@@ -335,14 +335,14 @@ async function sendDynamicPreparedWithdrawal(
 ): Promise<{ txHash?: string; signedPsbtBase64?: string; providerReference?: string }> {
   const wallet = findDynamicWalletForSource(wallets, primaryWallet, prepared.sourceAddress)
   if (!wallet) {
-    throw new Error("Open PineTree Wallet to approve this withdrawal.")
+    throw new Error("PineTree Wallet signer is not available for this asset yet.")
   }
 
   if (prepared.payload.kind === "evm_transaction") {
     const getWalletClient = wallet.getWalletClient || wallet.connector?.getWalletClient
     const client = await getWalletClient?.(prepared.payload.chainId) as DynamicEvmWalletClient | undefined
     if (!client?.sendTransaction) {
-      throw new Error("Open PineTree Wallet to approve this withdrawal.")
+      throw new Error("PineTree Wallet signer is not available for this asset yet.")
     }
     const txHash = await client.sendTransaction({
       account: prepared.payload.from as `0x${string}`,
@@ -356,18 +356,18 @@ async function sendDynamicPreparedWithdrawal(
   if (prepared.payload.kind === "bitcoin_psbt") {
     const signPsbt = wallet.signPsbt || wallet.connector?.signPsbt
     if (!signPsbt) {
-      throw new Error("Open PineTree Wallet to approve this withdrawal.")
+      throw new Error("PineTree Wallet signer is not available for this asset yet.")
     }
     const signed = await signPsbt({ unsignedPsbtBase64: prepared.payload.psbtBase64 })
     if (!signed?.signedPsbt) {
-      throw new Error("Open PineTree Wallet to approve this withdrawal.")
+      throw new Error("PineTree Wallet signer is not available for this asset yet.")
     }
     return { signedPsbtBase64: signed.signedPsbt, providerReference: "dynamic:bitcoin-psbt" }
   }
 
   const signAndSendTransaction = wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction
   if (!signAndSendTransaction) {
-    throw new Error("Open PineTree Wallet to approve this withdrawal.")
+    throw new Error("PineTree Wallet signer is not available for this asset yet.")
   }
   const transaction = Transaction.from(base64ToBytes(prepared.payload.transactionBase64))
   const txHash = await signAndSendTransaction(transaction)
@@ -456,6 +456,7 @@ function sanitizeWithdrawalErrorForMerchant(message: string | undefined) {
 function sanitizeWithdrawalSubmitErrorForMerchant(message: string | undefined) {
   const raw = String(message || "").trim()
   if (!raw) return "We couldn't submit this withdrawal request. Please try again."
+  if (raw === "PineTree Wallet signer is not available for this asset yet.") return raw
   const hiddenSignerPhrases = [
     ["provider", "signer"].join(" "),
     ["cannot", "sign"].join(" "),
@@ -760,7 +761,7 @@ function WithdrawalFormShell({
   const maxDisabled = !selectedBalanceKnown || selectedBalanceZero
   const nativeMaxNote = isNativeWithdrawalAsset(asset) && selectedBalanceKnown && !selectedBalanceZero
   const showLightningPayoutSetup = rail === "bitcoin" && asset === "BTC" && !lightningPayout.connected
-  const reviewActionLabel = review?.review.approvalMethod === "dynamic_browser" ? "Approve with PineTree Wallet" : "Submit withdrawal request"
+  const reviewActionLabel = review?.review.approvalMethod === "dynamic_browser" ? "Approve withdrawal" : "Submit withdrawal request"
   const blockingMessage =
     error ||
     (missingDestination
@@ -793,7 +794,7 @@ function WithdrawalFormShell({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-base font-semibold text-gray-950">Review withdrawal</p>
-              <p className="mt-1 text-xs leading-5 text-gray-500">Confirm the details, then approve from PineTree Wallet.</p>
+              <p className="mt-1 text-xs leading-5 text-gray-500">Confirm the withdrawal details before submitting.</p>
             </div>
           </div>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
@@ -945,7 +946,7 @@ function WithdrawalFormShell({
               disabled
               className="mt-3 inline-flex h-8 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-400"
             >
-              Set payout destination
+              Set Bitcoin payout destination
             </button>
           ) : null}
         </div>
@@ -1317,10 +1318,10 @@ function BalanceRows({
             </div>
           </dl>
           {walletAddress !== null ? (
-            <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-3">
+            <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 border-t border-gray-100 py-2.5 text-sm">
               <p className="text-xs font-semibold text-gray-500">Wallet address</p>
-              <div className="mt-1 flex min-w-0 items-center gap-2">
-                <p className="min-w-0 flex-1 truncate font-mono text-xs text-gray-800" title={walletAddress}>
+              <div className="flex min-w-0 items-center justify-end gap-2">
+                <p className="min-w-0 flex-1 truncate text-right font-mono text-xs text-gray-800" title={walletAddress}>
                   {walletAddress}
                 </p>
                 <button
@@ -2101,7 +2102,7 @@ function PineTreeWalletRuntime() {
       hasMatchingDynamicWallet: Boolean(_debugMatchingWallet),
       hasSolanaSigner: Boolean(_debugMatchingWallet && dynamicWalletSupportsRail(_debugMatchingWallet as DynamicWalletLike, "solana")),
       hasEvmSigner: Boolean(_debugMatchingWallet && dynamicWalletSupportsRail(_debugMatchingWallet as DynamicWalletLike, "base")),
-      primaryActionLabel: _debugApprovalMethod === "dynamic_browser" ? "Approve with PineTree Wallet" : "Submit withdrawal request",
+      primaryActionLabel: _debugApprovalMethod === "dynamic_browser" ? "Approve withdrawal" : "Submit withdrawal request",
     })
 
     setSubmittingWithdrawal(true)
@@ -2164,29 +2165,12 @@ function PineTreeWalletRuntime() {
         return
       }
 
-      const res = await fetch("/api/wallets/pinetree-wallet/withdrawals", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: "submit",
-          withdrawal_id: withdrawalId,
-        }),
-      })
-      const json = (await res.json()) as WithdrawalSubmitResponse | { error?: string }
-      if (!res.ok) {
-        setWithdrawalApprovalError(sanitizeWithdrawalSubmitErrorForMerchant("error" in json ? json.error : undefined))
-        setWithdrawalScreen("failed")
-        return
-      }
-      setWithdrawalSubmitResult(json as WithdrawalSubmitResponse)
-      setWithdrawalScreen("submitted")
-      void pollWithdrawalRequest(withdrawalId, json as WithdrawalSubmitResponse)
+      setWithdrawalApprovalError("PineTree Wallet signer is not available for this asset yet.")
+      setWithdrawalScreen("failed")
+      return
     } catch (error) {
       // Signing failure (Dynamic path) reaches here. Clear the stale review so
-      // "Approve with PineTree Wallet" is never shown alongside an error message.
+      // "Approve withdrawal" is never shown alongside an error message.
       if (withdrawalReview?.review.approvalMethod === "dynamic_browser") {
         setWithdrawalReview(null)
       }

@@ -65,7 +65,7 @@ type WithdrawalFallbackDiagnostics = {
 
 export type SubmitWalletWithdrawalResult = {
   request: WalletWithdrawalRequestRecord
-  merchantStatus: "Pending review" | "Processing" | "Withdrawal failed"
+  merchantStatus: "Processing" | "Withdrawal failed"
   message: string
 }
 
@@ -281,10 +281,10 @@ export async function createWalletWithdrawalReview(
     ...signerReview,
     signerEnabled: canSign,
     approvalMethod: canSign ? "dynamic_browser" : "manual_review",
-    estimatedStatus: canSign ? "Withdrawal review available" : "Pending review",
+    estimatedStatus: canSign ? "Ready to submit" : "Signer unavailable",
     message: canSign
-      ? "Approve with PineTree Wallet to submit this withdrawal."
-      : "Withdrawal request submitted. We'll review this withdrawal before processing.",
+      ? "Review this withdrawal before submitting."
+      : "PineTree Wallet signer is not available for this asset yet.",
     diagnostics,
   }
 
@@ -352,33 +352,16 @@ export async function submitWalletWithdrawalRequest(
       asset: request.asset,
     })
     throw Object.assign(
-      new Error("Wallet approval is required. Please approve this withdrawal with PineTree Wallet."),
+      new Error("This withdrawal must use the PineTree Wallet signer path."),
       { status: 409 }
     )
   }
 
   if (!canSign) {
-    const pendingReview = await updateWalletWithdrawalRequest(merchantId, request.id, {
-      status: "review_required",
-      errorMessage: null,
-      reviewPayload: {
-        ...request.review_payload,
-        merchant_status: "Pending review",
-      },
-    })
-    void insertWithdrawalAuditEvent({
-      merchantId,
-      eventType: "withdrawal.pending_review",
-      withdrawalId: request.id,
-      rail: request.rail,
-      asset: request.asset,
-      status: "review_required",
-    })
-    return {
-      request: pendingReview,
-      merchantStatus: "Pending review",
-      message: "Withdrawal request submitted. We'll review this withdrawal before processing.",
-    }
+    throw Object.assign(
+      new Error("PineTree Wallet signer is not available for this asset yet."),
+      { status: 422 }
+    )
   }
 
   await updateWalletWithdrawalRequest(merchantId, request.id, {

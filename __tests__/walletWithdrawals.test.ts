@@ -45,8 +45,8 @@ function makeSigner(canSign: boolean): WithdrawalSigner & {
     canSignWithdrawal: vi.fn(async () => canSign),
     createWithdrawalReview: vi.fn(async (input) => {
       const estimatedStatus = canSign
-        ? "Withdrawal review available" as const
-        : "Pending review" as const
+        ? "Ready to submit" as const
+        : "Signer unavailable" as const
       return {
         rail: input.rail,
         asset: input.asset,
@@ -56,8 +56,8 @@ function makeSigner(canSign: boolean): WithdrawalSigner & {
         approvalMethod: canSign ? "dynamic_browser" as const : "manual_review" as const,
         estimatedStatus,
         message: canSign
-          ? "Withdrawal review available"
-          : "Withdrawal request can be reviewed before processing.",
+          ? "Review this withdrawal before submitting."
+          : "PineTree Wallet signer is not available for this asset yet.",
       }
     }),
     submitWithdrawal: vi.fn(async () => ({
@@ -323,7 +323,7 @@ describe("PineTree Wallet withdrawals", () => {
     expect(result.review.amountDecimal).not.toBe(".01")
   })
 
-  it("creates a pending review request and never submits when signer is disabled", async () => {
+  it("creates a review_required request and never submits when signer is disabled", async () => {
     const signer = makeSigner(false)
 
     const result = await createWalletWithdrawalReview("merchant_1", {
@@ -365,14 +365,13 @@ describe("PineTree Wallet withdrawals", () => {
     expect(signer.submitWithdrawal).not.toHaveBeenCalled()
   })
 
-  it("submit with disabled signer keeps request pending review and never broadcasts", async () => {
+  it("submit with disabled signer fails and never broadcasts", async () => {
     const signer = makeSigner(false)
 
-    const result = await submitWalletWithdrawalRequest("merchant_1", "withdrawal_1", signer)
+    await expect(
+      submitWalletWithdrawalRequest("merchant_1", "withdrawal_1", signer)
+    ).rejects.toThrow("PineTree Wallet signer is not available for this asset yet.")
 
-    expect(result.merchantStatus).toBe("Pending review")
-    expect(result.request.status).toBe("review_required")
-    expect(result.message).toContain("Withdrawal request submitted")
     expect(signer.submitWithdrawal).not.toHaveBeenCalled()
   })
 
@@ -449,14 +448,14 @@ describe("PineTree Wallet withdrawals", () => {
 
     expect(result.canSubmit).toBe(true)
     expect(result.review.approvalMethod).toBe("dynamic_browser")
-    expect(result.review.message).toContain("Approve with PineTree Wallet")
+    expect(result.review.message).toContain("Review this withdrawal before submitting.")
     expect(mocks.createWalletWithdrawalRequest).toHaveBeenCalledWith(expect.objectContaining({
       provider: "dynamic",
       approvalMethod: "dynamic_browser",
     }))
   })
 
-  it("missing Dynamic config keeps withdrawals pending review", async () => {
+  it("missing Dynamic config marks signer unavailable", async () => {
     vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "")
 
     const result = await createWalletWithdrawalReview("merchant_1", {
@@ -525,7 +524,7 @@ describe("PineTree Wallet withdrawals", () => {
     })
   })
 
-  it("Bitcoin remains pending review with Dynamic configured", async () => {
+  it("Bitcoin remains signer unavailable without BTC execution config", async () => {
     vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
 
     const result = await createWalletWithdrawalReview("merchant_1", {
@@ -539,7 +538,7 @@ describe("PineTree Wallet withdrawals", () => {
     expect(result.review.approvalMethod).toBe("manual_review")
   })
 
-  it("Bitcoin remains pending review if BTC provider env is missing", async () => {
+  it("Bitcoin remains signer unavailable if BTC provider env is missing", async () => {
     vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
 
     const result = await createWalletWithdrawalReview("merchant_1", {
@@ -553,7 +552,7 @@ describe("PineTree Wallet withdrawals", () => {
     expect(result.review.approvalMethod).toBe("manual_review")
   })
 
-  it("Bitcoin remains pending review when BTC broadcast is not enabled", async () => {
+  it("Bitcoin remains signer unavailable when BTC broadcast is not enabled", async () => {
     vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
     vi.stubEnv("BITCOIN_NETWORK", "mainnet")
     vi.stubEnv("BITCOIN_UTXO_PROVIDER", "esplora")
@@ -1016,12 +1015,12 @@ describe("PineTree Wallet withdrawals", () => {
 
     await expect(
       submitWalletWithdrawalRequest("merchant_1", "withdrawal_1", signer)
-    ).rejects.toThrow("Wallet approval is required")
+    ).rejects.toThrow("This withdrawal must use the PineTree Wallet signer path.")
 
     expect(signer.submitWithdrawal).not.toHaveBeenCalled()
   })
 
-  it("Solana withdrawal with Dynamic env configured returns dynamic_browser and no Pending review copy", async () => {
+  it("Solana withdrawal with Dynamic env configured returns dynamic_browser and no manual review copy", async () => {
     vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
 
     const result = await createWalletWithdrawalReview("merchant_1", {
@@ -1033,12 +1032,12 @@ describe("PineTree Wallet withdrawals", () => {
 
     expect(result.canSubmit).toBe(true)
     expect(result.review.approvalMethod).toBe("dynamic_browser")
-    expect(result.review.estimatedStatus).toBe("Withdrawal review available")
+    expect(result.review.estimatedStatus).toBe("Ready to submit")
     expect(result.review.message).not.toContain("Pending review")
     expect(result.request.approval_method).toBe("dynamic_browser")
   })
 
-  it("Solana withdrawal without Dynamic env configured falls back to manual_review with merchant-safe message", async () => {
+  it("Solana withdrawal without Dynamic env configured returns signer unavailable", async () => {
     const result = await createWalletWithdrawalReview("merchant_1", {
       rail: "solana",
       asset: "SOL",
@@ -1048,8 +1047,8 @@ describe("PineTree Wallet withdrawals", () => {
 
     expect(result.canSubmit).toBe(false)
     expect(result.review.approvalMethod).toBe("manual_review")
-    expect(result.review.message).toContain("We'll review this withdrawal before processing")
-    expect(result.review.estimatedStatus).toBe("Pending review")
+    expect(result.review.message).toContain("PineTree Wallet signer is not available for this asset yet.")
+    expect(result.review.estimatedStatus).toBe("Signer unavailable")
   })
 
   it("Solana complete path stores transaction signature as tx hash and marks processing", async () => {

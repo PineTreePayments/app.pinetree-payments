@@ -123,7 +123,7 @@ describe("Balances tab wallet details", () => {
     expect(withdrawSrc).toContain("Bitcoin Lightning payout")
     expect(withdrawSrc).toContain("Destination: {lightningPayout.destinationLabel}")
     expect(withdrawSrc).toContain("PineTree BTC Wallet")
-    expect(withdrawSrc).toContain("Set payout destination")
+    expect(withdrawSrc).toContain("Set Bitcoin payout destination")
     expect(withdrawSrc).toContain('const showLightningPayoutSetup = rail === "bitcoin" && asset === "BTC" && !lightningPayout.connected')
     expect(walletPage).not.toContain("Last settlement")
     expect(walletPage).not.toContain("No settlements yet")

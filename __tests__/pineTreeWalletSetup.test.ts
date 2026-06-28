@@ -353,9 +353,8 @@ describe("PineTree embedded wallet setup", () => {
   // Withdrawal scaffold — no real fund movement
   // -------------------------------------------------------------------------
 
-  it("shows Dynamic approval copy only when wallet approval is available", () => {
-    expect(page).toContain("Withdrawal review available")
-    expect(page).toContain("Approve with PineTree Wallet")
+  it("shows Dynamic approval copy only when wallet signing is available", () => {
+    expect(page).toContain("Approve withdrawal")
     expect(page).toContain("dynamicApprovalAvailableForWithdrawal")
     expect(page).toContain("findDynamicApprovalWalletForSource")
     expect(page).toContain("dynamicWalletSupportsRail")
@@ -393,12 +392,11 @@ describe("PineTree embedded wallet setup", () => {
 
   it("withdrawal screen progresses through review, approving, submitted, and failed states", () => {
     expect(page).toContain("Review withdrawal")
-    expect(page).toContain("\"Approve with PineTree Wallet\"")
+    expect(page).toContain("\"Approve withdrawal\"")
     expect(page).toContain("Approving withdrawal")
     expect(page).toContain("Confirm this withdrawal in PineTree Wallet.")
     expect(page).toContain("Withdrawal failed")
     expect(page).toContain("Done")
-    expect(page).toContain("\"Pending review\"")
     expect(page).toContain("\"Processing\"")
     expect(page).toContain('setWithdrawalScreen("review")')
     expect(page).toContain('setWithdrawalScreen("approving")')
@@ -406,13 +404,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('setWithdrawalScreen("failed")')
   })
 
-  it("keeps the non-Dynamic submit path available behind the review screen", () => {
+  it("routes non-Dynamic wallet sends to a signer-unavailable failure instead of manual review", () => {
     expect(page).toContain("Submit withdrawal request")
     expect(page).toContain("if (withdrawalReview?.review.approvalMethod === \"dynamic_browser\")")
-    expect(page).toContain("action: \"submit\"")
-    expect(page).toContain("withdrawal_id: withdrawalId")
-    expect(page).toContain("Pending review")
-    expect(page).toContain("Processing")
+    expect(page).toContain("PineTree Wallet signer is not available for this asset yet.")
+    expect(page).not.toContain("action: \"submit\"")
+    expect(page).not.toContain("withdrawal_id: withdrawalId")
   })
 
   it("hides the editable form and review screen after withdrawal submission", () => {
@@ -587,14 +584,15 @@ describe("PineTree embedded wallet setup", () => {
     expect(withdrawalEngine).not.toContain("status: \"confirmed\"")
   })
 
-  it("Solana Dynamic approval remains reachable and unavailable Solana falls back without signing", () => {
+  it("Solana Dynamic approval remains reachable and unavailable Solana fails without signing", () => {
     expect(page).toContain("dynamicApprovalAvailableForWithdrawal")
     expect(page).toContain("kind: \"solana_transaction\"")
     expect(page).toContain("prepared.payload.transactionBase64")
     expect(page).toContain("wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction")
     expect(page).toContain("const dynamicSubmission = await sendDynamicPreparedWithdrawal")
     expect(page).toContain("if (withdrawalReview?.review.approvalMethod === \"dynamic_browser\")")
-    expect(page).toContain("action: \"submit\"")
+    expect(page).toContain("PineTree Wallet signer is not available for this asset yet.")
+    expect(page).not.toContain("action: \"submit\"")
   })
 
   it("BTC withdrawals use a Dynamic PSBT path instead of Speed, NWC, Spark, or Lightning", () => {
@@ -988,17 +986,17 @@ describe("PineTree embedded wallet setup", () => {
   // Withdrawal approval state machine — Task 3
   // -------------------------------------------------------------------------
 
-  it("UI never renders both a withdrawal error and Approve with PineTree Wallet simultaneously", () => {
+  it("UI never renders both a withdrawal error and Approve withdrawal simultaneously", () => {
     // Approval errors render on the failed screen, away from the review screen button.
     expect(page).toContain('if (screen === "failed")')
     expect(page).toContain("withdrawalApprovalError")
     expect(page).toContain('setWithdrawalScreen("failed")')
   })
 
-  it("valid Solana review with Dynamic approvalMethod shows Approve with PineTree Wallet button", () => {
+  it("valid Solana review with Dynamic approvalMethod shows Approve withdrawal button", () => {
     expect(page).toContain('if (screen === "review" && review)')
-    expect(page).toContain("\"Approve with PineTree Wallet\"")
-    expect(page).toContain("Confirm the details, then approve from PineTree Wallet.")
+    expect(page).toContain("\"Approve withdrawal\"")
+    expect(page).toContain("Confirm the withdrawal details before submitting.")
   })
 
   it("clicking Approve calls the prepare route before signing", () => {
@@ -1047,10 +1045,10 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("setWithdrawalSubmitResult(submitted as WithdrawalSubmitResponse)")
   })
 
-  it("missing Dynamic signer does not show Approve with PineTree Wallet", () => {
+  it("missing Dynamic signer does not show Approve withdrawal", () => {
     // When no matching wallet is found at signing time, sendDynamicPreparedWithdrawal throws
     // and the catch block moves to the failed screen — the review button cannot coexist with the error.
-    expect(page).toContain("Open PineTree Wallet to approve this withdrawal.")
+    expect(page).toContain("PineTree Wallet signer is not available for this asset yet.")
     const dynamicCatchBlock = page.slice(
       page.indexOf("// Signing failure (Dynamic path) reaches here"),
       page.indexOf("// Signing failure (Dynamic path) reaches here") + 500
@@ -1060,12 +1058,11 @@ describe("PineTree embedded wallet setup", () => {
     expect(dynamicCatchBlock).toContain('setWithdrawalScreen("failed")')
   })
 
-  it("missing Dynamic signer falls back to Submit withdrawal request copy", () => {
-    // When approvalMethod is not dynamic_browser, the label is Submit withdrawal request
+  it("missing Dynamic signer fails instead of creating a manual review request", () => {
     expect(page).toContain("\"Submit withdrawal request\"")
-    // The fallback path uses action: "submit" against the withdrawals route
-    expect(page).toContain("action: \"submit\"")
-    expect(page).toContain("withdrawal_id: withdrawalId")
+    expect(page).toContain('setWithdrawalApprovalError("PineTree Wallet signer is not available for this asset yet.")')
+    expect(page).not.toContain("action: \"submit\"")
+    expect(page).not.toContain("withdrawal_id: withdrawalId")
   })
 
   it("stale withdrawal review is cleared when amount, address, rail, or asset changes", () => {

@@ -21,7 +21,7 @@ export type WithdrawalReview = {
   amountDecimal: string
   signerEnabled: boolean
   approvalMethod?: "dynamic_browser" | "manual_review"
-  estimatedStatus: "Withdrawal review available" | "Pending review" | "Processing"
+  estimatedStatus: "Ready to submit" | "Signer unavailable" | "Processing"
   message: string
   diagnostics?: Record<string, unknown>
 }
@@ -47,8 +47,8 @@ export function disabledWithdrawalSigner(): WithdrawalSigner {
         amountDecimal: input.amountDecimal,
         signerEnabled: false,
         approvalMethod: "manual_review",
-        estimatedStatus: "Pending review",
-        message: "Withdrawal request can be reviewed before processing.",
+        estimatedStatus: "Signer unavailable",
+        message: "PineTree Wallet signer is not available for this asset yet.",
       }
     },
     async submitWithdrawal() {
@@ -79,10 +79,10 @@ export function dynamicBrowserWithdrawalSigner(): WithdrawalSigner {
         amountDecimal: input.amountDecimal,
         signerEnabled: canSign,
         approvalMethod: canSign ? "dynamic_browser" : "manual_review",
-        estimatedStatus: canSign ? "Withdrawal review available" : "Pending review",
+        estimatedStatus: canSign ? "Ready to submit" : "Signer unavailable",
         message: canSign
-          ? "Approve with PineTree Wallet to submit this withdrawal."
-          : "Withdrawal request can be reviewed before processing.",
+          ? "Review this withdrawal before submitting."
+          : "PineTree Wallet signer is not available for this asset yet.",
       }
     },
     async submitWithdrawal() {
