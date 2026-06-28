@@ -335,10 +335,10 @@ describe("PineTree embedded wallet setup", () => {
   it("balances tab shows wallet-style asset rows without fake unsynced zeroes", () => {
     expect(page).toContain("function BalanceRows")
     expect(page).toContain("Total value")
-    expect(page).toContain('["Deposit", "Withdraw", "History"].map')
     expect(page).toContain("allAssets.map((row, index)")
     expect(page).toContain("ChevronRight")
     expect(page).toContain("Wallet address")
+    expect(page).not.toContain('["Deposit", "Withdraw", "History"].map')
     expect(page).not.toContain("Managed by Speed")
     expect(page).not.toContain("Powered by Speed")
     expect(page).toContain("formatBalance(row.balance, row.asset)")
@@ -394,8 +394,10 @@ describe("PineTree embedded wallet setup", () => {
   it("withdrawal screen progresses through review, approving, submitted, and failed states", () => {
     expect(page).toContain("Review withdrawal")
     expect(page).toContain("\"Approve with PineTree Wallet\"")
-    expect(page).toContain("Waiting for wallet approval")
-    expect(page).toContain("Withdrawal was not approved")
+    expect(page).toContain("Approving withdrawal")
+    expect(page).toContain("Confirm this withdrawal in PineTree Wallet.")
+    expect(page).toContain("Withdrawal failed")
+    expect(page).toContain("Done")
     expect(page).toContain("\"Pending review\"")
     expect(page).toContain("\"Processing\"")
     expect(page).toContain('setWithdrawalScreen("review")')
@@ -407,17 +409,17 @@ describe("PineTree embedded wallet setup", () => {
   it("keeps the non-Dynamic submit path available behind the review screen", () => {
     expect(page).toContain("Submit withdrawal request")
     expect(page).toContain("if (withdrawalReview?.review.approvalMethod === \"dynamic_browser\")")
-    expect(page).toContain("Withdrawal request submitted")
-    expect(page).toContain("Status: {submitResult.merchantStatus}")
+    expect(page).toContain("action: \"submit\"")
+    expect(page).toContain("withdrawal_id: withdrawalId")
     expect(page).toContain("Pending review")
     expect(page).toContain("Processing")
   })
 
   it("hides the editable form and review screen after withdrawal submission", () => {
     expect(page).toContain('if (screen === "submitted" && submitResult)')
-    expect(page).toContain("Withdrawal request submitted")
     expect(page).toContain("Withdrawal submitted")
     expect(page).toContain("Transaction reference:")
+    expect(page).toContain("Done")
     expect(page).not.toContain("{review && !submitResult ? (")
   })
 
@@ -1041,7 +1043,7 @@ describe("PineTree embedded wallet setup", () => {
     // After submit succeeds, the page renders the withdrawalSubmitResult with a reference
     expect(page).toContain("Transaction reference:")
     expect(page).toContain("submitResult.request.provider_reference")
-    expect(page).toContain("Withdrawal request submitted")
+    expect(page).toContain("Withdrawal submitted")
     expect(page).toContain("setWithdrawalSubmitResult(submitted as WithdrawalSubmitResponse)")
   })
 

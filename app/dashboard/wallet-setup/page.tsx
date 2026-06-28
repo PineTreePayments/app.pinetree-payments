@@ -713,6 +713,7 @@ function WithdrawalFormShell({
   onAmountChange,
   onMaxAmount,
   onEdit,
+  onDone,
   onReview,
   onSubmit,
 }: {
@@ -739,6 +740,7 @@ function WithdrawalFormShell({
   onAmountChange: (value: string) => void
   onMaxAmount: () => void
   onEdit: () => void
+  onDone: () => void
   onReview: () => void
   onSubmit: () => void
 }) {
@@ -832,24 +834,30 @@ function WithdrawalFormShell({
   if (screen === "approving") {
     return (
       <div className="rounded-[1.2rem] border border-blue-100/80 bg-blue-50/50 px-5 py-6 text-center">
-        <p className="text-base font-semibold text-gray-950">Waiting for wallet approval</p>
-        <p className="mt-2 text-sm leading-6 text-gray-600">Approve the withdrawal in PineTree Wallet to continue.</p>
+        <p className="text-base font-semibold text-gray-950">Approving withdrawal</p>
+        <p className="mt-2 text-sm leading-6 text-gray-600">Confirm this withdrawal in PineTree Wallet.</p>
       </div>
     )
   }
 
   if (screen === "submitted" && submitResult) {
     return (
-      <div className="rounded-[1.2rem] border border-blue-200 bg-blue-50/70 px-5 py-5">
-        <p className="text-base font-semibold text-blue-950">
-          {submitResult.merchantStatus === "Processing" ? "Withdrawal submitted" : "Withdrawal request submitted"}
-        </p>
-        <p className="mt-1 text-sm leading-6 text-blue-900">Status: {submitResult.merchantStatus}</p>
+      <div className="space-y-4">
+        <div className="rounded-[1.2rem] border border-blue-200 bg-blue-50/70 px-5 py-5">
+          <p className="text-base font-semibold text-blue-950">Withdrawal submitted</p>
         {submitResult.request.provider_reference || submitResult.request.tx_hash ? (
           <p className="mt-2 break-all text-xs leading-5 text-blue-900">
             Transaction reference: {submitResult.request.tx_hash || submitResult.request.provider_reference}
           </p>
         ) : null}
+        </div>
+        <button
+          type="button"
+          onClick={onDone}
+          className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+        >
+          Done
+        </button>
       </div>
     )
   }
@@ -858,9 +866,9 @@ function WithdrawalFormShell({
     return (
       <div className="space-y-4">
         <div className="rounded-[1.2rem] border border-red-200 bg-red-50 px-5 py-5">
-          <p className="text-base font-semibold text-red-900">Withdrawal was not approved</p>
+          <p className="text-base font-semibold text-red-900">Withdrawal failed</p>
           <p className="mt-1 text-sm leading-6 text-red-800">
-            {approvalError || error || submitResult?.request.error_message || "The wallet approval did not complete. Review the details and try again."}
+            {approvalError || error || submitResult?.request.error_message || "The withdrawal could not be completed. Review the details and try again."}
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -1249,18 +1257,6 @@ function BalanceRows({
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {["Deposit", "Withdraw", "History"].map((action) => (
-          <button
-            key={action}
-            type="button"
-            className="inline-flex h-8 items-center justify-center rounded-full border border-blue-100 bg-white px-3 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
-          >
-            {action}
-          </button>
-        ))}
-      </div>
-
       <div className="overflow-hidden rounded-[1.2rem] border border-blue-100/80 bg-white shadow-sm">
         {allAssets.map((row, index) => {
           const isSelected = row.key === selectedAsset?.key
@@ -1300,22 +1296,22 @@ function BalanceRows({
               {formatBalance(selectedAsset.balance, selectedAsset.asset)}
             </p>
           </div>
-          <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
-            <div className="rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
+          <dl className="mt-4 divide-y divide-gray-100 text-sm">
+            <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 py-2.5">
               <dt className="text-xs font-semibold text-gray-500">Balance</dt>
-              <dd className="mt-1 font-semibold text-gray-950">{formatBalance(selectedAsset.balance, selectedAsset.asset)}</dd>
+              <dd className="min-w-0 text-right font-semibold text-gray-950">{formatBalance(selectedAsset.balance, selectedAsset.asset)}</dd>
             </div>
-            <div className="rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
+            <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 py-2.5">
               <dt className="text-xs font-semibold text-gray-500">Network</dt>
-              <dd className="mt-1 font-semibold text-gray-950">{assetRailLabel(selectedAsset.rail)}</dd>
+              <dd className="min-w-0 text-right font-semibold text-gray-950">{assetRailLabel(selectedAsset.rail)}</dd>
             </div>
-            <div className="rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
+            <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 py-2.5">
               <dt className="text-xs font-semibold text-gray-500">Asset</dt>
-              <dd className="mt-1 font-semibold text-gray-950">{selectedAsset.asset}</dd>
+              <dd className="min-w-0 text-right font-semibold text-gray-950">{selectedAsset.asset}</dd>
             </div>
-            <div className="rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
+            <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 py-2.5">
               <dt className="text-xs font-semibold text-gray-500">Last synced</dt>
-              <dd className="mt-1 font-semibold text-gray-950">
+              <dd className="min-w-0 text-right font-semibold text-gray-950">
                 {syncing ? "Syncing..." : lastSynced ?? "Pending sync"}
               </dd>
             </div>
@@ -1949,6 +1945,15 @@ function PineTreeWalletRuntime() {
     setWithdrawalError("")
   }
 
+  function handleDoneWithdrawal() {
+    setWithdrawalScreen("form")
+    setWithdrawalReview(null)
+    setWithdrawalSubmitResult(null)
+    setWithdrawalApprovalError("")
+    setWithdrawalError("")
+    setWalletOpen(false)
+  }
+
   async function handleReviewWithdrawal() {
     const token = accessTokenRef.current
     const destination = withdrawalDestination.trim()
@@ -2418,6 +2423,7 @@ function PineTreeWalletRuntime() {
                   }}
                   onMaxAmount={handleMaxWithdrawalAmount}
                   onEdit={handleEditWithdrawal}
+                  onDone={handleDoneWithdrawal}
                   onReview={() => void handleReviewWithdrawal()}
                   onSubmit={() => void handleSubmitWithdrawal()}
                 />
