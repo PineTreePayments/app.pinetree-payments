@@ -334,7 +334,39 @@ async function sendDynamicPreparedWithdrawal(
   primaryWallet: unknown
 ): Promise<{ txHash?: string; signedPsbtBase64?: string; providerReference?: string }> {
   const walletsToCheck = [...(wallets as unknown[]), primaryWallet].filter(Boolean)
+
+  if (walletCreationDebugEnabled) {
+    const walletList = wallets as DynamicWalletLike[]
+    console.info("[pinetree-withdrawals] signer_lookup", {
+      payloadKind: prepared.payload.kind,
+      sourceAddressPresent: Boolean(prepared.sourceAddress),
+      sourceAddressPrefix: prepared.sourceAddress?.slice(0, 8) ?? null,
+      dynamicWalletCount: wallets.length,
+      hasPrimaryWallet: Boolean(primaryWallet),
+      dynamicWalletAddressPrefixes: walletList.map((w) =>
+        getDynamicWalletAddresses(w)
+          .map((a) => a.slice(0, 8))
+          .join(",")
+      ),
+    })
+  }
+
   const wallet = findDynamicWalletForSource(wallets, primaryWallet, prepared.sourceAddress)
+
+  if (walletCreationDebugEnabled && wallet) {
+    const walletLike = wallet as DynamicWalletLike
+    console.info("[pinetree-withdrawals] signer_ready", {
+      payloadKind: prepared.payload.kind,
+      hasSolanaSigner: Boolean(
+        walletLike.signAndSendTransaction || walletLike.connector?.signAndSendTransaction
+      ),
+      hasEvmClient: Boolean(
+        walletLike.getWalletClient || walletLike.connector?.getWalletClient
+      ),
+      hasBtcSigner: Boolean(walletLike.signPsbt || walletLike.connector?.signPsbt),
+    })
+  }
+
   if (!wallet) {
     const hasAnyDynamicWallet = walletsToCheck.length > 0
     console.info("[pinetree-withdrawals] signer_not_found", {
@@ -505,7 +537,8 @@ function sanitizeWithdrawalSubmitErrorForMerchant(message: string | undefined) {
 const walletCreationTimeoutMs = 30_000
 const walletCreationDebugEnabled =
   process.env.NODE_ENV !== "production" ||
-  process.env.NEXT_PUBLIC_PINE_TREE_WALLET_DEBUG === "true"
+  process.env.NEXT_PUBLIC_PINE_TREE_WALLET_DEBUG === "true" ||
+  process.env.NEXT_PUBLIC_PINETREE_WALLET_DEBUG === "true"
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -1456,6 +1489,8 @@ function PineTreeWalletRuntime() {
   const [withdrawalApprovalError, setWithdrawalApprovalError] = useState("")
   const [reviewingWithdrawal, setReviewingWithdrawal] = useState(false)
   const [submittingWithdrawal, setSubmittingWithdrawal] = useState(false)
+  const [withdrawalReconnectPending, setWithdrawalReconnectPending] = useState(false)
+  const withdrawalReconnectSourceRef = useRef<string | null>(null)
 
   // --- SDK load timeout ---
   useEffect(() => {
@@ -1702,6 +1737,45 @@ function PineTreeWalletRuntime() {
       setPendingSync(false)
     }
   }, [user, wallets, dynamicNetworkAddresses, syncPineTreeManagedLightning, logWalletCreationStep, fetchProviderRailState])
+
+  // --- Post-reconnect wallet match check ---
+  // Fires when Dynamic loads wallets after setShowAuthFlow(true). Clears the reconnect
+  // pending flag immediately so it only runs once per reconnect attempt.
+  useEffect(() => {
+    if (!withdrawalReconnectPending) return
+    if (wallets.length === 0 && !primaryWallet) return
+    setWithdrawalReconnectPending(false)
+    const sourceAddress = withdrawalReconnectSourceRef.current
+    if (!sourceAddress) {
+      setWithdrawalScreen("form")
+      return
+    }
+    const matched = findDynamicWalletForSource(wallets as unknown[], primaryWallet, sourceAddress)
+    if (walletCreationDebugEnabled) {
+      const walletList = wallets as DynamicWalletLike[]
+      console.info("[pinetree-withdrawals] reconnect_after", {
+        dynamicWalletCountAfter: wallets.length,
+        hasPrimaryWallet: Boolean(primaryWallet),
+        sourceAddressPrefix: sourceAddress.slice(0, 8),
+        dynamicWalletAddressPrefixesAfter: walletList.map((w) =>
+          getDynamicWalletAddresses(w)
+            .map((a) => a.slice(0, 8))
+            .join(",")
+        ),
+        matchingWalletFound: Boolean(matched),
+      })
+    }
+    if (matched) {
+      setWithdrawalScreen("form")
+      setWithdrawalApprovalError("")
+      void syncProfileFromDynamic()
+    } else {
+      setWithdrawalApprovalError(
+        "This browser is connected to a different PineTree Wallet session. Sign in with the PineTree Wallet used for this merchant, then try again."
+      )
+      setWithdrawalScreen("failed")
+    }
+  }, [wallets, primaryWallet, withdrawalReconnectPending, syncProfileFromDynamic])
 
   // --- After wallet creation: auto-sync addresses to DB ---
   useEffect(() => {
@@ -1950,14 +2024,70 @@ function PineTreeWalletRuntime() {
   }
 
   function handleWithdrawalReconnect() {
-    // Clear the failed withdrawal state; rail/asset/destination/amount are preserved.
+    const profile = profileState.kind === "loaded" ? profileState.profile : null
+    const sourceAddress = getWithdrawalSourceAddress(profile, withdrawalRail)
+
+    if (walletCreationDebugEnabled) {
+      const walletList = wallets as DynamicWalletLike[]
+      console.info("[pinetree-withdrawals] reconnect_attempt", {
+        withdrawalRail,
+        withdrawalAsset,
+        sourceAddressPresent: Boolean(sourceAddress),
+        sourceAddressPrefix: sourceAddress?.slice(0, 8) ?? null,
+        dynamicWalletCountBefore: (wallets as unknown[]).length,
+        hasPrimaryWallet: Boolean(primaryWallet),
+        dynamicWalletAddressPrefixesBefore: walletList.map((w) =>
+          getDynamicWalletAddresses(w)
+            .map((a) => a.slice(0, 8))
+            .join(",")
+        ),
+      })
+    }
+
+    // Save source address for the post-reconnect effect to check against loaded wallets.
+    withdrawalReconnectSourceRef.current = sourceAddress
+    setWithdrawalApprovalError("")
+
+    // If Dynamic wallets are already loaded, check for a match immediately.
+    const allWalletCount = (wallets as unknown[]).length + (primaryWallet ? 1 : 0)
+    if (allWalletCount > 0 && sourceAddress) {
+      const matched = findDynamicWalletForSource(wallets as unknown[], primaryWallet, sourceAddress)
+      if (walletCreationDebugEnabled) {
+        const walletLike = matched as DynamicWalletLike | null
+        console.info("[pinetree-withdrawals] reconnect_wallets_present", {
+          dynamicWalletCount: (wallets as unknown[]).length,
+          matchingWalletFound: Boolean(matched),
+          hasSolanaSigner: Boolean(
+            walletLike &&
+              (walletLike.signAndSendTransaction || walletLike.connector?.signAndSendTransaction)
+          ),
+          hasEvmClient: Boolean(
+            walletLike && (walletLike.getWalletClient || walletLike.connector?.getWalletClient)
+          ),
+        })
+      }
+      if (matched) {
+        // Wallet is already active and matches — return to form; values are preserved.
+        setWithdrawalScreen("form")
+        setWithdrawalReview(null)
+        void syncProfileFromDynamic()
+        return
+      }
+      // Wallets are loaded but none match the saved address — different account or session.
+      setWithdrawalApprovalError(
+        "This browser is connected to a different PineTree Wallet session. Sign in with the PineTree Wallet used for this merchant, then try again."
+      )
+      setWithdrawalScreen("failed")
+      return
+    }
+
+    // No Dynamic wallets are active. Trigger the Dynamic auth flow to reconnect the session.
+    // The post-reconnect useEffect will re-run address matching once wallets load.
+    setWithdrawalReconnectPending(true)
     setWithdrawalScreen("form")
     setWithdrawalReview(null)
-    setWithdrawalApprovalError("")
-    // Resync the merchant profile from Dynamic in case the wallet already reconnected.
     void syncProfileFromDynamic()
-    // Navigate to the wallet overview using the same CTA as the normal Open PineTree Wallet button.
-    handleOpenWallet()
+    setShowAuthFlow(true)
   }
 
   function handleCreateWallet() {

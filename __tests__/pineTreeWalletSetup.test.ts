@@ -1239,13 +1239,15 @@ describe("PineTree embedded wallet setup", () => {
     expect(reconnectFn).toContain("syncProfileFromDynamic")
   })
 
-  it("reconnect handler uses the same Open PineTree Wallet function as the normal CTA", () => {
-    // handleOpenWallet navigates to the overview tab — same as the top-level Open button.
+  it("reconnect handler triggers Dynamic auth flow when no wallets are loaded", () => {
+    // When no Dynamic wallets are active (wallets[] empty, no primaryWallet), the handler
+    // calls setShowAuthFlow(true) to open the Dynamic connect/auth overlay and then waits
+    // for wallets to update — it does NOT just navigate to the overview tab.
     const reconnectFn = page.slice(
       page.indexOf("function handleWithdrawalReconnect()"),
       page.indexOf("function handleCreateWallet()")
     )
-    expect(reconnectFn).toContain("handleOpenWallet()")
+    expect(reconnectFn).toContain("setShowAuthFlow(true)")
   })
 
   it("no Wallet approval pill appears in withdrawal review or failure screens", () => {
@@ -1272,5 +1274,71 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("matchingWalletFound: false")
     expect(page).toContain("dynamicWalletCount:")
     expect(page).toContain("payloadKind:")
+  })
+
+  // -------------------------------------------------------------------------
+  // Withdrawal reconnect recovery — Task 6
+  // -------------------------------------------------------------------------
+
+  it("reconnect refreshes Dynamic wallets before matching source address", () => {
+    // When no wallets are active, the handler sets withdrawalReconnectPending and a useEffect
+    // watches wallets + primaryWallet; once non-empty, it runs address matching and clears
+    // pending — so the retry always uses the freshest wallet list from the Dynamic SDK.
+    expect(page).toContain("withdrawalReconnectPending")
+    expect(page).toContain("setWithdrawalReconnectPending")
+    expect(page).toContain("withdrawalReconnectSourceRef")
+    // useEffect watches wallets and primaryWallet for the reconnect path
+    expect(page).toContain("reconnect_after")
+  })
+
+  it("signer lookup searches all Dynamic wallets, not just primaryWallet", () => {
+    // findDynamicWalletForSource deduplicates candidates[] and primaryWallet into a single
+    // search list so that wallets in either source can match the saved DB source address.
+    expect(page).toContain("[...candidates, primaryWallet]")
+    expect(page).toContain("walletsToSearch.find")
+  })
+
+  it("Solana address matching uses exact string comparison after shared lowercase normalisation", () => {
+    // Both the stored address and the Dynamic wallet address are lowercased before comparison.
+    // A Solana address like 'CdKwuF...' lowercases identically from both sides, so the match
+    // is correct; no separate case-sensitive path is needed.
+    expect(page).toContain("normalizedSource = sourceAddress.toLowerCase()")
+    expect(page).toContain("address.toLowerCase() === normalizedSource")
+  })
+
+  it("EVM address matching is case-insensitive via shared lowercase normalisation", () => {
+    // EVM addresses from different sources may differ in case ('0xAbCd' vs '0xabcd').
+    // Both sides are lowercased before comparison so a checksum-cased DB address matches
+    // a lowercase Dynamic wallet address and vice versa.
+    expect(page).toContain("sourceAddress.toLowerCase()")
+    expect(page).toContain(".toLowerCase() === normalizedSource")
+  })
+
+  it("reconnect with wallets loaded but address mismatch shows different-session error", () => {
+    // When handleWithdrawalReconnect runs and Dynamic wallets are already loaded but none
+    // match the DB source address, it sets the specific mismatch error without showing auth.
+    const reconnectFn = page.slice(
+      page.indexOf("function handleWithdrawalReconnect()"),
+      page.indexOf("function handleCreateWallet()")
+    )
+    expect(reconnectFn).toContain(
+      "This browser is connected to a different PineTree Wallet session. Sign in with the PineTree Wallet used for this merchant, then try again."
+    )
+    expect(reconnectFn).toContain("setWithdrawalScreen(\"failed\")")
+  })
+
+  it("signer_lookup diagnostic logs wallet count and address prefixes before matching", () => {
+    // The signer_lookup event is emitted (gated by walletCreationDebugEnabled) before the
+    // wallet search so that diagnostics capture the exact state seen during signing.
+    expect(page).toContain("\"[pinetree-withdrawals] signer_lookup\"")
+    expect(page).toContain("dynamicWalletAddressPrefixes")
+    expect(page).toContain("sourceAddressPrefix")
+    expect(page).toContain("hasPrimaryWallet")
+  })
+
+  it("no pending review fallback: PineTree Wallet Solana/Base withdrawals always use dynamic_browser path", () => {
+    // There is no client-side fallback to action: "submit" for Solana or Base withdrawals.
+    // Signing failures surface as errors, not silent fallbacks to manual review.
+    expect(page).not.toContain("action: \"submit\"")
   })
 })
