@@ -16,13 +16,6 @@ function walletOverviewSrc() {
   )
 }
 
-function dropdownSrc() {
-  return walletPage.slice(
-    walletPage.indexOf("function AssetSelectDropdown("),
-    walletPage.indexOf("function BalanceRows(")
-  )
-}
-
 function balanceRowsSrc() {
   return walletPage.slice(
     walletPage.indexOf("function BalanceRows("),
@@ -102,29 +95,27 @@ describe("Overview tab - polished PineTree summary", () => {
   })
 })
 
-describe("Balances tab - dropdown asset selector and wallet detail", () => {
-  it("BalanceRows uses selectedKey state and AssetSelectDropdown", () => {
+describe("Balances tab - wallet asset list and compact detail", () => {
+  it("BalanceRows uses selectedKey state with wallet-style asset rows", () => {
     const src = balanceRowsSrc()
     expect(src).toContain("selectedKey")
     expect(src).toContain("setSelectedKey")
-    expect(src).toContain("AssetSelectDropdown")
-    expect(src).toContain("dropdownOptions")
-    expect(src).not.toContain("onClick={() => setSelectedKey(row.key)}")
-  })
-
-  it("AssetSelectDropdown uses PineTree blue selected-item styling", () => {
-    const src = dropdownSrc()
-    expect(src).toContain("bg-blue-50")
-    expect(src).toContain("border-blue-")
+    expect(src).toContain("Total value")
+    expect(src).toContain('["Deposit", "Withdraw", "History"].map')
+    expect(src).toContain("allAssets.map((row, index)")
+    expect(src).toContain("onClick={() => setSelectedKey(row.key)}")
+    expect(src).toContain("ChevronRight")
     expect(src).toContain("isSelected")
+    expect(src).not.toContain("dropdownOptions")
+    expect(src).not.toContain("AssetSelectDropdown")
   })
 
-  it("selected asset detail card shows balance, USD estimate, metadata, and wallet address", () => {
+  it("selected asset detail card shows balance, metadata, and wallet address", () => {
     const src = balanceRowsSrc()
-    expect(src).toContain("Available balance")
+    expect(src).toContain("Balance")
     expect(src).toContain("formatBalance(selectedAsset.balance, selectedAsset.asset)")
-    expect(src).toContain("formatUsd(selectedAsset.usdValue)")
     expect(src).toContain("Network")
+    expect(src).toContain("Asset")
     expect(src).toContain("Last synced")
     expect(src).toContain("Wallet address")
     expect(src).toContain('aria-label="Copy wallet address"')
@@ -193,7 +184,8 @@ describe("Wallets tab removed", () => {
     expect(src).toContain('"PineTree BTC Wallet"')
     expect(src).toContain('"Not set"')
     expect(src).toContain("lightningPayout.connected ? \"Connected\" : \"Not connected\"")
-    expect(src).toContain('const showLightningPayout = rail === "bitcoin" && asset === "BTC"')
+    expect(src).toContain('const showLightningPayoutSetup = rail === "bitcoin" && asset === "BTC" && !lightningPayout.connected')
+    expect(src).toContain("Set payout destination")
     expect(src).not.toContain("Speed")
     expect(src).not.toContain("Auto-settlement")
   })
@@ -223,7 +215,7 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
 
   it("Bitcoin Lightning payout does not render for Base or Solana withdrawal assets", () => {
     const src = withdrawalFormSrc()
-    expect(src).toContain('const showLightningPayout = rail === "bitcoin" && asset === "BTC"')
+    expect(src).toContain('const showLightningPayoutSetup = rail === "bitcoin" && asset === "BTC" && !lightningPayout.connected')
     expect(src).not.toContain('rail === "base"')
     expect(src).not.toContain('rail === "solana"')
   })
@@ -236,14 +228,20 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     expect(walletPage).toContain("handleWithdrawalAssetSelect")
     expect(walletPage).toContain("setWithdrawalReview(null)")
     expect(walletPage).toContain("setWithdrawalSubmitResult(null)")
+    expect(walletPage).toContain('setWithdrawalScreen("form")')
   })
 
-  it("withdraw tab keeps one progressive primary button", () => {
+  it("withdraw tab uses isolated form, review, approving, submitted, and failed screens", () => {
     const src = withdrawalFormSrc()
-    expect(src).toContain("primaryActionLabel")
-    expect(src).toContain("primaryAction")
-    const buttonMatches = (src.match(/onClick={primaryAction}/g) || []).length
-    expect(buttonMatches).toBe(1)
+    expect(walletPage).toContain('type WithdrawalScreen = "form" | "review" | "approving" | "submitted" | "failed"')
+    expect(src).toContain('if (screen === "review" && review)')
+    expect(src).toContain('if (screen === "approving")')
+    expect(src).toContain('if (screen === "submitted" && submitResult)')
+    expect(src).toContain('if (screen === "failed")')
+    expect(src).toContain("Waiting for wallet approval")
+    expect(src).toContain("Withdrawal was not approved")
+    expect(src).not.toContain("primaryActionLabel")
+    expect(src).not.toContain("onClick={primaryAction}")
   })
 
   it("withdraw validation and pending review states are not yellow warning blocks", () => {

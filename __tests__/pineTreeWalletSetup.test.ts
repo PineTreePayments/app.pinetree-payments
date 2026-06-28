@@ -332,9 +332,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("Balances will update as wallet activity is indexed.")
   })
 
-  it("balances tab shows asset-selector view without fake unsynced zeroes", () => {
+  it("balances tab shows wallet-style asset rows without fake unsynced zeroes", () => {
     expect(page).toContain("function BalanceRows")
-    expect(page).toContain("AssetSelectDropdown")
+    expect(page).toContain("Total value")
+    expect(page).toContain('["Deposit", "Withdraw", "History"].map')
+    expect(page).toContain("allAssets.map((row, index)")
+    expect(page).toContain("ChevronRight")
     expect(page).toContain("Wallet address")
     expect(page).not.toContain("Managed by Speed")
     expect(page).not.toContain("Powered by Speed")
@@ -378,37 +381,44 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('"address_mismatch"')
   })
 
-  it("uses one progressive withdrawal action button instead of stacked review and submit buttons", () => {
-    expect(page).toContain("const primaryActionLabel")
-    expect(page).toContain("const primaryAction = review ? onSubmit : onReview")
-    expect(page).toContain("onClick={primaryAction}")
-    expect(page).not.toContain("onClick={onSubmit}")
+  it("uses separate withdrawal screens instead of stacked review and submit panels", () => {
+    expect(page).toContain('type WithdrawalScreen = "form" | "review" | "approving" | "submitted" | "failed"')
+    expect(page).toContain('if (screen === "review" && review)')
+    expect(page).toContain('if (screen === "approving")')
+    expect(page).toContain('if (screen === "submitted" && submitResult)')
+    expect(page).toContain('if (screen === "failed")')
+    expect(page).not.toContain("const primaryActionLabel")
+    expect(page).not.toContain("onClick={primaryAction}")
   })
 
-  it("withdrawal primary action progresses through review, approval, pending, and processing states", () => {
-    expect(page).toContain(": \"Review withdrawal\"")
+  it("withdrawal screen progresses through review, approving, submitted, and failed states", () => {
+    expect(page).toContain("Review withdrawal")
     expect(page).toContain("\"Approve with PineTree Wallet\"")
-    expect(page).toContain("\"Submit withdrawal request\"")
+    expect(page).toContain("Waiting for wallet approval")
+    expect(page).toContain("Withdrawal was not approved")
     expect(page).toContain("\"Pending review\"")
     expect(page).toContain("\"Processing\"")
-    expect(page).toContain("const primaryActionDisabled = hasSubmitted")
+    expect(page).toContain('setWithdrawalScreen("review")')
+    expect(page).toContain('setWithdrawalScreen("approving")')
+    expect(page).toContain('setWithdrawalScreen("submitted")')
+    expect(page).toContain('setWithdrawalScreen("failed")')
   })
 
-  it("shows pending review copy when Dynamic approval is not available", () => {
+  it("keeps the non-Dynamic submit path available behind the review screen", () => {
     expect(page).toContain("Submit withdrawal request")
     expect(page).toContain("if (withdrawalReview?.review.approvalMethod === \"dynamic_browser\")")
     expect(page).toContain("Withdrawal request submitted")
     expect(page).toContain("Status: {submitResult.merchantStatus}")
     expect(page).toContain("Pending review")
     expect(page).toContain("Processing")
-    expect(page).toContain("We&apos;ll review this withdrawal before processing.")
   })
 
-  it("hides the editable review panel after withdrawal submission", () => {
-    expect(page).toContain("{review && !submitResult ? (")
+  it("hides the editable form and review screen after withdrawal submission", () => {
+    expect(page).toContain('if (screen === "submitted" && submitResult)')
     expect(page).toContain("Withdrawal request submitted")
     expect(page).toContain("Withdrawal submitted")
     expect(page).toContain("Transaction reference:")
+    expect(page).not.toContain("{review && !submitResult ? (")
   })
 
   it("shows selected asset availability and USD value in the Withdraw tab", () => {
@@ -416,7 +426,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("findWithdrawalBalance(walletSync, withdrawalRail, withdrawalAsset)")
     expect(page).toContain("Available")
     expect(page).toContain("formatCryptoAmount(selectedBalanceAmount, asset)")
-    expect(page).toContain("≈ ${formatUsd(selectedBalance.usdValue)}")
+    expect(page).toContain("formatUsd(selectedBalance.usdValue)")
   })
 
   it("shows a Max button that fills the selected asset balance", () => {
@@ -977,26 +987,16 @@ describe("PineTree embedded wallet setup", () => {
   // -------------------------------------------------------------------------
 
   it("UI never renders both a withdrawal error and Approve with PineTree Wallet simultaneously", () => {
-    // When prepare fails, setWithdrawalReview(null) is called before setWithdrawalError so
-    // the button reverts to "Review withdrawal" — the Approve label cannot coexist with an error.
-    expect(page).toContain("setWithdrawalReview(null)")
-    // All three error paths in the dynamic flow clear the review
-    const dynamicBlock = page.slice(
-      page.indexOf("if (withdrawalReview?.review.approvalMethod === \"dynamic_browser\")"),
-      page.indexOf("void pollWithdrawalRequest(withdrawalId, json as WithdrawalSubmitResponse)")
-    )
-    expect(dynamicBlock).toContain("setWithdrawalReview(null)")
+    // Approval errors render on the failed screen, away from the review screen button.
+    expect(page).toContain('if (screen === "failed")')
+    expect(page).toContain("withdrawalApprovalError")
+    expect(page).toContain('setWithdrawalScreen("failed")')
   })
 
   it("valid Solana review with Dynamic approvalMethod shows Approve with PineTree Wallet button", () => {
-    // isDynamicBrowserApproval is computed from the server's approvalMethod decision
-    expect(page).toContain("const isDynamicBrowserApproval = Boolean(review?.canSubmit && review.review.approvalMethod === \"dynamic_browser\")")
-    expect(page).toContain("isDynamicBrowserApproval")
+    expect(page).toContain('if (screen === "review" && review)')
     expect(page).toContain("\"Approve with PineTree Wallet\"")
-    // The button label resolves to Approve when isDynamicBrowserApproval is true and there is a review
-    const labelBlock = page.slice(page.indexOf("const primaryActionLabel ="), page.indexOf("const primaryActionDisabled ="))
-    expect(labelBlock).toContain("isDynamicBrowserApproval")
-    expect(labelBlock).toContain("\"Approve with PineTree Wallet\"")
+    expect(page).toContain("Confirm the details, then approve from PineTree Wallet.")
   })
 
   it("clicking Approve calls the prepare route before signing", () => {
@@ -1047,16 +1047,15 @@ describe("PineTree embedded wallet setup", () => {
 
   it("missing Dynamic signer does not show Approve with PineTree Wallet", () => {
     // When no matching wallet is found at signing time, sendDynamicPreparedWithdrawal throws
-    // and the catch block clears withdrawalReview — the button cannot show Approve
+    // and the catch block moves to the failed screen — the review button cannot coexist with the error.
     expect(page).toContain("Open PineTree Wallet to approve this withdrawal.")
-    // The catch block guards setWithdrawalReview(null) with the dynamic_browser check.
-    // Use the unique comment as an anchor — there is only one such catch block.
     const dynamicCatchBlock = page.slice(
       page.indexOf("// Signing failure (Dynamic path) reaches here"),
-      page.indexOf("// Signing failure (Dynamic path) reaches here") + 300
+      page.indexOf("// Signing failure (Dynamic path) reaches here") + 500
     )
     expect(dynamicCatchBlock).toContain("withdrawalReview?.review.approvalMethod === \"dynamic_browser\"")
     expect(dynamicCatchBlock).toContain("setWithdrawalReview(null)")
+    expect(dynamicCatchBlock).toContain('setWithdrawalScreen("failed")')
   })
 
   it("missing Dynamic signer falls back to Submit withdrawal request copy", () => {
