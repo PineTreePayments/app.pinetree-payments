@@ -333,16 +333,24 @@ async function sendDynamicPreparedWithdrawal(
   wallets: unknown[],
   primaryWallet: unknown
 ): Promise<{ txHash?: string; signedPsbtBase64?: string; providerReference?: string }> {
+  const walletsToCheck = [...(wallets as unknown[]), primaryWallet].filter(Boolean)
   const wallet = findDynamicWalletForSource(wallets, primaryWallet, prepared.sourceAddress)
   if (!wallet) {
-    // The Dynamic embedded wallet is not active in this browser session.
-    // This typically means the session has expired or the wallet page was opened before
-    // the Dynamic SDK finished loading. Re-opening PineTree Wallet reconnects the session.
+    const hasAnyDynamicWallet = walletsToCheck.length > 0
     console.info("[pinetree-withdrawals] signer_not_found", {
-      sourceAddress: prepared.sourceAddress,
-      walletCount: (wallets as unknown[]).length,
-      hasPrimaryWallet: Boolean(primaryWallet),
+      payloadKind: prepared.payload.kind,
+      sourceAddressPresent: Boolean(prepared.sourceAddress),
+      dynamicWalletCount: (wallets as unknown[]).length,
+      matchingWalletFound: false,
+      hasAnyDynamicWallet,
     })
+    if (hasAnyDynamicWallet) {
+      // Wallets are loaded but none match the saved DB address — different account/session.
+      throw new Error(
+        "This browser is connected to a different PineTree Wallet session. Reopen PineTree Wallet or sign in again."
+      )
+    }
+    // No Dynamic wallets present at all — session expired or SDK not yet loaded.
     throw new Error(
       "PineTree Wallet is not active in this browser session. Open PineTree Wallet to reconnect, then try again."
     )
@@ -355,7 +363,7 @@ async function sendDynamicPreparedWithdrawal(
       ?? await wallet.connector?.getWalletClient?.(chainIdStr)
     const client = rawClient as DynamicEvmWalletClient | undefined
     if (!client?.sendTransaction) {
-      throw new Error("PineTree Wallet signer is not available for this asset yet.")
+      throw new Error("Unable to sign this withdrawal. Please try again.")
     }
     const txHash = await client.sendTransaction({
       account: prepared.payload.from as `0x${string}`,
@@ -372,7 +380,7 @@ async function sendDynamicPreparedWithdrawal(
     const signed = await wallet.signPsbt?.(psbtRequest)
       ?? await wallet.connector?.signPsbt?.(psbtRequest)
     if (!signed?.signedPsbt) {
-      throw new Error("PineTree Wallet signer is not available for this asset yet.")
+      throw new Error("Unable to sign this withdrawal. Please try again.")
     }
     return { signedPsbtBase64: signed.signedPsbt, providerReference: "dynamic:bitcoin-psbt" }
   }
@@ -384,13 +392,13 @@ async function sendDynamicPreparedWithdrawal(
   const txResult = await wallet.signAndSendTransaction?.(transaction) as unknown
     ?? await wallet.connector?.signAndSendTransaction?.(transaction) as unknown
   if (!txResult) {
-    throw new Error("PineTree Wallet signer is not available for this asset yet.")
+    throw new Error("Unable to sign this withdrawal. Please try again.")
   }
   const txHash = typeof txResult === "string"
     ? txResult
     : (txResult as { signature?: string }).signature
   if (!txHash) {
-    throw new Error("PineTree Wallet signer is not available for this asset yet.")
+    throw new Error("Unable to sign this withdrawal. Please try again.")
   }
   return { txHash, providerReference: txHash }
 }
@@ -477,8 +485,9 @@ function sanitizeWithdrawalErrorForMerchant(message: string | undefined) {
 function sanitizeWithdrawalSubmitErrorForMerchant(message: string | undefined) {
   const raw = String(message || "").trim()
   if (!raw) return "We couldn't submit this withdrawal request. Please try again."
-  if (raw === "PineTree Wallet signer is not available for this asset yet.") return raw
+  // Pass through session-specific reconnect errors so merchants get actionable guidance.
   if (raw.includes("PineTree Wallet is not active in this browser session")) return raw
+  if (raw.includes("different PineTree Wallet session")) return raw
   const hiddenSignerPhrases = [
     ["provider", "signer"].join(" "),
     ["cannot", "sign"].join(" "),
@@ -739,6 +748,7 @@ function WithdrawalFormShell({
   onDone,
   onReview,
   onSubmit,
+  onOpenWallet,
 }: {
   rail: WithdrawalRail
   asset: WithdrawalAsset
@@ -766,6 +776,7 @@ function WithdrawalFormShell({
   onDone: () => void
   onReview: () => void
   onSubmit: () => void
+  onOpenWallet?: () => void
 }) {
   const amountTrimmed = amountDecimal.trim()
   const selectedBalanceAmount = selectedBalance?.balance ?? null
@@ -886,6 +897,9 @@ function WithdrawalFormShell({
   }
 
   if (screen === "failed") {
+    const isSignerSessionError =
+      approvalError.includes("not active in this browser session") ||
+      approvalError.includes("different PineTree Wallet session")
     return (
       <div className="space-y-4">
         <div className="rounded-[1.2rem] border border-red-200 bg-red-50 px-5 py-5">
@@ -895,7 +909,15 @@ function WithdrawalFormShell({
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          {review ? (
+          {isSignerSessionError && onOpenWallet ? (
+            <button
+              type="button"
+              onClick={onOpenWallet}
+              className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+            >
+              Open PineTree Wallet
+            </button>
+          ) : review ? (
             <button
               type="button"
               onClick={onSubmit}
@@ -1927,6 +1949,17 @@ function PineTreeWalletRuntime() {
     setWalletOpen(true)
   }
 
+  function handleWithdrawalReconnect() {
+    // Clear the failed withdrawal state; rail/asset/destination/amount are preserved.
+    setWithdrawalScreen("form")
+    setWithdrawalReview(null)
+    setWithdrawalApprovalError("")
+    // Resync the merchant profile from Dynamic in case the wallet already reconnected.
+    void syncProfileFromDynamic()
+    // Navigate to the wallet overview using the same CTA as the normal Open PineTree Wallet button.
+    handleOpenWallet()
+  }
+
   function handleCreateWallet() {
     if (hasStaleDynamicSession && user) {
       logWalletCreationStep("opening_dynamic", { reason: "stale_dynamic_session_logout" })
@@ -2187,7 +2220,7 @@ function PineTreeWalletRuntime() {
         return
       }
 
-      setWithdrawalApprovalError("PineTree Wallet signer is not available for this asset yet.")
+      setWithdrawalApprovalError("This withdrawal cannot be signed in this browser session.")
       setWithdrawalScreen("failed")
       return
     } catch (error) {
@@ -2432,6 +2465,7 @@ function PineTreeWalletRuntime() {
                   onDone={handleDoneWithdrawal}
                   onReview={() => void handleReviewWithdrawal()}
                   onSubmit={() => void handleSubmitWithdrawal()}
+                  onOpenWallet={handleWithdrawalReconnect}
                 />
               ) : null}
 

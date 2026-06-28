@@ -407,7 +407,7 @@ describe("PineTree embedded wallet setup", () => {
   it("routes non-Dynamic wallet sends to a signer-unavailable failure instead of manual review", () => {
     expect(page).toContain("Submit withdrawal request")
     expect(page).toContain("if (withdrawalReview?.review.approvalMethod === \"dynamic_browser\")")
-    expect(page).toContain("PineTree Wallet signer is not available for this asset yet.")
+    expect(page).toContain("This withdrawal cannot be signed in this browser session.")
     expect(page).not.toContain("action: \"submit\"")
     expect(page).not.toContain("withdrawal_id: withdrawalId")
   })
@@ -591,7 +591,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction")
     expect(page).toContain("const dynamicSubmission = await sendDynamicPreparedWithdrawal")
     expect(page).toContain("if (withdrawalReview?.review.approvalMethod === \"dynamic_browser\")")
-    expect(page).toContain("PineTree Wallet signer is not available for this asset yet.")
+    expect(page).toContain("Unable to sign this withdrawal. Please try again.")
     expect(page).not.toContain("action: \"submit\"")
   })
 
@@ -1048,7 +1048,7 @@ describe("PineTree embedded wallet setup", () => {
   it("missing Dynamic signer does not show Approve withdrawal", () => {
     // When no matching wallet is found at signing time, sendDynamicPreparedWithdrawal throws
     // and the catch block moves to the failed screen — the review button cannot coexist with the error.
-    expect(page).toContain("PineTree Wallet signer is not available for this asset yet.")
+    expect(page).toContain("PineTree Wallet is not active in this browser session.")
     const dynamicCatchBlock = page.slice(
       page.indexOf("// Signing failure (Dynamic path) reaches here"),
       page.indexOf("// Signing failure (Dynamic path) reaches here") + 500
@@ -1060,7 +1060,7 @@ describe("PineTree embedded wallet setup", () => {
 
   it("missing Dynamic signer fails instead of creating a manual review request", () => {
     expect(page).toContain("\"Submit withdrawal request\"")
-    expect(page).toContain('setWithdrawalApprovalError("PineTree Wallet signer is not available for this asset yet.")')
+    expect(page).toContain('setWithdrawalApprovalError("This withdrawal cannot be signed in this browser session.")')
     expect(page).not.toContain("action: \"submit\"")
     expect(page).not.toContain("withdrawal_id: withdrawalId")
   })
@@ -1167,8 +1167,8 @@ describe("PineTree embedded wallet setup", () => {
     // we emit a safe diagnostic log and throw a reconnect-guidance error — not the generic copy.
     expect(page).toContain("console.info(\"[pinetree-withdrawals] signer_not_found\"")
     expect(page).toContain("PineTree Wallet is not active in this browser session. Open PineTree Wallet to reconnect, then try again.")
-    expect(page).toContain("walletCount:")
-    expect(page).toContain("hasPrimaryWallet:")
+    expect(page).toContain("dynamicWalletCount:")
+    expect(page).toContain("hasAnyDynamicWallet")
   })
 
   it("Dynamic Base EVM signing calls getWalletClient inline and dispatches sendTransaction", () => {
@@ -1180,17 +1180,97 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("BigInt(prepared.payload.value)")
   })
 
-  it("missing Base wallet client shows signer unavailable instead of falling back to manual review", () => {
+  it("missing Base wallet client throws signing-unavailable error instead of falling back to manual review", () => {
     // When getWalletClient returns undefined or a client without sendTransaction,
-    // the EVM path throws the standard signer-unavailable error — not a pending-review request.
+    // the EVM path throws an actionable signing error — not a pending-review request.
     expect(page).toContain("if (!client?.sendTransaction)")
-    expect(page).toContain("PineTree Wallet signer is not available for this asset yet.")
+    expect(page).toContain("Unable to sign this withdrawal. Please try again.")
     expect(page).not.toContain("action: \"submit\"")
   })
 
-  it("sanitizer passes through PineTree Wallet session-not-active error to merchant display", () => {
-    // The reconnect-guidance error message must reach the UI so merchants know to reopen the wallet.
-    // It must not be replaced with the generic "We couldn't submit" copy.
+  it("sanitizer passes through session reconnect errors and blocks internal signer copy", () => {
+    // Both session-not-active and session-mismatch errors must reach the UI for merchant guidance.
     expect(page).toContain("if (raw.includes(\"PineTree Wallet is not active in this browser session\")) return raw")
+    expect(page).toContain("if (raw.includes(\"different PineTree Wallet session\")) return raw")
+    // The old generic signer passthrough is removed — use the new actionable messages instead.
+    expect(page).not.toContain("if (raw === \"PineTree Wallet signer is not available for this asset yet.\") return raw")
+  })
+
+  // -------------------------------------------------------------------------
+  // Withdrawal reconnect recovery — Task 5
+  // -------------------------------------------------------------------------
+
+  it("failed screen with session failure shows Open PineTree Wallet and Edit withdrawal", () => {
+    // isSignerSessionError drives which primary button appears on the failed screen.
+    expect(page).toContain("isSignerSessionError")
+    expect(page).toContain("not active in this browser session")
+    expect(page).toContain("different PineTree Wallet session")
+    // Primary reconnect button on the failed screen
+    expect(page).toContain("isSignerSessionError && onOpenWallet")
+    // Edit withdrawal is always the secondary button
+    expect(page).toContain("Edit withdrawal")
+  })
+
+  it("Open PineTree Wallet action clears failed state and preserves withdrawal form values", () => {
+    // handleWithdrawalReconnect resets the screen to form so the preserved values (rail/asset/
+    // destination/amount) are visible when the merchant navigates back to the Withdraw tab.
+    expect(page).toContain("function handleWithdrawalReconnect()")
+    expect(page).toContain("setWithdrawalScreen(\"form\")")
+    expect(page).toContain("setWithdrawalReview(null)")
+    expect(page).toContain("setWithdrawalApprovalError(\"\")")
+    // Form values (rail, asset, destination, amount) are NOT cleared in reconnect
+    const reconnectFn = page.slice(
+      page.indexOf("function handleWithdrawalReconnect()"),
+      page.indexOf("function handleCreateWallet()")
+    )
+    expect(reconnectFn).not.toContain("setWithdrawalRail")
+    expect(reconnectFn).not.toContain("setWithdrawalAsset")
+    expect(reconnectFn).not.toContain("setWithdrawalDestination")
+    expect(reconnectFn).not.toContain("setWithdrawalAmount")
+  })
+
+  it("reconnect handler calls syncProfileFromDynamic to resync wallet profile", () => {
+    // After clearing the error state, the handler resyncs in case the wallet reconnected.
+    expect(page).toContain("void syncProfileFromDynamic()")
+    const reconnectFn = page.slice(
+      page.indexOf("function handleWithdrawalReconnect()"),
+      page.indexOf("function handleCreateWallet()")
+    )
+    expect(reconnectFn).toContain("syncProfileFromDynamic")
+  })
+
+  it("reconnect handler uses the same Open PineTree Wallet function as the normal CTA", () => {
+    // handleOpenWallet navigates to the overview tab — same as the top-level Open button.
+    const reconnectFn = page.slice(
+      page.indexOf("function handleWithdrawalReconnect()"),
+      page.indexOf("function handleCreateWallet()")
+    )
+    expect(reconnectFn).toContain("handleOpenWallet()")
+  })
+
+  it("no Wallet approval pill appears in withdrawal review or failure screens", () => {
+    expect(page).not.toContain("Wallet approval")
+    expect(page).not.toContain("wallet-approval")
+    expect(page).not.toContain("approval pill")
+  })
+
+  it("no PineTree Wallet signer is not available merchant-facing copy remains in page", () => {
+    // The old generic error string is gone; session errors use specific reconnect-guidance copy.
+    expect(page).not.toContain("PineTree Wallet signer is not available for this asset yet.")
+    // Actionable errors that replaced it must be present
+    expect(page).toContain("PineTree Wallet is not active in this browser session.")
+    expect(page).toContain("different PineTree Wallet session")
+    expect(page).toContain("Unable to sign this withdrawal. Please try again.")
+  })
+
+  it("address mismatch shows a distinct session-mismatch error distinct from session-not-found", () => {
+    // When Dynamic wallets are present but none match the saved DB address (different account),
+    // the error is distinct from the no-wallets case, guiding the merchant to sign in again.
+    expect(page).toContain("This browser is connected to a different PineTree Wallet session.")
+    expect(page).toContain("hasAnyDynamicWallet")
+    // Both error paths share the same signer_not_found log key for diagnostics
+    expect(page).toContain("matchingWalletFound: false")
+    expect(page).toContain("dynamicWalletCount:")
+    expect(page).toContain("payloadKind:")
   })
 })
