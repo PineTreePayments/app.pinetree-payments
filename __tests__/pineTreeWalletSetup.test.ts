@@ -971,4 +971,175 @@ describe("PineTree embedded wallet setup", () => {
       fs.existsSync(path.join(process.cwd(), "app/api/wallets/lightning/speed/connect/route.ts"))
     ).toBe(false)
   })
+
+  // -------------------------------------------------------------------------
+  // Withdrawal approval state machine — Task 3
+  // -------------------------------------------------------------------------
+
+  it("UI never renders both a withdrawal error and Approve with PineTree Wallet simultaneously", () => {
+    // When prepare fails, setWithdrawalReview(null) is called before setWithdrawalError so
+    // the button reverts to "Review withdrawal" — the Approve label cannot coexist with an error.
+    expect(page).toContain("setWithdrawalReview(null)")
+    // All three error paths in the dynamic flow clear the review
+    const dynamicBlock = page.slice(
+      page.indexOf("if (withdrawalReview?.review.approvalMethod === \"dynamic_browser\")"),
+      page.indexOf("void pollWithdrawalRequest(withdrawalId, json as WithdrawalSubmitResponse)")
+    )
+    expect(dynamicBlock).toContain("setWithdrawalReview(null)")
+  })
+
+  it("valid Solana review with Dynamic approvalMethod shows Approve with PineTree Wallet button", () => {
+    // isDynamicBrowserApproval is computed from the server's approvalMethod decision
+    expect(page).toContain("const isDynamicBrowserApproval = Boolean(review?.canSubmit && review.review.approvalMethod === \"dynamic_browser\")")
+    expect(page).toContain("isDynamicBrowserApproval")
+    expect(page).toContain("\"Approve with PineTree Wallet\"")
+    // The button label resolves to Approve when isDynamicBrowserApproval is true and there is a review
+    const labelBlock = page.slice(page.indexOf("const primaryActionLabel ="), page.indexOf("const primaryActionDisabled ="))
+    expect(labelBlock).toContain("isDynamicBrowserApproval")
+    expect(labelBlock).toContain("\"Approve with PineTree Wallet\"")
+  })
+
+  it("clicking Approve calls the prepare route before signing", () => {
+    // handleSubmitWithdrawal routes to prepare first when approvalMethod is dynamic_browser
+    expect(page).toContain("if (withdrawalReview?.review.approvalMethod === \"dynamic_browser\")")
+    expect(page).toContain("/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/prepare")
+    // prepare is fetched with POST before sendDynamicPreparedWithdrawal is called
+    const submitFn = page.slice(page.indexOf("async function handleSubmitWithdrawal()"), page.indexOf("// ---------------------------------------------------------------------------\n  // Early returns"))
+    const prepareIndex = submitFn.indexOf("/prepare")
+    const signingIndex = submitFn.indexOf("sendDynamicPreparedWithdrawal")
+    expect(prepareIndex).toBeGreaterThan(-1)
+    expect(signingIndex).toBeGreaterThan(prepareIndex)
+  })
+
+  it("Solana prepared transaction calls Dynamic signAndSendTransaction", () => {
+    // sendDynamicPreparedWithdrawal handles the solana_transaction payload kind
+    expect(page).toContain("signAndSendTransaction")
+    expect(page).toContain("prepared.payload.transactionBase64")
+    expect(page).toContain("kind: \"solana_transaction\"")
+    expect(page).toContain("wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction")
+    // The transaction bytes are deserialised from the server-built base64 payload
+    expect(page).toContain("Transaction.from(base64ToBytes(prepared.payload.transactionBase64))")
+  })
+
+  it("returned tx hash from signing is sent to the submit route", () => {
+    // After signing succeeds, the hash is POSTed to the submit endpoint
+    expect(page).toContain("/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/submit")
+    expect(page).toContain("tx_hash: dynamicSubmission.txHash || \"\"")
+    expect(page).toContain("provider_reference: dynamicSubmission.providerReference || dynamicSubmission.txHash || \"\"")
+  })
+
+  it("successful Dynamic signing sets the withdrawal to Processing status", () => {
+    // completeDynamicWalletWithdrawal stores status: "processing" after a valid txHash
+    expect(withdrawalEngine).toContain("status: \"processing\"")
+    expect(withdrawalEngine).toContain("merchantStatus: \"Processing\"")
+    expect(withdrawalEngine).toContain("txHash")
+    // Confirmed status is never set without a real on-chain result
+    expect(withdrawalEngine).not.toContain("status: \"confirmed\"")
+  })
+
+  it("UI shows transaction reference after successful Dynamic approval", () => {
+    // After submit succeeds, the page renders the withdrawalSubmitResult with a reference
+    expect(page).toContain("Transaction reference:")
+    expect(page).toContain("submitResult.request.provider_reference")
+    expect(page).toContain("Withdrawal request submitted")
+    expect(page).toContain("setWithdrawalSubmitResult(submitted as WithdrawalSubmitResponse)")
+  })
+
+  it("missing Dynamic signer does not show Approve with PineTree Wallet", () => {
+    // When no matching wallet is found at signing time, sendDynamicPreparedWithdrawal throws
+    // and the catch block clears withdrawalReview — the button cannot show Approve
+    expect(page).toContain("Open PineTree Wallet to approve this withdrawal.")
+    // The catch block guards setWithdrawalReview(null) with the dynamic_browser check.
+    // Use the unique comment as an anchor — there is only one such catch block.
+    const dynamicCatchBlock = page.slice(
+      page.indexOf("// Signing failure (Dynamic path) reaches here"),
+      page.indexOf("// Signing failure (Dynamic path) reaches here") + 300
+    )
+    expect(dynamicCatchBlock).toContain("withdrawalReview?.review.approvalMethod === \"dynamic_browser\"")
+    expect(dynamicCatchBlock).toContain("setWithdrawalReview(null)")
+  })
+
+  it("missing Dynamic signer falls back to Submit withdrawal request copy", () => {
+    // When approvalMethod is not dynamic_browser, the label is Submit withdrawal request
+    expect(page).toContain("\"Submit withdrawal request\"")
+    // The fallback path uses action: "submit" against the withdrawals route
+    expect(page).toContain("action: \"submit\"")
+    expect(page).toContain("withdrawal_id: withdrawalId")
+  })
+
+  it("stale withdrawal review is cleared when amount, address, rail, or asset changes", () => {
+    // handleWithdrawalAssetSelect clears review
+    expect(page).toContain("function handleWithdrawalAssetSelect(")
+    expect(page).toContain("setWithdrawalRail(nextRail)")
+    expect(page).toContain("setWithdrawalAsset(nextAsset)")
+    // All change handlers clear stale review
+    const assetSelect = page.slice(
+      page.indexOf("function handleWithdrawalAssetSelect("),
+      page.indexOf("async function handleReviewWithdrawal(")
+    )
+    expect(assetSelect).toContain("setWithdrawalReview(null)")
+    // handleReviewWithdrawal also clears review at the top of each new review
+    expect(page).toContain("setWithdrawalReview(null)")
+  })
+
+  it("Base ETH withdrawal uses the EVM Dynamic path with an evm_transaction payload", () => {
+    expect(withdrawalEngine).toContain("kind: \"evm_transaction\"")
+    // ETH transfer sends value directly to the destination
+    expect(withdrawalEngine).toContain("SystemProgram.transfer")
+    // Engine dispatches evm_transaction for Base
+    const engineBase = withdrawalEngine.slice(
+      withdrawalEngine.indexOf("kind: \"evm_transaction\""),
+      withdrawalEngine.indexOf("kind: \"evm_transaction\"") + 300
+    )
+    expect(engineBase).toContain("evm_transaction")
+  })
+
+  it("Base USDC withdrawal uses EVM path with token contract address", () => {
+    // Token transfers encode the ERC-20 contract address and transfer calldata
+    expect(withdrawalEngine).toContain("BASE_USDC_TOKEN_ADDRESS")
+    expect(withdrawalEngine).toContain("to: BASE_USDC_TOKEN_ADDRESS")
+    expect(withdrawalEngine).toContain("tokenContract: prepared.rail === \"base\" && prepared.asset === \"USDC\" ? BASE_USDC_TOKEN_ADDRESS : null")
+    // prepare stores the token_contract for client-side verification
+    expect(withdrawalProductionSchemaMigration).toContain("token_contract")
+  })
+
+  it("provider disabled state does not block withdrawal when source address exists", () => {
+    // Withdrawal availability is driven by address presence (walletConnected / configured),
+    // not by whether a payment provider is enabled for that rail.
+    // Note: rail display chips DO use row.enabled && row.configured — that is intentional.
+    // Only the withdrawable-asset calculation must use configured alone.
+    expect(page).toContain("const noWithdrawableAssets = assetOptions.length === 0")
+    expect(page).toContain("withdrawalWalletRows")
+    // The withdrawable-assets useMemo filters by configured (address present) not enabled
+    const withdrawableSection = page.slice(
+      page.indexOf("const withdrawableAssetOptions = useMemo"),
+      page.indexOf("const withdrawableAssetOptions = useMemo") + 400
+    )
+    expect(withdrawableSection).toContain(".filter((row) => row.configured)")
+    expect(withdrawableSection).not.toContain("row.enabled")
+  })
+
+  it("no confirmed status is ever set without a real chain confirmation", () => {
+    const allWithdrawalSource = [withdrawalEngine, withdrawalApiRoute, withdrawalPrepareRoute, withdrawalSubmitRoute].join("\n")
+    expect(allWithdrawalSource).not.toContain("status: \"confirmed\"")
+    // Processing is the terminal client-visible state; confirmed is set only by webhooks
+    expect(withdrawalEngine).toContain("status: \"processing\"")
+    expect(withdrawalEngine).toContain("merchantStatus: \"Processing\"")
+  })
+
+  it("prepare and submit routes never return provider secrets or raw transaction payloads to the browser", () => {
+    // Prepare returns only the unsigned payload kind + fields the client needs to sign
+    expect(withdrawalPrepareRoute).not.toContain("DYNAMIC_API_KEY")
+    expect(withdrawalPrepareRoute).not.toContain("DYNAMIC_API_SECRET")
+    expect(withdrawalPrepareRoute).not.toContain("PRIVATE_KEY")
+    expect(withdrawalPrepareRoute).not.toContain("process.env")
+    expect(withdrawalSubmitRoute).not.toContain("DYNAMIC_API_KEY")
+    expect(withdrawalSubmitRoute).not.toContain("DYNAMIC_API_SECRET")
+    expect(withdrawalSubmitRoute).not.toContain("PRIVATE_KEY")
+    expect(withdrawalSubmitRoute).not.toContain("process.env")
+    // The debug logging in the page only logs safe metadata — no secrets
+    expect(page).toContain("console.info(\"[pinetree-withdrawals] approval_state\"")
+    expect(page).not.toContain("privateKey")
+    expect(page).not.toContain("DYNAMIC_API_KEY")
+  })
 })

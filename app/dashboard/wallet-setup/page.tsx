@@ -773,9 +773,7 @@ function WithdrawalFormShell({
         ? "Reviewing..."
         : review
           ? isDynamicBrowserApproval
-            ? review.request.status === "review_required"
-              ? "Approve with PineTree Wallet"
-              : "Approve with PineTree Wallet"
+            ? "Approve with PineTree Wallet"
             : "Submit withdrawal request"
           : "Review withdrawal"
   const primaryActionDisabled = hasSubmitted || submitting || (review ? false : reviewDisabled)
@@ -1997,6 +1995,24 @@ function PineTreeWalletRuntime() {
     const withdrawalId = withdrawalReview?.request.id
     if (!token || !withdrawalId) return
 
+    const _debugRail = withdrawalReview?.review.rail
+    const _debugApprovalMethod = withdrawalReview?.review.approvalMethod
+    const _debugSourceAddress = _debugRail ? getWithdrawalSourceAddress(profile, _debugRail) : null
+    const _debugMatchingWallet = _debugRail
+      ? findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, _debugRail, _debugSourceAddress)
+      : null
+    console.info("[pinetree-withdrawals] approval_state", {
+      rail: _debugRail,
+      asset: withdrawalReview?.review.asset,
+      requestId: withdrawalId,
+      approvalMethod: _debugApprovalMethod,
+      approvalReady: Boolean(withdrawalReview?.canSubmit && _debugApprovalMethod === "dynamic_browser"),
+      hasMatchingDynamicWallet: Boolean(_debugMatchingWallet),
+      hasSolanaSigner: Boolean(_debugMatchingWallet && dynamicWalletSupportsRail(_debugMatchingWallet as DynamicWalletLike, "solana")),
+      hasEvmSigner: Boolean(_debugMatchingWallet && dynamicWalletSupportsRail(_debugMatchingWallet as DynamicWalletLike, "base")),
+      primaryActionLabel: _debugApprovalMethod === "dynamic_browser" ? "Approve with PineTree Wallet" : "Submit withdrawal request",
+    })
+
     setSubmittingWithdrawal(true)
     setWithdrawalError("")
     setWithdrawalSubmitResult(null)
@@ -2014,6 +2030,10 @@ function PineTreeWalletRuntime() {
         })
         const prepared = (await prepareRes.json()) as WithdrawalPrepareResponse | { error?: string }
         if (!prepareRes.ok) {
+          // Clear the stale review so the button reverts to "Review withdrawal". The
+          // underlying request status may have changed (e.g. already "pending"), and
+          // prepare will keep rejecting it. The merchant must re-review to start fresh.
+          setWithdrawalReview(null)
           setWithdrawalError(sanitizeWithdrawalSubmitErrorForMerchant("error" in prepared ? prepared.error : undefined))
           return
         }
@@ -2037,6 +2057,9 @@ function PineTreeWalletRuntime() {
         })
         const submitted = (await submitRes.json()) as WithdrawalSubmitResponse | { error?: string }
         if (!submitRes.ok) {
+          // Clear stale review: status is no longer "review_required" after prepare
+          // succeeded, so a retry would fail at prepare with "not ready".
+          setWithdrawalReview(null)
           setWithdrawalError(sanitizeWithdrawalSubmitErrorForMerchant("error" in submitted ? submitted.error : undefined))
           return
         }
@@ -2064,6 +2087,11 @@ function PineTreeWalletRuntime() {
       setWithdrawalSubmitResult(json as WithdrawalSubmitResponse)
       void pollWithdrawalRequest(withdrawalId, json as WithdrawalSubmitResponse)
     } catch (error) {
+      // Signing failure (Dynamic path) reaches here. Clear the stale review so
+      // "Approve with PineTree Wallet" is never shown alongside an error message.
+      if (withdrawalReview?.review.approvalMethod === "dynamic_browser") {
+        setWithdrawalReview(null)
+      }
       setWithdrawalError(sanitizeWithdrawalSubmitErrorForMerchant(error instanceof Error ? error.message : undefined))
     } finally {
       setSubmittingWithdrawal(false)
