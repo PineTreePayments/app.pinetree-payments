@@ -1140,4 +1140,57 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("privateKey")
     expect(page).not.toContain("DYNAMIC_API_KEY")
   })
+
+  // -------------------------------------------------------------------------
+  // Withdrawal execution: Dynamic signing paths — Task 4
+  // -------------------------------------------------------------------------
+
+  it("Dynamic Solana signing uses inline optional-chaining calls to preserve this binding", () => {
+    // Method extraction (const fn = obj.method; fn()) loses 'this' in strict mode.
+    // signAndSendTransaction on TurnkeySolanaWalletConnector calls this.walletUiUtils, so
+    // 'this' must remain the connector object — inline ?. calls guarantee that.
+    expect(page).toContain("await wallet.signAndSendTransaction?.(transaction) as unknown")
+    expect(page).toContain("await wallet.connector?.signAndSendTransaction?.(transaction) as unknown")
+    expect(page).not.toContain("const signAndSendTransaction = wallet.signAndSendTransaction")
+  })
+
+  it("Dynamic Solana signer handles both string and {signature} return shapes", () => {
+    // TurnkeySolanaWalletConnector.signAndSendTransaction returns a string.
+    // ISolana (injected wallets like Phantom) returns { signature: string }.
+    // Both must be normalised to a plain hash string before submitting.
+    expect(page).toContain("typeof txResult === \"string\"")
+    expect(page).toContain("(txResult as { signature?: string }).signature")
+  })
+
+  it("wallet not found in Dynamic session shows reconnect error and logs signer_not_found", () => {
+    // When wallets[] from useUserWallets() contains no wallet matching the saved DB address,
+    // we emit a safe diagnostic log and throw a reconnect-guidance error — not the generic copy.
+    expect(page).toContain("console.info(\"[pinetree-withdrawals] signer_not_found\"")
+    expect(page).toContain("PineTree Wallet is not active in this browser session. Open PineTree Wallet to reconnect, then try again.")
+    expect(page).toContain("walletCount:")
+    expect(page).toContain("hasPrimaryWallet:")
+  })
+
+  it("Dynamic Base EVM signing calls getWalletClient inline and dispatches sendTransaction", () => {
+    // getWalletClient must be called through the wallet/connector owner so 'this' is preserved
+    // (TurnkeyEVMWalletConnector.getWalletClient reads this.turnkeyAddress).
+    expect(page).toContain("await wallet.getWalletClient?.(chainIdStr)")
+    expect(page).toContain("await wallet.connector?.getWalletClient?.(chainIdStr)")
+    expect(page).toContain("client.sendTransaction({")
+    expect(page).toContain("BigInt(prepared.payload.value)")
+  })
+
+  it("missing Base wallet client shows signer unavailable instead of falling back to manual review", () => {
+    // When getWalletClient returns undefined or a client without sendTransaction,
+    // the EVM path throws the standard signer-unavailable error — not a pending-review request.
+    expect(page).toContain("if (!client?.sendTransaction)")
+    expect(page).toContain("PineTree Wallet signer is not available for this asset yet.")
+    expect(page).not.toContain("action: \"submit\"")
+  })
+
+  it("sanitizer passes through PineTree Wallet session-not-active error to merchant display", () => {
+    // The reconnect-guidance error message must reach the UI so merchants know to reopen the wallet.
+    // It must not be replaced with the generic "We couldn't submit" copy.
+    expect(page).toContain("if (raw.includes(\"PineTree Wallet is not active in this browser session\")) return raw")
+  })
 })

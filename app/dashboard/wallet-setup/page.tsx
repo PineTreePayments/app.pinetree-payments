@@ -335,12 +335,25 @@ async function sendDynamicPreparedWithdrawal(
 ): Promise<{ txHash?: string; signedPsbtBase64?: string; providerReference?: string }> {
   const wallet = findDynamicWalletForSource(wallets, primaryWallet, prepared.sourceAddress)
   if (!wallet) {
-    throw new Error("PineTree Wallet signer is not available for this asset yet.")
+    // The Dynamic embedded wallet is not active in this browser session.
+    // This typically means the session has expired or the wallet page was opened before
+    // the Dynamic SDK finished loading. Re-opening PineTree Wallet reconnects the session.
+    console.info("[pinetree-withdrawals] signer_not_found", {
+      sourceAddress: prepared.sourceAddress,
+      walletCount: (wallets as unknown[]).length,
+      hasPrimaryWallet: Boolean(primaryWallet),
+    })
+    throw new Error(
+      "PineTree Wallet is not active in this browser session. Open PineTree Wallet to reconnect, then try again."
+    )
   }
 
   if (prepared.payload.kind === "evm_transaction") {
-    const getWalletClient = wallet.getWalletClient || wallet.connector?.getWalletClient
-    const client = await getWalletClient?.(prepared.payload.chainId) as DynamicEvmWalletClient | undefined
+    // Call getWalletClient through the object (not extracted) to preserve 'this' binding.
+    const chainIdStr = String(prepared.payload.chainId)
+    const rawClient = await wallet.getWalletClient?.(chainIdStr)
+      ?? await wallet.connector?.getWalletClient?.(chainIdStr)
+    const client = rawClient as DynamicEvmWalletClient | undefined
     if (!client?.sendTransaction) {
       throw new Error("PineTree Wallet signer is not available for this asset yet.")
     }
@@ -354,23 +367,31 @@ async function sendDynamicPreparedWithdrawal(
   }
 
   if (prepared.payload.kind === "bitcoin_psbt") {
-    const signPsbt = wallet.signPsbt || wallet.connector?.signPsbt
-    if (!signPsbt) {
-      throw new Error("PineTree Wallet signer is not available for this asset yet.")
-    }
-    const signed = await signPsbt({ unsignedPsbtBase64: prepared.payload.psbtBase64 })
+    // Call signPsbt through the object to preserve 'this' binding.
+    const psbtRequest = { unsignedPsbtBase64: prepared.payload.psbtBase64 }
+    const signed = await wallet.signPsbt?.(psbtRequest)
+      ?? await wallet.connector?.signPsbt?.(psbtRequest)
     if (!signed?.signedPsbt) {
       throw new Error("PineTree Wallet signer is not available for this asset yet.")
     }
     return { signedPsbtBase64: signed.signedPsbt, providerReference: "dynamic:bitcoin-psbt" }
   }
 
-  const signAndSendTransaction = wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction
-  if (!signAndSendTransaction) {
+  // Solana transaction. Call signAndSendTransaction through the object to preserve 'this' binding.
+  // The embedded Solana wallet triggers Dynamic's approval UI and returns a signature string.
+  // Injected wallets return { signature: string } per the ISolana interface.
+  const transaction = Transaction.from(base64ToBytes(prepared.payload.transactionBase64))
+  const txResult = await wallet.signAndSendTransaction?.(transaction) as unknown
+    ?? await wallet.connector?.signAndSendTransaction?.(transaction) as unknown
+  if (!txResult) {
     throw new Error("PineTree Wallet signer is not available for this asset yet.")
   }
-  const transaction = Transaction.from(base64ToBytes(prepared.payload.transactionBase64))
-  const txHash = await signAndSendTransaction(transaction)
+  const txHash = typeof txResult === "string"
+    ? txResult
+    : (txResult as { signature?: string }).signature
+  if (!txHash) {
+    throw new Error("PineTree Wallet signer is not available for this asset yet.")
+  }
   return { txHash, providerReference: txHash }
 }
 
@@ -457,6 +478,7 @@ function sanitizeWithdrawalSubmitErrorForMerchant(message: string | undefined) {
   const raw = String(message || "").trim()
   if (!raw) return "We couldn't submit this withdrawal request. Please try again."
   if (raw === "PineTree Wallet signer is not available for this asset yet.") return raw
+  if (raw.includes("PineTree Wallet is not active in this browser session")) return raw
   const hiddenSignerPhrases = [
     ["provider", "signer"].join(" "),
     ["cannot", "sign"].join(" "),
