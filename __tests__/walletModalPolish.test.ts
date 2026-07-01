@@ -160,12 +160,13 @@ describe("Balances tab - wallet asset list and compact detail", () => {
 })
 
 describe("Wallets tab removed", () => {
-  it("modal has only Overview, Balances, and Withdraw tabs", () => {
-    expect(walletPage).toContain('type WalletTab = "overview" | "balances" | "withdraw"')
+  it("modal tabs include Overview, Balances, Withdraw, and Activity", () => {
+    expect(walletPage).toContain('type WalletTab = "overview" | "balances" | "withdraw" | "activity"')
     expect(walletPage).toContain('{ id: "overview", label: "Overview" }')
     expect(walletPage).toContain('{ id: "balances", label: "Balances" }')
     expect(walletPage).toContain('{ id: "withdraw", label: "Withdraw" }')
-    expect(walletPage).toContain("grid-cols-3")
+    expect(walletPage).toContain('{ id: "activity", label: "Activity" }')
+    expect(walletPage).toContain("grid-cols-4")
     expect(walletPage).not.toContain('label: "Wallets"')
     expect(walletPage).not.toContain('activeTab === "wallets"')
   })
@@ -307,6 +308,80 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(chipsSrc).toContain("{rail.label}")
     expect(chipsSrc).not.toContain("ProviderStatusPill")
     expect(chipsSrc).not.toContain("walletStatus")
+  })
+})
+
+describe("Activity tab - recent withdrawal visibility", () => {
+  function activityTabSrc() {
+    return walletPage.slice(
+      walletPage.indexOf("function ActivityTab("),
+      walletPage.indexOf("// ---------------------------------------------------------------------------\n// Main runtime component")
+    )
+  }
+
+  it("ActivityStatusPill and ActivityTab components are present in the page", () => {
+    expect(walletPage).toContain("function ActivityStatusPill(")
+    expect(walletPage).toContain("function ActivityTab(")
+  })
+
+  it("Activity tab renders recentActivity items from sync state", () => {
+    const src = activityTabSrc()
+    expect(src).toContain("recentActivity")
+    expect(src).toContain("items.map")
+    expect(src).toContain("item.label")
+    expect(src).toContain("item.status")
+    expect(src).toContain("item.createdAt")
+  })
+
+  it("Activity tab shows empty state when no activity exists", () => {
+    const src = activityTabSrc()
+    expect(src).toContain("No wallet activity yet.")
+    expect(src).toContain("items.length === 0")
+  })
+
+  it("ActivityStatusPill renders Confirmed status in blue", () => {
+    const src = walletPage.slice(
+      walletPage.indexOf("function ActivityStatusPill("),
+      walletPage.indexOf("function ActivityTab(")
+    )
+    expect(src).toContain("Confirmed")
+    expect(src).toContain("bg-blue-100")
+    expect(src).toContain("text-blue-700")
+  })
+
+  it("ActivityStatusPill renders Failed status", () => {
+    const src = walletPage.slice(
+      walletPage.indexOf("function ActivityStatusPill("),
+      walletPage.indexOf("function ActivityTab(")
+    )
+    expect(src).toContain("Failed")
+    expect(src).toContain("text-red-600")
+  })
+
+  it("ActivityStatusPill renders Processing, Canceled, Blocked, and Pending statuses", () => {
+    const src = walletPage.slice(
+      walletPage.indexOf("function ActivityStatusPill("),
+      walletPage.indexOf("function ActivityTab(")
+    )
+    expect(src).toContain("Processing")
+    expect(src).toContain("Canceled")
+    expect(src).toContain("Blocked")
+    expect(src).toContain("Pending")
+  })
+
+  it("Activity tab is wired to walletSync and walletSyncing props", () => {
+    const src = walletPage.slice(
+      walletPage.indexOf('activeTab === "activity"'),
+      walletPage.indexOf("activeTab === \"activity\"") + 200
+    )
+    expect(src).toContain("walletSync")
+    expect(src).toContain("walletSyncing")
+  })
+
+  it("Activity tab shows Syncing label while sync is in progress", () => {
+    const src = activityTabSrc()
+    expect(src).toContain("Syncing...")
+    expect(src).toContain("syncing")
   })
 })
 

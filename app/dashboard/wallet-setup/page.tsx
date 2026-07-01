@@ -24,7 +24,7 @@ import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/Pi
 // Types
 // ---------------------------------------------------------------------------
 
-type WalletTab = "overview" | "balances" | "withdraw"
+type WalletTab = "overview" | "balances" | "withdraw" | "activity"
 type AddressEntry = { id: string; address: string; detail?: string }
 type WithdrawalRail = "base" | "solana" | "bitcoin"
 type WithdrawalAsset = "ETH" | "USDC" | "SOL" | "BTC"
@@ -95,7 +95,7 @@ type SyncedBalanceAsset = {
   balance: number | null
   usdValue: number | null
   lastSyncedAt: string | null
-  status: "synced" | "pending_sync"
+  status: "synced" | "pending_sync" | "config_missing"
 }
 
 type PineTreeWalletSyncResponse = {
@@ -233,6 +233,7 @@ const walletTabs: Array<{ id: WalletTab; label: string }> = [
   { id: "overview", label: "Overview" },
   { id: "balances", label: "Balances" },
   { id: "withdraw", label: "Withdraw" },
+  { id: "activity", label: "Activity" },
 ]
 
 const defaultEnabledRails: EnabledRailState = { base: false, solana: false, bitcoin: false }
@@ -889,7 +890,7 @@ function WithdrawalFormShell({
         <button
           type="button"
           onClick={onSubmit}
-          disabled={submitting}
+          disabled={submitting || !review.canSubmit}
           className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none sm:w-auto"
         >
           {reviewActionLabel}
@@ -1447,8 +1448,72 @@ function EnabledRailChips({
 }
 
 // ---------------------------------------------------------------------------
-// Wallet tab — dropdown-driven wallet view
+// Activity tab
 // ---------------------------------------------------------------------------
+
+function ActivityStatusPill({ status }: { status: string }) {
+  const s = status.toLowerCase()
+  const cls =
+    s === "confirmed"
+      ? "bg-blue-100 text-blue-700"
+      : s === "processing"
+        ? "bg-blue-50 text-blue-500"
+        : s === "failed"
+          ? "bg-red-50 text-red-600"
+          : "bg-gray-100 text-gray-500"
+  const label =
+    s === "confirmed" ? "Confirmed"
+    : s === "processing" ? "Processing"
+    : s === "failed" ? "Failed"
+    : s === "canceled" ? "Canceled"
+    : s === "blocked" ? "Blocked"
+    : "Pending"
+  return (
+    <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-[11px] font-semibold leading-none ${cls}`}>
+      {label}
+    </span>
+  )
+}
+
+function ActivityTab({
+  sync,
+  syncing,
+}: {
+  sync: PineTreeWalletSyncResponse | null
+  syncing: boolean
+}) {
+  const items = sync?.recentActivity ?? []
+  return (
+    <div className="space-y-4">
+      <div className="overflow-hidden rounded-[1.35rem] border border-blue-200/60 bg-white shadow-[0_18px_42px_rgba(15,23,42,0.07)]">
+        <div className="border-b border-blue-100/70 bg-blue-50/55 px-4 py-3 sm:px-5">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">
+            {syncing ? "Syncing..." : "RECENT WITHDRAWALS"}
+          </p>
+        </div>
+        {items.length === 0 ? (
+          <div className="px-4 py-6 text-center sm:px-5">
+            <p className="text-sm text-gray-500">No wallet activity yet.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-blue-50">
+            {items.map((item) => (
+              <div key={item.id} className="px-4 py-3.5 sm:px-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-gray-900">{item.label}</p>
+                    <p className="mt-0.5 text-xs text-gray-500">{formatLastSynced(item.createdAt) ?? item.createdAt}</p>
+                  </div>
+                  <ActivityStatusPill status={item.status} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Main runtime component
@@ -2514,7 +2579,7 @@ function PineTreeWalletRuntime() {
             </header>
 
             <nav
-              className="grid shrink-0 grid-cols-3 gap-1.5 border-b border-gray-100 px-4 py-3 sm:px-6"
+              className="grid shrink-0 grid-cols-4 gap-1.5 border-b border-gray-100 px-4 py-3 sm:px-6"
               aria-label="PineTree Wallet sections"
             >
               {walletTabs.map((tab) => (
@@ -2597,6 +2662,10 @@ function PineTreeWalletRuntime() {
                   onSubmit={() => void handleSubmitWithdrawal()}
                   onOpenWallet={handleWithdrawalReconnect}
                 />
+              ) : null}
+
+              {activeTab === "activity" ? (
+                <ActivityTab sync={walletSync} syncing={walletSyncing} />
               ) : null}
 
             </div>

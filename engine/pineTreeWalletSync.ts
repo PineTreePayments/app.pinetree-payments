@@ -3,6 +3,7 @@ import { getWalletBalances } from "@/database/walletBalances"
 import { upsertMerchantAssetBalances } from "@/database/walletOverview"
 import { fetchBaseUsdcBalance, fetchSolanaUsdcBalance } from "@/engine/settlementBalances"
 import { getMarketPricesUSD } from "@/engine/marketPrices"
+import { listRecentWalletWithdrawalsForActivity } from "@/database/walletWithdrawalRequests"
 
 export type PineTreeBalanceAsset = {
   key: "BASE_ETH" | "BASE_USDC" | "SOLANA_SOL" | "SOLANA_USDC" | "BTC"
@@ -11,7 +12,7 @@ export type PineTreeBalanceAsset = {
   balance: number | null
   usdValue: number | null
   lastSyncedAt: string | null
-  status: "synced" | "pending_sync"
+  status: "synced" | "pending_sync" | "config_missing"
 }
 
 export type PineTreeWalletSyncResult = {
@@ -162,21 +163,38 @@ export async function syncPineTreeWalletBalances(merchantId: string): Promise<Pi
   return getPineTreeWalletBalanceSnapshot(merchantId)
 }
 
+function isBaseRpcConfigured(): boolean {
+  return Boolean(String(process.env.BASE_RPC_URL || "").trim())
+}
+
 export async function getPineTreeWalletBalanceSnapshot(
   merchantId: string
 ): Promise<PineTreeWalletSyncResult> {
-  const [profile, rows, prices] = await Promise.all([
+  const [profile, rows, prices, recentWithdrawals] = await Promise.all([
     getPineTreeWalletProfile(merchantId),
     getWalletBalances(merchantId),
     getMarketPricesUSD(),
+    listRecentWalletWithdrawalsForActivity(merchantId, 10).catch(() => []),
   ])
   const byAsset = new Map(rows.map((row) => [String(row.asset || "").toUpperCase(), row]))
+  const baseConfigured = isBaseRpcConfigured()
+  const hasBaseAddress = Boolean(profile?.base_address)
 
   const toBalance = (def: typeof BALANCE_DEFS[number]): PineTreeBalanceAsset => {
     const key = balanceKey(def.rail, def.asset)
     const row = byAsset.get(key)
     const balance = row ? Number(row.balance ?? 0) : null
     const price = def.asset === "USDC" ? 1 : def.asset === "SOL" ? prices.SOL : def.asset === "ETH" ? prices.ETH : prices.BTC
+
+    let status: PineTreeBalanceAsset["status"]
+    if (row) {
+      status = "synced"
+    } else if (def.rail === "base" && hasBaseAddress && !baseConfigured) {
+      status = "config_missing"
+    } else {
+      status = "pending_sync"
+    }
+
     return {
       key,
       rail: def.rail,
@@ -184,7 +202,7 @@ export async function getPineTreeWalletBalanceSnapshot(
       balance,
       usdValue: balance === null ? null : balance * price,
       lastSyncedAt: row?.last_updated || null,
-      status: row ? "synced" : "pending_sync",
+      status,
     }
   }
 
@@ -193,6 +211,13 @@ export async function getPineTreeWalletBalanceSnapshot(
   const totalUsd = synced.length > 0
     ? synced.reduce((sum, item) => sum + Number(item.usdValue || 0), 0)
     : null
+
+  const recentActivity = recentWithdrawals.map((wd) => ({
+    id: wd.id,
+    label: `Withdrawal: ${wd.amount_decimal} ${wd.asset} (${wd.rail})`,
+    status: wd.status,
+    createdAt: wd.created_at,
+  }))
 
   return {
     readiness: {
@@ -207,6 +232,6 @@ export async function getPineTreeWalletBalanceSnapshot(
     },
     totalUsd,
     lastSyncedAt: latestTimestamp(all.map((item) => item.lastSyncedAt)),
-    recentActivity: [],
+    recentActivity,
   }
 }

@@ -249,7 +249,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('label: "Balances"')
     expect(page).toContain('label: "Withdraw"')
     expect(page).not.toContain('label: "Wallets"')
-    expect(page).not.toContain('label: "Activity"')
+    expect(page).toContain('label: "Activity"')
     expect(page).not.toContain('label: "Receive"')
   })
 

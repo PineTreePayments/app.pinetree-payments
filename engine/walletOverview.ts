@@ -29,6 +29,10 @@ import {
   listLightningPayoutJobsForMerchant,
   type LightningPayoutJob
 } from "@/database/lightningPayoutJobs"
+import {
+  listRecentWalletWithdrawalsForActivity,
+  type WalletWithdrawalRequestRecord,
+} from "@/database/walletWithdrawalRequests"
 
 // ─── NWC Types ────────────────────────────────────────────────────────────────
 
@@ -217,11 +221,31 @@ function summarizeLightningPayoutJob(row: LightningPayoutJob): WalletOverviewOpe
   }
 }
 
+function summarizeWalletWithdrawalRequest(row: WalletWithdrawalRequestRecord): WalletOverviewOperation {
+  return {
+    id: row.id,
+    provider: row.provider || "pinetree",
+    operationType: "PINETREE_WITHDRAWAL",
+    asset: row.asset,
+    network: row.rail,
+    amount: Number(row.amount_decimal) || 0,
+    destinationType: "crypto_address",
+    destinationValue: row.destination_address,
+    providerReference: row.tx_hash,
+    status: row.status.toUpperCase(),
+    errorCode: row.status === "failed" ? "WITHDRAWAL_FAILED" : null,
+    errorMessage: row.error_message,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
 async function listRecentWalletActivity(merchantId: string): Promise<WalletOverviewOperation[]> {
-  const [walletOperations, settlementWithdrawals, lightningPayoutJobs] = await Promise.all([
+  const [walletOperations, settlementWithdrawals, lightningPayoutJobs, walletWithdrawals] = await Promise.all([
     listRecentWalletOperationsForMerchant(merchantId, { limit: 25 }),
     listSettlementWithdrawalsForMerchant(merchantId, { limit: 25 }),
-    listLightningPayoutJobsForMerchant(merchantId, { limit: 25 }).catch(() => [])
+    listLightningPayoutJobsForMerchant(merchantId, { limit: 25 }).catch(() => []),
+    listRecentWalletWithdrawalsForActivity(merchantId, 25).catch(() => [] as WalletWithdrawalRequestRecord[]),
   ])
 
   const operationRows = walletOperations
@@ -234,7 +258,8 @@ async function listRecentWalletActivity(merchantId: string): Promise<WalletOverv
   return [
     ...operationRows,
     ...settlementWithdrawals.map(summarizeSettlementWithdrawal),
-    ...lightningPayoutJobs.map(summarizeLightningPayoutJob)
+    ...lightningPayoutJobs.map(summarizeLightningPayoutJob),
+    ...walletWithdrawals.map(summarizeWalletWithdrawalRequest),
   ]
     .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
     .slice(0, 8)

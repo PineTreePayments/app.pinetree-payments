@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   fetchSolanaUsdcBalance: vi.fn(),
   fetchBaseUsdcBalance: vi.fn(),
   getMarketPricesUSD: vi.fn(),
+  listRecentWalletWithdrawalsForActivity: vi.fn(),
 }))
 
 vi.mock("@/database/pineTreeWalletProfiles", () => ({
@@ -28,6 +29,10 @@ vi.mock("@/engine/settlementBalances", () => ({
 
 vi.mock("@/engine/marketPrices", () => ({
   getMarketPricesUSD: mocks.getMarketPricesUSD,
+}))
+
+vi.mock("@/database/walletWithdrawalRequests", () => ({
+  listRecentWalletWithdrawalsForActivity: mocks.listRecentWalletWithdrawalsForActivity,
 }))
 
 import {
@@ -67,6 +72,7 @@ describe("PineTree Wallet balance sync", () => {
     })
     mocks.fetchSolanaUsdcBalance.mockResolvedValue(1.25)
     mocks.getMarketPricesUSD.mockResolvedValue({ SOL: 100, ETH: 2000, BTC: 60000 })
+    mocks.listRecentWalletWithdrawalsForActivity.mockResolvedValue([])
     global.fetch = vi.fn(async () => ({
       json: async () => ({ result: { value: 2_000_000_000 } }),
     })) as unknown as typeof fetch
@@ -93,11 +99,84 @@ describe("PineTree Wallet balance sync", () => {
     expect(result.lastSyncedAt).toEqual(expect.any(String))
   })
 
-  it("returns pending sync for unsynced balances instead of fake zero", async () => {
+  it("returns pending_sync for Solana and config_missing for Base when BASE_RPC_URL is absent", async () => {
     const result = await getPineTreeWalletBalanceSnapshot("merchant_1")
 
     expect(result.totalUsd).toBeNull()
-    expect(result.balances.base[0]).toMatchObject({ asset: "ETH", balance: null, status: "pending_sync" })
+    expect(result.balances.base[0]).toMatchObject({ asset: "ETH", balance: null, status: "config_missing" })
+    expect(result.balances.base[1]).toMatchObject({ asset: "USDC", balance: null, status: "config_missing" })
     expect(result.balances.solana[0]).toMatchObject({ asset: "SOL", balance: null, status: "pending_sync" })
+  })
+
+  it("Solana balances sync independently when BASE_RPC_URL is absent", async () => {
+    const result = await syncPineTreeWalletBalances("merchant_1")
+
+    // Solana still persisted
+    expect(mocks.upsertMerchantAssetBalances).toHaveBeenCalledWith(
+      "merchant_1",
+      expect.arrayContaining([
+        { asset: "SOLANA_SOL", balance: 2 },
+        { asset: "SOLANA_USDC", balance: 1.25 },
+      ]),
+      expect.any(String)
+    )
+    // Base assets absent from upsert call
+    const callArgs = mocks.upsertMerchantAssetBalances.mock.calls[0][1] as Array<{ asset: string }>
+    const persistedAssets = callArgs.map((b) => b.asset)
+    expect(persistedAssets).not.toContain("BASE_ETH")
+    expect(persistedAssets).not.toContain("BASE_USDC")
+    // Solana result is synced
+    expect(result.balances.solana[0]).toMatchObject({ asset: "SOL", status: "synced" })
+    // Base result is config_missing (no RPC URL)
+    expect(result.balances.base[0]).toMatchObject({ asset: "ETH", status: "config_missing" })
+  })
+
+  it("Base balances sync when BASE_RPC_URL is present", async () => {
+    process.env.BASE_RPC_URL = "https://base-rpc.example.com"
+    mocks.fetchBaseUsdcBalance.mockResolvedValue(50)
+    global.fetch = vi.fn(async () => ({
+      json: async () => ({ result: "0x2386F26FC10000" }), // 0.01 ETH in hex
+    })) as unknown as typeof fetch
+
+    const result = await syncPineTreeWalletBalances("merchant_1")
+
+    const callArgs = mocks.upsertMerchantAssetBalances.mock.calls[0][1] as Array<{ asset: string }>
+    const persistedAssets = callArgs.map((b) => b.asset)
+    expect(persistedAssets).toContain("BASE_ETH")
+    expect(persistedAssets).toContain("BASE_USDC")
+    expect(result.balances.base.some((b) => b.status === "synced")).toBe(true)
+  })
+
+  it("populates recentActivity from wallet withdrawal requests", async () => {
+    mocks.listRecentWalletWithdrawalsForActivity.mockResolvedValue([
+      {
+        id: "wd-1",
+        merchant_id: "merchant_1",
+        rail: "solana",
+        asset: "SOL",
+        amount_decimal: "1.5",
+        status: "confirmed",
+        created_at: "2026-06-28T10:00:00Z",
+        destination_address: "SomeAddress",
+        tx_hash: "sol-tx-123",
+      },
+    ])
+
+    const result = await getPineTreeWalletBalanceSnapshot("merchant_1")
+
+    expect(result.recentActivity).toHaveLength(1)
+    expect(result.recentActivity[0]).toMatchObject({
+      id: "wd-1",
+      status: "confirmed",
+      createdAt: "2026-06-28T10:00:00Z",
+    })
+  })
+
+  it("returns empty recentActivity when no withdrawals exist", async () => {
+    mocks.listRecentWalletWithdrawalsForActivity.mockResolvedValue([])
+
+    const result = await getPineTreeWalletBalanceSnapshot("merchant_1")
+
+    expect(result.recentActivity).toEqual([])
   })
 })

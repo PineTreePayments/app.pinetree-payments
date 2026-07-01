@@ -201,3 +201,36 @@ export async function getWalletWithdrawalRequest(
   if (error) throw new Error(`Failed to get wallet withdrawal request: ${error.message}`)
   return data ? normalize(data as Record<string, unknown>) : null
 }
+
+const ACTIVITY_STATUSES: WalletWithdrawalStatus[] = ["pending", "processing", "confirmed", "failed", "canceled", "blocked"]
+
+export async function listRecentWalletWithdrawalsForActivity(
+  merchantId: string,
+  limit: number
+): Promise<WalletWithdrawalRequestRecord[]> {
+  const { data, error } = await db
+    .from(TABLE)
+    .select("*")
+    .eq("merchant_id", merchantId)
+    .in("status", ACTIVITY_STATUSES)
+    .order("created_at", { ascending: false })
+    .limit(limit)
+
+  if (error) throw new Error(`Failed to list wallet withdrawals for activity: ${error.message}`)
+  return (data || []).map((row) => normalize(row as Record<string, unknown>))
+}
+
+export async function listProcessingWithdrawalsForReconciliation(
+  limit: number
+): Promise<WalletWithdrawalRequestRecord[]> {
+  const { data, error } = await db
+    .from(TABLE)
+    .select("*")
+    .eq("status", "processing")
+    .not("tx_hash", "is", null)
+    .order("created_at", { ascending: true })
+    .limit(limit)
+
+  if (error) throw new Error(`Failed to list processing withdrawals for reconciliation: ${error.message}`)
+  return (data || []).map((row) => normalize(row as Record<string, unknown>))
+}
