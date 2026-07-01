@@ -126,14 +126,18 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("Preparing...")
   })
 
-  it("wallet status is derived from the DB profile, not the Dynamic browser session", () => {
+  it("wallet status requires DB profile addresses plus hydrated Dynamic signers", () => {
     // baseReady and solanaReady come from profileAddresses (DB-backed addresses)
     expect(page).toContain("const baseReady = profileAddresses.base.length > 0")
     expect(page).toContain("const solanaReady = profileAddresses.solana.length > 0")
+    expect(page).toContain("const baseSignerReady = Boolean(")
+    expect(page).toContain("const solanaSignerReady = Boolean(")
+    expect(page).toContain('findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, "base", profile.base_address)')
+    expect(page).toContain('findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, "solana", profile.solana_address)')
     // Merchant display readiness is based on the PineTree Wallet rails, not BTC payout processing readiness.
     expect(page).toContain('const btcPayoutReady = Boolean(profile?.btc_address && profile.btc_payout_enabled)')
     expect(page).toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
-    expect(page).toContain("const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady")
+    expect(page).toContain("const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady && baseSignerReady && solanaSignerReady")
     expect(page).toContain('const walletStatus = allPrimaryRailsConnected ? "Connected" : "Not connected"')
   })
 
@@ -142,6 +146,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("pendingSync")
     expect(page).toContain("syncProfileFromDynamic")
     expect(page).toContain("extractDynamicWalletAddresses")
+    expect(page).toContain("getDynamicWalletSearchList(wallets as unknown[], primaryWallet)")
     // POST to pinetree-profile route includes dynamic_user_id to lock the profile to this session
     expect(page).toContain("dynamic_user_id")
     expect(page).toContain("user.userId")
@@ -272,8 +277,8 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("configured: bitcoinReady, enabled: enabledRails.bitcoin")
   })
 
-  it("marks the merchant wallet Connected only when Base, Solana, and Bitcoin addresses exist", () => {
-    expect(page).toContain("const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady")
+  it("marks the merchant wallet Connected only when Base/Solana signers are hydrated", () => {
+    expect(page).toContain("const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady && baseSignerReady && solanaSignerReady")
     expect(page).toContain('const walletStatus = allPrimaryRailsConnected ? "Connected" : "Not connected"')
     expect(page).not.toContain("Bitcoin Lightning is being prepared through PineTree")
     expect(page).not.toContain("Bitcoin address pending")

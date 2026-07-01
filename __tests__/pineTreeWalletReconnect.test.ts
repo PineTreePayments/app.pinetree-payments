@@ -10,11 +10,16 @@ const page = fs.readFileSync(
 describe("PineTree Wallet reconnect flow", () => {
   it("Open PineTree Wallet triggers Dynamic auth/connect when signer context is missing", () => {
     expect(page).toContain("async function handleWithdrawalReconnect()")
+    expect(page).toContain('await refreshDynamicWalletRuntime("withdrawal_reconnect_before_lookup")')
     expect(page).toContain("setShowDynamicUserProfile(false)")
+    expect(page).toContain("setShowAuthFlow(false)")
     expect(page).toContain("setShowAuthFlow(true)")
   })
 
   it("reconnect refreshes Dynamic wallet/profile state before returning to review", () => {
+    expect(page).toContain("useRefreshUser")
+    expect(page).toContain("const refreshDynamicUser = useRefreshUser()")
+    expect(page).toContain("await refreshDynamicUser()")
     expect(page).toContain("await syncProfileFromDynamic()")
     expect(page).toContain('setWithdrawalScreen(withdrawalReview ? "review" : "form")')
     expect(page).toContain("setWithdrawalReconnectPending(true)")
@@ -24,5 +29,16 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(page).toContain("getDynamicWalletSearchList")
     expect(page).toContain("findDynamicApprovalWalletForSource")
     expect(page).toContain("findDynamicWalletForSource(wallets, primaryWallet, prepared.sourceAddress, prepared.rail)")
+  })
+
+  it("approve withdrawal refreshes Dynamic before signer lookup/signing", () => {
+    expect(page).toContain('await refreshDynamicWalletRuntime("withdrawal_submit_before_signing")')
+    expect(page).toContain("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, wallets as unknown[], primaryWallet)")
+  })
+
+  it("saved profiles with empty Dynamic runtime wallets trigger hydration", () => {
+    expect(page).toContain('refreshDynamicWalletRuntime("profile_loaded_runtime_wallets_empty")')
+    expect(page).toContain("if (dynamicWalletRuntimeCount > 0) return")
+    expect(page).toContain("if (!profile.base_address && !profile.solana_address) return")
   })
 })

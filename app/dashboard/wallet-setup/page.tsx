@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useDynamicContext, useUserWallets } from "@dynamic-labs/sdk-react-core"
+import { useDynamicContext, useRefreshUser, useUserWallets } from "@dynamic-labs/sdk-react-core"
 import { Transaction } from "@solana/web3.js"
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Copy, X } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
@@ -1482,6 +1482,7 @@ function PineTreeWalletRuntime() {
 
   // --- Dynamic SDK ---
   const { user, sdkHasLoaded, setShowAuthFlow, setShowDynamicUserProfile, handleLogOut, primaryWallet } = useDynamicContext()
+  const refreshDynamicUser = useRefreshUser()
   const wallets = useUserWallets()
 
   // --- UI state ---
@@ -1511,6 +1512,7 @@ function PineTreeWalletRuntime() {
   const [submittingWithdrawal, setSubmittingWithdrawal] = useState(false)
   const [withdrawalReconnectPending, setWithdrawalReconnectPending] = useState(false)
   const withdrawalReconnectSourceRef = useRef<string | null>(null)
+  const dynamicHydrationAttemptRef = useRef<string | null>(null)
 
   // --- SDK load timeout ---
   useEffect(() => {
@@ -1639,9 +1641,15 @@ function PineTreeWalletRuntime() {
   }, [fetchAllProfiles])
 
   // --- Live Dynamic wallet addresses — used only for sync, never for display ---
+  const dynamicWalletSearchList = useMemo(() => {
+    return getDynamicWalletSearchList(wallets as unknown[], primaryWallet)
+  }, [wallets, primaryWallet])
+
+  const dynamicWalletRuntimeCount = dynamicWalletSearchList.length
+
   const dynamicNetworkAddresses = useMemo(() => {
-    return extractDynamicWalletAddresses(wallets as DynamicWalletAddressSource[])
-  }, [wallets])
+    return extractDynamicWalletAddresses(dynamicWalletSearchList as DynamicWalletAddressSource[])
+  }, [dynamicWalletSearchList])
 
   const logWalletCreationStep = useCallback((step: WalletCreationStep, extra?: Record<string, unknown>) => {
     setWalletCreationStep(step)
@@ -1656,6 +1664,38 @@ function PineTreeWalletRuntime() {
       ...(extra || {}),
     })
   }, [user, wallets, dynamicNetworkAddresses])
+
+  const refreshDynamicWalletRuntime = useCallback(async (reason: string) => {
+    if (!sdkHasLoaded || !user) return false
+    try {
+      await refreshDynamicUser()
+      if (walletCreationDebugEnabled) {
+        console.info("[pinetree-wallets] dynamic_wallet_runtime_refreshed", {
+          reason,
+          dynamicWalletCountBeforeRender: (wallets as unknown[]).length,
+          hasPrimaryWalletBeforeRender: Boolean(primaryWallet),
+        })
+      }
+      return true
+    } catch (error) {
+      console.warn("[pinetree-wallets] dynamic_wallet_runtime_refresh_failed", {
+        reason,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return false
+    }
+  }, [primaryWallet, refreshDynamicUser, sdkHasLoaded, user, wallets])
+
+  useEffect(() => {
+    if (!sdkHasLoaded || !user || profileState.kind !== "loaded") return
+    if (dynamicWalletRuntimeCount > 0) return
+    const profile = profileState.profile
+    if (!profile.base_address && !profile.solana_address) return
+    const attemptKey = `${user.userId}:${profile.id}`
+    if (dynamicHydrationAttemptRef.current === attemptKey) return
+    dynamicHydrationAttemptRef.current = attemptKey
+    void refreshDynamicWalletRuntime("profile_loaded_runtime_wallets_empty")
+  }, [dynamicWalletRuntimeCount, profileState, refreshDynamicWalletRuntime, sdkHasLoaded, user])
 
   const syncPineTreeManagedLightning = useCallback(async () => {
     const token = accessTokenRef.current
@@ -1763,7 +1803,7 @@ function PineTreeWalletRuntime() {
   // pending flag immediately so it only runs once per reconnect attempt.
   useEffect(() => {
     if (!withdrawalReconnectPending) return
-    if (wallets.length === 0 && !primaryWallet) return
+    if (dynamicWalletRuntimeCount === 0) return
     setWithdrawalReconnectPending(false)
     const sourceAddress = withdrawalReconnectSourceRef.current
     if (!sourceAddress) {
@@ -1797,7 +1837,7 @@ function PineTreeWalletRuntime() {
         setWithdrawalScreen("failed")
       }
     })()
-  }, [wallets, primaryWallet, withdrawalRail, withdrawalReconnectPending, withdrawalReview, syncProfileFromDynamic])
+  }, [dynamicWalletRuntimeCount, wallets, primaryWallet, withdrawalRail, withdrawalReconnectPending, withdrawalReview, syncProfileFromDynamic])
 
   // --- After wallet creation: auto-sync addresses to DB ---
   useEffect(() => {
@@ -1811,13 +1851,13 @@ function PineTreeWalletRuntime() {
       return
     }
     logWalletCreationStep("dynamic_authenticated")
-    if (wallets.length === 0) {
+    if (dynamicWalletRuntimeCount === 0) {
       logWalletCreationStep("waiting_for_embedded_wallets")
       return
     }
     logWalletCreationStep("wallets_detected")
     void syncProfileFromDynamic({ autoEnableLightning: true })
-  }, [pendingSync, sdkHasLoaded, user, wallets, syncProfileFromDynamic, logWalletCreationStep])
+  }, [pendingSync, sdkHasLoaded, user, dynamicWalletRuntimeCount, syncProfileFromDynamic, logWalletCreationStep])
 
   useEffect(() => {
     if (!pendingSync) return
@@ -1862,6 +1902,14 @@ function PineTreeWalletRuntime() {
 
   const baseReady = profileAddresses.base.length > 0
   const solanaReady = profileAddresses.solana.length > 0
+  const baseSignerReady = Boolean(
+    profile?.base_address &&
+      findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, "base", profile.base_address)
+  )
+  const solanaSignerReady = Boolean(
+    profile?.solana_address &&
+      findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, "solana", profile.solana_address)
+  )
 
   // ---------------------------------------------------------------------------
   // Derived state — Lightning (PineTree-managed backend, NOT Dynamic Spark)
@@ -1876,7 +1924,7 @@ function PineTreeWalletRuntime() {
     : []
 
   const bitcoinReady = bitcoinPayoutEntries.length > 0
-  const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady
+  const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady && baseSignerReady && solanaSignerReady
 
   // Wallet exists once a PineTree embedded wallet address is available.
   const hasWallet = profileState.kind === "loaded" && (baseReady || solanaReady || btcPayoutReady || bitcoinReady)
@@ -2071,9 +2119,10 @@ function PineTreeWalletRuntime() {
     setWithdrawalApprovalError("")
     setActiveTab("withdraw")
     setWalletOpen(true)
+    await refreshDynamicWalletRuntime("withdrawal_reconnect_before_lookup")
 
     // If Dynamic wallets are already loaded, check for a match immediately.
-    const allWalletCount = (wallets as unknown[]).length + (primaryWallet ? 1 : 0)
+    const allWalletCount = dynamicWalletRuntimeCount
     if (allWalletCount > 0 && sourceAddress) {
       const matched = findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, withdrawalRail, sourceAddress)
       if (walletCreationDebugEnabled) {
@@ -2105,7 +2154,8 @@ function PineTreeWalletRuntime() {
     setWithdrawalScreen(withdrawalReview ? "review" : "form")
     void syncProfileFromDynamic()
     setShowDynamicUserProfile(false)
-    setShowAuthFlow(true)
+    setShowAuthFlow(false)
+    window.setTimeout(() => setShowAuthFlow(true), 0)
   }
 
   function handleCreateWallet() {
@@ -2292,6 +2342,9 @@ function PineTreeWalletRuntime() {
 
     const _debugRail = withdrawalReview?.review.rail
     const _debugApprovalMethod = withdrawalReview?.review.approvalMethod
+    if (_debugApprovalMethod === "dynamic_browser") {
+      await refreshDynamicWalletRuntime("withdrawal_submit_before_signing")
+    }
     const _debugSourceAddress = _debugRail ? getWithdrawalSourceAddress(profile, _debugRail) : null
     const _debugMatchingWallet = _debugRail
       ? findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, _debugRail, _debugSourceAddress)
