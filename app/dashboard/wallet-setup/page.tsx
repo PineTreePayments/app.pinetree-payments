@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useDynamicContext, useRefreshUser, useUserWallets } from "@dynamic-labs/sdk-react-core"
+import { useDynamicContext, useDynamicWaas, useEmbeddedWallet, useRefreshUser, useUserWallets } from "@dynamic-labs/sdk-react-core"
 import { Transaction } from "@solana/web3.js"
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Copy, X } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
@@ -1483,6 +1483,19 @@ function PineTreeWalletRuntime() {
   // --- Dynamic SDK ---
   const { user, sdkHasLoaded, setShowAuthFlow, setShowDynamicUserProfile, handleLogOut, primaryWallet } = useDynamicContext()
   const refreshDynamicUser = useRefreshUser()
+  const {
+    dynamicWaasIsEnabled,
+    getWaasWalletConnector,
+    getWaasWallets,
+    getWaasWalletsByCredentials,
+    initializeWaas,
+    shouldInitializeWaas,
+  } = useDynamicWaas()
+  const {
+    createOrRestoreSession,
+    isSessionActive: embeddedWalletSessionActive,
+    userHasEmbeddedWallet,
+  } = useEmbeddedWallet()
   const wallets = useUserWallets()
 
   // --- UI state ---
@@ -1513,6 +1526,8 @@ function PineTreeWalletRuntime() {
   const [withdrawalReconnectPending, setWithdrawalReconnectPending] = useState(false)
   const withdrawalReconnectSourceRef = useRef<string | null>(null)
   const dynamicHydrationAttemptRef = useRef<string | null>(null)
+  const dynamicWalletRuntimeCountRef = useRef(0)
+  const dynamicApprovalAvailableRef = useRef(false)
 
   // --- SDK load timeout ---
   useEffect(() => {
@@ -1651,6 +1666,10 @@ function PineTreeWalletRuntime() {
     return extractDynamicWalletAddresses(dynamicWalletSearchList as DynamicWalletAddressSource[])
   }, [dynamicWalletSearchList])
 
+  useEffect(() => {
+    dynamicWalletRuntimeCountRef.current = dynamicWalletRuntimeCount
+  }, [dynamicWalletRuntimeCount])
+
   const logWalletCreationStep = useCallback((step: WalletCreationStep, extra?: Record<string, unknown>) => {
     setWalletCreationStep(step)
     if (!walletCreationDebugEnabled) return
@@ -1665,26 +1684,95 @@ function PineTreeWalletRuntime() {
     })
   }, [user, wallets, dynamicNetworkAddresses])
 
-  const refreshDynamicWalletRuntime = useCallback(async (reason: string) => {
+  const waitForDynamicWalletRuntime = useCallback(async (options?: { requireApprovalWallet?: boolean }) => {
+    const startedAt = Date.now()
+    const timeoutMs = 6000
+    while (Date.now() - startedAt < timeoutMs) {
+      if (options?.requireApprovalWallet ? dynamicApprovalAvailableRef.current : dynamicWalletRuntimeCountRef.current > 0) {
+        return true
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 150))
+    }
+    return options?.requireApprovalWallet ? dynamicApprovalAvailableRef.current : dynamicWalletRuntimeCountRef.current > 0
+  }, [])
+
+  const refreshDynamicWalletRuntime = useCallback(async (reason: string, options?: { requireApprovalWallet?: boolean }) => {
     if (!sdkHasLoaded || !user) return false
     try {
       await refreshDynamicUser()
+      if (dynamicWaasIsEnabled && shouldInitializeWaas) {
+        await initializeWaas({ forceClientRebuild: true })
+      } else if (!dynamicWaasIsEnabled && userHasEmbeddedWallet()) {
+        await createOrRestoreSession()
+      }
+      await refreshDynamicUser()
+      const hydrated = await waitForDynamicWalletRuntime(options)
       if (walletCreationDebugEnabled) {
+        const primaryWalletLike = primaryWallet as DynamicWalletLike | null
+        const waasCredentials = getWaasWalletsByCredentials()
+        const waasRuntimeWallets = getWaasWallets()
         console.info("[pinetree-wallets] dynamic_wallet_runtime_refreshed", {
           reason,
+          dynamicUserId: user.userId,
+          hydrated,
+          dynamicWaasIsEnabled,
+          shouldInitializeWaas,
+          embeddedWalletSessionActive,
+          embeddedWalletCredentialCount: waasCredentials.length,
+          embeddedRuntimeWalletCount: waasRuntimeWallets.length,
           dynamicWalletCountBeforeRender: (wallets as unknown[]).length,
           hasPrimaryWalletBeforeRender: Boolean(primaryWallet),
+          primaryWallet: primaryWalletLike ? {
+            address: primaryWalletLike.address ?? null,
+            chain: primaryWalletLike.chain ?? null,
+            key: primaryWalletLike.connector ? primaryWalletLike.connector.constructor?.name : null,
+          } : null,
+          waasConnectors: ["EVM", "SOL"].map((chain) => {
+            try {
+              const connector = getWaasWalletConnector(chain)
+              return {
+                chain,
+                found: Boolean(connector),
+                key: connector?.key ?? null,
+                name: connector?.name ?? null,
+                connectedChain: connector?.connectedChain ?? null,
+              }
+            } catch (error) {
+              return {
+                chain,
+                found: false,
+                error: error instanceof Error ? error.message : String(error),
+              }
+            }
+          }),
         })
       }
-      return true
+      return hydrated
     } catch (error) {
       console.warn("[pinetree-wallets] dynamic_wallet_runtime_refresh_failed", {
         reason,
+        dynamicUserId: user.userId,
         error: error instanceof Error ? error.message : String(error),
       })
       return false
     }
-  }, [primaryWallet, refreshDynamicUser, sdkHasLoaded, user, wallets])
+  }, [
+    createOrRestoreSession,
+    dynamicWaasIsEnabled,
+    embeddedWalletSessionActive,
+    getWaasWalletConnector,
+    getWaasWallets,
+    getWaasWalletsByCredentials,
+    initializeWaas,
+    primaryWallet,
+    refreshDynamicUser,
+    sdkHasLoaded,
+    shouldInitializeWaas,
+    user,
+    userHasEmbeddedWallet,
+    waitForDynamicWalletRuntime,
+    wallets,
+  ])
 
   useEffect(() => {
     if (!sdkHasLoaded || !user || profileState.kind !== "loaded") return
@@ -1993,6 +2081,10 @@ function PineTreeWalletRuntime() {
     )
   }, [primaryWallet, profile, wallets, withdrawalReview])
 
+  useEffect(() => {
+    dynamicApprovalAvailableRef.current = dynamicApprovalAvailableForWithdrawal
+  }, [dynamicApprovalAvailableForWithdrawal])
+
   const withdrawalDiagnostics = useMemo((): WithdrawalDiagnostics => {
     const railState = walletRailRows.find((row) => row.rail === withdrawalRail)
     const sourceAddress = getWithdrawalSourceAddress(profile, withdrawalRail)
@@ -2119,7 +2211,7 @@ function PineTreeWalletRuntime() {
     setWithdrawalApprovalError("")
     setActiveTab("withdraw")
     setWalletOpen(true)
-    await refreshDynamicWalletRuntime("withdrawal_reconnect_before_lookup")
+    await refreshDynamicWalletRuntime("withdrawal_reconnect_before_lookup", { requireApprovalWallet: Boolean(withdrawalReview) })
 
     // If Dynamic wallets are already loaded, check for a match immediately.
     const allWalletCount = dynamicWalletRuntimeCount
@@ -2343,12 +2435,19 @@ function PineTreeWalletRuntime() {
     const _debugRail = withdrawalReview?.review.rail
     const _debugApprovalMethod = withdrawalReview?.review.approvalMethod
     if (_debugApprovalMethod === "dynamic_browser") {
-      await refreshDynamicWalletRuntime("withdrawal_submit_before_signing")
+      await refreshDynamicWalletRuntime("withdrawal_submit_before_signing", { requireApprovalWallet: true })
     }
     const _debugSourceAddress = _debugRail ? getWithdrawalSourceAddress(profile, _debugRail) : null
     const _debugMatchingWallet = _debugRail
       ? findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, _debugRail, _debugSourceAddress)
       : null
+    if (_debugApprovalMethod === "dynamic_browser" && !_debugMatchingWallet) {
+      setWithdrawalApprovalError(
+        "PineTree Wallet is not active in this browser session. Open PineTree Wallet to reconnect, then try again."
+      )
+      setWithdrawalScreen("failed")
+      return
+    }
     console.info("[pinetree-withdrawals] approval_state", {
       rail: _debugRail,
       asset: withdrawalReview?.review.asset,

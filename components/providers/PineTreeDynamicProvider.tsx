@@ -23,6 +23,11 @@ const blockedMerchantWalletConnectorTokens = [
 const embeddedMerchantWalletConnectorTokens = [
   "dynamicwaas",
   "turnkey",
+  "turnkeyhd",
+  "zerodev",
+  "magicemailotp",
+  "magiclink",
+  "magicsocial",
 ]
 
 function normalizeWalletToken(value: unknown) {
@@ -62,7 +67,7 @@ function isBlockedMerchantExternalWalletOption(option: WalletOption) {
 }
 
 export function filterPineTreeMerchantWalletOptions(options: WalletOption[]): WalletOption[] {
-  return options.flatMap((option) => {
+  const kept = options.flatMap((option) => {
     const groupedWallets: WalletOption[] | undefined = option.groupedWallets
       ? filterPineTreeMerchantWalletOptions(option.groupedWallets)
       : undefined
@@ -72,6 +77,31 @@ export function filterPineTreeMerchantWalletOptions(options: WalletOption[]): Wa
     if (isBlockedMerchantExternalWalletOption(option)) return []
     return []
   })
+
+  if (process.env.NODE_ENV !== "production") {
+    console.debug("[pinetree-wallets] dynamic_wallet_filter", {
+      inputCount: options.length,
+      keptCount: kept.length,
+      removedCount: Math.max(options.length - kept.length, 0),
+      inputConnectors: options.map((option) => ({
+        key: option.key,
+        name: option.name,
+        connectorKey: option.walletConnector.key,
+        connectorName: option.walletConnector.name,
+        isEmbeddedWallet: Boolean(option.walletConnector.isEmbeddedWallet),
+        isWalletConnect: Boolean(option.walletConnector.isWalletConnect),
+      })),
+      keptConnectors: kept.map((option) => ({
+        key: option.key,
+        name: option.name,
+        connectorKey: option.walletConnector.key,
+        connectorName: option.walletConnector.name,
+        isEmbeddedWallet: Boolean(option.walletConnector.isEmbeddedWallet),
+      })),
+    })
+  }
+
+  return kept
 }
 
 const PineTreeWalletInfrastructureContext = createContext<PineTreeWalletInfrastructureStatus>({

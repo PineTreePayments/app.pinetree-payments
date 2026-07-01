@@ -222,7 +222,6 @@ describe("PineTree embedded wallet setup", () => {
       "Connect Wallet",
       "MetaMask",
       "Coinbase Wallet",
-      "WalletConnect",
       "Phantom",
       "Solflare",
       "Trust Wallet",

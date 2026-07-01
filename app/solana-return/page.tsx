@@ -30,7 +30,12 @@ export default function SolanaReturnPage() {
         }
 
         const response = await provider.connect()
-        const walletAddress = response.publicKey.toString()
+        const walletAddress = response?.publicKey?.toString()
+        if (!walletAddress) {
+          setMessage("Wallet connection did not return a Solana address.")
+          setSetupState("failed")
+          return
+        }
 
         const res = await fetch(`${window.location.origin}/api/wallet-connect-session`, {
           method: "POST",

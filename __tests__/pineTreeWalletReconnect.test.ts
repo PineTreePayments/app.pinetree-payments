@@ -10,7 +10,7 @@ const page = fs.readFileSync(
 describe("PineTree Wallet reconnect flow", () => {
   it("Open PineTree Wallet triggers Dynamic auth/connect when signer context is missing", () => {
     expect(page).toContain("async function handleWithdrawalReconnect()")
-    expect(page).toContain('await refreshDynamicWalletRuntime("withdrawal_reconnect_before_lookup")')
+    expect(page).toContain('await refreshDynamicWalletRuntime("withdrawal_reconnect_before_lookup",')
     expect(page).toContain("setShowDynamicUserProfile(false)")
     expect(page).toContain("setShowAuthFlow(false)")
     expect(page).toContain("setShowAuthFlow(true)")
@@ -32,7 +32,7 @@ describe("PineTree Wallet reconnect flow", () => {
   })
 
   it("approve withdrawal refreshes Dynamic before signer lookup/signing", () => {
-    expect(page).toContain('await refreshDynamicWalletRuntime("withdrawal_submit_before_signing")')
+    expect(page).toContain('await refreshDynamicWalletRuntime("withdrawal_submit_before_signing", { requireApprovalWallet: true })')
     expect(page).toContain("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, wallets as unknown[], primaryWallet)")
   })
 
