@@ -1484,14 +1484,17 @@ function PineTreeWalletRuntime() {
   const { user, sdkHasLoaded, setShowAuthFlow, setShowDynamicUserProfile, handleLogOut, primaryWallet } = useDynamicContext()
   const refreshDynamicUser = useRefreshUser()
   const {
+    createWalletAccount,
     dynamicWaasIsEnabled,
     getWaasWalletConnector,
     getWaasWallets,
     getWaasWalletsByCredentials,
     initializeWaas,
+    needsAutoCreateWalletChains,
     shouldInitializeWaas,
   } = useDynamicWaas()
   const {
+    createEmbeddedWallet,
     createOrRestoreSession,
     isSessionActive: embeddedWalletSessionActive,
     userHasEmbeddedWallet,
@@ -1700,10 +1703,41 @@ function PineTreeWalletRuntime() {
     if (!sdkHasLoaded || !user) return false
     try {
       await refreshDynamicUser()
-      if (dynamicWaasIsEnabled && shouldInitializeWaas) {
-        await initializeWaas({ forceClientRebuild: true })
-      } else if (!dynamicWaasIsEnabled && userHasEmbeddedWallet()) {
-        await createOrRestoreSession()
+      if (dynamicWaasIsEnabled) {
+        if (shouldInitializeWaas) {
+          await initializeWaas({ forceClientRebuild: true })
+        }
+        // When WaaS wallets are absent after initialization, provision them.
+        // createWalletAccount uses needsAutoCreateWalletChains — the SDK-populated list of chains
+        // that require wallet creation for this user.
+        const runtimeWallets = getWaasWallets()
+        if (runtimeWallets.length === 0 && needsAutoCreateWalletChains.length > 0) {
+          if (walletCreationDebugEnabled) {
+            console.info("[pinetree-wallets] provisioning_waas_wallet_accounts", {
+              reason,
+              dynamicUserId: user.userId,
+              needsAutoCreateWalletChainCount: needsAutoCreateWalletChains.length,
+              shouldInitializeWaas,
+              useUserWalletsCountBefore: (wallets as unknown[]).length,
+              primaryWalletBefore: Boolean(primaryWallet),
+            })
+          }
+          await createWalletAccount(needsAutoCreateWalletChains)
+        }
+      } else {
+        if (userHasEmbeddedWallet()) {
+          await createOrRestoreSession()
+        } else {
+          // No embedded wallet exists yet — create one using the legacy embedded wallet API.
+          if (walletCreationDebugEnabled) {
+            console.info("[pinetree-wallets] provisioning_embedded_wallet_first_time", {
+              reason,
+              dynamicUserId: user.userId,
+              useUserWalletsCountBefore: (wallets as unknown[]).length,
+            })
+          }
+          await createEmbeddedWallet()
+        }
       }
       await refreshDynamicUser()
       const hydrated = await waitForDynamicWalletRuntime(options)
@@ -1720,6 +1754,15 @@ function PineTreeWalletRuntime() {
           embeddedWalletSessionActive,
           embeddedWalletCredentialCount: waasCredentials.length,
           embeddedRuntimeWalletCount: waasRuntimeWallets.length,
+          solanaWalletFound: waasRuntimeWallets.some((w) => {
+            const wl = w as unknown as DynamicWalletLike
+            return wl.chain === "SOL" || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(String(wl.address ?? ""))
+          }),
+          baseWalletFound: waasRuntimeWallets.some((w) => {
+            const wl = w as unknown as DynamicWalletLike
+            return wl.chain === "EVM" || /^0x[a-fA-F0-9]{40}$/.test(String(wl.address ?? ""))
+          }),
+          signerLookupResult: waasRuntimeWallets.length > 0 || Boolean(primaryWallet),
           dynamicWalletCountBeforeRender: (wallets as unknown[]).length,
           hasPrimaryWalletBeforeRender: Boolean(primaryWallet),
           primaryWallet: primaryWalletLike ? {
@@ -1757,13 +1800,16 @@ function PineTreeWalletRuntime() {
       return false
     }
   }, [
+    createEmbeddedWallet,
     createOrRestoreSession,
+    createWalletAccount,
     dynamicWaasIsEnabled,
     embeddedWalletSessionActive,
     getWaasWalletConnector,
     getWaasWallets,
     getWaasWalletsByCredentials,
     initializeWaas,
+    needsAutoCreateWalletChains,
     primaryWallet,
     refreshDynamicUser,
     sdkHasLoaded,
@@ -2345,6 +2391,23 @@ function PineTreeWalletRuntime() {
     }
     if (!withdrawableAssetOptions.some((option) => option.rail === withdrawalRail && option.asset === withdrawalAsset)) {
       setWithdrawalError("No PineTree Wallet source address is available for withdrawals.")
+      return
+    }
+    // Block review when the Dynamic wallet runtime has no signers — creating a withdrawal request
+    // row now would result in pending spam that can never be signed in this session.
+    if (sdkHasLoaded && user && dynamicWalletRuntimeCount === 0) {
+      if (walletCreationDebugEnabled) {
+        console.info("[pinetree-wallets] withdrawal_review_blocked_no_runtime_wallets", {
+          dynamicUserId: user.userId,
+          sdkHasLoaded,
+          dynamicWalletRuntimeCount,
+          withdrawalRail,
+          withdrawalAsset,
+        })
+      }
+      setWithdrawalError(
+        "PineTree Wallet is not active in this browser session. Open PineTree Wallet to reconnect first."
+      )
       return
     }
 
