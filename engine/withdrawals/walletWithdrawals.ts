@@ -1,6 +1,7 @@
 import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import {
   createWalletWithdrawalRequest,
+  findOpenUnsignedWalletWithdrawalReview,
   getWalletWithdrawalRequest,
   updateWalletWithdrawalRequest,
   type WalletWithdrawalAsset,
@@ -288,7 +289,33 @@ export async function createWalletWithdrawalReview(
     diagnostics,
   }
 
-  const request = await createWalletWithdrawalRequest({
+  const existingOpenReview = await findOpenUnsignedWalletWithdrawalReview({
+    merchantId,
+    rail: validated.rail,
+    asset: validated.asset,
+    destinationAddress: validated.destinationAddress,
+    amountDecimal: validated.amountDecimal,
+  })
+
+  const request = existingOpenReview
+    ? await updateWalletWithdrawalRequest(merchantId, existingOpenReview.id, {
+        status: "review_required",
+        provider: canSign && review.approvalMethod === "dynamic_browser" ? "dynamic" : null,
+        providerReference: null,
+        txHash: null,
+        unsignedTransactionPayload: null,
+        signedPayload: null,
+        approvalMethod: review.approvalMethod || (canSign ? "dynamic_browser" : "manual_review"),
+        chainId: null,
+        tokenContract: null,
+        tokenMint: null,
+        reviewPayload: {
+          ...review,
+          diagnostics,
+        },
+        errorMessage: null,
+      })
+    : await createWalletWithdrawalRequest({
     merchantId,
     walletProfileId: profile.id,
     ...validated,
@@ -309,7 +336,7 @@ export async function createWalletWithdrawalReview(
     rail: validated.rail,
     asset: validated.asset,
     status: request.status,
-    metadata: { approval_method: review.approvalMethod, can_submit: canSign },
+    metadata: { approval_method: review.approvalMethod, can_submit: canSign, reused: Boolean(existingOpenReview) },
   })
 
   return {
@@ -426,7 +453,12 @@ export async function prepareDynamicWalletWithdrawal(
   if (!request) {
     throw Object.assign(new Error("Withdrawal request not found."), { status: 404 })
   }
-  if (request.status !== "review_required") {
+  const hasReusablePreparedPayload =
+    request.status === "pending" &&
+    request.unsigned_transaction_payload &&
+    !request.tx_hash
+
+  if (request.status !== "review_required" && !hasReusablePreparedPayload) {
     throw Object.assign(new Error("Withdrawal request is not ready for wallet approval."), { status: 409 })
   }
   if (request.approval_method !== "dynamic_browser" || request.provider !== "dynamic") {
@@ -444,10 +476,24 @@ export async function prepareDynamicWalletWithdrawal(
     destinationAddress: request.destination_address,
     amountDecimal: request.amount_decimal,
   })
+  const sourceAddress = getSourceAddressForRail(profile, validated.rail)
+
+  if (hasReusablePreparedPayload) {
+    assertPreparedPayloadUsesSavedSource(request.unsigned_transaction_payload!, sourceAddress)
+    return {
+      request,
+      approvalMethod: "dynamic_browser",
+      provider: "dynamic",
+      rail: validated.rail,
+      asset: validated.asset,
+      sourceAddress,
+      payload: request.unsigned_transaction_payload! as PreparedDynamicWithdrawal["payload"],
+    }
+  }
 
   const prepared = await buildDynamicWithdrawalPayload({
     ...validated,
-    sourceAddress: getSourceAddressForRail(profile, validated.rail),
+    sourceAddress,
     sourceAddressType: validated.rail === "bitcoin" ? profile.btc_address_type : null,
   })
 

@@ -17,6 +17,7 @@ describe("PineTree embedded wallet setup", () => {
   const withdrawalSubmitRoute = read("app/api/wallets/pinetree-wallet/withdrawals/[id]/submit/route.ts")
   const withdrawalEngine = read("engine/withdrawals/walletWithdrawals.ts")
   const withdrawalSigner = read("providers/wallets/withdrawalSigner.ts")
+  const dynamicSignerLookup = read("lib/wallets/dynamicSignerLookup.ts")
   const dbHelper = read("database/pineTreeWalletProfiles.ts")
   const migration = read("database/migrations/20260622_create_pinetree_wallet_profile.sql")
   const withdrawalProductionSchemaMigration = read("database/migrations/20260625_ensure_wallet_withdrawal_requests_production_schema.sql")
@@ -358,7 +359,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("dynamicApprovalAvailableForWithdrawal")
     expect(page).toContain("findDynamicApprovalWalletForSource")
     expect(page).toContain("dynamicWalletSupportsRail")
-    expect(page).toContain("wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction")
+    expect(dynamicSignerLookup).toContain("wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction")
     expect(page).toContain("signAndSendTransaction")
     expect(page).toContain("signPsbt")
     expect(page).toContain("/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/prepare")
@@ -588,7 +589,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("dynamicApprovalAvailableForWithdrawal")
     expect(page).toContain("kind: \"solana_transaction\"")
     expect(page).toContain("prepared.payload.transactionBase64")
-    expect(page).toContain("wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction")
+    expect(dynamicSignerLookup).toContain("wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction")
     expect(page).toContain("const dynamicSubmission = await sendDynamicPreparedWithdrawal")
     expect(page).toContain("if (withdrawalReview?.review.approvalMethod === \"dynamic_browser\")")
     expect(page).toContain("Unable to sign this withdrawal. Please try again.")
@@ -1016,7 +1017,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("signAndSendTransaction")
     expect(page).toContain("prepared.payload.transactionBase64")
     expect(page).toContain("kind: \"solana_transaction\"")
-    expect(page).toContain("wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction")
+    expect(dynamicSignerLookup).toContain("wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction")
     // The transaction bytes are deserialised from the server-built base64 payload
     expect(page).toContain("Transaction.from(base64ToBytes(prepared.payload.transactionBase64))")
   })
@@ -1049,13 +1050,9 @@ describe("PineTree embedded wallet setup", () => {
     // When no matching wallet is found at signing time, sendDynamicPreparedWithdrawal throws
     // and the catch block moves to the failed screen — the review button cannot coexist with the error.
     expect(page).toContain("PineTree Wallet is not active in this browser session.")
-    const dynamicCatchBlock = page.slice(
-      page.indexOf("// Signing failure (Dynamic path) reaches here"),
-      page.indexOf("// Signing failure (Dynamic path) reaches here") + 500
-    )
-    expect(dynamicCatchBlock).toContain("withdrawalReview?.review.approvalMethod === \"dynamic_browser\"")
-    expect(dynamicCatchBlock).toContain("setWithdrawalReview(null)")
-    expect(dynamicCatchBlock).toContain('setWithdrawalScreen("failed")')
+    expect(page).toContain("sanitizeWithdrawalSubmitErrorForMerchant(error instanceof Error ? error.message : undefined)")
+    expect(page).toContain('setWithdrawalScreen("failed")')
+    expect(page).not.toContain("// Signing failure (Dynamic path) reaches here. Clear the stale review")
   })
 
   it("missing Dynamic signer fails instead of creating a manual review request", () => {
@@ -1294,37 +1291,38 @@ describe("PineTree embedded wallet setup", () => {
   it("signer lookup searches all Dynamic wallets, not just primaryWallet", () => {
     // findDynamicWalletForSource deduplicates candidates[] and primaryWallet into a single
     // search list so that wallets in either source can match the saved DB source address.
-    expect(page).toContain("[...candidates, primaryWallet]")
-    expect(page).toContain("walletsToSearch.find")
+    expect(dynamicSignerLookup).toContain("[primaryWallet, ...candidates]")
+    expect(dynamicSignerLookup).toContain("getDynamicWalletSearchList(candidates, primaryWallet).find")
   })
 
   it("Solana address matching uses exact string comparison after shared lowercase normalisation", () => {
     // Both the stored address and the Dynamic wallet address are lowercased before comparison.
     // A Solana address like 'CdKwuF...' lowercases identically from both sides, so the match
     // is correct; no separate case-sensitive path is needed.
-    expect(page).toContain("normalizedSource = sourceAddress.toLowerCase()")
-    expect(page).toContain("address.toLowerCase() === normalizedSource")
+    expect(dynamicSignerLookup).toContain('if (rail === "base") return address.toLowerCase()')
+    expect(dynamicSignerLookup).toContain("normalizeWalletAddress(address, rail) === normalizedSource")
   })
 
   it("EVM address matching is case-insensitive via shared lowercase normalisation", () => {
     // EVM addresses from different sources may differ in case ('0xAbCd' vs '0xabcd').
     // Both sides are lowercased before comparison so a checksum-cased DB address matches
     // a lowercase Dynamic wallet address and vice versa.
-    expect(page).toContain("sourceAddress.toLowerCase()")
-    expect(page).toContain(".toLowerCase() === normalizedSource")
+    expect(dynamicSignerLookup).toContain('if (rail === "base") return address.toLowerCase()')
+    expect(dynamicSignerLookup).toContain("normalizeWalletAddress(address, rail) === normalizedSource")
   })
 
-  it("reconnect with wallets loaded but address mismatch shows different-session error", () => {
+  it("reconnect with wallets loaded but address mismatch opens Dynamic auth before failing", () => {
     // When handleWithdrawalReconnect runs and Dynamic wallets are already loaded but none
-    // match the DB source address, it sets the specific mismatch error without showing auth.
+    // match the DB source address, it opens Dynamic auth/connect and lets the reconnect
+    // effect validate the refreshed wallet list.
     const reconnectFn = page.slice(
-      page.indexOf("function handleWithdrawalReconnect()"),
+      page.indexOf("async function handleWithdrawalReconnect()"),
       page.indexOf("function handleCreateWallet()")
     )
-    expect(reconnectFn).toContain(
-      "This browser is connected to a different PineTree Wallet session. Sign in with the PineTree Wallet used for this merchant, then try again."
-    )
-    expect(reconnectFn).toContain("setWithdrawalScreen(\"failed\")")
+    expect(reconnectFn).toContain("setWithdrawalReconnectPending(true)")
+    expect(reconnectFn).toContain("setShowDynamicUserProfile(false)")
+    expect(reconnectFn).toContain("setShowAuthFlow(true)")
+    expect(page).toContain("This browser is connected to a different PineTree Wallet session. Sign in with the PineTree Wallet used for this merchant, then try again.")
   })
 
   it("signer_lookup diagnostic logs wallet count and address prefixes before matching", () => {

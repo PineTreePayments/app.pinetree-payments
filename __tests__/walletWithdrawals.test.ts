@@ -5,6 +5,7 @@ import { address as btcAddress, Psbt, networks } from "bitcoinjs-lib"
 const mocks = vi.hoisted(() => ({
     getPineTreeWalletProfile: vi.fn(),
     createWalletWithdrawalRequest: vi.fn(),
+    findOpenUnsignedWalletWithdrawalReview: vi.fn(),
     getWalletWithdrawalRequest: vi.fn(),
     updateWalletWithdrawalRequest: vi.fn(),
     fetch: vi.fn(),
@@ -16,6 +17,7 @@ vi.mock("@/database/pineTreeWalletProfiles", () => ({
 
 vi.mock("@/database/walletWithdrawalRequests", () => ({
   createWalletWithdrawalRequest: mocks.createWalletWithdrawalRequest,
+  findOpenUnsignedWalletWithdrawalReview: mocks.findOpenUnsignedWalletWithdrawalReview,
   getWalletWithdrawalRequest: mocks.getWalletWithdrawalRequest,
   updateWalletWithdrawalRequest: mocks.updateWalletWithdrawalRequest,
 }))
@@ -173,8 +175,10 @@ describe("PineTree Wallet withdrawals", () => {
       updated_at: "2026-06-25T00:00:00.000Z",
     }))
     mocks.getWalletWithdrawalRequest.mockResolvedValue(makeWithdrawal())
+    mocks.findOpenUnsignedWalletWithdrawalReview.mockResolvedValue(null)
     mocks.updateWalletWithdrawalRequest.mockImplementation(async (_merchantId, _id, input) => ({
       ...makeWithdrawal(),
+      id: _id,
       ...("status" in input ? { status: input.status } : {}),
       ...("provider" in input ? { provider: input.provider } : {}),
       ...("providerReference" in input ? { provider_reference: input.providerReference } : {}),
@@ -363,6 +367,37 @@ describe("PineTree Wallet withdrawals", () => {
     expect(result.canSubmit).toBe(true)
     expect(result.request.status).toBe("review_required")
     expect(signer.submitWithdrawal).not.toHaveBeenCalled()
+  })
+
+  it("reuses an existing open unsigned review instead of creating duplicate pending rows", async () => {
+    const signer = makeSigner(true)
+    mocks.findOpenUnsignedWalletWithdrawalReview.mockResolvedValueOnce(makeWithdrawal({
+      id: "withdrawal_existing",
+      status: "pending",
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+      tx_hash: null,
+      unsigned_transaction_payload: { kind: "evm_transaction", from: "0x9999999999999999999999999999999999999999" },
+    }))
+
+    const result = await createWalletWithdrawalReview("merchant_1", {
+      rail: "base",
+      asset: "USDC",
+      destinationAddress: "0x1234567890abcdef1234567890abcdef12345678",
+      amountDecimal: "12.50",
+    }, signer)
+
+    expect(result.request.id).toBe("withdrawal_existing")
+    expect(mocks.createWalletWithdrawalRequest).not.toHaveBeenCalled()
+    expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
+      "merchant_1",
+      "withdrawal_existing",
+      expect.objectContaining({
+        status: "review_required",
+        unsignedTransactionPayload: null,
+        txHash: null,
+      })
+    )
   })
 
   it("submit with disabled signer fails and never broadcasts", async () => {
@@ -628,6 +663,39 @@ describe("PineTree Wallet withdrawals", () => {
       "withdrawal_1",
       expect.objectContaining({ chainId: "8453", approvalMethod: "dynamic_browser" })
     )
+  })
+
+  it("reuses a pending unsigned Dynamic preparation after reconnect", async () => {
+    mocks.getPineTreeWalletProfile.mockResolvedValueOnce({
+      id: "wallet_profile_1",
+      merchant_id: "merchant_1",
+      base_address: "0x9999999999999999999999999999999999999999",
+      solana_address: null,
+    })
+    mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
+      status: "pending",
+      rail: "base",
+      asset: "ETH",
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+      tx_hash: null,
+      unsigned_transaction_payload: {
+        kind: "evm_transaction",
+        chainId: 8453,
+        from: "0x9999999999999999999999999999999999999999",
+        to: "0x1234567890abcdef1234567890abcdef12345678",
+        value: "0x1",
+        data: "0x",
+      },
+    }))
+
+    const result = await prepareDynamicWalletWithdrawal("merchant_1", "withdrawal_1")
+
+    expect(result.payload).toMatchObject({
+      kind: "evm_transaction",
+      from: "0x9999999999999999999999999999999999999999",
+    })
+    expect(mocks.updateWalletWithdrawalRequest).not.toHaveBeenCalled()
   })
 
   it("prepares a Base USDC Dynamic transaction payload with the Base token contract", async () => {

@@ -3,7 +3,10 @@ import { getWalletBalances } from "@/database/walletBalances"
 import { upsertMerchantAssetBalances } from "@/database/walletOverview"
 import { fetchBaseUsdcBalance, fetchSolanaUsdcBalance } from "@/engine/settlementBalances"
 import { getMarketPricesUSD } from "@/engine/marketPrices"
-import { listRecentWalletWithdrawalsForActivity } from "@/database/walletWithdrawalRequests"
+import {
+  cancelStaleUnsignedWithdrawalReviews,
+  listRecentWalletWithdrawalsForActivity,
+} from "@/database/walletWithdrawalRequests"
 
 export type PineTreeBalanceAsset = {
   key: "BASE_ETH" | "BASE_USDC" | "SOLANA_SOL" | "SOLANA_USDC" | "BTC"
@@ -170,6 +173,7 @@ function isBaseRpcConfigured(): boolean {
 export async function getPineTreeWalletBalanceSnapshot(
   merchantId: string
 ): Promise<PineTreeWalletSyncResult> {
+  await cancelStaleUnsignedWithdrawalReviews(merchantId).catch(() => ({ canceled: 0 }))
   const [profile, rows, prices, recentWithdrawals] = await Promise.all([
     getPineTreeWalletProfile(merchantId),
     getWalletBalances(merchantId),
@@ -212,12 +216,18 @@ export async function getPineTreeWalletBalanceSnapshot(
     ? synced.reduce((sum, item) => sum + Number(item.usdValue || 0), 0)
     : null
 
-  const recentActivity = recentWithdrawals.map((wd) => ({
-    id: wd.id,
-    label: `Withdrawal: ${wd.amount_decimal} ${wd.asset} (${wd.rail})`,
-    status: wd.status,
-    createdAt: wd.created_at,
-  }))
+  const recentActivity = recentWithdrawals.map((wd) => {
+    const status =
+      (wd.status === "review_required" || (wd.status === "pending" && !wd.tx_hash))
+        ? "pending"
+        : wd.status
+    return {
+      id: wd.id,
+      label: `Withdrawal: ${wd.amount_decimal} ${wd.asset} (${wd.rail})`,
+      status,
+      createdAt: wd.created_at,
+    }
+  })
 
   return {
     readiness: {

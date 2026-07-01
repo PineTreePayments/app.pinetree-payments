@@ -75,6 +75,14 @@ export type UpdateWalletWithdrawalRequestInput = {
   errorMessage?: string | null
 }
 
+export type FindOpenUnsignedWalletWithdrawalInput = {
+  merchantId: string
+  rail: WalletWithdrawalRail
+  asset: WalletWithdrawalAsset
+  destinationAddress: string
+  amountDecimal: string
+}
+
 function normalize(row: Record<string, unknown>): WalletWithdrawalRequestRecord {
   const reviewPayload = row.review_payload
   const unsignedPayload = row.unsigned_transaction_payload
@@ -202,7 +210,62 @@ export async function getWalletWithdrawalRequest(
   return data ? normalize(data as Record<string, unknown>) : null
 }
 
-const ACTIVITY_STATUSES: WalletWithdrawalStatus[] = ["pending", "processing", "confirmed", "failed", "canceled", "blocked"]
+const ACTIVITY_STATUSES: WalletWithdrawalStatus[] = ["review_required", "pending", "processing", "confirmed", "failed", "canceled", "blocked"]
+
+export async function findOpenUnsignedWalletWithdrawalReview(
+  input: FindOpenUnsignedWalletWithdrawalInput
+): Promise<WalletWithdrawalRequestRecord | null> {
+  const { data, error } = await db
+    .from(TABLE)
+    .select("*")
+    .eq("merchant_id", input.merchantId)
+    .eq("rail", input.rail)
+    .eq("asset", input.asset)
+    .eq("destination_address", input.destinationAddress.trim())
+    .eq("amount_decimal", input.amountDecimal.trim())
+    .in("status", ["review_required", "pending"])
+    .is("tx_hash", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+
+  if (error) throw new Error(`Failed to find open wallet withdrawal review: ${error.message}`)
+  const row = data?.[0]
+  return row ? normalize(row as Record<string, unknown>) : null
+}
+
+export async function cancelStaleUnsignedWithdrawalReviews(
+  merchantId: string,
+  options: { olderThanMs?: number; now?: Date } = {}
+): Promise<{ canceled: number }> {
+  const olderThanMs = options.olderThanMs ?? 30 * 60 * 1000
+  const now = options.now ?? new Date()
+  const cutoff = new Date(now.getTime() - olderThanMs).toISOString()
+  const { data, error } = await db
+    .from(TABLE)
+    .update({
+      status: "canceled",
+      error_message: "Unsigned withdrawal review expired.",
+      updated_at: now.toISOString(),
+    })
+    .eq("merchant_id", merchantId)
+    .in("status", ["review_required", "pending"])
+    .is("tx_hash", null)
+    .lt("created_at", cutoff)
+    .select("id")
+
+  if (error) throw new Error(`Failed to clean stale wallet withdrawal reviews: ${error.message}`)
+  return { canceled: data?.length ?? 0 }
+}
+
+function isMeaningfulActivityWithdrawal(row: WalletWithdrawalRequestRecord, activeUnsignedId: string | null) {
+  if (row.status === "processing") return Boolean(row.tx_hash)
+  if (row.status === "confirmed") return true
+  if (row.status === "failed") return Boolean(row.tx_hash)
+  if (row.status === "review_required" || row.status === "pending") {
+    return !row.tx_hash && row.id === activeUnsignedId
+  }
+  return false
+}
 
 export async function listRecentWalletWithdrawalsForActivity(
   merchantId: string,
@@ -214,10 +277,16 @@ export async function listRecentWalletWithdrawalsForActivity(
     .eq("merchant_id", merchantId)
     .in("status", ACTIVITY_STATUSES)
     .order("created_at", { ascending: false })
-    .limit(limit)
+    .limit(Math.max(limit * 3, limit))
 
   if (error) throw new Error(`Failed to list wallet withdrawals for activity: ${error.message}`)
-  return (data || []).map((row) => normalize(row as Record<string, unknown>))
+  const rows = (data || []).map((row) => normalize(row as Record<string, unknown>))
+  const activeUnsigned = rows.find((row) =>
+    (row.status === "review_required" || row.status === "pending") && !row.tx_hash
+  )
+  return rows
+    .filter((row) => isMeaningfulActivityWithdrawal(row, activeUnsigned?.id ?? null))
+    .slice(0, limit)
 }
 
 export async function listProcessingWithdrawalsForReconciliation(

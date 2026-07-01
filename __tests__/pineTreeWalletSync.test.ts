@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   fetchBaseUsdcBalance: vi.fn(),
   getMarketPricesUSD: vi.fn(),
   listRecentWalletWithdrawalsForActivity: vi.fn(),
+  cancelStaleUnsignedWithdrawalReviews: vi.fn(),
 }))
 
 vi.mock("@/database/pineTreeWalletProfiles", () => ({
@@ -33,6 +34,7 @@ vi.mock("@/engine/marketPrices", () => ({
 
 vi.mock("@/database/walletWithdrawalRequests", () => ({
   listRecentWalletWithdrawalsForActivity: mocks.listRecentWalletWithdrawalsForActivity,
+  cancelStaleUnsignedWithdrawalReviews: mocks.cancelStaleUnsignedWithdrawalReviews,
 }))
 
 import {
@@ -73,6 +75,7 @@ describe("PineTree Wallet balance sync", () => {
     mocks.fetchSolanaUsdcBalance.mockResolvedValue(1.25)
     mocks.getMarketPricesUSD.mockResolvedValue({ SOL: 100, ETH: 2000, BTC: 60000 })
     mocks.listRecentWalletWithdrawalsForActivity.mockResolvedValue([])
+    mocks.cancelStaleUnsignedWithdrawalReviews.mockResolvedValue({ canceled: 0 })
     global.fetch = vi.fn(async () => ({
       json: async () => ({ result: { value: 2_000_000_000 } }),
     })) as unknown as typeof fetch
@@ -178,5 +181,35 @@ describe("PineTree Wallet balance sync", () => {
     const result = await getPineTreeWalletBalanceSnapshot("merchant_1")
 
     expect(result.recentActivity).toEqual([])
+  })
+
+  it("cleans stale unsigned reviews before loading activity", async () => {
+    await getPineTreeWalletBalanceSnapshot("merchant_1")
+
+    expect(mocks.cancelStaleUnsignedWithdrawalReviews).toHaveBeenCalledWith("merchant_1")
+    expect(mocks.listRecentWalletWithdrawalsForActivity).toHaveBeenCalledWith("merchant_1", 10)
+  })
+
+  it("maps active unsigned reviews to Pending activity", async () => {
+    mocks.listRecentWalletWithdrawalsForActivity.mockResolvedValue([
+      {
+        id: "wd-active",
+        merchant_id: "merchant_1",
+        rail: "base",
+        asset: "USDC",
+        amount_decimal: "5",
+        status: "review_required",
+        created_at: "2026-06-28T10:00:00Z",
+        destination_address: "0x1234567890abcdef1234567890abcdef12345678",
+        tx_hash: null,
+      },
+    ])
+
+    const result = await getPineTreeWalletBalanceSnapshot("merchant_1")
+
+    expect(result.recentActivity[0]).toMatchObject({
+      id: "wd-active",
+      status: "pending",
+    })
   })
 })
