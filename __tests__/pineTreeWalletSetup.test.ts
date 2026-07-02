@@ -1296,7 +1296,7 @@ describe("PineTree embedded wallet setup", () => {
     // findDynamicWalletForSource deduplicates candidates[] and primaryWallet into a single
     // search list so that wallets in either source can match the saved DB source address.
     expect(dynamicSignerLookup).toContain("[primaryWallet, ...candidates]")
-    expect(dynamicSignerLookup).toContain("getDynamicWalletSearchList(candidates, primaryWallet).find")
+    expect(dynamicSignerLookup).toContain("getDynamicWalletSearchList(candidates, primaryWallet, rail).find")
   })
 
   it("Solana address matching uses exact string comparison after shared lowercase normalisation", () => {

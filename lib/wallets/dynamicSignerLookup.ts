@@ -1,17 +1,33 @@
 export type DynamicSignerRail = "base" | "solana" | "bitcoin"
+export type DynamicWalletChain = "solana" | "evm" | "bitcoin" | "unknown"
 
 export type DynamicWalletLike = {
   address?: string
   publicKey?: unknown
   accountAddress?: string
-  accounts?: Array<{ address?: string | null }>
-  chain?: string
-  additionalAddresses?: Array<{ address?: string | null }>
+  accounts?: Array<{ address?: string | null; chain?: unknown; chainName?: unknown; network?: unknown }>
+  chain?: unknown
+  chainName?: unknown
+  connectedChain?: unknown
+  network?: unknown
+  walletConnector?: {
+    key?: string
+    name?: string
+    chain?: unknown
+    chainName?: unknown
+    connectedChain?: unknown
+    overrideKey?: string
+  }
+  additionalAddresses?: Array<{ address?: string | null; chain?: unknown; chainName?: unknown; network?: unknown }>
   signAndSendTransaction?: (...args: unknown[]) => Promise<unknown>
   signPsbt?: (request: { unsignedPsbtBase64: string }) => Promise<{ signedPsbt?: string } | undefined>
   connector?: {
     key?: string
     name?: string
+    chain?: unknown
+    chainName?: unknown
+    connectedChain?: unknown
+    overrideKey?: string
     activeAccount?: { address?: string | null }
     publicKey?: unknown
     turnkeyAddress?: string | null
@@ -46,6 +62,7 @@ export type DynamicWalletAddressDiagnostics = {
 export type DynamicSolanaSignerDiagnostics = {
   connectorKey: string | null
   connectorName: string | null
+  walletChain: DynamicWalletChain
   extractedAddressFields: DynamicWalletAddressDiagnostics
   sourceAddress: string
   activeAccountAddress: string | null
@@ -124,9 +141,86 @@ export function dynamicWalletAddressesMatch(
 
 export function getDynamicWalletConnectorInfo(wallet: DynamicWalletLike) {
   return {
-    connectorKey: wallet.connector?.key ?? null,
-    connectorName: wallet.connector?.name ?? null,
+    connectorKey: wallet.connector?.key ?? wallet.walletConnector?.key ?? null,
+    connectorName: wallet.connector?.name ?? wallet.walletConnector?.name ?? null,
   }
+}
+
+function stringifyChainHint(value: unknown): string {
+  if (typeof value === "string") return value.toLowerCase()
+  if (!value || typeof value !== "object") return ""
+  const record = value as Record<string, unknown>
+  return [
+    record.chain,
+    record.name,
+    record.key,
+    record.network,
+    record.namespace,
+    record.blockchain,
+    record.chainName,
+  ].map(stringifyChainHint).filter(Boolean).join(" ")
+}
+
+function classifyChainHint(value: unknown): DynamicWalletChain {
+  const hint = stringifyChainHint(value)
+  if (!hint) return "unknown"
+  if (/\b(solana|svm|sol)\b/.test(hint)) return "solana"
+  if (/\b(bitcoin|btc|bip122|sats|ordinals|psbt)\b/.test(hint)) return "bitcoin"
+  if (/\b(evm|eip155|ethereum|base|polygon|optimism|arbitrum|avalanche|bsc|binance|zerodev|turnkeyevm|wagmi)\b/.test(hint)) {
+    return "evm"
+  }
+  return "unknown"
+}
+
+function mergeChainClassifications(values: DynamicWalletChain[]): DynamicWalletChain {
+  const known = values.filter((value) => value !== "unknown")
+  return new Set(known).size === 1 ? known[0] : "unknown"
+}
+
+export function classifyDynamicWalletChain(wallet: DynamicWalletLike): DynamicWalletChain {
+  const connectorKeyName = [
+    wallet.connector?.key,
+    wallet.connector?.name,
+    wallet.walletConnector?.key,
+    wallet.walletConnector?.name,
+  ].filter(Boolean).join(" ")
+
+  return mergeChainClassifications([
+    classifyChainHint(wallet.chain),
+    classifyChainHint(wallet.chainName),
+    classifyChainHint(wallet.connectedChain),
+    classifyChainHint(wallet.network),
+    classifyChainHint(wallet.connector?.chain),
+    classifyChainHint(wallet.connector?.chainName),
+    classifyChainHint(wallet.connector?.connectedChain),
+    classifyChainHint(wallet.connector?.overrideKey),
+    classifyChainHint(wallet.walletConnector?.chain),
+    classifyChainHint(wallet.walletConnector?.chainName),
+    classifyChainHint(wallet.walletConnector?.connectedChain),
+    classifyChainHint(wallet.walletConnector?.overrideKey),
+    classifyChainHint(connectorKeyName),
+    ...((wallet.accounts ?? []).map((account) =>
+      mergeChainClassifications([
+        classifyChainHint(account.chain),
+        classifyChainHint(account.chainName),
+        classifyChainHint(account.network),
+      ])
+    )),
+    ...((wallet.additionalAddresses ?? []).map((entry) =>
+      mergeChainClassifications([
+        classifyChainHint(entry.chain),
+        classifyChainHint(entry.chainName),
+        classifyChainHint(entry.network),
+      ])
+    )),
+  ])
+}
+
+function expectedChainForRail(rail?: DynamicSignerRail): DynamicWalletChain | null {
+  if (rail === "solana") return "solana"
+  if (rail === "base") return "evm"
+  if (rail === "bitcoin") return "bitcoin"
+  return null
 }
 
 export function getDynamicWalletAddresses(wallet: DynamicWalletLike) {
@@ -187,12 +281,15 @@ export async function extractDynamicActiveWalletAddress(wallet: DynamicWalletLik
 
 export function getDynamicWalletSearchList(
   candidates: unknown[],
-  primaryWallet: unknown
+  primaryWallet: unknown,
+  rail?: DynamicSignerRail
 ): DynamicWalletLike[] {
   const seen = new Set<unknown>()
+  const expectedChain = expectedChainForRail(rail)
   return [primaryWallet, ...candidates].filter((wallet) => {
     if (!wallet || seen.has(wallet)) return false
     seen.add(wallet)
+    if (expectedChain && classifyDynamicWalletChain(wallet as DynamicWalletLike) !== expectedChain) return false
     return true
   }) as DynamicWalletLike[]
 }
@@ -204,7 +301,7 @@ export function findDynamicWalletForSource(
   rail?: DynamicSignerRail
 ): DynamicWalletLike | null {
   if (!sourceAddress.trim()) return null
-  return getDynamicWalletSearchList(candidates, primaryWallet).find((wallet) =>
+  return getDynamicWalletSearchList(candidates, primaryWallet, rail).find((wallet) =>
     getDynamicWalletAddresses(wallet).some((address) =>
       dynamicWalletAddressesMatch(address, sourceAddress, rail)
     )
@@ -212,6 +309,8 @@ export function findDynamicWalletForSource(
 }
 
 export function dynamicWalletSupportsRail(wallet: DynamicWalletLike, rail: DynamicSignerRail) {
+  const expectedChain = expectedChainForRail(rail)
+  if (expectedChain && classifyDynamicWalletChain(wallet) !== expectedChain) return false
   if (rail === "base") return Boolean(wallet.getWalletClient || wallet.connector?.getWalletClient)
   if (rail === "solana") return Boolean(wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction)
   return Boolean(wallet.signPsbt || wallet.connector?.signPsbt)
@@ -228,12 +327,23 @@ export function findDynamicApprovalWalletForSource(
   return wallet && dynamicWalletSupportsRail(wallet, rail) ? wallet : null
 }
 
+export function assertDynamicWalletChain(wallet: DynamicWalletLike, rail: Exclude<DynamicSignerRail, "bitcoin">) {
+  const walletChain = classifyDynamicWalletChain(wallet)
+  if (rail === "solana" && walletChain !== "solana") {
+    throw new Error("Dynamic signer chain mismatch: expected Solana signer.")
+  }
+  if (rail === "base" && walletChain !== "evm") {
+    throw new Error("Dynamic signer chain mismatch: expected EVM signer.")
+  }
+}
+
 export async function signDynamicSolanaTransactionWithActiveAccount(
   wallet: DynamicWalletLike,
   transaction: unknown,
   sourceAddress: string,
   onDiagnostics?: (diagnostics: DynamicSolanaSignerDiagnostics) => void
 ) {
+  assertDynamicWalletChain(wallet, "solana")
   const { activeAccountAddress, extractedAddressFields } = await extractDynamicActiveWalletAddress(wallet)
   const hasSignAndSendTransaction = Boolean(
     wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction
@@ -246,6 +356,7 @@ export async function signDynamicSolanaTransactionWithActiveAccount(
 
   onDiagnostics?.({
     ...getDynamicWalletConnectorInfo(wallet),
+    walletChain: classifyDynamicWalletChain(wallet),
     extractedAddressFields,
     sourceAddress,
     activeAccountAddress,

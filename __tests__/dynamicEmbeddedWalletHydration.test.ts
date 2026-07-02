@@ -67,6 +67,7 @@ describe("Dynamic embedded wallet hydration", () => {
     const solanaEmbeddedWallet = {
       address: "SolanaHydrated11111111111111111111111111111",
       key: "dynamicwaas",
+      chain: "solana",
       signAndSendTransaction: vi.fn(),
     }
 
@@ -82,6 +83,7 @@ describe("Dynamic embedded wallet hydration", () => {
     const baseEmbeddedWallet = {
       address: "0xABCDEFabcdefABCDEFabcdefABCDEFabcdefABCD",
       key: "dynamicwaas",
+      chain: "evm",
       getWalletClient: vi.fn(),
     }
 

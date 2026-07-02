@@ -14,6 +14,8 @@ import {
   shortAddress,
 } from "@/lib/wallets/sparkDetection"
 import {
+  assertDynamicWalletChain,
+  classifyDynamicWalletChain,
   dynamicWalletSupportsRail,
   findDynamicApprovalWalletForSource,
   findDynamicWalletForSource,
@@ -291,21 +293,33 @@ async function sendDynamicPreparedWithdrawal(
   wallets: unknown[],
   primaryWallet: unknown
 ): Promise<{ txHash?: string; signedPsbtBase64?: string; providerReference?: string }> {
-  const walletsToCheck = getDynamicWalletSearchList(wallets as unknown[], primaryWallet)
+  const walletsToCheck = getDynamicWalletSearchList(wallets as unknown[], primaryWallet, prepared.rail)
 
   if (walletCreationDebugEnabled) {
-    const walletList = wallets as DynamicWalletLike[]
+    const allWalletCandidates = getDynamicWalletSearchList(wallets as unknown[], primaryWallet)
+    const primaryWalletChain = primaryWallet
+      ? classifyDynamicWalletChain(primaryWallet as DynamicWalletLike)
+      : "unknown"
     console.info("[pinetree-withdrawals] signer_lookup", {
+      requestedRail: prepared.rail,
+      requestedAsset: prepared.asset,
       payloadKind: prepared.payload.kind,
+      preparedSourceAddress: prepared.sourceAddress,
       sourceAddressPresent: Boolean(prepared.sourceAddress),
       sourceAddressPrefix: prepared.sourceAddress?.slice(0, 8) ?? null,
       dynamicWalletCount: wallets.length,
       hasPrimaryWallet: Boolean(primaryWallet),
-      dynamicWalletAddressPrefixes: walletList.map((w) =>
-        getDynamicWalletAddresses(w)
-          .map((a) => a.slice(0, 8))
-          .join(",")
-      ),
+      candidateWallets: allWalletCandidates.map((w) => ({
+        addresses: getDynamicWalletAddresses(w),
+        chainClassification: classifyDynamicWalletChain(w),
+        connectorKey: w.connector?.key ?? w.walletConnector?.key ?? null,
+        connectorName: w.connector?.name ?? w.walletConnector?.name ?? null,
+        includedForRequestedRail: walletsToCheck.includes(w),
+      })),
+      primaryWalletExcludedReason:
+        primaryWallet && !walletsToCheck.includes(primaryWallet as DynamicWalletLike)
+          ? `classified_${primaryWalletChain}_for_${prepared.rail}`
+          : null,
     })
   }
 
@@ -315,6 +329,9 @@ async function sendDynamicPreparedWithdrawal(
     const walletLike = wallet as DynamicWalletLike
     console.info("[pinetree-withdrawals] signer_ready", {
       payloadKind: prepared.payload.kind,
+      selectedWalletChainClassification: classifyDynamicWalletChain(walletLike),
+      selectedConnectorKey: walletLike.connector?.key ?? walletLike.walletConnector?.key ?? null,
+      selectedConnectorName: walletLike.connector?.name ?? walletLike.walletConnector?.name ?? null,
       hasSolanaSigner: Boolean(
         walletLike.signAndSendTransaction || walletLike.connector?.signAndSendTransaction
       ),
@@ -347,6 +364,7 @@ async function sendDynamicPreparedWithdrawal(
   }
 
   if (prepared.payload.kind === "evm_transaction") {
+    assertDynamicWalletChain(wallet, "base")
     // Call getWalletClient through the object (not extracted) to preserve 'this' binding.
     const chainIdStr = String(prepared.payload.chainId)
     const rawClient = await wallet.getWalletClient?.(chainIdStr)
