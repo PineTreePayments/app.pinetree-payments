@@ -134,9 +134,10 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("const solanaSignerReady = Boolean(")
     expect(page).toContain('findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, "base", profile.base_address)')
     expect(page).toContain('findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, "solana", profile.solana_address)')
-    // Merchant display readiness is based on the PineTree Wallet rails, not BTC payout processing readiness.
+    // btcPayoutReady requires both address and payout enabled; bitcoinReady now delegates to it.
     expect(page).toContain('const btcPayoutReady = Boolean(profile?.btc_address && profile.btc_payout_enabled)')
-    expect(page).toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
+    expect(page).toContain("const bitcoinReady = btcPayoutReady")
+    expect(page).not.toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
     expect(page).toContain("const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady && baseSignerReady && solanaSignerReady")
     expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : allPrimaryRailsConnected ? "Ready" : repairOrSetupIncomplete ? "Setup incomplete" : "Not connected"')
   })

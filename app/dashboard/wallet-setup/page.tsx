@@ -1782,8 +1782,7 @@ function PineTreeWalletRuntime() {
       const providerRows = json.providers || []
       const providerEnabled = (provider: string) => {
         const row = providerRows.find((item) => item.provider === provider)
-        const status = String(row?.status || "").toLowerCase().trim()
-        return Boolean(row?.enabled === true && (status === "connected" || status === "active"))
+        return Boolean(row?.enabled === true)
       }
       setEnabledRails({
         base: providerEnabled("base"),
@@ -2432,7 +2431,7 @@ function PineTreeWalletRuntime() {
       }]
     : []
 
-  const bitcoinReady = bitcoinPayoutEntries.length > 0
+  const bitcoinReady = btcPayoutReady
   const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady && baseSignerReady && solanaSignerReady
   const dynamicEmbeddedSignersReady = baseSignerReady && solanaSignerReady
   const profileHasDynamicAddresses = baseReady || solanaReady
@@ -2455,10 +2454,10 @@ function PineTreeWalletRuntime() {
   ], [baseReady, bitcoinReady, enabledRails.base, enabledRails.bitcoin, enabledRails.solana, solanaReady])
 
   const withdrawalWalletRows = useMemo(() => [
-    { rail: "base" as const, configured: baseReady },
-    { rail: "solana" as const, configured: solanaReady },
-    { rail: "bitcoin" as const, configured: bitcoinReady },
-  ], [baseReady, bitcoinReady, solanaReady])
+    { rail: "base" as const, configured: baseReady && enabledRails.base },
+    { rail: "solana" as const, configured: solanaReady && enabledRails.solana },
+    { rail: "bitcoin" as const, configured: bitcoinReady && enabledRails.bitcoin },
+  ], [baseReady, bitcoinReady, enabledRails.base, enabledRails.bitcoin, enabledRails.solana, solanaReady])
 
   const withdrawableAssetOptions = useMemo((): WithdrawalAssetOption[] => {
     return withdrawalWalletRows
