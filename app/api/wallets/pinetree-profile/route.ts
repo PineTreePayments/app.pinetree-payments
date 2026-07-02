@@ -47,6 +47,18 @@ export async function POST(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
     const body = (await req.json()) as Record<string, unknown>
+    if (body.action === "reset_dynamic_wallet_profile") {
+      const profile = await upsertPineTreeWalletProfile({
+        merchantId,
+        dynamicUserId: null,
+        baseAddress: null,
+        solanaAddress: null,
+        bitcoinLightningAddress: null,
+        bitcoinOnchainAddress: null,
+      })
+      return NextResponse.json({ profile })
+    }
+
     const bodyBtcAddress = "btc_address" in body
       ? (body.btc_address as string | null)
       : "bitcoin_onchain_address" in body

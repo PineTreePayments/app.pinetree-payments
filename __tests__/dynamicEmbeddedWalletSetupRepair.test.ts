@@ -26,12 +26,12 @@ describe("Dynamic embedded wallet setup repair", () => {
     expect(page).toContain("const dbOnlyWalletProfile =")
     expect(page).toContain("dynamicWalletRuntimeCount === 0")
     expect(page).toContain("!dynamicEmbeddedSignersReady")
-    expect(page).toContain('walletSetupIncomplete ? "Setup incomplete"')
+    expect(page).toContain('repairOrSetupIncomplete ? "Setup incomplete"')
   })
 
-  it("Connected appears only when DB addresses and Dynamic runtime signers both exist", () => {
+  it("Ready appears only when DB addresses and Dynamic runtime signers both exist", () => {
     expect(page).toContain("const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady && baseSignerReady && solanaSignerReady")
-    expect(page).toContain('const walletStatus = allPrimaryRailsConnected ? "Connected"')
+    expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : allPrimaryRailsConnected ? "Ready"')
   })
 
   it("Review withdrawal is blocked when the runtime signer is missing", () => {
@@ -68,18 +68,54 @@ describe("Dynamic embedded wallet setup repair", () => {
     expect(postIdx).toBeGreaterThan(signerGuardIdx)
   })
 
-  it("broken DB-only profile can be repaired without deleting withdrawal history", () => {
+  it("repair clears broken DB-only profile addresses and linkage without deleting withdrawal history", () => {
     expect(page).toContain("function handleRepairWalletSetup()")
-    expect(page).toContain("dynamic_user_id: null")
-    expect(page).toContain("base_address: null")
-    expect(page).toContain("solana_address: null")
-    expect(page).toContain('beginWalletSetupRepair("repair_embedded_wallet_setup")')
+    expect(page).toContain('action: "reset_dynamic_wallet_profile"')
+    expect(profileRoute).toContain('body.action === "reset_dynamic_wallet_profile"')
+    expect(profileRoute).toContain("dynamicUserId: null")
+    expect(profileRoute).toContain("baseAddress: null")
+    expect(profileRoute).toContain("solanaAddress: null")
     expect(profileRoute).not.toContain("wallet_withdrawal_requests")
+    expect(profileRoute).not.toContain('"processing"')
+    expect(profileRoute).not.toContain('"confirmed"')
     expect(withdrawalRequestsDb).not.toContain("delete()")
   })
 
+  it("repair forces Dynamic session reset and opens auth before provisioning fresh wallets", () => {
+    expect(page).toContain("setRepairPendingAfterLogout(true)")
+    expect(page).toContain("void handleLogOut()")
+    expect(page).toContain("repair_dynamic_session_reset_auth_opened")
+    expect(page).toContain("setShowAuthFlow(true)")
+    expect(page).toContain("setPendingSync(true)")
+    expect(page).toContain('repairInProgress ? "repair_provision_embedded_wallets" : "create_provision_embedded_wallets"')
+    expect(page).toContain("refreshDynamicWalletRuntime(")
+  })
+
+  it("repair logs every reset and recreate checkpoint", () => {
+    for (const event of [
+      "repair_before_reset",
+      "repair_profile_cleared",
+      "repair_dynamic_session_reset_start",
+      "repair_dynamic_session_reset_auth_opened",
+      "repair_dynamic_wallets_after_provisioning",
+      "repair_signer_verification_failed",
+      "repair_profile_saved_with_new_addresses",
+    ]) {
+      expect(page).toContain(event)
+    }
+    expect(page).toContain("baseSignerFound")
+    expect(page).toContain("solanaSignerFound")
+  })
+
+  it("setup stays incomplete when Dynamic returns zero wallets during repair", () => {
+    expect(page).toContain("repairFailedIncomplete")
+    expect(page).toContain("repair_dynamic_wallets_missing_after_provisioning")
+    expect(page).toContain("setRepairFailedIncomplete(true)")
+    expect(page).toContain("const repairOrSetupIncomplete = repairFailedIncomplete || walletSetupIncomplete")
+  })
+
   it("setup incomplete shows Finish PineTree Wallet setup instead of Open PineTree Wallet", () => {
-    expect(page).toContain('walletSetupIncomplete ? "Finish PineTree Wallet setup" : "Open PineTree Wallet"')
+    expect(page).toContain('repairOrSetupIncomplete ? "Finish PineTree Wallet setup" : "Open PineTree Wallet"')
     expect(page).toContain("Repair PineTree Wallet setup")
   })
 })

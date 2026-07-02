@@ -222,6 +222,7 @@ type ProvidersDashboardResponse = {
 
 type WalletCreationStep =
   | "idle"
+  | "repairing_profile"
   | "opening_dynamic"
   | "waiting_for_dynamic_auth"
   | "dynamic_authenticated"
@@ -565,6 +566,7 @@ function EmptyWalletPanel({ title, detail }: { title: string; detail: string }) 
 }
 
 function walletCreationStepMessage(step: WalletCreationStep) {
+  if (step === "repairing_profile") return "Repairing PineTree Wallet setup..."
   if (step === "opening_dynamic") return "Creating wallet..."
   if (step === "waiting_for_dynamic_auth") return "Waiting for wallet login..."
   if (step === "dynamic_authenticated") return "Wallet login complete..."
@@ -1674,6 +1676,9 @@ function PineTreeWalletRuntime() {
   const [walletCreationStep, setWalletCreationStep] = useState<WalletCreationStep>("idle")
   // logoutPending: waiting for Dynamic logout to complete before opening auth flow
   const [logoutPending, setLogoutPending] = useState(false)
+  const [repairPendingAfterLogout, setRepairPendingAfterLogout] = useState(false)
+  const [repairInProgress, setRepairInProgress] = useState(false)
+  const [repairFailedIncomplete, setRepairFailedIncomplete] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [copiedAddress, setCopiedAddress] = useState("")
   const [enabledRails, setEnabledRails] = useState<EnabledRailState>(defaultEnabledRails)
@@ -1695,6 +1700,8 @@ function PineTreeWalletRuntime() {
   const dynamicHydrationAttemptRef = useRef<string | null>(null)
   const dynamicWalletRuntimeCountRef = useRef(0)
   const dynamicApprovalAvailableRef = useRef(false)
+  const repairProfileIdRef = useRef<string | null>(null)
+  const pendingWalletProvisionAttemptRef = useRef<string | null>(null)
 
   // --- SDK load timeout ---
   useEffect(() => {
@@ -2130,6 +2137,14 @@ function PineTreeWalletRuntime() {
       dynamicNetworkAddresses.solana.length === 0 &&
       dynamicNetworkAddresses.bitcoin.length === 0
     ) {
+      if (repairInProgress) {
+        console.info("[pinetree-wallets] repair_dynamic_wallets_missing_after_provisioning", {
+          dynamicUserId: user.userId,
+          dynamicWalletCountAfterProvisioning: dynamicWalletRuntimeCountRef.current,
+        })
+        setRepairInProgress(false)
+        setRepairFailedIncomplete(true)
+      }
       logWalletCreationStep("waiting_for_embedded_wallets", { reason: "no_wallet_addresses_detected" })
       return null
     }
@@ -2147,6 +2162,18 @@ function PineTreeWalletRuntime() {
         ? findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, "solana", solanaAddress)
         : null
       if (options?.requireBaseAndSolanaSigners && (!baseAddress || !solanaAddress || !baseSigner || !solanaSigner)) {
+        if (repairInProgress) {
+          console.info("[pinetree-wallets] repair_signer_verification_failed", {
+            dynamicUserId: user.userId,
+            dynamicWalletCountAfterProvisioning: dynamicWalletRuntimeCountRef.current,
+            baseAddressPresent: Boolean(baseAddress),
+            solanaAddressPresent: Boolean(solanaAddress),
+            baseSignerFound: Boolean(baseSigner),
+            solanaSignerFound: Boolean(solanaSigner),
+          })
+          setRepairInProgress(false)
+          setRepairFailedIncomplete(true)
+        }
         logWalletCreationStep("waiting_for_embedded_wallets", {
           reason: "embedded_signers_missing",
           base_address_present: Boolean(baseAddress),
@@ -2194,6 +2221,20 @@ function PineTreeWalletRuntime() {
       if (res.ok) {
         const json = (await res.json()) as { profile: PineTreeWalletProfile }
         setProfileState({ kind: "loaded", profile: json.profile })
+        if (repairInProgress) {
+          console.info("[pinetree-wallets] repair_profile_saved_with_new_addresses", {
+            previousProfileId: repairProfileIdRef.current,
+            dynamicUserId: user.userId,
+            dynamicWalletCountAfterProvisioning: dynamicWalletRuntimeCountRef.current,
+            baseAddressPresent: Boolean(json.profile.base_address),
+            solanaAddressPresent: Boolean(json.profile.solana_address),
+            baseSignerFound: Boolean(baseSigner),
+            solanaSignerFound: Boolean(solanaSigner),
+          })
+          setRepairInProgress(false)
+          setRepairFailedIncomplete(false)
+          repairProfileIdRef.current = null
+        }
         logWalletCreationStep("profile_synced", {
           profile_sync_response_status: res.status,
           profile_has_base: Boolean(json.profile.base_address),
@@ -2218,7 +2259,7 @@ function PineTreeWalletRuntime() {
       setSyncing(false)
       setPendingSync(false)
     }
-  }, [user, wallets, primaryWallet, dynamicNetworkAddresses, syncPineTreeManagedLightning, logWalletCreationStep, fetchProviderRailState])
+  }, [user, wallets, primaryWallet, dynamicNetworkAddresses, repairInProgress, syncPineTreeManagedLightning, logWalletCreationStep, fetchProviderRailState])
 
   // --- Post-reconnect wallet match check ---
   // Fires when Dynamic loads wallets after setShowAuthFlow(true). Clears the reconnect
@@ -2274,18 +2315,36 @@ function PineTreeWalletRuntime() {
     }
     logWalletCreationStep("dynamic_authenticated")
     if (dynamicWalletRuntimeCount === 0) {
+      const provisionAttemptKey = `${user.userId}:${repairInProgress ? "repair" : "create"}`
+      if (pendingWalletProvisionAttemptRef.current !== provisionAttemptKey) {
+        pendingWalletProvisionAttemptRef.current = provisionAttemptKey
+        void refreshDynamicWalletRuntime(
+          repairInProgress ? "repair_provision_embedded_wallets" : "create_provision_embedded_wallets",
+          { requireApprovalWallet: false }
+        )
+      }
       logWalletCreationStep("waiting_for_embedded_wallets")
       return
     }
+    pendingWalletProvisionAttemptRef.current = null
     logWalletCreationStep("wallets_detected")
+    if (repairInProgress) {
+      console.info("[pinetree-wallets] repair_dynamic_wallets_after_provisioning", {
+        previousProfileId: repairProfileIdRef.current,
+        dynamicUserId: user.userId,
+        dynamicWalletCountAfterProvisioning: dynamicWalletRuntimeCount,
+      })
+    }
     void syncProfileFromDynamic({ autoEnableLightning: true, requireBaseAndSolanaSigners: true })
-  }, [pendingSync, sdkHasLoaded, user, dynamicWalletRuntimeCount, syncProfileFromDynamic, logWalletCreationStep])
+  }, [pendingSync, sdkHasLoaded, user, dynamicWalletRuntimeCount, repairInProgress, refreshDynamicWalletRuntime, syncProfileFromDynamic, logWalletCreationStep])
 
   useEffect(() => {
     if (!pendingSync) return
     const timer = window.setTimeout(() => {
       setPendingSync(false)
       setSyncing(false)
+      setRepairInProgress(false)
+      setRepairFailedIncomplete(true)
       setWalletCreationStep("timeout")
       if (walletCreationDebugEnabled) {
         console.debug("[pinetree-wallets] wallet_creation_step", {
@@ -2306,6 +2365,20 @@ function PineTreeWalletRuntime() {
     setPendingSync(true)
     setShowAuthFlow(true)
   }, [logoutPending, user, setShowAuthFlow, logWalletCreationStep])
+
+  useEffect(() => {
+    if (!repairPendingAfterLogout) return
+    if (user !== null) return
+    setRepairPendingAfterLogout(false)
+    console.info("[pinetree-wallets] repair_dynamic_session_reset_auth_opened", {
+      previousProfileId: repairProfileIdRef.current,
+      dynamicWalletCountBeforeAuth: dynamicWalletRuntimeCountRef.current,
+    })
+    logWalletCreationStep("waiting_for_dynamic_auth", { reason: "repair_reopening_after_logout" })
+    setPendingSync(true)
+    setShowDynamicUserProfile(false)
+    setShowAuthFlow(true)
+  }, [repairPendingAfterLogout, user, setShowAuthFlow, setShowDynamicUserProfile, logWalletCreationStep])
 
   // ---------------------------------------------------------------------------
   // Derived state — wallet profile (Base/Solana from Dynamic, DB-backed)
@@ -2357,8 +2430,9 @@ function PineTreeWalletRuntime() {
     sdkHasLoaded &&
     (!user || dynamicWalletRuntimeCount === 0 || !dynamicEmbeddedSignersReady)
   const walletSetupIncomplete = hasWallet && dbOnlyWalletProfile
+  const repairOrSetupIncomplete = repairFailedIncomplete || walletSetupIncomplete
 
-  const walletStatus = allPrimaryRailsConnected ? "Connected" : walletSetupIncomplete ? "Setup incomplete" : "Not connected"
+  const walletStatus = repairInProgress ? "Repairing" : allPrimaryRailsConnected ? "Ready" : repairOrSetupIncomplete ? "Setup incomplete" : "Not connected"
 
   const walletRailRows = useMemo<WalletRailRow[]>(() => [
     { rail: "base", label: "Base" as const, configured: baseReady, enabled: enabledRails.base },
@@ -2547,6 +2621,20 @@ function PineTreeWalletRuntime() {
       void beginWalletSetupRepair("repair_embedded_wallet_setup_missing_auth")
       return
     }
+    const profileBeforeRepair = profileState.kind === "loaded" ? profileState.profile : null
+    repairProfileIdRef.current = profileBeforeRepair?.id ?? null
+    pendingWalletProvisionAttemptRef.current = null
+    setRepairInProgress(true)
+    setRepairFailedIncomplete(false)
+    setWalletCreationStep("repairing_profile")
+    console.info("[pinetree-wallets] repair_before_reset", {
+      profileId: profileBeforeRepair?.id ?? null,
+      baseAddressPresent: Boolean(profileBeforeRepair?.base_address),
+      solanaAddressPresent: Boolean(profileBeforeRepair?.solana_address),
+      dynamicUserIdPresent: Boolean(profileBeforeRepair?.dynamic_user_id),
+      dynamicWalletCountBeforeRepair: dynamicWalletRuntimeCount,
+      hasPrimaryWalletBeforeRepair: Boolean(primaryWallet),
+    })
     setSyncing(true)
     try {
       const res = await fetch("/api/wallets/pinetree-profile", {
@@ -2556,16 +2644,27 @@ function PineTreeWalletRuntime() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          dynamic_user_id: null,
-          base_address: null,
-          solana_address: null,
-          bitcoin_onchain_address: null,
-          bitcoin_lightning_address: null,
+          action: "reset_dynamic_wallet_profile",
         }),
       })
       if (res.ok) {
         const json = (await res.json()) as { profile: PineTreeWalletProfile }
         setProfileState({ kind: "loaded", profile: json.profile })
+        console.info("[pinetree-wallets] repair_profile_cleared", {
+          profileId: json.profile.id,
+          baseAddressPresent: Boolean(json.profile.base_address),
+          solanaAddressPresent: Boolean(json.profile.solana_address),
+          dynamicUserIdPresent: Boolean(json.profile.dynamic_user_id),
+          withdrawalHistoryUntouched: true,
+        })
+      } else {
+        console.warn("[pinetree-wallets] repair_profile_clear_failed", {
+          profileId: profileBeforeRepair?.id ?? null,
+          status: res.status,
+        })
+        logWalletCreationStep("failed", { reason: "repair_profile_clear_failed", profile_sync_response_status: res.status })
+        setRepairInProgress(false)
+        return
       }
     } finally {
       setSyncing(false)
@@ -2574,7 +2673,26 @@ function PineTreeWalletRuntime() {
     setWithdrawalScreen("form")
     setWithdrawalApprovalError("")
     setWithdrawalError("")
-    void beginWalletSetupRepair("repair_embedded_wallet_setup")
+    console.info("[pinetree-wallets] repair_dynamic_session_reset_start", {
+      previousProfileId: repairProfileIdRef.current,
+      dynamicWalletCountBeforeReset: dynamicWalletRuntimeCount,
+      hadDynamicUser: Boolean(user),
+    })
+    setPendingSync(false)
+    setShowAuthFlow(false)
+    setShowDynamicUserProfile(false)
+    if (user && handleLogOut) {
+      setRepairPendingAfterLogout(true)
+      void handleLogOut()
+      return
+    }
+    console.info("[pinetree-wallets] repair_dynamic_session_reset_auth_opened", {
+      previousProfileId: repairProfileIdRef.current,
+      dynamicWalletCountBeforeAuth: dynamicWalletRuntimeCount,
+    })
+    logWalletCreationStep("opening_dynamic", { reason: "repair_embedded_wallet_setup_no_active_dynamic_user" })
+    setPendingSync(true)
+    window.setTimeout(() => setShowAuthFlow(true), 0)
   }
 
   async function handleWithdrawalReconnect() {
@@ -2650,6 +2768,8 @@ function PineTreeWalletRuntime() {
       return
     }
     logWalletCreationStep("opening_dynamic")
+    pendingWalletProvisionAttemptRef.current = null
+    setRepairFailedIncomplete(false)
     setPendingSync(true)
     setShowAuthFlow(true)
     if (sdkHasLoaded && user) {
@@ -2661,6 +2781,9 @@ function PineTreeWalletRuntime() {
     setPendingSync(false)
     setLogoutPending(false)
     setSyncing(false)
+    setRepairInProgress(false)
+    setRepairFailedIncomplete(false)
+    pendingWalletProvisionAttemptRef.current = null
     setShowAuthFlow(false)
     logWalletCreationStep("opening_dynamic", { retry: true })
     window.setTimeout(() => {
@@ -3012,7 +3135,7 @@ function PineTreeWalletRuntime() {
           </div>
         ) : null}
 
-        {walletSetupIncomplete ? (
+        {repairOrSetupIncomplete ? (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
             <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
             <p className="text-xs leading-5 text-amber-800">
@@ -3047,17 +3170,17 @@ function PineTreeWalletRuntime() {
         ) : null}
 
         <div className="mt-6 flex justify-start">
-          {hasWallet ? (
+          {hasWallet || repairFailedIncomplete ? (
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={walletSetupIncomplete ? handleFinishWalletSetup : handleOpenWallet}
+                onClick={repairOrSetupIncomplete ? handleFinishWalletSetup : handleOpenWallet}
                 disabled={syncing || walletCreationInProgress}
                 className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
               >
-                {walletSetupIncomplete ? "Finish PineTree Wallet setup" : "Open PineTree Wallet"}
+                {repairOrSetupIncomplete ? "Finish PineTree Wallet setup" : "Open PineTree Wallet"}
               </button>
-              {walletSetupIncomplete ? (
+              {repairOrSetupIncomplete ? (
                 <button
                   type="button"
                   onClick={() => void handleRepairWalletSetup()}

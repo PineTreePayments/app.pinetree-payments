@@ -60,7 +60,7 @@ describe("Dynamic embedded wallet hydration", () => {
     expect(page).toContain("const baseSignerReady = Boolean(")
     expect(page).toContain("const solanaSignerReady = Boolean(")
     expect(page).toContain("const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady && baseSignerReady && solanaSignerReady")
-    expect(page).toContain('const walletStatus = allPrimaryRailsConnected ? "Connected" : walletSetupIncomplete ? "Setup incomplete" : "Not connected"')
+    expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : allPrimaryRailsConnected ? "Ready" : repairOrSetupIncomplete ? "Setup incomplete" : "Not connected"')
   })
 
   it("Solana embedded wallet signer lookup succeeds after hydration", () => {
