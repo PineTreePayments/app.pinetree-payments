@@ -1145,12 +1145,13 @@ describe("PineTree embedded wallet setup", () => {
   // Withdrawal execution: Dynamic signing paths — Task 4
   // -------------------------------------------------------------------------
 
-  it("Dynamic Solana signing uses inline optional-chaining calls to preserve this binding", () => {
+  it("Dynamic Solana signing uses a shared active-account helper that preserves this binding", () => {
     // Method extraction (const fn = obj.method; fn()) loses 'this' in strict mode.
     // signAndSendTransaction on TurnkeySolanaWalletConnector calls this.walletUiUtils, so
     // 'this' must remain the connector object — inline ?. calls guarantee that.
-    expect(page).toContain("await wallet.signAndSendTransaction?.(transaction) as unknown")
-    expect(page).toContain("await wallet.connector?.signAndSendTransaction?.(transaction) as unknown")
+    expect(page).toContain("signDynamicSolanaTransactionWithActiveAccount(")
+    expect(dynamicSignerLookup).toContain("await wallet.signAndSendTransaction?.(transaction, signOptions) as unknown")
+    expect(dynamicSignerLookup).toContain("await wallet.connector?.signAndSendTransaction?.(transaction, signOptions) as unknown")
     expect(page).not.toContain("const signAndSendTransaction = wallet.signAndSendTransaction")
   })
 
@@ -1158,8 +1159,8 @@ describe("PineTree embedded wallet setup", () => {
     // TurnkeySolanaWalletConnector.signAndSendTransaction returns a string.
     // ISolana (injected wallets like Phantom) returns { signature: string }.
     // Both must be normalised to a plain hash string before submitting.
-    expect(page).toContain("typeof txResult === \"string\"")
-    expect(page).toContain("(txResult as { signature?: string }).signature")
+    expect(dynamicSignerLookup).toContain("typeof txResult === \"string\"")
+    expect(dynamicSignerLookup).toContain("(txResult as { signature?: string }).signature")
   })
 
   it("wallet not found in Dynamic session shows reconnect error and logs signer_not_found", () => {
@@ -1303,7 +1304,8 @@ describe("PineTree embedded wallet setup", () => {
     // A Solana address like 'CdKwuF...' lowercases identically from both sides, so the match
     // is correct; no separate case-sensitive path is needed.
     expect(dynamicSignerLookup).toContain('if (rail === "base") return address.toLowerCase()')
-    expect(dynamicSignerLookup).toContain("normalizeWalletAddress(address, rail) === normalizedSource")
+    expect(dynamicSignerLookup).toContain("dynamicWalletAddressesMatch(address, sourceAddress, rail)")
+    expect(dynamicSignerLookup).toContain("normalizedCandidate === normalizedSource")
   })
 
   it("EVM address matching is case-insensitive via shared lowercase normalisation", () => {
@@ -1311,7 +1313,8 @@ describe("PineTree embedded wallet setup", () => {
     // Both sides are lowercased before comparison so a checksum-cased DB address matches
     // a lowercase Dynamic wallet address and vice versa.
     expect(dynamicSignerLookup).toContain('if (rail === "base") return address.toLowerCase()')
-    expect(dynamicSignerLookup).toContain("normalizeWalletAddress(address, rail) === normalizedSource")
+    expect(dynamicSignerLookup).toContain("dynamicWalletAddressesMatch(address, sourceAddress, rail)")
+    expect(dynamicSignerLookup).toContain("normalizedCandidate === normalizedSource")
   })
 
   it("reconnect with wallets loaded but address mismatch opens Dynamic auth before failing", () => {

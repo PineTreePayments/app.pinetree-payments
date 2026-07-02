@@ -19,6 +19,7 @@ import {
   findDynamicWalletForSource,
   getDynamicWalletAddresses,
   getDynamicWalletSearchList,
+  signDynamicSolanaTransactionWithActiveAccount,
   type DynamicWalletLike,
 } from "@/lib/wallets/dynamicSignerLookup"
 import {
@@ -374,22 +375,17 @@ async function sendDynamicPreparedWithdrawal(
     return { signedPsbtBase64: signed.signedPsbt, providerReference: "dynamic:bitcoin-psbt" }
   }
 
-  // Solana transaction. Call signAndSendTransaction through the object to preserve 'this' binding.
-  // The embedded Solana wallet triggers Dynamic's approval UI and returns a signature string.
-  // Injected wallets return { signature: string } per the ISolana interface.
+  // Solana transaction. Resolve and activate the signer account before calling Dynamic.
   const transaction = Transaction.from(base64ToBytes(prepared.payload.transactionBase64))
-  const txResult = await wallet.signAndSendTransaction?.(transaction) as unknown
-    ?? await wallet.connector?.signAndSendTransaction?.(transaction) as unknown
-  if (!txResult) {
-    throw new Error("Unable to sign this withdrawal. Please try again.")
-  }
-  const txHash = typeof txResult === "string"
-    ? txResult
-    : (txResult as { signature?: string }).signature
-  if (!txHash) {
-    throw new Error("Unable to sign this withdrawal. Please try again.")
-  }
-  return { txHash, providerReference: txHash }
+  return signDynamicSolanaTransactionWithActiveAccount(
+    wallet,
+    transaction,
+    prepared.sourceAddress,
+    (diagnostics) => {
+      if (!walletCreationDebugEnabled) return
+      console.info("[pinetree-withdrawals] solana_active_account_lookup", diagnostics)
+    }
+  )
 }
 
 function base64ToBytes(value: string) {
