@@ -46,15 +46,15 @@ describe("Dynamic wallet provisioning — zero-wallet case", () => {
 describe("Withdrawal review blocked when no runtime wallets", () => {
   it("handleReviewWithdrawal returns early when dynamicWalletRuntimeCount === 0", () => {
     expect(page).toContain("dynamicWalletRuntimeCount === 0")
-    expect(page).toContain("PineTree Wallet is not active in this browser session. Open PineTree Wallet to reconnect first.")
+    expect(page).toContain("PineTree Wallet setup is incomplete. Finish PineTree Wallet setup before reviewing withdrawals.")
   })
 
   it("guard only fires when SDK is loaded and user is authenticated", () => {
-    expect(page).toContain("sdkHasLoaded && user && dynamicWalletRuntimeCount === 0")
+    expect(page).toContain("sdkHasLoaded && user && (dynamicWalletRuntimeCount === 0 || !reviewSigner)")
   })
 
   it("guard fires before setReviewingWithdrawal so no row is created", () => {
-    const guardIdx = page.indexOf("sdkHasLoaded && user && dynamicWalletRuntimeCount === 0")
+    const guardIdx = page.indexOf("sdkHasLoaded && user && (dynamicWalletRuntimeCount === 0 || !reviewSigner)")
     const reviewIdx = page.indexOf("setReviewingWithdrawal(true)")
     expect(guardIdx).toBeGreaterThan(0)
     expect(reviewIdx).toBeGreaterThan(guardIdx)

@@ -138,7 +138,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('const btcPayoutReady = Boolean(profile?.btc_address && profile.btc_payout_enabled)')
     expect(page).toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
     expect(page).toContain("const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady && baseSignerReady && solanaSignerReady")
-    expect(page).toContain('const walletStatus = allPrimaryRailsConnected ? "Connected" : "Not connected"')
+    expect(page).toContain('const walletStatus = allPrimaryRailsConnected ? "Connected" : walletSetupIncomplete ? "Setup incomplete" : "Not connected"')
   })
 
   it("syncs Dynamic wallet addresses to the merchant profile on creation only when explicitly triggered", () => {
@@ -278,13 +278,13 @@ describe("PineTree embedded wallet setup", () => {
 
   it("marks the merchant wallet Connected only when Base/Solana signers are hydrated", () => {
     expect(page).toContain("const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady && baseSignerReady && solanaSignerReady")
-    expect(page).toContain('const walletStatus = allPrimaryRailsConnected ? "Connected" : "Not connected"')
+    expect(page).toContain('const walletStatus = allPrimaryRailsConnected ? "Connected" : walletSetupIncomplete ? "Setup incomplete" : "Not connected"')
     expect(page).not.toContain("Bitcoin Lightning is being prepared through PineTree")
     expect(page).not.toContain("Bitcoin address pending")
   })
 
   it("uses provider status vocabulary when a wallet address is missing", () => {
-    expect(page).toContain('walletStatus = allPrimaryRailsConnected ? "Connected" : "Not connected"')
+    expect(page).toContain('walletStatus = allPrimaryRailsConnected ? "Connected" : walletSetupIncomplete ? "Setup incomplete" : "Not connected"')
     expect(page).not.toContain('"Setup pending"')
     expect(page).not.toContain('const lightningPending = lightningProfile?.status === "pending"')
     expect(page).not.toContain("lightningRetryable")

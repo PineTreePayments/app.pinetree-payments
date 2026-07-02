@@ -404,6 +404,7 @@ const withdrawalAssetsByRail: Record<WithdrawalRail, WithdrawalAsset[]> = {
   solana: ["SOL", "USDC"],
   bitcoin: ["BTC"],
 }
+const dynamicSignerWithdrawalRails: WithdrawalRail[] = ["base", "solana"]
 
 function findWithdrawalBalance(
   sync: PineTreeWalletSyncResponse | null,
@@ -738,6 +739,7 @@ function WithdrawalFormShell({
   onReview,
   onSubmit,
   onOpenWallet,
+  onFinishSetup,
 }: {
   rail: WithdrawalRail
   asset: WithdrawalAsset
@@ -766,6 +768,7 @@ function WithdrawalFormShell({
   onReview: () => void
   onSubmit: () => void
   onOpenWallet?: () => void
+  onFinishSetup?: () => void
 }) {
   const amountTrimmed = amountDecimal.trim()
   const selectedBalanceAmount = selectedBalance?.balance ?? null
@@ -778,7 +781,12 @@ function WithdrawalFormShell({
   const amountExceedsBalance = selectedBalanceKnown && amountValue > selectedBalanceAmount
   const missingDestination = destinationAddress.trim().length === 0
   const noWithdrawableAssets = assetOptions.length === 0
-  const reviewDisabled = reviewing || noWithdrawableAssets || missingDestination || missingAmount || amountParseError || invalidAmount || selectedBalanceZero || amountExceedsBalance
+  const missingRuntimeSigner =
+    dynamicSignerWithdrawalRails.includes(rail) &&
+    diagnostics.walletProfileAddressPresent &&
+    !diagnostics.dynamicMethodAvailable
+  const reviewBlockedByInput = reviewing || noWithdrawableAssets || missingDestination || missingAmount || amountParseError || invalidAmount || selectedBalanceZero || amountExceedsBalance
+  const reviewDisabled = missingRuntimeSigner ? false : reviewBlockedByInput
   const formattedAvailable = formatCryptoAmount(selectedBalanceAmount, asset)
   const maxDisabled = !selectedBalanceKnown || selectedBalanceZero
   const nativeMaxNote = isNativeWithdrawalAsset(asset) && selectedBalanceKnown && !selectedBalanceZero
@@ -786,7 +794,9 @@ function WithdrawalFormShell({
   const reviewActionLabel = review?.review.approvalMethod === "dynamic_browser" ? "Approve withdrawal" : "Submit withdrawal request"
   const blockingMessage =
     error ||
-    (missingDestination
+    (missingRuntimeSigner
+      ? "Finish PineTree Wallet setup before reviewing withdrawals."
+      : missingDestination
       ? "Enter a destination address to review."
       : missingAmount
         ? "Enter an amount to review."
@@ -794,13 +804,13 @@ function WithdrawalFormShell({
           ? "Enter a valid withdrawal amount."
           : invalidAmount
             ? "Enter an amount greater than 0."
-            : selectedBalanceZero
-              ? "No available balance for this asset."
-              : noWithdrawableAssets
-                ? "No PineTree Wallet source address is available for withdrawals."
-                : amountExceedsBalance
-                  ? "Amount exceeds available balance."
-                  : "")
+              : selectedBalanceZero
+                ? "No available balance for this asset."
+                : noWithdrawableAssets
+                  ? "No PineTree Wallet source address is available for withdrawals."
+                  : amountExceedsBalance
+                    ? "Amount exceeds available balance."
+                    : "")
 
   if (screen === "review" && review) {
     return (
@@ -1043,12 +1053,21 @@ function WithdrawalFormShell({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <button
           type="button"
-          onClick={onReview}
+          onClick={missingRuntimeSigner && onFinishSetup ? onFinishSetup : onReview}
           disabled={reviewDisabled}
           className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none"
         >
-          {reviewing ? "Reviewing..." : "Review withdrawal"}
+          {reviewing ? "Reviewing..." : missingRuntimeSigner ? "Finish PineTree Wallet setup" : "Review withdrawal"}
         </button>
+        {missingRuntimeSigner && onFinishSetup ? (
+          <button
+            type="button"
+            onClick={onFinishSetup}
+            className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700"
+          >
+            Finish setup
+          </button>
+        ) : null}
       </div>
 
       {process.env.NODE_ENV !== "production" ? (
@@ -1849,7 +1868,7 @@ function PineTreeWalletRuntime() {
   }, [])
 
   // --- Sync Dynamic wallet addresses (Base/Solana) to the merchant profile DB record ---
-  const syncProfileFromDynamic = useCallback(async (options?: { autoEnableLightning?: boolean }) => {
+  const syncProfileFromDynamic = useCallback(async (options?: { autoEnableLightning?: boolean; requireBaseAndSolanaSigners?: boolean }) => {
     const token = accessTokenRef.current
     if (!token || !user) {
       logWalletCreationStep("failed", { reason: "missing_auth_context" })
@@ -1868,13 +1887,31 @@ function PineTreeWalletRuntime() {
     logWalletCreationStep("extracting_addresses")
     try {
       const bitcoinAddress = dynamicNetworkAddresses.bitcoin[0]?.address ?? null
+      const baseAddress = dynamicNetworkAddresses.base[0]?.address ?? null
+      const solanaAddress = dynamicNetworkAddresses.solana[0]?.address ?? null
+      const baseSigner = baseAddress
+        ? findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, "base", baseAddress)
+        : null
+      const solanaSigner = solanaAddress
+        ? findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, "solana", solanaAddress)
+        : null
+      if (options?.requireBaseAndSolanaSigners && (!baseAddress || !solanaAddress || !baseSigner || !solanaSigner)) {
+        logWalletCreationStep("waiting_for_embedded_wallets", {
+          reason: "embedded_signers_missing",
+          base_address_present: Boolean(baseAddress),
+          solana_address_present: Boolean(solanaAddress),
+          base_signer_ready: Boolean(baseSigner),
+          solana_signer_ready: Boolean(solanaSigner),
+        })
+        return null
+      }
       // Only include btc_address when Dynamic actually returned a Bitcoin wallet.
       // Omitting the field preserves a previously saved btc_address — a partial sync
       // (base/solana returned, bitcoin not yet provisioned) must not clear payout config.
       const body: Record<string, unknown> = {
         dynamic_user_id: user.userId,
-        base_address: dynamicNetworkAddresses.base[0]?.address ?? null,
-        solana_address: dynamicNetworkAddresses.solana[0]?.address ?? null,
+        base_address: baseAddress,
+        solana_address: solanaAddress,
         bitcoin_lightning_address: dynamicNetworkAddresses.lightning[0]?.address ?? null,
         ...(bitcoinAddress !== null && {
           bitcoin_onchain_address: bitcoinAddress,
@@ -1930,7 +1967,7 @@ function PineTreeWalletRuntime() {
       setSyncing(false)
       setPendingSync(false)
     }
-  }, [user, wallets, dynamicNetworkAddresses, syncPineTreeManagedLightning, logWalletCreationStep, fetchProviderRailState])
+  }, [user, wallets, primaryWallet, dynamicNetworkAddresses, syncPineTreeManagedLightning, logWalletCreationStep, fetchProviderRailState])
 
   // --- Post-reconnect wallet match check ---
   // Fires when Dynamic loads wallets after setShowAuthFlow(true). Clears the reconnect
@@ -1990,7 +2027,7 @@ function PineTreeWalletRuntime() {
       return
     }
     logWalletCreationStep("wallets_detected")
-    void syncProfileFromDynamic({ autoEnableLightning: true })
+    void syncProfileFromDynamic({ autoEnableLightning: true, requireBaseAndSolanaSigners: true })
   }, [pendingSync, sdkHasLoaded, user, dynamicWalletRuntimeCount, syncProfileFromDynamic, logWalletCreationStep])
 
   useEffect(() => {
@@ -2059,11 +2096,18 @@ function PineTreeWalletRuntime() {
 
   const bitcoinReady = bitcoinPayoutEntries.length > 0
   const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady && baseSignerReady && solanaSignerReady
-
+  const dynamicEmbeddedSignersReady = baseSignerReady && solanaSignerReady
+  const profileHasDynamicAddresses = baseReady || solanaReady
   // Wallet exists once a PineTree embedded wallet address is available.
   const hasWallet = profileState.kind === "loaded" && (baseReady || solanaReady || btcPayoutReady || bitcoinReady)
+  const dbOnlyWalletProfile =
+    Boolean(profile?.dynamic_user_id) &&
+    profileHasDynamicAddresses &&
+    sdkHasLoaded &&
+    (!user || dynamicWalletRuntimeCount === 0 || !dynamicEmbeddedSignersReady)
+  const walletSetupIncomplete = hasWallet && dbOnlyWalletProfile
 
-  const walletStatus = allPrimaryRailsConnected ? "Connected" : "Not connected"
+  const walletStatus = allPrimaryRailsConnected ? "Connected" : walletSetupIncomplete ? "Setup incomplete" : "Not connected"
 
   const walletRailRows = useMemo<WalletRailRow[]>(() => [
     { rail: "base", label: "Base" as const, configured: baseReady, enabled: enabledRails.base },
@@ -2231,6 +2275,57 @@ function PineTreeWalletRuntime() {
     setWalletOpen(true)
   }
 
+  async function beginWalletSetupRepair(reason: string) {
+    logWalletCreationStep("opening_dynamic", { reason })
+    setPendingSync(true)
+    setWalletOpen(false)
+    setShowDynamicUserProfile(false)
+    setShowAuthFlow(true)
+    if (sdkHasLoaded && user) {
+      void refreshDynamicWalletRuntime(reason, { requireApprovalWallet: false })
+    }
+  }
+
+  function handleFinishWalletSetup() {
+    void beginWalletSetupRepair("finish_embedded_wallet_setup")
+  }
+
+  async function handleRepairWalletSetup() {
+    const token = accessTokenRef.current
+    if (!token) {
+      void beginWalletSetupRepair("repair_embedded_wallet_setup_missing_auth")
+      return
+    }
+    setSyncing(true)
+    try {
+      const res = await fetch("/api/wallets/pinetree-profile", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          dynamic_user_id: null,
+          base_address: null,
+          solana_address: null,
+          bitcoin_onchain_address: null,
+          bitcoin_lightning_address: null,
+        }),
+      })
+      if (res.ok) {
+        const json = (await res.json()) as { profile: PineTreeWalletProfile }
+        setProfileState({ kind: "loaded", profile: json.profile })
+      }
+    } finally {
+      setSyncing(false)
+    }
+    setWithdrawalReview(null)
+    setWithdrawalScreen("form")
+    setWithdrawalApprovalError("")
+    setWithdrawalError("")
+    void beginWalletSetupRepair("repair_embedded_wallet_setup")
+  }
+
   async function handleWithdrawalReconnect() {
     const profile = profileState.kind === "loaded" ? profileState.profile : null
     const sourceAddress = getWithdrawalSourceAddress(profile, withdrawalRail)
@@ -2306,6 +2401,9 @@ function PineTreeWalletRuntime() {
     logWalletCreationStep("opening_dynamic")
     setPendingSync(true)
     setShowAuthFlow(true)
+    if (sdkHasLoaded && user) {
+      void refreshDynamicWalletRuntime("create_embedded_wallet_setup", { requireApprovalWallet: false })
+    }
   }
 
   function handleRetryWalletSetup() {
@@ -2317,6 +2415,9 @@ function PineTreeWalletRuntime() {
     window.setTimeout(() => {
       setPendingSync(true)
       setShowAuthFlow(true)
+      if (sdkHasLoaded && user) {
+        void refreshDynamicWalletRuntime("retry_embedded_wallet_setup", { requireApprovalWallet: false })
+      }
     }, 0)
   }
 
@@ -2393,9 +2494,14 @@ function PineTreeWalletRuntime() {
       setWithdrawalError("No PineTree Wallet source address is available for withdrawals.")
       return
     }
-    // Block review when the Dynamic wallet runtime has no signers — creating a withdrawal request
+    const reviewSourceAddress = getWithdrawalSourceAddress(profile, withdrawalRail)
+    const reviewSigner =
+      withdrawalRail === "base" || withdrawalRail === "solana"
+        ? findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, withdrawalRail, reviewSourceAddress)
+        : true
+    // Block review when the Dynamic wallet runtime has no usable signer — creating a withdrawal request
     // row now would result in pending spam that can never be signed in this session.
-    if (sdkHasLoaded && user && dynamicWalletRuntimeCount === 0) {
+    if (sdkHasLoaded && user && (dynamicWalletRuntimeCount === 0 || !reviewSigner)) {
       if (walletCreationDebugEnabled) {
         console.info("[pinetree-wallets] withdrawal_review_blocked_no_runtime_wallets", {
           dynamicUserId: user.userId,
@@ -2403,10 +2509,12 @@ function PineTreeWalletRuntime() {
           dynamicWalletRuntimeCount,
           withdrawalRail,
           withdrawalAsset,
+          sourceAddressPresent: Boolean(reviewSourceAddress),
+          matchingDynamicWallet: Boolean(reviewSigner),
         })
       }
       setWithdrawalError(
-        "PineTree Wallet is not active in this browser session. Open PineTree Wallet to reconnect first."
+        "PineTree Wallet setup is incomplete. Finish PineTree Wallet setup before reviewing withdrawals."
       )
       return
     }
@@ -2653,6 +2761,15 @@ function PineTreeWalletRuntime() {
           </div>
         ) : null}
 
+        {walletSetupIncomplete ? (
+          <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
+            <p className="text-xs leading-5 text-amber-800">
+              PineTree Wallet setup is incomplete. This profile has saved addresses, but Dynamic has not restored embedded wallet signers in this browser session.
+            </p>
+          </div>
+        ) : null}
+
         {walletCreationMessage ? (
           <div className={`mt-4 flex flex-wrap items-center gap-3 rounded-xl border px-3 py-2.5 ${
             walletCreationStep === "failed" || walletCreationStep === "timeout"
@@ -2680,14 +2797,26 @@ function PineTreeWalletRuntime() {
 
         <div className="mt-6 flex justify-start">
           {hasWallet ? (
-            <button
-              type="button"
-              onClick={handleOpenWallet}
-              disabled={syncing}
-              className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
-            >
-              Open PineTree Wallet
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={walletSetupIncomplete ? handleFinishWalletSetup : handleOpenWallet}
+                disabled={syncing || walletCreationInProgress}
+                className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+              >
+                {walletSetupIncomplete ? "Finish PineTree Wallet setup" : "Open PineTree Wallet"}
+              </button>
+              {walletSetupIncomplete ? (
+                <button
+                  type="button"
+                  onClick={() => void handleRepairWalletSetup()}
+                  disabled={syncing || walletCreationInProgress}
+                  className="h-10 rounded-lg border border-amber-200 bg-white px-4 text-sm font-semibold text-amber-800 shadow-sm transition hover:bg-amber-50 disabled:opacity-60"
+                >
+                  Repair PineTree Wallet setup
+                </button>
+              ) : null}
+            </div>
           ) : (
             <button
               type="button"
@@ -2824,6 +2953,7 @@ function PineTreeWalletRuntime() {
                   onReview={() => void handleReviewWithdrawal()}
                   onSubmit={() => void handleSubmitWithdrawal()}
                   onOpenWallet={handleWithdrawalReconnect}
+                  onFinishSetup={handleFinishWalletSetup}
                 />
               ) : null}
 

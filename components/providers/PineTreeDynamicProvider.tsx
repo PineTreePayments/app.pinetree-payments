@@ -1,6 +1,6 @@
 "use client"
 
-import { Component, createContext, useContext, type ErrorInfo, type ReactNode } from "react"
+import { Component, createContext, useContext, useEffect, type ErrorInfo, type ReactNode } from "react"
 import { DynamicContextProvider, type WalletOption } from "@dynamic-labs/sdk-react-core"
 import { EthereumWalletConnectors } from "@dynamic-labs/ethereum"
 import { SolanaWalletConnectors } from "@dynamic-labs/solana"
@@ -137,6 +137,12 @@ class WalletInfrastructureErrorBoundary extends Component<
 
 export default function PineTreeDynamicProvider({ children }: { children: ReactNode }) {
   const environmentId = process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?.trim()
+
+  useEffect(() => {
+    console.info("[pinetree-wallets] dynamic_environment_config", {
+      NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID: environmentId ? "present" : "missing",
+    })
+  }, [environmentId])
 
   if (!environmentId) {
     return (
