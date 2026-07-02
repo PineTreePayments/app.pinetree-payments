@@ -607,6 +607,151 @@ function safeWalletSetupDiagnostics({
   }
 }
 
+function toRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {}
+}
+
+function safeString(value: unknown) {
+  return typeof value === "string" ? value : value === undefined || value === null ? null : String(value)
+}
+
+function safeBooleanCall(fn: unknown) {
+  if (typeof fn !== "function") return null
+  try {
+    return Boolean((fn as () => unknown)())
+  } catch {
+    return null
+  }
+}
+
+function walletConnectorRecord(wallet: unknown) {
+  return toRecord(toRecord(wallet).connector)
+}
+
+function walletAddresses(wallet: unknown) {
+  const row = toRecord(wallet)
+  const primaryAddress = safeString(row.address)
+  const additional = Array.isArray(row.additionalAddresses)
+    ? row.additionalAddresses.flatMap((entry) => {
+        const address = safeString(toRecord(entry).address)
+        return address ? [address] : []
+      })
+    : []
+  return [primaryAddress, ...additional].flatMap((address) => address ? [address] : [])
+}
+
+function walletSigningCapabilities(wallet: unknown) {
+  const row = toRecord(wallet)
+  const connector = walletConnectorRecord(wallet)
+  const hasEvmClient = typeof row.getWalletClient === "function" || typeof connector.getWalletClient === "function"
+  const hasSolanaSigner =
+    typeof row.signAndSendTransaction === "function" ||
+    typeof connector.signAndSendTransaction === "function"
+  const hasBitcoinSigner = typeof row.signPsbt === "function" || typeof connector.signPsbt === "function"
+  const hasMessageSigner = typeof row.signMessage === "function" || typeof connector.signMessage === "function"
+  return {
+    canSign: hasEvmClient || hasSolanaSigner || hasBitcoinSigner || hasMessageSigner,
+    hasEvmClient,
+    hasSolanaSigner,
+    hasBitcoinSigner,
+    hasMessageSigner,
+  }
+}
+
+function dynamicWalletInventoryEntry(wallet: unknown, source: "useUserWallets" | "primaryWallet" | "waas") {
+  const row = toRecord(wallet)
+  const connector = walletConnectorRecord(wallet)
+  const addresses = walletAddresses(wallet)
+  const capabilities = walletSigningCapabilities(wallet)
+  return {
+    source,
+    id: safeString(row.id),
+    key: safeString(row.key),
+    chain: safeString(row.chain),
+    address: safeString(row.address),
+    addresses,
+    addressCount: addresses.length,
+    additionalAddressCount: Array.isArray(row.additionalAddresses) ? row.additionalAddresses.length : 0,
+    connector: {
+      key: safeString(connector.key),
+      name: safeString(connector.name),
+      connectedChain: safeString(connector.connectedChain),
+      isEmbeddedWallet: Boolean(connector.isEmbeddedWallet),
+      isWalletConnect: Boolean(connector.isWalletConnect),
+      isInstalledOnBrowser: safeBooleanCall(connector.isInstalledOnBrowser),
+      isInitialized: typeof connector.isInitialized === "boolean" ? connector.isInitialized : null,
+      supportedChains: Array.isArray(connector.supportedChains) ? connector.supportedChains.map(safeString) : [],
+    },
+    embeddedOrExternal: connector.isEmbeddedWallet ? "embedded" : "external",
+    signing: capabilities,
+  }
+}
+
+function inferDynamicInventoryDiagnosis(input: {
+  dynamicWaasIsEnabled: boolean
+  shouldInitializeWaas: boolean
+  needsAutoCreateWalletChains: unknown[]
+  embeddedWalletSessionActive: boolean
+  legacyUserHasEmbeddedWallet: boolean
+  waasCredentialCount: number
+  embeddedWallets: Array<ReturnType<typeof dynamicWalletInventoryEntry>>
+  allWallets: Array<ReturnType<typeof dynamicWalletInventoryEntry>>
+}) {
+  const hasEmbeddedEvmWallet = input.embeddedWallets.some((wallet) =>
+    wallet.signing.hasEvmClient ||
+    wallet.chain === "EVM" ||
+    wallet.connector.connectedChain === "EVM" ||
+    wallet.addresses.some((address) => /^0x[a-fA-F0-9]{40}$/.test(address))
+  )
+  const hasEmbeddedSolanaWallet = input.embeddedWallets.some((wallet) =>
+    wallet.signing.hasSolanaSigner ||
+    wallet.chain === "SOL" ||
+    wallet.connector.connectedChain === "SOL" ||
+    wallet.addresses.some((address) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address))
+  )
+  const solanaFilteredOut = !hasEmbeddedSolanaWallet && input.allWallets.some((wallet) =>
+    wallet.chain === "SOL" ||
+    wallet.connector.connectedChain === "SOL" ||
+    wallet.signing.hasSolanaSigner ||
+    wallet.addresses.some((address) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address))
+  )
+  const noEmbeddedWalletReason = input.embeddedWallets.length > 0
+    ? null
+    : input.dynamicWaasIsEnabled
+      ? input.shouldInitializeWaas
+        ? "waas_not_initialized"
+        : input.needsAutoCreateWalletChains.length > 0
+          ? "waas_wallet_accounts_not_created"
+          : input.waasCredentialCount === 0
+            ? "dynamic_project_or_auth_did_not_issue_embedded_wallet_credentials"
+            : "waas_credentials_exist_but_no_runtime_wallets_restored"
+      : input.legacyUserHasEmbeddedWallet
+        ? input.embeddedWalletSessionActive
+          ? "legacy_embedded_session_active_but_no_wallets_returned"
+          : "legacy_embedded_wallet_exists_but_session_not_restored"
+        : "legacy_embedded_wallet_not_created_for_user"
+
+  return {
+    hasEmbeddedEvmWallet,
+    hasEmbeddedSolanaWallet,
+    solanaFilteredOut,
+    noEmbeddedWalletReason,
+    restorationFailure:
+      input.embeddedWallets.length === 0 &&
+      (input.waasCredentialCount > 0 || input.legacyUserHasEmbeddedWallet)
+        ? noEmbeddedWalletReason
+        : null,
+    missingProjectOrRuntime:
+      input.embeddedWallets.length === 0 &&
+      !input.shouldInitializeWaas &&
+      input.needsAutoCreateWalletChains.length === 0 &&
+      input.waasCredentialCount === 0 &&
+      !input.legacyUserHasEmbeddedWallet
+        ? "project_configuration_or_auth_policy_did_not_provision_embedded_wallets"
+        : null,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Dev diagnostics (hidden in production)
 // ---------------------------------------------------------------------------
@@ -1691,6 +1836,112 @@ function PineTreeWalletRuntime() {
   useEffect(() => {
     dynamicWalletRuntimeCountRef.current = dynamicWalletRuntimeCount
   }, [dynamicWalletRuntimeCount])
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return
+    if (!sdkHasLoaded) return
+
+    let waasRuntimeWallets: unknown[] = []
+    let waasCredentials: unknown[] = []
+    try {
+      waasRuntimeWallets = dynamicWaasIsEnabled ? getWaasWallets() : []
+      waasCredentials = dynamicWaasIsEnabled ? getWaasWalletsByCredentials() : []
+    } catch (error) {
+      console.warn("[pinetree-wallets] dynamic_wallet_inventory_read_failed", {
+        dynamicUserId: user?.userId ?? null,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+
+    const useUserWalletEntries = (wallets as unknown[]).map((wallet) =>
+      dynamicWalletInventoryEntry(wallet, "useUserWallets")
+    )
+    const primaryWalletEntry = primaryWallet
+      ? dynamicWalletInventoryEntry(primaryWallet, "primaryWallet")
+      : null
+    const waasWalletEntries = waasRuntimeWallets.map((wallet) =>
+      dynamicWalletInventoryEntry(wallet, "waas")
+    )
+    const allEntries = [
+      ...useUserWalletEntries,
+      ...(primaryWalletEntry ? [primaryWalletEntry] : []),
+      ...waasWalletEntries,
+    ]
+    const embeddedEntries = allEntries.filter((wallet) =>
+      wallet.source === "waas" || wallet.connector.isEmbeddedWallet
+    )
+    const diagnosis = inferDynamicInventoryDiagnosis({
+      dynamicWaasIsEnabled,
+      shouldInitializeWaas,
+      needsAutoCreateWalletChains,
+      embeddedWalletSessionActive,
+      legacyUserHasEmbeddedWallet: user ? userHasEmbeddedWallet() : false,
+      waasCredentialCount: waasCredentials.length,
+      embeddedWallets: embeddedEntries,
+      allWallets: allEntries,
+    })
+
+    console.info("[pinetree-wallets] dynamic_authenticated_user_wallet_inventory", {
+      dynamicUserId: user?.userId ?? null,
+      sdkHasLoaded,
+      dynamicWaas: {
+        enabled: dynamicWaasIsEnabled,
+        shouldInitializeWaas,
+        needsAutoCreateWalletChains,
+        waasCredentialCount: waasCredentials.length,
+        waasRuntimeWalletCount: waasRuntimeWallets.length,
+        connectors: ["EVM", "SOL"].map((chain) => {
+          try {
+            const connector = getWaasWalletConnector(chain)
+            return {
+              chain,
+              found: Boolean(connector),
+              key: connector?.key ?? null,
+              name: connector?.name ?? null,
+              connectedChain: connector?.connectedChain ?? null,
+              isEmbeddedWallet: Boolean(connector?.isEmbeddedWallet),
+            }
+          } catch (error) {
+            return {
+              chain,
+              found: false,
+              error: error instanceof Error ? error.message : String(error),
+            }
+          }
+        }),
+      },
+      legacyEmbeddedWallet: {
+        userHasEmbeddedWallet: user ? userHasEmbeddedWallet() : false,
+        isSessionActive: embeddedWalletSessionActive,
+      },
+      primaryWallet: primaryWalletEntry,
+      useUserWallets: useUserWalletEntries,
+      waasWallets: waasWalletEntries,
+      extractedAddressGroups: {
+        base: dynamicNetworkAddresses.base.map((entry) => entry.address),
+        solana: dynamicNetworkAddresses.solana.map((entry) => entry.address),
+        bitcoin: dynamicNetworkAddresses.bitcoin.map((entry) => entry.address),
+        lightning: dynamicNetworkAddresses.lightning.map((entry) => entry.address),
+      },
+      diagnosis,
+      filterNote:
+        "walletsFilter only filters Dynamic wallet options shown during auth; it does not remove wallets returned by useUserWallets(). See [pinetree-wallets] dynamic_wallet_filter for option filtering.",
+    })
+  }, [
+    dynamicNetworkAddresses,
+    dynamicWaasIsEnabled,
+    embeddedWalletSessionActive,
+    getWaasWalletConnector,
+    getWaasWallets,
+    getWaasWalletsByCredentials,
+    needsAutoCreateWalletChains,
+    primaryWallet,
+    sdkHasLoaded,
+    shouldInitializeWaas,
+    user,
+    userHasEmbeddedWallet,
+    wallets,
+  ])
 
   const logWalletCreationStep = useCallback((step: WalletCreationStep, extra?: Record<string, unknown>) => {
     setWalletCreationStep(step)
