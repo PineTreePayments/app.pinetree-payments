@@ -3,6 +3,7 @@ import {
   classifyDynamicWalletChain,
   dynamicWalletSupportsRail,
   findDynamicApprovalWalletForSource,
+  findDynamicApprovalWalletForSourceAsync,
   findDynamicWalletForSource,
   getDynamicWalletSearchList,
   signDynamicSolanaTransactionWithActiveAccount,
@@ -351,6 +352,56 @@ describe("Dynamic signer lookup", () => {
       "base",
       "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
     )).toBe(evmWallet)
+  })
+
+  it("async profile sync signer lookup matches Dynamic WaaS active account address", async () => {
+    const baseWallet = {
+      chain: "EVM",
+      connector: {
+        connectedChain: "EVM",
+        getActiveAccountAddress: vi.fn().mockResolvedValue("0xABCDEFabcdefABCDEFabcdefABCDEFabcdefABCD"),
+        getWalletClient: vi.fn(),
+      },
+    }
+    const solanaWallet = {
+      chain: "SOL",
+      connector: {
+        connectedChain: "SOL",
+        getActiveAccountAddress: vi.fn().mockResolvedValue("SolanaAsync11111111111111111111111111111"),
+        signAndSendTransaction: vi.fn(),
+      },
+    }
+
+    await expect(findDynamicApprovalWalletForSourceAsync(
+      [baseWallet],
+      null,
+      "base",
+      "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
+    )).resolves.toBe(baseWallet)
+    await expect(findDynamicApprovalWalletForSourceAsync(
+      [solanaWallet],
+      null,
+      "solana",
+      "SolanaAsync11111111111111111111111111111"
+    )).resolves.toBe(solanaWallet)
+  })
+
+  it("async profile sync signer lookup matches Dynamic connected accounts", async () => {
+    const solanaWallet = {
+      chain: "SOL",
+      connector: {
+        connectedChain: "SOL",
+        getConnectedAccounts: vi.fn().mockResolvedValue(["SolanaConnected111111111111111111111111111"]),
+        signAndSendTransaction: vi.fn(),
+      },
+    }
+
+    await expect(findDynamicApprovalWalletForSourceAsync(
+      [solanaWallet],
+      null,
+      "solana",
+      "SolanaConnected111111111111111111111111111"
+    )).resolves.toBe(solanaWallet)
   })
 
   it("primaryWallet does not override requested rail", () => {

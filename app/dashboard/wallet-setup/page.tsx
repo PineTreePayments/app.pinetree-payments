@@ -18,6 +18,7 @@ import {
   classifyDynamicWalletChain,
   dynamicWalletSupportsRail,
   findDynamicApprovalWalletForSource,
+  findDynamicApprovalWalletForSourceAsync,
   findDynamicWalletForSource,
   getDynamicWalletAddresses,
   getDynamicWalletSearchList,
@@ -1701,6 +1702,7 @@ function PineTreeWalletRuntime() {
   const [railReadiness, setRailReadiness] = useState<PineTreeRailReadinessMap | null>(null)
   const [walletSync, setWalletSync] = useState<PineTreeWalletSyncResponse>(defaultWalletSyncState)
   const [walletSyncing, setWalletSyncing] = useState(false)
+  const [dynamicWalletRuntimeRefreshNonce, setDynamicWalletRuntimeRefreshNonce] = useState(0)
   const [withdrawalRail, setWithdrawalRail] = useState<WithdrawalRail>("base")
   const [withdrawalAsset, setWithdrawalAsset] = useState<WithdrawalAsset>("ETH")
   const [withdrawalDestination, setWithdrawalDestination] = useState("")
@@ -1848,15 +1850,47 @@ function PineTreeWalletRuntime() {
   }, [fetchAllProfiles])
 
   // --- Live Dynamic wallet addresses — used only for sync, never for display ---
+  const waasRuntimeWallets = useMemo(() => {
+    if (!dynamicWaasIsEnabled) return []
+    try {
+      return getWaasWallets() as unknown[]
+    } catch {
+      return []
+    }
+  }, [dynamicWaasIsEnabled, dynamicWalletRuntimeRefreshNonce, getWaasWallets, sdkHasLoaded, user, wallets])
+
+  const waasCredentialWalletSources = useMemo(() => {
+    if (!dynamicWaasIsEnabled) return []
+    try {
+      return getWaasWalletsByCredentials().map((credential) => {
+        const row = credential as unknown as Record<string, unknown>
+        return {
+          id: row.id,
+          key: row.walletName,
+          walletName: row.walletName,
+          walletProvider: row.walletProvider,
+          chain: row.chain,
+          address: row.address,
+        } satisfies DynamicWalletAddressSource
+      })
+    } catch {
+      return []
+    }
+  }, [dynamicWaasIsEnabled, dynamicWalletRuntimeRefreshNonce, getWaasWalletsByCredentials, sdkHasLoaded, user])
+
   const dynamicWalletSearchList = useMemo(() => {
-    return getDynamicWalletSearchList(wallets as unknown[], primaryWallet)
-  }, [wallets, primaryWallet])
+    return getDynamicWalletSearchList([...(wallets as unknown[]), ...waasRuntimeWallets], primaryWallet)
+  }, [wallets, primaryWallet, waasRuntimeWallets])
+
+  const dynamicAddressSearchList = useMemo(() => {
+    return [...dynamicWalletSearchList, ...waasCredentialWalletSources]
+  }, [dynamicWalletSearchList, waasCredentialWalletSources])
 
   const dynamicWalletRuntimeCount = dynamicWalletSearchList.length
 
   const dynamicNetworkAddresses = useMemo(() => {
-    return extractDynamicWalletAddresses(dynamicWalletSearchList as DynamicWalletAddressSource[])
-  }, [dynamicWalletSearchList])
+    return extractDynamicWalletAddresses(dynamicAddressSearchList as DynamicWalletAddressSource[])
+  }, [dynamicAddressSearchList])
 
   useEffect(() => {
     dynamicWalletRuntimeCountRef.current = dynamicWalletRuntimeCount
@@ -1915,6 +1949,7 @@ function PineTreeWalletRuntime() {
         needsAutoCreateWalletChains,
         waasCredentialCount: waasCredentials.length,
         waasRuntimeWalletCount: waasRuntimeWallets.length,
+        waasCredentialWalletSourceCount: waasCredentialWalletSources.length,
         connectors: ["EVM", "SOL"].map((chain) => {
           try {
             const connector = getWaasWalletConnector(chain)
@@ -1965,6 +2000,7 @@ function PineTreeWalletRuntime() {
     shouldInitializeWaas,
     user,
     userHasEmbeddedWallet,
+    waasCredentialWalletSources.length,
     wallets,
   ])
 
@@ -2018,10 +2054,12 @@ function PineTreeWalletRuntime() {
             })
           }
           await createWalletAccount(needsAutoCreateWalletChains)
+          setDynamicWalletRuntimeRefreshNonce((value) => value + 1)
         }
       } else {
         if (userHasEmbeddedWallet()) {
           await createOrRestoreSession()
+          setDynamicWalletRuntimeRefreshNonce((value) => value + 1)
         } else {
           // No embedded wallet exists yet — create one using the legacy embedded wallet API.
           if (walletCreationDebugEnabled) {
@@ -2032,9 +2070,11 @@ function PineTreeWalletRuntime() {
             })
           }
           await createEmbeddedWallet()
+          setDynamicWalletRuntimeRefreshNonce((value) => value + 1)
         }
       }
       await refreshDynamicUser()
+      setDynamicWalletRuntimeRefreshNonce((value) => value + 1)
       const hydrated = await waitForDynamicWalletRuntime(options)
       if (walletCreationDebugEnabled) {
         const primaryWalletLike = primaryWallet as DynamicWalletLike | null
@@ -2155,6 +2195,17 @@ function PineTreeWalletRuntime() {
       dynamicNetworkAddresses.solana.length === 0 &&
       dynamicNetworkAddresses.bitcoin.length === 0
     ) {
+      console.info("[pinetree-wallets] profile_sync_not_called", {
+        reason: "no_wallet_addresses_detected",
+        dynamicUserIdPresent: Boolean(user.userId),
+        dynamicUserId: user.userId,
+        baseAddressPresent: false,
+        solanaAddressPresent: false,
+        dynamicWalletRuntimeCount,
+        waasRuntimeWalletCount: waasRuntimeWallets.length,
+        waasCredentialWalletSourceCount: waasCredentialWalletSources.length,
+        useUserWalletsCount: (wallets as unknown[]).length,
+      })
       if (repairInProgress) {
         console.info("[pinetree-wallets] repair_dynamic_wallets_missing_after_provisioning", {
           dynamicUserId: user.userId,
@@ -2173,11 +2224,24 @@ function PineTreeWalletRuntime() {
       const baseAddress = dynamicNetworkAddresses.base[0]?.address ?? null
       const solanaAddress = dynamicNetworkAddresses.solana[0]?.address ?? null
       const baseSigner = baseAddress
-        ? findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, "base", baseAddress)
+        ? await findDynamicApprovalWalletForSourceAsync(dynamicWalletSearchList as unknown[], primaryWallet, "base", baseAddress)
         : null
       const solanaSigner = solanaAddress
-        ? findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, "solana", solanaAddress)
+        ? await findDynamicApprovalWalletForSourceAsync(dynamicWalletSearchList as unknown[], primaryWallet, "solana", solanaAddress)
         : null
+      console.info("[pinetree-wallets] profile_sync_dynamic_state", {
+        dynamicUserIdPresent: Boolean(user.userId),
+        dynamicUserId: user.userId,
+        baseAddressPresent: Boolean(baseAddress),
+        solanaAddressPresent: Boolean(solanaAddress),
+        baseSignerFound: Boolean(baseSigner),
+        solanaSignerFound: Boolean(solanaSigner),
+        dynamicWalletRuntimeCount,
+        waasRuntimeWalletCount: waasRuntimeWallets.length,
+        waasCredentialWalletSourceCount: waasCredentialWalletSources.length,
+        useUserWalletsCount: (wallets as unknown[]).length,
+        profileSyncEndpoint: "/api/wallets/pinetree-profile",
+      })
       if (options?.requireBaseAndSolanaSigners && (!baseAddress || !solanaAddress || !baseSigner || !solanaSigner)) {
         if (repairInProgress) {
           console.info("[pinetree-wallets] repair_signer_verification_failed", {
@@ -2187,6 +2251,7 @@ function PineTreeWalletRuntime() {
             solanaAddressPresent: Boolean(solanaAddress),
             baseSignerFound: Boolean(baseSigner),
             solanaSignerFound: Boolean(solanaSigner),
+            waasCredentialWalletSourceCount: waasCredentialWalletSources.length,
           })
           setRepairInProgress(false)
           setRepairFailedIncomplete(true)
@@ -2198,6 +2263,19 @@ function PineTreeWalletRuntime() {
           base_signer_ready: Boolean(baseSigner),
           solana_signer_ready: Boolean(solanaSigner),
         })
+        console.info("[pinetree-wallets] profile_sync_not_called", {
+          reason: "embedded_signers_missing",
+          dynamicUserIdPresent: Boolean(user.userId),
+          dynamicUserId: user.userId,
+          baseAddressPresent: Boolean(baseAddress),
+          solanaAddressPresent: Boolean(solanaAddress),
+          baseSignerFound: Boolean(baseSigner),
+          solanaSignerFound: Boolean(solanaSigner),
+          dynamicWalletRuntimeCount,
+          waasRuntimeWalletCount: waasRuntimeWallets.length,
+          waasCredentialWalletSourceCount: waasCredentialWalletSources.length,
+          useUserWalletsCount: (wallets as unknown[]).length,
+        })
         return null
       }
       const body: Record<string, unknown> = {
@@ -2205,6 +2283,12 @@ function PineTreeWalletRuntime() {
         base_address: baseAddress,
         solana_address: solanaAddress,
       }
+      console.info("[pinetree-wallets] profile_sync_request", {
+        endpoint: "/api/wallets/pinetree-profile",
+        dynamicUserIdPresent: Boolean(body.dynamic_user_id),
+        baseAddressPresent: Boolean(body.base_address),
+        solanaAddressPresent: Boolean(body.solana_address),
+      })
       logWalletCreationStep("syncing_pinetree_profile", {
         profile_sync_request_sent: true,
       })
@@ -2229,6 +2313,13 @@ function PineTreeWalletRuntime() {
       }
       if (res.ok) {
         const json = (await res.json()) as { profile: PineTreeWalletProfile }
+        console.info("[pinetree-wallets] profile_sync_success", {
+          profileId: json.profile.id,
+          dynamicUserIdPersisted: Boolean(json.profile.dynamic_user_id),
+          baseAddressPersisted: Boolean(json.profile.base_address),
+          solanaAddressPersisted: Boolean(json.profile.solana_address),
+          status: json.profile.status,
+        })
         setProfileState({ kind: "loaded", profile: json.profile })
         if (repairInProgress) {
           console.info("[pinetree-wallets] repair_profile_saved_with_new_addresses", {
@@ -2262,13 +2353,17 @@ function PineTreeWalletRuntime() {
         }).then(() => fetchProviderRailState(token)).catch(() => undefined)
         return json.profile
       }
+      console.warn("[pinetree-wallets] profile_sync_failed", {
+        endpoint: "/api/wallets/pinetree-profile",
+        status: res.status,
+      })
       logWalletCreationStep("failed", { profile_sync_response_status: res.status })
       return null
     } finally {
       setSyncing(false)
       setPendingSync(false)
     }
-  }, [user, wallets, primaryWallet, dynamicNetworkAddresses, repairInProgress, syncPineTreeManagedLightning, logWalletCreationStep, fetchProviderRailState])
+  }, [user, wallets, primaryWallet, dynamicWalletSearchList, dynamicNetworkAddresses, dynamicWalletRuntimeCount, waasRuntimeWallets.length, waasCredentialWalletSources.length, repairInProgress, syncPineTreeManagedLightning, logWalletCreationStep, fetchProviderRailState])
 
   // --- Post-reconnect wallet match check ---
   // Fires when Dynamic loads wallets after setShowAuthFlow(true). Clears the reconnect

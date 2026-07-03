@@ -118,6 +118,92 @@ describe("Spark/Lightning address detection", () => {
     ])
   })
 
+  it("detects Dynamic WaaS Base and Solana wallets from connector hints and address shape", () => {
+    const groups = extractDynamicWalletAddresses([
+      {
+        id: "waas-base",
+        key: "dynamicwaas",
+        address: "0x1111111111111111111111111111111111111111",
+        connector: { name: "Dynamic WaaS", key: "dynamicwaas", connectedChain: "EVM" },
+      },
+      {
+        id: "waas-sol",
+        key: "dynamicwaas",
+        address: "So11111111111111111111111111111111111111112",
+        connector: { name: "Dynamic WaaS", key: "dynamicwaas", connectedChain: "SOL" },
+      },
+    ])
+
+    expect(groups.base.map((entry) => entry.address)).toEqual([
+      "0x1111111111111111111111111111111111111111",
+    ])
+    expect(groups.solana.map((entry) => entry.address)).toEqual([
+      "So11111111111111111111111111111111111111112",
+    ])
+  })
+
+  it("detects Dynamic WaaS Base and Solana addresses from verified credentials", () => {
+    const groups = extractDynamicWalletAddresses([
+      {
+        id: "evm-credential",
+        walletName: "dynamicwaas",
+        walletProvider: "embeddedWallet",
+        chain: "EVM",
+        address: "0x2222222222222222222222222222222222222222",
+      },
+      {
+        id: "sol-credential",
+        walletName: "dynamicwaas",
+        walletProvider: "embeddedWallet",
+        chain: "SOL",
+        address: "So22222222222222222222222222222222222222222",
+      },
+    ])
+
+    expect(groups.base.map((entry) => entry.address)).toEqual([
+      "0x2222222222222222222222222222222222222222",
+    ])
+    expect(groups.solana.map((entry) => entry.address)).toEqual([
+      "So22222222222222222222222222222222222222222",
+    ])
+    expect(groups.lightning).toEqual([])
+  })
+
+  it("detects Dynamic account and connector address fields", () => {
+    const groups = extractDynamicWalletAddresses([
+      {
+        id: "waas-base-account",
+        key: "dynamicwaas",
+        chain: "EVM",
+        accountAddress: "0x3333333333333333333333333333333333333333",
+        connector: {
+          name: "Dynamic WaaS",
+          key: "dynamicwaas",
+          connectedChain: "EVM",
+        },
+      },
+      {
+        id: "waas-sol-account",
+        key: "dynamicwaas",
+        chain: "SOL",
+        accounts: [{ address: "So33333333333333333333333333333333333333333" }],
+        connector: {
+          name: "Dynamic WaaS",
+          key: "dynamicwaas",
+          connectedChain: "SOL",
+          activeAccount: { address: "So33333333333333333333333333333333333333333" },
+        },
+      },
+    ])
+
+    expect(groups.base.map((entry) => entry.address)).toEqual([
+      "0x3333333333333333333333333333333333333333",
+    ])
+    expect(groups.solana.map((entry) => entry.address)).toEqual([
+      "So33333333333333333333333333333333333333333",
+    ])
+  })
+
   it("wallet remains Needs attention if Spark/Lightning is missing", () => {
     const groups = extractDynamicWalletAddresses([
       { id: "base", chain: "EVM", key: "evm", address: "0xbase", connector: { name: "Ethereum" } },

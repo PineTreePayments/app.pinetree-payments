@@ -34,6 +34,7 @@ export type DynamicWalletLike = {
     activeAccountAddress?: string | null
     getActiveAddress?: () => string | undefined
     getActiveAccountAddress?: () => string | undefined | Promise<string | undefined>
+    getConnectedAccounts?: () => string[] | undefined | Promise<string[] | undefined>
     getPublicKey?: () => unknown | Promise<unknown>
     getAddress?: () => string | undefined | Promise<string | undefined>
     getWalletClientByAddress?: (request: { accountAddress: string }) => unknown
@@ -279,6 +280,30 @@ export async function extractDynamicActiveWalletAddress(wallet: DynamicWalletLik
   }
 }
 
+export async function getDynamicWalletAddressesAsync(wallet: DynamicWalletLike) {
+  const connector = wallet.connector
+  const { activeAccountAddress, extractedAddressFields } = await extractDynamicActiveWalletAddress(wallet)
+  let connectedAccounts: string[] = []
+  try {
+    const accounts = await connector?.getConnectedAccounts?.()
+    connectedAccounts = Array.isArray(accounts) ? accounts : []
+  } catch {
+    connectedAccounts = []
+  }
+
+  const addresses = [
+    ...getDynamicWalletAddresses(wallet),
+    activeAccountAddress,
+    ...Object.values(extractedAddressFields),
+    ...connectedAccounts,
+  ].flatMap((address) => {
+    const normalized = String(address || "").trim()
+    return normalized ? [normalized] : []
+  })
+
+  return Array.from(new Set(addresses))
+}
+
 export function getDynamicWalletSearchList(
   candidates: unknown[],
   primaryWallet: unknown,
@@ -325,6 +350,23 @@ export function findDynamicApprovalWalletForSource(
   if (!sourceAddress) return null
   const wallet = findDynamicWalletForSource(candidates, primaryWallet, sourceAddress, rail)
   return wallet && dynamicWalletSupportsRail(wallet, rail) ? wallet : null
+}
+
+export async function findDynamicApprovalWalletForSourceAsync(
+  candidates: unknown[],
+  primaryWallet: unknown,
+  rail: DynamicSignerRail,
+  sourceAddress: string | null | undefined
+) {
+  if (!sourceAddress) return null
+  for (const wallet of getDynamicWalletSearchList(candidates, primaryWallet, rail)) {
+    if (!dynamicWalletSupportsRail(wallet, rail)) continue
+    const addresses = await getDynamicWalletAddressesAsync(wallet)
+    if (addresses.some((address) => dynamicWalletAddressesMatch(address, sourceAddress, rail))) {
+      return wallet
+    }
+  }
+  return null
 }
 
 export function assertDynamicWalletChain(wallet: DynamicWalletLike, rail: Exclude<DynamicSignerRail, "bitcoin">) {

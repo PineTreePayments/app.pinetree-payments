@@ -37,6 +37,18 @@ describe("Dynamic wallet provisioning — zero-wallet case", () => {
     expect(page).toContain("provisioning_embedded_wallet_first_time")
   })
 
+  it("profile sync reads Dynamic WaaS runtime wallets when useUserWallets is empty", () => {
+    expect(page).toContain("const waasRuntimeWallets = useMemo")
+    expect(page).toContain("getWaasWallets() as unknown[]")
+    expect(page).toContain("getDynamicWalletSearchList([...(wallets as unknown[]), ...waasRuntimeWallets], primaryWallet)")
+    expect(page).toContain("setDynamicWalletRuntimeRefreshNonce((value) => value + 1)")
+  })
+
+  it("profile sync signer guard uses the merged Dynamic wallet candidate list", () => {
+    expect(page).toContain('findDynamicApprovalWalletForSourceAsync(dynamicWalletSearchList as unknown[], primaryWallet, "base", baseAddress)')
+    expect(page).toContain('findDynamicApprovalWalletForSourceAsync(dynamicWalletSearchList as unknown[], primaryWallet, "solana", solanaAddress)')
+  })
+
   it("WaaS init path still runs initializeWaas when shouldInitializeWaas is true", () => {
     expect(page).toContain("initializeWaas({ forceClientRebuild: true })")
     expect(page).toContain("if (shouldInitializeWaas)")

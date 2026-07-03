@@ -57,6 +57,8 @@ describe("Dynamic embedded wallet setup repair", () => {
   it("profile is saved only after runtime wallets expose Base and Solana signers", () => {
     expect(page).toContain("const baseSigner = baseAddress")
     expect(page).toContain("const solanaSigner = solanaAddress")
+    expect(page).toContain('findDynamicApprovalWalletForSourceAsync(dynamicWalletSearchList as unknown[], primaryWallet, "base", baseAddress)')
+    expect(page).toContain('findDynamicApprovalWalletForSourceAsync(dynamicWalletSearchList as unknown[], primaryWallet, "solana", solanaAddress)')
     expect(page).toContain("options?.requireBaseAndSolanaSigners && (!baseAddress || !solanaAddress || !baseSigner || !solanaSigner)")
     const syncFn = page.slice(
       page.indexOf("const syncProfileFromDynamic = useCallback"),

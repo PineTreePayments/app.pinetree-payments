@@ -39,6 +39,26 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(profileRoute).toContain('solanaAddress: "solana_address" in body')
   })
 
+  it("opening PineTree Wallet logs sync checkpoints from browser to route", () => {
+    expect(page).toContain("[pinetree-wallets] profile_sync_dynamic_state")
+    expect(page).toContain("[pinetree-wallets] profile_sync_request")
+    expect(page).toContain("[pinetree-wallets] profile_sync_success")
+    expect(page).toContain("[pinetree-wallets] profile_sync_not_called")
+    expect(profileRoute).toContain("[pinetree-wallets] profile_route_upsert_success")
+    expect(profileRoute).toContain("dynamicUserIdPersisted")
+    expect(profileRoute).toContain("baseAddressPersisted")
+    expect(profileRoute).toContain("solanaAddressPersisted")
+  })
+
+  it("opening PineTree Wallet can sync from Dynamic WaaS credentials after runtime signers hydrate", () => {
+    expect(page).toContain("const waasCredentialWalletSources = useMemo")
+    expect(page).toContain("getWaasWalletsByCredentials().map")
+    expect(page).toContain("const dynamicAddressSearchList = useMemo")
+    expect(page).toContain("extractDynamicWalletAddresses(dynamicAddressSearchList as DynamicWalletAddressSource[])")
+    expect(page).toContain('findDynamicApprovalWalletForSourceAsync(dynamicWalletSearchList as unknown[], primaryWallet, "base", baseAddress)')
+    expect(page).toContain('findDynamicApprovalWalletForSourceAsync(dynamicWalletSearchList as unknown[], primaryWallet, "solana", solanaAddress)')
+  })
+
   it("profile becomes ready only after required Dynamic addresses exist", () => {
     expect(deriveProfileStatus({
       base_address: "0x1111111111111111111111111111111111111111",

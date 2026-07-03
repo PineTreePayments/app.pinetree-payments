@@ -113,8 +113,23 @@ export async function POST(req: NextRequest) {
         : undefined,
     })
 
+    console.info("[pinetree-wallets] profile_route_upsert_success", {
+      merchantId,
+      profileId: profile.id,
+      dynamicUserIdPersisted: Boolean(profile.dynamic_user_id),
+      baseAddressPersisted: Boolean(profile.base_address),
+      solanaAddressPersisted: Boolean(profile.solana_address),
+      status: profile.status,
+      btcAddressPersisted: Boolean(profile.btc_address),
+      btcPayoutEnabled: Boolean(profile.btc_payout_enabled),
+      bitcoinProvisioningStatus: bitcoinProvisioning?.status ?? "not_requested",
+    })
+
     return NextResponse.json({ profile })
   } catch (error) {
+    console.warn("[pinetree-wallets] profile_route_upsert_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    })
     return NextResponse.json(
       { error: "Failed to save wallet profile" },
       { status: getRouteErrorStatus(error) }
