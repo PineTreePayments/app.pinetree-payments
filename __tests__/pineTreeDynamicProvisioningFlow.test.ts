@@ -53,10 +53,35 @@ describe("PineTree Dynamic provisioning flow", () => {
   it("opening PineTree Wallet can sync from Dynamic WaaS credentials after runtime signers hydrate", () => {
     expect(page).toContain("const waasCredentialWalletSources = useMemo")
     expect(page).toContain("getWaasWalletsByCredentials().map")
+    expect(page).toContain("const waasCredentialSignerWallets = useMemo")
+    expect(page).toContain('getWaasWalletConnector(connectorChain)')
     expect(page).toContain("const dynamicAddressSearchList = useMemo")
     expect(page).toContain("extractDynamicWalletAddresses(dynamicAddressSearchList as DynamicWalletAddressSource[])")
     expect(page).toContain('findDynamicApprovalWalletForSourceAsync(dynamicWalletSearchList as unknown[], primaryWallet, "base", baseAddress)')
     expect(page).toContain('findDynamicApprovalWalletForSourceAsync(dynamicWalletSearchList as unknown[], primaryWallet, "solana", solanaAddress)')
+  })
+
+  it("Open PineTree Wallet starts browser-to-server profile sync and logs the exact result", () => {
+    const openWalletFn = page.slice(
+      page.indexOf("function handleOpenWallet()"),
+      page.indexOf("async function beginWalletSetupRepair")
+    )
+    expect(openWalletFn).toContain('console.info("[pinetree-wallets] open_wallet_sync_requested"')
+    expect(openWalletFn).toContain("setPendingSync(true)")
+    expect(openWalletFn).toContain('refreshDynamicWalletRuntime("open_wallet_sync_profile"')
+    expect(page).toContain('console.info("[pinetree-wallets] profile_sync_request"')
+    expect(page).toContain("payload: body")
+    expect(page).toContain('console.info("[pinetree-wallets] profile_sync_response"')
+    expect(page).toContain("profileEndpointResponse")
+    expect(page).toContain("PineTree Wallet sync debug")
+  })
+
+  it("backend route logs merchant resolution and returns the updated merchant id", () => {
+    expect(profileRoute).toContain('console.info("[pinetree-wallets] profile_route_post_received"')
+    expect(profileRoute).toContain("merchantId,")
+    expect(profileRoute).toContain("payload: body")
+    expect(profileRoute).toContain("profileMerchantId: profile.merchant_id")
+    expect(profileRoute).toContain("return NextResponse.json({ profile, merchantId })")
   })
 
   it("profile becomes ready only after required Dynamic addresses exist", () => {

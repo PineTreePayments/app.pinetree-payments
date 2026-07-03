@@ -46,6 +46,14 @@ export async function POST(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
     const body = (await req.json()) as Record<string, unknown>
+    console.info("[pinetree-wallets] profile_route_post_received", {
+      merchantId,
+      payload: body,
+      dynamicUserIdPresent: Boolean(body.dynamic_user_id),
+      baseAddressPresent: Boolean(body.base_address),
+      solanaAddressPresent: Boolean(body.solana_address),
+      btcAddressInputPresent: "btc_address" in body || "bitcoin_onchain_address" in body,
+    })
     if (body.action === "reset_dynamic_wallet_profile") {
       const profile = await upsertPineTreeWalletProfile({
         merchantId,
@@ -55,7 +63,12 @@ export async function POST(req: NextRequest) {
         bitcoinLightningAddress: null,
         bitcoinOnchainAddress: null,
       })
-      return NextResponse.json({ profile })
+      console.info("[pinetree-wallets] profile_route_reset_success", {
+        merchantId,
+        profileId: profile.id,
+        profileMerchantId: profile.merchant_id,
+      })
+      return NextResponse.json({ profile, merchantId })
     }
 
     const hasBtcAddressInput = "btc_address" in body || "bitcoin_onchain_address" in body
@@ -116,6 +129,7 @@ export async function POST(req: NextRequest) {
     console.info("[pinetree-wallets] profile_route_upsert_success", {
       merchantId,
       profileId: profile.id,
+      profileMerchantId: profile.merchant_id,
       dynamicUserIdPersisted: Boolean(profile.dynamic_user_id),
       baseAddressPersisted: Boolean(profile.base_address),
       solanaAddressPersisted: Boolean(profile.solana_address),
@@ -125,7 +139,7 @@ export async function POST(req: NextRequest) {
       bitcoinProvisioningStatus: bitcoinProvisioning?.status ?? "not_requested",
     })
 
-    return NextResponse.json({ profile })
+    return NextResponse.json({ profile, merchantId })
   } catch (error) {
     console.warn("[pinetree-wallets] profile_route_upsert_failed", {
       error: error instanceof Error ? error.message : String(error),

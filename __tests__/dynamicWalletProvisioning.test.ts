@@ -40,7 +40,8 @@ describe("Dynamic wallet provisioning — zero-wallet case", () => {
   it("profile sync reads Dynamic WaaS runtime wallets when useUserWallets is empty", () => {
     expect(page).toContain("const waasRuntimeWallets = useMemo")
     expect(page).toContain("getWaasWallets() as unknown[]")
-    expect(page).toContain("getDynamicWalletSearchList([...(wallets as unknown[]), ...waasRuntimeWallets], primaryWallet)")
+    expect(page).toContain("const waasCredentialSignerWallets = useMemo")
+    expect(page).toContain("...(wallets as unknown[]), ...waasRuntimeWallets, ...waasCredentialSignerWallets")
     expect(page).toContain("setDynamicWalletRuntimeRefreshNonce((value) => value + 1)")
   })
 

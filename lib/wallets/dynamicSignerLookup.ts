@@ -2,6 +2,8 @@ export type DynamicSignerRail = "base" | "solana" | "bitcoin"
 export type DynamicWalletChain = "solana" | "evm" | "bitcoin" | "unknown"
 
 export type DynamicWalletLike = {
+  id?: unknown
+  key?: unknown
   address?: string
   publicKey?: unknown
   accountAddress?: string
