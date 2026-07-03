@@ -8,6 +8,51 @@ const enabledProviders = [
 ]
 
 describe("PineTree rail readiness", () => {
+  it("clean not_created wallet profile does not make enabled pending crypto rails payment-ready", () => {
+    const readiness = buildPineTreeRailReadiness({
+      providers: [
+        { provider: "solana", enabled: true, status: "pending" },
+        { provider: "base", enabled: true, status: "pending" },
+        { provider: "lightning_speed", enabled: true, status: "pending" },
+      ],
+      walletProfile: {
+        solana_address: null,
+        base_address: null,
+        btc_address: null,
+        btc_payout_enabled: false,
+      },
+      speed: { configured: false, accountReady: false, payoutReady: false, status: "pending" },
+    })
+
+    expect(readiness.solana.enabled).toBe(true)
+    expect(readiness.base.enabled).toBe(true)
+    expect(readiness.bitcoin_lightning.enabled).toBe(true)
+    expect(readiness.solana.walletProvisioned).toBe(false)
+    expect(readiness.base.walletProvisioned).toBe(false)
+    expect(readiness.bitcoin_lightning.walletProvisioned).toBe(false)
+    expect(readiness.solana.paymentReady).toBe(false)
+    expect(readiness.base.paymentReady).toBe(false)
+    expect(readiness.bitcoin_lightning.paymentReady).toBe(false)
+  })
+
+  it("enabled=true plus pending provider does not make rails active", () => {
+    const readiness = buildPineTreeRailReadiness({
+      providers: [
+        { provider: "solana", enabled: true, status: "pending" },
+        { provider: "base", enabled: true, status: "pending" },
+      ],
+      walletProfile: {
+        solana_address: "So11111111111111111111111111111111111111112",
+        base_address: "0x1111111111111111111111111111111111111111",
+      },
+    })
+
+    expect(readiness.solana.paymentReady).toBe(false)
+    expect(readiness.base.paymentReady).toBe(false)
+    expect(readiness.solana.reasonCodes).toContain("provider_not_connected")
+    expect(readiness.base.reasonCodes).toContain("provider_not_connected")
+  })
+
   it("provider enabled but missing Solana address is not paymentReady or withdrawalReady", () => {
     const readiness = buildPineTreeRailReadiness({
       providers: enabledProviders,
@@ -19,7 +64,7 @@ describe("PineTree rail readiness", () => {
     expect(readiness.solana.reasonCodes).toContain("missing_solana_address")
   })
 
-  it("provider enabled plus Solana address is paymentReady", () => {
+  it("Solana paymentReady is true only when Solana address plus connected/active provider exist", () => {
     const readiness = buildPineTreeRailReadiness({
       providers: enabledProviders,
       walletProfile: { solana_address: "So11111111111111111111111111111111111111112" },
@@ -28,6 +73,15 @@ describe("PineTree rail readiness", () => {
     expect(readiness.solana.paymentReady).toBe(true)
     expect(readiness.solana.withdrawalReady).toBe(false)
     expect(readiness.solana.reasonCodes).toContain("missing_dynamic_signer")
+  })
+
+  it("Solana address without connected provider is not paymentReady", () => {
+    const readiness = buildPineTreeRailReadiness({
+      providers: [{ provider: "solana", enabled: true, status: "pending" }],
+      walletProfile: { solana_address: "So11111111111111111111111111111111111111112" },
+    })
+
+    expect(readiness.solana.paymentReady).toBe(false)
   })
 
   it("provider enabled plus Solana address plus Dynamic signer is withdrawalReady", () => {
@@ -53,7 +107,7 @@ describe("PineTree rail readiness", () => {
     expect(readiness.base.reasonCodes).toContain("missing_base_address")
   })
 
-  it("provider enabled plus Base address is paymentReady", () => {
+  it("Base paymentReady is true only when Base address plus connected/active provider exist", () => {
     const readiness = buildPineTreeRailReadiness({
       providers: enabledProviders,
       walletProfile: { base_address: "0x1111111111111111111111111111111111111111" },
@@ -62,6 +116,15 @@ describe("PineTree rail readiness", () => {
     expect(readiness.base.paymentReady).toBe(true)
     expect(readiness.base.withdrawalReady).toBe(false)
     expect(readiness.base.reasonCodes).toContain("missing_dynamic_signer")
+  })
+
+  it("Base address without connected provider is not paymentReady", () => {
+    const readiness = buildPineTreeRailReadiness({
+      providers: [{ provider: "base", enabled: true, status: "pending" }],
+      walletProfile: { base_address: "0x1111111111111111111111111111111111111111" },
+    })
+
+    expect(readiness.base.paymentReady).toBe(false)
   })
 
   it("provider enabled plus Base address plus Dynamic signer is withdrawalReady", () => {
@@ -102,6 +165,18 @@ describe("PineTree rail readiness", () => {
     expect(readiness.bitcoin_lightning.walletProvisioned).toBe(true)
     expect(readiness.bitcoin_lightning.paymentReady).toBe(true)
     expect(readiness.bitcoin_lightning.withdrawalReady).toBe(false)
+  })
+
+  it("Lightning enabled pending is not paymentReady until Speed account is active", () => {
+    const readiness = buildPineTreeRailReadiness({
+      providers: [{ provider: "lightning_speed", enabled: true, status: "pending" }],
+      walletProfile: { btc_address: "bc1placeholder", btc_payout_enabled: true },
+      speed: { configured: true, accountReady: false, payoutReady: false, status: "pending" },
+    })
+
+    expect(readiness.bitcoin_lightning.paymentReady).toBe(false)
+    expect(readiness.bitcoin_lightning.withdrawalReady).toBe(false)
+    expect(readiness.bitcoin_lightning.reasonCodes).toContain("missing_speed_account")
   })
 
   it("Speed active plus payout config makes Lightning withdrawalReady", () => {

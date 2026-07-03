@@ -165,12 +165,15 @@ describe("Providers page and Wallet page readiness agreement", () => {
 
   it("ManagedCryptoRailCard status is Connected only when paymentReady is true", () => {
     expect(providersPage).toContain("const usable = Boolean(readiness?.paymentReady)")
-    expect(providersPage).toContain('usable ? "Connected" : enabled ? "Setup needed" : "Not connected"')
+    expect(providersPage).toContain('usable ? "Connected" : merchantPreferenceEnabled || readiness ? "Setup needed" : "Not connected"')
   })
 
-  it("enabled toggle alone does not mark a rail connected on providers page", () => {
+  it("enabled preference alone does not mark a rail connected or visually on in providers page", () => {
     // usable requires central payment readiness. Toggle alone is not enough.
     expect(providersPage).toContain("const usable = Boolean(readiness?.paymentReady)")
+    expect(providersPage).toContain("const toggleOn = isManagedRailToggleOn(provider)")
+    expect(providersPage).toContain("checked={toggleOn}")
+    expect(providersPage).toContain("return Boolean(readiness.paymentReady)")
     expect(providersPage).not.toContain('statusLabel = enabled ? "Connected"')
   })
 

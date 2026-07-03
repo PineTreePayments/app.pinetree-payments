@@ -44,12 +44,15 @@ describe("PineTree rail readiness consumers", () => {
     expect(src).toContain('validated.rail === "bitcoin" && !readiness.withdrawalReady')
   })
 
-  it("Providers page status uses normalized paymentReady while toggles use enabled", () => {
+  it("Providers page status and visible availability toggles use normalized paymentReady", () => {
     const src = read("app/dashboard/providers/page.tsx")
 
     expect(src).toContain("readiness.paymentReady")
-    expect(src).toContain("const enabled = isEnabled(provider)")
-    expect(src).toContain('enabled ? "Setup needed" : "Not connected"')
+    expect(src).toContain("function isManagedRailToggleOn")
+    expect(src).toContain("return Boolean(readiness.paymentReady)")
+    expect(src).toContain("checked={toggleOn}")
+    expect(src).toContain('merchantPreferenceEnabled || readiness ? "Setup needed" : "Not connected"')
+    expect(src).toContain("isMerchantPreferenceEnabled")
   })
 
   it("Wallet page connected pills use walletProvisioned and withdrawal assets use payout/address gates", () => {

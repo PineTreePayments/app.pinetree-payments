@@ -394,6 +394,6 @@ describe("Provider connected/not connected behavior", () => {
 
   it("providers page uses Connected/Setup needed/Not connected with no Disabled pill for crypto rails", () => {
     expect(providersPage).not.toContain('"Disabled"')
-    expect(providersPage).toContain('"Connected" : enabled ? "Setup needed" : "Not connected"')
+    expect(providersPage).toContain('"Connected" : merchantPreferenceEnabled || readiness ? "Setup needed" : "Not connected"')
   })
 })

@@ -147,11 +147,11 @@ describe("Providers page canonical wallet mode", () => {
 
   it("shows managed crypto rails as Connected, Setup needed, or Not connected with Enabled toggles", () => {
     expect(page).toContain('provider: "solana" | "base" | "lightning"')
-    expect(page).toContain('"Connected" : enabled ? "Setup needed" : "Not connected"')
+    expect(page).toContain('"Connected" : merchantPreferenceEnabled || readiness ? "Setup needed" : "Not connected"')
     expect(page).not.toContain('"Not configured"')
-    expect(page).toContain(">Enabled</span>")
+    expect(page).toContain(">Available</span>")
     expect(page).toContain("onChange={(v) => toggleProvider(provider, v)}")
-    expect(page).toContain('disabled={provider !== "lightning" && !connected}')
+    expect(page).toContain("disabled={toggleDisabled}")
   })
 
   it("calculates canonical rail connection from PineTree Wallet profile address presence", () => {
@@ -168,12 +168,12 @@ describe("Providers page canonical wallet mode", () => {
 
   it("keeps Connected/Not connected status independent from the Enabled toggle", () => {
     expect(page).toContain("const connected = readiness?.walletProvisioned ?? isCanonicalRailConfigured(provider)")
-    expect(page).toContain("const enabled = isEnabled(provider)")
+    expect(page).toContain("const merchantPreferenceEnabled = isMerchantPreferenceEnabled(provider)")
     // Status pill reflects normalized payment readiness.
     expect(page).toContain("const usable = Boolean(readiness?.paymentReady)")
     expect(page).toContain("const statusLabel = usable")
-    expect(page).toContain('"Connected" : enabled ? "Setup needed" : "Not connected"')
-    expect(page).toContain("checked={enabled}")
+    expect(page).toContain('"Connected" : merchantPreferenceEnabled || readiness ? "Setup needed" : "Not connected"')
+    expect(page).toContain("checked={toggleOn}")
   })
 
   it("does not let the legacy Bitcoin Lightning setup card render in canonical wallet mode", () => {

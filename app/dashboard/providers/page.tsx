@@ -355,7 +355,7 @@ export default function ProvidersPage() {
       const readiness = getManagedRailReadiness(provider)
       if (!readiness) return "Not connected"
       if (readiness.paymentReady) return "Connected"
-      if (readiness.enabled && !readiness.walletProvisioned) return "Setup needed"
+      if (!readiness.walletProvisioned || readiness.reasonCodes.includes("provider_not_connected")) return "Setup needed"
       return "Not connected"
     }
 
@@ -393,7 +393,7 @@ export default function ProvidersPage() {
     if (provider === "lightning") {
       if (canonicalWalletMode) {
         const readiness = getManagedRailReadiness("lightning")
-        return Boolean(readiness?.enabled)
+        return Boolean(readiness?.paymentReady)
       }
       const speedProv = getProvider("lightning_speed")
       if (speedProv?.enabled) return true
@@ -411,6 +411,22 @@ export default function ProvidersPage() {
 
     const p = getProvider(provider)
     return p?.enabled ?? false
+  }
+
+  function isMerchantPreferenceEnabled(provider: "solana" | "base" | "lightning") {
+    const dbProvider = provider === "lightning" ? "lightning_speed" : provider
+    return Boolean(getProvider(dbProvider)?.enabled)
+  }
+
+  function isManagedRailToggleOn(provider: "solana" | "base" | "lightning") {
+    const readiness = getManagedRailReadiness(provider)
+    if (readiness) return Boolean(readiness.paymentReady)
+    if (provider === "solana" || provider === "base") {
+      const p = getProvider(provider)
+      const connected = p?.status === "connected" || p?.status === "active"
+      return connected && isCanonicalRailConfigured(provider)
+    }
+    return false
   }
 
 function EngineSettingStatus({
@@ -499,10 +515,18 @@ function EngineSettingStatus({
   async function toggleProvider(provider: string, value: boolean) {
     if (value && (provider === "solana" || provider === "base")) {
       const railReady = canonicalWalletMode
-        ? isCanonicalRailConfigured(provider as "solana" | "base")
+        ? Boolean(getManagedRailReadiness(provider as "solana" | "base")?.paymentReady)
         : Boolean(getWallet(provider))
       if (!railReady) {
-        toast.error(canonicalWalletMode ? "Wallet address not provisioned" : "Connect wallet first")
+        toast.error(canonicalWalletMode ? "Create PineTree Wallet before enabling this rail." : "Connect wallet first")
+        return
+      }
+    }
+
+    if (value && provider === "lightning" && canonicalWalletMode) {
+      const readiness = getManagedRailReadiness("lightning")
+      if (!readiness?.paymentReady) {
+        toast.error("Complete PineTree Wallet Lightning setup before enabling this rail.")
         return
       }
     }
@@ -626,10 +650,10 @@ function EngineSettingStatus({
   function getLightningCardState() {
     if (canonicalWalletMode || canonicalLightningMode) {
       const readiness = getManagedRailReadiness("lightning")
-      const lightningEnabled = isEnabled("lightning")
+      const lightningPreferenceEnabled = isMerchantPreferenceEnabled("lightning")
       const isConnected = Boolean(readiness?.paymentReady)
       return {
-        status: (isConnected ? "Connected" : lightningEnabled ? "Setup needed" : "Not connected") as "Connected" | "Setup needed" | "Not connected",
+        status: (isConnected ? "Connected" : lightningPreferenceEnabled || readiness ? "Setup needed" : "Not connected") as "Connected" | "Setup needed" | "Not connected",
         connectionType: "pinetree" as const,
         summary: "Bitcoin Lightning payments settle to the merchant's PineTree Wallet.",
         detail: "PineTree Wallet"
@@ -726,10 +750,13 @@ function EngineSettingStatus({
   }) {
     const readiness = getManagedRailReadiness(provider)
     const connected = readiness?.walletProvisioned ?? isCanonicalRailConfigured(provider)
-    const enabled = isEnabled(provider)
+    const merchantPreferenceEnabled = isMerchantPreferenceEnabled(provider)
+    const toggleOn = isManagedRailToggleOn(provider)
     const usable = Boolean(readiness?.paymentReady)
-    const statusLabel = usable ? "Connected" : enabled ? "Setup needed" : "Not connected"
-    const statusPillTone = usable ? "blue" : enabled ? "amber" : ("default" as const)
+    const statusLabel = usable ? "Connected" : merchantPreferenceEnabled || readiness ? "Setup needed" : "Not connected"
+    const statusPillTone = usable ? "blue" : statusLabel === "Setup needed" ? "amber" : ("default" as const)
+    const canDisablePreference = merchantPreferenceEnabled && !usable
+    const toggleDisabled = toggleOn ? false : !canDisablePreference
 
     return (
       <div className="flex min-h-[226px] flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
@@ -755,10 +782,10 @@ function EngineSettingStatus({
         <div className="mt-auto flex items-center justify-between gap-3 border-t border-gray-100 pt-4">
           <p className="text-xs font-semibold text-blue-700">Manage from PineTree Wallet</p>
           <div className="flex shrink-0 items-center gap-2">
-            <span className="text-sm font-medium text-gray-700">Enabled</span>
+            <span className="text-sm font-medium text-gray-700">Available</span>
             <ToggleSwitch
-              checked={enabled}
-              disabled={provider !== "lightning" && !connected}
+              checked={toggleOn}
+              disabled={toggleDisabled}
               onChange={(v) => toggleProvider(provider, v)}
             />
           </div>
@@ -979,10 +1006,13 @@ function EngineSettingStatus({
   }
 
   const shift4Connected = getStatus("shift4") === "Connected"
-  const connectedAndEnabledProvidersCount = getConnectedAndEnabledProvidersCount(providers)
-  const connectedAndEnabledProviders = providers.filter((provider) =>
-    provider.enabled && getStatus(provider.provider) === "Connected"
-  )
+  const connectedAndEnabledProviders = providers.filter((provider) => {
+    if (provider.provider === "solana") return Boolean(railReadiness?.solana.paymentReady)
+    if (provider.provider === "base") return Boolean(railReadiness?.base.paymentReady)
+    if (provider.provider === "lightning_speed") return Boolean(railReadiness?.bitcoin_lightning.paymentReady)
+    return provider.enabled && getStatus(provider.provider) === "Connected"
+  })
+  const connectedAndEnabledProvidersCount = connectedAndEnabledProviders.length
 
   return (
     <div className="space-y-5 md:space-y-7">

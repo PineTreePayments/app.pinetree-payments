@@ -42,7 +42,8 @@ describe("Bitcoin Lightning provider card cleanup", () => {
 
 describe("rail status vocabulary - Connected / Setup needed / Not connected", () => {
   it("ManagedCryptoRailCard uses normalized payment readiness status labels", () => {
-    expect(providersPage).toContain('"Connected" : enabled ? "Setup needed" : "Not connected"')
+    expect(providersPage).toContain('"Connected" : merchantPreferenceEnabled || readiness ? "Setup needed" : "Not connected"')
+    expect(providersPage).toContain("checked={toggleOn}")
   })
 
   it("providers page does not use a yellow Disabled pill for crypto rails", () => {
