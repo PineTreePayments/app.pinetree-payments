@@ -81,7 +81,15 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(profileRoute).toContain("merchantId,")
     expect(profileRoute).toContain("payload: body")
     expect(profileRoute).toContain("profileMerchantId: profile.merchant_id")
-    expect(profileRoute).toContain("return NextResponse.json({ profile, merchantId })")
+    expect(profileRoute).toContain("syncPineTreeWalletProfileProviders(profile)")
+    expect(profileRoute).toContain("providerSync")
+    expect(profileRoute).toContain("return NextResponse.json({ profile, merchantId, providerSync })")
+  })
+
+  it("profile sync upserts Dynamic Base/Solana provider rows without enabling Lightning readiness", () => {
+    expect(profileRoute).toContain("syncPineTreeWalletProfileProviders")
+    expect(profileRoute).toContain("providerSync")
+    expect(profileRoute).not.toContain("btc_address: profile.btc_address")
   })
 
   it("profile becomes ready only after required Dynamic addresses exist", () => {

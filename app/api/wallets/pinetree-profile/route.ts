@@ -6,6 +6,7 @@ import {
   normalizeBtcAddressType,
   upsertPineTreeWalletProfile
 } from "@/database/pineTreeWalletProfiles"
+import { syncPineTreeWalletProfileProviders } from "@/database/pineTreeWalletProfileProviderSync"
 import { provisionMerchantBitcoinAddress } from "@/engine/pineTreeBitcoinAddressProvisioning"
 
 /**
@@ -126,6 +127,8 @@ export async function POST(req: NextRequest) {
         : undefined,
     })
 
+    const providerSync = await syncPineTreeWalletProfileProviders(profile)
+
     console.info("[pinetree-wallets] profile_route_upsert_success", {
       merchantId,
       profileId: profile.id,
@@ -137,9 +140,10 @@ export async function POST(req: NextRequest) {
       btcAddressPersisted: Boolean(profile.btc_address),
       btcPayoutEnabled: Boolean(profile.btc_payout_enabled),
       bitcoinProvisioningStatus: bitcoinProvisioning?.status ?? "not_requested",
+      providerSync,
     })
 
-    return NextResponse.json({ profile, merchantId })
+    return NextResponse.json({ profile, merchantId, providerSync })
   } catch (error) {
     console.warn("[pinetree-wallets] profile_route_upsert_failed", {
       error: error instanceof Error ? error.message : String(error),
