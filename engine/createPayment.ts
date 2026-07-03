@@ -343,14 +343,32 @@ export async function createPayment(
     merchantWalletAddress = `${providerSettlementNetwork}_${input.merchantId}`
     network = providerSettlementNetwork
   } else {
-    const merchantWallet = await selectBestWallet(input.merchantId, preferredNetwork)
+    const pineTreeProfile =
+      preferredNetwork === "solana" || preferredNetwork === "base"
+        ? await import("@/database/pineTreeWalletProfiles").then((mod) =>
+            mod.getPineTreeWalletProfile(input.merchantId)
+          ).catch(() => null)
+        : null
+    const pineTreeSettlementAddress =
+      preferredNetwork === "solana"
+        ? String(pineTreeProfile?.solana_address || "").trim()
+        : preferredNetwork === "base"
+          ? String(pineTreeProfile?.base_address || "").trim()
+          : ""
+    const merchantWallet = pineTreeSettlementAddress
+      ? {
+          wallet_address: pineTreeSettlementAddress,
+          network: preferredNetwork,
+          asset: preferredNetwork === "solana" ? "SOL-PINETREE" : "ETH-PINETREE",
+        }
+      : await selectBestWallet(input.merchantId, preferredNetwork)
 
-    if (!merchantWallet) {
+    if (!merchantWallet?.wallet_address) {
       throw new Error("No wallet configured for merchant")
     }
 
     merchantWalletAddress = merchantWallet.wallet_address
-    network = merchantWallet.network
+    network = merchantWallet.network || preferredNetwork || ""
     walletAsset = merchantWallet.asset || undefined
   }
 

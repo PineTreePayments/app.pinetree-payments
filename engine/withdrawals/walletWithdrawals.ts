@@ -27,11 +27,13 @@ import {
   getBitcoinProviderConfig,
   validateBitcoinAddressForConfiguredNetwork,
 } from "@/providers/wallets/bitcoinNetworkProvider"
+import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
 import {
   createDefaultWithdrawalSigner,
   type WithdrawalReview,
   type WithdrawalSigner,
 } from "@/providers/wallets/withdrawalSigner"
+import { buildPineTreeRailReadiness } from "@/lib/pinetreeRailReadiness"
 
 export type CreateWalletWithdrawalReviewInput = {
   rail: string
@@ -244,9 +246,61 @@ export async function createWalletWithdrawalReview(
   signer: WithdrawalSigner = createDefaultWithdrawalSigner()
 ): Promise<CreateWalletWithdrawalReviewResult> {
   const validated = validateWalletWithdrawalInput(input)
-  const profile = await getPineTreeWalletProfile(merchantId)
+  const [profile, providers, lightningProfile] = await Promise.all([
+    getPineTreeWalletProfile(merchantId),
+    import("@/database/merchants").then((mod) => mod.getMerchantProviders(merchantId)).catch(() => []),
+    import("@/database/merchantLightningProfiles").then((mod) => mod.getMerchantLightningProfile(merchantId)).catch(() => null),
+  ])
+  const { SPEED_PROVIDER_NAME } = await import("@/database/merchantProviders").catch(() => ({ SPEED_PROVIDER_NAME: "lightning_speed" }))
   if (!profile) {
     throw Object.assign(new Error("PineTree Wallet profile not found."), { status: 404 })
+  }
+
+  const readinessProviders = providers.length
+    ? providers
+    : [
+        { provider: "solana", enabled: true, status: "connected" },
+        { provider: "base", enabled: true, status: "connected" },
+        { provider: SPEED_PROVIDER_NAME, enabled: true, status: "connected" },
+      ]
+  const speedProvider = readinessProviders.find((provider) => String(provider.provider || "").toLowerCase().trim() === SPEED_PROVIDER_NAME) as {
+    credentials?: unknown
+    status?: string | null
+  } | undefined
+  const speedCredentials = (speedProvider?.credentials || {}) as {
+    speed_account_id?: string
+    account_id?: string
+    setup_status?: string
+  }
+  const speedConfig = getPineTreeSpeedConfigStatus()
+  const speedAccountReady = Boolean(
+    lightningProfile?.status === "ready" ||
+    (
+      String(speedCredentials.speed_account_id || speedCredentials.account_id || "").trim() &&
+      (String(speedCredentials.setup_status || "").trim() === "ready" ||
+        String(speedCredentials.setup_status || "").trim() === "ready_for_payments")
+    )
+  )
+  const railReadiness = buildPineTreeRailReadiness({
+    providers: readinessProviders,
+    walletProfile: profile,
+    speed: {
+      configured: speedConfig.configured,
+      accountReady: speedAccountReady,
+      payoutReady: Boolean(speedAccountReady && profile.btc_payout_enabled),
+      status: lightningProfile?.status || String(speedCredentials.setup_status || "")
+    }
+  })
+  const readinessKey = validated.rail === "bitcoin" ? "bitcoin_lightning" : validated.rail
+  const readiness = railReadiness[readinessKey]
+  if (!readiness.enabled) {
+    throw Object.assign(new Error("This withdrawal rail is disabled."), { status: 409 })
+  }
+  if (validated.rail === "bitcoin" && !readiness.withdrawalReady) {
+    throw Object.assign(new Error("Bitcoin payouts are not ready for this merchant."), { status: 409 })
+  }
+  if (!readiness.walletProvisioned) {
+    throw Object.assign(new Error("PineTree Wallet source address is not available."), { status: 409 })
   }
 
   const signerInput = {

@@ -1,6 +1,7 @@
 import { getMerchantProviders } from "@/database/merchants"
 import { getMerchantWallets } from "@/database/merchantWallets"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
+import { getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
 import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import {
   getPineTreeSpeedConfigStatus,
@@ -18,6 +19,7 @@ import {
 } from "./config"
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 import { isProviderHealthy } from "./providerRegistry"
+import { buildPineTreeRailReadiness } from "@/lib/pinetreeRailReadiness"
 
 type ReadinessNetwork = "solana" | "base" | "bitcoin_lightning"
 
@@ -56,7 +58,9 @@ export async function getPaymentReadinessEngine(input: { merchantId?: string }) 
 
   const networks: ReadinessNetwork[] = ["solana", "base", "bitcoin_lightning"]
 
-  const connectedProviders = merchantId ? await getMerchantProviders(merchantId) : []
+  const [connectedProviders, lightningProfile] = merchantId
+    ? await Promise.all([getMerchantProviders(merchantId), getMerchantLightningProfile(merchantId)])
+    : [[], null]
   const connectedAdapterIds = connectedProviders
     .map((row) => normalizePaymentAdapter(String(row.provider || "")))
     .filter((value): value is PaymentAdapterId => Boolean(value))
@@ -189,12 +193,38 @@ export async function getPaymentReadinessEngine(input: { merchantId?: string }) 
     }
   })
 
+  const speedProvider = connectedProviders.find(
+    (provider) => String(provider.provider || "").toLowerCase().trim() === SPEED_PROVIDER_NAME
+  )
+  const speedCredentials = (speedProvider?.credentials || {}) as {
+    speed_account_id?: string
+    account_id?: string
+    setup_status?: string
+  }
+  const speedConfig = getPineTreeSpeedConfigStatus()
+  const speedAccountReady = Boolean(
+    lightningProfile?.status === "ready" ||
+    (
+      String(speedCredentials.speed_account_id || speedCredentials.account_id || "").trim() &&
+      (String(speedCredentials.setup_status || "").trim() === "ready" ||
+        String(speedCredentials.setup_status || "").trim() === "ready_for_payments")
+    )
+  )
+  const railReadiness = buildPineTreeRailReadiness({
+    providers: connectedProviders,
+    walletProfile: pineTreeWalletProfile,
+    speed: {
+      configured: speedConfig.configured,
+      accountReady: speedAccountReady,
+      payoutReady: Boolean(speedAccountReady && pineTreeWalletProfile?.btc_payout_enabled),
+      status: lightningProfile?.status || String(speedCredentials.setup_status || "")
+    }
+  })
+
   const supportedIntentNetworks = details.filter((item) =>
     item.network === "solana" || item.network === "base" || item.network === "bitcoin_lightning"
   )
-  const readyNetworks = supportedIntentNetworks.filter(
-    (item) => item.adapters.available && item.wallet.connected && item.treasury.configured && item.treasury.validFormat
-  )
+  const readyNetworks = supportedIntentNetworks.filter((item) => railReadiness[item.network].paymentReady)
 
   return {
     merchantId: merchantId || null,

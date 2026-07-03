@@ -7,6 +7,8 @@ import {
   cancelStaleUnsignedWithdrawalReviews,
   listRecentWalletWithdrawalsForActivity,
 } from "@/database/walletWithdrawalRequests"
+import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
+import { buildPineTreeRailReadiness } from "@/lib/pinetreeRailReadiness"
 
 export type PineTreeBalanceAsset = {
   key: "BASE_ETH" | "BASE_USDC" | "SOLANA_SOL" | "SOLANA_USDC" | "BTC"
@@ -174,12 +176,40 @@ export async function getPineTreeWalletBalanceSnapshot(
   merchantId: string
 ): Promise<PineTreeWalletSyncResult> {
   await cancelStaleUnsignedWithdrawalReviews(merchantId).catch(() => ({ canceled: 0 }))
-  const [profile, rows, prices, recentWithdrawals] = await Promise.all([
+  const [profile, rows, prices, recentWithdrawals, providers, lightningProfile] = await Promise.all([
     getPineTreeWalletProfile(merchantId),
     getWalletBalances(merchantId),
     getMarketPricesUSD(),
     listRecentWalletWithdrawalsForActivity(merchantId, 10).catch(() => []),
+    import("@/database/merchants").then((mod) => mod.getMerchantProviders(merchantId)).catch(() => []),
+    import("@/database/merchantLightningProfiles").then((mod) => mod.getMerchantLightningProfile(merchantId)).catch(() => null),
   ])
+  const { SPEED_PROVIDER_NAME } = await import("@/database/merchantProviders").catch(() => ({ SPEED_PROVIDER_NAME: "lightning_speed" }))
+  const speedProvider = providers.find((provider) => String(provider.provider || "").toLowerCase().trim() === SPEED_PROVIDER_NAME)
+  const speedCredentials = (speedProvider?.credentials || {}) as {
+    speed_account_id?: string
+    account_id?: string
+    setup_status?: string
+  }
+  const speedConfig = getPineTreeSpeedConfigStatus()
+  const speedAccountReady = Boolean(
+    lightningProfile?.status === "ready" ||
+    (
+      String(speedCredentials.speed_account_id || speedCredentials.account_id || "").trim() &&
+      (String(speedCredentials.setup_status || "").trim() === "ready" ||
+        String(speedCredentials.setup_status || "").trim() === "ready_for_payments")
+    )
+  )
+  const railReadiness = buildPineTreeRailReadiness({
+    providers,
+    walletProfile: profile,
+    speed: {
+      configured: speedConfig.configured,
+      accountReady: speedAccountReady,
+      payoutReady: Boolean(speedAccountReady && profile?.btc_payout_enabled),
+      status: lightningProfile?.status || String(speedCredentials.setup_status || "")
+    }
+  })
   const byAsset = new Map(rows.map((row) => [String(row.asset || "").toUpperCase(), row]))
   const baseConfigured = isBaseRpcConfigured()
   const hasBaseAddress = Boolean(profile?.base_address)
@@ -231,9 +261,9 @@ export async function getPineTreeWalletBalanceSnapshot(
 
   return {
     readiness: {
-      base: Boolean(profile?.base_address),
-      solana: Boolean(profile?.solana_address),
-      bitcoin: Boolean(profile?.btc_address || profile?.bitcoin_onchain_address || profile?.bitcoin_lightning_address),
+      base: railReadiness.base.walletProvisioned,
+      solana: railReadiness.solana.walletProvisioned,
+      bitcoin: railReadiness.bitcoin_lightning.walletProvisioned,
     },
     balances: {
       base: all.filter((item) => item.rail === "base"),

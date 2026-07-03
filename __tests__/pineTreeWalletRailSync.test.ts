@@ -81,7 +81,7 @@ describe("syncPineTreeWalletRailsEngine", () => {
 
     const result = await syncPineTreeWalletRailsEngine("merchant-1")
 
-    expect(mockSaveProvider).toHaveBeenCalledTimes(3)
+    expect(mockSaveProvider).toHaveBeenCalledTimes(2)
     expect(mockSaveProvider).toHaveBeenCalledWith(expect.objectContaining({
       merchantId: "merchant-1",
       provider: "solana",
@@ -92,14 +92,12 @@ describe("syncPineTreeWalletRailsEngine", () => {
       provider: "base",
       walletAddress: "0xbaseaddr",
     }))
-    expect(mockSaveProvider).toHaveBeenCalledWith(expect.objectContaining({
-      provider: "lightning_speed",
-      walletAddress: "bc1merchantbtc",
-      walletType: "PINETREE_BTC",
-    }))
 
-    expect(result.rails.every((r) => r.status === "synced")).toBe(true)
-    expect(mockUpsertSync).toHaveBeenCalledTimes(3)
+    expect(result.rails.find((r) => r.rail === "solana")?.status).toBe("synced")
+    expect(result.rails.find((r) => r.rail === "base")?.status).toBe("synced")
+    expect(result.rails.find((r) => r.rail === "bitcoin_lightning")?.status).toBe("skipped")
+    expect(result.rails.find((r) => r.rail === "bitcoin_lightning")?.reason).toContain("Speed account status")
+    expect(mockUpsertSync).toHaveBeenCalledTimes(2)
   })
 
   it("skips a rail when address matches the last synced address (idempotent)", async () => {
@@ -111,13 +109,14 @@ describe("syncPineTreeWalletRailsEngine", () => {
     mockGetSyncs.mockResolvedValue([
       { rail: "solana", synced_address: "solana-addr-abc" },
       { rail: "base", synced_address: "0xbaseaddr" },
-      { rail: "bitcoin_lightning", synced_address: "bc1merchantbtc" },
     ])
 
     const result = await syncPineTreeWalletRailsEngine("merchant-1")
 
     expect(mockSaveProvider).not.toHaveBeenCalled()
-    expect(result.rails.every((r) => r.status === "skipped" && r.reason === "Already synced")).toBe(true)
+    expect(result.rails.find((r) => r.rail === "solana")?.reason).toBe("Already synced")
+    expect(result.rails.find((r) => r.rail === "base")?.reason).toBe("Already synced")
+    expect(result.rails.find((r) => r.rail === "bitcoin_lightning")?.reason).toContain("Speed account status")
   })
 
   it("re-syncs a rail when address has changed", async () => {
@@ -187,13 +186,12 @@ describe("pineTreeWalletRailSync engine", () => {
 
   it("marks rails as PINETREE wallet type", () => {
     expect(engine).toContain("PINETREE")
-    expect(engine).toContain("PINETREE_BTC")
   })
 
-  it("syncs Bitcoin Lightning through the Speed provider row", () => {
-    expect(engine).toContain("SPEED_PROVIDER_NAME")
+  it("does not infer Bitcoin Lightning readiness from btc_address", () => {
     expect(engine).toContain('rail: "bitcoin_lightning"')
-    expect(engine).toContain("profile.btc_address")
+    expect(engine).toContain("Lightning readiness is managed by Speed account status")
+    expect(engine).not.toContain("profile.btc_address")
   })
 
   it("exports syncPineTreeWalletRailsEngine", () => {

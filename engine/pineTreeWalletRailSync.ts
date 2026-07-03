@@ -1,5 +1,4 @@
 import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
-import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { getWalletRailSyncs, upsertWalletRailSync } from "@/database/pineTreeWalletRailSyncs"
 import { saveProviderEngine } from "./providersDashboard"
 
@@ -18,8 +17,9 @@ export type PineTreeWalletRailSyncResult = {
 
 /**
  * Idempotent: reads the merchant's PineTree Wallet profile and writes the
- * base_address, solana_address, and btc_address into the provider rows that
- * drive checkout availability. Skips a rail when the address in the DB already
+ * base_address and solana_address into the provider rows that drive checkout
+ * availability. Lightning readiness is Speed-managed and is never inferred from
+ * btc_address placeholders. Skips a rail when the address in the DB already
  * matches the profile address.
  */
 export async function syncPineTreeWalletRailsEngine(
@@ -50,7 +50,6 @@ export async function syncPineTreeWalletRailsEngine(
   }> = [
     { rail: "solana", provider: "solana", address: profile.solana_address, walletType: "PINETREE" },
     { rail: "base", provider: "base", address: profile.base_address, walletType: "PINETREE" },
-    { rail: "bitcoin_lightning", provider: SPEED_PROVIDER_NAME, address: profile.btc_address, walletType: "PINETREE_BTC" },
   ]
 
   const results: RailSyncResult[] = []
@@ -87,6 +86,13 @@ export async function syncPineTreeWalletRailsEngine(
       })
     }
   }
+
+  results.push({
+    rail: "bitcoin_lightning",
+    status: "skipped",
+    address: null,
+    reason: "Lightning readiness is managed by Speed account status",
+  })
 
   return { merchantId, rails: results, syncedAt: new Date().toISOString() }
 }

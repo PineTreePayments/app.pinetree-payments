@@ -210,14 +210,18 @@ describe("Lightning payout worker safety guards", () => {
 describe("syncProfileFromDynamic BTC address safety", () => {
   const page = read("app/dashboard/wallet-setup/page.tsx")
 
-  it("only includes btc_address in the sync body when Dynamic returned a Bitcoin address", () => {
-    // The spread conditional ensures btc_address is omitted from the body when null
-    expect(page).toContain("bitcoinAddress !== null && {")
-    expect(page).toContain("btc_address: bitcoinAddress,")
+  it("does not include BTC address fields in the Dynamic profile sync body", () => {
+    expect(page).toContain("dynamic_user_id: user.userId")
+    expect(page).toContain("base_address: baseAddress")
+    expect(page).toContain("solana_address: solanaAddress")
+    expect(page).not.toContain("btc_address: bitcoinAddress")
+    expect(page).not.toContain("bitcoin_onchain_address: bitcoinAddress")
   })
 
-  it("includes a comment explaining why btc_address is conditionally included", () => {
-    expect(page).toContain("Omitting the field preserves a previously saved btc_address")
+  it("leaves BTC provisioning to explicit BTC inputs on the profile API", () => {
+    const apiRoute = read("app/api/wallets/pinetree-profile/route.ts")
+    expect(apiRoute).toContain("hasBtcAddressInput && normalizedBtcAddress")
+    expect(apiRoute).toContain("Dynamic Base/Solana profile sync does not provision BTC")
   })
 })
 

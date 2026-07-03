@@ -65,7 +65,7 @@ describe("Withdraw asset dropdown source of truth", () => {
 
   it("withdrawalWalletRows requires address AND provider enabled for Bitcoin", () => {
     const src = withdrawalWalletRowsSrc()
-    expect(src).toContain("configured: bitcoinReady && enabledRails.bitcoin")
+    expect(src).toContain("configured: btcPayoutReady && enabledRails.bitcoin")
   })
 
   it("withdrawableAssetOptions filters by configured only — balance status does not gate assets", () => {
@@ -97,9 +97,9 @@ describe("Withdraw asset dropdown source of truth", () => {
 // ---------------------------------------------------------------------------
 
 describe("Bitcoin withdrawal availability", () => {
-  it("bitcoinReady is derived from btcPayoutReady, not just address presence", () => {
+  it("bitcoinReady is derived from normalized Lightning wallet provisioning, not just address presence", () => {
     const src = bitcoinReadinessSrc()
-    expect(walletPage).toContain("const bitcoinReady = btcPayoutReady")
+    expect(src).toContain("railReadiness?.bitcoin_lightning.walletProvisioned")
     expect(walletPage).not.toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
   })
 
@@ -111,12 +111,10 @@ describe("Bitcoin withdrawal availability", () => {
   })
 
   it("Bitcoin does not appear in withdrawal dropdown when btc_payout_enabled is false", () => {
-    // The configured gate for bitcoin is: bitcoinReady && enabledRails.bitcoin
-    // bitcoinReady = btcPayoutReady = btc_address && btc_payout_enabled
+    // The configured gate for bitcoin is: btcPayoutReady && enabledRails.bitcoin
     // So BTC cannot appear when payout is not enabled.
     const rowSrc = withdrawalWalletRowsSrc()
-    expect(rowSrc).toContain("configured: bitcoinReady && enabledRails.bitcoin")
-    expect(walletPage).toContain("const bitcoinReady = btcPayoutReady")
+    expect(rowSrc).toContain("configured: btcPayoutReady && enabledRails.bitcoin")
   })
 
   it("auto-provisioned btc_address alone does not make Bitcoin withdrawable", () => {
@@ -155,8 +153,8 @@ describe("enabledRails reflects toggle state, not connection status", () => {
 // ---------------------------------------------------------------------------
 
 describe("Providers page and Wallet page readiness agreement", () => {
-  it("ManagedCryptoRailCard uses isCanonicalRailConfigured for address-based connected check", () => {
-    expect(providersPage).toContain("const connected = isCanonicalRailConfigured(provider)")
+  it("ManagedCryptoRailCard uses normalized walletProvisioned for address-based connected check", () => {
+    expect(providersPage).toContain("const connected = readiness?.walletProvisioned ?? isCanonicalRailConfigured(provider)")
   })
 
   it("isCanonicalRailConfigured checks pineTreeWalletProfile address flags", () => {
@@ -165,14 +163,14 @@ describe("Providers page and Wallet page readiness agreement", () => {
     expect(providersPage).toContain("pineTreeWalletProfile?.bitcoinAddressPresent")
   })
 
-  it("ManagedCryptoRailCard status is Connected only when both address and toggle are ready", () => {
-    expect(providersPage).toContain("const usable = connected && enabled")
-    expect(providersPage).toContain('usable ? "Connected" : "Not connected"')
+  it("ManagedCryptoRailCard status is Connected only when paymentReady is true", () => {
+    expect(providersPage).toContain("const usable = Boolean(readiness?.paymentReady)")
+    expect(providersPage).toContain('usable ? "Connected" : enabled ? "Setup needed" : "Not connected"')
   })
 
   it("enabled toggle alone does not mark a rail connected on providers page", () => {
-    // usable requires connected (address) AND enabled (toggle). Toggle alone is not enough.
-    expect(providersPage).toContain("const usable = connected && enabled")
+    // usable requires central payment readiness. Toggle alone is not enough.
+    expect(providersPage).toContain("const usable = Boolean(readiness?.paymentReady)")
     expect(providersPage).not.toContain('statusLabel = enabled ? "Connected"')
   })
 

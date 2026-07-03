@@ -15,11 +15,11 @@ import { PINETREE_FEE } from "./config"
 import { markPaymentIncomplete, markPaymentIncompleteIfAbandoned } from "./paymentStateActions"
 import { loadProviders } from "./loadProviders"
 import { getMerchantProviders } from "@/database/merchants"
-import { getLightningNwcReadiness, SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
+import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
-import { getPineTreeSpeedConfigStatus, isSpeedPlatformTreasurySweepEnabled } from "@/providers/lightning/speedClient"
-import { getProviderMetadata, isProviderHealthy, providerSupportsFeeAtPaymentTime } from "./providerRegistry"
+import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
 import { merchantProviderCanProcessPayments } from "@/lib/providers/cardProviderReadiness"
+import { buildPineTreeRailReadiness, getPineTreeRailReadinessDiagnostics } from "@/lib/pinetreeRailReadiness"
 
 const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base", "shift4", "stripe", "bitcoin_lightning"]
 const PAYMENT_DETAILS_TIMEOUT_MS = Number(process.env.PAYMENT_DETAILS_TIMEOUT_MS || 12000)
@@ -171,11 +171,14 @@ function buildWalletOptions(walletUrl: string, network?: string): WalletOption[]
 export async function getMerchantAvailableNetworks(merchantId: string): Promise<WalletNetwork[]> {
   await loadProviders()
 
-  const [wallets, hostedNetworks, providers, pineTreeWalletProfile] = await Promise.all([
+  const [wallets, hostedNetworks, providers, pineTreeWalletProfile, lightningProfile] = await Promise.all([
     getMerchantWallets(merchantId),
     getConnectedHostedCheckoutNetworks(merchantId),
     getMerchantProviders(merchantId),
-    getPineTreeWalletProfile(merchantId)
+    getPineTreeWalletProfile(merchantId),
+    import("@/database/merchantLightningProfiles")
+      .then((mod) => mod.getMerchantLightningProfile(merchantId))
+      .catch(() => null)
   ])
 
   // Build the set of provider keys that are both connected and enabled.
@@ -193,10 +196,45 @@ export async function getMerchantAvailableNetworks(merchantId: string): Promise<
     providers.map((p) => String(p.provider || "").toLowerCase().trim())
   )
 
+  const speedProvider = providers.find((provider) => String(provider.provider || "").toLowerCase().trim() === SPEED_PROVIDER_NAME)
+  const speedCredentials = (speedProvider?.credentials || {}) as {
+    speed_account_id?: string
+    account_id?: string
+    setup_status?: string
+  }
+  const speedConfig = getPineTreeSpeedConfigStatus()
+  const speedAccountReady = Boolean(
+    lightningProfile?.status === "ready" ||
+    (
+      String(speedCredentials.speed_account_id || speedCredentials.account_id || "").trim() &&
+      (String(speedCredentials.setup_status || "").trim() === "ready" ||
+        String(speedCredentials.setup_status || "").trim() === "ready_for_payments")
+    )
+  )
+  const railReadiness = buildPineTreeRailReadiness({
+    providers,
+    walletProfile: pineTreeWalletProfile,
+    speed: {
+      configured: speedConfig.configured,
+      accountReady: speedAccountReady,
+      payoutReady: Boolean(speedAccountReady && pineTreeWalletProfile?.btc_payout_enabled),
+      status: lightningProfile?.status || String(speedCredentials.setup_status || "")
+    }
+  })
+
+  if (process.env.NODE_ENV !== "production" || process.env.PINETREE_RAIL_READINESS_DEBUG === "true") {
+    console.info("[pinetree-rail-readiness] payment-networks", {
+      merchantId,
+      ...getPineTreeRailReadinessDiagnostics(railReadiness)
+    })
+  }
+
   const walletNetworks = wallets
     .map((w) => normalizeWalletNetwork(w.network))
     .filter((n): n is WalletNetwork => {
       if (!n || !SUPPORTED_NETWORKS.includes(n)) return false
+      if (n === "solana") return railReadiness.solana.paymentReady
+      if (n === "base") return railReadiness.base.paymentReady
       const providerKey = walletNetworkToProviderKey(n)
       if (!providerKey) return false
       if (enabledProviders.has(providerKey)) return true
@@ -205,50 +243,24 @@ export async function getMerchantAvailableNetworks(merchantId: string): Promise<
       return true
     })
 
+  const pineTreeWalletNetworks: WalletNetwork[] = [
+    ...(railReadiness.solana.paymentReady ? ["solana" as const] : []),
+    ...(railReadiness.base.paymentReady ? ["base" as const] : []),
+  ]
+
   const hostedCheckoutNetworks = hostedNetworks
     .map((n) => normalizeWalletNetwork(n))
     .filter((n): n is WalletNetwork => Boolean(n && SUPPORTED_NETWORKS.includes(n)))
 
   const enabledHostedNetworks = hostedCheckoutNetworks.filter((network) => {
+    if (network === "bitcoin_lightning") return railReadiness.bitcoin_lightning.paymentReady
     if (!isProviderAvailableForCheckout(network, enabledProviders)) return false
 
-    if (network !== "bitcoin_lightning") return true
+    return true
 
-    return providers.some((provider) => {
-      const providerId = String(provider.provider || "").toLowerCase().trim()
-      const metadata = getProviderMetadata(providerId)
-      if (!metadata?.supportedNetworks.includes("bitcoin_lightning")) return false
-      if (!metadata.capabilities?.supportsLightningInvoice) return false
-      if (!isProviderHealthy(providerId)) return false
-      // NWC uses polling and post-payment fee — does not require webhook or atomic fee capture
-      if (providerId === SPEED_PROVIDER_NAME) {
-        if (isSpeedPlatformTreasurySweepEnabled()) {
-          const speedConfig = getPineTreeSpeedConfigStatus()
-          const btcPayoutReady = Boolean(pineTreeWalletProfile?.btc_address && pineTreeWalletProfile.btc_payout_enabled)
-          return Boolean(speedConfig.configured && btcPayoutReady)
-        }
-        const credentials = (provider.credentials || {}) as {
-          speed_account_id?: string
-          setup_status?: string
-        }
-        const setupStatus = String(credentials.setup_status || "").trim()
-        return Boolean(
-          String(credentials.speed_account_id || "").trim() &&
-          (setupStatus === "ready_for_payments" || setupStatus === "ready")
-        )
-      }
-      if (providerId === "lightning_nwc") {
-        const credentials = (provider.credentials || {}) as { capabilities?: Parameters<typeof getLightningNwcReadiness>[0] }
-        return getLightningNwcReadiness(credentials.capabilities).ready
-      }
-      return Boolean(
-        metadata.capabilities?.supportsWebhookConfirmation &&
-        providerSupportsFeeAtPaymentTime(providerId)
-      )
-    })
   })
 
-  return uniqueNetworks([...walletNetworks, ...enabledHostedNetworks])
+  return uniqueNetworks([...walletNetworks, ...pineTreeWalletNetworks, ...enabledHostedNetworks])
 }
 
 export async function createPaymentIntentEngine(input: {

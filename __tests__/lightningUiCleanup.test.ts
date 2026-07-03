@@ -40,18 +40,18 @@ describe("Bitcoin Lightning provider card cleanup", () => {
   })
 })
 
-describe("rail status vocabulary - Connected / Not connected only", () => {
-  it("ManagedCryptoRailCard uses Connected or Not connected status labels", () => {
-    expect(providersPage).toContain('"Connected" : "Not connected"')
+describe("rail status vocabulary - Connected / Setup needed / Not connected", () => {
+  it("ManagedCryptoRailCard uses normalized payment readiness status labels", () => {
+    expect(providersPage).toContain('"Connected" : enabled ? "Setup needed" : "Not connected"')
   })
 
   it("providers page does not use a yellow Disabled pill for crypto rails", () => {
     expect(providersPage).not.toContain('"Disabled"')
   })
 
-  it("getLightningCardState returns Connected or Not connected, never Managed", () => {
+  it("getLightningCardState returns Connected, Setup needed, or Not connected, never Managed", () => {
     expect(providersPage).not.toContain('"Managed" as const')
-    expect(providersPage).toContain('"Connected" | "Not connected"')
+    expect(providersPage).toContain('"Connected" | "Setup needed" | "Not connected"')
   })
 })
 
@@ -133,14 +133,14 @@ describe("Balances tab wallet details", () => {
 
 describe("Lightning connected state derives from real readiness", () => {
   it("getLightningCardState checks BTC address presence, platform config, and enabled flag", () => {
-    expect(providersPage).toContain('isCanonicalRailConfigured("lightning")')
-    expect(providersPage).toContain('dashboard_status === "connected"')
+    expect(providersPage).toContain('getManagedRailReadiness("lightning")')
+    expect(providersPage).toContain("readiness?.paymentReady")
     expect(providersPage).toContain('isEnabled("lightning")')
   })
 
   it("ManagedCryptoRailCard checks lightning platform readiness for status pill", () => {
-    expect(providersPage).toContain("lightningPlatformReady")
-    expect(providersPage).toContain('provider !== "lightning"')
+    expect(providersPage).toContain("readiness?.paymentReady")
+    expect(providersPage).toContain("readiness?.walletProvisioned")
   })
 })
 

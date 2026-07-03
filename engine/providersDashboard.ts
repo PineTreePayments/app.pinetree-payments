@@ -5,6 +5,11 @@ import { getProviderMetadata } from "./providerRegistry"
 import { getLightningNwcReadiness, SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
+import {
+  buildPineTreeRailReadiness,
+  getPineTreeRailReadinessDiagnostics,
+  type PineTreeRailReadinessMap
+} from "@/lib/pinetreeRailReadiness"
 
 const db = supabaseAdmin || supabase
 
@@ -60,6 +65,7 @@ function oneWalletPerRail(wallets: WalletRow[]): WalletRow[] {
 export type ProvidersDashboardData = {
   providers: ProviderRow[]
   wallets: WalletRow[]
+  railReadiness: PineTreeRailReadinessMap
   pineTreeWalletProfile: {
     baseAddressPresent: boolean
     solanaAddressPresent: boolean
@@ -87,13 +93,23 @@ const OVERVIEW_RAILS = [
 ] as const
 
 export function buildOverviewRailReadiness(
-  data: Pick<ProvidersDashboardData, "providers" | "wallets">
+  data: Pick<ProvidersDashboardData, "providers" | "wallets"> & Partial<Pick<ProvidersDashboardData, "railReadiness">>
 ): OverviewRailReadiness[] {
   const provider = (id: string) => data.providers.find((row) => row.provider === id)
   const wallet = (id: string) => data.wallets.find((row) => row.network === id)
 
   return OVERVIEW_RAILS.map(({ id, label }) => {
     if (id === "solana" || id === "base") {
+      const readiness = data.railReadiness?.[id]
+      if (readiness) {
+        if (readiness.paymentReady) {
+          return { id, label, status: "Connected", detail: "PineTree Wallet settlement address ready" }
+        }
+        if (readiness.enabled) {
+          return { id, label, status: "Requires Configuration", detail: "PineTree Wallet address missing" }
+        }
+        return { id, label, status: "Not Connected", detail: "Payment rail off" }
+      }
       const row = provider(id)
       const connectedWallet = wallet(id)
       if (!connectedWallet) {
@@ -106,6 +122,26 @@ export function buildOverviewRailReadiness(
     }
 
     if (id === "lightning") {
+      const readiness = data.railReadiness?.bitcoin_lightning
+      if (readiness) {
+        if (readiness.paymentReady) {
+          return {
+            id,
+            label,
+            status: "Connected",
+            detail: "Speed Lightning payment account ready"
+          }
+        }
+        if (readiness.enabled) {
+          return {
+            id,
+            label,
+            status: "Requires Configuration",
+            detail: "Speed Lightning setup pending"
+          }
+        }
+        return { id, label, status: "Not Connected", detail: "Bitcoin Lightning rail off" }
+      }
       const speed = provider(SPEED_PROVIDER_NAME)
       const nwc = provider("lightning")
       const speedConnected = Boolean(speed?.enabled && speed?.readiness?.ready)
@@ -442,10 +478,11 @@ export async function getProvidersDashboardEngine(merchantId: string): Promise<P
   await loadProviders()
   await ensureMerchant(merchantId)
 
-  const [providersRes, walletsRes, pineTreeWalletProfile, settings] = await Promise.all([
+  const [providersRes, walletsRes, pineTreeWalletProfile, lightningProfile, settings] = await Promise.all([
     db.from("merchant_providers").select("*").eq("merchant_id", merchantId),
     db.from("merchant_wallets").select("*").eq("merchant_id", merchantId),
     getPineTreeWalletProfile(merchantId),
+    import("@/database/merchantLightningProfiles").then((mod) => mod.getMerchantLightningProfile(merchantId)),
     ensureMerchantSettings(merchantId)
   ])
 
@@ -457,16 +494,45 @@ export async function getProvidersDashboardEngine(merchantId: string): Promise<P
     throw new Error(`Failed to load wallets: ${walletsRes.error.message}`)
   }
 
+  const providerRows = (providersRes.data || []) as ProviderRow[]
+  const speedProvider = providerRows.find((row) => row.provider === SPEED_PROVIDER_NAME)
+  const speedCredentials = (speedProvider?.credentials || {}) as JsonObject
+  const speedConfig = getPineTreeSpeedConfigStatus()
+  const speedAccountReady = Boolean(
+    lightningProfile?.status === "ready" ||
+    (
+      String(speedCredentials.speed_account_id || speedCredentials.account_id || "").trim() &&
+      (String(speedCredentials.setup_status || "").trim() === "ready" ||
+        String(speedCredentials.setup_status || "").trim() === "ready_for_payments")
+    )
+  )
+  const railReadiness = buildPineTreeRailReadiness({
+    providers: providerRows,
+    walletProfile: pineTreeWalletProfile,
+    speed: {
+      configured: speedConfig.configured,
+      accountReady: speedAccountReady,
+      payoutReady: Boolean(speedAccountReady && pineTreeWalletProfile?.btc_payout_enabled),
+      status: lightningProfile?.status || String(speedCredentials.setup_status || speedProvider?.status || "")
+    }
+  })
+
+  if (process.env.NODE_ENV !== "production" || process.env.PINETREE_RAIL_READINESS_DEBUG === "true") {
+    console.info("[pinetree-rail-readiness] providers-dashboard", {
+      merchantId,
+      ...getPineTreeRailReadinessDiagnostics(railReadiness)
+    })
+  }
+
   return {
-    providers: decorateProviderRows((providersRes.data || []) as ProviderRow[]),
+    providers: decorateProviderRows(providerRows),
     wallets: oneWalletPerRail((walletsRes.data || []) as WalletRow[]),
+    railReadiness,
     pineTreeWalletProfile: pineTreeWalletProfile
       ? {
           baseAddressPresent: Boolean(pineTreeWalletProfile.base_address),
           solanaAddressPresent: Boolean(pineTreeWalletProfile.solana_address),
-          bitcoinAddressPresent: Boolean(
-            pineTreeWalletProfile.btc_address || pineTreeWalletProfile.bitcoin_onchain_address
-          )
+          bitcoinAddressPresent: railReadiness.bitcoin_lightning.walletProvisioned
         }
       : null,
     settings

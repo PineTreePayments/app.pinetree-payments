@@ -30,6 +30,7 @@ import {
   dashboardPageTitleClass,
 } from "@/components/dashboard/DashboardPrimitives"
 import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/PineTreeDynamicProvider"
+import type { PineTreeRailReadinessMap } from "@/lib/pinetreeRailReadiness"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -221,6 +222,7 @@ type ProvidersDashboardResponse = {
     status?: string
     enabled?: boolean
   }>
+  railReadiness?: PineTreeRailReadinessMap
 }
 
 type WalletCreationStep =
@@ -1696,6 +1698,7 @@ function PineTreeWalletRuntime() {
   const [syncing, setSyncing] = useState(false)
   const [copiedAddress, setCopiedAddress] = useState("")
   const [enabledRails, setEnabledRails] = useState<EnabledRailState>(defaultEnabledRails)
+  const [railReadiness, setRailReadiness] = useState<PineTreeRailReadinessMap | null>(null)
   const [walletSync, setWalletSync] = useState<PineTreeWalletSyncResponse>(defaultWalletSyncState)
   const [walletSyncing, setWalletSyncing] = useState(false)
   const [withdrawalRail, setWithdrawalRail] = useState<WithdrawalRail>("base")
@@ -1779,17 +1782,19 @@ function PineTreeWalletRuntime() {
         return
       }
       const json = (await res.json()) as ProvidersDashboardResponse
+      setRailReadiness(json.railReadiness || null)
       const providerRows = json.providers || []
       const providerEnabled = (provider: string) => {
         const row = providerRows.find((item) => item.provider === provider)
         return Boolean(row?.enabled === true)
       }
       setEnabledRails({
-        base: providerEnabled("base"),
-        solana: providerEnabled("solana"),
-        bitcoin: providerEnabled("lightning_speed"),
+        base: json.railReadiness?.base.enabled ?? providerEnabled("base"),
+        solana: json.railReadiness?.solana.enabled ?? providerEnabled("solana"),
+        bitcoin: json.railReadiness?.bitcoin_lightning.enabled ?? providerEnabled("lightning_speed"),
       })
     } catch {
+      setRailReadiness(null)
       setEnabledRails(defaultEnabledRails)
     }
   }, [])
@@ -2165,7 +2170,6 @@ function PineTreeWalletRuntime() {
     setSyncing(true)
     logWalletCreationStep("extracting_addresses")
     try {
-      const bitcoinAddress = dynamicNetworkAddresses.bitcoin[0]?.address ?? null
       const baseAddress = dynamicNetworkAddresses.base[0]?.address ?? null
       const solanaAddress = dynamicNetworkAddresses.solana[0]?.address ?? null
       const baseSigner = baseAddress
@@ -2196,18 +2200,10 @@ function PineTreeWalletRuntime() {
         })
         return null
       }
-      // Only include btc_address when Dynamic actually returned a Bitcoin wallet.
-      // Omitting the field preserves a previously saved btc_address — a partial sync
-      // (base/solana returned, bitcoin not yet provisioned) must not clear payout config.
       const body: Record<string, unknown> = {
         dynamic_user_id: user.userId,
         base_address: baseAddress,
         solana_address: solanaAddress,
-        bitcoin_lightning_address: dynamicNetworkAddresses.lightning[0]?.address ?? null,
-        ...(bitcoinAddress !== null && {
-          bitcoin_onchain_address: bitcoinAddress,
-          btc_address: bitcoinAddress,
-        }),
       }
       logWalletCreationStep("syncing_pinetree_profile", {
         profile_sync_request_sent: true,
@@ -2408,8 +2404,8 @@ function PineTreeWalletRuntime() {
     }
   }, [profile])
 
-  const baseReady = profileAddresses.base.length > 0
-  const solanaReady = profileAddresses.solana.length > 0
+  const baseReady = railReadiness?.base.walletProvisioned ?? profileAddresses.base.length > 0
+  const solanaReady = railReadiness?.solana.walletProvisioned ?? profileAddresses.solana.length > 0
   const baseSignerReady = Boolean(
     profile?.base_address &&
       findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, "base", profile.base_address)
@@ -2423,7 +2419,7 @@ function PineTreeWalletRuntime() {
   // Derived state — Lightning (PineTree-managed backend, NOT Dynamic Spark)
   // ---------------------------------------------------------------------------
 
-  const btcPayoutReady = Boolean(profile?.btc_address && profile.btc_payout_enabled)
+  const btcPayoutReady = railReadiness?.bitcoin_lightning.withdrawalReady ?? Boolean(profile?.btc_address && profile.btc_payout_enabled)
   const bitcoinPayoutEntries: AddressEntry[] = profile?.btc_address
     ? [{
         id: "btc-payout",
@@ -2431,7 +2427,7 @@ function PineTreeWalletRuntime() {
       }]
     : []
 
-  const bitcoinReady = btcPayoutReady
+  const bitcoinReady = railReadiness?.bitcoin_lightning.walletProvisioned ?? btcPayoutReady
   const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady && baseSignerReady && solanaSignerReady
   const dynamicEmbeddedSignersReady = baseSignerReady && solanaSignerReady
   const profileHasDynamicAddresses = baseReady || solanaReady
@@ -2456,8 +2452,8 @@ function PineTreeWalletRuntime() {
   const withdrawalWalletRows = useMemo(() => [
     { rail: "base" as const, configured: baseReady && enabledRails.base },
     { rail: "solana" as const, configured: solanaReady && enabledRails.solana },
-    { rail: "bitcoin" as const, configured: bitcoinReady && enabledRails.bitcoin },
-  ], [baseReady, bitcoinReady, enabledRails.base, enabledRails.bitcoin, enabledRails.solana, solanaReady])
+    { rail: "bitcoin" as const, configured: btcPayoutReady && enabledRails.bitcoin },
+  ], [baseReady, btcPayoutReady, enabledRails.base, enabledRails.bitcoin, enabledRails.solana, solanaReady])
 
   const withdrawableAssetOptions = useMemo((): WithdrawalAssetOption[] => {
     return withdrawalWalletRows

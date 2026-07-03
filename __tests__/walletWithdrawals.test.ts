@@ -544,65 +544,49 @@ describe("PineTree Wallet withdrawals", () => {
       btc_address_type: "native_segwit",
     })
 
-    const result = await createWalletWithdrawalReview("merchant_1", {
+    await expect(createWalletWithdrawalReview("merchant_1", {
       rail: "base",
       asset: "ETH",
       destinationAddress: "0x1234567890abcdef1234567890abcdef12345678",
       amountDecimal: "0.01",
-    }, createDefaultWithdrawalSigner())
-
-    expect(result.canSubmit).toBe(false)
-    expect(result.review.approvalMethod).toBe("manual_review")
-    expect(result.review.diagnostics).toMatchObject({
-      walletProfileAddressPresent: false,
-      fallbackReason: "source_wallet_missing",
-    })
+    }, createDefaultWithdrawalSigner())).rejects.toThrow("PineTree Wallet source address is not available.")
   })
 
-  it("Bitcoin remains signer unavailable without BTC execution config", async () => {
+  it("Bitcoin withdrawal review is blocked without Speed/BTC payout readiness", async () => {
     vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
 
-    const result = await createWalletWithdrawalReview("merchant_1", {
+    await expect(createWalletWithdrawalReview("merchant_1", {
       rail: "bitcoin",
       asset: "BTC",
       destinationAddress: BTC_DESTINATION,
       amountDecimal: "0.001",
-    }, createDefaultWithdrawalSigner())
-
-    expect(result.canSubmit).toBe(false)
-    expect(result.review.approvalMethod).toBe("manual_review")
+    }, createDefaultWithdrawalSigner())).rejects.toThrow("Bitcoin payouts are not ready for this merchant.")
   })
 
-  it("Bitcoin remains signer unavailable if BTC provider env is missing", async () => {
+  it("Bitcoin withdrawal review is blocked if BTC provider env is missing", async () => {
     vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
 
-    const result = await createWalletWithdrawalReview("merchant_1", {
+    await expect(createWalletWithdrawalReview("merchant_1", {
       rail: "bitcoin",
       asset: "BTC",
       destinationAddress: BTC_DESTINATION,
       amountDecimal: "0.0001",
-    }, createDefaultWithdrawalSigner())
-
-    expect(result.canSubmit).toBe(false)
-    expect(result.review.approvalMethod).toBe("manual_review")
+    }, createDefaultWithdrawalSigner())).rejects.toThrow("Bitcoin payouts are not ready for this merchant.")
   })
 
-  it("Bitcoin remains signer unavailable when BTC broadcast is not enabled", async () => {
+  it("Bitcoin withdrawal review is blocked when BTC broadcast is not enabled", async () => {
     vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
     vi.stubEnv("BITCOIN_NETWORK", "mainnet")
     vi.stubEnv("BITCOIN_UTXO_PROVIDER", "esplora")
     vi.stubEnv("BITCOIN_ESPLORA_BASE_URL", "https://mempool.test/api")
     vi.stubEnv("BITCOIN_BROADCAST_ENABLED", "false")
 
-    const result = await createWalletWithdrawalReview("merchant_1", {
+    await expect(createWalletWithdrawalReview("merchant_1", {
       rail: "bitcoin",
       asset: "BTC",
       destinationAddress: BTC_DESTINATION,
       amountDecimal: "0.0001",
-    }, createDefaultWithdrawalSigner())
-
-    expect(result.canSubmit).toBe(false)
-    expect(result.review.approvalMethod).toBe("manual_review")
+    }, createDefaultWithdrawalSigner())).rejects.toThrow("Bitcoin payouts are not ready for this merchant.")
   })
 
   it("rejects invalid and wrong-network BTC destination addresses", () => {
@@ -1185,20 +1169,17 @@ describe("PineTree Wallet withdrawals", () => {
     }
   })
 
-  it("BTC withdrawal without BITCOIN_BROADCAST_ENABLED uses manual_review approval method", async () => {
+  it("BTC withdrawal without BITCOIN_BROADCAST_ENABLED is blocked before approval", async () => {
     vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
     vi.stubEnv("BITCOIN_NETWORK", "mainnet")
     vi.stubEnv("BITCOIN_UTXO_PROVIDER", "esplora")
     vi.stubEnv("BITCOIN_ESPLORA_BASE_URL", "https://mempool.test/api")
 
-    const result = await createWalletWithdrawalReview("merchant_1", {
+    await expect(createWalletWithdrawalReview("merchant_1", {
       rail: "bitcoin",
       asset: "BTC",
       destinationAddress: BTC_DESTINATION,
       amountDecimal: "0.0001",
-    }, createDefaultWithdrawalSigner())
-
-    expect(result.canSubmit).toBe(false)
-    expect(result.review.approvalMethod).toBe("manual_review")
+    }, createDefaultWithdrawalSigner())).rejects.toThrow("Bitcoin payouts are not ready for this merchant.")
   })
 })

@@ -127,16 +127,16 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("wallet status requires DB profile addresses plus hydrated Dynamic signers", () => {
-    // baseReady and solanaReady come from profileAddresses (DB-backed addresses)
-    expect(page).toContain("const baseReady = profileAddresses.base.length > 0")
-    expect(page).toContain("const solanaReady = profileAddresses.solana.length > 0")
+    // baseReady and solanaReady come from normalized readiness with DB-backed address fallback
+    expect(page).toContain("const baseReady = railReadiness?.base.walletProvisioned ?? profileAddresses.base.length > 0")
+    expect(page).toContain("const solanaReady = railReadiness?.solana.walletProvisioned ?? profileAddresses.solana.length > 0")
     expect(page).toContain("const baseSignerReady = Boolean(")
     expect(page).toContain("const solanaSignerReady = Boolean(")
     expect(page).toContain('findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, "base", profile.base_address)')
     expect(page).toContain('findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, "solana", profile.solana_address)')
-    // btcPayoutReady requires both address and payout enabled; bitcoinReady now delegates to it.
-    expect(page).toContain('const btcPayoutReady = Boolean(profile?.btc_address && profile.btc_payout_enabled)')
-    expect(page).toContain("const bitcoinReady = btcPayoutReady")
+    // BTC payout readiness is separate from Lightning wallet provisioning.
+    expect(page).toContain("const btcPayoutReady = railReadiness?.bitcoin_lightning.withdrawalReady")
+    expect(page).toContain("const bitcoinReady = railReadiness?.bitcoin_lightning.walletProvisioned")
     expect(page).not.toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
     expect(page).toContain("const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady && baseSignerReady && solanaSignerReady")
     expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : allPrimaryRailsConnected ? "Ready" : repairOrSetupIncomplete ? "Setup incomplete" : "Not connected"')
@@ -191,14 +191,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("recoveryPhrase")
   })
 
-  it("sync payload omits btc_address when Dynamic does not return a Bitcoin wallet", () => {
-    // When Dynamic embedded wallet hasn't provisioned Bitcoin, bitcoinAddress is null.
-    // Including btc_address: null in the body would wipe a previously saved payout address.
-    // The conditional spread ensures btc_address is only sent when it is non-null.
-    expect(page).toContain("bitcoinAddress !== null && {")
-    expect(page).toContain("btc_address: bitcoinAddress,")
-    // The comment in code explains the safety rationale
-    expect(page).toContain("Omitting the field preserves a previously saved btc_address")
+  it("Dynamic profile sync sends only Dynamic user, Base, and Solana addresses", () => {
+    expect(page).toContain("dynamic_user_id: user.userId")
+    expect(page).toContain("base_address: baseAddress")
+    expect(page).toContain("solana_address: solanaAddress")
+    expect(page).not.toContain("btc_address: bitcoinAddress")
+    expect(page).not.toContain("bitcoin_onchain_address: bitcoinAddress")
   })
 
   it("does not render a separate wallet-address refresh control in the modal", () => {
@@ -661,16 +659,17 @@ describe("PineTree embedded wallet setup", () => {
     expect(apiRoute).toContain("upsertPineTreeWalletProfile")
   })
 
-  it("pinetree-profile API runs server-side BTC address provisioning during profile sync", () => {
+  it("pinetree-profile API does not run BTC provisioning during Base/Solana profile sync", () => {
     expect(apiRoute).toContain("provisionMerchantBitcoinAddress")
     expect(apiRoute).toContain("existingProfile")
+    expect(apiRoute).toContain("hasBtcAddressInput && normalizedBtcAddress")
     expect(apiRoute).toContain("dynamicBtcAddress: normalizedBtcAddress")
-    expect(apiRoute).toContain("btcWalletProvisioningStatus: bitcoinProvisioning.status")
-    expect(apiRoute).toContain("btcWalletProvisioningError: bitcoinProvisioning.error || null")
+    expect(apiRoute).toContain("btcWalletProvisioningStatus: bitcoinProvisioning?.status")
+    expect(apiRoute).toContain("btcWalletProvisioningError: bitcoinProvisioning ? bitcoinProvisioning.error || null : undefined")
   })
 
   it("pinetree-profile API does not overwrite an existing btc_address with null", () => {
-    expect(apiRoute).toContain('const btcAddressAlreadyExists = bitcoinProvisioning.status === "already_exists"')
+    expect(apiRoute).toContain('const btcAddressAlreadyExists = bitcoinProvisioning?.status === "already_exists"')
     expect(apiRoute).toContain("btcAddress: btcAddressIsReady && !btcAddressAlreadyExists ? provisionedBtcAddress : undefined")
   })
 
@@ -760,7 +759,8 @@ describe("PineTree embedded wallet setup", () => {
 
   it("Bitcoin display readiness is not derived from a Dynamic Spark address", () => {
     // Readiness is driven by the DB record, not any Spark address returned by Dynamic
-    expect(page).toContain("const btcPayoutReady = Boolean(profile?.btc_address && profile.btc_payout_enabled)")
+    expect(page).toContain("railReadiness?.bitcoin_lightning.walletProvisioned")
+    expect(page).toContain("railReadiness?.bitcoin_lightning.withdrawalReady")
     expect(page).toContain("function WalletOverviewSummary")
     // No old pattern that checked Spark address length
     expect(page).not.toContain("profileAddresses.lightning.length > 0")

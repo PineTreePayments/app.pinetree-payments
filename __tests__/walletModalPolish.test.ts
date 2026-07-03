@@ -140,7 +140,7 @@ describe("Balances tab - wallet asset list and compact detail", () => {
 
   it("BTC wallet address can exist while BTC balance indexing remains pending", () => {
     const src = balanceRowsSrc()
-    expect(walletPage).toContain("const bitcoinReady = btcPayoutReady")
+    expect(walletPage).toContain("const bitcoinReady = railReadiness?.bitcoin_lightning.walletProvisioned")
     expect(walletPage).not.toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
     expect(src).toContain("bitcoinPayoutEntries[0]?.address")
     expect(src).toContain("formatBalance(row.balance, row.asset)")
@@ -392,8 +392,8 @@ describe("Provider connected/not connected behavior", () => {
     expect(walletPage).toContain('"Connected" : "Not connected"')
   })
 
-  it("providers page uses Connected/Not connected with no Disabled pill for crypto rails", () => {
+  it("providers page uses Connected/Setup needed/Not connected with no Disabled pill for crypto rails", () => {
     expect(providersPage).not.toContain('"Disabled"')
-    expect(providersPage).toContain('"Connected" : "Not connected"')
+    expect(providersPage).toContain('"Connected" : enabled ? "Setup needed" : "Not connected"')
   })
 })

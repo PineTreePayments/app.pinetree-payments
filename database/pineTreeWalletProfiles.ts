@@ -56,17 +56,16 @@ export type UpsertWalletProfileInput = {
   btcPayoutVerifiedAt?: string | null
 }
 
-function deriveProfileStatus(fields: {
+export function deriveProfileStatus(fields: {
   base_address: string | null | undefined
   solana_address: string | null | undefined
   bitcoin_lightning_status: string | null | undefined
 }): PineTreeWalletProfileStatus {
   const hasBase = Boolean(fields.base_address)
   const hasSolana = Boolean(fields.solana_address)
-  const lightningReady = fields.bitcoin_lightning_status === "ready"
 
   if (!hasBase && !hasSolana) return "not_created"
-  if (hasBase && hasSolana && lightningReady) return "ready"
+  if (hasBase && hasSolana) return "ready"
   return "needs_attention"
 }
 

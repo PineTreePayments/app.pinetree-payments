@@ -39,9 +39,8 @@ export async function GET(req: NextRequest) {
  *   btc_address                string | null
  *   btc_address_type           "taproot" | "native_segwit" | "legacy" | "nested_segwit" | "unknown" | null
  *
- * Bitcoin payout address provisioning is completed server-side. A Dynamic BTC
- * address from the client may be used, but a null client value never clears an
- * existing btc_address.
+ * Dynamic Base/Solana profile sync does not provision BTC. BTC payout fields
+ * are updated only when an explicit BTC address is supplied.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -59,6 +58,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ profile })
     }
 
+    const hasBtcAddressInput = "btc_address" in body || "bitcoin_onchain_address" in body
     const bodyBtcAddress = "btc_address" in body
       ? (body.btc_address as string | null)
       : "bitcoin_onchain_address" in body
@@ -71,17 +71,19 @@ export async function POST(req: NextRequest) {
         ? inferBtcAddressType(normalizedBtcAddress)
         : undefined
     const existingProfile = await getPineTreeWalletProfile(merchantId)
-    const bitcoinProvisioning = await provisionMerchantBitcoinAddress({
-      merchantId,
-      existingProfile,
-      dynamicBtcAddress: normalizedBtcAddress,
-      dynamicBtcAddressType: btcAddressType,
-    })
-    const provisionedBtcAddress = bitcoinProvisioning.btcAddress
+    const bitcoinProvisioning = hasBtcAddressInput && normalizedBtcAddress
+      ? await provisionMerchantBitcoinAddress({
+        merchantId,
+        existingProfile,
+        dynamicBtcAddress: normalizedBtcAddress,
+        dynamicBtcAddressType: btcAddressType,
+      })
+      : null
+    const provisionedBtcAddress = bitcoinProvisioning?.btcAddress
       ? bitcoinProvisioning.btcAddress.trim()
       : null
     const now = new Date().toISOString()
-    const btcAddressAlreadyExists = bitcoinProvisioning.status === "already_exists"
+    const btcAddressAlreadyExists = bitcoinProvisioning?.status === "already_exists"
     const btcAddressIsReady = Boolean(provisionedBtcAddress)
 
     const profile = await upsertPineTreeWalletProfile({
@@ -95,16 +97,16 @@ export async function POST(req: NextRequest) {
       bitcoinLightningProvider: "bitcoin_lightning_provider" in body ? (body.bitcoin_lightning_provider as string | null) : undefined,
       bitcoinLightningAccountId: "bitcoin_lightning_account_id" in body ? (body.bitcoin_lightning_account_id as string | null) : undefined,
       btcAddress: btcAddressIsReady && !btcAddressAlreadyExists ? provisionedBtcAddress : undefined,
-      btcAddressType: btcAddressIsReady && !btcAddressAlreadyExists ? bitcoinProvisioning.btcAddressType : undefined,
+      btcAddressType: btcAddressIsReady && !btcAddressAlreadyExists ? bitcoinProvisioning?.btcAddressType : undefined,
       btcWalletProvider: btcAddressIsReady && !btcAddressAlreadyExists
-        ? bitcoinProvisioning.btcWalletProvider
-        : bitcoinProvisioning.status === "missing_provider" || bitcoinProvisioning.status === "provider_failed"
+        ? bitcoinProvisioning?.btcWalletProvider
+        : bitcoinProvisioning?.status === "missing_provider" || bitcoinProvisioning?.status === "provider_failed"
           ? bitcoinProvisioning.btcWalletProvider
           : undefined,
-      btcWalletProviderRef: btcAddressIsReady && !btcAddressAlreadyExists ? bitcoinProvisioning.providerRef ?? null : undefined,
+      btcWalletProviderRef: btcAddressIsReady && !btcAddressAlreadyExists ? bitcoinProvisioning?.providerRef ?? null : undefined,
       btcWalletLastProvisionedAt: btcAddressIsReady && !btcAddressAlreadyExists ? now : undefined,
-      btcWalletProvisioningStatus: bitcoinProvisioning.status,
-      btcWalletProvisioningError: bitcoinProvisioning.error || null,
+      btcWalletProvisioningStatus: bitcoinProvisioning?.status,
+      btcWalletProvisioningError: bitcoinProvisioning ? bitcoinProvisioning.error || null : undefined,
       btcPayoutEnabled: btcAddressIsReady || btcAddressAlreadyExists ? true : undefined,
       btcPayoutVerifiedAt: btcAddressIsReady || (btcAddressAlreadyExists && !existingProfile?.btc_payout_verified_at)
         ? now

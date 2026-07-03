@@ -86,10 +86,9 @@ describe("paymentReadiness canonical wallet mode", () => {
   })
 
   it("requires Speed config, BTC address, and merchant enablement for Lightning readiness", () => {
-    expect(engine).toContain("const merchantLightningEnabled = speedProvider?.enabled !== false")
-    expect(engine).toContain("const speedReady = Boolean(speedConfig.configured && merchantLightningEnabled)")
-    expect(engine).toContain("const btcPayoutReady = Boolean(btcAddress && pineTreeWalletProfile?.btc_payout_enabled)")
-    expect(engine).toContain("connected: btcPayoutReady")
+    expect(engine).toContain("buildPineTreeRailReadiness")
+    expect(engine).toContain("railReadiness[item.network].paymentReady")
+    expect(engine).toContain("payoutReady: Boolean(speedAccountReady && pineTreeWalletProfile?.btc_payout_enabled)")
   })
 })
 
@@ -111,8 +110,8 @@ describe("payment intent rail filtering", () => {
     expect(engine).toContain('enabledProviders.has("lightning")')
     expect(engine).toContain('enabledProviders.has("lightning_nwc")')
     expect(engine).toContain("getPineTreeWalletProfile")
-    expect(engine).toContain("const btcPayoutReady = Boolean(pineTreeWalletProfile?.btc_address && pineTreeWalletProfile.btc_payout_enabled)")
-    expect(engine).toContain("return Boolean(speedConfig.configured && btcPayoutReady)")
+    expect(engine).toContain("buildPineTreeRailReadiness")
+    expect(engine).toContain("railReadiness.bitcoin_lightning.paymentReady")
   })
 })
 
@@ -146,13 +145,13 @@ describe("Providers page canonical wallet mode", () => {
     // Destination row was removed from the card; settlement label is sufficient
   })
 
-  it("shows managed crypto rails as Connected or Not connected with Enabled toggles", () => {
+  it("shows managed crypto rails as Connected, Setup needed, or Not connected with Enabled toggles", () => {
     expect(page).toContain('provider: "solana" | "base" | "lightning"')
-    expect(page).toContain('"Connected" : "Not connected"')
+    expect(page).toContain('"Connected" : enabled ? "Setup needed" : "Not connected"')
     expect(page).not.toContain('"Not configured"')
     expect(page).toContain(">Enabled</span>")
     expect(page).toContain("onChange={(v) => toggleProvider(provider, v)}")
-    expect(page).toContain("disabled={!connected}")
+    expect(page).toContain('disabled={provider !== "lightning" && !connected}')
   })
 
   it("calculates canonical rail connection from PineTree Wallet profile address presence", () => {
@@ -160,7 +159,7 @@ describe("Providers page canonical wallet mode", () => {
     expect(engine).toContain("getPineTreeWalletProfile")
     expect(engine).toContain("baseAddressPresent: Boolean(pineTreeWalletProfile.base_address)")
     expect(engine).toContain("solanaAddressPresent: Boolean(pineTreeWalletProfile.solana_address)")
-    expect(engine).toContain("pineTreeWalletProfile.btc_address || pineTreeWalletProfile.bitcoin_onchain_address")
+    expect(engine).toContain("bitcoinAddressPresent: railReadiness.bitcoin_lightning.walletProvisioned")
     expect(page).toContain("function isCanonicalRailConfigured")
     expect(page).toContain("pineTreeWalletProfile?.solanaAddressPresent")
     expect(page).toContain("pineTreeWalletProfile?.baseAddressPresent")
@@ -168,12 +167,12 @@ describe("Providers page canonical wallet mode", () => {
   })
 
   it("keeps Connected/Not connected status independent from the Enabled toggle", () => {
-    expect(page).toContain("const connected = isCanonicalRailConfigured(provider)")
+    expect(page).toContain("const connected = readiness?.walletProvisioned ?? isCanonicalRailConfigured(provider)")
     expect(page).toContain("const enabled = isEnabled(provider)")
-    // Status pill reflects address presence, merchant enabled choice, and platform readiness
-    expect(page).toContain("const usable = connected && enabled && lightningPlatformReady")
+    // Status pill reflects normalized payment readiness.
+    expect(page).toContain("const usable = Boolean(readiness?.paymentReady)")
     expect(page).toContain("const statusLabel = usable")
-    expect(page).toContain('"Connected" : "Not connected"')
+    expect(page).toContain('"Connected" : enabled ? "Setup needed" : "Not connected"')
     expect(page).toContain("checked={enabled}")
   })
 
