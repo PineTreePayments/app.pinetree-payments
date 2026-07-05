@@ -1738,6 +1738,7 @@ function PineTreeWalletRuntime() {
     waasCredentialSignerWalletCount: 0,
     updatedAt: null,
   })
+  const [walletSyncDebugQueryEnabled, setWalletSyncDebugQueryEnabled] = useState(false)
   const [withdrawalRail, setWithdrawalRail] = useState<WithdrawalRail>("base")
   const [withdrawalAsset, setWithdrawalAsset] = useState<WithdrawalAsset>("ETH")
   const [withdrawalDestination, setWithdrawalDestination] = useState("")
@@ -1756,6 +1757,14 @@ function PineTreeWalletRuntime() {
   const dynamicApprovalAvailableRef = useRef(false)
   const repairProfileIdRef = useRef<string | null>(null)
   const pendingWalletProvisionAttemptRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    setWalletSyncDebugQueryEnabled(
+      params.get("pinetree_wallet_debug") === "true" ||
+        params.get("debugPineTreeWallet") === "true"
+    )
+  }, [])
 
   // --- SDK load timeout ---
   useEffect(() => {
@@ -2483,9 +2492,12 @@ function PineTreeWalletRuntime() {
           profile_has_solana: Boolean(json.profile.solana_address),
           profile_has_btc: Boolean(json.profile.btc_address),
         })
-        if (options?.autoEnableLightning && json.profile.base_address && json.profile.solana_address) {
+        if (json.profile.status === "ready") {
+          setSyncing(false)
           setPendingSync(false)
-          await syncPineTreeManagedLightning()
+        }
+        if (options?.autoEnableLightning && json.profile.base_address && json.profile.solana_address) {
+          void syncPineTreeManagedLightning()
         }
         // Fire rail sync in the background so merchant_wallets stays in sync with
         // the PineTree Wallet profile without blocking the UI response.
@@ -2665,7 +2677,7 @@ function PineTreeWalletRuntime() {
     : []
 
   const bitcoinReady = railReadiness?.bitcoin_lightning.walletProvisioned ?? btcPayoutReady
-  const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady && baseSignerReady && solanaSignerReady
+  const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady
   const dynamicEmbeddedSignersReady = baseSignerReady && solanaSignerReady
   const profileHasDynamicAddresses = baseReady || solanaReady
   // Wallet exists once a PineTree embedded wallet address is available.
@@ -2678,7 +2690,8 @@ function PineTreeWalletRuntime() {
   const walletSetupIncomplete = hasWallet && dbOnlyWalletProfile
   const repairOrSetupIncomplete = repairFailedIncomplete || walletSetupIncomplete
 
-  const walletStatus = repairInProgress ? "Repairing" : allPrimaryRailsConnected ? "Ready" : repairOrSetupIncomplete ? "Setup incomplete" : "Not connected"
+  const walletStatus = repairInProgress ? "Repairing" : dynamicProfileReady ? "Ready" : repairOrSetupIncomplete ? "Setup incomplete" : "Not connected"
+  const showProfileSyncDebugPanel = walletCreationDebugEnabled || walletSyncDebugQueryEnabled
 
   const walletRailRows = useMemo<WalletRailRow[]>(() => [
     { rail: "base", label: "Base" as const, configured: baseReady, enabled: enabledRails.base },
@@ -3436,7 +3449,7 @@ function PineTreeWalletRuntime() {
           </div>
         ) : null}
 
-        {profileSyncDiagnostics.updatedAt ? (
+        {showProfileSyncDebugPanel && profileSyncDiagnostics.updatedAt ? (
           <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-3 text-xs text-slate-700">
             <p className="font-semibold text-slate-900">PineTree Wallet sync debug</p>
             <div className="mt-2 grid gap-1 sm:grid-cols-2">
@@ -3454,11 +3467,6 @@ function PineTreeWalletRuntime() {
               <p>waasCredentialSigners: {profileSyncDiagnostics.waasCredentialSignerWalletCount}</p>
               <p>skippedReason: {profileSyncDiagnostics.skippedReason || "none"}</p>
             </div>
-            {profileSyncDiagnostics.profileEndpointResponse ? (
-              <pre className="mt-2 max-h-32 overflow-auto rounded-lg bg-white p-2 text-[11px] leading-4 text-slate-600">
-                {JSON.stringify(profileSyncDiagnostics.profileEndpointResponse, null, 2).slice(0, 1200)}
-              </pre>
-            ) : null}
           </div>
         ) : null}
 

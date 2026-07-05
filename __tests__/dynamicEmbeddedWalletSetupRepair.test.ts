@@ -30,8 +30,8 @@ describe("Dynamic embedded wallet setup repair", () => {
   })
 
   it("Ready appears only when DB addresses and Dynamic runtime signers both exist", () => {
-    expect(page).toContain("const allPrimaryRailsConnected = baseReady && solanaReady && bitcoinReady && baseSignerReady && solanaSignerReady")
-    expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : allPrimaryRailsConnected ? "Ready"')
+    expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
+    expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : dynamicProfileReady ? "Ready"')
   })
 
   it("Review withdrawal is blocked when the runtime signer is missing", () => {

@@ -37,7 +37,7 @@ function withdrawableAssetOptionsSrc() {
 function bitcoinReadinessSrc() {
   return walletPage.slice(
     walletPage.indexOf("const btcPayoutReady"),
-    walletPage.indexOf("const allPrimaryRailsConnected")
+    walletPage.indexOf("const dynamicProfileReady")
   )
 }
 
@@ -200,14 +200,14 @@ describe("walletStatus Not connected does not hide asset list", () => {
   })
 
   it("asset options depend only on address presence and provider enabled, not overall wallet status", () => {
-    // walletStatus is derived from allPrimaryRailsConnected + signer states.
+    // walletStatus is derived from dynamicProfileReady + signer states.
     // configured for withdrawal is baseReady && enabledRails.base — no walletStatus involvement.
     expect(walletPage).toContain("configured: baseReady && enabledRails.base")
     expect(walletPage).toContain("configured: solanaReady && enabledRails.solana")
     const src = withdrawalWalletRowsSrc()
     expect(src).not.toContain("baseSignerReady")
     expect(src).not.toContain("solanaSignerReady")
-    expect(src).not.toContain("allPrimaryRailsConnected")
+    expect(src).not.toContain("dynamicProfileReady")
   })
 })
 

@@ -73,7 +73,36 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain("payload: body")
     expect(page).toContain('console.info("[pinetree-wallets] profile_sync_response"')
     expect(page).toContain("profileEndpointResponse")
-    expect(page).toContain("PineTree Wallet sync debug")
+  })
+
+  it("successful profile sync clears Saving as soon as the profile is ready", () => {
+    const successBranch = page.slice(
+      page.indexOf('if (res.ok) {'),
+      page.indexOf('console.warn("[pinetree-wallets] profile_sync_failed"')
+    )
+    expect(successBranch).toContain('if (json.profile.status === "ready")')
+    expect(successBranch).toContain("setSyncing(false)")
+    expect(successBranch).toContain("setPendingSync(false)")
+    expect(successBranch).toContain("void syncPineTreeManagedLightning()")
+    expect(successBranch).not.toContain("await syncPineTreeManagedLightning()")
+  })
+
+  it("debug panel is hidden in the default merchant UI", () => {
+    expect(page).toContain("const showProfileSyncDebugPanel = walletCreationDebugEnabled || walletSyncDebugQueryEnabled")
+    expect(page).toContain("{showProfileSyncDebugPanel && profileSyncDiagnostics.updatedAt ?")
+    expect(page).not.toContain("{profileSyncDiagnostics.updatedAt ?")
+    expect(page).toContain('params.get("pinetree_wallet_debug") === "true"')
+  })
+
+  it("raw profile and provider sync JSON is not rendered in merchant UI", () => {
+    expect(page).not.toContain("JSON.stringify(profileSyncDiagnostics.profileEndpointResponse")
+    expect(page).not.toContain("<pre className=\"mt-2 max-h-32")
+  })
+
+  it("ready Dynamic profile renders Ready without requiring Lightning to finish", () => {
+    expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
+    expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : dynamicProfileReady ? "Ready"')
+    expect(page).not.toContain('const walletStatus = repairInProgress ? "Repairing" : allPrimaryRailsConnected ? "Ready"')
   })
 
   it("backend route logs merchant resolution and returns the updated merchant id", () => {
@@ -103,6 +132,12 @@ describe("PineTree Dynamic provisioning flow", () => {
       base_address: "0x1111111111111111111111111111111111111111",
       solana_address: "So11111111111111111111111111111111111111112",
       bitcoin_lightning_status: "not_configured",
+    })).toBe("ready")
+
+    expect(deriveProfileStatus({
+      base_address: "0x1111111111111111111111111111111111111111",
+      solana_address: "So11111111111111111111111111111111111111112",
+      bitcoin_lightning_status: "pending",
     })).toBe("ready")
   })
 
