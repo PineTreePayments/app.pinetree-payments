@@ -3264,14 +3264,36 @@ function PineTreeWalletRuntime() {
     user !== null &&
     profileState.kind === "none"
 
-  const walletCreationMessage = (identityMismatchError || identityUnverified) ? "" : walletCreationStepMessage(walletCreationStep)
+  // Ready is authoritative: once the saved profile itself is marked ready with both
+  // addresses (or the live Dynamic runtime confirms it), stale failed/timeout/identity
+  // state from earlier in the session must never contradict it in the UI.
+  const hasReadyBaseAndSolanaProfile =
+    profileState.kind === "loaded" &&
+    profileState.profile.status === "ready" &&
+    Boolean(profileState.profile.base_address) &&
+    Boolean(profileState.profile.solana_address)
+  const suppressSetupProblems = dynamicProfileReady || hasReadyBaseAndSolanaProfile
+  // Only surface an identity warning on a ready wallet if the *live* Dynamic session
+  // actually conflicts with the merchant's own email right now - never a stale flag.
+  const readyIdentityConflict =
+    suppressSetupProblems &&
+    Boolean(merchantEmail) &&
+    Boolean(dynamicUserEmail) &&
+    dynamicUserEmail !== merchantEmail
+
+  const walletCreationMessage =
+    (identityMismatchError || identityUnverified || suppressSetupProblems)
+      ? ""
+      : walletCreationStepMessage(walletCreationStep)
   const walletCreationDetail = walletCreationStepDetail(walletCreationStep)
   const walletCreationInProgress =
     walletCreationStep !== "idle" &&
     walletCreationStep !== "profile_synced" &&
     walletCreationStep !== "failed" &&
     walletCreationStep !== "timeout"
-  const showProvisioningRetryOnly = (walletCreationStep === "timeout" && Boolean(user)) || Boolean(identityMismatchError) || identityUnverified
+  const showProvisioningRetryOnly =
+    !suppressSetupProblems &&
+    ((walletCreationStep === "timeout" && Boolean(user)) || Boolean(identityMismatchError) || identityUnverified)
 
   useEffect(() => {
     if (!dynamicProfileReady) return
@@ -3290,6 +3312,19 @@ function PineTreeWalletRuntime() {
     clearWalletSetupInProgress()
     setWalletCreationStep("profile_synced")
   }, [dynamicProfileReady])
+
+  // Defense in depth: the effect above only fires on a false -> true transition of
+  // dynamicProfileReady. If a stale failed/timeout step gets set afterward (e.g. a
+  // transient auth-context race) while the profile is already ready, nothing would
+  // otherwise clear it - so watch walletCreationStep directly and self-correct.
+  useEffect(() => {
+    if (!dynamicProfileReady) return
+    if (walletCreationStep !== "failed" && walletCreationStep !== "timeout") return
+    setWalletCreationStep("profile_synced")
+    setIdentityMismatchError(null)
+    setIdentityUnverified(false)
+    setWalletIdentityError("")
+  }, [dynamicProfileReady, walletCreationStep])
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -3953,7 +3988,7 @@ function PineTreeWalletRuntime() {
           </div>
         ) : null}
 
-        {identityMismatchError ? (
+        {!suppressSetupProblems && identityMismatchError ? (
           <div className="mt-4 flex flex-wrap items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
             <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
             <div className="min-w-0 flex-1">
@@ -3975,7 +4010,7 @@ function PineTreeWalletRuntime() {
               Use PineTree account email
             </button>
           </div>
-        ) : identityUnverified ? (
+        ) : !suppressSetupProblems && identityUnverified ? (
           <div className="mt-4 flex flex-wrap items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
             <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
             <div className="min-w-0 flex-1">
@@ -3994,12 +4029,24 @@ function PineTreeWalletRuntime() {
               Use PineTree account email
             </button>
           </div>
-        ) : walletIdentityError ? (
+        ) : !suppressSetupProblems && walletIdentityError ? (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
             <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
             <p className="text-xs leading-5 text-amber-800">
               {walletIdentityError}
             </p>
+          </div>
+        ) : readyIdentityConflict ? (
+          <div className="mt-4 flex flex-wrap items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold leading-5 text-amber-900">
+                This wallet sign-in does not match your PineTree account email.
+              </p>
+              <p className="mt-1 text-xs leading-5 text-amber-800">
+                Using your PineTree account email: {merchantEmail}
+              </p>
+            </div>
           </div>
         ) : null}
 
@@ -4038,8 +4085,8 @@ function PineTreeWalletRuntime() {
           </div>
         ) : null}
 
-        {/* Temporary production-safe diagnostics for the dynamic_email_mismatch investigation - remove once resolved. */}
-        {(walletCreationStep === "failed" || walletCreationStep === "timeout") ? (
+        {/* Temporary diagnostics for the dynamic_email_mismatch investigation - debug-flag gated, remove once resolved. */}
+        {showProfileSyncDebugPanel && !suppressSetupProblems && (walletCreationStep === "failed" || walletCreationStep === "timeout") ? (
           <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-3 text-xs text-slate-700">
             <p className="font-semibold text-slate-900">Setup diagnostics</p>
             <div className="mt-2 grid gap-1 sm:grid-cols-2">
@@ -4077,7 +4124,7 @@ function PineTreeWalletRuntime() {
         ) : null}
 
         <div className="mt-6 flex justify-start">
-          {identityMismatchError || identityUnverified ? (
+          {!suppressSetupProblems && (identityMismatchError || identityUnverified) ? (
             <button
               type="button"
               onClick={handleUsePineTreeAccountEmail}
