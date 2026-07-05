@@ -3,9 +3,11 @@ import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/mer
 import {
   getPineTreeWalletProfile,
   inferBtcAddressType,
+  normalizeWalletIdentityEmail,
   normalizeBtcAddressType,
   upsertPineTreeWalletProfile
 } from "@/database/pineTreeWalletProfiles"
+import { getMerchantById } from "@/database/merchants"
 import { syncPineTreeWalletProfileProviders } from "@/database/pineTreeWalletProfileProviderSync"
 import { provisionMerchantBitcoinAddress } from "@/engine/pineTreeBitcoinAddressProvisioning"
 
@@ -59,6 +61,7 @@ export async function POST(req: NextRequest) {
       const profile = await upsertPineTreeWalletProfile({
         merchantId,
         dynamicUserId: null,
+        dynamicEmail: null,
         baseAddress: null,
         solanaAddress: null,
         bitcoinLightningAddress: null,
@@ -70,6 +73,30 @@ export async function POST(req: NextRequest) {
         profileMerchantId: profile.merchant_id,
       })
       return NextResponse.json({ profile, merchantId })
+    }
+
+    const syncsDynamicProfile =
+      "dynamic_user_id" in body ||
+      "dynamic_email" in body ||
+      "base_address" in body ||
+      "solana_address" in body
+    if (syncsDynamicProfile) {
+      const merchant = await getMerchantById(merchantId)
+      const merchantEmail = normalizeWalletIdentityEmail(merchant?.email)
+      const bodyMerchantEmail = normalizeWalletIdentityEmail(body.merchant_email as string | null)
+      const dynamicEmail = normalizeWalletIdentityEmail(body.dynamic_email as string | null)
+      if (!merchantEmail || bodyMerchantEmail !== merchantEmail || dynamicEmail !== merchantEmail) {
+        console.warn("[pinetree-wallets] profile_route_identity_mismatch", {
+          merchantId,
+          merchantEmailPresent: Boolean(merchantEmail),
+          bodyMerchantEmailMatches: Boolean(merchantEmail && bodyMerchantEmail === merchantEmail),
+          dynamicEmailMatches: Boolean(merchantEmail && dynamicEmail === merchantEmail),
+        })
+        return NextResponse.json(
+          { error: "Use the same email as your PineTree account to create your PineTree Wallet." },
+          { status: 409 }
+        )
+      }
     }
 
     const hasBtcAddressInput = "btc_address" in body || "bitcoin_onchain_address" in body
@@ -103,6 +130,7 @@ export async function POST(req: NextRequest) {
     const profile = await upsertPineTreeWalletProfile({
       merchantId,
       dynamicUserId: "dynamic_user_id" in body ? (body.dynamic_user_id as string | null) : undefined,
+      dynamicEmail: "dynamic_email" in body ? (body.dynamic_email as string | null) : undefined,
       baseAddress: "base_address" in body ? (body.base_address as string | null) : undefined,
       solanaAddress: "solana_address" in body ? (body.solana_address as string | null) : undefined,
       bitcoinLightningAddress: "bitcoin_lightning_address" in body ? (body.bitcoin_lightning_address as string | null) : undefined,

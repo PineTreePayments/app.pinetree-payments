@@ -13,6 +13,7 @@ function profile(overrides: Partial<PineTreeWalletProfile>): PineTreeWalletProfi
     id: "profile_1",
     merchant_id: "merchant_1",
     dynamic_user_id: null,
+    dynamic_email: null,
     base_address: null,
     solana_address: null,
     bitcoin_lightning_address: null,
@@ -153,4 +154,3 @@ describe("PineTree Bitcoin address provisioning", () => {
     }))
   })
 })
-

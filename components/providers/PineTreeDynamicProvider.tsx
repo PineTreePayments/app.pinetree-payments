@@ -169,6 +169,7 @@ export default function PineTreeDynamicProvider({ children }: { children: ReactN
             SolanaWalletConnectors,
             BitcoinWalletConnectors,
           ],
+          detectNewWalletsForLinking: false,
           walletsFilter: filterPineTreeMerchantWalletOptions,
         }}
       >

@@ -278,7 +278,7 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     const src = runtimeSrc()
     expect(src).toContain("flex items-start justify-between gap-4")
     expect(src).toContain("<h2 className=\"min-w-0 text-base font-semibold text-gray-950\">PineTree Wallet</h2>")
-    expect(src).toContain("label={syncing ? \"Saving...\" : walletStatus}")
+    expect(src).toContain("label={dynamicProfileReady ? \"Ready\" : syncing ? \"Saving...\" : walletStatus}")
     expect(src).toContain("className=\"shrink-0\"")
   })
 

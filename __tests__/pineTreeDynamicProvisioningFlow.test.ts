@@ -13,6 +13,8 @@ function read(file: string) {
 
 const page = read("app/dashboard/wallet-setup/page.tsx")
 const profileRoute = read("app/api/wallets/pinetree-profile/route.ts")
+const dynamicProvider = read("components/providers/PineTreeDynamicProvider.tsx")
+const walletProfileDb = read("database/pineTreeWalletProfiles.ts")
 const railSync = read("engine/pineTreeWalletRailSync.ts")
 
 const pendingProviders = [
@@ -32,9 +34,12 @@ describe("PineTree Dynamic provisioning flow", () => {
 
   it("Dynamic provisioning saves Dynamic user id plus Base and Solana addresses", () => {
     expect(page).toContain("dynamic_user_id: user.userId")
+    expect(page).toContain("dynamic_email: dynamicUserEmail")
+    expect(page).toContain("merchant_email: merchantEmail")
     expect(page).toContain("base_address: baseAddress")
     expect(page).toContain("solana_address: solanaAddress")
     expect(profileRoute).toContain('dynamicUserId: "dynamic_user_id" in body')
+    expect(profileRoute).toContain('dynamicEmail: "dynamic_email" in body')
     expect(profileRoute).toContain('baseAddress: "base_address" in body')
     expect(profileRoute).toContain('solanaAddress: "solana_address" in body')
   })
@@ -211,12 +216,64 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(readyCleanupEffect).toContain("setRepairFailedIncomplete(false)")
     expect(readyCleanupEffect).toContain("setProvisioningRetryExhausted(false)")
     expect(readyCleanupEffect).toContain("setFinalProvisioningRefreshAttempted(false)")
+    expect(readyCleanupEffect).toContain('setWalletIdentityError("")')
+    expect(readyCleanupEffect).toContain("clearWalletSetupInProgress()")
     expect(readyCleanupEffect).toContain('setWalletCreationStep("profile_synced")')
   })
 
   it("authenticated timeout state hides the Create button and leaves only PineTree retry", () => {
     expect(page).toContain('const showProvisioningRetryOnly = walletCreationStep === "timeout" && Boolean(user)')
     expect(page).toContain(") : showProvisioningRetryOnly ? null : (")
+  })
+
+  it("Create PineTree Wallet uses the PineTree merchant email as wallet identity", () => {
+    expect(page).toContain("setMerchantEmail(canonicalMerchantEmail)")
+    expect(page).toContain("normalizeIdentityEmail(sessionUser.email)")
+    expect(page).toContain("Using your PineTree account email: {merchantEmail}")
+    expect(page).toContain("dynamicUserEmail = useMemo(() => extractDynamicUserEmail(user), [user])")
+    expect(page).toContain("merchant_email: merchantEmail")
+    expect(page).toContain("dynamic_email: dynamicUserEmail")
+  })
+
+  it("mismatched Dynamic email is rejected before saving a PineTree Wallet profile", () => {
+    const identityGuard = page.slice(
+      page.indexOf("if (!merchantEmail || !dynamicUserEmail || dynamicUserEmail !== merchantEmail)"),
+      page.indexOf("const body: Record<string, unknown>")
+    )
+    expect(identityGuard).toContain("dynamic_email_mismatch")
+    expect(identityGuard).toContain("Use the same email as your PineTree account to create your PineTree Wallet.")
+    expect(identityGuard).toContain("clearWalletSetupInProgress()")
+    expect(identityGuard).toContain("return null")
+    expect(profileRoute).toContain("profile_route_identity_mismatch")
+    expect(profileRoute).toContain("{ status: 409 }")
+  })
+
+  it("matching Dynamic email can save profile and is stored for audit/debugging", () => {
+    expect(profileRoute).toContain("const merchantEmail = normalizeWalletIdentityEmail(merchant?.email)")
+    expect(profileRoute).toContain("bodyMerchantEmail !== merchantEmail || dynamicEmail !== merchantEmail")
+    expect(profileRoute).toContain('dynamicEmail: "dynamic_email" in body')
+    expect(walletProfileDb).toContain("dynamic_email: string | null")
+    expect(walletProfileDb).toContain("dynamic_email: input.dynamicEmail !== undefined")
+  })
+
+  it("reload during setup resumes provisioning instead of resetting to Create PineTree Wallet", () => {
+    expect(page).toContain('walletSetupStoragePrefix = "pinetree_wallet_setup_in_progress:"')
+    expect(page).toContain("window.localStorage.getItem(setupKey) === \"true\"")
+    expect(page).toContain("setWalletCreationStep(\"provisioning_wallet\")")
+    expect(page).toContain("markWalletSetupInProgress()")
+    expect(page).toContain("clearWalletSetupInProgress()")
+  })
+
+  it("first-time setup and retry do not call Dynamic external wallet linking", () => {
+    expect(dynamicProvider).toContain("detectNewWalletsForLinking: false")
+    expect(page).not.toContain("connectWallet(")
+    expect(page).not.toContain("linkWallet(")
+    const retryFn = page.slice(
+      page.indexOf("function handleRetryWalletSetup()"),
+      page.indexOf("function handleWithdrawalAssetSelect")
+    )
+    expect(retryFn).toContain('refreshDynamicWalletRuntime("retry_embedded_wallet_setup"')
+    expect(retryFn).not.toContain("setShowDynamicUserProfile(true)")
   })
 
   it("backend route logs merchant resolution and returns the updated merchant id", () => {

@@ -135,6 +135,7 @@ type PineTreeWalletSyncResponse = {
 type PineTreeWalletProfile = {
   id: string
   dynamic_user_id: string | null
+  dynamic_email: string | null
   base_address: string | null
   solana_address: string | null
   bitcoin_lightning_address: string | null
@@ -243,6 +244,8 @@ type WalletCreationStep =
 
 type ProfileSyncDiagnosticsState = {
   dynamicUserId: string | null
+  dynamicEmail?: string | null
+  merchantEmail?: string | null
   extractedBaseAddress: string | null
   extractedSolanaAddress: string | null
   baseSignerFound: boolean
@@ -531,6 +534,7 @@ function sanitizeWithdrawalSubmitErrorForMerchant(message: string | undefined) {
 const walletCreationTimeoutMs = 30_000
 const walletProvisioningRetryIntervalMs = 1_800
 const walletProvisioningFinalRefreshGraceMs = 6_000
+const walletSetupStoragePrefix = "pinetree_wallet_setup_in_progress:"
 const walletCreationDebugEnabled =
   process.env.NODE_ENV !== "production" ||
   process.env.NEXT_PUBLIC_PINE_TREE_WALLET_DEBUG === "true" ||
@@ -661,6 +665,30 @@ function toRecord(value: unknown): Record<string, unknown> {
 
 function safeString(value: unknown) {
   return typeof value === "string" ? value : value === undefined || value === null ? null : String(value)
+}
+
+function normalizeIdentityEmail(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : null
+}
+
+function extractDynamicUserEmail(dynamicUser: unknown) {
+  const row = toRecord(dynamicUser)
+  const directEmail = normalizeIdentityEmail(row.email)
+  if (directEmail) return directEmail
+
+  const verifiedCredentials = Array.isArray(row.verifiedCredentials)
+    ? row.verifiedCredentials
+    : []
+  for (const credential of verifiedCredentials) {
+    const credentialEmail = normalizeIdentityEmail(toRecord(credential).email)
+    if (credentialEmail) return credentialEmail
+  }
+
+  return null
+}
+
+function walletSetupStorageKeyForMerchant(merchantId: string | null | undefined) {
+  return merchantId ? `${walletSetupStoragePrefix}${merchantId}` : null
 }
 
 function safeBooleanCall(fn: unknown) {
@@ -1717,6 +1745,9 @@ function PineTreeWalletRuntime() {
   const [sdkTimedOut, setSdkTimedOut] = useState(false)
   const [walletOpen, setWalletOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<WalletTab>("overview")
+  const [merchantId, setMerchantId] = useState<string | null>(null)
+  const [merchantEmail, setMerchantEmail] = useState<string | null>(null)
+  const [walletIdentityError, setWalletIdentityError] = useState("")
   // pendingSync: merchant explicitly clicked "Create PineTree Wallet"
   const [pendingSync, setPendingSync] = useState(false)
   const [walletCreationStep, setWalletCreationStep] = useState<WalletCreationStep>("idle")
@@ -1736,6 +1767,8 @@ function PineTreeWalletRuntime() {
   const [dynamicWalletRuntimeRefreshNonce, setDynamicWalletRuntimeRefreshNonce] = useState(0)
   const [profileSyncDiagnostics, setProfileSyncDiagnostics] = useState<ProfileSyncDiagnosticsState>({
     dynamicUserId: null,
+    dynamicEmail: null,
+    merchantEmail: null,
     extractedBaseAddress: null,
     extractedSolanaAddress: null,
     baseSignerFound: false,
@@ -1866,13 +1899,20 @@ function PineTreeWalletRuntime() {
     setLightningProfileState({ kind: "loading" })
     try {
       const { data: sessionData } = await supabase.auth.getSession()
-      const token = sessionData.session?.access_token
-      if (!token) {
+      const session = sessionData.session
+      const token = session?.access_token
+      if (!session || !token) {
         setProfileState({ kind: "none" })
         setLightningProfileState({ kind: "none" })
+        setMerchantId(null)
+        setMerchantEmail(null)
         return
       }
       accessTokenRef.current = token
+      const sessionUser = session.user
+      setMerchantId(sessionUser.id)
+      const canonicalMerchantEmail = normalizeIdentityEmail(sessionUser.email)
+      setMerchantEmail(canonicalMerchantEmail)
 
       const [walletRes, lightningRes] = await Promise.all([
         fetch("/api/wallets/pinetree-profile", {
@@ -1889,6 +1929,21 @@ function PineTreeWalletRuntime() {
       } else {
         const json = (await walletRes.json()) as { profile: PineTreeWalletProfile | null }
         setProfileState(json.profile ? { kind: "loaded", profile: json.profile } : { kind: "none" })
+        if (typeof window !== "undefined") {
+          const setupKey = walletSetupStorageKeyForMerchant(sessionUser.id)
+          if (setupKey) {
+            const setupStarted = window.localStorage.getItem(setupKey) === "true"
+            if (setupStarted && json.profile?.status !== "ready") {
+              setPendingSync(true)
+              setProvisioningRetryExhausted(false)
+              setFinalProvisioningRefreshAttempted(false)
+              setWalletCreationStep("provisioning_wallet")
+            }
+            if (json.profile?.status === "ready") {
+              window.localStorage.removeItem(setupKey)
+            }
+          }
+        }
       }
 
       // Lightning profile is non-critical; don't block wallet display on failure
@@ -1975,6 +2030,8 @@ function PineTreeWalletRuntime() {
   const dynamicNetworkAddresses = useMemo(() => {
     return extractDynamicWalletAddresses(dynamicAddressSearchList as DynamicWalletAddressSource[])
   }, [dynamicAddressSearchList])
+
+  const dynamicUserEmail = useMemo(() => extractDynamicUserEmail(user), [user])
 
   useEffect(() => {
     dynamicWalletRuntimeCountRef.current = dynamicWalletRuntimeCount
@@ -2421,8 +2478,39 @@ function PineTreeWalletRuntime() {
         })
         return null
       }
+      if (!merchantEmail || !dynamicUserEmail || dynamicUserEmail !== merchantEmail) {
+        keepPendingSync = false
+        const skippedReason = !merchantEmail
+          ? "missing_pinetree_merchant_email"
+          : !dynamicUserEmail
+            ? "missing_dynamic_user_email"
+            : "dynamic_email_mismatch"
+        const message = "Use the same email as your PineTree account to create your PineTree Wallet."
+        setWalletIdentityError(message)
+        clearWalletSetupInProgress()
+        setProfileSyncDiagnostics({
+          ...baseDiagnostics,
+          dynamicEmail: dynamicUserEmail,
+          merchantEmail,
+          skippedReason,
+          updatedAt: new Date().toISOString(),
+        })
+        logWalletCreationStep("failed", {
+          reason: skippedReason,
+          merchant_email_present: Boolean(merchantEmail),
+          dynamic_email_present: Boolean(dynamicUserEmail),
+        })
+        console.warn("[pinetree-wallets] profile_sync_identity_mismatch", {
+          reason: skippedReason,
+          merchantEmailPresent: Boolean(merchantEmail),
+          dynamicEmailPresent: Boolean(dynamicUserEmail),
+        })
+        return null
+      }
       const body: Record<string, unknown> = {
         dynamic_user_id: user.userId,
+        dynamic_email: dynamicUserEmail,
+        merchant_email: merchantEmail,
         base_address: baseAddress,
         solana_address: solanaAddress,
       }
@@ -2486,6 +2574,8 @@ function PineTreeWalletRuntime() {
           solanaAddressPersisted: Boolean(json.profile.solana_address),
           status: json.profile.status,
         })
+        setWalletIdentityError("")
+        clearWalletSetupInProgress()
         setProfileState({ kind: "loaded", profile: json.profile })
         if (repairInProgress) {
           console.info("[pinetree-wallets] repair_profile_saved_with_new_addresses", {
@@ -2532,7 +2622,7 @@ function PineTreeWalletRuntime() {
       setSyncing(false)
       if (!keepPendingSync) setPendingSync(false)
     }
-  }, [user, wallets, primaryWallet, dynamicWalletSearchList, dynamicNetworkAddresses, dynamicWalletRuntimeCount, waasRuntimeWallets.length, waasCredentialWalletSources.length, waasCredentialSignerWallets.length, repairInProgress, syncPineTreeManagedLightning, logWalletCreationStep, fetchProviderRailState])
+  }, [user, wallets, primaryWallet, dynamicWalletSearchList, dynamicNetworkAddresses, dynamicWalletRuntimeCount, waasRuntimeWallets.length, waasCredentialWalletSources.length, waasCredentialSignerWallets.length, repairInProgress, syncPineTreeManagedLightning, logWalletCreationStep, fetchProviderRailState, merchantEmail, dynamicUserEmail])
 
   // --- Post-reconnect wallet match check ---
   // Fires when Dynamic loads wallets after setShowAuthFlow(true). Clears the reconnect
@@ -2738,6 +2828,7 @@ function PineTreeWalletRuntime() {
       pendingWalletProvisionAttemptRef.current = null
       pendingProfileSyncAttemptRef.current = false
       setPendingSync(true)
+      markWalletSetupInProgress()
       setProvisioningRetryExhausted(false)
       setFinalProvisioningRefreshAttempted(false)
       logWalletCreationStep("provisioning_wallet", {
@@ -2769,6 +2860,7 @@ function PineTreeWalletRuntime() {
     setLogoutPending(false)
     logWalletCreationStep("waiting_for_dynamic_auth", { reason: "reopening_after_logout" })
     setPendingSync(true)
+    markWalletSetupInProgress()
     setProvisioningRetryExhausted(false)
     setFinalProvisioningRefreshAttempted(false)
     setShowAuthFlow(true)
@@ -2784,6 +2876,7 @@ function PineTreeWalletRuntime() {
     })
     logWalletCreationStep("waiting_for_dynamic_auth", { reason: "repair_reopening_after_logout" })
     setPendingSync(true)
+    markWalletSetupInProgress()
     setProvisioningRetryExhausted(false)
     setFinalProvisioningRefreshAttempted(false)
     setShowDynamicUserProfile(false)
@@ -3010,12 +3103,26 @@ function PineTreeWalletRuntime() {
     setRepairFailedIncomplete(false)
     setProvisioningRetryExhausted(false)
     setFinalProvisioningRefreshAttempted(false)
+    setWalletIdentityError("")
+    clearWalletSetupInProgress()
     setWalletCreationStep("profile_synced")
   }, [dynamicProfileReady])
 
   // ---------------------------------------------------------------------------
   // Actions
   // ---------------------------------------------------------------------------
+
+  function markWalletSetupInProgress() {
+    const setupKey = walletSetupStorageKeyForMerchant(merchantId)
+    if (!setupKey) return
+    window.localStorage.setItem(setupKey, "true")
+  }
+
+  function clearWalletSetupInProgress() {
+    const setupKey = walletSetupStorageKeyForMerchant(merchantId)
+    if (!setupKey) return
+    window.localStorage.removeItem(setupKey)
+  }
 
   async function copyAddress(address: string) {
     try {
@@ -3042,6 +3149,7 @@ function PineTreeWalletRuntime() {
       waasCredentialSignerWalletCount: waasCredentialSignerWallets.length,
     })
     setPendingSync(true)
+    markWalletSetupInProgress()
     setProvisioningRetryExhausted(false)
     setFinalProvisioningRefreshAttempted(false)
     pendingProfileSyncAttemptRef.current = false
@@ -3059,6 +3167,7 @@ function PineTreeWalletRuntime() {
   async function beginWalletSetupRepair(reason: string) {
     logWalletCreationStep("opening_dynamic", { reason })
     setPendingSync(true)
+    markWalletSetupInProgress()
     setProvisioningRetryExhausted(false)
     setFinalProvisioningRefreshAttempted(false)
     pendingProfileSyncAttemptRef.current = false
@@ -3156,6 +3265,7 @@ function PineTreeWalletRuntime() {
     })
     logWalletCreationStep("opening_dynamic", { reason: "repair_embedded_wallet_setup_no_active_dynamic_user" })
     setPendingSync(true)
+    markWalletSetupInProgress()
     setProvisioningRetryExhausted(false)
     setFinalProvisioningRefreshAttempted(false)
     pendingProfileSyncAttemptRef.current = false
@@ -3228,6 +3338,7 @@ function PineTreeWalletRuntime() {
   }
 
   function handleCreateWallet() {
+    setWalletIdentityError("")
     if (hasStaleDynamicSession && user) {
       logWalletCreationStep("opening_dynamic", { reason: "stale_dynamic_session_logout" })
       setLogoutPending(true)
@@ -3242,6 +3353,7 @@ function PineTreeWalletRuntime() {
     setProvisioningRetryExhausted(false)
     setFinalProvisioningRefreshAttempted(false)
     setPendingSync(true)
+    markWalletSetupInProgress()
     if (sdkHasLoaded && user) {
       void refreshDynamicWalletRuntime("create_embedded_wallet_setup", { requireApprovalWallet: false })
       return
@@ -3250,6 +3362,12 @@ function PineTreeWalletRuntime() {
   }
 
   function handleRetryWalletSetup() {
+    if (walletIdentityError && user && handleLogOut) {
+      setWalletIdentityError("")
+      setLogoutPending(true)
+      void handleLogOut()
+      return
+    }
     setPendingSync(false)
     setLogoutPending(false)
     setSyncing(false)
@@ -3264,6 +3382,7 @@ function PineTreeWalletRuntime() {
     logWalletCreationStep("provisioning_wallet", { retry: true, reason: "restart_embedded_wallet_runtime_polling" })
     window.setTimeout(() => {
       setPendingSync(true)
+      markWalletSetupInProgress()
       setProvisioningRetryExhausted(false)
       if (sdkHasLoaded && user) {
         void refreshDynamicWalletRuntime("retry_embedded_wallet_setup", { requireApprovalWallet: false })
@@ -3590,7 +3709,7 @@ function PineTreeWalletRuntime() {
         <div className="flex items-start justify-between gap-4">
           <h2 className="min-w-0 text-base font-semibold text-gray-950">PineTree Wallet</h2>
           <WalletStatusPill
-            label={syncing ? "Saving..." : walletStatus}
+            label={dynamicProfileReady ? "Ready" : syncing ? "Saving..." : walletStatus}
             tone="blue"
             className="shrink-0"
           />
@@ -3622,6 +3741,15 @@ function PineTreeWalletRuntime() {
           </div>
         ) : null}
 
+        {walletIdentityError ? (
+          <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
+            <p className="text-xs leading-5 text-amber-800">
+              {walletIdentityError}
+            </p>
+          </div>
+        ) : null}
+
         {walletCreationMessage ? (
           <div className={`mt-4 flex flex-wrap items-center gap-3 rounded-xl border px-3 py-2.5 ${
             walletCreationStep === "failed" || walletCreationStep === "timeout"
@@ -3638,6 +3766,11 @@ function PineTreeWalletRuntime() {
             {walletCreationDetail ? (
               <p className="basis-full text-xs leading-5 text-blue-700">
                 {walletCreationDetail}
+              </p>
+            ) : null}
+            {walletProvisioningInProgress && merchantEmail ? (
+              <p className="basis-full text-xs leading-5 text-blue-700">
+                Using your PineTree account email: {merchantEmail}
               </p>
             ) : null}
             {(walletCreationStep === "failed" || walletCreationStep === "timeout") ? (

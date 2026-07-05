@@ -20,6 +20,7 @@ describe("PineTree embedded wallet setup", () => {
   const dynamicSignerLookup = read("lib/wallets/dynamicSignerLookup.ts")
   const dbHelper = read("database/pineTreeWalletProfiles.ts")
   const migration = read("database/migrations/20260622_create_pinetree_wallet_profile.sql")
+  const dynamicEmailMigration = read("database/migrations/20260705_add_dynamic_email_to_pinetree_wallet_profiles.sql")
   const withdrawalProductionSchemaMigration = read("database/migrations/20260625_ensure_wallet_withdrawal_requests_production_schema.sql")
   // PineTree-managed Lightning backend files
   const lightningMigration = read("database/migrations/20260622_create_merchant_lightning_profiles.sql")
@@ -69,6 +70,17 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("Create PineTree Wallet")
     expect(page).toContain("Open PineTree Wallet")
     expect(page).not.toContain("Sign up with Dynamic")
+  })
+
+  it("binds PineTree Wallet creation to the merchant account email", () => {
+    expect(page).toContain("setMerchantEmail(canonicalMerchantEmail)")
+    expect(page).toContain("extractDynamicUserEmail(user)")
+    expect(page).toContain("Use the same email as your PineTree account to create your PineTree Wallet.")
+    expect(page).toContain("Using your PineTree account email: {merchantEmail}")
+    expect(apiRoute).toContain("getMerchantById(merchantId)")
+    expect(apiRoute).toContain("dynamicEmail !== merchantEmail")
+    expect(dbHelper).toContain("dynamic_email: string | null")
+    expect(dynamicEmailMigration).toContain("ADD COLUMN IF NOT EXISTS dynamic_email TEXT")
   })
 
   it("loads the merchant wallet profile from the DB before deciding Create vs Open", () => {

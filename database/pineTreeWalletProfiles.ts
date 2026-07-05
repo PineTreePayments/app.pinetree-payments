@@ -11,6 +11,7 @@ export type PineTreeWalletProfile = {
   id: string
   merchant_id: string
   dynamic_user_id: string | null
+  dynamic_email: string | null
   base_address: string | null
   solana_address: string | null
   bitcoin_lightning_address: string | null
@@ -37,6 +38,7 @@ export type PineTreeWalletProfile = {
 export type UpsertWalletProfileInput = {
   merchantId: string
   dynamicUserId?: string | null
+  dynamicEmail?: string | null
   baseAddress?: string | null
   solanaAddress?: string | null
   bitcoinLightningAddress?: string | null
@@ -98,6 +100,11 @@ export function inferBtcAddressType(address?: string | null): BtcAddressType {
   return "unknown"
 }
 
+export function normalizeWalletIdentityEmail(value?: string | null): string | null {
+  const normalized = String(value || "").trim().toLowerCase()
+  return normalized || null
+}
+
 export async function getPineTreeWalletProfile(
   merchantId: string
 ): Promise<PineTreeWalletProfile | null> {
@@ -123,6 +130,7 @@ export async function upsertPineTreeWalletProfile(
 
   const merged = {
     dynamic_user_id: input.dynamicUserId !== undefined ? input.dynamicUserId : existing?.dynamic_user_id ?? null,
+    dynamic_email: input.dynamicEmail !== undefined ? normalizeWalletIdentityEmail(input.dynamicEmail) : existing?.dynamic_email ?? null,
     base_address: input.baseAddress !== undefined ? input.baseAddress : existing?.base_address ?? null,
     solana_address: input.solanaAddress !== undefined ? input.solanaAddress : existing?.solana_address ?? null,
     bitcoin_lightning_address: input.bitcoinLightningAddress !== undefined ? input.bitcoinLightningAddress : existing?.bitcoin_lightning_address ?? null,

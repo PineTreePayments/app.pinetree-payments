@@ -37,6 +37,7 @@ function profile(overrides: Partial<PineTreeWalletProfile> = {}): PineTreeWallet
     id: "profile_1",
     merchant_id: "merchant_1",
     dynamic_user_id: "dyn_1",
+    dynamic_email: "merchant@example.com",
     base_address: "0x1111111111111111111111111111111111111111",
     solana_address: "So11111111111111111111111111111111111111112",
     bitcoin_lightning_address: null,
