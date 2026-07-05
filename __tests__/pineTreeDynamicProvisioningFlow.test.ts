@@ -106,7 +106,8 @@ describe("PineTree Dynamic provisioning flow", () => {
 
   it("ready Dynamic profile renders Ready without requiring Lightning to finish", () => {
     expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
-    expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : walletProvisioningInProgress ? "Provisioning" : dynamicProfileReady ? "Ready"')
+    expect(page).toContain('if (dynamicProfileReady) return "ready"')
+    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Ready" :')
     expect(page).not.toContain('const walletStatus = repairInProgress ? "Repairing" : allPrimaryRailsConnected ? "Ready"')
   })
 
@@ -143,7 +144,7 @@ describe("PineTree Dynamic provisioning flow", () => {
   })
 
   it("Base/Solana connected chips render after delayed hydration is saved", () => {
-    expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : walletProvisioningInProgress ? "Provisioning" : dynamicProfileReady ? "Ready"')
+    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Ready" :')
     expect(page).toContain("setProfileState({ kind: \"loaded\", profile: json.profile })")
     expect(page).toContain("void fetch(\"/api/wallets/pinetree-wallet/rail-sync\"")
     expect(page).toContain("configured: baseReady, enabled: enabledRails.base")
@@ -222,8 +223,7 @@ describe("PineTree Dynamic provisioning flow", () => {
   })
 
   it("authenticated timeout state hides the Create button and leaves only PineTree retry", () => {
-    expect(page).toContain("const showProvisioningRetryOnly =\n    !suppressSetupProblems &&")
-    expect(page).toContain('((walletCreationStep === "timeout" && Boolean(user)) || Boolean(identityMismatchError) || identityUnverified)')
+    expect(page).toContain('const showProvisioningRetryOnly = walletSetupPrimaryState === "failed" && Boolean(user)')
     expect(page).toContain(") : showProvisioningRetryOnly ? null : (")
   })
 
@@ -260,18 +260,18 @@ describe("PineTree Dynamic provisioning flow", () => {
   })
 
   it("mismatched Dynamic email shows explicit PineTree account email copy instead of generic timeout copy", () => {
-    expect(page).toContain("(identityMismatchError || identityUnverified || suppressSetupProblems)")
-    expect(page).toContain("Use the same email as your PineTree account to create your PineTree Wallet.")
-    expect(page).toContain("PineTree account email: {identityMismatchError.merchantEmail}")
-    expect(page).toContain("Sign out of the current Dynamic session, then enter your PineTree account email if Dynamic asks again.")
+    expect(page).toContain('walletSetupPrimaryState === "provisioning" || walletSetupPrimaryState === "failed")')
+    expect(page).toContain("This wallet sign-in does not match your PineTree account email.")
+    expect(page).toContain("Use your PineTree account email: {identityMismatchError?.merchantEmail ?? merchantEmail}")
+    expect(page).toContain("Switch PineTree Wallet sign-in")
   })
 
   it("Create PineTree Wallet is hidden while a mismatched Dynamic session is active", () => {
-    expect(page).toContain("const showProvisioningRetryOnly =\n    !suppressSetupProblems &&")
-    expect(page).toContain("{!suppressSetupProblems && (identityMismatchError || identityUnverified) ? (")
-    expect(page).toContain("Use PineTree account email")
+    expect(page).toContain('const showProvisioningRetryOnly = walletSetupPrimaryState === "failed" && Boolean(user)')
+    expect(page).toContain('{walletSetupPrimaryState === "email_mismatch" || walletSetupPrimaryState === "email_unverified" ? (')
+    expect(page).toContain("Switch PineTree Wallet sign-in")
     const ctaBlock = page.slice(
-      page.indexOf("{!suppressSetupProblems && (identityMismatchError || identityUnverified) ? ("),
+      page.indexOf('{walletSetupPrimaryState === "email_mismatch" || walletSetupPrimaryState === "email_unverified" ? ('),
       page.indexOf(") : hasWallet || repairFailedIncomplete ? (")
     )
     expect(ctaBlock).not.toContain("Create PineTree Wallet")
@@ -293,7 +293,7 @@ describe("PineTree Dynamic provisioning flow", () => {
       page.indexOf("function handleRetryWalletSetup()"),
       page.indexOf("function handleWithdrawalAssetSelect")
     )
-    expect(retryFn).toContain("if (identityMismatchError || identityUnverified || (walletIdentityError && user))")
+    expect(retryFn).toContain("if (emailMismatchActive || emailUnverifiedActive || (walletIdentityError && user))")
     expect(retryFn).toContain("handleUsePineTreeAccountEmail()")
   })
 
@@ -305,48 +305,76 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain('skippedReason: "dynamic_email_mismatch"')
   })
 
-  it("suppressSetupProblems is authoritative once the profile is ready", () => {
-    expect(page).toContain("const hasReadyBaseAndSolanaProfile =")
-    expect(page).toContain('profileState.profile.status === "ready" &&')
-    expect(page).toContain("Boolean(profileState.profile.base_address) &&")
-    expect(page).toContain("Boolean(profileState.profile.solana_address)")
-    expect(page).toContain("const suppressSetupProblems = dynamicProfileReady || hasReadyBaseAndSolanaProfile")
+  it("walletSetupPrimaryState resolves in priority order: ready > reconnect > email mismatch > email unverified > stale session > provisioning > repair > failed", () => {
+    const resolverBody = page.slice(
+      page.indexOf("const walletSetupPrimaryState = useMemo<WalletSetupPrimaryState>(() => {"),
+      page.indexOf("return \"idle\"\n  }, [")
+    )
+    const order = [
+      'if (dynamicProfileReady) return "ready"',
+      'if (hasReadyBaseAndSolanaProfile && !user) return "reconnect_needed"',
+      'if (emailMismatchActive) return "email_mismatch"',
+      'if (emailUnverifiedActive) return "email_unverified"',
+      'if (!dynamicSessionMatchesProfile) return "reconnect_needed"',
+      'if (walletProvisioningInProgress) return "provisioning"',
+      'if (repairOrSetupIncomplete) return "repair_needed"',
+      'if (walletCreationStep === "failed" || walletCreationStep === "timeout") return "failed"',
+    ]
+    let cursor = -1
+    for (const line of order) {
+      expect(resolverBody).toContain(line)
+      const index = resolverBody.indexOf(line)
+      expect(index).toBeGreaterThan(cursor)
+      cursor = index
+    }
   })
 
-  it("ready profile suppresses the generic failed/timeout message and Try again button", () => {
-    expect(page).toContain("(identityMismatchError || identityUnverified || suppressSetupProblems)")
-    expect(page).toContain('? ""\n      : walletCreationStepMessage(walletCreationStep)')
-    // walletCreationMessage gates the entire failed/timeout card including "Try again",
-    // so forcing it to "" whenever suppressSetupProblems is true hides both at once.
+  it("exactly one problem card renders per walletSetupPrimaryState - never stacked", () => {
+    // A single ternary chain keyed on walletSetupPrimaryState replaces what used to be
+    // three independent, simultaneously-renderable conditionals (session mismatch,
+    // repair-needed, identity chain) - so switching PineTree accounts in the same
+    // browser (which used to trip all three at once) can only ever show one banner.
+    expect(page).not.toContain("{!dynamicSessionMatchesProfile ? (")
+    expect(page).not.toContain("{repairOrSetupIncomplete ? (")
+    const bannerChain = page.slice(
+      page.indexOf('{walletSetupPrimaryState === "reconnect_needed" ? ('),
+      page.indexOf("{walletCreationMessage ? (")
+    )
+    expect(bannerChain).toContain(') : walletSetupPrimaryState === "email_mismatch" ? (')
+    expect(bannerChain).toContain(') : walletSetupPrimaryState === "email_unverified" ? (')
+    expect(bannerChain).toContain(') : walletSetupPrimaryState === "repair_needed" ? (')
+    expect(bannerChain).toContain(") : null}")
+  })
+
+  it("ready profile suppresses the generic failed/timeout message, Try again, and every problem banner", () => {
+    expect(page).toContain(
+      '(walletSetupPrimaryState === "provisioning" || walletSetupPrimaryState === "failed")\n      ? walletCreationStepMessage(walletCreationStep)\n      : ""'
+    )
     const messageBlock = page.slice(
       page.indexOf("{walletCreationMessage ? ("),
       page.indexOf("{/* Temporary diagnostics")
     )
     expect(messageBlock).toContain("Try again")
+    // dynamicProfileReady resolves to "ready" first, so none of the later branches
+    // (reconnect/mismatch/unverified/repair/failed) can ever also be true.
+    expect(page).toContain('if (dynamicProfileReady) return "ready"')
   })
 
   it("ready profile suppresses showProvisioningRetryOnly", () => {
-    expect(page).toContain("const showProvisioningRetryOnly =\n    !suppressSetupProblems &&")
-  })
-
-  it("ready profile suppresses identityMismatchError/identityUnverified/walletIdentityError banners and the CTA", () => {
-    expect(page).toContain("{!suppressSetupProblems && identityMismatchError ? (")
-    expect(page).toContain(") : !suppressSetupProblems && identityUnverified ? (")
-    expect(page).toContain(") : !suppressSetupProblems && walletIdentityError ? (")
-    expect(page).toContain("{!suppressSetupProblems && (identityMismatchError || identityUnverified) ? (")
+    expect(page).toContain('const showProvisioningRetryOnly = walletSetupPrimaryState === "failed" && Boolean(user)')
   })
 
   it("ready profile suppresses the temporary diagnostics panel outside of the debug flag", () => {
-    expect(page).toContain(
-      'showProfileSyncDebugPanel && !suppressSetupProblems && (walletCreationStep === "failed" || walletCreationStep === "timeout")'
-    )
+    expect(page).toContain('showProfileSyncDebugPanel && walletSetupPrimaryState === "failed"')
   })
 
   it("ready profile still shows Base/Solana chips and Open PineTree Wallet", () => {
     expect(page).toContain("<EnabledRailChips rows={walletRailRows} />")
-    expect(page).toContain('{repairOrSetupIncomplete ? "Finish PineTree Wallet setup" : "Open PineTree Wallet"}')
+    expect(page).toContain(
+      '{walletSetupPrimaryState === "repair_needed" ? "Finish PineTree Wallet setup" : "Open PineTree Wallet"}'
+    )
     const ctaBlock = page.slice(
-      page.indexOf("{!suppressSetupProblems && (identityMismatchError || identityUnverified) ? ("),
+      page.indexOf('{walletSetupPrimaryState === "email_mismatch" || walletSetupPrimaryState === "email_unverified" ? ('),
       page.indexOf(") : showProvisioningRetryOnly ? null : (")
     )
     expect(ctaBlock).toContain("hasWallet || repairFailedIncomplete ? (")
@@ -365,19 +393,72 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(selfCorrectEffect).toContain("setIdentityUnverified(false)")
   })
 
-  it("mismatch warning on a ready wallet only shows when the live Dynamic session actually conflicts with the merchant email", () => {
-    expect(page).toContain("const readyIdentityConflict =")
-    expect(page).toContain("suppressSetupProblems &&")
-    expect(page).toContain("Boolean(merchantEmail) &&")
-    expect(page).toContain("Boolean(dynamicUserEmail) &&")
-    expect(page).toContain("dynamicUserEmail !== merchantEmail")
+  it("mismatch warning (ready or not) only shows when the live Dynamic session actually conflicts with the merchant email", () => {
+    expect(page).toContain("const liveEmailMismatch =")
+    expect(page).toContain("Boolean(user) && Boolean(merchantEmail) && Boolean(dynamicUserEmail) && dynamicUserEmail !== merchantEmail")
+    expect(page).toContain("const emailMismatchActive = Boolean(identityMismatchError) || liveEmailMismatch")
     expect(page).toContain("This wallet sign-in does not match your PineTree account email.")
-    expect(page).toContain(") : readyIdentityConflict ? (")
-    const readyConflictBanner = page.slice(
-      page.indexOf(") : readyIdentityConflict ? ("),
-      page.indexOf(") : null}", page.indexOf(") : readyIdentityConflict ? ("))
+  })
+
+  it("email mismatch outranks the saved-address missing-signer warning and the repair button", () => {
+    // emailMismatchActive is checked before repairOrSetupIncomplete in the resolver, so a
+    // profile with saved addresses but the wrong Dynamic session never shows "setup
+    // incomplete" / Repair - it shows the mismatch card instead.
+    const resolverBody = page.slice(
+      page.indexOf("const walletSetupPrimaryState = useMemo<WalletSetupPrimaryState>(() => {"),
+      page.indexOf("return \"idle\"\n  }, [")
     )
-    expect(readyConflictBanner).toContain("Using your PineTree account email: {merchantEmail}")
+    const mismatchIndex = resolverBody.indexOf('if (emailMismatchActive) return "email_mismatch"')
+    const repairIndex = resolverBody.indexOf('if (repairOrSetupIncomplete) return "repair_needed"')
+    expect(mismatchIndex).toBeGreaterThan(-1)
+    expect(repairIndex).toBeGreaterThan(mismatchIndex)
+    // The Repair button only renders inside the repair_needed branch of the CTA chain,
+    // which the email_mismatch/email_unverified branch precedes and short-circuits.
+    const ctaChain = page.slice(
+      page.indexOf('{walletSetupPrimaryState === "email_mismatch" || walletSetupPrimaryState === "email_unverified" ? ('),
+      page.indexOf(") : showProvisioningRetryOnly ? null : (")
+    )
+    const repairButtonIndex = ctaChain.indexOf("Repair PineTree Wallet setup")
+    expect(repairButtonIndex).toBeGreaterThan(-1)
+    expect(ctaChain).toContain('walletSetupPrimaryState === "repair_needed" ? (')
+  })
+
+  it("saved ready profile with no Dynamic session shows reconnect-needed, not setup incomplete", () => {
+    const resolverBody = page.slice(
+      page.indexOf("const walletSetupPrimaryState = useMemo<WalletSetupPrimaryState>(() => {"),
+      page.indexOf("return \"idle\"\n  }, [")
+    )
+    const reconnectIndex = resolverBody.indexOf('if (hasReadyBaseAndSolanaProfile && !user) return "reconnect_needed"')
+    const repairIndex = resolverBody.indexOf('if (repairOrSetupIncomplete) return "repair_needed"')
+    expect(reconnectIndex).toBeGreaterThan(-1)
+    expect(repairIndex).toBeGreaterThan(reconnectIndex)
+    expect(page).toContain('walletSetupPrimaryState === "reconnect_needed" ? "Reconnect needed" :')
+  })
+
+  it("ready profile with a matching Dynamic session shows Ready and Open PineTree Wallet only", () => {
+    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Ready" :')
+    const ctaChain = page.slice(
+      page.indexOf('{walletSetupPrimaryState === "email_mismatch" || walletSetupPrimaryState === "email_unverified" ? ('),
+      page.indexOf(") : showProvisioningRetryOnly ? null : (")
+    )
+    // When primaryState is "ready", every earlier CTA branch (mismatch/unverified/
+    // reconnect) is false, so control falls through to hasWallet's plain Open button
+    // with no Repair button alongside it.
+    expect(ctaChain).toContain("Open PineTree Wallet")
+    expect(ctaChain).toContain('walletSetupPrimaryState === "repair_needed" ? "Finish PineTree Wallet setup" : "Open PineTree Wallet"')
+  })
+
+  it("badge distinguishes Reconnect needed and Wrong sign-in from Setup incomplete, and rail chips render independently of the badge", () => {
+    expect(page).toContain('walletSetupPrimaryState === "reconnect_needed" ? "Reconnect needed" :')
+    expect(page).toContain('walletSetupPrimaryState === "email_mismatch" ? "Wrong sign-in" :')
+    expect(page).toContain('walletSetupPrimaryState === "email_unverified" ? "Wrong sign-in" :')
+    expect(page).toContain('walletSetupPrimaryState === "repair_needed" ? "Setup incomplete" :')
+    // EnabledRailChips is rendered unconditionally above the problem-card chain, so it
+    // never depends on which (if any) problem state is active.
+    const chipsIndex = page.indexOf("<EnabledRailChips rows={walletRailRows} />")
+    const bannerChainIndex = page.indexOf('{walletSetupPrimaryState === "reconnect_needed" ? (')
+    expect(chipsIndex).toBeGreaterThan(-1)
+    expect(bannerChainIndex).toBeGreaterThan(chipsIndex)
   })
 
   it("Dynamic email extraction covers OAuth credentials, not just direct email-OTP sign-in", () => {
@@ -438,8 +519,8 @@ describe("PineTree Dynamic provisioning flow", () => {
     )
     expect(page).toContain('Please sign in with your PineTree account email: {merchantEmail || "unknown"}')
     const unverifiedBanner = page.slice(
-      page.indexOf(") : !suppressSetupProblems && identityUnverified ? ("),
-      page.indexOf(") : !suppressSetupProblems && walletIdentityError ? (")
+      page.indexOf(') : walletSetupPrimaryState === "email_unverified" ? ('),
+      page.indexOf(') : walletSetupPrimaryState === "repair_needed" ? (')
     )
     expect(unverifiedBanner).toContain("handleUsePineTreeAccountEmail")
     expect(unverifiedBanner).toContain("Use PineTree account email")
