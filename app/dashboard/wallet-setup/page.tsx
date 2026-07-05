@@ -262,6 +262,11 @@ type ProfileSyncDiagnosticsState = {
   updatedAt: string | null
 }
 
+type IdentityMismatchError = {
+  dynamicEmail: string
+  merchantEmail: string
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -689,6 +694,15 @@ function extractDynamicUserEmail(dynamicUser: unknown) {
 
 function walletSetupStorageKeyForMerchant(merchantId: string | null | undefined) {
   return merchantId ? `${walletSetupStoragePrefix}${merchantId}` : null
+}
+
+function getDynamicEmailMismatchResponse(value: unknown): IdentityMismatchError | null {
+  const row = toRecord(value)
+  if (row.error !== "dynamic_email_mismatch") return null
+  const merchantEmail = normalizeIdentityEmail(row.merchantEmail)
+  const dynamicEmail = normalizeIdentityEmail(row.dynamicEmail)
+  if (!merchantEmail || !dynamicEmail) return null
+  return { merchantEmail, dynamicEmail }
 }
 
 function safeBooleanCall(fn: unknown) {
@@ -1747,6 +1761,7 @@ function PineTreeWalletRuntime() {
   const [activeTab, setActiveTab] = useState<WalletTab>("overview")
   const [merchantId, setMerchantId] = useState<string | null>(null)
   const [merchantEmail, setMerchantEmail] = useState<string | null>(null)
+  const [identityMismatchError, setIdentityMismatchError] = useState<IdentityMismatchError | null>(null)
   const [walletIdentityError, setWalletIdentityError] = useState("")
   // pendingSync: merchant explicitly clicked "Create PineTree Wallet"
   const [pendingSync, setPendingSync] = useState(false)
@@ -2409,6 +2424,8 @@ function PineTreeWalletRuntime() {
         : null
       const baseDiagnostics: ProfileSyncDiagnosticsState = {
         dynamicUserId: user.userId ?? null,
+        dynamicEmail: dynamicUserEmail,
+        merchantEmail,
         extractedBaseAddress: baseAddress,
         extractedSolanaAddress: solanaAddress,
         baseSignerFound: Boolean(baseSigner),
@@ -2433,6 +2450,29 @@ function PineTreeWalletRuntime() {
         useUserWalletsCount: (wallets as unknown[]).length,
         profileSyncEndpoint: "/api/wallets/pinetree-profile",
       })
+      if (merchantEmail && dynamicUserEmail && dynamicUserEmail !== merchantEmail) {
+        keepPendingSync = false
+        const message = "Use the same email as your PineTree account to create your PineTree Wallet."
+        setIdentityMismatchError({ merchantEmail, dynamicEmail: dynamicUserEmail })
+        setWalletIdentityError(message)
+        clearWalletSetupInProgress()
+        setProfileSyncDiagnostics({
+          ...baseDiagnostics,
+          skippedReason: "dynamic_email_mismatch",
+          updatedAt: new Date().toISOString(),
+        })
+        logWalletCreationStep("failed", {
+          reason: "dynamic_email_mismatch",
+          merchant_email_present: true,
+          dynamic_email_present: true,
+        })
+        console.warn("[pinetree-wallets] profile_sync_identity_mismatch", {
+          reason: "dynamic_email_mismatch",
+          merchantEmailPresent: true,
+          dynamicEmailPresent: true,
+        })
+        return null
+      }
       if (options?.requireBaseAndSolanaSigners && (!baseAddress || !solanaAddress || !baseSigner || !solanaSigner)) {
         keepPendingSync = true
         const skippedReason = !baseAddress
@@ -2486,6 +2526,9 @@ function PineTreeWalletRuntime() {
             ? "missing_dynamic_user_email"
             : "dynamic_email_mismatch"
         const message = "Use the same email as your PineTree account to create your PineTree Wallet."
+        if (merchantEmail && dynamicUserEmail && dynamicUserEmail !== merchantEmail) {
+          setIdentityMismatchError({ merchantEmail, dynamicEmail: dynamicUserEmail })
+        }
         setWalletIdentityError(message)
         clearWalletSetupInProgress()
         setProfileSyncDiagnostics({
@@ -2575,6 +2618,7 @@ function PineTreeWalletRuntime() {
           status: json.profile.status,
         })
         setWalletIdentityError("")
+        setIdentityMismatchError(null)
         clearWalletSetupInProgress()
         setProfileState({ kind: "loaded", profile: json.profile })
         if (repairInProgress) {
@@ -2611,6 +2655,23 @@ function PineTreeWalletRuntime() {
           headers: { Authorization: `Bearer ${token}` },
         }).then(() => fetchProviderRailState(token)).catch(() => undefined)
         return json.profile
+      }
+      const mismatchResponse = getDynamicEmailMismatchResponse(responseBody)
+      if (mismatchResponse) {
+        const message = "Use the same email as your PineTree account to create your PineTree Wallet."
+        setIdentityMismatchError(mismatchResponse)
+        setWalletIdentityError(message)
+        clearWalletSetupInProgress()
+        setProfileSyncDiagnostics({
+          ...baseDiagnostics,
+          didCallProfileEndpoint: true,
+          profileEndpointStatus: res.status,
+          profileEndpointResponse: responseBody,
+          skippedReason: "dynamic_email_mismatch",
+          updatedAt: new Date().toISOString(),
+        })
+        logWalletCreationStep("failed", { profile_sync_response_status: res.status, reason: "dynamic_email_mismatch" })
+        return null
       }
       console.warn("[pinetree-wallets] profile_sync_failed", {
         endpoint: "/api/wallets/pinetree-profile",
@@ -3083,14 +3144,14 @@ function PineTreeWalletRuntime() {
     user !== null &&
     profileState.kind === "none"
 
-  const walletCreationMessage = walletCreationStepMessage(walletCreationStep)
+  const walletCreationMessage = identityMismatchError ? "" : walletCreationStepMessage(walletCreationStep)
   const walletCreationDetail = walletCreationStepDetail(walletCreationStep)
   const walletCreationInProgress =
     walletCreationStep !== "idle" &&
     walletCreationStep !== "profile_synced" &&
     walletCreationStep !== "failed" &&
     walletCreationStep !== "timeout"
-  const showProvisioningRetryOnly = walletCreationStep === "timeout" && Boolean(user)
+  const showProvisioningRetryOnly = (walletCreationStep === "timeout" && Boolean(user)) || Boolean(identityMismatchError)
 
   useEffect(() => {
     if (!dynamicProfileReady) return
@@ -3104,6 +3165,7 @@ function PineTreeWalletRuntime() {
     setProvisioningRetryExhausted(false)
     setFinalProvisioningRefreshAttempted(false)
     setWalletIdentityError("")
+    setIdentityMismatchError(null)
     clearWalletSetupInProgress()
     setWalletCreationStep("profile_synced")
   }, [dynamicProfileReady])
@@ -3339,6 +3401,7 @@ function PineTreeWalletRuntime() {
 
   function handleCreateWallet() {
     setWalletIdentityError("")
+    setIdentityMismatchError(null)
     if (hasStaleDynamicSession && user) {
       logWalletCreationStep("opening_dynamic", { reason: "stale_dynamic_session_logout" })
       setLogoutPending(true)
@@ -3361,11 +3424,37 @@ function PineTreeWalletRuntime() {
     setShowAuthFlow(true)
   }
 
-  function handleRetryWalletSetup() {
-    if (walletIdentityError && user && handleLogOut) {
-      setWalletIdentityError("")
+  function handleUsePineTreeAccountEmail() {
+    clearWalletSetupInProgress()
+    setPendingSync(false)
+    setSyncing(false)
+    setRepairInProgress(false)
+    setRepairFailedIncomplete(false)
+    setProvisioningRetryExhausted(false)
+    setFinalProvisioningRefreshAttempted(false)
+    pendingWalletProvisionAttemptRef.current = null
+    pendingProfileSyncAttemptRef.current = false
+    pendingWalletProvisionStartedAtRef.current = null
+    setShowAuthFlow(false)
+    setShowDynamicUserProfile(false)
+    logWalletCreationStep("waiting_for_dynamic_auth", {
+      reason: "restart_after_dynamic_email_mismatch",
+    })
+    setWalletIdentityError("")
+    setIdentityMismatchError(null)
+    if (user && handleLogOut) {
       setLogoutPending(true)
       void handleLogOut()
+      return
+    }
+    setPendingSync(true)
+    markWalletSetupInProgress()
+    window.setTimeout(() => setShowAuthFlow(true), 0)
+  }
+
+  function handleRetryWalletSetup() {
+    if (identityMismatchError || (walletIdentityError && user)) {
+      handleUsePineTreeAccountEmail()
       return
     }
     setPendingSync(false)
@@ -3741,7 +3830,29 @@ function PineTreeWalletRuntime() {
           </div>
         ) : null}
 
-        {walletIdentityError ? (
+        {identityMismatchError ? (
+          <div className="mt-4 flex flex-wrap items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold leading-5 text-amber-900">
+                Use the same email as your PineTree account to create your PineTree Wallet.
+              </p>
+              <p className="mt-1 text-xs leading-5 text-amber-800">
+                PineTree account email: {identityMismatchError.merchantEmail}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-amber-800">
+                Sign out of the current Dynamic session, then enter your PineTree account email if Dynamic asks again.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleUsePineTreeAccountEmail}
+              className="ml-5 inline-flex h-8 items-center justify-center rounded-lg bg-amber-700 px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-amber-800"
+            >
+              Use PineTree account email
+            </button>
+          </div>
+        ) : walletIdentityError ? (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
             <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
             <p className="text-xs leading-5 text-amber-800">
@@ -3807,7 +3918,16 @@ function PineTreeWalletRuntime() {
         ) : null}
 
         <div className="mt-6 flex justify-start">
-          {hasWallet || repairFailedIncomplete ? (
+          {identityMismatchError ? (
+            <button
+              type="button"
+              onClick={handleUsePineTreeAccountEmail}
+              disabled={logoutPending}
+              className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+            >
+              {logoutPending ? "Preparing..." : "Use PineTree account email"}
+            </button>
+          ) : hasWallet || repairFailedIncomplete ? (
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"

@@ -222,7 +222,7 @@ describe("PineTree Dynamic provisioning flow", () => {
   })
 
   it("authenticated timeout state hides the Create button and leaves only PineTree retry", () => {
-    expect(page).toContain('const showProvisioningRetryOnly = walletCreationStep === "timeout" && Boolean(user)')
+    expect(page).toContain('const showProvisioningRetryOnly = (walletCreationStep === "timeout" && Boolean(user)) || Boolean(identityMismatchError)')
     expect(page).toContain(") : showProvisioningRetryOnly ? null : (")
   })
 
@@ -237,14 +237,16 @@ describe("PineTree Dynamic provisioning flow", () => {
 
   it("mismatched Dynamic email is rejected before saving a PineTree Wallet profile", () => {
     const identityGuard = page.slice(
-      page.indexOf("if (!merchantEmail || !dynamicUserEmail || dynamicUserEmail !== merchantEmail)"),
+      page.indexOf("if (merchantEmail && dynamicUserEmail && dynamicUserEmail !== merchantEmail)"),
       page.indexOf("const body: Record<string, unknown>")
     )
     expect(identityGuard).toContain("dynamic_email_mismatch")
     expect(identityGuard).toContain("Use the same email as your PineTree account to create your PineTree Wallet.")
+    expect(identityGuard).toContain("setIdentityMismatchError({ merchantEmail, dynamicEmail: dynamicUserEmail })")
     expect(identityGuard).toContain("clearWalletSetupInProgress()")
     expect(identityGuard).toContain("return null")
     expect(profileRoute).toContain("profile_route_identity_mismatch")
+    expect(profileRoute).toContain('error: "dynamic_email_mismatch"')
     expect(profileRoute).toContain("{ status: 409 }")
   })
 
@@ -254,6 +256,50 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(profileRoute).toContain('dynamicEmail: "dynamic_email" in body')
     expect(walletProfileDb).toContain("dynamic_email: string | null")
     expect(walletProfileDb).toContain("dynamic_email: input.dynamicEmail !== undefined")
+  })
+
+  it("mismatched Dynamic email shows explicit PineTree account email copy instead of generic timeout copy", () => {
+    expect(page).toContain("const walletCreationMessage = identityMismatchError ? \"\" : walletCreationStepMessage(walletCreationStep)")
+    expect(page).toContain("Use the same email as your PineTree account to create your PineTree Wallet.")
+    expect(page).toContain("PineTree account email: {identityMismatchError.merchantEmail}")
+    expect(page).toContain("Sign out of the current Dynamic session, then enter your PineTree account email if Dynamic asks again.")
+  })
+
+  it("Create PineTree Wallet is hidden while a mismatched Dynamic session is active", () => {
+    expect(page).toContain("const showProvisioningRetryOnly = (walletCreationStep === \"timeout\" && Boolean(user)) || Boolean(identityMismatchError)")
+    expect(page).toContain("{identityMismatchError ? (")
+    expect(page).toContain("Use PineTree account email")
+    const ctaBlock = page.slice(
+      page.indexOf("{identityMismatchError ? ("),
+      page.indexOf(") : hasWallet || repairFailedIncomplete ? (")
+    )
+    expect(ctaBlock).not.toContain("Create PineTree Wallet")
+  })
+
+  it("mismatch retry logs out Dynamic and clears the setup marker before restarting", () => {
+    const recoveryFn = page.slice(
+      page.indexOf("function handleUsePineTreeAccountEmail()"),
+      page.indexOf("function handleRetryWalletSetup()")
+    )
+    expect(recoveryFn).toContain("clearWalletSetupInProgress()")
+    expect(recoveryFn).toContain('reason: "restart_after_dynamic_email_mismatch"')
+    expect(recoveryFn).toContain("setLogoutPending(true)")
+    expect(recoveryFn).toContain("void handleLogOut()")
+    expect(recoveryFn).toContain("markWalletSetupInProgress()")
+    const retryFn = page.slice(
+      page.indexOf("function handleRetryWalletSetup()"),
+      page.indexOf("function handleWithdrawalAssetSelect")
+    )
+    expect(retryFn).toContain("if (identityMismatchError || (walletIdentityError && user))")
+    expect(retryFn).toContain("handleUsePineTreeAccountEmail()")
+  })
+
+  it("client maps API dynamic_email_mismatch response to identity mismatch UI", () => {
+    expect(page).toContain("function getDynamicEmailMismatchResponse(value: unknown): IdentityMismatchError | null")
+    expect(page).toContain('if (row.error !== "dynamic_email_mismatch") return null')
+    expect(page).toContain("const mismatchResponse = getDynamicEmailMismatchResponse(responseBody)")
+    expect(page).toContain("setIdentityMismatchError(mismatchResponse)")
+    expect(page).toContain('skippedReason: "dynamic_email_mismatch"')
   })
 
   it("reload during setup resumes provisioning instead of resetting to Create PineTree Wallet", () => {
