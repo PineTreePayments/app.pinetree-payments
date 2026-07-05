@@ -162,7 +162,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("walletProvisioningRetryIntervalMs = 1_800")
     expect(page).toContain('logWalletCreationStep("waiting_for_dynamic_auth")')
     expect(page).toContain('logWalletCreationStep("provisioning_wallet"')
-    expect(page).toContain('step: "timeout"')
+    expect(page).toContain('setWalletCreationStep("timeout")')
     expect(page).toContain("Wallet setup is taking longer than expected. Please try again.")
   })
 
@@ -171,12 +171,16 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("PineTree Wallet synced.")
   })
 
-  it("retry clears local setup state and reopens Dynamic without deleting rows", () => {
-    expect(page).toContain("function handleRetryWalletSetup()")
-    expect(page).toContain("setPendingSync(false)")
-    expect(page).toContain("setLogoutPending(false)")
-    expect(page).toContain("setShowAuthFlow(false)")
-    expect(page).toContain("setShowAuthFlow(true)")
+  it("retry clears local setup state and restarts embedded wallet polling without deleting rows", () => {
+    const retryFn = page.slice(
+      page.indexOf("function handleRetryWalletSetup()"),
+      page.indexOf("function handleWithdrawalAssetSelect")
+    )
+    expect(retryFn).toContain("setPendingSync(false)")
+    expect(retryFn).toContain("setLogoutPending(false)")
+    expect(retryFn).toContain("setShowAuthFlow(false)")
+    expect(retryFn).toContain('refreshDynamicWalletRuntime("retry_embedded_wallet_setup"')
+    expect(retryFn).toContain("} else {\n        setShowAuthFlow(true)")
     expect(page).not.toContain("delete Dynamic")
   })
 

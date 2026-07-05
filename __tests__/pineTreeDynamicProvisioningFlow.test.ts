@@ -146,6 +146,79 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain("<EnabledRailChips rows={walletRailRows} />")
   })
 
+  it("first-time Dynamic verification does not use an external link/connect wallet flow", () => {
+    const dynamicContextLine = page.slice(
+      page.indexOf("const { user, sdkHasLoaded"),
+      page.indexOf("} = useDynamicContext()") + "} = useDynamicContext()".length
+    )
+    expect(dynamicContextLine).not.toContain("connectWallet")
+    expect(dynamicContextLine).not.toContain("linkWallet")
+    expect(page).toContain("createEmbeddedWallet")
+    expect(page).toContain("createWalletAccount")
+  })
+
+  it("Create PineTree Wallet does not open Dynamic auth again once Dynamic user is authenticated", () => {
+    const createFn = page.slice(
+      page.indexOf("function handleCreateWallet()"),
+      page.indexOf("function handleRetryWalletSetup()")
+    )
+    expect(createFn).toContain('refreshDynamicWalletRuntime("create_embedded_wallet_setup"')
+    expect(createFn).toContain("if (sdkHasLoaded && user) {")
+    expect(createFn).toContain("return\n    }\n    setShowAuthFlow(true)")
+  })
+
+  it("Try again during first-time provisioning restarts PineTree polling instead of link-new-wallet auth", () => {
+    const retryFn = page.slice(
+      page.indexOf("function handleRetryWalletSetup()"),
+      page.indexOf("function handleWithdrawalAssetSelect")
+    )
+    expect(retryFn).toContain('reason: "restart_embedded_wallet_runtime_polling"')
+    expect(retryFn).toContain('refreshDynamicWalletRuntime("retry_embedded_wallet_setup"')
+    expect(retryFn).toContain("} else {\n        setShowAuthFlow(true)")
+  })
+
+  it("no timeout message appears before a final runtime refresh attempt", () => {
+    expect(page).toContain("walletProvisioningFinalRefreshGraceMs = 6_000")
+    expect(page).toContain("setFinalProvisioningRefreshAttempted(true)")
+    expect(page).toContain('refreshDynamicWalletRuntime("final_embedded_wallet_runtime_refresh_before_timeout"')
+    const firstTimeoutEffect = page.slice(
+      page.indexOf("if (!pendingSync || finalProvisioningRefreshAttempted) return"),
+      page.indexOf("useEffect(() => {\n    if (!pendingSync || !finalProvisioningRefreshAttempted) return")
+    )
+    expect(firstTimeoutEffect).not.toContain('setWalletCreationStep("timeout")')
+    const graceTimeoutEffect = page.slice(
+      page.indexOf("if (!pendingSync || !finalProvisioningRefreshAttempted) return"),
+      page.indexOf("// --- After Dynamic logout")
+    )
+    expect(graceTimeoutEffect).toContain('setWalletCreationStep("timeout")')
+  })
+
+  it("delayed hydration after modal close triggers final refresh and saves profile", () => {
+    expect(page).toContain("window.addEventListener(\"focus\", refreshAfterDynamicModalChange)")
+    expect(page).toContain("document.addEventListener(\"visibilitychange\", refreshAfterDynamicModalChange)")
+    expect(page).toContain('reason: "dynamic_modal_closed_or_page_visible_runtime_recheck"')
+    expect(page).toContain('refreshDynamicWalletRuntime("dynamic_modal_close_runtime_recheck"')
+    expect(page).toContain("pendingProfileSyncAttemptRef.current = false")
+  })
+
+  it("ready profile clears timeout/error state even if timeout was previously pending", () => {
+    const readyCleanupEffect = page.slice(
+      page.indexOf("if (!dynamicProfileReady) return"),
+      page.indexOf("// ---------------------------------------------------------------------------\n  // Actions")
+    )
+    expect(readyCleanupEffect).toContain("setPendingSync(false)")
+    expect(readyCleanupEffect).toContain("setSyncing(false)")
+    expect(readyCleanupEffect).toContain("setRepairFailedIncomplete(false)")
+    expect(readyCleanupEffect).toContain("setProvisioningRetryExhausted(false)")
+    expect(readyCleanupEffect).toContain("setFinalProvisioningRefreshAttempted(false)")
+    expect(readyCleanupEffect).toContain('setWalletCreationStep("profile_synced")')
+  })
+
+  it("authenticated timeout state hides the Create button and leaves only PineTree retry", () => {
+    expect(page).toContain('const showProvisioningRetryOnly = walletCreationStep === "timeout" && Boolean(user)')
+    expect(page).toContain(") : showProvisioningRetryOnly ? null : (")
+  })
+
   it("backend route logs merchant resolution and returns the updated merchant id", () => {
     expect(profileRoute).toContain('console.info("[pinetree-wallets] profile_route_post_received"')
     expect(profileRoute).toContain("merchantId,")
