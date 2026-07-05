@@ -101,8 +101,49 @@ describe("PineTree Dynamic provisioning flow", () => {
 
   it("ready Dynamic profile renders Ready without requiring Lightning to finish", () => {
     expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
-    expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : dynamicProfileReady ? "Ready"')
+    expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : walletProvisioningInProgress ? "Provisioning" : dynamicProfileReady ? "Ready"')
     expect(page).not.toContain('const walletStatus = repairInProgress ? "Repairing" : allPrimaryRailsConnected ? "Ready"')
+  })
+
+  it("first-time Dynamic auth with delayed wallet addresses stays in provisioning, not setup incomplete", () => {
+    expect(page).toContain('| "provisioning_wallet"')
+    expect(page).toContain('if (step === "provisioning_wallet") return "Creating your PineTree Wallet..."')
+    expect(page).toContain("Securing Base and Solana wallet addresses... This usually takes a few seconds.")
+    expect(page).toContain("const walletProvisioningInProgress =")
+    expect(page).toContain("const walletSetupIncomplete = hasWallet && dbOnlyWalletProfile && !walletProvisioningInProgress")
+    expect(page).toContain("const repairOrSetupIncomplete = (repairFailedIncomplete || walletSetupIncomplete) && !walletProvisioningInProgress")
+  })
+
+  it("delayed Base/Solana hydration retries before saving the profile and then clears Preparing/Saving", () => {
+    expect(page).toContain("walletProvisioningRetryIntervalMs = 1_800")
+    expect(page).toContain("window.setInterval(() => {")
+    expect(page).toContain('reason: "dynamic_wallet_hydration_retry"')
+    expect(page).toContain('findDynamicApprovalWalletForSourceAsync(dynamicWalletSearchList as unknown[], primaryWallet, "base", baseAddress)')
+    expect(page).toContain('findDynamicApprovalWalletForSourceAsync(dynamicWalletSearchList as unknown[], primaryWallet, "solana", solanaAddress)')
+    expect(page).toContain('reason: "waiting_for_dynamic_addresses_or_signers"')
+    expect(page).toContain("await syncProfileFromDynamic({ autoEnableLightning: true, requireBaseAndSolanaSigners: true })")
+    expect(page).toContain('if (json.profile.status === "ready")')
+    expect(page).toContain("setSyncing(false)")
+    expect(page).toContain("setPendingSync(false)")
+  })
+
+  it("missing signer warning is deferred during first-time provisioning and only restored after saved-profile retry exhaustion", () => {
+    const timeoutBlock = page.slice(
+      page.indexOf("const savedDynamicProfileBeforeProvisioning ="),
+      page.indexOf("// --- After Dynamic logout")
+    )
+    expect(timeoutBlock).toContain("setProvisioningRetryExhausted(true)")
+    expect(timeoutBlock).toContain("setRepairFailedIncomplete(repairInProgress || savedDynamicProfileBeforeProvisioning)")
+    expect(timeoutBlock).toContain("profileState.profile.dynamic_user_id && profileState.profile.base_address && profileState.profile.solana_address")
+  })
+
+  it("Base/Solana connected chips render after delayed hydration is saved", () => {
+    expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : walletProvisioningInProgress ? "Provisioning" : dynamicProfileReady ? "Ready"')
+    expect(page).toContain("setProfileState({ kind: \"loaded\", profile: json.profile })")
+    expect(page).toContain("void fetch(\"/api/wallets/pinetree-wallet/rail-sync\"")
+    expect(page).toContain("configured: baseReady, enabled: enabledRails.base")
+    expect(page).toContain("configured: solanaReady, enabled: enabledRails.solana")
+    expect(page).toContain("<EnabledRailChips rows={walletRailRows} />")
   })
 
   it("backend route logs merchant resolution and returns the updated merchant id", () => {

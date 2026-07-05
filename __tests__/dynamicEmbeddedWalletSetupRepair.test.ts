@@ -26,12 +26,13 @@ describe("Dynamic embedded wallet setup repair", () => {
     expect(page).toContain("const dbOnlyWalletProfile =")
     expect(page).toContain("dynamicWalletRuntimeCount === 0")
     expect(page).toContain("!dynamicEmbeddedSignersReady")
+    expect(page).toContain("const walletSetupIncomplete = hasWallet && dbOnlyWalletProfile && !walletProvisioningInProgress")
     expect(page).toContain('repairOrSetupIncomplete ? "Setup incomplete"')
   })
 
   it("Ready appears only when DB addresses and Dynamic runtime signers both exist", () => {
     expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
-    expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : dynamicProfileReady ? "Ready"')
+    expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : walletProvisioningInProgress ? "Provisioning" : dynamicProfileReady ? "Ready"')
   })
 
   it("Review withdrawal is blocked when the runtime signer is missing", () => {
@@ -113,7 +114,7 @@ describe("Dynamic embedded wallet setup repair", () => {
     expect(page).toContain("repairFailedIncomplete")
     expect(page).toContain("repair_dynamic_wallets_missing_after_provisioning")
     expect(page).toContain("setRepairFailedIncomplete(true)")
-    expect(page).toContain("const repairOrSetupIncomplete = repairFailedIncomplete || walletSetupIncomplete")
+    expect(page).toContain("const repairOrSetupIncomplete = (repairFailedIncomplete || walletSetupIncomplete) && !walletProvisioningInProgress")
   })
 
   it("setup incomplete shows Finish PineTree Wallet setup instead of Open PineTree Wallet", () => {

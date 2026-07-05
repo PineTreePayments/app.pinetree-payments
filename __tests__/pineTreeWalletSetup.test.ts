@@ -139,7 +139,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("const bitcoinReady = railReadiness?.bitcoin_lightning.walletProvisioned")
     expect(page).not.toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
     expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
-    expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : dynamicProfileReady ? "Ready" : repairOrSetupIncomplete ? "Setup incomplete" : "Not connected"')
+    expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : walletProvisioningInProgress ? "Provisioning" : dynamicProfileReady ? "Ready" : repairOrSetupIncomplete ? "Setup incomplete" : "Not connected"')
   })
 
   it("syncs Dynamic wallet addresses to the merchant profile on creation only when explicitly triggered", () => {
@@ -159,8 +159,9 @@ describe("PineTree embedded wallet setup", () => {
   it("tracks wallet creation steps and times out instead of waiting forever", () => {
     expect(page).toContain("type WalletCreationStep")
     expect(page).toContain("walletCreationTimeoutMs = 30_000")
+    expect(page).toContain("walletProvisioningRetryIntervalMs = 1_800")
     expect(page).toContain('logWalletCreationStep("waiting_for_dynamic_auth")')
-    expect(page).toContain('logWalletCreationStep("waiting_for_embedded_wallets")')
+    expect(page).toContain('logWalletCreationStep("provisioning_wallet"')
     expect(page).toContain('step: "timeout"')
     expect(page).toContain("Wallet setup is taking longer than expected. Please try again.")
   })
@@ -277,13 +278,13 @@ describe("PineTree embedded wallet setup", () => {
 
   it("marks the merchant wallet Ready only when Base/Solana signers are hydrated", () => {
     expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
-    expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : dynamicProfileReady ? "Ready" : repairOrSetupIncomplete ? "Setup incomplete" : "Not connected"')
+    expect(page).toContain('const walletStatus = repairInProgress ? "Repairing" : walletProvisioningInProgress ? "Provisioning" : dynamicProfileReady ? "Ready" : repairOrSetupIncomplete ? "Setup incomplete" : "Not connected"')
     expect(page).not.toContain("Bitcoin Lightning is being prepared through PineTree")
     expect(page).not.toContain("Bitcoin address pending")
   })
 
   it("uses provider status vocabulary when a wallet address is missing", () => {
-    expect(page).toContain('walletStatus = repairInProgress ? "Repairing" : dynamicProfileReady ? "Ready" : repairOrSetupIncomplete ? "Setup incomplete" : "Not connected"')
+    expect(page).toContain('walletStatus = repairInProgress ? "Repairing" : walletProvisioningInProgress ? "Provisioning" : dynamicProfileReady ? "Ready" : repairOrSetupIncomplete ? "Setup incomplete" : "Not connected"')
     expect(page).not.toContain('"Setup pending"')
     expect(page).not.toContain('const lightningPending = lightningProfile?.status === "pending"')
     expect(page).not.toContain("lightningRetryable")
