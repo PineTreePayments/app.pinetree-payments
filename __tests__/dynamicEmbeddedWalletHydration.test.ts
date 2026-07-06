@@ -56,12 +56,13 @@ describe("Dynamic embedded wallet hydration", () => {
     expect(page).toContain('setWithdrawalScreen("failed")')
   })
 
-  it("DB profile with zero Dynamic wallets stays Setup incomplete", () => {
+  it("DB profile with zero Dynamic wallets maps to Reconnect needed", () => {
     expect(page).toContain("const baseSignerReady = Boolean(")
     expect(page).toContain("const solanaSignerReady = Boolean(")
     expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
     expect(page).toContain('if (dynamicProfileReady) return "ready"')
-    expect(page).toContain('walletSetupPrimaryState === "repair_needed" ? "Setup incomplete" :')
+    expect(page).toContain('if (repairOrSetupIncomplete) return "reconnect_needed"')
+    expect(page).toContain('walletSetupPrimaryState === "reconnect_needed" ? "Reconnect needed" :')
   })
 
   it("Solana embedded wallet signer lookup succeeds after hydration", () => {

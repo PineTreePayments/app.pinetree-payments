@@ -127,8 +127,9 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("user.userId")
     // hasStaleDynamicSession guards Create so it doesn't silently reuse the old session
     expect(page).toContain("hasStaleDynamicSession")
-    // Mismatch warning is shown to the merchant
-    expect(page).toContain("PineTree Wallet session not active for this account")
+    // Reconnect copy is shown to the merchant instead of the old setup-incomplete warning.
+    expect(page).toContain("Reconnect your PineTree Wallet to restore secure browser access.")
+    expect(page).toContain("Reconnect PineTree Wallet")
   })
 
   it("clears a stale Dynamic session before creating a wallet for a new merchant", () => {
@@ -153,7 +154,8 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
     expect(page).toContain('if (dynamicProfileReady) return "ready"')
     expect(page).toContain('walletSetupPrimaryState === "ready" ? "Ready" :')
-    expect(page).toContain('walletSetupPrimaryState === "repair_needed" ? "Setup incomplete" :')
+    expect(page).toContain('if (repairOrSetupIncomplete) return "reconnect_needed"')
+    expect(page).toContain('walletSetupPrimaryState === "reconnect_needed" ? "Reconnect needed" :')
   })
 
   it("syncs Dynamic wallet addresses to the merchant profile on creation only when explicitly triggered", () => {
@@ -299,7 +301,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
     expect(page).toContain('if (dynamicProfileReady) return "ready"')
     expect(page).toContain('walletSetupPrimaryState === "ready" ? "Ready" :')
-    expect(page).toContain('walletSetupPrimaryState === "repair_needed" ? "Setup incomplete" :')
+    expect(page).toContain('walletSetupPrimaryState === "reconnect_needed" ? "Reconnect needed" :')
     expect(page).not.toContain("Bitcoin Lightning is being prepared through PineTree")
     expect(page).not.toContain("Bitcoin address pending")
   })

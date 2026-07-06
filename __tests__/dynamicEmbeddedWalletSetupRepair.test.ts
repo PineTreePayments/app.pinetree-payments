@@ -22,12 +22,13 @@ describe("Dynamic embedded wallet setup repair", () => {
     expect(logBlock).not.toContain("environmentId,")
   })
 
-  it("DB profile exists but runtime wallets are zero or signerless -> Setup incomplete", () => {
+  it("DB profile exists but runtime wallets are zero or signerless -> Reconnect needed", () => {
     expect(page).toContain("const dbOnlyWalletProfile =")
     expect(page).toContain("dynamicWalletRuntimeCount === 0")
     expect(page).toContain("!dynamicEmbeddedSignersReady")
     expect(page).toContain("const walletSetupIncomplete = hasWallet && dbOnlyWalletProfile && !walletProvisioningInProgress")
-    expect(page).toContain('walletSetupPrimaryState === "repair_needed" ? "Setup incomplete"')
+    expect(page).toContain('if (repairOrSetupIncomplete) return "reconnect_needed"')
+    expect(page).toContain('walletSetupPrimaryState === "reconnect_needed" ? "Reconnect needed"')
   })
 
   it("Ready appears only when DB addresses and Dynamic runtime signers both exist", () => {
@@ -40,7 +41,7 @@ describe("Dynamic embedded wallet setup repair", () => {
     expect(page).toContain("const reviewSigner =")
     expect(page).toContain("findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, withdrawalRail, reviewSourceAddress)")
     expect(page).toContain("dynamicWalletRuntimeCount === 0 || !reviewSigner")
-    expect(page).toContain("Finish PineTree Wallet setup before reviewing withdrawals.")
+    expect(page).toContain("Reconnect your PineTree Wallet before reviewing withdrawals.")
     const guardIdx = page.indexOf("dynamicWalletRuntimeCount === 0 || !reviewSigner")
     const reviewIdx = page.indexOf("setReviewingWithdrawal(true)")
     expect(guardIdx).toBeGreaterThan(0)
@@ -118,10 +119,13 @@ describe("Dynamic embedded wallet setup repair", () => {
     expect(page).toContain("const repairOrSetupIncomplete = (repairFailedIncomplete || walletSetupIncomplete) && !walletProvisioningInProgress")
   })
 
-  it("setup incomplete shows Finish PineTree Wallet setup instead of Open PineTree Wallet", () => {
-    expect(page).toContain(
-      'walletSetupPrimaryState === "repair_needed" ? "Finish PineTree Wallet setup" : "Open PineTree Wallet"'
+  it("missing signer recovery shows Reconnect PineTree Wallet instead of repair", () => {
+    expect(page).toContain("Reconnect your PineTree Wallet to restore secure browser access.")
+    expect(page).toContain("Reconnect PineTree Wallet")
+    const ctaChain = page.slice(
+      page.indexOf('walletSetupPrimaryState === "reconnect_needed" ? ('),
+      page.indexOf(') : walletSetupPrimaryState === "failed"')
     )
-    expect(page).toContain("Repair PineTree Wallet setup")
+    expect(ctaChain).not.toContain("Repair PineTree Wallet setup")
   })
 })

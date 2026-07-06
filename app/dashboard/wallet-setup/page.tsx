@@ -245,11 +245,13 @@ type WalletCreationStep =
 // Priority-ordered: exactly one of these drives the setup card at a time, highest first.
 type WalletSetupPrimaryState =
   | "ready"
+  | "create_wallet"
   | "reconnect_needed"
   | "email_mismatch"
   | "email_unverified"
+  | "save_needed"
+  | "rail_sync_needed"
   | "provisioning"
-  | "repair_needed"
   | "failed"
   | "idle"
 
@@ -709,6 +711,16 @@ function walletSetupFailureRecoveryLabel(reason: WalletSetupFailureReason | null
   return "Check wallet readiness"
 }
 
+function walletSetupNoticeCopy(state: WalletSetupPrimaryState, reason: WalletSetupFailureReason | null) {
+  if (state === "reconnect_needed") return "Reconnect your PineTree Wallet to restore secure browser access."
+  if (state === "email_mismatch") return "This browser is signed into a different wallet session."
+  if (state === "email_unverified") return "PineTree could not verify the wallet sign-in email."
+  if (state === "save_needed") return "Wallet setup is almost finished. Save your wallet profile to continue."
+  if (state === "rail_sync_needed") return "Payment rails need to sync before this wallet can accept payments."
+  if (state === "failed") return walletSetupFailureMessage(reason || "provisioning_timeout_unknown")
+  return ""
+}
+
 function walletCreationStepDetail(step: WalletCreationStep) {
   if (step === "provisioning_wallet" || step === "waiting_for_embedded_wallets") {
     return "Securing Base and Solana wallet addresses... This usually takes a few seconds."
@@ -1157,7 +1169,7 @@ function WithdrawalFormShell({
   const blockingMessage =
     error ||
     (missingRuntimeSigner
-      ? "Finish PineTree Wallet setup before reviewing withdrawals."
+      ? "Reconnect your PineTree Wallet before reviewing withdrawals."
       : missingDestination
       ? "Enter a destination address to review."
       : missingAmount
@@ -1419,7 +1431,7 @@ function WithdrawalFormShell({
           disabled={reviewDisabled}
           className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none"
         >
-          {reviewing ? "Reviewing..." : missingRuntimeSigner ? "Finish PineTree Wallet setup" : "Review withdrawal"}
+          {reviewing ? "Reviewing..." : missingRuntimeSigner ? "Reconnect PineTree Wallet" : "Review withdrawal"}
         </button>
         {missingRuntimeSigner && onFinishSetup ? (
           <button
@@ -1912,6 +1924,7 @@ function PineTreeWalletRuntime() {
   const [railReadiness, setRailReadiness] = useState<PineTreeRailReadinessMap | null>(null)
   const [walletSync, setWalletSync] = useState<PineTreeWalletSyncResponse>(defaultWalletSyncState)
   const [walletSyncing, setWalletSyncing] = useState(false)
+  const [resettingWalletSetup, setResettingWalletSetup] = useState(false)
   const [dynamicWalletRuntimeRefreshNonce, setDynamicWalletRuntimeRefreshNonce] = useState(0)
   const [profileSyncDiagnostics, setProfileSyncDiagnostics] = useState<ProfileSyncDiagnosticsState>({
     dynamicUserId: null,
@@ -3524,8 +3537,11 @@ function PineTreeWalletRuntime() {
     if (emailUnverifiedActive) return "email_unverified"
     if (!dynamicSessionMatchesProfile) return "reconnect_needed"
     if (walletProvisioningInProgress) return "provisioning"
-    if (repairOrSetupIncomplete) return "repair_needed"
+    if (walletSetupFailureReason === "profile_sync_failed") return "save_needed"
+    if (walletSetupFailureReason === "provider_sync_failed") return "rail_sync_needed"
+    if (repairOrSetupIncomplete) return "reconnect_needed"
     if (walletCreationStep === "failed" || walletCreationStep === "timeout") return "failed"
+    if (profileState.kind === "none") return "create_wallet"
     return "idle"
   }, [
     dynamicProfileReady,
@@ -3535,20 +3551,24 @@ function PineTreeWalletRuntime() {
     emailUnverifiedActive,
     dynamicSessionMatchesProfile,
     walletProvisioningInProgress,
+    walletSetupFailureReason,
     repairOrSetupIncomplete,
     walletCreationStep,
+    profileState,
   ])
 
   const walletStatus =
     repairInProgress ? "Repairing" :
     syncing ? "Saving..." :
     walletSetupPrimaryState === "ready" ? "Ready" :
+    walletSetupPrimaryState === "create_wallet" ? "Create wallet" :
     walletSetupPrimaryState === "provisioning" ? "Provisioning" :
     walletSetupPrimaryState === "reconnect_needed" ? "Reconnect needed" :
     walletSetupPrimaryState === "email_mismatch" ? "Wrong sign-in" :
     walletSetupPrimaryState === "email_unverified" ? "Wrong sign-in" :
-    walletSetupPrimaryState === "repair_needed" ? "Setup incomplete" :
-    walletSetupPrimaryState === "failed" ? "Setup incomplete" :
+    walletSetupPrimaryState === "save_needed" ? "Save needed" :
+    walletSetupPrimaryState === "rail_sync_needed" ? "Rail sync needed" :
+    walletSetupPrimaryState === "failed" ? "Failed" :
     "Not connected"
 
   const walletCreationMessage =
@@ -3941,6 +3961,44 @@ function PineTreeWalletRuntime() {
     }, 0)
   }
 
+  async function handleResetPineTreeWalletSetup() {
+    const token = accessTokenRef.current
+    if (!token || !merchantId) return
+    setResettingWalletSetup(true)
+    try {
+      const res = await fetch("/api/debug/pinetree-wallet/reset-setup", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ merchant_id: merchantId }),
+      })
+      if (!res.ok) return
+      clearWalletSetupInProgress()
+      setProfileState({ kind: "none" })
+      setEnabledRails(defaultEnabledRails)
+      setRailReadiness(null)
+      setWalletSync(defaultWalletSyncState)
+      setWalletSetupStage("idle")
+      setWalletSetupFailureReason(null)
+      setWalletCreationStep("idle")
+      setPendingSync(false)
+      setSyncing(false)
+      setRepairInProgress(false)
+      setRepairFailedIncomplete(false)
+      setIdentityMismatchError(null)
+      setIdentityUnverified(false)
+      setWalletIdentityError("")
+      console.warn("[pinetree-wallets] setup_reset_requested", {
+        merchantId,
+        untouched: ["payments", "ledger", "transactions"],
+      })
+    } finally {
+      setResettingWalletSetup(false)
+    }
+  }
+
   function handleWithdrawalAssetSelect(nextRail: WithdrawalRail, nextAsset: WithdrawalAsset) {
     setWithdrawalRail(nextRail)
     setWithdrawalAsset(nextAsset)
@@ -4034,7 +4092,7 @@ function PineTreeWalletRuntime() {
         })
       }
       setWithdrawalError(
-        "PineTree Wallet setup is incomplete. Finish PineTree Wallet setup before reviewing withdrawals."
+        "Reconnect your PineTree Wallet before reviewing withdrawals."
       )
       return
     }
@@ -4274,62 +4332,48 @@ function PineTreeWalletRuntime() {
 
         {/* Exactly one problem card renders, per walletSetupPrimaryState - never stacked. */}
         {walletSetupPrimaryState === "reconnect_needed" ? (
-          <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
-            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
-            <p className="text-xs leading-5 text-amber-800">
-              PineTree Wallet session not active for this account. Click &ldquo;Open PineTree Wallet&rdquo; to reconnect.
+          <div className="mt-4 flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/70 px-3 py-2">
+            <AlertTriangle size={13} className="mt-0.5 shrink-0 text-blue-600" />
+            <p className="text-xs leading-5 text-blue-800">
+              {walletSetupNoticeCopy(walletSetupPrimaryState, walletSetupFailureReason)}
             </p>
           </div>
         ) : walletSetupPrimaryState === "email_mismatch" ? (
-          <div className="mt-4 flex flex-wrap items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
-            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
+          <div className="mt-4 flex flex-wrap items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/70 px-3 py-2">
+            <AlertTriangle size={13} className="mt-0.5 shrink-0 text-blue-600" />
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold leading-5 text-amber-900">
-                Use the same email as your PineTree account to create your PineTree Wallet.
+              <p className="text-xs font-semibold leading-5 text-blue-900">
+                {walletSetupNoticeCopy(walletSetupPrimaryState, walletSetupFailureReason)}
               </p>
-              <p className="mt-1 text-xs leading-5 text-amber-800">
+              <p className="mt-1 text-xs leading-5 text-blue-800">
                 PineTree account email: {identityMismatchError?.merchantEmail ?? merchantEmail}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={handleUsePineTreeAccountEmail}
-              className="ml-5 inline-flex h-8 items-center justify-center rounded-lg bg-amber-700 px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-amber-800"
-            >
-              Use PineTree account email
-            </button>
           </div>
         ) : walletSetupPrimaryState === "email_unverified" ? (
-          <div className="mt-4 flex flex-wrap items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
-            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
+          <div className="mt-4 flex flex-wrap items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/70 px-3 py-2">
+            <AlertTriangle size={13} className="mt-0.5 shrink-0 text-blue-600" />
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold leading-5 text-amber-900">
-                We could not verify that this wallet sign-in matches your PineTree account email.
+              <p className="text-xs font-semibold leading-5 text-blue-900">
+                {walletSetupNoticeCopy(walletSetupPrimaryState, walletSetupFailureReason)}
               </p>
-              <p className="mt-1 text-xs leading-5 text-amber-800">
+              <p className="mt-1 text-xs leading-5 text-blue-800">
                 Please sign in with your PineTree account email: {merchantEmail || "unknown"}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={handleUsePineTreeAccountEmail}
-              className="ml-5 inline-flex h-8 items-center justify-center rounded-lg bg-amber-700 px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-amber-800"
-            >
-              Use PineTree account email
-            </button>
-          </div>
-        ) : walletSetupPrimaryState === "repair_needed" ? (
-          <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
-            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
-            <p className="text-xs leading-5 text-amber-800">
-              PineTree Wallet setup is incomplete. This profile has saved addresses, but Dynamic has not restored embedded wallet signers in this browser session.
-            </p>
           </div>
         ) : walletSetupPrimaryState === "failed" ? (
-          <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
-            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
-            <p className="text-xs leading-5 text-amber-800">
+          <div className="mt-4 flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/70 px-3 py-2">
+            <AlertTriangle size={13} className="mt-0.5 shrink-0 text-blue-600" />
+            <p className="text-xs leading-5 text-blue-800">
               {walletSetupFailureMessage(walletSetupFailureReason || "provisioning_timeout_unknown")}
+            </p>
+          </div>
+        ) : walletSetupPrimaryState === "save_needed" || walletSetupPrimaryState === "rail_sync_needed" ? (
+          <div className="mt-4 flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/70 px-3 py-2">
+            <AlertTriangle size={13} className="mt-0.5 shrink-0 text-blue-600" />
+            <p className="text-xs leading-5 text-blue-800">
+              {walletSetupNoticeCopy(walletSetupPrimaryState, walletSetupFailureReason)}
             </p>
           </div>
         ) : null}
@@ -4410,6 +4454,24 @@ function PineTreeWalletRuntime() {
           </div>
         ) : null}
 
+        {showProfileSyncDebugPanel ? (
+          <div className="mt-4 rounded-lg border border-slate-200 bg-white px-3 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs leading-5 text-slate-600">
+                Reset PineTree Wallet setup clears only wallet profile, crypto provider rows, and wallet balances.
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleResetPineTreeWalletSetup()}
+                disabled={resettingWalletSetup || !merchantId}
+                className="h-8 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-60"
+              >
+                {resettingWalletSetup ? "Resetting..." : "Reset PineTree Wallet setup"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-6 flex justify-start">
           {walletSetupPrimaryState === "email_mismatch" || walletSetupPrimaryState === "email_unverified" ? (
             <button
@@ -4421,7 +4483,7 @@ function PineTreeWalletRuntime() {
               {logoutPending
                 ? "Preparing..."
                 : walletSetupPrimaryState === "email_mismatch"
-                  ? "Use PineTree account email"
+                  ? "Switch PineTree Wallet sign-in"
                   : "Use PineTree account email"}
             </button>
           ) : walletSetupPrimaryState === "reconnect_needed" ? (
@@ -4431,37 +4493,31 @@ function PineTreeWalletRuntime() {
               disabled={syncing || walletCreationInProgress}
               className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
             >
-              Open PineTree Wallet
+              Reconnect PineTree Wallet
             </button>
-          ) : walletSetupPrimaryState === "failed" ? (
+          ) : walletSetupPrimaryState === "failed" || walletSetupPrimaryState === "save_needed" || walletSetupPrimaryState === "rail_sync_needed" ? (
             <button
               type="button"
               onClick={handleRetryWalletSetup}
               disabled={syncing || walletCreationInProgress}
               className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
             >
-              {walletSetupFailureRecoveryLabel(walletSetupFailureReason)}
+              {walletSetupPrimaryState === "save_needed"
+                ? "Save wallet profile"
+                : walletSetupPrimaryState === "rail_sync_needed"
+                  ? "Sync payment rails"
+                  : walletSetupFailureRecoveryLabel(walletSetupFailureReason)}
             </button>
-          ) : hasWallet || repairFailedIncomplete ? (
+          ) : hasWallet ? (
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={walletSetupPrimaryState === "repair_needed" ? handleFinishWalletSetup : handleOpenWallet}
+                onClick={handleOpenWallet}
                 disabled={syncing || walletCreationInProgress}
                 className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
               >
-                {walletSetupPrimaryState === "repair_needed" ? "Finish PineTree Wallet setup" : "Open PineTree Wallet"}
+                Open PineTree Wallet
               </button>
-              {walletSetupPrimaryState === "repair_needed" ? (
-                <button
-                  type="button"
-                  onClick={() => void handleRepairWalletSetup()}
-                  disabled={syncing || walletCreationInProgress}
-                  className="h-10 rounded-lg border border-amber-200 bg-white px-4 text-sm font-semibold text-amber-800 shadow-sm transition hover:bg-amber-50 disabled:opacity-60"
-                >
-                  Repair PineTree Wallet setup
-                </button>
-              ) : null}
             </div>
           ) : showProvisioningRetryOnly ? null : (
             <button
