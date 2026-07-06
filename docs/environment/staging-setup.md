@@ -22,6 +22,23 @@ Provider-specific webhook secrets such as `SPEED_WEBHOOK_SECRET`,
 `ALCHEMY_WEBHOOK_SIGNING_KEY_BASE` are required only when those providers are
 enabled in staging.
 
+## PineTree Wallet Dynamic auth
+
+Set `NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID` for PineTree Wallet embedded wallet
+signing. In sandbox and staging, keep Dynamic Email login enabled unless
+PineTree external JWT/BYOA auth is actually configured.
+
+Do not set `NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK=false` by itself. That
+removes the current Dynamic fallback used to restore the embedded wallet signer
+session. Only disable it when `NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE=external_jwt`
+is configured end to end:
+
+```bash
+NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID=...
+NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE=external_jwt
+NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK=false
+```
+
 ## Shopify
 
 Set all variables in

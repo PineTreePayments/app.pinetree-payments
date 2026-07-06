@@ -36,6 +36,12 @@ import {
 } from "@/components/dashboard/DashboardPrimitives"
 import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/PineTreeDynamicProvider"
 import type { PineTreeRailReadinessMap } from "@/lib/pinetreeRailReadiness"
+import {
+  getPineTreeDynamicAuthConfig,
+  pineTreeDynamicEmailFallbackMisconfiguredWarning,
+  requestPineTreeDynamicExternalJwtAuth,
+  shouldOpenDynamicEmailFallbackAuth,
+} from "@/lib/pinetreeDynamicAuth"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -715,9 +721,7 @@ async function sendDynamicPreparedWithdrawal(
       )
     }
     // No Dynamic wallets present at all — session expired or SDK not yet loaded.
-    throw new Error(
-      "PineTree Wallet is not active in this browser session. Open PineTree Wallet to reconnect, then try again."
-    )
+    throw new Error(pineTreeSignerReconnectMessage)
   }
 
   assertPreparedWithdrawalSignerMatchesRail(prepared, wallet)
@@ -867,8 +871,9 @@ function sanitizeWithdrawalSubmitErrorForMerchant(message: string | undefined) {
   const raw = String(message || "").trim()
   if (!raw) return "We couldn't submit this withdrawal request. Please try again."
   // Pass through session-specific reconnect errors so merchants get actionable guidance.
-  if (raw.includes("PineTree Wallet is not active in this browser session")) return raw
+  if (raw.includes("PineTree Wallet is not active in this browser session")) return pineTreeSignerReconnectMessage
   if (raw.includes("different PineTree Wallet session")) return raw
+  if (raw === pineTreeSignerReconnectMessage) return raw
   if (raw === withdrawalSignerRailMismatchMessage) return raw
   if (raw === solanaWithdrawalReconnectMessage) return raw
   if (raw === "Withdrawal approval is still pending. Check your wallet activity before trying again.") return raw
@@ -896,6 +901,7 @@ const walletCreationDebugEnabled =
   process.env.NEXT_PUBLIC_PINETREE_WALLET_DEBUG === "true"
 const withdrawalSignerRailMismatchMessage = "Selected wallet network does not match this withdrawal asset."
 const solanaWithdrawalReconnectMessage = "Reconnect your Solana wallet session before approving this withdrawal."
+const pineTreeSignerReconnectMessage = "Reconnect PineTree Wallet to restore secure signing access."
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -1467,7 +1473,7 @@ function WithdrawalFormShell({
   const blockingMessage =
     error ||
     (missingRuntimeSigner
-      ? "Reconnect your PineTree Wallet before reviewing withdrawals."
+      ? pineTreeSignerReconnectMessage
       : missingDestination
       ? "Enter a destination address to review."
       : missingAmount
@@ -2221,22 +2227,30 @@ function PineTreeWalletRuntime() {
   const { user, sdkHasLoaded, setShowAuthFlow, setShowDynamicUserProfile, handleLogOut, primaryWallet } = useDynamicContext()
   const refreshDynamicUser = useRefreshUser()
   const switchDynamicWallet = useSwitchWallet()
-  const pineTreeControlledDynamicAuthAvailable =
-    process.env.NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE === "external_jwt"
-  const dynamicEmailFallbackAllowed =
-    !pineTreeControlledDynamicAuthAvailable &&
-    process.env.NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK !== "false"
+  const dynamicAuthConfig = getPineTreeDynamicAuthConfig()
+  const pineTreeControlledDynamicAuthAvailable = dynamicAuthConfig.externalJwtConfigured
+  const dynamicEmailFallbackAllowed = shouldOpenDynamicEmailFallbackAuth(dynamicAuthConfig)
   const openDynamicEmailFallbackAuth = useCallback((reason: string) => {
-    if (!dynamicEmailFallbackAllowed) {
+    if (pineTreeControlledDynamicAuthAvailable) {
+      void requestPineTreeDynamicExternalJwtAuth().catch((error) => {
+        console.warn("[pinetree-wallets] dynamic_external_jwt_auth_unavailable", {
+          reason,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      })
+      return false
+    }
+    if (!shouldOpenDynamicEmailFallbackAuth(dynamicAuthConfig)) {
       console.warn("[pinetree-wallets] dynamic_email_fallback_blocked", {
         reason,
         pineTreeControlledDynamicAuthAvailable,
+        emailFallbackMisconfigured: dynamicAuthConfig.emailFallbackMisconfigured,
       })
       return false
     }
     setShowAuthFlow(true)
     return true
-  }, [dynamicEmailFallbackAllowed, pineTreeControlledDynamicAuthAvailable, setShowAuthFlow])
+  }, [dynamicAuthConfig, pineTreeControlledDynamicAuthAvailable, setShowAuthFlow])
   const scheduleDynamicEmailFallbackAuth = useCallback((reason: string) => {
     window.setTimeout(() => {
       openDynamicEmailFallbackAuth(reason)
@@ -3741,6 +3755,8 @@ function PineTreeWalletRuntime() {
   // walletStatus is derived from walletSetupPrimaryState further down, once that
   // resolver (and the live identity signals it depends on) is computed.
   const showProfileSyncDebugPanel = walletSyncDebugQueryEnabled
+  const showDynamicAuthMisconfigurationWarning =
+    showProfileSyncDebugPanel && dynamicAuthConfig.emailFallbackMisconfigured
 
   useEffect(() => {
     dynamicProfileReadyRef.current = Boolean(dynamicProfileReady)
@@ -4519,9 +4535,7 @@ function PineTreeWalletRuntime() {
           matchingDynamicWallet: Boolean(reviewSigner),
         })
       }
-      setWithdrawalError(
-        "Reconnect your PineTree Wallet before reviewing withdrawals."
-      )
+      setWithdrawalError(pineTreeSignerReconnectMessage)
       return
     }
 
@@ -4625,7 +4639,7 @@ function PineTreeWalletRuntime() {
       setWithdrawalApprovalError(
         _debugRail === "solana"
           ? solanaWithdrawalReconnectMessage
-          : "PineTree Wallet is not active in this browser session. Open PineTree Wallet to reconnect, then try again."
+          : pineTreeSignerReconnectMessage
       )
       setWithdrawalScreen("failed")
       return
@@ -4864,6 +4878,13 @@ function PineTreeWalletRuntime() {
                 Using your PineTree account email: {merchantEmail}
               </p>
             ) : null}
+          </div>
+        ) : null}
+
+        {showDynamicAuthMisconfigurationWarning ? (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-3 text-xs text-amber-900">
+            <p className="font-semibold">Dynamic auth configuration warning</p>
+            <p className="mt-1 leading-5">{pineTreeDynamicEmailFallbackMisconfiguredWarning}</p>
           </div>
         ) : null}
 

@@ -17,7 +17,7 @@ describe("Dynamic embedded wallet setup repair", () => {
     expect(provider).toContain('NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID: environmentId ? "present" : "missing"')
     const logBlock = provider.slice(
       provider.indexOf("[pinetree-wallets] dynamic_environment_config"),
-      provider.indexOf("}, [dynamicEmailFallbackEnabled, environmentId])")
+      provider.indexOf("})\n  }, [dynamicAuthConfig.emailFallbackEnabled")
     )
     expect(logBlock).not.toContain("environmentId,")
   })
@@ -41,7 +41,7 @@ describe("Dynamic embedded wallet setup repair", () => {
     expect(page).toContain("const reviewSigner =")
     expect(page).toContain("findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, withdrawalRail, reviewSourceAddress)")
     expect(page).toContain("dynamicWalletRuntimeCount === 0 || !reviewSigner")
-    expect(page).toContain("Reconnect your PineTree Wallet before reviewing withdrawals.")
+    expect(page).toContain("Reconnect PineTree Wallet to restore secure signing access.")
     const guardIdx = page.indexOf("dynamicWalletRuntimeCount === 0 || !reviewSigner")
     const reviewIdx = page.indexOf("setReviewingWithdrawal(true)")
     expect(guardIdx).toBeGreaterThan(0)

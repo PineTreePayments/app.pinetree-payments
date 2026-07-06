@@ -52,7 +52,7 @@ describe("Dynamic embedded wallet hydration", () => {
   it("Approve withdrawal is blocked when Dynamic runtime has no matching signer", () => {
     expect(page).toContain('refreshDynamicWalletRuntime("withdrawal_submit_before_signing", { requireApprovalWallet: true })')
     expect(page).toContain('if (_debugApprovalMethod === "dynamic_browser" && !_debugMatchingWallet)')
-    expect(page).toContain("PineTree Wallet is not active in this browser session")
+    expect(page).toContain("Reconnect PineTree Wallet to restore secure signing access.")
     expect(page).toContain('setWithdrawalScreen("failed")')
   })
 

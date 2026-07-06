@@ -5,6 +5,7 @@ import { DynamicContextProvider, type WalletOption } from "@dynamic-labs/sdk-rea
 import { EthereumWalletConnectors } from "@dynamic-labs/ethereum"
 import { SolanaWalletConnectors } from "@dynamic-labs/solana"
 import { BitcoinWalletConnectors } from "@dynamic-labs/bitcoin"
+import { getPineTreeDynamicAuthConfig } from "@/lib/pinetreeDynamicAuth"
 
 type PineTreeWalletInfrastructureStatus = {
   configured: boolean
@@ -137,17 +138,16 @@ class WalletInfrastructureErrorBoundary extends Component<
 
 export default function PineTreeDynamicProvider({ children }: { children: ReactNode }) {
   const environmentId = process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?.trim()
-  // Temporary sandbox/dev fallback: Dynamic email OTP remains enabled in the
-  // Dynamic dashboard until PineTree-controlled BYOA/external-JWT auth is live.
-  const dynamicEmailFallbackEnabled =
-    process.env.NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK !== "false"
+  const dynamicAuthConfig = getPineTreeDynamicAuthConfig()
 
   useEffect(() => {
     console.info("[pinetree-wallets] dynamic_environment_config", {
       NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID: environmentId ? "present" : "missing",
-      pineTreeDynamicEmailFallbackEnabled: dynamicEmailFallbackEnabled,
+      pineTreeDynamicAuthMode: dynamicAuthConfig.mode,
+      pineTreeDynamicEmailFallbackEnabled: dynamicAuthConfig.emailFallbackEnabled,
+      pineTreeDynamicExternalJwtConfigured: dynamicAuthConfig.externalJwtConfigured,
     })
-  }, [dynamicEmailFallbackEnabled, environmentId])
+  }, [dynamicAuthConfig.emailFallbackEnabled, dynamicAuthConfig.externalJwtConfigured, dynamicAuthConfig.mode, environmentId])
 
   if (!environmentId) {
     return (

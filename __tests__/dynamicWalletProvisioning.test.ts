@@ -59,7 +59,7 @@ describe("Dynamic wallet provisioning — zero-wallet case", () => {
 describe("Withdrawal review blocked when no runtime wallets", () => {
   it("handleReviewWithdrawal returns early when dynamicWalletRuntimeCount === 0", () => {
     expect(page).toContain("dynamicWalletRuntimeCount === 0")
-    expect(page).toContain("Reconnect your PineTree Wallet before reviewing withdrawals.")
+    expect(page).toContain("Reconnect PineTree Wallet to restore secure signing access.")
   })
 
   it("guard only fires when SDK is loaded and user is authenticated", () => {
