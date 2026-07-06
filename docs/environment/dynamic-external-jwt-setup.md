@@ -18,13 +18,13 @@ npm run dynamic:jwt:generate
 
 This prints:
 
-- RS256 private signing key for server-only env.
+- Base64-encoded RS256 PEM signing key for server-only env.
 - Public JWKS JSON for Dynamic verification.
 - Stable `kid`.
 - Vercel env blocks.
 - Dynamic dashboard values.
 
-Do not commit generated private keys.
+Do not commit generated signing keys.
 
 ## Vercel Env Vars
 
@@ -35,7 +35,7 @@ DYNAMIC_EXTERNAL_JWT_ENABLED=true
 DYNAMIC_EXTERNAL_JWT_ISSUER=https://app.pinetree-payments.com
 DYNAMIC_EXTERNAL_JWT_AUDIENCE=dynamic
 DYNAMIC_EXTERNAL_JWT_KID=<generated kid>
-DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY=<generated private key with \n escapes>
+DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64=<generated base64 signing key>
 DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC='<generated public JWKS JSON>'
 ```
 

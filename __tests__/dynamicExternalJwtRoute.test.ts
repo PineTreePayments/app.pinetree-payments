@@ -26,6 +26,7 @@ const envKeys = [
   "DYNAMIC_EXTERNAL_JWT_ISSUER",
   "DYNAMIC_EXTERNAL_JWT_AUDIENCE",
   "DYNAMIC_EXTERNAL_JWT_SECRET",
+  "DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64",
   "DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY",
   "DYNAMIC_EXTERNAL_JWT_KID",
   "DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC",
@@ -64,7 +65,8 @@ describe("Dynamic external JWT route", () => {
     process.env.DYNAMIC_EXTERNAL_JWT_ISSUER = "pinetree"
     process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE = "dynamic"
     process.env.DYNAMIC_EXTERNAL_JWT_KID = "pinetree-test-kid"
-    process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY = privateKeyPem
+    process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64 = Buffer.from(privateKeyPem, "utf8").toString("base64")
+    delete process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY
     process.env.DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC = JSON.stringify({
       keys: [{ ...publicJwk, kid: "pinetree-test-kid", alg: "RS256", use: "sig" }],
     })
@@ -118,7 +120,7 @@ describe("Dynamic external JWT route", () => {
         issuer: string
         audienceConfigured: boolean
         kidConfigured: boolean
-        privateKeyConfigured: boolean
+        signingKeyConfigured: boolean
       }
     }
 
@@ -150,8 +152,45 @@ describe("Dynamic external JWT route", () => {
       issuer: "pinetree",
       audienceConfigured: true,
       kidConfigured: true,
-      privateKeyConfigured: true,
+      signingKeyConfigured: true,
     })
+  })
+
+  it("decodes the base64 PEM signing key before signing", async () => {
+    const res = await POST(request())
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as { externalJwt: string }
+
+    await expect(
+      jwtVerify(json.externalJwt, publicKey, {
+        issuer: "pinetree",
+        audience: "dynamic",
+        subject: "merchant-1",
+      })
+    ).resolves.toBeTruthy()
+  })
+
+  it("temporarily supports the legacy raw private key env fallback", async () => {
+    const legacyKeys = await generateKeyPair("RS256", { extractable: true })
+    publicKey = legacyKeys.publicKey
+    const privateKeyPem = await exportPKCS8(legacyKeys.privateKey)
+    delete process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64
+    process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY = privateKeyPem
+
+    const res = await POST(request())
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as {
+      externalJwt: string
+      diagnostics?: { signingKeyConfigured: boolean }
+    }
+    expect(json.diagnostics?.signingKeyConfigured).toBe(true)
+    await expect(
+      jwtVerify(json.externalJwt, publicKey, {
+        issuer: "pinetree",
+        audience: "dynamic",
+        subject: "merchant-1",
+      })
+    ).resolves.toBeTruthy()
   })
 
   it("omits audience when no audience is configured", async () => {
@@ -177,17 +216,25 @@ describe("Dynamic external JWT route", () => {
     await expect(res.json()).resolves.toEqual({ error: "dynamic_external_jwt_not_enabled" })
   })
 
-  it("requires server-only private key and configured kid before issuing tokens", async () => {
+  it("requires server-only signing key and configured kid before issuing tokens", async () => {
+    delete process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64
     delete process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY
 
     const res = await POST(request())
     expect(res.status).toBe(503)
-    await expect(res.json()).resolves.toEqual({ error: "dynamic_external_jwt_private_key_missing" })
+    await expect(res.json()).resolves.toEqual({ error: "dynamic_external_jwt_signing_key_missing" })
 
-    process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY = "not-a-real-key"
     delete process.env.DYNAMIC_EXTERNAL_JWT_KID
     const missingKid = await POST(request())
     expect(missingKid.status).toBe(503)
     await expect(missingKid.json()).resolves.toEqual({ error: "dynamic_external_jwt_kid_missing" })
+  })
+
+  it("fails clearly when the base64 signing key is invalid", async () => {
+    process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64 = "not-a-real-base64-key"
+
+    const res = await POST(request())
+    expect(res.status).toBe(503)
+    await expect(res.json()).resolves.toEqual({ error: "dynamic_external_jwt_signing_key_invalid" })
   })
 })

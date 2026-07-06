@@ -160,7 +160,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("externalJwtAudienceConfigured")
     expect(page).toContain("jwksUrl")
     expect(page).toContain("kidConfigured")
-    expect(page).toContain("privateKeyConfigured")
+    expect(page).toContain("signingKeyConfigured")
     expect(page).toContain("externalJwtEndpointStatus")
     expect(page).toContain("externalJwtErrorCode")
     expect(page).toContain("dynamicExternalAuthAttempted")
@@ -323,6 +323,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("dynamic_jwt")
     expect(page).not.toContain("session_token")
     expect(page).not.toContain("DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY")
+    expect(page).not.toContain("DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64")
     expect(page).not.toContain("recoveryPhrase")
   })
 
@@ -1287,6 +1288,7 @@ describe("PineTree embedded wallet setup", () => {
     // The debug logging in the page only logs safe metadata — no secrets
     expect(page).toContain("console.info(\"[pinetree-withdrawals] approval_state\"")
     expect(page).not.toContain("DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY")
+    expect(page).not.toContain("DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64")
     expect(page).not.toContain("DYNAMIC_API_KEY")
   })
 

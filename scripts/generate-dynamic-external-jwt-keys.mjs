@@ -17,14 +17,14 @@ const jwk = {
 }
 const jwks = { keys: [jwk] }
 const jwksJson = JSON.stringify(jwks)
-const escapedPrivateKey = privateKeyPem.replace(/\n/g, "\\n")
+const signingKeyB64 = Buffer.from(privateKeyPem, "utf8").toString("base64")
 
 const output = {
   kid,
   issuer,
   audience,
   jwksUrl: `${appUrl.replace(/\/$/, "")}/.well-known/dynamic-jwks.json`,
-  privateKeyPem,
+  signingKeyB64,
   jwks,
 }
 
@@ -41,7 +41,7 @@ console.log("DYNAMIC_EXTERNAL_JWT_ENABLED=true")
 console.log(`DYNAMIC_EXTERNAL_JWT_ISSUER=${issuer}`)
 console.log(`DYNAMIC_EXTERNAL_JWT_AUDIENCE=${audience}`)
 console.log(`DYNAMIC_EXTERNAL_JWT_KID=${kid}`)
-console.log(`DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY=${escapedPrivateKey}`)
+console.log(`DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64=${signingKeyB64}`)
 console.log(`DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC='${jwksJson}'`)
 console.log("```")
 console.log("")
@@ -71,4 +71,4 @@ console.log("- Sandbox and production Dynamic environment IDs")
 console.log("- Dashboard location or support confirmation for issuer/JWKS configuration")
 console.log("```")
 console.log("")
-console.log("Do not commit the private key. Store it only in server-side secret env vars.")
+console.log("Do not commit the signing key. Store it only in server-side secret env vars.")

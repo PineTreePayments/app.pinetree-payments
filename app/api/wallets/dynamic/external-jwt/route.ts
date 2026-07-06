@@ -25,8 +25,30 @@ function getExternalJwtConfigDiagnostics() {
     audienceConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE?.trim()),
     jwksUrl: `${(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://app.pinetree-payments.com").replace(/\/$/, "")}/.well-known/dynamic-jwks.json`,
     kidConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_KID || process.env.DYNAMIC_EXTERNAL_JWT_KEY_ID),
-    privateKeyConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY),
+    signingKeyConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64 || process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY),
   }
+}
+
+function getSigningKeyPem() {
+  const encodedSigningKey = process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64?.trim()
+  if (encodedSigningKey) {
+    try {
+      const decoded = Buffer.from(encodedSigningKey, "base64").toString("utf8")
+      if (!decoded.includes("-----BEGIN PRIVATE KEY-----") || !decoded.includes("-----END PRIVATE KEY-----")) {
+        throw new Error("invalid_pem")
+      }
+      return decoded
+    } catch {
+      throw Object.assign(new Error("dynamic_external_jwt_signing_key_invalid"), { status: 503 })
+    }
+  }
+
+  // TODO: Remove this raw PEM fallback after all environments use
+  // DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64.
+  const legacyPrivateKey = process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY?.replace(/\\n/g, "\n")
+  if (legacyPrivateKey) return legacyPrivateKey
+
+  throw Object.assign(new Error("dynamic_external_jwt_signing_key_missing"), { status: 503 })
 }
 
 async function requireSupabaseMerchant(req: NextRequest): Promise<AuthenticatedMerchant> {
@@ -67,16 +89,13 @@ async function signPineTreeDynamicJwt(input: AuthenticatedMerchant) {
   const issuer = process.env.DYNAMIC_EXTERNAL_JWT_ISSUER || "https://app.pinetree-payments.com"
   const audience = process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE?.trim()
   const keyId = process.env.DYNAMIC_EXTERNAL_JWT_KID || process.env.DYNAMIC_EXTERNAL_JWT_KEY_ID || undefined
-  const privateKey = process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY?.replace(/\\n/g, "\n")
   const ttlSeconds = 5 * 60
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000)
 
-  if (!privateKey) {
-    throw Object.assign(new Error("dynamic_external_jwt_private_key_missing"), { status: 503 })
-  }
   if (!keyId) {
     throw Object.assign(new Error("dynamic_external_jwt_kid_missing"), { status: 503 })
   }
+  const privateKey = getSigningKeyPem()
 
   let jwt = new SignJWT({
     email: input.email,
@@ -95,7 +114,12 @@ async function signPineTreeDynamicJwt(input: AuthenticatedMerchant) {
 
   if (audience) jwt = jwt.setAudience(audience)
 
-  const signingKey = await importPKCS8(privateKey, "RS256")
+  let signingKey: Awaited<ReturnType<typeof importPKCS8>>
+  try {
+    signingKey = await importPKCS8(privateKey, "RS256")
+  } catch {
+    throw Object.assign(new Error("dynamic_external_jwt_signing_key_invalid"), { status: 503 })
+  }
   return { externalJwt: await jwt.sign(signingKey), expiresAt, issuer, audience, keyId }
 }
 
@@ -121,7 +145,7 @@ export async function POST(req: NextRequest) {
       audienceConfigured: Boolean(signed.audience),
       kidConfigured: Boolean(signed.keyId),
       jwksUrl: diagnostics.jwksUrl,
-      privateKeyConfigured: diagnostics.privateKeyConfigured,
+      signingKeyConfigured: diagnostics.signingKeyConfigured,
       expiresAt: signed.expiresAt.toISOString(),
     })
 

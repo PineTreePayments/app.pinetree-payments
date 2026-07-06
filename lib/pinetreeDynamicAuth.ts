@@ -17,7 +17,7 @@ export type PineTreeDynamicExternalJwtPayload = {
     audienceConfigured: boolean
     jwksUrl: string
     kidConfigured: boolean
-    privateKeyConfigured: boolean
+    signingKeyConfigured: boolean
   }
 }
 
@@ -76,5 +76,6 @@ export async function requestPineTreeDynamicExternalJwtAuth(accessToken: string)
     externalJwt: json.externalJwt,
     externalUserId: json.externalUserId,
     expiresAt: json.expiresAt,
+    diagnostics: json.diagnostics,
   }
 }
