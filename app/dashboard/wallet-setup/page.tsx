@@ -711,7 +711,7 @@ async function sendDynamicPreparedWithdrawal(
     if (hasAnyDynamicWallet) {
       // Wallets are loaded but none match the saved DB address — different account/session.
       throw new Error(
-        "This browser is connected to a different PineTree Wallet session. Reopen PineTree Wallet or sign in again."
+        "This browser is connected to a different PineTree Wallet session. Reopen PineTree Wallet or restore secure access."
       )
     }
     // No Dynamic wallets present at all — session expired or SDK not yet loaded.
@@ -967,8 +967,8 @@ function EmptyWalletPanel({ title, detail }: { title: string; detail: string }) 
 function walletCreationStepMessage(step: WalletCreationStep) {
   if (step === "repairing_profile") return "Repairing PineTree Wallet setup..."
   if (step === "opening_dynamic") return "Creating wallet..."
-  if (step === "waiting_for_dynamic_auth") return "Waiting for wallet login..."
-  if (step === "dynamic_authenticated") return "Wallet login complete..."
+  if (step === "waiting_for_dynamic_auth") return "Restore secure wallet access..."
+  if (step === "dynamic_authenticated") return "Secure wallet access restored..."
   if (step === "provisioning_wallet") return "Creating your PineTree Wallet..."
   if (step === "waiting_for_embedded_wallets") return "Waiting for wallet addresses..."
   if (step === "wallets_detected" || step === "extracting_addresses") return "Preparing wallet addresses..."
@@ -980,9 +980,9 @@ function walletCreationStepMessage(step: WalletCreationStep) {
 }
 
 function walletSetupFailureMessage(reason: WalletSetupFailureReason | null) {
-  if (reason === "dynamic_auth_missing" || reason === "dynamic_auth_cancelled") return "PineTree Wallet sign-in did not complete."
-  if (reason === "dynamic_email_mismatch") return "Use the same email as your PineTree account to create your PineTree Wallet."
-  if (reason === "dynamic_email_missing" || reason === "dynamic_email_unverified") return "PineTree could not verify the wallet sign-in email."
+  if (reason === "dynamic_auth_missing" || reason === "dynamic_auth_cancelled") return "Secure PineTree Wallet access was not restored."
+  if (reason === "dynamic_email_mismatch") return "Use your PineTree account email to restore secure wallet access."
+  if (reason === "dynamic_email_missing" || reason === "dynamic_email_unverified") return "PineTree could not verify the PineTree account email for this wallet session."
   if (reason === "no_dynamic_wallets") return "Dynamic did not return embedded wallet addresses yet."
   if (reason === "base_address_missing" || reason === "solana_address_missing") return "PineTree could not find the required wallet address."
   if (reason === "base_signer_missing" || reason === "solana_signer_missing") return "PineTree found the wallet address, but the signer was not restored in this browser session."
@@ -990,7 +990,7 @@ function walletSetupFailureMessage(reason: WalletSetupFailureReason | null) {
   if (reason === "provider_sync_failed") return "PineTree saved the wallet profile, but could not activate the payment rails."
   if (reason === "pine_tree_auth_missing") return "PineTree sign-in is required before creating a PineTree Wallet."
   if (reason === "merchant_email_missing") return "PineTree could not find the merchant account email."
-  if (reason === "dynamic_user_missing") return "PineTree Wallet sign-in did not return a Dynamic user."
+  if (reason === "dynamic_user_missing") return "PineTree Wallet access did not return a wallet session."
   if (reason === "provisioning_timeout_unknown") return "Wallet setup timed out before PineTree could confirm wallet readiness."
   return ""
 }
@@ -1000,7 +1000,7 @@ function walletSetupFailureRecoveryLabel(reason: WalletSetupFailureReason | null
     return "Use PineTree account email"
   }
   if (reason === "dynamic_auth_missing" || reason === "dynamic_auth_cancelled" || reason === "dynamic_user_missing") {
-    return "Sign in to PineTree Wallet"
+    return "Restore secure wallet access"
   }
   if (reason === "profile_sync_failed") return "Save wallet profile"
   if (reason === "provider_sync_failed") return "Activate payment rails"
@@ -1010,7 +1010,7 @@ function walletSetupFailureRecoveryLabel(reason: WalletSetupFailureReason | null
 function walletSetupNoticeCopy(state: WalletSetupPrimaryState, reason: WalletSetupFailureReason | null) {
   if (state === "reconnect_needed") return "Reconnect your PineTree Wallet to restore secure browser access."
   if (state === "email_mismatch") return "This browser is signed into a different wallet session."
-  if (state === "email_unverified") return "PineTree could not verify the wallet sign-in email."
+  if (state === "email_unverified") return "PineTree could not verify the PineTree account email for this wallet session."
   if (state === "save_needed") return "Wallet setup is almost finished. Save your wallet profile to continue."
   if (state === "rail_sync_needed") return "Payment rails need to sync before this wallet can accept payments."
   if (state === "failed") return walletSetupFailureMessage(reason || "provisioning_timeout_unknown")
@@ -2221,6 +2221,27 @@ function PineTreeWalletRuntime() {
   const { user, sdkHasLoaded, setShowAuthFlow, setShowDynamicUserProfile, handleLogOut, primaryWallet } = useDynamicContext()
   const refreshDynamicUser = useRefreshUser()
   const switchDynamicWallet = useSwitchWallet()
+  const pineTreeControlledDynamicAuthAvailable =
+    process.env.NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE === "external_jwt"
+  const dynamicEmailFallbackAllowed =
+    !pineTreeControlledDynamicAuthAvailable &&
+    process.env.NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK !== "false"
+  const openDynamicEmailFallbackAuth = useCallback((reason: string) => {
+    if (!dynamicEmailFallbackAllowed) {
+      console.warn("[pinetree-wallets] dynamic_email_fallback_blocked", {
+        reason,
+        pineTreeControlledDynamicAuthAvailable,
+      })
+      return false
+    }
+    setShowAuthFlow(true)
+    return true
+  }, [dynamicEmailFallbackAllowed, pineTreeControlledDynamicAuthAvailable, setShowAuthFlow])
+  const scheduleDynamicEmailFallbackAuth = useCallback((reason: string) => {
+    window.setTimeout(() => {
+      openDynamicEmailFallbackAuth(reason)
+    }, 0)
+  }, [openDynamicEmailFallbackAuth])
   const {
     createWalletAccount,
     dynamicWaasIsEnabled,
@@ -2943,7 +2964,7 @@ function PineTreeWalletRuntime() {
     // sync, or the provisioning timeout - so a wrong/unverifiable Dynamic email never
     // has a chance to fall through to the generic "could not finish" / timeout copy.
     if (merchantEmail && dynamicUserEmail && dynamicUserEmail !== merchantEmail) {
-      const message = "Use the same email as your PineTree account to create your PineTree Wallet."
+      const message = "Use your PineTree account email to restore secure wallet access."
       setIdentityMismatchError({ merchantEmail, dynamicEmail: dynamicUserEmail })
       setIdentityUnverified(false)
       setWalletIdentityError(message)
@@ -2992,7 +3013,7 @@ function PineTreeWalletRuntime() {
       const skippedReason = !merchantEmail ? "missing_pinetree_merchant_email" : "missing_dynamic_user_email"
       setIdentityMismatchError(null)
       setIdentityUnverified(true)
-      setWalletIdentityError("We could not verify that this wallet sign-in matches your PineTree account email.")
+      setWalletIdentityError("We could not verify that this wallet session matches your PineTree account email.")
       clearWalletSetupInProgress()
       setProfileSyncDiagnostics({
         dynamicUserId: user.userId ?? null,
@@ -3291,7 +3312,7 @@ function PineTreeWalletRuntime() {
       }
       const mismatchResponse = getDynamicEmailMismatchResponse(responseBody)
       if (mismatchResponse) {
-        const message = "Use the same email as your PineTree account to create your PineTree Wallet."
+        const message = "Use your PineTree account email to restore secure wallet access."
         setIdentityMismatchError(mismatchResponse)
         setIdentityUnverified(false)
         setWalletIdentityError(message)
@@ -3360,7 +3381,7 @@ function PineTreeWalletRuntime() {
         setWithdrawalApprovalError("")
       } else {
         setWithdrawalApprovalError(
-          "This browser is connected to a different PineTree Wallet session. Sign in with the PineTree Wallet used for this merchant, then try again."
+          "This browser is connected to a different PineTree Wallet session. Restore the PineTree Wallet used for this merchant, then try again."
         )
         setWithdrawalScreen("failed")
       }
@@ -3386,14 +3407,14 @@ function PineTreeWalletRuntime() {
     if (dynamicUserEmail && dynamicUserEmail !== merchantEmail) {
       setIdentityMismatchError({ merchantEmail, dynamicEmail: dynamicUserEmail })
       setIdentityUnverified(false)
-      setWalletIdentityError("Use the same email as your PineTree account to create your PineTree Wallet.")
+      setWalletIdentityError("Use your PineTree account email to restore secure wallet access.")
       recordWalletSetupFailure("dynamic_email_mismatch", "dynamic_identity_mismatch", {
         dynamicEmailSource,
       })
     } else {
       setIdentityMismatchError(null)
       setIdentityUnverified(true)
-      setWalletIdentityError("We could not verify that this wallet sign-in matches your PineTree account email.")
+      setWalletIdentityError("We could not verify that this wallet session matches your PineTree account email.")
       recordWalletSetupFailure("dynamic_email_missing", "dynamic_identity_unverified", {
         dynamicEmailSource,
       })
@@ -3640,8 +3661,8 @@ function PineTreeWalletRuntime() {
     markWalletSetupInProgress()
     setProvisioningRetryExhausted(false)
     setFinalProvisioningRefreshAttempted(false)
-    setShowAuthFlow(true)
-  }, [logoutPending, user, setShowAuthFlow, logWalletCreationStep])
+    openDynamicEmailFallbackAuth("reopening_after_logout")
+  }, [logoutPending, user, openDynamicEmailFallbackAuth, logWalletCreationStep])
 
   useEffect(() => {
     if (!repairPendingAfterLogout) return
@@ -3657,8 +3678,8 @@ function PineTreeWalletRuntime() {
     setProvisioningRetryExhausted(false)
     setFinalProvisioningRefreshAttempted(false)
     setShowDynamicUserProfile(false)
-    setShowAuthFlow(true)
-  }, [repairPendingAfterLogout, user, setShowAuthFlow, setShowDynamicUserProfile, logWalletCreationStep])
+    openDynamicEmailFallbackAuth("repair_reopening_after_logout")
+  }, [repairPendingAfterLogout, user, openDynamicEmailFallbackAuth, setShowDynamicUserProfile, logWalletCreationStep])
 
   // ---------------------------------------------------------------------------
   // Derived state — wallet profile (Base/Solana from Dynamic, DB-backed)
@@ -3896,20 +3917,15 @@ function PineTreeWalletRuntime() {
   const emailMismatchActive = Boolean(identityMismatchError) || liveEmailMismatch
   const emailUnverifiedActive = !emailMismatchActive && (identityUnverified || liveEmailUnverified)
 
-  // Single prioritized state resolver. Switching between PineTree accounts in the same
-  // browser can simultaneously trip the session-mismatch check, the missing-signer
-  // check, AND the email-mismatch check - without a single source of truth here, all
-  // three would render as separate, contradictory banners. Exactly one wins, in this
-  // priority order: ready > reconnect needed > email mismatch > email unverifiable >
-  // (stale session for another reason) > first-time provisioning > repair > generic
-  // failure.
+  // Single prioritized state resolver. The PineTree merchant profile is canonical for
+  // viewing the wallet; Dynamic session state is required only when we need to create,
+  // repair, sync, or sign with embedded wallets.
   const walletSetupPrimaryState = useMemo<WalletSetupPrimaryState>(() => {
     if (openWalletReconnectNeeded) return "reconnect_needed"
-    if (dynamicProfileReady) return "ready"
-    if (hasReadyBaseAndSolanaProfile && !user) return "reconnect_needed"
     if (emailMismatchActive) return "email_mismatch"
     if (emailUnverifiedActive) return "email_unverified"
     if (!dynamicSessionMatchesProfile) return "reconnect_needed"
+    if (dynamicProfileReady || hasReadyBaseAndSolanaProfile) return "ready"
     if (walletProvisioningInProgress) return "provisioning"
     if (walletSetupFailureReason === "profile_sync_failed") return "save_needed"
     if (walletSetupFailureReason === "provider_sync_failed") return "rail_sync_needed"
@@ -4040,9 +4056,16 @@ function PineTreeWalletRuntime() {
     setFinalProvisioningRefreshAttempted(false)
     pendingProfileSyncAttemptRef.current = false
     if (!user) {
+      if (hasReadyBaseAndSolanaProfile) {
+        setPendingSync(false)
+        clearWalletSetupInProgress()
+        setWalletOpening(false)
+        setWalletOpen(true)
+        return
+      }
       logWalletCreationStep("waiting_for_dynamic_auth", { reason: "open_wallet_sync_missing_dynamic_user" })
       setShowDynamicUserProfile(false)
-      setShowAuthFlow(true)
+      openDynamicEmailFallbackAuth("open_wallet_sync_missing_dynamic_user")
       setWalletOpening(false)
       return
     }
@@ -4090,7 +4113,7 @@ function PineTreeWalletRuntime() {
     pendingProfileSyncAttemptRef.current = false
     setWalletOpen(false)
     setShowDynamicUserProfile(false)
-    setShowAuthFlow(true)
+    openDynamicEmailFallbackAuth(reason)
     if (sdkHasLoaded && user) {
       void refreshDynamicWalletRuntime(reason, { requireApprovalWallet: false })
     }
@@ -4186,7 +4209,7 @@ function PineTreeWalletRuntime() {
     setProvisioningRetryExhausted(false)
     setFinalProvisioningRefreshAttempted(false)
     pendingProfileSyncAttemptRef.current = false
-    window.setTimeout(() => setShowAuthFlow(true), 0)
+    scheduleDynamicEmailFallbackAuth("repair_embedded_wallet_setup_no_active_dynamic_user")
   }
 
   async function handleWithdrawalReconnect() {
@@ -4251,7 +4274,7 @@ function PineTreeWalletRuntime() {
     void syncProfileFromDynamic()
     setShowDynamicUserProfile(false)
     setShowAuthFlow(false)
-    window.setTimeout(() => setShowAuthFlow(true), 0)
+    scheduleDynamicEmailFallbackAuth("withdrawal_reconnect")
   }
 
   function handleCreateWallet() {
@@ -4279,7 +4302,7 @@ function PineTreeWalletRuntime() {
       void refreshDynamicWalletRuntime("create_embedded_wallet_setup", { requireApprovalWallet: false })
       return
     }
-    setShowAuthFlow(true)
+    openDynamicEmailFallbackAuth("create_pinetree_wallet")
   }
 
   function handleUsePineTreeAccountEmail() {
@@ -4310,7 +4333,7 @@ function PineTreeWalletRuntime() {
     }
     setPendingSync(true)
     markWalletSetupInProgress()
-    window.setTimeout(() => setShowAuthFlow(true), 0)
+    scheduleDynamicEmailFallbackAuth("restart_after_dynamic_email_mismatch")
   }
 
   function handleRetryWalletSetup() {
@@ -4323,7 +4346,7 @@ function PineTreeWalletRuntime() {
       setWalletSetupAttemptId(createWalletSetupAttemptId())
       setWalletSetupFailureReason(null)
       setShowDynamicUserProfile(false)
-      setShowAuthFlow(true)
+      openDynamicEmailFallbackAuth("retry_dynamic_auth_missing")
       return
     }
     if (retryFailureReason === "profile_sync_failed") {
@@ -4361,7 +4384,7 @@ function PineTreeWalletRuntime() {
       if (sdkHasLoaded && user) {
         void refreshDynamicWalletRuntime("retry_embedded_wallet_setup", { requireApprovalWallet: false })
       } else {
-        setShowAuthFlow(true)
+        openDynamicEmailFallbackAuth("retry_embedded_wallet_setup_missing_dynamic_user")
       }
     }, 0)
   }
@@ -4798,7 +4821,7 @@ function PineTreeWalletRuntime() {
                 {walletSetupNoticeCopy(walletSetupPrimaryState, walletSetupFailureReason)}
               </p>
               <p className="mt-1 text-xs leading-5 text-blue-800">
-                Please sign in with your PineTree account email: {merchantEmail || "unknown"}
+                Use your PineTree account email: {merchantEmail || "unknown"}
               </p>
             </div>
           </div>

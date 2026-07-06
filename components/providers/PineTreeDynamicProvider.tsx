@@ -137,12 +137,17 @@ class WalletInfrastructureErrorBoundary extends Component<
 
 export default function PineTreeDynamicProvider({ children }: { children: ReactNode }) {
   const environmentId = process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?.trim()
+  // Temporary sandbox/dev fallback: Dynamic email OTP remains enabled in the
+  // Dynamic dashboard until PineTree-controlled BYOA/external-JWT auth is live.
+  const dynamicEmailFallbackEnabled =
+    process.env.NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK !== "false"
 
   useEffect(() => {
     console.info("[pinetree-wallets] dynamic_environment_config", {
       NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID: environmentId ? "present" : "missing",
+      pineTreeDynamicEmailFallbackEnabled: dynamicEmailFallbackEnabled,
     })
-  }, [environmentId])
+  }, [dynamicEmailFallbackEnabled, environmentId])
 
   if (!environmentId) {
     return (

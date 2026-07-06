@@ -17,23 +17,23 @@ describe("Dynamic embedded wallet setup repair", () => {
     expect(provider).toContain('NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID: environmentId ? "present" : "missing"')
     const logBlock = provider.slice(
       provider.indexOf("[pinetree-wallets] dynamic_environment_config"),
-      provider.indexOf("}, [environmentId])")
+      provider.indexOf("}, [dynamicEmailFallbackEnabled, environmentId])")
     )
     expect(logBlock).not.toContain("environmentId,")
   })
 
-  it("DB profile exists but runtime wallets are zero or signerless -> Reconnect needed", () => {
+  it("DB profile exists but runtime wallets are zero or signerless keeps repair state for signer restoration", () => {
     expect(page).toContain("const dbOnlyWalletProfile =")
     expect(page).toContain("dynamicWalletRuntimeCount === 0")
     expect(page).toContain("!dynamicEmbeddedSignersReady")
     expect(page).toContain("const walletSetupIncomplete = hasWallet && dbOnlyWalletProfile && !walletProvisioningInProgress")
     expect(page).toContain('if (repairOrSetupIncomplete) return "reconnect_needed"')
-    expect(page).toContain('walletSetupPrimaryState === "reconnect_needed" ? "Reconnect needed"')
+    expect(page).toContain('if (dynamicProfileReady || hasReadyBaseAndSolanaProfile) return "ready"')
   })
 
-  it("Ready appears only when DB addresses and Dynamic runtime signers both exist", () => {
+  it("Connected appears when DB profile is ready; runtime signers are separately required for approvals", () => {
     expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
-    expect(page).toContain('if (dynamicProfileReady) return "ready"')
+    expect(page).toContain('if (dynamicProfileReady || hasReadyBaseAndSolanaProfile) return "ready"')
     expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected"')
   })
 
@@ -90,7 +90,7 @@ describe("Dynamic embedded wallet setup repair", () => {
     expect(page).toContain("setRepairPendingAfterLogout(true)")
     expect(page).toContain("void handleLogOut()")
     expect(page).toContain("repair_dynamic_session_reset_auth_opened")
-    expect(page).toContain("setShowAuthFlow(true)")
+    expect(page).toContain('openDynamicEmailFallbackAuth("repair_reopening_after_logout")')
     expect(page).toContain("setPendingSync(true)")
     expect(page).toContain('repairInProgress ? "repair_provision_embedded_wallets" : "create_provision_embedded_wallets"')
     expect(page).toContain("refreshDynamicWalletRuntime(")

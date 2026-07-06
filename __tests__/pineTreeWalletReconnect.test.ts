@@ -13,7 +13,7 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(page).toContain('await refreshDynamicWalletRuntime("withdrawal_reconnect_before_lookup",')
     expect(page).toContain("setShowDynamicUserProfile(false)")
     expect(page).toContain("setShowAuthFlow(false)")
-    expect(page).toContain("setShowAuthFlow(true)")
+    expect(page).toContain('scheduleDynamicEmailFallbackAuth("withdrawal_reconnect")')
   })
 
   it("reconnect refreshes Dynamic wallet/profile state before returning to review", () => {

@@ -50,6 +50,8 @@ describe("PineTree embedded wallet setup", () => {
     expect(layout).toContain('/dashboard/wallet-setup')
     expect(provider).toContain("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID")
     expect(provider).toContain('appName: "PineTree Wallet"')
+    expect(provider).toContain("NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK")
+    expect(provider).toContain("Temporary sandbox/dev fallback")
   })
 
   it("registers EVM, Solana, and Bitcoin wallet connectors without Spark", () => {
@@ -75,7 +77,7 @@ describe("PineTree embedded wallet setup", () => {
   it("binds PineTree Wallet creation to the merchant account email", () => {
     expect(page).toContain("setMerchantEmail(canonicalMerchantEmail)")
     expect(page).toContain("extractDynamicUserEmail(user)")
-    expect(page).toContain("Use the same email as your PineTree account to create your PineTree Wallet.")
+    expect(page).toContain("Use your PineTree account email to restore secure wallet access.")
     expect(page).toContain("Using your PineTree account email: {merchantEmail}")
     expect(apiRoute).toContain("getMerchantById(merchantId)")
     expect(apiRoute).toContain("dynamicEmail !== merchantEmail")
@@ -91,6 +93,42 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("profileState")
     // Merchant-profile-derived readiness flags
     expect(page).toContain("profileAddresses")
+  })
+
+  it("loads merchant profile by PineTree merchant auth without requiring Dynamic auth", () => {
+    expect(apiRoute).toContain("const merchantId = await requireMerchantIdFromRequest(req)")
+    expect(apiRoute).toContain("const profile = await getPineTreeWalletProfile(merchantId)")
+    expect(page).toContain('fetch("/api/wallets/pinetree-profile"')
+    expect(page).toContain("headers: { Authorization: `Bearer ${token}` }")
+  })
+
+  it("existing ready wallet profile shows Connected without a Dynamic user session", () => {
+    expect(page).toContain("const hasReadyBaseAndSolanaProfile =")
+    expect(page).toContain('if (dynamicProfileReady || hasReadyBaseAndSolanaProfile) return "ready"')
+    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
+    const openWalletFn = page.slice(
+      page.indexOf("async function handleOpenWallet()"),
+      page.indexOf("async function beginWalletSetupRepair")
+    )
+    expect(openWalletFn).toContain("if (hasReadyBaseAndSolanaProfile)")
+    expect(openWalletFn).toContain("setWalletOpen(true)")
+    expect(openWalletFn).toContain('logWalletCreationStep("waiting_for_dynamic_auth"')
+  })
+
+  it("withdrawal signing still requires restored Dynamic signer access", () => {
+    expect(page).toContain('refreshDynamicWalletRuntime("withdrawal_submit_before_signing", { requireApprovalWallet: true })')
+    expect(page).toContain('if (_debugApprovalMethod === "dynamic_browser" && !_debugMatchingWallet)')
+    expect(page).toContain("Reconnect your PineTree Wallet before reviewing withdrawals.")
+  })
+
+  it("Dynamic email fallback is temporary and guarded by PineTree identity checks", () => {
+    expect(provider).toContain("NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK")
+    expect(provider).toContain("Temporary sandbox/dev fallback")
+    expect(page).toContain('process.env.NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE === "external_jwt"')
+    expect(page).toContain("const dynamicEmailFallbackAllowed =")
+    expect(page).toContain("[pinetree-wallets] dynamic_email_fallback_blocked")
+    expect(page).toContain("dynamicUserEmail !== merchantEmail")
+    expect(apiRoute).toContain("dynamicEmail !== merchantEmail")
   })
 
   it("shows Create PineTree Wallet when no profile exists, not the Dynamic session state", () => {
@@ -139,7 +177,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("Preparing...")
   })
 
-  it("wallet status requires DB profile addresses plus hydrated Dynamic signers", () => {
+  it("wallet status shows Connected from a ready DB profile and keeps signer readiness separate", () => {
     // baseReady and solanaReady come from normalized readiness with DB-backed address fallback
     expect(page).toContain("const baseReady = railReadiness?.base.walletProvisioned ?? profileAddresses.base.length > 0")
     expect(page).toContain("const solanaReady = railReadiness?.solana.walletProvisioned ?? profileAddresses.solana.length > 0")
@@ -152,7 +190,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("const bitcoinReady = railReadiness?.bitcoin_lightning.walletProvisioned")
     expect(page).not.toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
     expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
-    expect(page).toContain('if (dynamicProfileReady) return "ready"')
+    expect(page).toContain('if (dynamicProfileReady || hasReadyBaseAndSolanaProfile) return "ready"')
     expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
     expect(page).toContain('if (repairOrSetupIncomplete) return "reconnect_needed"')
     expect(page).toContain('walletSetupPrimaryState === "reconnect_needed" ? "Reconnect needed" :')
@@ -197,7 +235,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(retryFn).toContain("setLogoutPending(false)")
     expect(retryFn).toContain("setShowAuthFlow(false)")
     expect(retryFn).toContain('refreshDynamicWalletRuntime("retry_embedded_wallet_setup"')
-    expect(retryFn).toContain("} else {\n        setShowAuthFlow(true)")
+    expect(retryFn).toContain("} else {\n        openDynamicEmailFallbackAuth(\"retry_embedded_wallet_setup_missing_dynamic_user\")")
     expect(page).not.toContain("delete Dynamic")
   })
 
@@ -297,9 +335,9 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("configured: bitcoinReady, enabled: enabledRails.bitcoin")
   })
 
-  it("marks the merchant wallet Ready only when Base/Solana signers are hydrated", () => {
+  it("marks the merchant wallet Connected when the saved Base/Solana profile is ready", () => {
     expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
-    expect(page).toContain('if (dynamicProfileReady) return "ready"')
+    expect(page).toContain('if (dynamicProfileReady || hasReadyBaseAndSolanaProfile) return "ready"')
     expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
     expect(page).toContain('walletSetupPrimaryState === "reconnect_needed" ? "Reconnect needed" :')
     expect(page).not.toContain("Bitcoin Lightning is being prepared through PineTree")
@@ -1282,13 +1320,13 @@ describe("PineTree embedded wallet setup", () => {
 
   it("reconnect handler triggers Dynamic auth flow when no wallets are loaded", () => {
     // When no Dynamic wallets are active (wallets[] empty, no primaryWallet), the handler
-    // calls setShowAuthFlow(true) to open the Dynamic connect/auth overlay and then waits
+    // opens the temporary Dynamic email fallback and then waits
     // for wallets to update — it does NOT just navigate to the overview tab.
     const reconnectFn = page.slice(
       page.indexOf("function handleWithdrawalReconnect()"),
       page.indexOf("function handleCreateWallet()")
     )
-    expect(reconnectFn).toContain("setShowAuthFlow(true)")
+    expect(reconnectFn).toContain('scheduleDynamicEmailFallbackAuth("withdrawal_reconnect")')
   })
 
   it("no Wallet approval pill appears in withdrawal review or failure screens", () => {
@@ -1308,7 +1346,7 @@ describe("PineTree embedded wallet setup", () => {
 
   it("address mismatch shows a distinct session-mismatch error distinct from session-not-found", () => {
     // When Dynamic wallets are present but none match the saved DB address (different account),
-    // the error is distinct from the no-wallets case, guiding the merchant to sign in again.
+    // the error is distinct from the no-wallets case, guiding the merchant to restore access.
     expect(page).toContain("This browser is connected to a different PineTree Wallet session.")
     expect(page).toContain("hasAnyDynamicWallet")
     // Both error paths share the same signer_not_found log key for diagnostics
@@ -1359,7 +1397,7 @@ describe("PineTree embedded wallet setup", () => {
 
   it("reconnect with wallets loaded but address mismatch opens Dynamic auth before failing", () => {
     // When handleWithdrawalReconnect runs and Dynamic wallets are already loaded but none
-    // match the DB source address, it opens Dynamic auth/connect and lets the reconnect
+    // match the DB source address, it opens the temporary fallback and lets the reconnect
     // effect validate the refreshed wallet list.
     const reconnectFn = page.slice(
       page.indexOf("async function handleWithdrawalReconnect()"),
@@ -1367,8 +1405,8 @@ describe("PineTree embedded wallet setup", () => {
     )
     expect(reconnectFn).toContain("setWithdrawalReconnectPending(true)")
     expect(reconnectFn).toContain("setShowDynamicUserProfile(false)")
-    expect(reconnectFn).toContain("setShowAuthFlow(true)")
-    expect(page).toContain("This browser is connected to a different PineTree Wallet session. Sign in with the PineTree Wallet used for this merchant, then try again.")
+    expect(reconnectFn).toContain('scheduleDynamicEmailFallbackAuth("withdrawal_reconnect")')
+    expect(page).toContain("This browser is connected to a different PineTree Wallet session. Restore the PineTree Wallet used for this merchant, then try again.")
   })
 
   it("signer_lookup diagnostic logs wallet count and address prefixes before matching", () => {

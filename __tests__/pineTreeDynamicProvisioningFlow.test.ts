@@ -82,7 +82,7 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain("profileEndpointResponse")
   })
 
-  it("first Open PineTree Wallet after Ready refreshes Dynamic runtime before opening the modal", () => {
+  it("first Open PineTree Wallet after Ready opens from the DB profile when Dynamic is not restored", () => {
     const openWalletFn = page.slice(
       page.indexOf("async function handleOpenWallet()"),
       page.indexOf("async function beginWalletSetupRepair")
@@ -90,9 +90,10 @@ describe("PineTree Dynamic provisioning flow", () => {
     const refreshIndex = openWalletFn.indexOf('await refreshDynamicWalletRuntime("open_wallet_sync_profile"')
     const waitIndex = openWalletFn.indexOf("await waitForOpenWalletReadiness()")
     const openIndex = openWalletFn.indexOf("setWalletOpen(true)")
-    expect(refreshIndex).toBeGreaterThan(-1)
+    expect(openWalletFn).toContain("if (hasReadyBaseAndSolanaProfile)")
+    expect(openIndex).toBeGreaterThan(-1)
+    expect(refreshIndex).toBeGreaterThan(openIndex)
     expect(waitIndex).toBeGreaterThan(refreshIndex)
-    expect(openIndex).toBeGreaterThan(waitIndex)
     expect(openWalletFn).toContain("setWalletOpening(true)")
     expect(openWalletFn).toContain("setWalletOpening(false)")
   })
@@ -176,7 +177,7 @@ describe("PineTree Dynamic provisioning flow", () => {
 
   it("ready Dynamic profile renders Ready without requiring Lightning to finish", () => {
     expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
-    expect(page).toContain('if (dynamicProfileReady) return "ready"')
+    expect(page).toContain('if (dynamicProfileReady || hasReadyBaseAndSolanaProfile) return "ready"')
     expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
     expect(page).not.toContain('const walletStatus = repairInProgress ? "Repairing" : allPrimaryRailsConnected ? "Ready"')
   })
@@ -240,7 +241,7 @@ describe("PineTree Dynamic provisioning flow", () => {
     )
     expect(createFn).toContain('refreshDynamicWalletRuntime("create_embedded_wallet_setup"')
     expect(createFn).toContain("if (sdkHasLoaded && user) {")
-    expect(createFn).toContain("return\n    }\n    setShowAuthFlow(true)")
+    expect(createFn).toContain("return\n    }\n    openDynamicEmailFallbackAuth(\"create_pinetree_wallet\")")
   })
 
   it("Try again during first-time provisioning restarts PineTree polling instead of link-new-wallet auth", () => {
@@ -250,7 +251,7 @@ describe("PineTree Dynamic provisioning flow", () => {
     )
     expect(retryFn).toContain('reason: "restart_embedded_wallet_runtime_polling"')
     expect(retryFn).toContain('refreshDynamicWalletRuntime("retry_embedded_wallet_setup"')
-    expect(retryFn).toContain("} else {\n        setShowAuthFlow(true)")
+    expect(retryFn).toContain("} else {\n        openDynamicEmailFallbackAuth(\"retry_embedded_wallet_setup_missing_dynamic_user\")")
   })
 
   it("no timeout message appears before a final runtime refresh attempt", () => {
@@ -312,7 +313,7 @@ describe("PineTree Dynamic provisioning flow", () => {
       page.indexOf("const body: Record<string, unknown>")
     )
     expect(identityGuard).toContain("dynamic_email_mismatch")
-    expect(identityGuard).toContain("Use the same email as your PineTree account to create your PineTree Wallet.")
+    expect(identityGuard).toContain("Use your PineTree account email to restore secure wallet access.")
     expect(identityGuard).toContain("setIdentityMismatchError({ merchantEmail, dynamicEmail: dynamicUserEmail })")
     expect(identityGuard).toContain("clearWalletSetupInProgress()")
     expect(identityGuard).toContain("return null")
@@ -331,7 +332,7 @@ describe("PineTree Dynamic provisioning flow", () => {
 
   it("mismatched Dynamic email shows explicit PineTree account email copy instead of generic timeout copy", () => {
     expect(page).toContain('walletSetupPrimaryState === "provisioning" || walletSetupPrimaryState === "failed")')
-    expect(page).toContain("Use the same email as your PineTree account to create your PineTree Wallet.")
+    expect(page).toContain("Use your PineTree account email to restore secure wallet access.")
     expect(page).toContain("PineTree account email: {identityMismatchError?.merchantEmail ?? merchantEmail}")
     expect(page).toContain("Use PineTree account email")
   })
@@ -390,9 +391,9 @@ describe("PineTree Dynamic provisioning flow", () => {
   })
 
   it("explicit setup failure reasons map to merchant-facing copy", () => {
-    expect(page).toContain('if (reason === "dynamic_auth_missing" || reason === "dynamic_auth_cancelled") return "PineTree Wallet sign-in did not complete."')
-    expect(page).toContain('if (reason === "dynamic_email_mismatch") return "Use the same email as your PineTree account to create your PineTree Wallet."')
-    expect(page).toContain('if (reason === "dynamic_email_missing" || reason === "dynamic_email_unverified") return "PineTree could not verify the wallet sign-in email."')
+    expect(page).toContain('if (reason === "dynamic_auth_missing" || reason === "dynamic_auth_cancelled") return "Secure PineTree Wallet access was not restored."')
+    expect(page).toContain('if (reason === "dynamic_email_mismatch") return "Use your PineTree account email to restore secure wallet access."')
+    expect(page).toContain('if (reason === "dynamic_email_missing" || reason === "dynamic_email_unverified") return "PineTree could not verify the PineTree account email for this wallet session."')
     expect(page).toContain('if (reason === "no_dynamic_wallets") return "Dynamic did not return embedded wallet addresses yet."')
     expect(page).toContain('if (reason === "base_address_missing" || reason === "solana_address_missing") return "PineTree could not find the required wallet address."')
     expect(page).toContain('if (reason === "base_signer_missing" || reason === "solana_signer_missing") return "PineTree found the wallet address, but the signer was not restored in this browser session."')
@@ -459,12 +460,12 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(noUserBranchStart).toBeGreaterThan(-1)
     expect(noUserBranchEnd).toBeGreaterThan(noUserBranchStart)
     const noUserBranch = openWalletFn.slice(noUserBranchStart, noUserBranchEnd)
-    expect(noUserBranch).toContain("setShowAuthFlow(true)")
+    expect(noUserBranch).toContain('openDynamicEmailFallbackAuth("open_wallet_sync_missing_dynamic_user")')
     expect(noUserBranch).toContain("return")
     // Once a Dynamic session already exists, control never reaches the auth-opening
     // branch above - it falls straight through to the silent runtime refresh instead.
     const silentRefreshBranch = openWalletFn.slice(noUserBranchEnd)
-    expect(silentRefreshBranch).not.toContain("setShowAuthFlow(true)")
+    expect(silentRefreshBranch).not.toContain("openDynamicEmailFallbackAuth(")
     expect(silentRefreshBranch).toContain('await refreshDynamicWalletRuntime("open_wallet_sync_profile"')
     // The Reconnect PineTree Wallet button (reconnect_needed state) invokes this same
     // handler, so a genuinely missing session opens auth, and an existing one doesn't.
@@ -475,14 +476,14 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(ctaBlock).toContain("onClick={handleOpenWallet}")
   })
 
-  it("existing ready profile plus missing Dynamic session shows Reconnect needed", () => {
+  it("existing ready profile plus missing Dynamic session shows Connected", () => {
     const resolverBody = page.slice(
       page.indexOf("const walletSetupPrimaryState = useMemo<WalletSetupPrimaryState>(() => {"),
       page.indexOf("return \"idle\"\n  }, [")
     )
-    expect(resolverBody).toContain('if (hasReadyBaseAndSolanaProfile && !user) return "reconnect_needed"')
-    expect(page).toContain("Reconnect your PineTree Wallet to restore secure browser access.")
-    expect(page).toContain("Reconnect PineTree Wallet")
+    expect(resolverBody).toContain('if (dynamicProfileReady || hasReadyBaseAndSolanaProfile) return "ready"')
+    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
+    expect(page).toContain("Open PineTree Wallet")
   })
 
   it("existing ready profile plus wrong Dynamic session shows Wrong sign-in", () => {
@@ -538,17 +539,17 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain('fetch("/api/debug/pinetree-wallet/reset-setup"')
   })
 
-  it("walletSetupPrimaryState resolves in priority order: ready > reconnect > wrong sign-in > save/rail sync > provisioning > failed > create", () => {
+  it("walletSetupPrimaryState resolves in priority order: reconnect override > wrong sign-in > stale session > ready profile > save/rail sync > provisioning > failed > create", () => {
     const resolverBody = page.slice(
       page.indexOf("const walletSetupPrimaryState = useMemo<WalletSetupPrimaryState>(() => {"),
       page.indexOf("return \"idle\"\n  }, [")
     )
     const order = [
-      'if (dynamicProfileReady) return "ready"',
-      'if (hasReadyBaseAndSolanaProfile && !user) return "reconnect_needed"',
+      'if (openWalletReconnectNeeded) return "reconnect_needed"',
       'if (emailMismatchActive) return "email_mismatch"',
       'if (emailUnverifiedActive) return "email_unverified"',
       'if (!dynamicSessionMatchesProfile) return "reconnect_needed"',
+      'if (dynamicProfileReady || hasReadyBaseAndSolanaProfile) return "ready"',
       'if (walletProvisioningInProgress) return "provisioning"',
       'if (walletSetupFailureReason === "profile_sync_failed") return "save_needed"',
       'if (walletSetupFailureReason === "provider_sync_failed") return "rail_sync_needed"',
@@ -591,9 +592,9 @@ describe("PineTree Dynamic provisioning flow", () => {
       page.indexOf("{/* Safe diagnostics")
     )
     expect(messageBlock).not.toContain("Try again")
-    // dynamicProfileReady resolves to "ready" first, so none of the later branches
+    // dynamicProfileReady or a saved ready profile resolves to "ready" first, so none of the later branches
     // (reconnect/mismatch/unverified/save/rail sync/failed) can ever also be true.
-    expect(page).toContain('if (dynamicProfileReady) return "ready"')
+    expect(page).toContain('if (dynamicProfileReady || hasReadyBaseAndSolanaProfile) return "ready"')
   })
 
   it("ready profile suppresses showProvisioningRetryOnly", () => {
@@ -631,7 +632,7 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain("const liveEmailMismatch =")
     expect(page).toContain("Boolean(user) && Boolean(merchantEmail) && Boolean(dynamicUserEmail) && dynamicUserEmail !== merchantEmail")
     expect(page).toContain("const emailMismatchActive = Boolean(identityMismatchError) || liveEmailMismatch")
-    expect(page).toContain("Use the same email as your PineTree account to create your PineTree Wallet.")
+    expect(page).toContain("Use your PineTree account email to restore secure wallet access.")
   })
 
   it("email mismatch outranks the saved-address missing-signer warning and the repair button", () => {
@@ -654,16 +655,16 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(mismatchBranch).toContain("Switch PineTree Wallet sign-in")
   })
 
-  it("saved ready profile with no Dynamic session shows reconnect-needed, not setup incomplete", () => {
+  it("saved ready profile with no Dynamic session shows Connected, not setup incomplete", () => {
     const resolverBody = page.slice(
       page.indexOf("const walletSetupPrimaryState = useMemo<WalletSetupPrimaryState>(() => {"),
       page.indexOf("return \"idle\"\n  }, [")
     )
-    const reconnectIndex = resolverBody.indexOf('if (hasReadyBaseAndSolanaProfile && !user) return "reconnect_needed"')
+    const readyIndex = resolverBody.indexOf('if (dynamicProfileReady || hasReadyBaseAndSolanaProfile) return "ready"')
     const repairIndex = resolverBody.indexOf('if (repairOrSetupIncomplete) return "reconnect_needed"')
-    expect(reconnectIndex).toBeGreaterThan(-1)
-    expect(repairIndex).toBeGreaterThan(reconnectIndex)
-    expect(page).toContain('walletSetupPrimaryState === "reconnect_needed" ? "Reconnect needed" :')
+    expect(readyIndex).toBeGreaterThan(-1)
+    expect(repairIndex).toBeGreaterThan(readyIndex)
+    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
   })
 
   it("ready profile with a matching Dynamic session shows Ready and Open PineTree Wallet only", () => {
@@ -737,7 +738,7 @@ describe("PineTree Dynamic provisioning flow", () => {
     )
     expect(fnBody).toContain("if (!merchantEmail || !dynamicUserEmail) {")
     expect(fnBody).toContain(
-      '"We could not verify that this wallet sign-in matches your PineTree account email."'
+      '"We could not verify that this wallet session matches your PineTree account email."'
     )
     expect(fnBody).toContain("setIdentityUnverified(true)")
     expect(fnBody).toContain(
@@ -748,9 +749,9 @@ describe("PineTree Dynamic provisioning flow", () => {
 
   it("unverifiable Dynamic identity shows dedicated copy instead of the generic wallet timeout card", () => {
     expect(page).toContain(
-      "We could not verify that this wallet sign-in matches your PineTree account email."
+      "We could not verify that this wallet session matches your PineTree account email."
     )
-    expect(page).toContain('Please sign in with your PineTree account email: {merchantEmail || "unknown"}')
+    expect(page).toContain('Use your PineTree account email: {merchantEmail || "unknown"}')
     const unverifiedBanner = page.slice(
       page.indexOf(') : walletSetupPrimaryState === "email_unverified" ? ('),
       page.indexOf(') : walletSetupPrimaryState === "failed" ? (')
