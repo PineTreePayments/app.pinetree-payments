@@ -1897,6 +1897,8 @@ function PineTreeWalletRuntime() {
   // --- UI state ---
   const [sdkTimedOut, setSdkTimedOut] = useState(false)
   const [walletOpen, setWalletOpen] = useState(false)
+  const [walletOpening, setWalletOpening] = useState(false)
+  const [openWalletReconnectNeeded, setOpenWalletReconnectNeeded] = useState(false)
   const [activeTab, setActiveTab] = useState<WalletTab>("overview")
   const [merchantId, setMerchantId] = useState<string | null>(null)
   const [merchantEmail, setMerchantEmail] = useState<string | null>(null)
@@ -1963,6 +1965,7 @@ function PineTreeWalletRuntime() {
   const dynamicHydrationAttemptRef = useRef<string | null>(null)
   const dynamicWalletRuntimeCountRef = useRef(0)
   const dynamicApprovalAvailableRef = useRef(false)
+  const dynamicProfileReadyRef = useRef(false)
   const repairProfileIdRef = useRef<string | null>(null)
   const pendingWalletProvisionAttemptRef = useRef<string | null>(null)
   const pendingWalletProvisionStartedAtRef = useRef<number | null>(null)
@@ -2396,6 +2399,16 @@ function PineTreeWalletRuntime() {
       await new Promise((resolve) => window.setTimeout(resolve, 150))
     }
     return options?.requireApprovalWallet ? dynamicApprovalAvailableRef.current : dynamicWalletRuntimeCountRef.current > 0
+  }, [])
+
+  const waitForOpenWalletReadiness = useCallback(async () => {
+    const startedAt = Date.now()
+    const timeoutMs = 3000
+    while (Date.now() - startedAt < timeoutMs) {
+      if (dynamicProfileReadyRef.current) return true
+      await new Promise((resolve) => window.setTimeout(resolve, 150))
+    }
+    return dynamicProfileReadyRef.current
   }, [])
 
   const refreshDynamicWalletRuntime = useCallback(async (reason: string, options?: { requireApprovalWallet?: boolean }) => {
@@ -3363,6 +3376,13 @@ function PineTreeWalletRuntime() {
   // resolver (and the live identity signals it depends on) is computed.
   const showProfileSyncDebugPanel = walletSyncDebugQueryEnabled
 
+  useEffect(() => {
+    dynamicProfileReadyRef.current = Boolean(dynamicProfileReady)
+    if (dynamicProfileReady) {
+      setWalletSetupFailureReason(null)
+    }
+  }, [dynamicProfileReady])
+
   const walletRailRows = useMemo<WalletRailRow[]>(() => [
     { rail: "base", label: "Base" as const, configured: baseReady, enabled: enabledRails.base },
     { rail: "solana", label: "Solana" as const, configured: solanaReady, enabled: enabledRails.solana },
@@ -3531,6 +3551,7 @@ function PineTreeWalletRuntime() {
   // (stale session for another reason) > first-time provisioning > repair > generic
   // failure.
   const walletSetupPrimaryState = useMemo<WalletSetupPrimaryState>(() => {
+    if (openWalletReconnectNeeded) return "reconnect_needed"
     if (dynamicProfileReady) return "ready"
     if (hasReadyBaseAndSolanaProfile && !user) return "reconnect_needed"
     if (emailMismatchActive) return "email_mismatch"
@@ -3555,6 +3576,7 @@ function PineTreeWalletRuntime() {
     repairOrSetupIncomplete,
     walletCreationStep,
     profileState,
+    openWalletReconnectNeeded,
   ])
 
   const walletStatus =
@@ -3642,11 +3664,12 @@ function PineTreeWalletRuntime() {
     }
   }
 
-  function handleOpenWallet() {
+  async function handleOpenWallet() {
     setWalletSetupAttemptId(createWalletSetupAttemptId())
     setWalletSetupFailureReason(null)
     setActiveTab("overview")
-    setWalletOpen(true)
+    setWalletOpening(true)
+    setOpenWalletReconnectNeeded(false)
     console.info("[pinetree-wallets] open_wallet_sync_requested", {
       dynamicAuthenticated: Boolean(user),
       dynamicUserId: user?.userId ?? null,
@@ -3667,11 +3690,40 @@ function PineTreeWalletRuntime() {
       logWalletCreationStep("waiting_for_dynamic_auth", { reason: "open_wallet_sync_missing_dynamic_user" })
       setShowDynamicUserProfile(false)
       setShowAuthFlow(true)
+      setWalletOpening(false)
       return
     }
-    if (sdkHasLoaded) {
-      void refreshDynamicWalletRuntime("open_wallet_sync_profile", { requireApprovalWallet: false })
+    if (!sdkHasLoaded) {
+      setWalletOpening(false)
+      return
     }
+
+    const firstRefreshReady = await refreshDynamicWalletRuntime("open_wallet_sync_profile", { requireApprovalWallet: false })
+    const firstOpenReady = firstRefreshReady && (await waitForOpenWalletReadiness())
+
+    if (!firstOpenReady) {
+      console.info("[pinetree-wallets] open_wallet_runtime_retry", {
+        dynamicAuthenticated: Boolean(user),
+        dynamicUserId: user?.userId ?? null,
+        dynamicWalletRuntimeCount: dynamicWalletRuntimeCountRef.current,
+      })
+      const retryRefreshReady = await refreshDynamicWalletRuntime("open_wallet_sync_profile_retry", { requireApprovalWallet: false })
+      const retryOpenReady = retryRefreshReady && (await waitForOpenWalletReadiness())
+      if (!retryOpenReady) {
+        setPendingSync(false)
+        setWalletOpening(false)
+        setOpenWalletReconnectNeeded(true)
+        recordWalletSetupFailure("dynamic_auth_missing", "failed", {
+          reason: "open_wallet_runtime_refresh_failed",
+          dynamicUserId: user.userId ?? null,
+          dynamicWalletRuntimeCount: dynamicWalletRuntimeCountRef.current,
+        })
+        return
+      }
+    }
+
+    setWalletOpening(false)
+    setWalletOpen(true)
   }
 
   async function beginWalletSetupRepair(reason: string) {
@@ -4490,10 +4542,10 @@ function PineTreeWalletRuntime() {
             <button
               type="button"
               onClick={handleOpenWallet}
-              disabled={syncing || walletCreationInProgress}
+              disabled={syncing || walletCreationInProgress || walletOpening}
               className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
             >
-              Reconnect PineTree Wallet
+              {walletOpening ? "Opening PineTree Wallet..." : "Reconnect PineTree Wallet"}
             </button>
           ) : walletSetupPrimaryState === "failed" || walletSetupPrimaryState === "save_needed" || walletSetupPrimaryState === "rail_sync_needed" ? (
             <button
@@ -4513,10 +4565,10 @@ function PineTreeWalletRuntime() {
               <button
                 type="button"
                 onClick={handleOpenWallet}
-                disabled={syncing || walletCreationInProgress}
+                disabled={syncing || walletCreationInProgress || walletOpening}
                 className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
               >
-                Open PineTree Wallet
+                {walletOpening ? "Opening PineTree Wallet..." : "Open PineTree Wallet"}
               </button>
             </div>
           ) : showProvisioningRetryOnly ? null : (

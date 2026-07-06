@@ -37,7 +37,7 @@ function withdrawableAssetOptionsSrc() {
 function bitcoinReadinessSrc() {
   return walletPage.slice(
     walletPage.indexOf("const btcPayoutReady"),
-    walletPage.indexOf("const dynamicProfileReady")
+    walletPage.indexOf("const dynamicEmbeddedSignersReady")
   )
 }
 

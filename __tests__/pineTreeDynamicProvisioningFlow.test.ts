@@ -69,16 +69,84 @@ describe("PineTree Dynamic provisioning flow", () => {
 
   it("Open PineTree Wallet starts browser-to-server profile sync and logs the exact result", () => {
     const openWalletFn = page.slice(
-      page.indexOf("function handleOpenWallet()"),
+      page.indexOf("async function handleOpenWallet()"),
       page.indexOf("async function beginWalletSetupRepair")
     )
     expect(openWalletFn).toContain('console.info("[pinetree-wallets] open_wallet_sync_requested"')
     expect(openWalletFn).toContain("setPendingSync(true)")
     expect(openWalletFn).toContain('refreshDynamicWalletRuntime("open_wallet_sync_profile"')
+    expect(openWalletFn).toContain("setWalletOpen(true)")
     expect(page).toContain('console.info("[pinetree-wallets] profile_sync_request"')
     expect(page).toContain("payload: body")
     expect(page).toContain('console.info("[pinetree-wallets] profile_sync_response"')
     expect(page).toContain("profileEndpointResponse")
+  })
+
+  it("first Open PineTree Wallet after Ready refreshes Dynamic runtime before opening the modal", () => {
+    const openWalletFn = page.slice(
+      page.indexOf("async function handleOpenWallet()"),
+      page.indexOf("async function beginWalletSetupRepair")
+    )
+    const refreshIndex = openWalletFn.indexOf('await refreshDynamicWalletRuntime("open_wallet_sync_profile"')
+    const waitIndex = openWalletFn.indexOf("await waitForOpenWalletReadiness()")
+    const openIndex = openWalletFn.indexOf("setWalletOpen(true)")
+    expect(refreshIndex).toBeGreaterThan(-1)
+    expect(waitIndex).toBeGreaterThan(refreshIndex)
+    expect(openIndex).toBeGreaterThan(waitIndex)
+    expect(openWalletFn).toContain("setWalletOpening(true)")
+    expect(openWalletFn).toContain("setWalletOpening(false)")
+  })
+
+  it("stale Dynamic runtime on first open retries once automatically before opening", () => {
+    const openWalletFn = page.slice(
+      page.indexOf("async function handleOpenWallet()"),
+      page.indexOf("async function beginWalletSetupRepair")
+    )
+    expect(openWalletFn).toContain('console.info("[pinetree-wallets] open_wallet_runtime_retry"')
+    expect(openWalletFn).toContain('await refreshDynamicWalletRuntime("open_wallet_sync_profile_retry"')
+    expect(openWalletFn).toContain("const retryOpenReady = retryRefreshReady && (await waitForOpenWalletReadiness())")
+  })
+
+  it("successful open retry opens PineTree Wallet without showing Dynamic recovery", () => {
+    const openWalletFn = page.slice(
+      page.indexOf("async function handleOpenWallet()"),
+      page.indexOf("async function beginWalletSetupRepair")
+    )
+    const retryReadyIndex = openWalletFn.indexOf("const retryOpenReady = retryRefreshReady && (await waitForOpenWalletReadiness())")
+    const failureIndex = openWalletFn.indexOf("if (!retryOpenReady)")
+    const openIndex = openWalletFn.lastIndexOf("setWalletOpen(true)")
+    expect(retryReadyIndex).toBeGreaterThan(-1)
+    expect(failureIndex).toBeGreaterThan(retryReadyIndex)
+    expect(openIndex).toBeGreaterThan(failureIndex)
+    expect(page).not.toContain("Let's try that again")
+    expect(page).not.toContain("setup didn't finish all the way")
+  })
+
+  it("failed open runtime retry maps to PineTree-controlled Reconnect needed", () => {
+    const openWalletFn = page.slice(
+      page.indexOf("async function handleOpenWallet()"),
+      page.indexOf("async function beginWalletSetupRepair")
+    )
+    expect(openWalletFn).toContain("setOpenWalletReconnectNeeded(true)")
+    expect(openWalletFn).toContain('recordWalletSetupFailure("dynamic_auth_missing", "failed"')
+    expect(page).toContain('if (openWalletReconnectNeeded) return "reconnect_needed"')
+    expect(page).toContain("Reconnect PineTree Wallet")
+  })
+
+  it("Open PineTree Wallet runtime refresh does not call external link/connect wallet flow", () => {
+    const openWalletFn = page.slice(
+      page.indexOf("async function handleOpenWallet()"),
+      page.indexOf("async function beginWalletSetupRepair")
+    )
+    expect(openWalletFn).not.toContain("connectWallet(")
+    expect(openWalletFn).not.toContain("linkWallet(")
+    expect(openWalletFn).not.toContain("setShowDynamicUserProfile(true)")
+  })
+
+  it("Ready state remains visible while Opening PineTree Wallet runs", () => {
+    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Ready" :')
+    expect(page).toContain('{walletOpening ? "Opening PineTree Wallet..." : "Open PineTree Wallet"}')
+    expect(page).not.toContain('walletOpening ? "Opening" : walletSetupPrimaryState === "ready"')
   })
 
   it("successful profile sync clears Saving as soon as the profile is ready", () => {
