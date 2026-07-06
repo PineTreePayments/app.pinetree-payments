@@ -871,6 +871,7 @@ function sanitizeWithdrawalSubmitErrorForMerchant(message: string | undefined) {
   if (raw.includes("different PineTree Wallet session")) return raw
   if (raw === withdrawalSignerRailMismatchMessage) return raw
   if (raw === solanaWithdrawalReconnectMessage) return raw
+  if (raw === "Withdrawal approval is still pending. Check your wallet activity before trying again.") return raw
   const hiddenSignerPhrases = [
     ["provider", "signer"].join(" "),
     ["cannot", "sign"].join(" "),
@@ -1561,10 +1562,14 @@ function WithdrawalFormShell({
   }
 
   if (screen === "submitted" && submitResult) {
+    const isSolanaSolWithdrawal = review?.review.rail === "solana" && review.review.asset === "SOL"
     return (
       <div className="space-y-4">
         <div className="rounded-[1.2rem] border border-blue-200 bg-blue-50/70 px-5 py-5">
-          <p className="text-base font-semibold text-blue-950">Withdrawal submitted</p>
+          <p className="text-base font-semibold text-blue-950">{isSolanaSolWithdrawal ? "Withdrawal sent" : "Withdrawal submitted"}</p>
+          {isSolanaSolWithdrawal ? (
+            <p className="mt-2 text-sm leading-6 text-blue-900">Your SOL withdrawal has been submitted.</p>
+          ) : null}
         {submitResult.request.provider_reference || submitResult.request.tx_hash ? (
           <p className="mt-2 break-all text-xs leading-5 text-blue-900">
             Transaction reference: {submitResult.request.tx_hash || submitResult.request.provider_reference}

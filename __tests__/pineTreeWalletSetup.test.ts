@@ -1186,17 +1186,21 @@ describe("PineTree embedded wallet setup", () => {
     // signAndSendTransaction on TurnkeySolanaWalletConnector calls this.walletUiUtils, so
     // 'this' must remain the connector object — inline ?. calls guarantee that.
     expect(page).toContain("signDynamicSolanaTransactionWithActiveAccount(")
-    expect(dynamicSignerLookup).toContain("await wallet.signAndSendTransaction?.(transaction, signOptions) as unknown")
-    expect(dynamicSignerLookup).toContain("await wallet.connector?.signAndSendTransaction?.(transaction, signOptions) as unknown")
+    expect(dynamicSignerLookup).toContain("wallet.signAndSendTransaction(transaction, signOptions)")
+    expect(dynamicSignerLookup).toContain("wallet.connector?.signAndSendTransaction?.(transaction, signOptions)")
+    expect(dynamicSignerLookup).toContain("const txResult = await withTimeout(")
     expect(page).not.toContain("const signAndSendTransaction = wallet.signAndSendTransaction")
   })
 
-  it("Dynamic Solana signer handles both string and {signature} return shapes", () => {
+  it("Dynamic Solana signer normalizes string, object, and nested return shapes", () => {
     // TurnkeySolanaWalletConnector.signAndSendTransaction returns a string.
     // ISolana (injected wallets like Phantom) returns { signature: string }.
     // Both must be normalised to a plain hash string before submitting.
-    expect(dynamicSignerLookup).toContain("typeof txResult === \"string\"")
-    expect(dynamicSignerLookup).toContain("(txResult as { signature?: string }).signature")
+    expect(dynamicSignerLookup).toContain("export function normalizeDynamicSolanaSignature")
+    expect(dynamicSignerLookup).toContain('"signature"')
+    expect(dynamicSignerLookup).toContain('"txHash"')
+    expect(dynamicSignerLookup).toContain('"transactionSignature"')
+    expect(dynamicSignerLookup).toContain('for (const key of ["result", "response", "data"])')
   })
 
   it("wallet not found in Dynamic session shows reconnect error and logs signer_not_found", () => {

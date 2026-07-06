@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import {
+  DYNAMIC_SOLANA_SIGN_TIMEOUT_MESSAGE,
+  DYNAMIC_SOLANA_SIGN_TIMEOUT_MS,
   assertDynamicWalletChain,
   classifyDynamicWalletChain,
   dynamicWalletSupportsRail,
@@ -8,6 +10,7 @@ import {
   findDynamicWalletForSource,
   getDynamicWalletSearchList,
   inferredSignerRailForWallet,
+  normalizeDynamicSolanaSignature,
   railForDynamicWalletChain,
   signDynamicSolanaTransactionWithActiveAccount,
 } from "@/lib/wallets/dynamicSignerLookup"
@@ -242,6 +245,36 @@ describe("Dynamic signer lookup", () => {
     )).resolves.toMatchObject({ txHash: "sig-solana" })
 
     expect(calls).toEqual(["before-modal", "sign"])
+  })
+
+  it("normalizes Dynamic Solana sign results into a tx hash/provider reference", () => {
+    expect(normalizeDynamicSolanaSignature("sig-string")).toBe("sig-string")
+    expect(normalizeDynamicSolanaSignature({ signature: "sig-object" })).toBe("sig-object")
+    expect(normalizeDynamicSolanaSignature({ txHash: "sig-hash" })).toBe("sig-hash")
+    expect(normalizeDynamicSolanaSignature({ transactionSignature: "sig-transaction" })).toBe("sig-transaction")
+    expect(normalizeDynamicSolanaSignature({ result: { signature: "sig-nested" } })).toBe("sig-nested")
+    expect(normalizeDynamicSolanaSignature({ signatures: ["sig-array"] })).toBe("sig-array")
+  })
+
+  it("times out a Solana Dynamic signing promise that never resolves", async () => {
+    vi.useFakeTimers()
+    const signAndSendTransaction = vi.fn().mockReturnValue(new Promise(() => undefined))
+    const wallet = {
+      address: "SolanaTimeout1111111111111111111111111111",
+      chain: "solana",
+      signAndSendTransaction,
+    }
+
+    const pending = signDynamicSolanaTransactionWithActiveAccount(
+      wallet,
+      "tx",
+      "SolanaTimeout1111111111111111111111111111"
+    )
+
+    const assertion = expect(pending).rejects.toThrow(DYNAMIC_SOLANA_SIGN_TIMEOUT_MESSAGE)
+    await vi.advanceTimersByTimeAsync(DYNAMIC_SOLANA_SIGN_TIMEOUT_MS)
+    await assertion
+    vi.useRealTimers()
   })
 
   it("classifies Dynamic wallet chains from wallet and connector metadata", () => {

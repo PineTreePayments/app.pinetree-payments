@@ -160,6 +160,59 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(solanaCallbackIndex).toBeGreaterThan(solanaCallIndex)
   })
 
+  it("logs the Dynamic Solana sign result after signAndSendTransaction resolves", () => {
+    const dynamicSignerLookup = fs.readFileSync(
+      path.join(process.cwd(), "lib/wallets/dynamicSignerLookup.ts"),
+      "utf8"
+    )
+    const signFn = dynamicSignerLookup.slice(
+      dynamicSignerLookup.indexOf("export async function signDynamicSolanaTransactionWithActiveAccount("),
+      dynamicSignerLookup.length
+    )
+    const callIndex = signFn.indexOf("const txResult = await withTimeout(")
+    const logIndex = signFn.indexOf('console.info("[pinetree-withdrawals] dynamic_solana_sign_result"')
+    expect(callIndex).toBeGreaterThan(-1)
+    expect(logIndex).toBeGreaterThan(callIndex)
+    expect(signFn).toContain("signaturePresent")
+    expect(signFn).toContain("resultType")
+  })
+
+  it("Solana signing timeout shows a controlled pending message and exits approving", () => {
+    const dynamicSignerLookup = fs.readFileSync(
+      path.join(process.cwd(), "lib/wallets/dynamicSignerLookup.ts"),
+      "utf8"
+    )
+    expect(dynamicSignerLookup).toContain("DYNAMIC_SOLANA_SIGN_TIMEOUT_MS = 45_000")
+    expect(dynamicSignerLookup).toContain("Withdrawal approval is still pending. Check your wallet activity before trying again.")
+    expect(page).toContain('if (raw === "Withdrawal approval is still pending. Check your wallet activity before trying again.") return raw')
+    const catchBlock = page.slice(
+      page.indexOf("} catch (error) {", page.indexOf("async function handleSubmitWithdrawal()")),
+      page.indexOf("} finally {", page.indexOf("async function handleSubmitWithdrawal()"))
+    )
+    expect(catchBlock).toContain("setWithdrawalApprovalError")
+    expect(catchBlock).toContain('setWithdrawalScreen("failed")')
+    expect(page).toContain("setSubmittingWithdrawal(false)")
+  })
+
+  it("successful Solana signing posts normalized tx_hash/provider_reference and refreshes activity", () => {
+    const submitFn = page.slice(
+      page.indexOf("async function handleSubmitWithdrawal()"),
+      page.indexOf("// ---------------------------------------------------------------------------\n  // Early returns")
+    )
+    expect(submitFn).toContain("tx_hash: dynamicSubmission.txHash || \"\"")
+    expect(submitFn).toContain("provider_reference: dynamicSubmission.providerReference || dynamicSubmission.txHash || \"\"")
+    expect(submitFn).toContain("setWithdrawalSubmitResult(submitted as WithdrawalSubmitResponse)")
+    expect(submitFn).toContain('setWithdrawalScreen("submitted")')
+    expect(submitFn).toContain("void syncPineTreeWallet()")
+    expect(submitFn).toContain("void pollWithdrawalRequest(withdrawalId, submitted as WithdrawalSubmitResponse)")
+  })
+
+  it("SOL success state says Withdrawal sent and does not leave approving visible", () => {
+    expect(page).toContain("Withdrawal sent")
+    expect(page).toContain("Your SOL withdrawal has been submitted.")
+    expect(page).toContain("isSolanaSolWithdrawal")
+  })
+
   it("Solana withdrawal path never calls signPsbt or uses Bitcoin primaryWallet as signer", () => {
     const solanaPreflight = page.slice(
       page.indexOf("async function assertSolanaWithdrawalModalPreflight"),

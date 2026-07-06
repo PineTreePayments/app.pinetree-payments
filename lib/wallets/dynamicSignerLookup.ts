@@ -73,6 +73,10 @@ export type DynamicSolanaSignerDiagnostics = {
   hasSignAndSendTransaction: boolean
 }
 
+export const DYNAMIC_SOLANA_SIGN_TIMEOUT_MS = 45_000
+export const DYNAMIC_SOLANA_SIGN_TIMEOUT_MESSAGE =
+  "Withdrawal approval is still pending. Check your wallet activity before trying again."
+
 function normalizeWalletAddress(value: string, rail?: DynamicSignerRail) {
   const address = value.trim()
   if (rail === "base") return address.toLowerCase()
@@ -398,6 +402,69 @@ export function assertDynamicWalletChain(wallet: DynamicWalletLike, rail: Dynami
   }
 }
 
+function summarizeDynamicSolanaSignResult(value: unknown): string {
+  if (typeof value === "string") return value
+  if (value === null) return "null"
+  if (value === undefined) return "undefined"
+  if (Array.isArray(value)) return `array(${value.length})`
+  if (typeof value === "object") return `object(${Object.keys(value as Record<string, unknown>).join(",")})`
+  return typeof value
+}
+
+function readStringField(record: Record<string, unknown>, key: string) {
+  const value = record[key]
+  return typeof value === "string" && value.trim() ? value.trim() : null
+}
+
+export function normalizeDynamicSolanaSignature(value: unknown): string | null {
+  if (typeof value === "string") return value.trim() || null
+  if (!value || typeof value !== "object") return null
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const signature = normalizeDynamicSolanaSignature(item)
+      if (signature) return signature
+    }
+    return null
+  }
+
+  const record = value as Record<string, unknown>
+  const direct = [
+    "signature",
+    "txHash",
+    "tx_hash",
+    "hash",
+    "transactionHash",
+    "transactionSignature",
+    "signedTransaction",
+  ].map((key) => readStringField(record, key)).find(Boolean)
+  if (direct) return direct
+
+  const signatures = record.signatures
+  if (Array.isArray(signatures)) {
+    const signature = signatures.find((item): item is string => typeof item === "string" && item.trim().length > 0)
+    if (signature) return signature.trim()
+  }
+
+  for (const key of ["result", "response", "data"]) {
+    const signature = normalizeDynamicSolanaSignature(record[key])
+    if (signature) return signature
+  }
+
+  return null
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs)
+  })
+  try {
+    return await Promise.race([promise, timeout])
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId)
+  }
+}
+
 export async function signDynamicSolanaTransactionWithActiveAccount(
   wallet: DynamicWalletLike,
   transaction: unknown,
@@ -442,14 +509,28 @@ export async function signDynamicSolanaTransactionWithActiveAccount(
     publicKey: activeAccountAddress,
   }
   onBeforeDynamicModal?.()
-  const txResult = await wallet.signAndSendTransaction?.(transaction, signOptions) as unknown
-    ?? await wallet.connector?.signAndSendTransaction?.(transaction, signOptions) as unknown
+  const signPromise =
+    wallet.signAndSendTransaction
+      ? wallet.signAndSendTransaction(transaction, signOptions)
+      : wallet.connector?.signAndSendTransaction?.(transaction, signOptions)
+  if (!signPromise) {
+    throw new Error("Unable to sign this withdrawal. Please try again.")
+  }
+  const txResult = await withTimeout(
+    signPromise,
+    DYNAMIC_SOLANA_SIGN_TIMEOUT_MS,
+    DYNAMIC_SOLANA_SIGN_TIMEOUT_MESSAGE
+  )
+  const txHash = normalizeDynamicSolanaSignature(txResult)
+  console.info("[pinetree-withdrawals] dynamic_solana_sign_result", {
+    returned: summarizeDynamicSolanaSignResult(txResult),
+    signaturePresent: Boolean(txHash),
+    signature: txHash,
+    resultType: txResult === null ? "null" : Array.isArray(txResult) ? "array" : typeof txResult,
+  })
   if (!txResult) {
     throw new Error("Unable to sign this withdrawal. Please try again.")
   }
-  const txHash = typeof txResult === "string"
-    ? txResult
-    : (txResult as { signature?: string }).signature
   if (!txHash) {
     throw new Error("Unable to sign this withdrawal. Please try again.")
   }

@@ -252,9 +252,12 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
 
   it("Bitcoin Lightning payout does not render for Base or Solana withdrawal assets", () => {
     const src = withdrawalFormSrc()
-    expect(src).toContain('const showLightningPayoutSetup = rail === "bitcoin" && asset === "BTC" && !lightningPayout.connected')
-    expect(src).not.toContain('rail === "base"')
-    expect(src).not.toContain('rail === "solana"')
+    const showLightningLine = src
+      .split("\n")
+      .find((line) => line.includes("const showLightningPayoutSetup")) || ""
+    expect(showLightningLine).toContain('rail === "bitcoin" && asset === "BTC" && !lightningPayout.connected')
+    expect(showLightningLine).not.toContain('rail === "base"')
+    expect(showLightningLine).not.toContain('rail === "solana"')
   })
 
   it("withdraw auto-selects first wallet-backed asset and clears review state on change", () => {
