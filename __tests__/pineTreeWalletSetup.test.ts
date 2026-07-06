@@ -339,6 +339,13 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain(">Setup pending</p>")
   })
 
+  it("removes the top Merchant Wallet eyebrow while keeping title and description", () => {
+    expect(page).not.toContain("Merchant wallet</p>")
+    expect(page).not.toContain("MERCHANT WALLET")
+    expect(page).toContain(">PineTree Wallet</h1>")
+    expect(page).toContain("Create and open one merchant wallet for Base, Solana, and Bitcoin.")
+  })
+
   it("overview shows wallet summary balances instead of duplicating receive addresses", () => {
     expect(page).toContain("function WalletOverviewSummary")
     expect(page).toContain(">TOTAL BALANCE</p>")
@@ -360,17 +367,20 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("Balances will update as wallet activity is indexed.")
   })
 
-  it("balances tab shows wallet-style asset rows without fake unsynced zeroes", () => {
+  it("balances tab uses a selected asset dropdown without fake unsynced zeroes", () => {
     expect(page).toContain("function BalanceRows")
-    expect(page).toContain("Total value")
-    expect(page).toContain("allAssets.map((row, index)")
-    expect(page).toContain("ChevronRight")
+    expect(page).toContain("AssetSelectDropdown")
+    expect(page).toContain("dropdownOptions")
+    expect(page).toContain("balanceOptions")
+    expect(page).not.toContain("allAssets.map((row, index)")
+    expect(page).not.toContain("ChevronRight")
     expect(page).toContain("Wallet address")
     expect(page).not.toContain('["Deposit", "Withdraw", "History"].map')
     expect(page).not.toContain("Managed by Speed")
     expect(page).not.toContain("Powered by Speed")
     expect(page).toContain("formatBalance(row.balance, row.asset)")
-    expect(page).toContain("Pending sync")
+    expect(page).toContain("No balances yet")
+    expect(page).toContain("Received funds will appear here after payments settle.")
     expect(page).not.toContain("Base balance")
     expect(page).not.toContain("Solana balance")
     expect(page).not.toContain("Bitcoin balance")

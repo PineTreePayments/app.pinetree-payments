@@ -95,19 +95,19 @@ describe("Overview tab - polished PineTree summary", () => {
   })
 })
 
-describe("Balances tab - wallet asset list and compact detail", () => {
-  it("BalanceRows uses selectedKey state with wallet-style asset rows", () => {
+describe("Balances tab - compact selected asset detail", () => {
+  it("BalanceRows uses selectedKey state with the shared asset dropdown", () => {
     const src = balanceRowsSrc()
     expect(src).toContain("selectedKey")
     expect(src).toContain("setSelectedKey")
-    expect(src).toContain("Total value")
-    expect(src).toContain("allAssets.map((row, index)")
-    expect(src).toContain("onClick={() => setSelectedKey(row.key)}")
-    expect(src).toContain("ChevronRight")
-    expect(src).toContain("isSelected")
+    expect(src).toContain("balanceOptions")
+    expect(src).toContain("dropdownOptions")
+    expect(src).toContain("AssetSelectDropdown")
+    expect(src).toContain("onSelect={setSelectedKey}")
+    expect(src).toContain('balanceOptions.find((row) => row.key === "BASE_ETH")')
     expect(src).not.toContain('["Deposit", "Withdraw", "History"].map')
-    expect(src).not.toContain("dropdownOptions")
-    expect(src).not.toContain("AssetSelectDropdown")
+    expect(src).not.toContain("allAssets.map((row, index)")
+    expect(src).not.toContain("ChevronRight")
   })
 
   it("selected asset detail card shows balance, metadata, and wallet address", () => {
@@ -116,9 +116,17 @@ describe("Balances tab - wallet asset list and compact detail", () => {
     expect(src).toContain("formatBalance(selectedAsset.balance, selectedAsset.asset)")
     expect(src).toContain("Network")
     expect(src).toContain("Asset")
+    expect(src).toContain("Estimated USD value")
     expect(src).toContain("Last synced")
     expect(src).toContain("Wallet address")
     expect(src).toContain('aria-label="Copy wallet address"')
+  })
+
+  it("BalanceRows shows a clean empty state when no balances are available", () => {
+    const src = balanceRowsSrc()
+    expect(src).toContain("No balances yet")
+    expect(src).toContain("Received funds will appear here after payments settle.")
+    expect(src).toContain("if (balanceOptions.length === 0)")
   })
 
   it("BalanceRows selects the wallet address from the correct rail", () => {
@@ -126,6 +134,23 @@ describe("Balances tab - wallet asset list and compact detail", () => {
     expect(src).toContain("profileAddresses.base[0]?.address")
     expect(src).toContain("profileAddresses.solana[0]?.address")
     expect(src).toContain("bitcoinPayoutEntries[0]?.address")
+  })
+
+  it("Base and Solana USDC remain distinct balance options", () => {
+    expect(walletPage).toContain('{ key: "BASE_USDC", rail: "base", asset: "USDC"')
+    expect(walletPage).toContain('{ key: "SOLANA_USDC", rail: "solana", asset: "USDC"')
+    const src = balanceRowsSrc()
+    expect(src).toContain("key: row.key")
+    expect(src).toContain("railLabel: assetRailLabel(row.rail)")
+  })
+
+  it("BTC is only included for the Bitcoin rail when a Bitcoin payout address exists", () => {
+    const src = balanceRowsSrc()
+    expect(walletPage).toContain('{ key: "BTC", rail: "bitcoin", asset: "BTC"')
+    expect(src).toContain('if (profileAddresses.base.length > 0) rows.push(...(sync?.balances.base ?? []))')
+    expect(src).toContain('if (profileAddresses.solana.length > 0) rows.push(...(sync?.balances.solana ?? []))')
+    expect(src).toContain('if (bitcoinPayoutEntries.length > 0) rows.push(...(sync?.balances.bitcoin ?? []))')
+    expect(src).toContain('if (row.rail === "bitcoin" && bitcoinPayoutEntries.length === 0) return false')
   })
 
   it("BalanceRows detail card does not render a Status field", () => {
@@ -145,6 +170,7 @@ describe("Balances tab - wallet asset list and compact detail", () => {
     expect(src).toContain("bitcoinPayoutEntries[0]?.address")
     expect(src).toContain("formatBalance(row.balance, row.asset)")
     expect(walletPage).toContain('{ key: "BTC", rail: "bitcoin", asset: "BTC", balance: null')
+    expect(src).toContain('if (row.rail === "bitcoin" && bitcoinPayoutEntries.length === 0) return false')
     expect(src).not.toContain("Speed")
   })
 

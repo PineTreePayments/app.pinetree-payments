@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useDynamicContext, useDynamicWaas, useEmbeddedWallet, useRefreshUser, useUserWallets } from "@dynamic-labs/sdk-react-core"
 import { Transaction } from "@solana/web3.js"
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Copy, X } from "lucide-react"
+import { AlertTriangle, CheckCircle2, ChevronDown, Copy, X } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import {
   extractDynamicWalletAddresses,
@@ -1654,17 +1654,46 @@ function BalanceRows({
   copiedAddress: string
   onCopy: (address: string) => void
 }) {
-  const allAssets: SyncedBalanceAsset[] = [
-    ...(sync?.balances.base ?? defaultWalletSyncState.balances.base),
-    ...(sync?.balances.solana ?? defaultWalletSyncState.balances.solana),
-    ...(sync?.balances.bitcoin ?? defaultWalletSyncState.balances.bitcoin),
-  ]
-  const [selectedKey, setSelectedKey] = useState(allAssets[0]?.key ?? "BASE_ETH")
-  const selectedAsset = allAssets.find((row) => row.key === selectedKey) ?? allAssets[0] ?? null
   const assetRailLabel = (rail: SyncedBalanceAsset["rail"]) =>
     rail === "base" ? "Base" : rail === "solana" ? "Solana" : "Bitcoin"
+  const balanceOptions = useMemo(() => {
+    const rows: SyncedBalanceAsset[] = []
+    if (profileAddresses.base.length > 0) rows.push(...(sync?.balances.base ?? []))
+    if (profileAddresses.solana.length > 0) rows.push(...(sync?.balances.solana ?? []))
+    if (bitcoinPayoutEntries.length > 0) rows.push(...(sync?.balances.bitcoin ?? []))
+    return rows.filter((row) => {
+      if (row.rail === "bitcoin" && bitcoinPayoutEntries.length === 0) return false
+      if (row.rail === "base" && profileAddresses.base.length === 0) return false
+      if (row.rail === "solana" && profileAddresses.solana.length === 0) return false
+      return row.status === "synced" || row.balance !== null || row.usdValue !== null
+    })
+  }, [bitcoinPayoutEntries.length, profileAddresses.base.length, profileAddresses.solana.length, sync?.balances.base, sync?.balances.bitcoin, sync?.balances.solana])
+
+  const preferredSelectedKey =
+    balanceOptions.find((row) => row.key === "BASE_ETH")?.key ??
+    balanceOptions[0]?.key ??
+    ""
+  const [selectedKey, setSelectedKey] = useState(preferredSelectedKey)
+  const selectedAsset = balanceOptions.find((row) => row.key === selectedKey) ?? balanceOptions[0] ?? null
+
+  useEffect(() => {
+    if (balanceOptions.length === 0) {
+      if (selectedKey) setSelectedKey("")
+      return
+    }
+    if (!balanceOptions.some((row) => row.key === selectedKey)) {
+      setSelectedKey(preferredSelectedKey)
+    }
+  }, [balanceOptions, preferredSelectedKey, selectedKey])
+
+  const dropdownOptions: AssetDropdownOption[] = balanceOptions.map((row) => ({
+    key: row.key,
+    asset: row.asset,
+    railLabel: assetRailLabel(row.rail),
+    balanceLabel: formatBalance(row.balance, row.asset),
+    usdLabel: row.status === "synced" && row.usdValue !== null ? `≈ ${formatUsd(row.usdValue)}` : null,
+  }))
   const lastSynced = formatLastSynced(sync?.lastSyncedAt ?? null)
-  const totalUsd = allAssets.reduce((sum, row) => sum + (row.status === "synced" && row.usdValue !== null ? row.usdValue : 0), 0)
 
   const walletAddress = selectedAsset
     ? selectedAsset.rail === "base"
@@ -1674,50 +1703,30 @@ function BalanceRows({
         : bitcoinPayoutEntries[0]?.address ?? null
     : null
 
+  if (balanceOptions.length === 0) {
+    return (
+      <div className="rounded-[1.1rem] border border-dashed border-gray-200 bg-gray-50 px-4 py-5">
+        <p className="text-sm font-semibold text-gray-950">No balances yet</p>
+        <p className="mt-1 text-xs leading-5 text-gray-500">Received funds will appear here after payments settle.</p>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-4">
-      <div className="rounded-[1.35rem] border border-blue-200/60 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.12),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(248,251,255,0.96))] px-5 py-4 shadow-[0_18px_42px_rgba(15,23,42,0.07)]">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">Total value</p>
-        <p className="mt-1 text-3xl font-semibold text-gray-950">{formatUsd(totalUsd)}</p>
-        <p className="mt-1 text-xs leading-5 text-gray-500">
-          {syncing ? "Syncing balances..." : lastSynced ? `Last synced ${lastSynced}` : "Pending sync"}
-        </p>
-      </div>
-
-      <div className="overflow-hidden rounded-[1.2rem] border border-blue-100/80 bg-white shadow-sm">
-        {allAssets.map((row, index) => {
-          const isSelected = row.key === selectedAsset?.key
-          return (
-            <button
-              key={row.key}
-              type="button"
-              onClick={() => setSelectedKey(row.key)}
-              className={`grid w-full grid-cols-[minmax(0,1fr)_auto_1.5rem] items-center gap-3 px-4 py-3 text-left transition ${
-                index === 0 ? "" : "border-t border-blue-50"
-              } ${isSelected ? "bg-blue-50/70" : "bg-white hover:bg-gray-50"}`}
-            >
-              <span className="min-w-0">
-                <span className="block text-sm font-semibold text-gray-950">{row.asset}</span>
-                <span className="block text-xs text-gray-500">{assetRailLabel(row.rail)}</span>
-              </span>
-              <span className="text-right">
-                <span className="block text-sm font-semibold text-gray-950">{formatBalance(row.balance, row.asset)}</span>
-                <span className="block text-xs text-gray-500">
-                  {row.usdValue !== null && row.status === "synced" ? formatUsd(row.usdValue) : "Pending value"}
-                </span>
-              </span>
-              <ChevronRight size={16} className={`justify-self-end ${isSelected ? "text-blue-600" : "text-gray-300"}`} />
-            </button>
-          )
-        })}
-      </div>
+      <AssetSelectDropdown
+        label="Asset"
+        options={dropdownOptions}
+        selectedKey={selectedAsset?.key ?? selectedKey}
+        onSelect={setSelectedKey}
+      />
 
       {selectedAsset ? (
         <div className="rounded-[1.2rem] border border-blue-100/80 bg-white px-4 py-4 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-gray-950">{selectedAsset.asset} details</p>
-              <p className="mt-1 text-xs text-gray-500">{assetRailLabel(selectedAsset.rail)} wallet asset</p>
+              <p className="text-sm font-semibold text-gray-950">{selectedAsset.asset}</p>
+              <p className="mt-1 text-xs text-gray-500">{assetRailLabel(selectedAsset.rail)}</p>
             </div>
             <p className="text-right text-sm font-semibold text-gray-950">
               {formatBalance(selectedAsset.balance, selectedAsset.asset)}
@@ -1727,6 +1736,12 @@ function BalanceRows({
             <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 py-2.5">
               <dt className="text-xs font-semibold text-gray-500">Balance</dt>
               <dd className="min-w-0 text-right font-semibold text-gray-950">{formatBalance(selectedAsset.balance, selectedAsset.asset)}</dd>
+            </div>
+            <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 py-2.5">
+              <dt className="text-xs font-semibold text-gray-500">Estimated USD value</dt>
+              <dd className="min-w-0 text-right font-semibold text-gray-950">
+                {selectedAsset.status === "synced" && selectedAsset.usdValue !== null ? formatUsd(selectedAsset.usdValue) : "Pending value"}
+              </dd>
             </div>
             <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 py-2.5">
               <dt className="text-xs font-semibold text-gray-500">Network</dt>
@@ -4733,8 +4748,7 @@ export default function PineTreeWalletPage() {
   return (
     <div className="space-y-5">
       <div>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">Merchant wallet</p>
-        <h1 className={`${dashboardPageTitleClass} mt-1`}>PineTree Wallet</h1>
+        <h1 className={dashboardPageTitleClass}>PineTree Wallet</h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-600">
           Create and open one merchant wallet for Base, Solana, and Bitcoin.
         </p>
