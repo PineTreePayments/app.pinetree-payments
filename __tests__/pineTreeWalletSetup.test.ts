@@ -153,7 +153,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
     expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
     expect(page).toContain('if (dynamicProfileReady) return "ready"')
-    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Ready" :')
+    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
     expect(page).toContain('if (repairOrSetupIncomplete) return "reconnect_needed"')
     expect(page).toContain('walletSetupPrimaryState === "reconnect_needed" ? "Reconnect needed" :')
   })
@@ -300,7 +300,7 @@ describe("PineTree embedded wallet setup", () => {
   it("marks the merchant wallet Ready only when Base/Solana signers are hydrated", () => {
     expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
     expect(page).toContain('if (dynamicProfileReady) return "ready"')
-    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Ready" :')
+    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
     expect(page).toContain('walletSetupPrimaryState === "reconnect_needed" ? "Reconnect needed" :')
     expect(page).not.toContain("Bitcoin Lightning is being prepared through PineTree")
     expect(page).not.toContain("Bitcoin address pending")
@@ -1036,7 +1036,7 @@ describe("PineTree embedded wallet setup", () => {
   it("valid Solana review with Dynamic approvalMethod shows Approve withdrawal button", () => {
     expect(page).toContain('if (screen === "review" && review)')
     expect(page).toContain("\"Approve withdrawal\"")
-    expect(page).toContain("Confirm the withdrawal details before submitting.")
+    expect(page).toContain("Confirm the withdrawal details before approving.")
   })
 
   it("clicking Approve calls the prepare route before signing", () => {

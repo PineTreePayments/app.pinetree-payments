@@ -144,7 +144,7 @@ describe("PineTree Dynamic provisioning flow", () => {
   })
 
   it("Ready state remains visible while Opening PineTree Wallet runs", () => {
-    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Ready" :')
+    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
     expect(page).toContain('{walletOpening ? "Opening PineTree Wallet..." : "Open PineTree Wallet"}')
     expect(page).not.toContain('walletOpening ? "Opening" : walletSetupPrimaryState === "ready"')
   })
@@ -177,7 +177,7 @@ describe("PineTree Dynamic provisioning flow", () => {
   it("ready Dynamic profile renders Ready without requiring Lightning to finish", () => {
     expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
     expect(page).toContain('if (dynamicProfileReady) return "ready"')
-    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Ready" :')
+    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
     expect(page).not.toContain('const walletStatus = repairInProgress ? "Repairing" : allPrimaryRailsConnected ? "Ready"')
   })
 
@@ -214,7 +214,7 @@ describe("PineTree Dynamic provisioning flow", () => {
   })
 
   it("Base/Solana connected chips render after delayed hydration is saved", () => {
-    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Ready" :')
+    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
     expect(page).toContain("setProfileState({ kind: \"loaded\", profile: json.profile })")
     expect(page).toContain("void fetch(\"/api/wallets/pinetree-wallet/rail-sync\"")
     expect(page).toContain("configured: baseReady, enabled: enabledRails.base")
@@ -667,7 +667,7 @@ describe("PineTree Dynamic provisioning flow", () => {
   })
 
   it("ready profile with a matching Dynamic session shows Ready and Open PineTree Wallet only", () => {
-    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Ready" :')
+    expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
     const ctaChain = page.slice(
       page.indexOf('{walletSetupPrimaryState === "email_mismatch" || walletSetupPrimaryState === "email_unverified" ? ('),
       page.indexOf(") : showProvisioningRetryOnly ? null : (")

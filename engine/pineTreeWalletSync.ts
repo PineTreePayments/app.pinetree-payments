@@ -36,6 +36,7 @@ export type PineTreeWalletSyncResult = {
   recentActivity: Array<{
     id: string
     label: string
+    rail: "base" | "solana" | "bitcoin"
     status: string
     createdAt: string
   }>
@@ -247,13 +248,20 @@ export async function getPineTreeWalletBalanceSnapshot(
     : null
 
   const recentActivity = recentWithdrawals.map((wd) => {
+    // "processing" only ever gets set alongside a tx_hash (the transaction was signed
+    // and submitted) - display that as "sent" rather than a raw internal status name,
+    // since PineTree has not independently reconciled final on-chain confirmation yet.
     const status =
-      (wd.status === "review_required" || (wd.status === "pending" && !wd.tx_hash))
-        ? "pending"
-        : wd.status
+      wd.status === "confirmed" ? "confirmed"
+      : wd.status === "failed" ? "failed"
+      : wd.status === "canceled" ? "canceled"
+      : wd.status === "blocked" ? "blocked"
+      : (wd.status === "processing" || Boolean(wd.tx_hash)) ? "sent"
+      : "pending"
     return {
       id: wd.id,
-      label: `Withdrawal: ${wd.amount_decimal} ${wd.asset} (${wd.rail})`,
+      label: `Sent ${wd.amount_decimal} ${wd.asset}`,
+      rail: wd.rail,
       status,
       createdAt: wd.created_at,
     }

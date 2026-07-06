@@ -285,6 +285,38 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     expect(src).not.toContain("Estimated status")
   })
 
+  it("withdrawal review screen uses PineTree-styled review copy", () => {
+    const src = withdrawalFormSrc()
+    const reviewScreen = src.slice(
+      src.indexOf('if (screen === "review" && review)'),
+      src.indexOf('if (screen === "approving")')
+    )
+    expect(reviewScreen).toContain("rounded-[1.35rem]")
+    expect(reviewScreen).toContain("border-blue-200/70")
+    expect(reviewScreen).toContain("Review withdrawal")
+    expect(reviewScreen).toContain("<dt")
+    expect(reviewScreen).toContain(">Asset<")
+    expect(reviewScreen).toContain(">Network<")
+    expect(reviewScreen).toContain(">Amount<")
+    expect(reviewScreen).toContain(">Destination<")
+    expect(reviewScreen).toContain("Estimated network fee")
+    expect(reviewScreen).toContain("Network fee may apply")
+  })
+
+  it("review screen has Approve withdrawal and a Back secondary action, not a generic browser-confirm layout", () => {
+    const src = withdrawalFormSrc()
+    const reviewScreen = src.slice(
+      src.indexOf('if (screen === "review" && review)'),
+      src.indexOf('if (screen === "approving")')
+    )
+    expect(reviewScreen).toContain("{reviewActionLabel}")
+    expect(reviewScreen).toContain(">\n            Back\n          </button>")
+    expect(reviewScreen).toContain("onClick={onSubmit}")
+    expect(reviewScreen).toContain("onClick={onEdit}")
+    expect(reviewScreen).toContain("flex-col gap-2 sm:flex-row")
+    expect(reviewScreen).not.toContain("window.confirm")
+  })
+
   it("withdraw validation and pending review states are not yellow warning blocks", () => {
     const src = withdrawalFormSrc()
     expect(src).not.toContain("border-amber")
@@ -315,6 +347,20 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(src).toContain("<h2 className=\"min-w-0 text-base font-semibold text-gray-950\">PineTree Wallet</h2>")
     expect(src).toContain("label={walletStatus}")
     expect(src).toContain("className=\"shrink-0\"")
+  })
+
+  it("wallet setup card badge displays Connected instead of Ready when the wallet is set up", () => {
+    expect(walletPage).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
+    expect(walletPage).not.toContain('walletSetupPrimaryState === "ready" ? "Ready"')
+    const runtime = runtimeSrc()
+    expect(runtime).toContain("label={walletStatus}")
+  })
+
+  it("wallet modal header badge also displays Connected instead of Ready", () => {
+    // Both the setup-card badge and the modal header badge share the same
+    // walletStatus value, so renaming the underlying label fixes both at once.
+    const labelUsages = [...walletPage.matchAll(/label=\{walletStatus\}/g)]
+    expect(labelUsages.length).toBeGreaterThanOrEqual(2)
   })
 
   it("Open/Create PineTree Wallet button remains in the content flow", () => {
@@ -375,6 +421,29 @@ describe("Activity tab - recent withdrawal visibility", () => {
     expect(src).toContain("items.length === 0")
   })
 
+  it("Activity row shows Solana/Base/Bitcoin network names, not the lowercase rail in parentheses", () => {
+    const src = activityTabSrc()
+    expect(src).toContain("railDisplayName(item.rail)")
+    expect(src).toContain("formatActivityTimestamp(item.createdAt)")
+    expect(walletPage).toContain('function railDisplayName(rail: WithdrawalRail) {')
+    expect(walletPage).toContain('if (rail === "base") return "Base"')
+    expect(walletPage).toContain('if (rail === "solana") return "Solana"')
+  })
+
+  it("Activity submits a fresh sync after a withdrawal is submitted, so it never shows a stale Pending row", () => {
+    expect(walletPage).toContain('setWithdrawalScreen("submitted")')
+    const pollFn = walletPage.slice(
+      walletPage.indexOf("async function pollWithdrawalRequest"),
+      walletPage.indexOf("async function handleSubmitWithdrawal()")
+    )
+    expect(pollFn).toContain("void syncPineTreeWallet()")
+    const submitFn = walletPage.slice(
+      walletPage.indexOf("async function handleSubmitWithdrawal()"),
+      walletPage.indexOf("// ---------------------------------------------------------------------------\n  // Early returns")
+    )
+    expect(submitFn).toContain("void syncPineTreeWallet()")
+  })
+
   it("ActivityStatusPill renders Confirmed status in blue", () => {
     const src = walletPage.slice(
       walletPage.indexOf("function ActivityStatusPill("),
@@ -394,12 +463,13 @@ describe("Activity tab - recent withdrawal visibility", () => {
     expect(src).toContain("text-red-600")
   })
 
-  it("ActivityStatusPill renders Processing, Canceled, Blocked, and Pending statuses", () => {
+  it("ActivityStatusPill renders Sent, Confirmed, Canceled, Blocked, and Pending statuses", () => {
     const src = walletPage.slice(
       walletPage.indexOf("function ActivityStatusPill("),
       walletPage.indexOf("function ActivityTab(")
     )
-    expect(src).toContain("Processing")
+    expect(src).toContain('s === "sent" || s === "processing" ? "Sent"')
+    expect(src).toContain("Confirmed")
     expect(src).toContain("Canceled")
     expect(src).toContain("Blocked")
     expect(src).toContain("Pending")

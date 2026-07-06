@@ -212,4 +212,76 @@ describe("PineTree Wallet balance sync", () => {
       status: "pending",
     })
   })
+
+  it("a submitted withdrawal with a tx hash maps to Sent activity, not Pending", async () => {
+    mocks.listRecentWalletWithdrawalsForActivity.mockResolvedValue([
+      {
+        id: "wd-sent",
+        merchant_id: "merchant_1",
+        rail: "solana",
+        asset: "SOL",
+        amount_decimal: "0.01",
+        status: "processing",
+        created_at: "2026-07-05T22:18:00Z",
+        destination_address: "SomeAddress",
+        tx_hash: "sol-tx-999",
+      },
+    ])
+
+    const result = await getPineTreeWalletBalanceSnapshot("merchant_1")
+
+    expect(result.recentActivity[0]).toMatchObject({
+      id: "wd-sent",
+      status: "sent",
+      label: "Sent 0.01 SOL",
+      rail: "solana",
+    })
+    expect(result.recentActivity[0].status).not.toBe("pending")
+  })
+
+  it("a withdrawal without a tx hash still shown as Pending even if status is oddly pending", async () => {
+    mocks.listRecentWalletWithdrawalsForActivity.mockResolvedValue([
+      {
+        id: "wd-still-pending",
+        merchant_id: "merchant_1",
+        rail: "base",
+        asset: "ETH",
+        amount_decimal: "0.2",
+        status: "pending",
+        created_at: "2026-07-05T22:18:00Z",
+        destination_address: "0x1234567890abcdef1234567890abcdef12345678",
+        tx_hash: null,
+      },
+    ])
+
+    const result = await getPineTreeWalletBalanceSnapshot("merchant_1")
+
+    expect(result.recentActivity[0]).toMatchObject({
+      id: "wd-still-pending",
+      status: "pending",
+    })
+  })
+
+  it("activity label is clean copy without the rail spelled out in parentheses", async () => {
+    mocks.listRecentWalletWithdrawalsForActivity.mockResolvedValue([
+      {
+        id: "wd-label",
+        merchant_id: "merchant_1",
+        rail: "bitcoin",
+        asset: "BTC",
+        amount_decimal: "0.002",
+        status: "confirmed",
+        created_at: "2026-07-05T22:18:00Z",
+        destination_address: "bc1qsomeaddress",
+        tx_hash: "btc-tx-1",
+      },
+    ])
+
+    const result = await getPineTreeWalletBalanceSnapshot("merchant_1")
+
+    expect(result.recentActivity[0].label).toBe("Sent 0.002 BTC")
+    expect(result.recentActivity[0].label).not.toContain("(")
+    expect(result.recentActivity[0].label).not.toContain("Withdrawal:")
+    expect(result.recentActivity[0].rail).toBe("bitcoin")
+  })
 })

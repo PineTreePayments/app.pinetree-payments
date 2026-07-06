@@ -127,6 +127,7 @@ type PineTreeWalletSyncResponse = {
   recentActivity: Array<{
     id: string
     label: string
+    rail: "base" | "solana" | "bitcoin"
     status: string
     createdAt: string
   }>
@@ -1189,51 +1190,49 @@ function WithdrawalFormShell({
   if (screen === "review" && review) {
     return (
       <div className="space-y-4">
-        <div className="rounded-[1.2rem] border border-blue-100/80 bg-white px-4 py-4 shadow-sm">
-          <button
-            type="button"
-            onClick={onEdit}
-            className="mb-4 inline-flex h-8 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-600 transition hover:border-blue-200 hover:text-blue-700"
-          >
-            Edit withdrawal
-          </button>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="text-base font-semibold text-gray-950">Review withdrawal</p>
-              <p className="mt-1 text-xs leading-5 text-gray-500">Confirm the withdrawal details before submitting.</p>
-            </div>
-          </div>
+        <div className="rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.10),transparent_45%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.97))] px-4 py-4 shadow-[0_18px_42px_rgba(37,99,235,0.10)] sm:px-5 sm:py-5">
+          <p className="text-base font-semibold text-gray-950">Review withdrawal</p>
+          <p className="mt-1 text-xs leading-5 text-gray-500">Confirm the withdrawal details before approving.</p>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-            <div className="rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
+            <div className="rounded-xl border border-blue-100/70 bg-white/80 px-3 py-2.5">
               <dt className="text-xs font-semibold text-gray-500">Asset</dt>
               <dd className="mt-1 font-semibold text-gray-950">{review.review.asset}</dd>
             </div>
-            <div className="rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
+            <div className="rounded-xl border border-blue-100/70 bg-white/80 px-3 py-2.5">
               <dt className="text-xs font-semibold text-gray-500">Network</dt>
               <dd className="mt-1 font-semibold text-gray-950">{railDisplayName(review.review.rail)}</dd>
             </div>
-            <div className="rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
+            <div className="rounded-xl border border-blue-100/70 bg-white/80 px-3 py-2.5">
               <dt className="text-xs font-semibold text-gray-500">Amount</dt>
               <dd className="mt-1 font-semibold text-gray-950">{review.review.amountDecimal} {review.review.asset}</dd>
             </div>
-            <div className="rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
-              <dt className="text-xs font-semibold text-gray-500">Fee</dt>
+            <div className="rounded-xl border border-blue-100/70 bg-white/80 px-3 py-2.5">
+              <dt className="text-xs font-semibold text-gray-500">Estimated network fee</dt>
               <dd className="mt-1 font-semibold text-gray-950">Network fee may apply</dd>
             </div>
-            <div className="rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5 sm:col-span-2">
+            <div className="rounded-xl border border-blue-100/70 bg-white/80 px-3 py-2.5 sm:col-span-2">
               <dt className="text-xs font-semibold text-gray-500">Destination</dt>
               <dd className="mt-1 break-all font-mono text-xs text-gray-800">{review.review.destinationAddress}</dd>
             </div>
           </dl>
         </div>
-        <button
-          type="button"
-          onClick={onSubmit}
-          disabled={submitting || !review.canSubmit}
-          className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none sm:w-auto"
-        >
-          {reviewActionLabel}
-        </button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={submitting || !review.canSubmit}
+            className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none sm:order-2"
+          >
+            {reviewActionLabel}
+          </button>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="inline-flex h-11 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-600 shadow-sm transition hover:border-blue-200 hover:text-blue-700 sm:order-1"
+          >
+            Back
+          </button>
+        </div>
       </div>
     )
   }
@@ -1479,6 +1478,15 @@ function formatLastSynced(value: string | null) {
     hour: "numeric",
     minute: "2-digit",
   })
+}
+
+function formatActivityTimestamp(value: string | null) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const datePart = date.toLocaleString(undefined, { month: "short", day: "numeric" })
+  const timePart = date.toLocaleString(undefined, { hour: "numeric", minute: "2-digit" })
+  return `${datePart} at ${timePart}`
 }
 
 function WalletOverviewSummary({
@@ -1815,14 +1823,17 @@ function ActivityStatusPill({ status }: { status: string }) {
   const cls =
     s === "confirmed"
       ? "bg-blue-100 text-blue-700"
-      : s === "processing"
+      : s === "sent" || s === "processing"
         ? "bg-blue-50 text-blue-500"
         : s === "failed"
           ? "bg-red-50 text-red-600"
           : "bg-gray-100 text-gray-500"
   const label =
     s === "confirmed" ? "Confirmed"
-    : s === "processing" ? "Processing"
+    // "processing" is the legacy internal status name for a signed/submitted
+    // transaction PineTree hasn't independently reconciled on-chain yet - display it
+    // the same as "sent" rather than exposing internal vocabulary to merchants.
+    : s === "sent" || s === "processing" ? "Sent"
     : s === "failed" ? "Failed"
     : s === "canceled" ? "Canceled"
     : s === "blocked" ? "Blocked"
@@ -1861,7 +1872,9 @@ function ActivityTab({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-gray-900">{item.label}</p>
-                    <p className="mt-0.5 text-xs text-gray-500">{formatLastSynced(item.createdAt) ?? item.createdAt}</p>
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      {railDisplayName(item.rail)} · {formatActivityTimestamp(item.createdAt) ?? item.createdAt}
+                    </p>
                   </div>
                   <ActivityStatusPill status={item.status} />
                 </div>
@@ -3593,7 +3606,7 @@ function PineTreeWalletRuntime() {
   const walletStatus =
     repairInProgress ? "Repairing" :
     syncing ? "Saving..." :
-    walletSetupPrimaryState === "ready" ? "Ready" :
+    walletSetupPrimaryState === "ready" ? "Connected" :
     walletSetupPrimaryState === "create_wallet" ? "Create wallet" :
     walletSetupPrimaryState === "provisioning" ? "Provisioning" :
     walletSetupPrimaryState === "reconnect_needed" ? "Reconnect needed" :
@@ -4232,7 +4245,10 @@ function PineTreeWalletRuntime() {
           merchantStatus: nextStatus,
         })
         if (nextStatus === "Withdrawal failed") setWithdrawalScreen("failed")
-        if (json.request.status === "processing" || json.request.status === "failed") return
+        if (json.request.status === "processing" || json.request.status === "failed") {
+          void syncPineTreeWallet()
+          return
+        }
       } catch {
         return
       }
@@ -4328,6 +4344,9 @@ function PineTreeWalletRuntime() {
         }
         setWithdrawalSubmitResult(submitted as WithdrawalSubmitResponse)
         setWithdrawalScreen("submitted")
+        // Refresh Activity immediately so it reflects the just-submitted transaction
+        // (tx hash present) instead of the stale pre-submission "pending" snapshot.
+        void syncPineTreeWallet()
         void pollWithdrawalRequest(withdrawalId, submitted as WithdrawalSubmitResponse)
         return
       }
