@@ -89,6 +89,7 @@ type WithdrawalPrepareResponse = {
       }
     | {
         kind: "solana_transaction"
+        network: "solana"
         from: string
         transactionBase64: string
       }
@@ -375,6 +376,54 @@ function getWithdrawalSourceAddress(
   return profile.btc_address || profile.bitcoin_onchain_address
 }
 
+function expectedWithdrawalPayloadKindForRail(rail: WithdrawalRail): WithdrawalPrepareResponse["payload"]["kind"] {
+  if (rail === "base") return "evm_transaction"
+  if (rail === "solana") return "solana_transaction"
+  return "bitcoin_psbt"
+}
+
+function assertPreparedWithdrawalSignerMatchesRail(
+  prepared: Pick<WithdrawalPrepareResponse, "rail" | "asset" | "sourceAddress" | "payload">,
+  wallet: DynamicWalletLike
+) {
+  const expectedPayloadKind = expectedWithdrawalPayloadKindForRail(prepared.rail)
+  if (prepared.payload.kind !== expectedPayloadKind) {
+    console.warn("[pinetree-withdrawals] prepared_payload_rail_mismatch", {
+      requestedRail: prepared.rail,
+      requestedAsset: prepared.asset,
+      payloadKind: prepared.payload.kind,
+      expectedPayloadKind,
+      sourceAddressPresent: Boolean(prepared.sourceAddress),
+    })
+    throw new Error(withdrawalSignerRailMismatchMessage)
+  }
+
+  try {
+    assertDynamicWalletChain(wallet, prepared.rail)
+  } catch (error) {
+    console.warn("[pinetree-withdrawals] signer_rail_mismatch", {
+      requestedRail: prepared.rail,
+      requestedAsset: prepared.asset,
+      payloadKind: prepared.payload.kind,
+      selectedWalletChainClassification: classifyDynamicWalletChain(wallet),
+      sourceAddressPresent: Boolean(prepared.sourceAddress),
+      error: error instanceof Error ? error.message : "unknown",
+    })
+    throw new Error(withdrawalSignerRailMismatchMessage)
+  }
+
+  if (!dynamicWalletSupportsRail(wallet, prepared.rail)) {
+    console.warn("[pinetree-withdrawals] signer_method_mismatch", {
+      requestedRail: prepared.rail,
+      requestedAsset: prepared.asset,
+      payloadKind: prepared.payload.kind,
+      selectedWalletChainClassification: classifyDynamicWalletChain(wallet),
+      sourceAddressPresent: Boolean(prepared.sourceAddress),
+    })
+    throw new Error(withdrawalSignerRailMismatchMessage)
+  }
+}
+
 async function sendDynamicPreparedWithdrawal(
   prepared: WithdrawalPrepareResponse,
   wallets: unknown[],
@@ -450,6 +499,8 @@ async function sendDynamicPreparedWithdrawal(
     )
   }
 
+  assertPreparedWithdrawalSignerMatchesRail(prepared, wallet)
+
   if (prepared.payload.kind === "evm_transaction") {
     assertDynamicWalletChain(wallet, "base")
     // Call getWalletClient through the object (not extracted) to preserve 'this' binding.
@@ -470,6 +521,7 @@ async function sendDynamicPreparedWithdrawal(
   }
 
   if (prepared.payload.kind === "bitcoin_psbt") {
+    assertDynamicWalletChain(wallet, "bitcoin")
     // Call signPsbt through the object to preserve 'this' binding.
     const psbtRequest = { unsignedPsbtBase64: prepared.payload.psbtBase64 }
     const signed = await wallet.signPsbt?.(psbtRequest)
@@ -579,6 +631,7 @@ function sanitizeWithdrawalSubmitErrorForMerchant(message: string | undefined) {
   // Pass through session-specific reconnect errors so merchants get actionable guidance.
   if (raw.includes("PineTree Wallet is not active in this browser session")) return raw
   if (raw.includes("different PineTree Wallet session")) return raw
+  if (raw === withdrawalSignerRailMismatchMessage) return raw
   const hiddenSignerPhrases = [
     ["provider", "signer"].join(" "),
     ["cannot", "sign"].join(" "),
@@ -601,6 +654,7 @@ const walletCreationDebugEnabled =
   process.env.NODE_ENV !== "production" ||
   process.env.NEXT_PUBLIC_PINE_TREE_WALLET_DEBUG === "true" ||
   process.env.NEXT_PUBLIC_PINETREE_WALLET_DEBUG === "true"
+const withdrawalSignerRailMismatchMessage = "Selected wallet network does not match this withdrawal asset."
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -4275,6 +4329,26 @@ function PineTreeWalletRuntime() {
       )
       setWithdrawalScreen("failed")
       return
+    }
+    if (_debugApprovalMethod === "dynamic_browser" && _debugMatchingWallet && _debugRail) {
+      try {
+        assertDynamicWalletChain(_debugMatchingWallet as DynamicWalletLike, _debugRail)
+        if (!dynamicWalletSupportsRail(_debugMatchingWallet as DynamicWalletLike, _debugRail)) {
+          throw new Error("Dynamic signer method mismatch.")
+        }
+      } catch (error) {
+        console.warn("[pinetree-withdrawals] selected_signer_asset_rail_mismatch", {
+          requestedRail: _debugRail,
+          requestedAsset: withdrawalReview?.review.asset,
+          requestId: withdrawalId,
+          selectedWalletChainClassification: classifyDynamicWalletChain(_debugMatchingWallet as DynamicWalletLike),
+          sourceAddressPresent: Boolean(_debugSourceAddress),
+          error: error instanceof Error ? error.message : "unknown",
+        })
+        setWithdrawalApprovalError(withdrawalSignerRailMismatchMessage)
+        setWithdrawalScreen("failed")
+        return
+      }
     }
     console.info("[pinetree-withdrawals] approval_state", {
       rail: _debugRail,

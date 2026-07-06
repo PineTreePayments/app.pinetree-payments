@@ -371,13 +371,16 @@ export async function findDynamicApprovalWalletForSourceAsync(
   return null
 }
 
-export function assertDynamicWalletChain(wallet: DynamicWalletLike, rail: Exclude<DynamicSignerRail, "bitcoin">) {
+export function assertDynamicWalletChain(wallet: DynamicWalletLike, rail: DynamicSignerRail) {
   const walletChain = classifyDynamicWalletChain(wallet)
   if (rail === "solana" && walletChain !== "solana") {
     throw new Error("Dynamic signer chain mismatch: expected Solana signer.")
   }
   if (rail === "base" && walletChain !== "evm") {
     throw new Error("Dynamic signer chain mismatch: expected EVM signer.")
+  }
+  if (rail === "bitcoin" && walletChain !== "bitcoin") {
+    throw new Error("Dynamic signer chain mismatch: expected Bitcoin signer.")
   }
 }
 

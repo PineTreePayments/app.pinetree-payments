@@ -96,6 +96,7 @@ export type PreparedDynamicWithdrawal = {
       }
     | {
         kind: "solana_transaction"
+        network: "solana"
         from: string
         transactionBase64: string
       }
@@ -896,6 +897,7 @@ async function buildSolanaWithdrawalPayload(input: {
 
   return {
     kind: "solana_transaction",
+    network: "solana",
     from: input.sourceAddress,
     transactionBase64: transaction.serialize({ requireAllSignatures: false, verifySignatures: false }).toString("base64"),
   }

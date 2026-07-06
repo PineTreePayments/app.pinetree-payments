@@ -634,6 +634,11 @@ describe("PineTree Wallet withdrawals", () => {
 
     const result = await prepareDynamicWalletWithdrawal("merchant_1", "withdrawal_1")
 
+    expect(result).toMatchObject({
+      rail: "base",
+      asset: "ETH",
+      sourceAddress: "0x9999999999999999999999999999999999999999",
+    })
     expect(result.payload).toMatchObject({
       kind: "evm_transaction",
       chainId: 8453,
@@ -699,6 +704,11 @@ describe("PineTree Wallet withdrawals", () => {
 
     const result = await prepareDynamicWalletWithdrawal("merchant_1", "withdrawal_1")
 
+    expect(result).toMatchObject({
+      rail: "base",
+      asset: "USDC",
+      sourceAddress: "0x9999999999999999999999999999999999999999",
+    })
     expect(result.payload).toMatchObject({
       kind: "evm_transaction",
       chainId: 8453,
@@ -750,8 +760,14 @@ describe("PineTree Wallet withdrawals", () => {
 
     const result = await prepareDynamicWalletWithdrawal("merchant_1", "withdrawal_1")
 
+    expect(result).toMatchObject({
+      rail: "solana",
+      asset: "SOL",
+      sourceAddress: source,
+    })
     expect(result.payload).toMatchObject({
       kind: "solana_transaction",
+      network: "solana",
       from: source,
     })
     expect("transactionBase64" in result.payload ? result.payload.transactionBase64 : "").toMatch(/^[A-Za-z0-9+/=]+$/)
@@ -794,6 +810,7 @@ describe("PineTree Wallet withdrawals", () => {
 
     expect(result.payload).toMatchObject({
       kind: "solana_transaction",
+      network: "solana",
       from: source,
     })
     expect("transactionBase64" in result.payload ? result.payload.transactionBase64 : "").toMatch(/^[A-Za-z0-9+/=]+$/)
@@ -840,8 +857,14 @@ describe("PineTree Wallet withdrawals", () => {
 
     const result = await prepareDynamicWalletWithdrawal("merchant_1", "withdrawal_1")
 
+    expect(result).toMatchObject({
+      rail: "solana",
+      asset: "USDC",
+      sourceAddress: source,
+    })
     expect(result.payload).toMatchObject({
       kind: "solana_transaction",
+      network: "solana",
       from: source,
     })
     expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(

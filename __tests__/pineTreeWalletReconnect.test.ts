@@ -36,6 +36,13 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(page).toContain("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, wallets as unknown[], primaryWallet)")
   })
 
+  it("blocks selected signer and asset rail mismatches before Dynamic approval opens", () => {
+    expect(page).toContain('const withdrawalSignerRailMismatchMessage = "Selected wallet network does not match this withdrawal asset."')
+    expect(page).toContain("assertPreparedWithdrawalSignerMatchesRail(prepared, wallet)")
+    expect(page).toContain('console.warn("[pinetree-withdrawals] selected_signer_asset_rail_mismatch"')
+    expect(page).toContain("setWithdrawalApprovalError(withdrawalSignerRailMismatchMessage)")
+  })
+
   it("saved profiles with empty Dynamic runtime wallets trigger hydration", () => {
     expect(page).toContain('refreshDynamicWalletRuntime("profile_loaded_runtime_wallets_empty")')
     expect(page).toContain("if (dynamicWalletRuntimeCount > 0) return")

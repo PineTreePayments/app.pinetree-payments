@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import {
+  assertDynamicWalletChain,
   classifyDynamicWalletChain,
   dynamicWalletSupportsRail,
   findDynamicApprovalWalletForSource,
@@ -437,5 +438,42 @@ describe("Dynamic signer lookup", () => {
       "solana",
       "SharedSource11111111111111111111111111111"
     )).toBeNull()
+  })
+
+  it("never selects a Bitcoin signer for Solana or Base assets", () => {
+    const bitcoinWallet = {
+      address: "SharedSource11111111111111111111111111111",
+      chain: "bitcoin",
+      signPsbt: vi.fn(),
+    }
+
+    expect(findDynamicApprovalWalletForSource(
+      [bitcoinWallet],
+      bitcoinWallet,
+      "solana",
+      "SharedSource11111111111111111111111111111"
+    )).toBeNull()
+    expect(findDynamicApprovalWalletForSource(
+      [bitcoinWallet],
+      bitcoinWallet,
+      "base",
+      "SharedSource11111111111111111111111111111"
+    )).toBeNull()
+    expect(dynamicWalletSupportsRail(bitcoinWallet, "solana")).toBe(false)
+    expect(dynamicWalletSupportsRail(bitcoinWallet, "base")).toBe(false)
+  })
+
+  it("blocks mismatched signer rails before calling a Dynamic approval method", () => {
+    const bitcoinWallet = {
+      address: "SharedSource11111111111111111111111111111",
+      chain: "bitcoin",
+      signPsbt: vi.fn(),
+    }
+
+    expect(() => assertDynamicWalletChain(bitcoinWallet, "solana"))
+      .toThrow("Dynamic signer chain mismatch: expected Solana signer.")
+    expect(() => assertDynamicWalletChain(bitcoinWallet, "base"))
+      .toThrow("Dynamic signer chain mismatch: expected EVM signer.")
+    expect(bitcoinWallet.signPsbt).not.toHaveBeenCalled()
   })
 })
