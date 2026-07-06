@@ -177,7 +177,8 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('logWalletCreationStep("waiting_for_dynamic_auth")')
     expect(page).toContain('logWalletCreationStep("provisioning_wallet"')
     expect(page).toContain('setWalletCreationStep("timeout")')
-    expect(page).toContain("Wallet setup is taking longer than expected. Please try again.")
+    expect(page).toContain("Wallet setup timed out before PineTree could confirm wallet readiness.")
+    expect(page).not.toContain("Wallet setup could not finish. Please try again.")
   })
 
   it("does not render a persistent synced banner after profile sync succeeds", () => {
