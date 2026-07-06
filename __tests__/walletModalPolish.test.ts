@@ -236,9 +236,18 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
 
   it("Withdraw helper copy is wallet-asset based, not enabled-rail based", () => {
     const src = withdrawalFormSrc()
-    expect(src).toContain("Choose a PineTree Wallet asset, then review before approval.")
     expect(src).not.toContain("Choose an enabled PineTree Wallet asset")
     expect(src).toContain("Balance will be verified before processing.")
+  })
+
+  it("Withdraw tab has no intro Send card above the asset selector", () => {
+    const src = withdrawalFormSrc()
+    expect(src).not.toContain(">Send<")
+    expect(src).not.toContain("Choose a PineTree Wallet asset, then review before approval.")
+    // The default (non-review) screen opens straight into the asset selector.
+    const formScreen = src.slice(src.lastIndexOf('return (\n    <div className="space-y-4">'))
+    expect(formScreen.indexOf("AssetSelectDropdown")).toBeGreaterThan(-1)
+    expect(formScreen.indexOf(">Send<")).toBe(-1)
   })
 
   it("Bitcoin Lightning payout does not render for Base or Solana withdrawal assets", () => {

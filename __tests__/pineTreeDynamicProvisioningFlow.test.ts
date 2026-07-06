@@ -449,6 +449,32 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).not.toContain("JSON.stringify(profileSyncDiagnostics)")
   })
 
+  it("Reconnect PineTree Wallet opens Dynamic auth only when no matching session exists yet", () => {
+    const openWalletFn = page.slice(
+      page.indexOf("async function handleOpenWallet()"),
+      page.indexOf("async function beginWalletSetupRepair")
+    )
+    const noUserBranchStart = openWalletFn.indexOf("if (!user) {")
+    const noUserBranchEnd = openWalletFn.indexOf("if (!sdkHasLoaded) {")
+    expect(noUserBranchStart).toBeGreaterThan(-1)
+    expect(noUserBranchEnd).toBeGreaterThan(noUserBranchStart)
+    const noUserBranch = openWalletFn.slice(noUserBranchStart, noUserBranchEnd)
+    expect(noUserBranch).toContain("setShowAuthFlow(true)")
+    expect(noUserBranch).toContain("return")
+    // Once a Dynamic session already exists, control never reaches the auth-opening
+    // branch above - it falls straight through to the silent runtime refresh instead.
+    const silentRefreshBranch = openWalletFn.slice(noUserBranchEnd)
+    expect(silentRefreshBranch).not.toContain("setShowAuthFlow(true)")
+    expect(silentRefreshBranch).toContain('await refreshDynamicWalletRuntime("open_wallet_sync_profile"')
+    // The Reconnect PineTree Wallet button (reconnect_needed state) invokes this same
+    // handler, so a genuinely missing session opens auth, and an existing one doesn't.
+    const ctaBlock = page.slice(
+      page.indexOf(') : walletSetupPrimaryState === "reconnect_needed" ? ('),
+      page.indexOf(') : walletSetupPrimaryState === "failed" || walletSetupPrimaryState === "save_needed"')
+    )
+    expect(ctaBlock).toContain("onClick={handleOpenWallet}")
+  })
+
   it("existing ready profile plus missing Dynamic session shows Reconnect needed", () => {
     const resolverBody = page.slice(
       page.indexOf("const walletSetupPrimaryState = useMemo<WalletSetupPrimaryState>(() => {"),
@@ -473,6 +499,12 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain('if (repairOrSetupIncomplete) return "reconnect_needed"')
     expect(page).not.toContain('walletSetupPrimaryState === "repair_needed" ? "Setup incomplete" :')
     expect(page).toContain("Reconnect your PineTree Wallet to restore secure browser access.")
+  })
+
+  it("no copy anywhere reads like setup failed for a saved profile that just needs browser reconnect", () => {
+    expect(page).not.toContain("Setup incomplete")
+    expect(page).not.toContain("Repair PineTree Wallet setup")
+    expect(page).not.toContain("wallet setup failed")
   })
 
   it("normal merchant notices do not render raw technical debug fields", () => {

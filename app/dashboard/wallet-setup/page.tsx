@@ -1314,10 +1314,6 @@ function WithdrawalFormShell({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-[1.2rem] border border-blue-100/80 bg-blue-50/40 px-4 py-3">
-        <p className="text-base font-semibold text-gray-950">Send</p>
-        <p className="mt-1 text-xs leading-5 text-gray-500">Choose a PineTree Wallet asset, then review before approval.</p>
-      </div>
       {assetOptions.length > 0 ? (
         <AssetSelectDropdown
           label="Asset"

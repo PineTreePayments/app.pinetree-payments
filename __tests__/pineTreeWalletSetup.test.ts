@@ -517,7 +517,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("AssetSelectDropdown")
     expect(page).toContain("assetOptions.map((option)")
     expect(page).toContain("onAssetSelect(r as WithdrawalRail, a as WithdrawalAsset)")
-    expect(page).toContain("Choose a PineTree Wallet asset, then review before approval.")
+    expect(page).not.toContain("Choose a PineTree Wallet asset, then review before approval.")
     expect(page).not.toContain("Choose an enabled PineTree Wallet asset")
     expect(page).toContain('aria-label="Destination address"')
     expect(page).toContain('aria-label="Withdrawal amount"')
