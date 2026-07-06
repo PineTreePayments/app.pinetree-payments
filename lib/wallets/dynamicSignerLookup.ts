@@ -402,7 +402,8 @@ export async function signDynamicSolanaTransactionWithActiveAccount(
   wallet: DynamicWalletLike,
   transaction: unknown,
   sourceAddress: string,
-  onDiagnostics?: (diagnostics: DynamicSolanaSignerDiagnostics) => void
+  onDiagnostics?: (diagnostics: DynamicSolanaSignerDiagnostics) => void,
+  onBeforeDynamicModal?: () => void
 ) {
   assertDynamicWalletChain(wallet, "solana")
   const { activeAccountAddress, extractedAddressFields } = await extractDynamicActiveWalletAddress(wallet)
@@ -440,6 +441,7 @@ export async function signDynamicSolanaTransactionWithActiveAccount(
     address: activeAccountAddress,
     publicKey: activeAccountAddress,
   }
+  onBeforeDynamicModal?.()
   const txResult = await wallet.signAndSendTransaction?.(transaction, signOptions) as unknown
     ?? await wallet.connector?.signAndSendTransaction?.(transaction, signOptions) as unknown
   if (!txResult) {

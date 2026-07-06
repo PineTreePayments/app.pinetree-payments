@@ -49,29 +49,31 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(page).toContain("if (!profile.base_address && !profile.solana_address) return")
   })
 
-  it("logs dynamic_signing_preflight with every required field before any signing call", () => {
+  it("logs ABOUT_TO_OPEN_DYNAMIC_MODAL with every required field before any signing call", () => {
     const preflightFn = page.slice(
-      page.indexOf("function logDynamicSigningPreflight("),
+      page.indexOf("function buildDynamicModalDebugPayload("),
       page.indexOf("async function sendDynamicPreparedWithdrawal(")
     )
-    expect(preflightFn).toContain('console.info("[pinetree-wallets] dynamic_signing_preflight"')
+    expect(preflightFn).toContain('console.error("[pinetree-withdrawals] ABOUT_TO_OPEN_DYNAMIC_MODAL"')
     for (const field of [
       "selectedAsset",
       "selectedRail",
-      "reviewRail",
+      "preparedRail",
+      "preparedAsset",
       "preparedPayloadKind",
       "preparedPayloadNetwork",
-      "preparedPayloadChainId",
-      "destinationAddress",
-      "dynamicWalletId",
-      "dynamicWalletAddress",
-      "dynamicWalletChain",
-      "dynamicWalletConnectorKey",
-      "dynamicWalletConnectorName",
-      "dynamicWalletNetwork",
+      "preparedSourceAddress",
+      "pineTreeProfileSolanaAddress",
+      "dynamicPrimaryWalletChain",
+      "dynamicPrimaryWalletAddress",
+      "selectedDynamicWalletChain",
+      "selectedDynamicWalletAddress",
+      "selectedDynamicWalletConnectorKey",
+      "selectedDynamicWalletConnectorName",
+      "selectedDynamicWalletNetwork",
+      "selectedDynamicWalletId",
       "inferredSignerRail",
-      "expectedRail",
-      "willOpenDynamicModal",
+      "expectedSignerRail",
     ]) {
       expect(preflightFn).toContain(field)
     }
@@ -84,12 +86,14 @@ describe("PineTree Wallet reconnect flow", () => {
     )
     const preflightIndex = sendFn.indexOf("logDynamicSigningPreflight(prepared, wallet, context, inferredSignerRail, willOpenDynamicModal)")
     const hardFailIndex = sendFn.indexOf("if (expectedRail !== inferredSignerRail) {")
+    const solanaHardBlockIndex = sendFn.indexOf("await assertSolanaWithdrawalModalPreflight(prepared, wallet, context)")
     const evmBranchIndex = sendFn.indexOf('if (prepared.payload.kind === "evm_transaction") {')
     const btcBranchIndex = sendFn.indexOf('if (prepared.payload.kind === "bitcoin_psbt") {')
     expect(preflightIndex).toBeGreaterThan(-1)
     expect(hardFailIndex).toBeGreaterThan(preflightIndex)
-    expect(evmBranchIndex).toBeGreaterThan(hardFailIndex)
-    expect(btcBranchIndex).toBeGreaterThan(hardFailIndex)
+    expect(solanaHardBlockIndex).toBeGreaterThan(hardFailIndex)
+    expect(evmBranchIndex).toBeGreaterThan(solanaHardBlockIndex)
+    expect(btcBranchIndex).toBeGreaterThan(solanaHardBlockIndex)
     expect(sendFn).toContain("throw new Error(withdrawalSignerRailMismatchMessage)")
   })
 
@@ -109,12 +113,61 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(sendFn).toContain("getDynamicWalletSearchList(wallets as unknown[], primaryWallet, prepared.rail)")
     expect(sendFn).toContain('if (!hasAnyDynamicWallet && prepared.rail === "solana") {')
     expect(sendFn).toContain('throw new Error("Reconnect your Solana wallet session before approving this withdrawal.")')
+    expect(page).toContain('_debugRail === "solana"')
+    expect(page).toContain("solanaWithdrawalReconnectMessage")
   })
 
   it("sendDynamicPreparedWithdrawal receives the merchant's currently-selected rail/asset for preflight comparison against the reviewed payload", () => {
     expect(page).toContain("context: DynamicSigningPreflightContext")
     expect(page).toContain("selectedRail: withdrawalRail,")
     expect(page).toContain("selectedAsset: withdrawalAsset,")
+    expect(page).toContain("pineTreeProfileSolanaAddress: profile?.solana_address ?? null")
+    expect(page).toContain("switchDynamicWallet,")
+  })
+
+  it("SOL withdrawal with Bitcoin primaryWallet activates the selected Solana wallet before signing", () => {
+    expect(page).toContain("useSwitchWallet")
+    expect(page).toContain("const switchDynamicWallet = useSwitchWallet()")
+    expect(page).toContain('const primaryWalletIsBitcoin = Boolean(primaryWalletLike && classifyDynamicWalletChain(primaryWalletLike) === "bitcoin")')
+    expect(page).toContain("await switchDynamicWallet(selectedWalletId)")
+    expect(page).toContain("bitcoin_primary_selected_for_solana")
+  })
+
+  it("Solana modal preflight blocks Bitcoin-classified wallets before Dynamic opens", () => {
+    expect(page).toContain("async function assertSolanaWithdrawalModalPreflight")
+    expect(page).toContain('if (prepared.rail !== "solana" && context.selectedRail !== "solana") return')
+    expect(page).toContain('if (classifyDynamicWalletChain(wallet) !== "solana") fail("selected_wallet_not_solana")')
+    expect(page).toContain('if (primaryWalletIsBitcoin && wallet === primaryWalletLike) fail("bitcoin_primary_selected_for_solana")')
+    expect(page).toContain("throw new Error(solanaWithdrawalReconnectMessage)")
+  })
+
+  it("preflight log exists immediately before every Dynamic modal/sign call", () => {
+    const sendFn = page.slice(
+      page.indexOf("async function sendDynamicPreparedWithdrawal("),
+      page.indexOf("function base64ToBytes(")
+    )
+    const evmLogIndex = sendFn.indexOf("logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)")
+    const evmCallIndex = sendFn.indexOf("const txHash = await client.sendTransaction({")
+    const btcLogIndex = sendFn.indexOf("logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)", evmLogIndex + 1)
+    const btcCallIndex = sendFn.indexOf("const signed = await wallet.signPsbt?.(psbtRequest)")
+    const solanaCallbackIndex = sendFn.indexOf("logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)", btcLogIndex + 1)
+    const solanaCallIndex = sendFn.indexOf("return signDynamicSolanaTransactionWithActiveAccount(")
+    expect(page).toContain('console.error("[pinetree-withdrawals] ABOUT_TO_OPEN_DYNAMIC_MODAL"')
+    expect(evmLogIndex).toBeGreaterThan(-1)
+    expect(evmCallIndex).toBeGreaterThan(evmLogIndex)
+    expect(btcLogIndex).toBeGreaterThan(evmCallIndex)
+    expect(btcCallIndex).toBeGreaterThan(btcLogIndex)
+    expect(solanaCallbackIndex).toBeGreaterThan(solanaCallIndex)
+  })
+
+  it("Solana withdrawal path never calls signPsbt or uses Bitcoin primaryWallet as signer", () => {
+    const solanaPreflight = page.slice(
+      page.indexOf("async function assertSolanaWithdrawalModalPreflight"),
+      page.indexOf("async function sendDynamicPreparedWithdrawal(")
+    )
+    expect(solanaPreflight).not.toContain("signPsbt")
+    expect(solanaPreflight).toContain("selected_wallet_not_solana")
+    expect(solanaPreflight).toContain("bitcoin_primary_selected_for_solana")
   })
 
   it("review screen exposes a debug-only signer panel, gated behind ?walletDebug=1, never shown by default", () => {
@@ -123,12 +176,17 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(page).toContain("debugEnabled={walletSyncDebugQueryEnabled}")
     const debugPanel = page.slice(
       page.indexOf("{debugEnabled ? ("),
-      page.indexOf("Signer diagnostics (?walletDebug=1)") + 700
+      page.indexOf("Signer diagnostics (?walletDebug=1)") + 1400
     )
     expect(debugPanel).toContain("{debugEnabled ? (")
-    expect(debugPanel).toContain("signerRail")
-    expect(debugPanel).toContain("signerWalletAddress")
-    expect(debugPanel).toContain("signerConnectorName")
-    expect(debugPanel).toContain("signerChain")
+    expect(debugPanel).toContain("preparedPayloadKind")
+    expect(debugPanel).toContain("preparedPayloadNetwork")
+    expect(debugPanel).toContain("preparedSourceAddressLast6")
+    expect(debugPanel).toContain("selectedDynamicWalletAddressLast6")
+    expect(debugPanel).toContain("selectedDynamicWalletConnector")
+    expect(debugPanel).toContain("selectedDynamicWalletChain")
+    expect(debugPanel).toContain("dynamicPrimaryWalletChain")
+    expect(debugPanel).toContain("inferredSignerRail")
+    expect(debugPanel).toContain("willOpenDynamicModal")
   })
 })

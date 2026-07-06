@@ -221,6 +221,29 @@ describe("Dynamic signer lookup", () => {
     })
   })
 
+  it("runs the pre-modal callback immediately before Solana signAndSendTransaction", async () => {
+    const calls: string[] = []
+    const signAndSendTransaction = vi.fn().mockImplementation(async () => {
+      calls.push("sign")
+      return "sig-solana"
+    })
+    const wallet = {
+      address: "SolanaModal111111111111111111111111111111",
+      chain: "solana",
+      signAndSendTransaction,
+    }
+
+    await expect(signDynamicSolanaTransactionWithActiveAccount(
+      wallet,
+      "tx",
+      "SolanaModal111111111111111111111111111111",
+      undefined,
+      () => calls.push("before-modal")
+    )).resolves.toMatchObject({ txHash: "sig-solana" })
+
+    expect(calls).toEqual(["before-modal", "sign"])
+  })
+
   it("classifies Dynamic wallet chains from wallet and connector metadata", () => {
     expect(classifyDynamicWalletChain({ chain: "solana" })).toBe("solana")
     expect(classifyDynamicWalletChain({ connector: { connectedChain: "base" } })).toBe("evm")

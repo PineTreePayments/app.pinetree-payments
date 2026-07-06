@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useDynamicContext, useDynamicWaas, useEmbeddedWallet, useRefreshUser, useUserWallets } from "@dynamic-labs/sdk-react-core"
+import { useDynamicContext, useDynamicWaas, useEmbeddedWallet, useRefreshUser, useSwitchWallet, useUserWallets } from "@dynamic-labs/sdk-react-core"
 import { Transaction } from "@solana/web3.js"
 import { AlertTriangle, CheckCircle2, ChevronDown, Copy, X } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
@@ -16,10 +16,12 @@ import {
 import {
   assertDynamicWalletChain,
   classifyDynamicWalletChain,
+  dynamicWalletAddressesMatch,
   dynamicWalletSupportsRail,
   findDynamicApprovalWalletForSource,
   findDynamicApprovalWalletForSourceAsync,
   findDynamicWalletForSource,
+  getDynamicWalletAddressesAsync,
   getDynamicWalletAddresses,
   getDynamicWalletSearchList,
   inferredSignerRailForWallet,
@@ -210,8 +212,12 @@ type WithdrawalDiagnostics = {
   // review-screen panel - never shown to merchants by default.
   signerRail: DynamicSignerRail | "unknown"
   signerWalletAddressLast4: string | null
+  signerWalletAddressLast6: string | null
+  signerConnectorKey: string | null
   signerConnectorName: string | null
   signerChain: string | null
+  primaryWalletChain: string | null
+  willOpenDynamicModal: boolean
 }
 
 type WithdrawalAssetOption = {
@@ -453,38 +459,183 @@ type DynamicSigningPreflightContext = {
   selectedRail: WithdrawalRail
   selectedAsset: WithdrawalAsset
   destinationAddress: string
+  pineTreeProfileSolanaAddress: string | null
+  primaryWallet: unknown
+  switchDynamicWallet?: (walletId: string) => Promise<void>
 }
 
-// Logged unconditionally (not gated behind the debug flag) immediately before every
-// Dynamic signing call, regardless of payload kind - this is the last checkpoint
-// before the Dynamic approval modal can open, so it must capture everything needed
-// to tell whether PineTree selected the wrong signer or Dynamic's own wallet/connector
-// metadata disagrees with the signer it is actually using.
+function dynamicWalletConnectorValue(wallet: DynamicWalletLike, key: "key" | "name") {
+  return wallet.connector?.[key] ?? wallet.walletConnector?.[key] ?? null
+}
+
+function dynamicWalletNetworkHint(wallet: DynamicWalletLike) {
+  return wallet.network ?? wallet.connector?.chain ?? wallet.connector?.chainName ?? wallet.connector?.connectedChain ?? wallet.connectedChain ?? null
+}
+
+function dynamicWalletId(wallet: DynamicWalletLike) {
+  const id = wallet.id ?? wallet.key
+  return typeof id === "string" ? id : null
+}
+
+function dynamicWalletPrimaryAddress(wallet: DynamicWalletLike | null | undefined) {
+  return wallet ? (getDynamicWalletAddresses(wallet)[0] ?? null) : null
+}
+
+function stringContainsSolanaHint(value: unknown) {
+  if (typeof value === "string") return /\b(solana|svm|sol)\b/i.test(value)
+  if (!value || typeof value !== "object") return false
+  const record = value as Record<string, unknown>
+  return [
+    record.chain,
+    record.chainName,
+    record.connectedChain,
+    record.network,
+    record.key,
+    record.name,
+    record.overrideKey,
+    record.namespace,
+    record.blockchain,
+  ].some(stringContainsSolanaHint)
+}
+
+function dynamicWalletConnectorIsSolanaCompatible(wallet: DynamicWalletLike) {
+  return [
+    wallet.chain,
+    wallet.chainName,
+    wallet.connectedChain,
+    wallet.network,
+    wallet.connector,
+    wallet.walletConnector,
+    ...(wallet.accounts ?? []),
+    ...(wallet.additionalAddresses ?? []),
+  ].some(stringContainsSolanaHint)
+}
+
+function buildDynamicModalDebugPayload(
+  prepared: Pick<WithdrawalPrepareResponse, "rail" | "asset" | "sourceAddress" | "payload">,
+  wallet: DynamicWalletLike,
+  context: DynamicSigningPreflightContext,
+  inferredSignerRail: DynamicSignerRail | "unknown",
+  willOpenDynamicModal: boolean,
+) {
+  const primaryWalletLike = context.primaryWallet as DynamicWalletLike | null
+  return {
+    selectedAsset: context.selectedAsset,
+    selectedRail: context.selectedRail,
+    preparedRail: prepared.rail,
+    preparedAsset: prepared.asset,
+    preparedPayloadKind: prepared.payload.kind,
+    preparedPayloadNetwork: "network" in prepared.payload ? prepared.payload.network : null,
+    preparedSourceAddress: prepared.sourceAddress,
+    pineTreeProfileSolanaAddress: context.pineTreeProfileSolanaAddress,
+    dynamicPrimaryWalletChain: primaryWalletLike ? classifyDynamicWalletChain(primaryWalletLike) : "unknown",
+    dynamicPrimaryWalletAddress: dynamicWalletPrimaryAddress(primaryWalletLike),
+    selectedDynamicWalletChain: classifyDynamicWalletChain(wallet),
+    selectedDynamicWalletAddress: dynamicWalletPrimaryAddress(wallet),
+    selectedDynamicWalletConnectorKey: dynamicWalletConnectorValue(wallet, "key"),
+    selectedDynamicWalletConnectorName: dynamicWalletConnectorValue(wallet, "name"),
+    selectedDynamicWalletNetwork: dynamicWalletNetworkHint(wallet),
+    selectedDynamicWalletId: dynamicWalletId(wallet),
+    inferredSignerRail,
+    expectedSignerRail: prepared.rail,
+    willOpenDynamicModal,
+  }
+}
+
 function logDynamicSigningPreflight(
-  prepared: Pick<WithdrawalPrepareResponse, "rail" | "payload">,
+  prepared: Pick<WithdrawalPrepareResponse, "rail" | "asset" | "sourceAddress" | "payload">,
   wallet: DynamicWalletLike,
   context: DynamicSigningPreflightContext,
   inferredSignerRail: DynamicSignerRail | "unknown",
   willOpenDynamicModal: boolean
 ) {
-  console.info("[pinetree-wallets] dynamic_signing_preflight", {
-    selectedAsset: context.selectedAsset,
-    selectedRail: context.selectedRail,
-    reviewRail: prepared.rail,
-    preparedPayloadKind: prepared.payload.kind,
-    preparedPayloadNetwork: "network" in prepared.payload ? prepared.payload.network : null,
-    preparedPayloadChainId: prepared.payload.kind === "evm_transaction" ? prepared.payload.chainId : null,
-    destinationAddress: context.destinationAddress,
-    dynamicWalletId: wallet.id ?? wallet.key ?? null,
-    dynamicWalletAddress: getDynamicWalletAddresses(wallet)[0] ?? null,
-    dynamicWalletChain: classifyDynamicWalletChain(wallet),
-    dynamicWalletConnectorKey: wallet.connector?.key ?? wallet.walletConnector?.key ?? null,
-    dynamicWalletConnectorName: wallet.connector?.name ?? wallet.walletConnector?.name ?? null,
-    dynamicWalletNetwork: wallet.network ?? wallet.connector?.chain ?? wallet.connectedChain ?? null,
+  console.info("[pinetree-wallets] dynamic_signing_preflight", buildDynamicModalDebugPayload(
+    prepared,
+    wallet,
+    context,
     inferredSignerRail,
-    expectedRail: prepared.rail,
-    willOpenDynamicModal,
-  })
+    willOpenDynamicModal
+  ))
+}
+
+function logAboutToOpenDynamicModal(
+  prepared: Pick<WithdrawalPrepareResponse, "rail" | "asset" | "sourceAddress" | "payload">,
+  wallet: DynamicWalletLike,
+  context: DynamicSigningPreflightContext,
+  inferredSignerRail: DynamicSignerRail | "unknown"
+) {
+  console.error("[pinetree-withdrawals] ABOUT_TO_OPEN_DYNAMIC_MODAL", buildDynamicModalDebugPayload(
+    prepared,
+    wallet,
+    context,
+    inferredSignerRail,
+    true
+  ))
+}
+
+async function assertSolanaWithdrawalModalPreflight(
+  prepared: WithdrawalPrepareResponse,
+  wallet: DynamicWalletLike,
+  context: DynamicSigningPreflightContext
+) {
+  if (prepared.rail !== "solana" && context.selectedRail !== "solana") return
+
+  const fail = (reason: string, extra?: Record<string, unknown>): never => {
+    console.warn("[pinetree-withdrawals] solana_dynamic_modal_blocked", {
+      reason,
+      selectedRail: context.selectedRail,
+      selectedAsset: context.selectedAsset,
+      preparedRail: prepared.rail,
+      preparedAsset: prepared.asset,
+      preparedPayloadKind: prepared.payload.kind,
+      preparedPayloadNetwork: "network" in prepared.payload ? prepared.payload.network : null,
+      preparedSourceAddressPresent: Boolean(prepared.sourceAddress),
+      selectedDynamicWalletChain: classifyDynamicWalletChain(wallet),
+      selectedDynamicWalletConnectorKey: dynamicWalletConnectorValue(wallet, "key"),
+      selectedDynamicWalletConnectorName: dynamicWalletConnectorValue(wallet, "name"),
+      primaryWalletChain: context.primaryWallet ? classifyDynamicWalletChain(context.primaryWallet as DynamicWalletLike) : "unknown",
+      ...extra,
+    })
+    throw new Error(solanaWithdrawalReconnectMessage)
+  }
+
+  if (context.selectedRail !== "solana") fail("selected_rail_not_solana")
+  if (prepared.rail !== "solana") fail("prepared_rail_not_solana")
+  if (context.selectedAsset !== "SOL" && context.selectedAsset !== "USDC") fail("selected_asset_not_solana_supported")
+  if (prepared.asset !== "SOL" && prepared.asset !== "USDC") fail("prepared_asset_not_solana_supported")
+  const solanaPayload = prepared.payload.kind === "solana_transaction"
+    ? prepared.payload
+    : fail("payload_kind_not_solana")
+  if (solanaPayload.network !== "solana") fail("payload_network_not_solana")
+  if (classifyDynamicWalletChain(wallet) !== "solana") fail("selected_wallet_not_solana")
+  if (!dynamicWalletConnectorIsSolanaCompatible(wallet)) fail("connector_not_solana_compatible")
+  if (!dynamicWalletSupportsRail(wallet, "solana")) fail("selected_wallet_missing_solana_signer")
+
+  const primaryWalletLike = context.primaryWallet as DynamicWalletLike | null
+  const primaryWalletIsBitcoin = Boolean(primaryWalletLike && classifyDynamicWalletChain(primaryWalletLike) === "bitcoin")
+  if (primaryWalletIsBitcoin && wallet === primaryWalletLike) fail("bitcoin_primary_selected_for_solana")
+
+  const addresses = await getDynamicWalletAddressesAsync(wallet)
+  const sourceMatches = addresses.some((address) => dynamicWalletAddressesMatch(address, prepared.sourceAddress, "solana"))
+  const profileMatches = context.pineTreeProfileSolanaAddress
+    ? addresses.some((address) => dynamicWalletAddressesMatch(address, context.pineTreeProfileSolanaAddress, "solana"))
+    : false
+  if (!sourceMatches && !profileMatches) {
+    fail("selected_wallet_address_mismatch", {
+      selectedWalletAddressCount: addresses.length,
+      profileSolanaAddressPresent: Boolean(context.pineTreeProfileSolanaAddress),
+    })
+  }
+
+  if (primaryWalletIsBitcoin) {
+    const selectedWalletId = dynamicWalletId(wallet) || fail("cannot_activate_solana_wallet_before_signing")
+    const switchDynamicWallet = context.switchDynamicWallet || fail("cannot_activate_solana_wallet_before_signing")
+    try {
+      await switchDynamicWallet(selectedWalletId)
+    } catch (error) {
+      fail("switch_solana_wallet_failed", { error: error instanceof Error ? error.message : "unknown" })
+    }
+  }
 }
 
 async function sendDynamicPreparedWithdrawal(
@@ -581,6 +732,7 @@ async function sendDynamicPreparedWithdrawal(
   if (expectedRail !== inferredSignerRail) {
     throw new Error(withdrawalSignerRailMismatchMessage)
   }
+  await assertSolanaWithdrawalModalPreflight(prepared, wallet, context)
 
   if (prepared.payload.kind === "evm_transaction") {
     assertDynamicWalletChain(wallet, "base")
@@ -592,6 +744,7 @@ async function sendDynamicPreparedWithdrawal(
     if (!client?.sendTransaction) {
       throw new Error("Unable to sign this withdrawal. Please try again.")
     }
+    logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)
     const txHash = await client.sendTransaction({
       account: prepared.payload.from as `0x${string}`,
       to: prepared.payload.to as `0x${string}`,
@@ -605,6 +758,7 @@ async function sendDynamicPreparedWithdrawal(
     assertDynamicWalletChain(wallet, "bitcoin")
     // Call signPsbt through the object to preserve 'this' binding.
     const psbtRequest = { unsignedPsbtBase64: prepared.payload.psbtBase64 }
+    logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)
     const signed = await wallet.signPsbt?.(psbtRequest)
       ?? await wallet.connector?.signPsbt?.(psbtRequest)
     if (!signed?.signedPsbt) {
@@ -622,6 +776,9 @@ async function sendDynamicPreparedWithdrawal(
     (diagnostics) => {
       if (!walletCreationDebugEnabled) return
       console.info("[pinetree-withdrawals] solana_active_account_lookup", diagnostics)
+    },
+    () => {
+      logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)
     }
   )
 }
@@ -713,6 +870,7 @@ function sanitizeWithdrawalSubmitErrorForMerchant(message: string | undefined) {
   if (raw.includes("PineTree Wallet is not active in this browser session")) return raw
   if (raw.includes("different PineTree Wallet session")) return raw
   if (raw === withdrawalSignerRailMismatchMessage) return raw
+  if (raw === solanaWithdrawalReconnectMessage) return raw
   const hiddenSignerPhrases = [
     ["provider", "signer"].join(" "),
     ["cannot", "sign"].join(" "),
@@ -736,6 +894,7 @@ const walletCreationDebugEnabled =
   process.env.NEXT_PUBLIC_PINE_TREE_WALLET_DEBUG === "true" ||
   process.env.NEXT_PUBLIC_PINETREE_WALLET_DEBUG === "true"
 const withdrawalSignerRailMismatchMessage = "Selected wallet network does not match this withdrawal asset."
+const solanaWithdrawalReconnectMessage = "Reconnect your Solana wallet session before approving this withdrawal."
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -1361,10 +1520,13 @@ function WithdrawalFormShell({
               <p>selectedAsset: {asset}</p>
               <p>preparedPayloadKind: {expectedWithdrawalPayloadKindForRail(rail)}</p>
               <p>preparedPayloadNetwork: {expectedWithdrawalPayloadNetworkLabel(rail)}</p>
-              <p>signerRail: {diagnostics.signerRail}</p>
-              <p>signerWalletAddress: {diagnostics.signerWalletAddressLast4 ? `…${diagnostics.signerWalletAddressLast4}` : "none"}</p>
-              <p>signerConnectorName: {diagnostics.signerConnectorName || "none"}</p>
-              <p>signerChain: {diagnostics.signerChain || "none"}</p>
+              <p>preparedSourceAddressLast6: {diagnostics.savedSourceAddress ? `...${diagnostics.savedSourceAddress.slice(-6)}` : "none"}</p>
+              <p>selectedDynamicWalletAddressLast6: {diagnostics.signerWalletAddressLast6 ? `...${diagnostics.signerWalletAddressLast6}` : "none"}</p>
+              <p>selectedDynamicWalletConnector: {[diagnostics.signerConnectorName, diagnostics.signerConnectorKey].filter(Boolean).join(" / ") || "none"}</p>
+              <p>selectedDynamicWalletChain: {diagnostics.signerChain || "none"}</p>
+              <p>dynamicPrimaryWalletChain: {diagnostics.primaryWalletChain || "none"}</p>
+              <p>inferredSignerRail: {diagnostics.signerRail}</p>
+              <p>willOpenDynamicModal: {String(diagnostics.willOpenDynamicModal)}</p>
             </div>
           </div>
         ) : null}
@@ -1423,7 +1585,8 @@ function WithdrawalFormShell({
   if (screen === "failed") {
     const isSignerSessionError =
       approvalError.includes("not active in this browser session") ||
-      approvalError.includes("different PineTree Wallet session")
+      approvalError.includes("different PineTree Wallet session") ||
+      approvalError === solanaWithdrawalReconnectMessage
     return (
       <div className="space-y-4">
         <div className="rounded-[1.2rem] border border-red-200 bg-red-50 px-5 py-5">
@@ -2052,6 +2215,7 @@ function PineTreeWalletRuntime() {
   // --- Dynamic SDK ---
   const { user, sdkHasLoaded, setShowAuthFlow, setShowDynamicUserProfile, handleLogOut, primaryWallet } = useDynamicContext()
   const refreshDynamicUser = useRefreshUser()
+  const switchDynamicWallet = useSwitchWallet()
   const {
     createWalletAccount,
     dynamicWaasIsEnabled,
@@ -3657,8 +3821,12 @@ function PineTreeWalletRuntime() {
       fallbackReason: null,
       signerRail: matchingWallet ? inferredSignerRailForWallet(matchingWallet) : "unknown",
       signerWalletAddressLast4: matchingWallet ? (getDynamicWalletAddresses(matchingWallet)[0]?.slice(-4) ?? null) : null,
+      signerWalletAddressLast6: matchingWallet ? (getDynamicWalletAddresses(matchingWallet)[0]?.slice(-6) ?? null) : null,
+      signerConnectorKey: matchingWallet ? (matchingWallet.connector?.key ?? matchingWallet.walletConnector?.key ?? null) : null,
       signerConnectorName: matchingWallet ? (matchingWallet.connector?.name ?? matchingWallet.walletConnector?.name ?? null) : null,
       signerChain: matchingWallet ? classifyDynamicWalletChain(matchingWallet) : null,
+      primaryWalletChain: primaryWallet ? classifyDynamicWalletChain(primaryWallet as DynamicWalletLike) : null,
+      willOpenDynamicModal: Boolean(matchingWallet && inferredSignerRailForWallet(matchingWallet) === withdrawalRail),
     }
     return {
       ...baseDiagnostics,
@@ -4427,7 +4595,9 @@ function PineTreeWalletRuntime() {
       : null
     if (_debugApprovalMethod === "dynamic_browser" && !_debugMatchingWallet) {
       setWithdrawalApprovalError(
-        "PineTree Wallet is not active in this browser session. Open PineTree Wallet to reconnect, then try again."
+        _debugRail === "solana"
+          ? solanaWithdrawalReconnectMessage
+          : "PineTree Wallet is not active in this browser session. Open PineTree Wallet to reconnect, then try again."
       )
       setWithdrawalScreen("failed")
       return
@@ -4496,6 +4666,9 @@ function PineTreeWalletRuntime() {
           selectedRail: withdrawalRail,
           selectedAsset: withdrawalAsset,
           destinationAddress: withdrawalReview?.review.destinationAddress ?? withdrawalDestination,
+          pineTreeProfileSolanaAddress: profile?.solana_address ?? null,
+          primaryWallet,
+          switchDynamicWallet,
         })
         const submitRes = await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/submit`, {
           method: "POST",
