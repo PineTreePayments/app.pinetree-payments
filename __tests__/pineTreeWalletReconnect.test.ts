@@ -33,7 +33,7 @@ describe("PineTree Wallet reconnect flow", () => {
 
   it("approve withdrawal refreshes Dynamic before signer lookup/signing", () => {
     expect(page).toContain('await refreshDynamicWalletRuntime("withdrawal_submit_before_signing", { requireApprovalWallet: true })')
-    expect(page).toContain("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, wallets as unknown[], primaryWallet)")
+    expect(page).toContain("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, wallets as unknown[], primaryWallet, {")
   })
 
   it("blocks selected signer and asset rail mismatches before Dynamic approval opens", () => {
@@ -47,5 +47,88 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(page).toContain('refreshDynamicWalletRuntime("profile_loaded_runtime_wallets_empty")')
     expect(page).toContain("if (dynamicWalletRuntimeCount > 0) return")
     expect(page).toContain("if (!profile.base_address && !profile.solana_address) return")
+  })
+
+  it("logs dynamic_signing_preflight with every required field before any signing call", () => {
+    const preflightFn = page.slice(
+      page.indexOf("function logDynamicSigningPreflight("),
+      page.indexOf("async function sendDynamicPreparedWithdrawal(")
+    )
+    expect(preflightFn).toContain('console.info("[pinetree-wallets] dynamic_signing_preflight"')
+    for (const field of [
+      "selectedAsset",
+      "selectedRail",
+      "reviewRail",
+      "preparedPayloadKind",
+      "preparedPayloadNetwork",
+      "preparedPayloadChainId",
+      "destinationAddress",
+      "dynamicWalletId",
+      "dynamicWalletAddress",
+      "dynamicWalletChain",
+      "dynamicWalletConnectorKey",
+      "dynamicWalletConnectorName",
+      "dynamicWalletNetwork",
+      "inferredSignerRail",
+      "expectedRail",
+      "willOpenDynamicModal",
+    ]) {
+      expect(preflightFn).toContain(field)
+    }
+  })
+
+  it("hard-fails on expectedRail/inferredSignerRail mismatch immediately before the signing branches, not just at prepare/review", () => {
+    const sendFn = page.slice(
+      page.indexOf("async function sendDynamicPreparedWithdrawal("),
+      page.indexOf("function base64ToBytes(")
+    )
+    const preflightIndex = sendFn.indexOf("logDynamicSigningPreflight(prepared, wallet, context, inferredSignerRail, willOpenDynamicModal)")
+    const hardFailIndex = sendFn.indexOf("if (expectedRail !== inferredSignerRail) {")
+    const evmBranchIndex = sendFn.indexOf('if (prepared.payload.kind === "evm_transaction") {')
+    const btcBranchIndex = sendFn.indexOf('if (prepared.payload.kind === "bitcoin_psbt") {')
+    expect(preflightIndex).toBeGreaterThan(-1)
+    expect(hardFailIndex).toBeGreaterThan(preflightIndex)
+    expect(evmBranchIndex).toBeGreaterThan(hardFailIndex)
+    expect(btcBranchIndex).toBeGreaterThan(hardFailIndex)
+    expect(sendFn).toContain("throw new Error(withdrawalSignerRailMismatchMessage)")
+  })
+
+  it("runtime-asserts chainId 8453 for evm_transaction payloads, not just the declared TypeScript literal type", () => {
+    expect(page).toContain('if (prepared.payload.kind === "evm_transaction" && prepared.payload.chainId !== 8453) {')
+    expect(page).toContain("prepared_payload_chain_id_mismatch")
+  })
+
+  it("Solana withdrawals never fall back to a non-Solana primaryWallet, and get a Solana-specific reconnect message", () => {
+    const sendFn = page.slice(
+      page.indexOf("async function sendDynamicPreparedWithdrawal("),
+      page.indexOf("function base64ToBytes(")
+    )
+    // getDynamicWalletSearchList filters primaryWallet by expected chain before any
+    // address match is attempted, so a Bitcoin primaryWallet is excluded outright for
+    // a Solana rail - findDynamicWalletForSource can never resolve it as a signer.
+    expect(sendFn).toContain("getDynamicWalletSearchList(wallets as unknown[], primaryWallet, prepared.rail)")
+    expect(sendFn).toContain('if (!hasAnyDynamicWallet && prepared.rail === "solana") {')
+    expect(sendFn).toContain('throw new Error("Reconnect your Solana wallet session before approving this withdrawal.")')
+  })
+
+  it("sendDynamicPreparedWithdrawal receives the merchant's currently-selected rail/asset for preflight comparison against the reviewed payload", () => {
+    expect(page).toContain("context: DynamicSigningPreflightContext")
+    expect(page).toContain("selectedRail: withdrawalRail,")
+    expect(page).toContain("selectedAsset: withdrawalAsset,")
+  })
+
+  it("review screen exposes a debug-only signer panel, gated behind ?walletDebug=1, never shown by default", () => {
+    expect(page).toContain("Signer diagnostics (?walletDebug=1)")
+    expect(page).toContain("debugEnabled?: boolean")
+    expect(page).toContain("debugEnabled={walletSyncDebugQueryEnabled}")
+    const debugPanel = page.slice(
+      page.indexOf("{debugEnabled ? ("),
+      page.indexOf("Signer diagnostics (?walletDebug=1)") + 700
+    )
+    expect(debugPanel).toContain("{debugEnabled ? (")
+    expect(debugPanel).toContain("signerRail")
+    expect(debugPanel).toContain("signerWalletAddress")
+    expect(debugPanel).toContain("signerConnectorName")
+    expect(debugPanel).toContain("signerChain")
   })
 })

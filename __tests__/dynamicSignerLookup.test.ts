@@ -7,6 +7,8 @@ import {
   findDynamicApprovalWalletForSourceAsync,
   findDynamicWalletForSource,
   getDynamicWalletSearchList,
+  inferredSignerRailForWallet,
+  railForDynamicWalletChain,
   signDynamicSolanaTransactionWithActiveAccount,
 } from "@/lib/wallets/dynamicSignerLookup"
 
@@ -475,5 +477,62 @@ describe("Dynamic signer lookup", () => {
     expect(() => assertDynamicWalletChain(bitcoinWallet, "base"))
       .toThrow("Dynamic signer chain mismatch: expected EVM signer.")
     expect(bitcoinWallet.signPsbt).not.toHaveBeenCalled()
+  })
+
+  it("railForDynamicWalletChain maps each classified chain back to its withdrawal rail", () => {
+    expect(railForDynamicWalletChain("solana")).toBe("solana")
+    expect(railForDynamicWalletChain("evm")).toBe("base")
+    expect(railForDynamicWalletChain("bitcoin")).toBe("bitcoin")
+    expect(railForDynamicWalletChain("unknown")).toBe("unknown")
+  })
+
+  it("inferredSignerRailForWallet reports bitcoin for a Bitcoin-classified wallet, never solana", () => {
+    const bitcoinWallet = {
+      address: "SharedSource11111111111111111111111111111",
+      chain: "bitcoin",
+      signPsbt: vi.fn(),
+    }
+    expect(inferredSignerRailForWallet(bitcoinWallet)).toBe("bitcoin")
+    expect(inferredSignerRailForWallet(bitcoinWallet)).not.toBe("solana")
+  })
+
+  it("inferredSignerRailForWallet reports solana for a Solana-classified wallet", () => {
+    const solanaWallet = {
+      address: "SolanaSource111111111111111111111111111111",
+      chain: "solana",
+      signAndSendTransaction: vi.fn(),
+    }
+    expect(inferredSignerRailForWallet(solanaWallet)).toBe("solana")
+  })
+
+  it("end-to-end: a Solana withdrawal request never resolves to the Bitcoin primaryWallet, even when it is the only wallet available", () => {
+    // Simulates the exact live scenario reported: PineTree prepares a solana_transaction
+    // payload for a SOL withdrawal, but the only connected Dynamic wallet is Bitcoin.
+    const bitcoinPrimary = {
+      address: "SolanaSource111111111111111111111111111111",
+      chain: "bitcoin",
+      connector: { key: "bitcoin", name: "Bitcoin Wallet" },
+      signPsbt: vi.fn(),
+    }
+    const preparedRail = "solana" as const
+    const preparedSourceAddress = "SolanaSource111111111111111111111111111111"
+
+    const selectedWallet = findDynamicApprovalWalletForSource(
+      [],
+      bitcoinPrimary,
+      preparedRail,
+      preparedSourceAddress
+    )
+
+    // No Solana-classified wallet exists, so selection must fail closed - never fall
+    // back to the Bitcoin primaryWallet just because its address happens to match.
+    expect(selectedWallet).toBeNull()
+
+    // If selection had (incorrectly) returned the Bitcoin wallet, the chain assertion
+    // must still hard-fail before any Dynamic signing method is invoked.
+    expect(() => assertDynamicWalletChain(bitcoinPrimary, preparedRail)).toThrow(
+      "Dynamic signer chain mismatch: expected Solana signer."
+    )
+    expect(bitcoinPrimary.signPsbt).not.toHaveBeenCalled()
   })
 })

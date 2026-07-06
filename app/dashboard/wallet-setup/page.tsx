@@ -22,7 +22,9 @@ import {
   findDynamicWalletForSource,
   getDynamicWalletAddresses,
   getDynamicWalletSearchList,
+  inferredSignerRailForWallet,
   signDynamicSolanaTransactionWithActiveAccount,
+  type DynamicSignerRail,
   type DynamicWalletLike,
 } from "@/lib/wallets/dynamicSignerLookup"
 import {
@@ -204,6 +206,12 @@ type WithdrawalDiagnostics = {
   btcProviderConfigured: boolean
   speedPayoutAvailable: boolean
   fallbackReason: string | null
+  // Signer identity for the currently-selected rail, used only by the ?walletDebug=1
+  // review-screen panel - never shown to merchants by default.
+  signerRail: DynamicSignerRail | "unknown"
+  signerWalletAddressLast4: string | null
+  signerConnectorName: string | null
+  signerChain: string | null
 }
 
 type WithdrawalAssetOption = {
@@ -382,6 +390,11 @@ function expectedWithdrawalPayloadKindForRail(rail: WithdrawalRail): WithdrawalP
   return "bitcoin_psbt"
 }
 
+function expectedWithdrawalPayloadNetworkLabel(rail: WithdrawalRail): string {
+  const byRail: Record<WithdrawalRail, string> = { base: "8453", solana: "solana", bitcoin: "bitcoin" }
+  return byRail[rail]
+}
+
 function assertPreparedWithdrawalSignerMatchesRail(
   prepared: Pick<WithdrawalPrepareResponse, "rail" | "asset" | "sourceAddress" | "payload">,
   wallet: DynamicWalletLike
@@ -394,6 +407,18 @@ function assertPreparedWithdrawalSignerMatchesRail(
       payloadKind: prepared.payload.kind,
       expectedPayloadKind,
       sourceAddressPresent: Boolean(prepared.sourceAddress),
+    })
+    throw new Error(withdrawalSignerRailMismatchMessage)
+  }
+
+  // Belt and suspenders: the server types chainId as the literal 8453, but nothing
+  // stops a runtime response from disagreeing with its own declared type.
+  if (prepared.payload.kind === "evm_transaction" && prepared.payload.chainId !== 8453) {
+    console.warn("[pinetree-withdrawals] prepared_payload_chain_id_mismatch", {
+      requestedRail: prepared.rail,
+      requestedAsset: prepared.asset,
+      chainId: prepared.payload.chainId,
+      expectedChainId: 8453,
     })
     throw new Error(withdrawalSignerRailMismatchMessage)
   }
@@ -424,10 +449,49 @@ function assertPreparedWithdrawalSignerMatchesRail(
   }
 }
 
+type DynamicSigningPreflightContext = {
+  selectedRail: WithdrawalRail
+  selectedAsset: WithdrawalAsset
+  destinationAddress: string
+}
+
+// Logged unconditionally (not gated behind the debug flag) immediately before every
+// Dynamic signing call, regardless of payload kind - this is the last checkpoint
+// before the Dynamic approval modal can open, so it must capture everything needed
+// to tell whether PineTree selected the wrong signer or Dynamic's own wallet/connector
+// metadata disagrees with the signer it is actually using.
+function logDynamicSigningPreflight(
+  prepared: Pick<WithdrawalPrepareResponse, "rail" | "payload">,
+  wallet: DynamicWalletLike,
+  context: DynamicSigningPreflightContext,
+  inferredSignerRail: DynamicSignerRail | "unknown",
+  willOpenDynamicModal: boolean
+) {
+  console.info("[pinetree-wallets] dynamic_signing_preflight", {
+    selectedAsset: context.selectedAsset,
+    selectedRail: context.selectedRail,
+    reviewRail: prepared.rail,
+    preparedPayloadKind: prepared.payload.kind,
+    preparedPayloadNetwork: "network" in prepared.payload ? prepared.payload.network : null,
+    preparedPayloadChainId: prepared.payload.kind === "evm_transaction" ? prepared.payload.chainId : null,
+    destinationAddress: context.destinationAddress,
+    dynamicWalletId: wallet.id ?? wallet.key ?? null,
+    dynamicWalletAddress: getDynamicWalletAddresses(wallet)[0] ?? null,
+    dynamicWalletChain: classifyDynamicWalletChain(wallet),
+    dynamicWalletConnectorKey: wallet.connector?.key ?? wallet.walletConnector?.key ?? null,
+    dynamicWalletConnectorName: wallet.connector?.name ?? wallet.walletConnector?.name ?? null,
+    dynamicWalletNetwork: wallet.network ?? wallet.connector?.chain ?? wallet.connectedChain ?? null,
+    inferredSignerRail,
+    expectedRail: prepared.rail,
+    willOpenDynamicModal,
+  })
+}
+
 async function sendDynamicPreparedWithdrawal(
   prepared: WithdrawalPrepareResponse,
   wallets: unknown[],
-  primaryWallet: unknown
+  primaryWallet: unknown,
+  context: DynamicSigningPreflightContext
 ): Promise<{ txHash?: string; signedPsbtBase64?: string; providerReference?: string }> {
   const walletsToCheck = getDynamicWalletSearchList(wallets as unknown[], primaryWallet, prepared.rail)
 
@@ -487,6 +551,12 @@ async function sendDynamicPreparedWithdrawal(
       matchingWalletFound: false,
       hasAnyDynamicWallet,
     })
+    // No wallet classified for this rail at all - do not fall back to primaryWallet or
+    // any other chain's signer. Solana gets its own explicit copy per rail; Base/Bitcoin
+    // fall back to the existing generic reconnect copy.
+    if (!hasAnyDynamicWallet && prepared.rail === "solana") {
+      throw new Error("Reconnect your Solana wallet session before approving this withdrawal.")
+    }
     if (hasAnyDynamicWallet) {
       // Wallets are loaded but none match the saved DB address — different account/session.
       throw new Error(
@@ -500,6 +570,17 @@ async function sendDynamicPreparedWithdrawal(
   }
 
   assertPreparedWithdrawalSignerMatchesRail(prepared, wallet)
+
+  // Final checkpoint immediately before any Dynamic signing call can run. Logged
+  // unconditionally, and hard-fails on any expected-vs-inferred rail disagreement -
+  // this is the very last line of defense before the Dynamic approval modal opens.
+  const inferredSignerRail = inferredSignerRailForWallet(wallet)
+  const expectedRail = prepared.rail
+  const willOpenDynamicModal = expectedRail === inferredSignerRail
+  logDynamicSigningPreflight(prepared, wallet, context, inferredSignerRail, willOpenDynamicModal)
+  if (expectedRail !== inferredSignerRail) {
+    throw new Error(withdrawalSignerRailMismatchMessage)
+  }
 
   if (prepared.payload.kind === "evm_transaction") {
     assertDynamicWalletChain(wallet, "base")
@@ -1159,6 +1240,7 @@ function WithdrawalFormShell({
   submitResult,
   selectedBalance,
   diagnostics,
+  debugEnabled,
   onAssetSelect,
   onDestinationChange,
   onAmountChange,
@@ -1188,6 +1270,7 @@ function WithdrawalFormShell({
   submitResult: WithdrawalSubmitResponse | null
   selectedBalance: SyncedBalanceAsset | null
   diagnostics: WithdrawalDiagnostics
+  debugEnabled?: boolean
   onAssetSelect: (rail: WithdrawalRail, asset: WithdrawalAsset) => void
   onDestinationChange: (value: string) => void
   onAmountChange: (value: string) => void
@@ -1270,6 +1353,21 @@ function WithdrawalFormShell({
             </div>
           </dl>
         </div>
+        {debugEnabled ? (
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-3 text-xs text-slate-700">
+            <p className="font-semibold text-slate-900">Signer diagnostics (?walletDebug=1)</p>
+            <div className="mt-2 grid gap-1 sm:grid-cols-2">
+              <p>selectedRail: {rail}</p>
+              <p>selectedAsset: {asset}</p>
+              <p>preparedPayloadKind: {expectedWithdrawalPayloadKindForRail(rail)}</p>
+              <p>preparedPayloadNetwork: {expectedWithdrawalPayloadNetworkLabel(rail)}</p>
+              <p>signerRail: {diagnostics.signerRail}</p>
+              <p>signerWalletAddress: {diagnostics.signerWalletAddressLast4 ? `…${diagnostics.signerWalletAddressLast4}` : "none"}</p>
+              <p>signerConnectorName: {diagnostics.signerConnectorName || "none"}</p>
+              <p>signerChain: {diagnostics.signerChain || "none"}</p>
+            </div>
+          </div>
+        ) : null}
         <div className="flex flex-col gap-2 sm:flex-row">
           <button
             type="button"
@@ -3557,6 +3655,10 @@ function PineTreeWalletRuntime() {
       btcProviderConfigured: false,
       speedPayoutAvailable: lightningProfileState.kind === "loaded" && lightningProfileState.profile.status === "ready",
       fallbackReason: null,
+      signerRail: matchingWallet ? inferredSignerRailForWallet(matchingWallet) : "unknown",
+      signerWalletAddressLast4: matchingWallet ? (getDynamicWalletAddresses(matchingWallet)[0]?.slice(-4) ?? null) : null,
+      signerConnectorName: matchingWallet ? (matchingWallet.connector?.name ?? matchingWallet.walletConnector?.name ?? null) : null,
+      signerChain: matchingWallet ? classifyDynamicWalletChain(matchingWallet) : null,
     }
     return {
       ...baseDiagnostics,
@@ -4390,7 +4492,11 @@ function PineTreeWalletRuntime() {
           return
         }
 
-        const dynamicSubmission = await sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, wallets as unknown[], primaryWallet)
+        const dynamicSubmission = await sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, wallets as unknown[], primaryWallet, {
+          selectedRail: withdrawalRail,
+          selectedAsset: withdrawalAsset,
+          destinationAddress: withdrawalReview?.review.destinationAddress ?? withdrawalDestination,
+        })
         const submitRes = await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/submit`, {
           method: "POST",
           headers: {
@@ -4788,6 +4894,7 @@ function PineTreeWalletRuntime() {
                   submitResult={withdrawalSubmitResult}
                   selectedBalance={selectedWithdrawalBalance}
                   diagnostics={withdrawalDiagnostics}
+                  debugEnabled={walletSyncDebugQueryEnabled}
                   onAssetSelect={handleWithdrawalAssetSelect}
                   onDestinationChange={(value) => {
                     setWithdrawalDestination(value)

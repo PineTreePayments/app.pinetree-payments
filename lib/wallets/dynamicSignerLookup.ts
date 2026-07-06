@@ -226,6 +226,20 @@ function expectedChainForRail(rail?: DynamicSignerRail): DynamicWalletChain | nu
   return null
 }
 
+// Inverse of expectedChainForRail - what withdrawal rail a wallet's classified chain
+// actually corresponds to, so callers can compare "what we asked for" against "what
+// we got" using the same vocabulary (e.g. in signing preflight diagnostics/logging).
+export function railForDynamicWalletChain(chain: DynamicWalletChain): DynamicSignerRail | "unknown" {
+  if (chain === "solana") return "solana"
+  if (chain === "evm") return "base"
+  if (chain === "bitcoin") return "bitcoin"
+  return "unknown"
+}
+
+export function inferredSignerRailForWallet(wallet: DynamicWalletLike): DynamicSignerRail | "unknown" {
+  return railForDynamicWalletChain(classifyDynamicWalletChain(wallet))
+}
+
 export function getDynamicWalletAddresses(wallet: DynamicWalletLike) {
   return [
     wallet.address,
