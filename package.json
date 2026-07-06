@@ -14,6 +14,7 @@
     "test": "vitest run",
     "check:env": "node scripts/check-environment.mjs",
     "check:env:strict": "node scripts/check-environment.mjs --strict",
+    "dynamic:jwt:generate": "node scripts/generate-dynamic-external-jwt-keys.mjs",
     "smoke:staging-routes": "node scripts/smoke-staging-routes.mjs",
     "smoke:wallet-approval": "node scripts/smoke-wallet-approval.mjs",
     "smoke:checkout-api": "node scripts/smoke-checkout-api.mjs",

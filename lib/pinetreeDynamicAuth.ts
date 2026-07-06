@@ -11,6 +11,14 @@ export type PineTreeDynamicExternalJwtPayload = {
   externalJwt: string
   externalUserId: string
   expiresAt: string
+  diagnostics?: {
+    enabled: boolean
+    issuer: string
+    audienceConfigured: boolean
+    jwksUrl: string
+    kidConfigured: boolean
+    privateKeyConfigured: boolean
+  }
 }
 
 export const pineTreeDynamicEmailFallbackMisconfiguredWarning =

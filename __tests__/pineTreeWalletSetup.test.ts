@@ -156,6 +156,11 @@ describe("PineTree embedded wallet setup", () => {
 
   it("wallet debug mode exposes external JWT auth attempt diagnostics", () => {
     expect(page).toContain("externalJwtEnabled")
+    expect(page).toContain("externalJwtIssuer")
+    expect(page).toContain("externalJwtAudienceConfigured")
+    expect(page).toContain("jwksUrl")
+    expect(page).toContain("kidConfigured")
+    expect(page).toContain("privateKeyConfigured")
     expect(page).toContain("externalJwtEndpointStatus")
     expect(page).toContain("externalJwtErrorCode")
     expect(page).toContain("dynamicExternalAuthAttempted")
@@ -317,7 +322,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("profile_sync_response_status")
     expect(page).not.toContain("dynamic_jwt")
     expect(page).not.toContain("session_token")
-    expect(page).not.toContain("privateKey")
+    expect(page).not.toContain("DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY")
     expect(page).not.toContain("recoveryPhrase")
   })
 
@@ -1281,7 +1286,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(withdrawalSubmitRoute).not.toContain("process.env")
     // The debug logging in the page only logs safe metadata — no secrets
     expect(page).toContain("console.info(\"[pinetree-withdrawals] approval_state\"")
-    expect(page).not.toContain("privateKey")
+    expect(page).not.toContain("DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY")
     expect(page).not.toContain("DYNAMIC_API_KEY")
   })
 

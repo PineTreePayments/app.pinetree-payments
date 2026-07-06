@@ -47,15 +47,16 @@ NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID=...
 NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE=external_jwt
 NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK=false
 DYNAMIC_EXTERNAL_JWT_ENABLED=true
-DYNAMIC_EXTERNAL_JWT_ISSUER=pinetree
+DYNAMIC_EXTERNAL_JWT_ISSUER=https://app.pinetree-payments.com
 DYNAMIC_EXTERNAL_JWT_AUDIENCE=dynamic
 
-# Server-only signing material. Use one configured Dynamic can verify.
-DYNAMIC_EXTERNAL_JWT_SECRET=...
-# or
+# Server-only signing material. Use npm run dynamic:jwt:generate.
+DYNAMIC_EXTERNAL_JWT_KID=...
 DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY=...
-DYNAMIC_EXTERNAL_JWT_KEY_ID=...
+DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC='{"keys":[...]}'
 ```
+
+Full setup guide: [dynamic-external-jwt-setup.md](./dynamic-external-jwt-setup.md).
 
 ## Shopify
 

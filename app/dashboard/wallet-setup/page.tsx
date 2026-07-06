@@ -319,6 +319,11 @@ type WalletSetupFailureReason =
 
 type ProfileSyncDiagnosticsState = {
   externalJwtEnabled?: boolean
+  externalJwtIssuer?: string | null
+  externalJwtAudienceConfigured?: boolean
+  externalJwtJwksUrl?: string | null
+  externalJwtKidConfigured?: boolean
+  externalJwtPrivateKeyConfigured?: boolean
   externalJwtEndpointStatus?: number | null
   externalJwtErrorCode?: string | null
   dynamicExternalAuthAttempted?: boolean
@@ -2294,6 +2299,11 @@ function PineTreeWalletRuntime() {
   const [dynamicWalletRuntimeRefreshNonce, setDynamicWalletRuntimeRefreshNonce] = useState(0)
   const [profileSyncDiagnostics, setProfileSyncDiagnostics] = useState<ProfileSyncDiagnosticsState>({
     externalJwtEnabled: pineTreeControlledDynamicAuthAvailable,
+    externalJwtIssuer: null,
+    externalJwtAudienceConfigured: false,
+    externalJwtJwksUrl: null,
+    externalJwtKidConfigured: false,
+    externalJwtPrivateKeyConfigured: false,
     externalJwtEndpointStatus: null,
     externalJwtErrorCode: null,
     dynamicExternalAuthAttempted: false,
@@ -2808,6 +2818,11 @@ function PineTreeWalletRuntime() {
           setProfileSyncDiagnostics((prev) => ({
             ...prev,
             externalJwtEnabled: true,
+            externalJwtIssuer: payload.diagnostics?.issuer ?? prev.externalJwtIssuer ?? null,
+            externalJwtAudienceConfigured: payload.diagnostics?.audienceConfigured ?? prev.externalJwtAudienceConfigured,
+            externalJwtJwksUrl: payload.diagnostics?.jwksUrl ?? prev.externalJwtJwksUrl ?? null,
+            externalJwtKidConfigured: payload.diagnostics?.kidConfigured ?? prev.externalJwtKidConfigured,
+            externalJwtPrivateKeyConfigured: payload.diagnostics?.privateKeyConfigured ?? prev.externalJwtPrivateKeyConfigured,
             externalJwtEndpointStatus: 200,
             externalJwtErrorCode: null,
             dynamicExternalAuthAttempted: true,
@@ -2821,6 +2836,11 @@ function PineTreeWalletRuntime() {
           setProfileSyncDiagnostics((prev) => ({
             ...prev,
             externalJwtEnabled: true,
+            externalJwtIssuer: payload.diagnostics?.issuer ?? prev.externalJwtIssuer ?? null,
+            externalJwtAudienceConfigured: payload.diagnostics?.audienceConfigured ?? prev.externalJwtAudienceConfigured,
+            externalJwtJwksUrl: payload.diagnostics?.jwksUrl ?? prev.externalJwtJwksUrl ?? null,
+            externalJwtKidConfigured: payload.diagnostics?.kidConfigured ?? prev.externalJwtKidConfigured,
+            externalJwtPrivateKeyConfigured: payload.diagnostics?.privateKeyConfigured ?? prev.externalJwtPrivateKeyConfigured,
             externalJwtEndpointStatus: 200,
             externalJwtErrorCode: null,
             dynamicExternalAuthAttempted: true,
@@ -5050,6 +5070,11 @@ function PineTreeWalletRuntime() {
               <p>dynamicUserIdPresent: {String(Boolean(user?.userId))}</p>
               <p>dynamicEmailSource: {dynamicEmailSource || "none"}</p>
               <p>externalJwtEnabled: {String(Boolean(profileSyncDiagnostics.externalJwtEnabled))}</p>
+              <p>externalJwtIssuer: {profileSyncDiagnostics.externalJwtIssuer || "none"}</p>
+              <p>externalJwtAudienceConfigured: {String(Boolean(profileSyncDiagnostics.externalJwtAudienceConfigured))}</p>
+              <p>jwksUrl: {profileSyncDiagnostics.externalJwtJwksUrl || "none"}</p>
+              <p>kidConfigured: {String(Boolean(profileSyncDiagnostics.externalJwtKidConfigured))}</p>
+              <p>privateKeyConfigured: {String(Boolean(profileSyncDiagnostics.externalJwtPrivateKeyConfigured))}</p>
               <p>externalJwtEndpointStatus: {profileSyncDiagnostics.externalJwtEndpointStatus ?? "none"}</p>
               <p>externalJwtErrorCode: {profileSyncDiagnostics.externalJwtErrorCode || "none"}</p>
               <p>dynamicExternalAuthAttempted: {String(Boolean(profileSyncDiagnostics.dynamicExternalAuthAttempted))}</p>
@@ -5075,6 +5100,11 @@ function PineTreeWalletRuntime() {
               <p>dynamicAuthenticated: {String(profileSyncDiagnostics.dynamicAuthenticated)}</p>
               <p>dynamicUserIdPresent: {String(Boolean(profileSyncDiagnostics.dynamicUserId))}</p>
               <p>externalJwtEnabled: {String(Boolean(profileSyncDiagnostics.externalJwtEnabled))}</p>
+              <p>externalJwtIssuer: {profileSyncDiagnostics.externalJwtIssuer || "none"}</p>
+              <p>externalJwtAudienceConfigured: {String(Boolean(profileSyncDiagnostics.externalJwtAudienceConfigured))}</p>
+              <p>jwksUrl: {profileSyncDiagnostics.externalJwtJwksUrl || "none"}</p>
+              <p>kidConfigured: {String(Boolean(profileSyncDiagnostics.externalJwtKidConfigured))}</p>
+              <p>privateKeyConfigured: {String(Boolean(profileSyncDiagnostics.externalJwtPrivateKeyConfigured))}</p>
               <p>externalJwtEndpointStatus: {profileSyncDiagnostics.externalJwtEndpointStatus ?? "none"}</p>
               <p>externalJwtErrorCode: {profileSyncDiagnostics.externalJwtErrorCode || "none"}</p>
               <p>dynamicExternalAuthAttempted: {String(Boolean(profileSyncDiagnostics.dynamicExternalAuthAttempted))}</p>
