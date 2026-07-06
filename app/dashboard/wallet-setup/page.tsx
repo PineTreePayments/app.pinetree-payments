@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useDynamicContext, useDynamicWaas, useEmbeddedWallet, useRefreshUser, useSwitchWallet, useUserWallets } from "@dynamic-labs/sdk-react-core"
+import { useDynamicContext, useDynamicWaas, useEmbeddedWallet, useExternalAuth, useRefreshUser, useSwitchWallet, useUserWallets } from "@dynamic-labs/sdk-react-core"
 import { Transaction } from "@solana/web3.js"
 import { AlertTriangle, CheckCircle2, ChevronDown, Copy, X } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
@@ -38,6 +38,7 @@ import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/Pi
 import type { PineTreeRailReadinessMap } from "@/lib/pinetreeRailReadiness"
 import {
   getPineTreeDynamicAuthConfig,
+  pineTreeDynamicExternalJwtRestoreFailedMessage,
   pineTreeDynamicEmailFallbackMisconfiguredWarning,
   requestPineTreeDynamicExternalJwtAuth,
   shouldOpenDynamicEmailFallbackAuth,
@@ -306,6 +307,7 @@ type WalletSetupFailureReason =
   | "dynamic_email_missing"
   | "dynamic_email_mismatch"
   | "dynamic_email_unverified"
+  | "dynamic_external_jwt_failed"
   | "no_dynamic_wallets"
   | "base_address_missing"
   | "solana_address_missing"
@@ -316,6 +318,11 @@ type WalletSetupFailureReason =
   | "provisioning_timeout_unknown"
 
 type ProfileSyncDiagnosticsState = {
+  externalJwtEnabled?: boolean
+  externalJwtEndpointStatus?: number | null
+  externalJwtErrorCode?: string | null
+  dynamicExternalAuthAttempted?: boolean
+  dynamicExternalAuthSucceeded?: boolean
   dynamicUserId: string | null
   dynamicEmail?: string | null
   merchantEmail?: string | null
@@ -986,6 +993,7 @@ function walletCreationStepMessage(step: WalletCreationStep) {
 }
 
 function walletSetupFailureMessage(reason: WalletSetupFailureReason | null) {
+  if (reason === "dynamic_external_jwt_failed") return pineTreeDynamicExternalJwtRestoreFailedMessage
   if (reason === "dynamic_auth_missing" || reason === "dynamic_auth_cancelled") return "Secure PineTree Wallet access was not restored."
   if (reason === "dynamic_email_mismatch") return "Use your PineTree account email to restore secure wallet access."
   if (reason === "dynamic_email_missing" || reason === "dynamic_email_unverified") return "PineTree could not verify the PineTree account email for this wallet session."
@@ -1008,6 +1016,7 @@ function walletSetupFailureRecoveryLabel(reason: WalletSetupFailureReason | null
   if (reason === "dynamic_auth_missing" || reason === "dynamic_auth_cancelled" || reason === "dynamic_user_missing") {
     return "Restore secure wallet access"
   }
+  if (reason === "dynamic_external_jwt_failed") return "Restore secure wallet access"
   if (reason === "profile_sync_failed") return "Save wallet profile"
   if (reason === "provider_sync_failed") return "Activate payment rails"
   return "Check wallet readiness"
@@ -2225,37 +2234,12 @@ function PineTreeWalletRuntime() {
 
   // --- Dynamic SDK ---
   const { user, sdkHasLoaded, setShowAuthFlow, setShowDynamicUserProfile, handleLogOut, primaryWallet } = useDynamicContext()
+  const { signInWithExternalJwt } = useExternalAuth()
   const refreshDynamicUser = useRefreshUser()
   const switchDynamicWallet = useSwitchWallet()
   const dynamicAuthConfig = getPineTreeDynamicAuthConfig()
   const pineTreeControlledDynamicAuthAvailable = dynamicAuthConfig.externalJwtConfigured
   const dynamicEmailFallbackAllowed = shouldOpenDynamicEmailFallbackAuth(dynamicAuthConfig)
-  const openDynamicEmailFallbackAuth = useCallback((reason: string) => {
-    if (pineTreeControlledDynamicAuthAvailable) {
-      void requestPineTreeDynamicExternalJwtAuth().catch((error) => {
-        console.warn("[pinetree-wallets] dynamic_external_jwt_auth_unavailable", {
-          reason,
-          error: error instanceof Error ? error.message : String(error),
-        })
-      })
-      return false
-    }
-    if (!shouldOpenDynamicEmailFallbackAuth(dynamicAuthConfig)) {
-      console.warn("[pinetree-wallets] dynamic_email_fallback_blocked", {
-        reason,
-        pineTreeControlledDynamicAuthAvailable,
-        emailFallbackMisconfigured: dynamicAuthConfig.emailFallbackMisconfigured,
-      })
-      return false
-    }
-    setShowAuthFlow(true)
-    return true
-  }, [dynamicAuthConfig, pineTreeControlledDynamicAuthAvailable, setShowAuthFlow])
-  const scheduleDynamicEmailFallbackAuth = useCallback((reason: string) => {
-    window.setTimeout(() => {
-      openDynamicEmailFallbackAuth(reason)
-    }, 0)
-  }, [openDynamicEmailFallbackAuth])
   const {
     createWalletAccount,
     dynamicWaasIsEnabled,
@@ -2309,6 +2293,11 @@ function PineTreeWalletRuntime() {
   const [resettingWalletSetup, setResettingWalletSetup] = useState(false)
   const [dynamicWalletRuntimeRefreshNonce, setDynamicWalletRuntimeRefreshNonce] = useState(0)
   const [profileSyncDiagnostics, setProfileSyncDiagnostics] = useState<ProfileSyncDiagnosticsState>({
+    externalJwtEnabled: pineTreeControlledDynamicAuthAvailable,
+    externalJwtEndpointStatus: null,
+    externalJwtErrorCode: null,
+    dynamicExternalAuthAttempted: false,
+    dynamicExternalAuthSucceeded: false,
     dynamicUserId: null,
     dynamicEmail: null,
     merchantEmail: null,
@@ -2768,6 +2757,164 @@ function PineTreeWalletRuntime() {
     profileSyncDiagnostics.profileEndpointStatus,
     profileSyncDiagnostics.providerSyncStatus,
   ])
+
+  const openDynamicEmailFallbackAuth = useCallback((reason: string) => {
+    if (pineTreeControlledDynamicAuthAvailable) {
+      const token = accessTokenRef.current
+      setShowAuthFlow(false)
+      setShowDynamicUserProfile(false)
+      setWalletIdentityError("")
+      setProfileSyncDiagnostics((prev) => ({
+        ...prev,
+        externalJwtEnabled: true,
+        externalJwtEndpointStatus: null,
+        externalJwtErrorCode: null,
+        dynamicExternalAuthAttempted: true,
+        dynamicExternalAuthSucceeded: false,
+        updatedAt: new Date().toISOString(),
+      }))
+      logWalletCreationStep("waiting_for_dynamic_auth", {
+        reason,
+        dynamic_external_auth_attempted: true,
+      })
+
+      if (!token) {
+        setWalletIdentityError(pineTreeDynamicExternalJwtRestoreFailedMessage)
+        setPendingSync(false)
+        clearWalletSetupInProgress()
+        recordWalletSetupFailure("pine_tree_auth_missing", "failed", {
+          reason,
+          externalJwtEnabled: true,
+          externalJwtErrorCode: "missing_supabase_auth_token",
+          dynamicExternalAuthAttempted: true,
+          dynamicExternalAuthSucceeded: false,
+        })
+        setProfileSyncDiagnostics((prev) => ({
+          ...prev,
+          externalJwtEnabled: true,
+          externalJwtEndpointStatus: 401,
+          externalJwtErrorCode: "missing_supabase_auth_token",
+          dynamicExternalAuthAttempted: true,
+          dynamicExternalAuthSucceeded: false,
+          skippedReason: "missing_supabase_auth_token",
+          updatedAt: new Date().toISOString(),
+        }))
+        return false
+      }
+
+      void (async () => {
+        try {
+          const payload = await requestPineTreeDynamicExternalJwtAuth(token)
+          setProfileSyncDiagnostics((prev) => ({
+            ...prev,
+            externalJwtEnabled: true,
+            externalJwtEndpointStatus: 200,
+            externalJwtErrorCode: null,
+            dynamicExternalAuthAttempted: true,
+            dynamicExternalAuthSucceeded: false,
+            updatedAt: new Date().toISOString(),
+          }))
+          const dynamicProfile = await signInWithExternalJwt({
+            externalJwt: payload.externalJwt,
+            externalUserId: payload.externalUserId,
+          })
+          setProfileSyncDiagnostics((prev) => ({
+            ...prev,
+            externalJwtEnabled: true,
+            externalJwtEndpointStatus: 200,
+            externalJwtErrorCode: null,
+            dynamicExternalAuthAttempted: true,
+            dynamicExternalAuthSucceeded: Boolean(dynamicProfile),
+            dynamicAuthenticated: Boolean(dynamicProfile),
+            dynamicUserId: dynamicProfile?.userId ?? prev.dynamicUserId,
+            updatedAt: new Date().toISOString(),
+          }))
+          if (!dynamicProfile) {
+            throw Object.assign(new Error("dynamic_external_auth_no_user"), { status: 502 })
+          }
+          setPendingSync(true)
+          markWalletSetupInProgress()
+          setProvisioningRetryExhausted(false)
+          setFinalProvisioningRefreshAttempted(false)
+          pendingProfileSyncAttemptRef.current = false
+          setWalletIdentityError("")
+          logWalletCreationStep("dynamic_authenticated", {
+            reason,
+            dynamic_external_auth_succeeded: true,
+          })
+          void refreshDynamicUser()
+        } catch (error) {
+          const status =
+            typeof error === "object" && error !== null && "status" in error && typeof (error as { status?: unknown }).status === "number"
+              ? (error as { status: number }).status
+              : null
+          const code =
+            typeof error === "object" && error !== null && "code" in error && typeof (error as { code?: unknown }).code === "string"
+              ? (error as { code: string }).code
+              : error instanceof Error
+                ? error.message
+                : "dynamic_external_auth_failed"
+          console.warn("[pinetree-wallets] dynamic_external_jwt_auth_failed", {
+            reason,
+            status,
+            code,
+          })
+          setWalletIdentityError(pineTreeDynamicExternalJwtRestoreFailedMessage)
+          setPendingSync(false)
+          clearWalletSetupInProgress()
+          recordWalletSetupFailure("dynamic_external_jwt_failed", "failed", {
+            reason,
+            externalJwtEnabled: true,
+            externalJwtEndpointStatus: status,
+            externalJwtErrorCode: code,
+            dynamicExternalAuthAttempted: true,
+            dynamicExternalAuthSucceeded: false,
+          })
+          setProfileSyncDiagnostics((prev) => ({
+            ...prev,
+            externalJwtEnabled: true,
+            externalJwtEndpointStatus: status,
+            externalJwtErrorCode: code,
+            dynamicExternalAuthAttempted: true,
+            dynamicExternalAuthSucceeded: false,
+            skippedReason: "dynamic_external_jwt_failed",
+            updatedAt: new Date().toISOString(),
+          }))
+          logWalletCreationStep("failed", {
+            reason: "dynamic_external_jwt_failed",
+            externalJwtEndpointStatus: status,
+            externalJwtErrorCode: code,
+          })
+        }
+      })()
+      return true
+    }
+    if (!shouldOpenDynamicEmailFallbackAuth(dynamicAuthConfig)) {
+      console.warn("[pinetree-wallets] dynamic_email_fallback_blocked", {
+        reason,
+        pineTreeControlledDynamicAuthAvailable,
+        emailFallbackMisconfigured: dynamicAuthConfig.emailFallbackMisconfigured,
+      })
+      return false
+    }
+    setShowAuthFlow(true)
+    return true
+  }, [
+    dynamicAuthConfig,
+    logWalletCreationStep,
+    pineTreeControlledDynamicAuthAvailable,
+    recordWalletSetupFailure,
+    refreshDynamicUser,
+    setShowAuthFlow,
+    setShowDynamicUserProfile,
+    signInWithExternalJwt,
+  ])
+
+  const scheduleDynamicEmailFallbackAuth = useCallback((reason: string) => {
+    window.setTimeout(() => {
+      openDynamicEmailFallbackAuth(reason)
+    }, 0)
+  }, [openDynamicEmailFallbackAuth])
 
   const waitForDynamicWalletRuntime = useCallback(async (options?: { requireApprovalWallet?: boolean }) => {
     const startedAt = Date.now()
@@ -4902,6 +5049,11 @@ function PineTreeWalletRuntime() {
               <p>dynamicAuthenticated: {String(Boolean(user))}</p>
               <p>dynamicUserIdPresent: {String(Boolean(user?.userId))}</p>
               <p>dynamicEmailSource: {dynamicEmailSource || "none"}</p>
+              <p>externalJwtEnabled: {String(Boolean(profileSyncDiagnostics.externalJwtEnabled))}</p>
+              <p>externalJwtEndpointStatus: {profileSyncDiagnostics.externalJwtEndpointStatus ?? "none"}</p>
+              <p>externalJwtErrorCode: {profileSyncDiagnostics.externalJwtErrorCode || "none"}</p>
+              <p>dynamicExternalAuthAttempted: {String(Boolean(profileSyncDiagnostics.dynamicExternalAuthAttempted))}</p>
+              <p>dynamicExternalAuthSucceeded: {String(Boolean(profileSyncDiagnostics.dynamicExternalAuthSucceeded))}</p>
               <p>mismatchCheckRan: {String(Boolean(profileSyncDiagnostics.mismatchCheckRan))}</p>
               <p>mismatchBlocked: {String(Boolean(profileSyncDiagnostics.mismatchBlocked))}</p>
               <p>timeoutReason: {walletCreationStep === "timeout" ? "embedded_wallet_provisioning_timeout" : "none"}</p>
@@ -4922,6 +5074,11 @@ function PineTreeWalletRuntime() {
               <p>failureReason: {walletSetupFailureReason || "none"}</p>
               <p>dynamicAuthenticated: {String(profileSyncDiagnostics.dynamicAuthenticated)}</p>
               <p>dynamicUserIdPresent: {String(Boolean(profileSyncDiagnostics.dynamicUserId))}</p>
+              <p>externalJwtEnabled: {String(Boolean(profileSyncDiagnostics.externalJwtEnabled))}</p>
+              <p>externalJwtEndpointStatus: {profileSyncDiagnostics.externalJwtEndpointStatus ?? "none"}</p>
+              <p>externalJwtErrorCode: {profileSyncDiagnostics.externalJwtErrorCode || "none"}</p>
+              <p>dynamicExternalAuthAttempted: {String(Boolean(profileSyncDiagnostics.dynamicExternalAuthAttempted))}</p>
+              <p>dynamicExternalAuthSucceeded: {String(Boolean(profileSyncDiagnostics.dynamicExternalAuthSucceeded))}</p>
               <p>extractedBaseAddressPresent: {String(Boolean(profileSyncDiagnostics.extractedBaseAddress))}</p>
               <p>extractedSolanaAddressPresent: {String(Boolean(profileSyncDiagnostics.extractedSolanaAddress))}</p>
               <p>baseSignerFound: {String(profileSyncDiagnostics.baseSignerFound)}</p>

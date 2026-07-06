@@ -7,8 +7,17 @@ export type PineTreeDynamicAuthConfig = {
   emailFallbackMisconfigured: boolean
 }
 
+export type PineTreeDynamicExternalJwtPayload = {
+  externalJwt: string
+  externalUserId: string
+  expiresAt: string
+}
+
 export const pineTreeDynamicEmailFallbackMisconfiguredWarning =
   "Dynamic email fallback is disabled, but PineTree external JWT auth is not configured."
+
+export const pineTreeDynamicExternalJwtRestoreFailedMessage =
+  "PineTree Wallet sign-in could not be restored. Please try again."
 
 export function getPineTreeDynamicAuthConfig(env: Record<string, string | undefined> = process.env): PineTreeDynamicAuthConfig {
   const externalJwtConfigured = env.NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE === "external_jwt"
@@ -28,11 +37,36 @@ export function shouldOpenDynamicEmailFallbackAuth(config: PineTreeDynamicAuthCo
   return config.mode !== "external_jwt" && config.emailFallbackEnabled
 }
 
-export async function requestPineTreeDynamicExternalJwtAuth(): Promise<never> {
-  // TODO(PineTree external JWT auth):
+export async function requestPineTreeDynamicExternalJwtAuth(accessToken: string): Promise<PineTreeDynamicExternalJwtPayload> {
   // PineTree Supabase user/session
   // -> PineTree backend issues/verifies JWT for Dynamic
   // -> Dynamic session initializes for same PineTree user/email
   // -> embedded wallet signer restores without merchant typing a second email.
-  throw new Error("PineTree external JWT Dynamic auth is not implemented yet")
+  const res = await fetch("/api/wallets/dynamic/external-jwt", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({}),
+    credentials: "include",
+    cache: "no-store",
+  })
+  const json = (await res.json().catch(() => null)) as
+    | (PineTreeDynamicExternalJwtPayload & { error?: string })
+    | { error?: string }
+    | null
+
+  if (!res.ok || !json || !("externalJwt" in json) || !("externalUserId" in json)) {
+    const error = new Error(json?.error || "dynamic_external_jwt_failed")
+    ;(error as Error & { status?: number; code?: string }).status = res.status
+    ;(error as Error & { status?: number; code?: string }).code = json?.error || "dynamic_external_jwt_failed"
+    throw error
+  }
+
+  return {
+    externalJwt: json.externalJwt,
+    externalUserId: json.externalUserId,
+    expiresAt: json.expiresAt,
+  }
 }

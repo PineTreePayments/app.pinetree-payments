@@ -48,6 +48,7 @@
     "@walletconnect/universal-provider": "^2.23.8",
     "bitcoinjs-lib": "^6.1.5",
     "coinbase-commerce-node": "^1.0.4",
+    "jose": "^6.2.3",
     "lucide-react": "^0.577.0",
     "next": "16.1.6",
     "pdf-lib": "^1.17.1",

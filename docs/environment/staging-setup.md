@@ -25,18 +25,36 @@ enabled in staging.
 ## PineTree Wallet Dynamic auth
 
 Set `NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID` for PineTree Wallet embedded wallet
-signing. In sandbox and staging, keep Dynamic Email login enabled unless
-PineTree external JWT/BYOA auth is actually configured.
+signing. Dynamic Email fallback is temporary sandbox/dev mode. The production
+target is PineTree-issued external JWT/BYOA, where the merchant signs into
+PineTree once and Dynamic restores the embedded wallet session from PineTree
+auth.
 
 Do not set `NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK=false` by itself. That
 removes the current Dynamic fallback used to restore the embedded wallet signer
 session. Only disable it when `NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE=external_jwt`
-is configured end to end:
+is configured end to end and Dynamic has enabled External Authentication/BYOA
+for the project with the matching issuer, audience, and JWKS/signing settings.
 
 ```bash
 NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID=...
+
+# Temporary sandbox/dev fallback:
+# NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE=dynamic_email_fallback
+# NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK=true
+
+# Production target after Dynamic BYOA/external JWT is enabled and tested:
 NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE=external_jwt
 NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK=false
+DYNAMIC_EXTERNAL_JWT_ENABLED=true
+DYNAMIC_EXTERNAL_JWT_ISSUER=pinetree
+DYNAMIC_EXTERNAL_JWT_AUDIENCE=dynamic
+
+# Server-only signing material. Use one configured Dynamic can verify.
+DYNAMIC_EXTERNAL_JWT_SECRET=...
+# or
+DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY=...
+DYNAMIC_EXTERNAL_JWT_KEY_ID=...
 ```
 
 ## Shopify
