@@ -1,4 +1,4 @@
-import { exportPKCS8, exportJWK, generateKeyPair, jwtVerify } from "jose"
+import { exportPKCS8, exportJWK, generateKeyPair, importJWK, jwtVerify } from "jose"
 import { NextRequest } from "next/server"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { POST } from "@/app/api/wallets/dynamic/external-jwt/route"
@@ -117,10 +117,11 @@ describe("Dynamic external JWT route", () => {
       email?: string
       diagnostics?: {
         enabled: boolean
-        issuer: string
+        issuerConfigured: boolean
         audienceConfigured: boolean
         kidConfigured: boolean
         signingKeyConfigured: boolean
+        jwksPublicConfigured: boolean
       }
     }
 
@@ -149,11 +150,59 @@ describe("Dynamic external JWT route", () => {
     expect(new Date(json.expiresAt).getTime()).toBeGreaterThan(Date.now())
     expect(json.diagnostics).toMatchObject({
       enabled: true,
-      issuer: "pinetree",
+      issuerConfigured: true,
       audienceConfigured: true,
       kidConfigured: true,
       signingKeyConfigured: true,
+      jwksPublicConfigured: true,
     })
+    expect(json.diagnostics).not.toHaveProperty("issuer")
+    expect(json.diagnostics).not.toHaveProperty("jwksUrl")
+  })
+
+  it("route-generated JWT verifies against the configured public JWKS", async () => {
+    const res = await POST(request())
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as { externalJwt: string; externalUserId: string }
+    const jwks = JSON.parse(process.env.DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC || "{}") as { keys: Array<Record<string, unknown>> }
+    const jwk = jwks.keys.find((key) => key.kid === "pinetree-test-kid")
+    expect(jwk).toBeTruthy()
+    const verificationKey = await importJWK(jwk!, "RS256")
+
+    const verified = await jwtVerify(json.externalJwt, verificationKey, {
+      issuer: "pinetree",
+      audience: "dynamic",
+      subject: "merchant-1",
+    })
+
+    expect(json.externalUserId).toBe(verified.payload.sub)
+  })
+
+  it("logs safe route diagnostics only", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined)
+
+    const res = await POST(request())
+    expect(res.status).toBe(200)
+
+    const routeLog = info.mock.calls.findLast((call) => call[0] === "[pinetree-dynamic-auth] external_jwt_route")
+    expect(routeLog?.[1]).toMatchObject({
+      enabled: true,
+      issuerConfigured: true,
+      audienceConfigured: true,
+      kidConfigured: true,
+      signingKeyConfigured: true,
+      jwksPublicConfigured: true,
+      userPresent: true,
+      merchantResolved: true,
+      status: "issued",
+    })
+    const serialized = JSON.stringify(routeLog?.[1])
+    expect(serialized).not.toContain("merchant-1")
+    expect(serialized).not.toContain("merchant@example.com")
+    expect(serialized).not.toContain("BEGIN PRIVATE KEY")
+    expect(serialized).not.toContain(process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64)
+
+    info.mockRestore()
   })
 
   it("decodes the base64 PEM signing key before signing", async () => {

@@ -156,9 +156,9 @@ describe("PineTree embedded wallet setup", () => {
 
   it("wallet debug mode exposes external JWT auth attempt diagnostics", () => {
     expect(page).toContain("externalJwtEnabled")
-    expect(page).toContain("externalJwtIssuer")
+    expect(page).toContain("externalJwtIssuerConfigured")
     expect(page).toContain("externalJwtAudienceConfigured")
-    expect(page).toContain("jwksUrl")
+    expect(page).toContain("externalJwtJwksPublicConfigured")
     expect(page).toContain("kidConfigured")
     expect(page).toContain("signingKeyConfigured")
     expect(page).toContain("externalJwtEndpointStatus")
@@ -183,6 +183,9 @@ describe("PineTree embedded wallet setup", () => {
     expect(openFallbackFn).toContain("if (pineTreeControlledDynamicAuthAvailable)")
     expect(openFallbackFn).toContain("requestPineTreeDynamicExternalJwtAuth(token)")
     expect(openFallbackFn).toContain("signInWithExternalJwt({")
+    expect(openFallbackFn).toContain("[pinetree-dynamic-auth] external_jwt_client")
+    expect(openFallbackFn).toContain("signInWithExternalJwtCalled")
+    expect(openFallbackFn).toContain("signInWithExternalJwtSucceeded")
     expect(openFallbackFn).toContain("externalJwt: payload.externalJwt")
     expect(openFallbackFn).toContain("externalUserId: payload.externalUserId")
     expect(openFallbackFn).toContain("setPendingSync(true)")
@@ -190,6 +193,19 @@ describe("PineTree embedded wallet setup", () => {
     expect(openFallbackFn).toContain("return false")
     expect(openFallbackFn).toContain("setShowAuthFlow(true)")
     expect(openFallbackFn.indexOf("return false")).toBeLessThan(openFallbackFn.indexOf("setShowAuthFlow(true)"))
+  })
+
+  it("external_jwt mode logs external auth attempt before any Dynamic email auth path", () => {
+    const openFallbackFn = page.slice(
+      page.indexOf("const openDynamicEmailFallbackAuth = useCallback"),
+      page.indexOf("const scheduleDynamicEmailFallbackAuth = useCallback")
+    )
+
+    expect(openFallbackFn).toContain("console.info(\"[pinetree-dynamic-auth] external_jwt_client\"")
+    expect(openFallbackFn).toContain("externalJwtAttempted: true")
+    expect(openFallbackFn).toContain("endpointStatus")
+    expect(openFallbackFn).toContain("endpointErrorCode")
+    expect(openFallbackFn.indexOf("[pinetree-dynamic-auth] external_jwt_client")).toBeLessThan(openFallbackFn.indexOf("setShowAuthFlow(true)"))
   })
 
   it("external auth failure shows PineTree-controlled copy", () => {

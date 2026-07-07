@@ -319,11 +319,11 @@ type WalletSetupFailureReason =
 
 type ProfileSyncDiagnosticsState = {
   externalJwtEnabled?: boolean
-  externalJwtIssuer?: string | null
+  externalJwtIssuerConfigured?: boolean
   externalJwtAudienceConfigured?: boolean
-  externalJwtJwksUrl?: string | null
   externalJwtKidConfigured?: boolean
   externalJwtSigningKeyConfigured?: boolean
+  externalJwtJwksPublicConfigured?: boolean
   externalJwtEndpointStatus?: number | null
   externalJwtErrorCode?: string | null
   dynamicExternalAuthAttempted?: boolean
@@ -2299,11 +2299,11 @@ function PineTreeWalletRuntime() {
   const [dynamicWalletRuntimeRefreshNonce, setDynamicWalletRuntimeRefreshNonce] = useState(0)
   const [profileSyncDiagnostics, setProfileSyncDiagnostics] = useState<ProfileSyncDiagnosticsState>({
     externalJwtEnabled: pineTreeControlledDynamicAuthAvailable,
-    externalJwtIssuer: null,
+    externalJwtIssuerConfigured: false,
     externalJwtAudienceConfigured: false,
-    externalJwtJwksUrl: null,
     externalJwtKidConfigured: false,
     externalJwtSigningKeyConfigured: false,
+    externalJwtJwksPublicConfigured: false,
     externalJwtEndpointStatus: null,
     externalJwtErrorCode: null,
     dynamicExternalAuthAttempted: false,
@@ -2789,6 +2789,15 @@ function PineTreeWalletRuntime() {
       })
 
       if (!token) {
+        console.info("[pinetree-dynamic-auth] external_jwt_client", {
+          authMode: dynamicAuthConfig.mode,
+          emailFallbackEnabled: dynamicAuthConfig.emailFallbackEnabled,
+          externalJwtAttempted: true,
+          endpointStatus: 401,
+          endpointErrorCode: "missing_supabase_auth_token",
+          signInWithExternalJwtCalled: false,
+          signInWithExternalJwtSucceeded: false,
+        })
         setWalletIdentityError(pineTreeDynamicExternalJwtRestoreFailedMessage)
         setPendingSync(false)
         clearWalletSetupInProgress()
@@ -2813,34 +2822,41 @@ function PineTreeWalletRuntime() {
       }
 
       void (async () => {
+        let endpointStatus: number | null = null
+        let endpointErrorCode: string | null = null
+        let signInWithExternalJwtCalled = false
+        let signInWithExternalJwtSucceeded = false
         try {
           const payload = await requestPineTreeDynamicExternalJwtAuth(token)
+          endpointStatus = 200
           setProfileSyncDiagnostics((prev) => ({
             ...prev,
             externalJwtEnabled: true,
-            externalJwtIssuer: payload.diagnostics?.issuer ?? prev.externalJwtIssuer ?? null,
+            externalJwtIssuerConfigured: payload.diagnostics?.issuerConfigured ?? prev.externalJwtIssuerConfigured,
             externalJwtAudienceConfigured: payload.diagnostics?.audienceConfigured ?? prev.externalJwtAudienceConfigured,
-            externalJwtJwksUrl: payload.diagnostics?.jwksUrl ?? prev.externalJwtJwksUrl ?? null,
             externalJwtKidConfigured: payload.diagnostics?.kidConfigured ?? prev.externalJwtKidConfigured,
             externalJwtSigningKeyConfigured: payload.diagnostics?.signingKeyConfigured ?? prev.externalJwtSigningKeyConfigured,
+            externalJwtJwksPublicConfigured: payload.diagnostics?.jwksPublicConfigured ?? prev.externalJwtJwksPublicConfigured,
             externalJwtEndpointStatus: 200,
             externalJwtErrorCode: null,
             dynamicExternalAuthAttempted: true,
             dynamicExternalAuthSucceeded: false,
             updatedAt: new Date().toISOString(),
           }))
+          signInWithExternalJwtCalled = true
           const dynamicProfile = await signInWithExternalJwt({
             externalJwt: payload.externalJwt,
             externalUserId: payload.externalUserId,
           })
+          signInWithExternalJwtSucceeded = Boolean(dynamicProfile)
           setProfileSyncDiagnostics((prev) => ({
             ...prev,
             externalJwtEnabled: true,
-            externalJwtIssuer: payload.diagnostics?.issuer ?? prev.externalJwtIssuer ?? null,
+            externalJwtIssuerConfigured: payload.diagnostics?.issuerConfigured ?? prev.externalJwtIssuerConfigured,
             externalJwtAudienceConfigured: payload.diagnostics?.audienceConfigured ?? prev.externalJwtAudienceConfigured,
-            externalJwtJwksUrl: payload.diagnostics?.jwksUrl ?? prev.externalJwtJwksUrl ?? null,
             externalJwtKidConfigured: payload.diagnostics?.kidConfigured ?? prev.externalJwtKidConfigured,
             externalJwtSigningKeyConfigured: payload.diagnostics?.signingKeyConfigured ?? prev.externalJwtSigningKeyConfigured,
+            externalJwtJwksPublicConfigured: payload.diagnostics?.jwksPublicConfigured ?? prev.externalJwtJwksPublicConfigured,
             externalJwtEndpointStatus: 200,
             externalJwtErrorCode: null,
             dynamicExternalAuthAttempted: true,
@@ -2862,6 +2878,15 @@ function PineTreeWalletRuntime() {
             reason,
             dynamic_external_auth_succeeded: true,
           })
+          console.info("[pinetree-dynamic-auth] external_jwt_client", {
+            authMode: dynamicAuthConfig.mode,
+            emailFallbackEnabled: dynamicAuthConfig.emailFallbackEnabled,
+            externalJwtAttempted: true,
+            endpointStatus,
+            endpointErrorCode,
+            signInWithExternalJwtCalled,
+            signInWithExternalJwtSucceeded,
+          })
           void refreshDynamicUser()
         } catch (error) {
           const status =
@@ -2874,6 +2899,17 @@ function PineTreeWalletRuntime() {
               : error instanceof Error
                 ? error.message
                 : "dynamic_external_auth_failed"
+          endpointStatus = endpointStatus ?? status
+          endpointErrorCode = code
+          console.info("[pinetree-dynamic-auth] external_jwt_client", {
+            authMode: dynamicAuthConfig.mode,
+            emailFallbackEnabled: dynamicAuthConfig.emailFallbackEnabled,
+            externalJwtAttempted: true,
+            endpointStatus,
+            endpointErrorCode,
+            signInWithExternalJwtCalled,
+            signInWithExternalJwtSucceeded,
+          })
           console.warn("[pinetree-wallets] dynamic_external_jwt_auth_failed", {
             reason,
             status,
@@ -5070,11 +5106,11 @@ function PineTreeWalletRuntime() {
               <p>dynamicUserIdPresent: {String(Boolean(user?.userId))}</p>
               <p>dynamicEmailSource: {dynamicEmailSource || "none"}</p>
               <p>externalJwtEnabled: {String(Boolean(profileSyncDiagnostics.externalJwtEnabled))}</p>
-              <p>externalJwtIssuer: {profileSyncDiagnostics.externalJwtIssuer || "none"}</p>
+              <p>externalJwtIssuerConfigured: {String(Boolean(profileSyncDiagnostics.externalJwtIssuerConfigured))}</p>
               <p>externalJwtAudienceConfigured: {String(Boolean(profileSyncDiagnostics.externalJwtAudienceConfigured))}</p>
-              <p>jwksUrl: {profileSyncDiagnostics.externalJwtJwksUrl || "none"}</p>
               <p>kidConfigured: {String(Boolean(profileSyncDiagnostics.externalJwtKidConfigured))}</p>
               <p>signingKeyConfigured: {String(Boolean(profileSyncDiagnostics.externalJwtSigningKeyConfigured))}</p>
+              <p>jwksPublicConfigured: {String(Boolean(profileSyncDiagnostics.externalJwtJwksPublicConfigured))}</p>
               <p>externalJwtEndpointStatus: {profileSyncDiagnostics.externalJwtEndpointStatus ?? "none"}</p>
               <p>externalJwtErrorCode: {profileSyncDiagnostics.externalJwtErrorCode || "none"}</p>
               <p>dynamicExternalAuthAttempted: {String(Boolean(profileSyncDiagnostics.dynamicExternalAuthAttempted))}</p>
@@ -5100,11 +5136,11 @@ function PineTreeWalletRuntime() {
               <p>dynamicAuthenticated: {String(profileSyncDiagnostics.dynamicAuthenticated)}</p>
               <p>dynamicUserIdPresent: {String(Boolean(profileSyncDiagnostics.dynamicUserId))}</p>
               <p>externalJwtEnabled: {String(Boolean(profileSyncDiagnostics.externalJwtEnabled))}</p>
-              <p>externalJwtIssuer: {profileSyncDiagnostics.externalJwtIssuer || "none"}</p>
+              <p>externalJwtIssuerConfigured: {String(Boolean(profileSyncDiagnostics.externalJwtIssuerConfigured))}</p>
               <p>externalJwtAudienceConfigured: {String(Boolean(profileSyncDiagnostics.externalJwtAudienceConfigured))}</p>
-              <p>jwksUrl: {profileSyncDiagnostics.externalJwtJwksUrl || "none"}</p>
               <p>kidConfigured: {String(Boolean(profileSyncDiagnostics.externalJwtKidConfigured))}</p>
               <p>signingKeyConfigured: {String(Boolean(profileSyncDiagnostics.externalJwtSigningKeyConfigured))}</p>
+              <p>jwksPublicConfigured: {String(Boolean(profileSyncDiagnostics.externalJwtJwksPublicConfigured))}</p>
               <p>externalJwtEndpointStatus: {profileSyncDiagnostics.externalJwtEndpointStatus ?? "none"}</p>
               <p>externalJwtErrorCode: {profileSyncDiagnostics.externalJwtErrorCode || "none"}</p>
               <p>dynamicExternalAuthAttempted: {String(Boolean(profileSyncDiagnostics.dynamicExternalAuthAttempted))}</p>

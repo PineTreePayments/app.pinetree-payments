@@ -10,6 +10,16 @@ type AuthenticatedMerchant = {
   email: string
 }
 
+type ExternalJwtRouteStatus =
+  | "starting"
+  | "mode_disabled"
+  | "not_enabled"
+  | "authenticating"
+  | "merchant_resolving"
+  | "signing"
+  | "issued"
+  | "failed"
+
 function jsonError(error: string, status: number) {
   return NextResponse.json({ error }, { status })
 }
@@ -21,12 +31,20 @@ function isEnabled(value: string | undefined) {
 function getExternalJwtConfigDiagnostics() {
   return {
     enabled: isEnabled(process.env.DYNAMIC_EXTERNAL_JWT_ENABLED),
-    issuer: process.env.DYNAMIC_EXTERNAL_JWT_ISSUER || "https://app.pinetree-payments.com",
+    issuerConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_ISSUER?.trim()),
     audienceConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE?.trim()),
-    jwksUrl: `${(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://app.pinetree-payments.com").replace(/\/$/, "")}/.well-known/dynamic-jwks.json`,
     kidConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_KID || process.env.DYNAMIC_EXTERNAL_JWT_KEY_ID),
     signingKeyConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64 || process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY),
+    jwksPublicConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC?.trim()),
   }
+}
+
+function logExternalJwtRoute(input: ReturnType<typeof getExternalJwtConfigDiagnostics> & {
+  userPresent: boolean
+  merchantResolved: boolean
+  status: ExternalJwtRouteStatus
+}) {
+  console.info("[pinetree-dynamic-auth] external_jwt_route", input)
 }
 
 function getSigningKeyPem() {
@@ -124,27 +142,37 @@ async function signPineTreeDynamicJwt(input: AuthenticatedMerchant) {
 }
 
 export async function POST(req: NextRequest) {
+  let userPresent = false
+  let merchantResolved = false
+  let routeStatus: ExternalJwtRouteStatus = "starting"
   try {
     const diagnostics = getExternalJwtConfigDiagnostics()
+    logExternalJwtRoute({ ...diagnostics, userPresent, merchantResolved, status: routeStatus })
     if (process.env.NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE !== "external_jwt") {
+      routeStatus = "mode_disabled"
+      logExternalJwtRoute({ ...diagnostics, userPresent, merchantResolved, status: routeStatus })
       return jsonError("dynamic_external_jwt_mode_disabled", 409)
     }
     if (!isEnabled(process.env.DYNAMIC_EXTERNAL_JWT_ENABLED)) {
+      routeStatus = "not_enabled"
+      logExternalJwtRoute({ ...diagnostics, userPresent, merchantResolved, status: routeStatus })
       return jsonError("dynamic_external_jwt_not_enabled", 503)
     }
 
+    routeStatus = "authenticating"
     const auth = await requireSupabaseMerchant(req)
+    userPresent = true
+    merchantResolved = true
+    routeStatus = "signing"
     const signed = await signPineTreeDynamicJwt(auth)
+    routeStatus = "issued"
+    logExternalJwtRoute({ ...diagnostics, userPresent, merchantResolved, status: routeStatus })
 
     console.info("[pinetree-wallets] dynamic_external_jwt_issued", {
-      merchantId: auth.merchantId,
-      userId: auth.userId,
       emailPresent: Boolean(auth.email),
-      externalUserId: auth.merchantId,
       issuer: signed.issuer,
       audienceConfigured: Boolean(signed.audience),
       kidConfigured: Boolean(signed.keyId),
-      jwksUrl: diagnostics.jwksUrl,
       signingKeyConfigured: diagnostics.signingKeyConfigured,
       expiresAt: signed.expiresAt.toISOString(),
     })
@@ -156,6 +184,9 @@ export async function POST(req: NextRequest) {
       diagnostics,
     })
   } catch (error) {
+    routeStatus = "failed"
+    const diagnostics = getExternalJwtConfigDiagnostics()
+    logExternalJwtRoute({ ...diagnostics, userPresent, merchantResolved, status: routeStatus })
     const status =
       typeof error === "object" && error !== null && "status" in error && typeof (error as { status?: unknown }).status === "number"
         ? (error as { status: number }).status

@@ -13,11 +13,11 @@ export type PineTreeDynamicExternalJwtPayload = {
   expiresAt: string
   diagnostics?: {
     enabled: boolean
-    issuer: string
+    issuerConfigured: boolean
     audienceConfigured: boolean
-    jwksUrl: string
     kidConfigured: boolean
     signingKeyConfigured: boolean
+    jwksPublicConfigured: boolean
   }
 }
 

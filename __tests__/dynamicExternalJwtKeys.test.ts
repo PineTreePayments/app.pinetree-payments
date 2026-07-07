@@ -1,4 +1,8 @@
 import { execFileSync } from "node:child_process"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { exportJWK, exportPKCS8, generateKeyPair } from "jose"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { GET } from "@/app/.well-known/dynamic-jwks.json/route"
 
@@ -48,6 +52,53 @@ describe("Dynamic external JWT key material", () => {
     expect(JSON.stringify(parsed.jwks)).not.toContain("PRIVATE KEY")
     expect(JSON.stringify(parsed.jwks)).not.toContain(parsed.signingKeyB64)
     expect(JSON.stringify(parsed.jwks)).not.toContain('"d"')
+  })
+
+  it("dynamic:jwt:test script validates configured keypair without printing secrets", async () => {
+    const keys = await generateKeyPair("RS256", { extractable: true })
+    const privateKeyPem = await exportPKCS8(keys.privateKey)
+    const publicJwk = await exportJWK(keys.publicKey)
+    const signingKeyB64 = Buffer.from(privateKeyPem, "utf8").toString("base64")
+    const jwks = JSON.stringify({
+      keys: [{ ...publicJwk, kid: "pinetree-test-kid", alg: "RS256", use: "sig" }],
+    })
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pinetree-dynamic-jwt-"))
+    fs.writeFileSync(
+      path.join(tempDir, ".env.local"),
+      [
+        "DYNAMIC_EXTERNAL_JWT_ENABLED=true",
+        "DYNAMIC_EXTERNAL_JWT_ISSUER=https://app.pinetree-payments.com",
+        "DYNAMIC_EXTERNAL_JWT_AUDIENCE=dynamic",
+        "DYNAMIC_EXTERNAL_JWT_KID=pinetree-test-kid",
+        `DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64=${signingKeyB64}`,
+        `DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC='${jwks}'`,
+      ].join("\n"),
+      "utf8"
+    )
+
+    const output = execFileSync("node", [path.join(process.cwd(), "scripts/test-dynamic-external-jwt.mjs")], {
+      cwd: tempDir,
+      encoding: "utf8",
+    })
+    const parsed = JSON.parse(output) as {
+      ok: boolean
+      decodedHeader: Record<string, unknown>
+      decodedPayload: Record<string, unknown>
+      checks: Array<{ name: string; pass: boolean }>
+    }
+
+    expect(parsed.ok).toBe(true)
+    expect(parsed.decodedHeader).toMatchObject({ alg: "RS256", kid: "pinetree-test-kid" })
+    expect(parsed.decodedPayload).toMatchObject({
+      iss: "https://app.pinetree-payments.com",
+      aud: "dynamic",
+      sub: "pinetree-dynamic-test-merchant",
+      email: "dynamic-jwt-test@pinetree-payments.com",
+    })
+    expect(parsed.checks.every((check) => check.pass)).toBe(true)
+    expect(output).not.toContain(signingKeyB64)
+    expect(output).not.toContain("BEGIN PRIVATE KEY")
+    expect(output).not.toContain("PRIVATE KEY")
   })
 
   it("JWKS endpoint returns public key only and safe cache headers", async () => {
