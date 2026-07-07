@@ -79,7 +79,7 @@ describe("PineTree embedded wallet setup", () => {
   it("binds PineTree Wallet creation to the merchant account email", () => {
     expect(page).toContain("setMerchantEmail(canonicalMerchantEmail)")
     expect(page).toContain("extractDynamicUserEmail(user)")
-    expect(page).toContain("Use your PineTree account email to restore secure wallet access.")
+    expect(page).toContain("Use your PineTree account email to verify wallet access.")
     expect(page).toContain("Using your PineTree account email: {merchantEmail}")
     expect(apiRoute).toContain("getMerchantById(merchantId)")
     expect(apiRoute).toContain("dynamicEmail !== merchantEmail")
@@ -103,6 +103,15 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("profileState")
     // Merchant-profile-derived readiness flags
     expect(page).toContain("profileAddresses")
+  })
+
+  it("treats a missing DB wallet profile as a new PineTree wallet even with stale local setup state", () => {
+    expect(page).toContain("if (!json.profile) {")
+    expect(page).toContain("window.localStorage.removeItem(setupKey)")
+    expect(page).toContain('setWalletCreationStep("idle")')
+    expect(page).toContain('status: "new_wallet_required"')
+    expect(page).toContain('if (profileState.kind === "none") return "create_wallet"')
+    expect(page).not.toContain('if (setupStarted && json.profile?.status !== "ready")')
   })
 
   it("loads merchant profile by PineTree merchant auth without requiring Dynamic auth", () => {
@@ -131,7 +140,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('refreshDynamicWalletRuntime("withdrawal_submit_before_signing", { requireApprovalWallet: true })')
     expect(page).toContain('if (_debugApprovalMethod === "dynamic_browser" && !_debugMatchingWallet)')
     expect(page).toContain("pineTreeSignerReconnectMessage")
-    expect(page).toContain("Reconnect PineTree Wallet to restore secure signing access.")
+    expect(page).toContain("Reconnect PineTree Wallet to verify secure signing access.")
   })
 
   it("Dynamic email fallback is temporary and guarded by PineTree identity checks", () => {
@@ -210,7 +219,7 @@ describe("PineTree embedded wallet setup", () => {
 
   it("external auth failure shows PineTree-controlled copy", () => {
     expect(dynamicAuthConfig).toContain("pineTreeDynamicExternalJwtRestoreFailedMessage")
-    expect(dynamicAuthConfig).toContain("PineTree Wallet sign-in could not be restored. Please try again.")
+    expect(dynamicAuthConfig).toContain("PineTree Wallet access could not be verified. Please try again.")
     expect(page).toContain("pineTreeDynamicExternalJwtRestoreFailedMessage")
     expect(page).toContain('"dynamic_external_jwt_failed"')
   })
@@ -257,7 +266,7 @@ describe("PineTree embedded wallet setup", () => {
     // hasStaleDynamicSession guards Create so it doesn't silently reuse the old session
     expect(page).toContain("hasStaleDynamicSession")
     // Reconnect copy is shown to the merchant instead of the old setup-incomplete warning.
-    expect(page).toContain("Reconnect your PineTree Wallet to restore secure browser access.")
+    expect(page).toContain("Verify wallet access to continue using secure PineTree Wallet signing.")
     expect(page).toContain("Reconnect PineTree Wallet")
   })
 
@@ -265,7 +274,7 @@ describe("PineTree embedded wallet setup", () => {
     // logoutPending flow: detect stale session → call handleLogOut → wait → open auth flow
     expect(page).toContain("logoutPending")
     expect(page).toContain("handleLogOut")
-    expect(page).toContain("Preparing...")
+    expect(page).toContain("Securing wallet access")
   })
 
   it("wallet status shows Connected from a ready DB profile and keeps signer readiness separate", () => {
@@ -641,6 +650,13 @@ describe("PineTree embedded wallet setup", () => {
     expect(withdrawalSource).not.toContain(["Cannot", "sign"].join(" "))
     expect(withdrawalSource).not.toContain(["Broadcast", "disabled"].join(" "))
     expect(withdrawalSource).not.toContain(["Provider signer", "unavailable"].join(" "))
+  })
+
+  it("shows honest disabled withdrawal copy when no wallet source address is available", () => {
+    expect(page).toContain("const noWithdrawableAssets = assetOptions.length === 0")
+    expect(page).toContain("Withdrawals are being finalized. Receiving funds is available now.")
+    expect(page).not.toContain("No PineTree Wallet source address is available for withdrawals.")
+    expect(page).not.toContain("Create or connect a PineTree Wallet address before withdrawing.")
   })
 
   it("keeps the withdrawal form shell without redesigning the controls", () => {
@@ -1218,7 +1234,7 @@ describe("PineTree embedded wallet setup", () => {
   it("missing Dynamic signer does not show Approve withdrawal", () => {
     // When no matching wallet is found at signing time, sendDynamicPreparedWithdrawal throws
     // and the catch block moves to the failed screen — the review button cannot coexist with the error.
-    expect(page).toContain("Reconnect PineTree Wallet to restore secure signing access.")
+    expect(page).toContain("Reconnect PineTree Wallet to verify secure signing access.")
     expect(page).toContain("sanitizeWithdrawalSubmitErrorForMerchant(error instanceof Error ? error.message : undefined)")
     expect(page).toContain('setWithdrawalScreen("failed")')
     expect(page).not.toContain("// Signing failure (Dynamic path) reaches here. Clear the stale review")
@@ -1338,7 +1354,7 @@ describe("PineTree embedded wallet setup", () => {
     // When wallets[] from useUserWallets() contains no wallet matching the saved DB address,
     // we emit a safe diagnostic log and throw a reconnect-guidance error — not the generic copy.
     expect(page).toContain("console.info(\"[pinetree-withdrawals] signer_not_found\"")
-    expect(page).toContain("Reconnect PineTree Wallet to restore secure signing access.")
+    expect(page).toContain("Reconnect PineTree Wallet to verify secure signing access.")
     expect(page).toContain("dynamicWalletCount:")
     expect(page).toContain("hasAnyDynamicWallet")
   })
@@ -1433,7 +1449,7 @@ describe("PineTree embedded wallet setup", () => {
     // The old generic error string is gone; session errors use specific reconnect-guidance copy.
     expect(page).not.toContain("PineTree Wallet signer is not available for this asset yet.")
     // Actionable errors that replaced it must be present
-    expect(page).toContain("Reconnect PineTree Wallet to restore secure signing access.")
+    expect(page).toContain("Reconnect PineTree Wallet to verify secure signing access.")
     expect(page).toContain("different PineTree Wallet session")
     expect(page).toContain("Unable to sign this withdrawal. Please try again.")
   })

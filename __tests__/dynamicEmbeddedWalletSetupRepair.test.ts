@@ -41,7 +41,7 @@ describe("Dynamic embedded wallet setup repair", () => {
     expect(page).toContain("const reviewSigner =")
     expect(page).toContain("findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, withdrawalRail, reviewSourceAddress)")
     expect(page).toContain("dynamicWalletRuntimeCount === 0 || !reviewSigner")
-    expect(page).toContain("Reconnect PineTree Wallet to restore secure signing access.")
+    expect(page).toContain("Reconnect PineTree Wallet to verify secure signing access.")
     const guardIdx = page.indexOf("dynamicWalletRuntimeCount === 0 || !reviewSigner")
     const reviewIdx = page.indexOf("setReviewingWithdrawal(true)")
     expect(guardIdx).toBeGreaterThan(0)
@@ -120,7 +120,7 @@ describe("Dynamic embedded wallet setup repair", () => {
   })
 
   it("missing signer recovery shows Reconnect PineTree Wallet instead of repair", () => {
-    expect(page).toContain("Reconnect your PineTree Wallet to restore secure browser access.")
+    expect(page).toContain("Verify wallet access to continue using secure PineTree Wallet signing.")
     expect(page).toContain("Reconnect PineTree Wallet")
     const ctaChain = page.slice(
       page.indexOf('walletSetupPrimaryState === "reconnect_needed" ? ('),

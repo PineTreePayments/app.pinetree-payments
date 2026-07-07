@@ -25,7 +25,7 @@ export const pineTreeDynamicEmailFallbackMisconfiguredWarning =
   "Dynamic email fallback is disabled, but PineTree external JWT auth is not configured."
 
 export const pineTreeDynamicExternalJwtRestoreFailedMessage =
-  "PineTree Wallet sign-in could not be restored. Please try again."
+  "PineTree Wallet access could not be verified. Please try again."
 
 export function getPineTreeDynamicAuthConfig(env: Record<string, string | undefined> = process.env): PineTreeDynamicAuthConfig {
   const externalJwtConfigured = env.NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE === "external_jwt"

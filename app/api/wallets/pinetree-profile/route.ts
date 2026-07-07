@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           {
             error: "dynamic_email_mismatch",
-            message: "Use your PineTree account email to restore secure wallet access.",
+            message: "Use your PineTree account email to verify wallet access.",
             merchantEmail,
             dynamicEmail,
           },
