@@ -1,5 +1,4 @@
 import { execFileSync } from "node:child_process"
-import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { exportJWK, exportPKCS8, generateKeyPair } from "jose"
@@ -8,6 +7,19 @@ import { GET } from "@/app/.well-known/dynamic-jwks.json/route"
 
 const envKeys = ["DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC", "DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64", "DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY"] as const
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]])) as Record<(typeof envKeys)[number], string | undefined>
+
+function execNodeAllowFailure(args: string[], env: NodeJS.ProcessEnv) {
+  try {
+    return execFileSync("node", args, {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env,
+    })
+  } catch (error) {
+    const output = (error as { stdout?: Buffer | string }).stdout
+    return Buffer.isBuffer(output) ? output.toString("utf8") : String(output || "")
+  }
+}
 
 describe("Dynamic external JWT key material", () => {
   beforeEach(() => {
@@ -54,7 +66,7 @@ describe("Dynamic external JWT key material", () => {
     expect(JSON.stringify(parsed.jwks)).not.toContain('"d"')
   })
 
-  it("dynamic:jwt:test script validates configured keypair without printing secrets", async () => {
+  async function createTestEnv(overrides: Record<string, string> = {}) {
     const keys = await generateKeyPair("RS256", { extractable: true })
     const privateKeyPem = await exportPKCS8(keys.privateKey)
     const publicJwk = await exportJWK(keys.publicKey)
@@ -62,23 +74,28 @@ describe("Dynamic external JWT key material", () => {
     const jwks = JSON.stringify({
       keys: [{ ...publicJwk, kid: "pinetree-test-kid", alg: "RS256", use: "sig" }],
     })
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pinetree-dynamic-jwt-"))
-    fs.writeFileSync(
-      path.join(tempDir, ".env.local"),
-      [
-        "DYNAMIC_EXTERNAL_JWT_ENABLED=true",
-        "DYNAMIC_EXTERNAL_JWT_ISSUER=https://app.pinetree-payments.com",
-        "DYNAMIC_EXTERNAL_JWT_AUDIENCE=dynamic",
-        "DYNAMIC_EXTERNAL_JWT_KID=pinetree-test-kid",
-        `DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64=${signingKeyB64}`,
-        `DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC='${jwks}'`,
-      ].join("\n"),
-      "utf8"
-    )
+    return {
+      signingKeyB64,
+      jwks,
+      env: {
+        ...process.env,
+        DYNAMIC_EXTERNAL_JWT_ENABLED: "true",
+        DYNAMIC_EXTERNAL_JWT_ISSUER: "https://app.pinetree-payments.com",
+        DYNAMIC_EXTERNAL_JWT_AUDIENCE: "dynamic",
+        DYNAMIC_EXTERNAL_JWT_KID: "pinetree-test-kid",
+        DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64: signingKeyB64,
+        DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC: `'${jwks}'`,
+        ...overrides,
+      },
+    }
+  }
 
+  it("dynamic:jwt:test script validates configured keypair without printing secrets", async () => {
+    const { env, signingKeyB64 } = await createTestEnv()
     const output = execFileSync("node", [path.join(process.cwd(), "scripts/test-dynamic-external-jwt.mjs")], {
-      cwd: tempDir,
+      cwd: os.tmpdir(),
       encoding: "utf8",
+      env,
     })
     const parsed = JSON.parse(output) as {
       ok: boolean
@@ -99,6 +116,66 @@ describe("Dynamic external JWT key material", () => {
     expect(output).not.toContain(signingKeyB64)
     expect(output).not.toContain("BEGIN PRIVATE KEY")
     expect(output).not.toContain("PRIVATE KEY")
+  })
+
+  it("dynamic:jwt:test --debug-env masks secrets and reports repo env paths", async () => {
+    const { env, signingKeyB64, jwks } = await createTestEnv()
+    const output = execFileSync("node", ["scripts/test-dynamic-external-jwt.mjs", "--debug-env"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env,
+    })
+    const parsed = JSON.parse(output) as {
+      ok: boolean
+      debugEnv: {
+        repoRoot: string
+        envLocalPath: string
+        enabledValue: boolean
+        signingKeyConfigured: boolean
+        signingKeyLength: number
+        jwksPublicConfigured: boolean
+        jwksPublicLength: number
+        jwksKidMatchesEnvKid: boolean
+      }
+    }
+
+    expect(parsed.ok).toBe(true)
+    expect(parsed.debugEnv.repoRoot.replace(/\\/g, "/")).toBe(process.cwd().replace(/\\/g, "/"))
+    expect(parsed.debugEnv.envLocalPath.replace(/\\/g, "/")).toBe(path.join(process.cwd(), ".env.local").replace(/\\/g, "/"))
+    expect(parsed.debugEnv.enabledValue).toBe(true)
+    expect(parsed.debugEnv.signingKeyConfigured).toBe(true)
+    expect(parsed.debugEnv.signingKeyLength).toBe(signingKeyB64.length)
+    expect(parsed.debugEnv.jwksPublicConfigured).toBe(true)
+    expect(parsed.debugEnv.jwksPublicLength).toBe(jwks.length)
+    expect(parsed.debugEnv.jwksKidMatchesEnvKid).toBe(true)
+    expect(output).not.toContain(signingKeyB64)
+    expect(output).not.toContain(jwks)
+    expect(output).not.toContain("BEGIN PRIVATE KEY")
+  })
+
+  it("dynamic:jwt:test recognizes missing enabled and malformed JWKS clearly", async () => {
+    const missingEnabled = await createTestEnv({ DYNAMIC_EXTERNAL_JWT_ENABLED: "" })
+    const missingOutput = execNodeAllowFailure(["scripts/test-dynamic-external-jwt.mjs"], missingEnabled.env)
+    expect(JSON.parse(missingOutput)).toMatchObject({
+      ok: false,
+      code: "dynamic_external_jwt_not_enabled",
+    })
+
+    const malformed = await createTestEnv({ DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC: "'{\"keys\":[" })
+    const malformedOutput = execNodeAllowFailure(["scripts/test-dynamic-external-jwt.mjs"], malformed.env)
+    expect(JSON.parse(malformedOutput)).toMatchObject({
+      ok: false,
+      code: "dynamic_external_jwt_jwks_invalid",
+    })
+  })
+
+  it("dynamic:jwt:test fails clearly when JWKS kid does not match env kid", async () => {
+    const mismatched = await createTestEnv({ DYNAMIC_EXTERNAL_JWT_KID: "different-kid" })
+    const output = execNodeAllowFailure(["scripts/test-dynamic-external-jwt.mjs"], mismatched.env)
+    expect(JSON.parse(output)).toMatchObject({
+      ok: false,
+      code: "dynamic_external_jwt_jwks_kid_mismatch",
+    })
   })
 
   it("JWKS endpoint returns public key only and safe cache headers", async () => {
