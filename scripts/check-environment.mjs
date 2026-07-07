@@ -70,6 +70,19 @@ const groups = [
     ],
   },
   {
+    name: "PineTree Wallet Dynamic auth",
+    entries: [
+      ["NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", true, "text"],
+      ["NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE", false, "authmode"],
+      ["NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK", false, "boolean"],
+      ["DYNAMIC_EXTERNAL_JWT_ENABLED", false, "boolean"],
+      ["DYNAMIC_EXTERNAL_JWT_ISSUER", false, "url"],
+      ["DYNAMIC_EXTERNAL_JWT_AUDIENCE", false, "text"],
+      ["DYNAMIC_EXTERNAL_JWT_KID", false, "text"],
+      ["DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64", false, "secret16"],
+    ],
+  },
+  {
     name: "Shopify",
     entries: [
       ["SHOPIFY_CLIENT_ID", true, "text"],
@@ -139,6 +152,9 @@ function validation(name, kind) {
   if (kind === "boolean") return ["true", "false", "1", "0"].includes(value.toLowerCase())
     ? { ok: true }
     : { ok: false, detail: "expected true/false or 1/0" }
+  if (kind === "authmode") return ["external_jwt", "dynamic_email_fallback"].includes(value)
+    ? { ok: true }
+    : { ok: false, detail: "expected external_jwt or dynamic_email_fallback" }
   if (kind === "scopes") {
     const required = ["read_orders", "write_orders", "read_checkouts"]
     const scopes = new Set(value.split(",").map((item) => item.trim()).filter(Boolean))
@@ -177,6 +193,33 @@ for (const name of ["NEXT_PUBLIC_APP_URL", "SHOPIFY_APP_URL", "PINETREE_INTEGRAT
   if (localMode && productionLooking) {
     warnings.push(`${name} looks production-like while NODE_ENV is ${nodeEnv}.`)
   }
+}
+
+const dynamicAuthMode = String(env.NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE ?? "").trim()
+const dynamicEmailFallbackDisabled = String(env.NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK ?? "").trim().toLowerCase() === "false"
+if (dynamicAuthMode === "external_jwt") {
+  const externalJwtVars = [
+    "DYNAMIC_EXTERNAL_JWT_ENABLED",
+    "DYNAMIC_EXTERNAL_JWT_ISSUER",
+    "DYNAMIC_EXTERNAL_JWT_AUDIENCE",
+    "DYNAMIC_EXTERNAL_JWT_KID",
+    "DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64",
+  ]
+  const missingExternalJwtVars = externalJwtVars.filter((name) => !present(name))
+  const enabledValue = String(env.DYNAMIC_EXTERNAL_JWT_ENABLED ?? "").trim().toLowerCase()
+  if (missingExternalJwtVars.length > 0 || !["true", "1"].includes(enabledValue)) {
+    requiredFailures += 1
+    warnings.push(
+      `NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE=external_jwt requires DYNAMIC_EXTERNAL_JWT_ENABLED=true and all of ${externalJwtVars.join(", ")}. ` +
+        (missingExternalJwtVars.length > 0 ? `Missing: ${missingExternalJwtVars.join(", ")}.` : "DYNAMIC_EXTERNAL_JWT_ENABLED is not true.")
+    )
+  }
+} else if (dynamicEmailFallbackDisabled) {
+  requiredFailures += 1
+  warnings.push(
+    "NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK=false without NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE=external_jwt disables PineTree Wallet " +
+      "creation entirely (no fallback, no external JWT). Set AUTH_MODE=external_jwt or leave EMAIL_FALLBACK unset/true."
+  )
 }
 
 if (present("PINETREE_INTEGRATION_API_KEY")) {

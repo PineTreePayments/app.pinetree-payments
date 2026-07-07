@@ -231,6 +231,32 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("Log in or sign up")
   })
 
+  it("fallback Dynamic auth is gated by PineTree-branded wallet verification copy", () => {
+    const createFn = page.slice(
+      page.indexOf("function handleCreateWallet()"),
+      page.indexOf("function handleUsePineTreeAccountEmail()")
+    )
+    expect(page).toContain('type WalletCreationStep =')
+    expect(page).toContain('| "verification_required"')
+    expect(page).toContain('if (step === "verification_required") return "Verification required"')
+    expect(page).toContain("const requestDynamicVerificationPrompt = useCallback")
+    expect(createFn).toContain('if (pineTreeControlledDynamicAuthAvailable) {')
+    expect(createFn).toContain('openDynamicEmailFallbackAuth("create_pinetree_wallet")')
+    expect(createFn).toContain('requestDynamicVerificationPrompt("create_pinetree_wallet")')
+    expect(page).toContain("For security, we need to verify access to your PineTree Wallet before enabling wallet creation and withdrawals.")
+    expect(page).toContain("Verify PineTree Wallet access")
+    expect(page).toContain("Using your PineTree account email: {merchantEmail}")
+  })
+
+  it("cancelled Dynamic verification clears pending setup instead of spinning forever", () => {
+    expect(page).toContain('useDynamicEvents("authFlowCancelled"')
+    expect(page).toContain('console.info("[pinetree-wallets] dynamic_auth_cancelled"')
+    expect(page).toContain("setDynamicVerificationPromptReason(null)")
+    expect(page).toContain("setPendingSync(false)")
+    expect(page).toContain('recordWalletSetupFailure("dynamic_auth_cancelled", "failed"')
+    expect(page).toContain('logWalletCreationStep("failed", { reason: "dynamic_auth_cancelled" })')
+  })
+
   it("shows Create PineTree Wallet when no profile exists, not the Dynamic session state", () => {
     // The Create vs Open decision is driven by 'hasWallet' which comes from profileState (DB),
     // not from the raw Dynamic useUserWallets() data
@@ -350,6 +376,33 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY")
     expect(page).not.toContain("DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64")
     expect(page).not.toContain("recoveryPhrase")
+  })
+
+  it("gates the Dynamic auth mode diagnostic to development only and never logs secrets", () => {
+    expect(provider).toContain('if (process.env.NODE_ENV === "production") return')
+    const providerDiagnosticEffect = provider.slice(
+      provider.indexOf("useEffect(() => {\n    if (process.env.NODE_ENV"),
+      provider.indexOf("}, [dynamicAuthConfig.emailFallbackEnabled")
+    )
+    expect(providerDiagnosticEffect).toContain("dynamic_environment_config")
+    expect(providerDiagnosticEffect).toContain("pineTreeDynamicAuthMode: dynamicAuthConfig.mode")
+    expect(providerDiagnosticEffect).toContain("pineTreeDynamicEmailFallbackEnabled: dynamicAuthConfig.emailFallbackEnabled")
+    expect(providerDiagnosticEffect).toContain("pineTreeDynamicExternalJwtConfigured: dynamicAuthConfig.externalJwtConfigured")
+
+    expect(page).toContain("dynamic_auth_diagnostic")
+    const pageDiagnosticEffect = page.slice(
+      page.indexOf("// Dev-only wallet auth diagnostic"),
+      page.indexOf("// --- SDK load timeout ---")
+    )
+    expect(pageDiagnosticEffect).toContain('if (process.env.NODE_ENV === "production") return')
+    expect(pageDiagnosticEffect).toContain("authMode: dynamicAuthConfig.mode")
+    expect(pageDiagnosticEffect).toContain("emailFallbackEnabled: dynamicAuthConfig.emailFallbackEnabled")
+    expect(pageDiagnosticEffect).toContain("externalJwtEndpointConfigured: dynamicAuthConfig.externalJwtConfigured")
+    expect(pageDiagnosticEffect).toContain("merchantEmailPresent: Boolean(merchantEmail)")
+    // Only presence booleans - never the raw email, JWT, signing key, wallet address, or merchant id.
+    expect(pageDiagnosticEffect).not.toContain("merchantEmail,")
+    expect(pageDiagnosticEffect).not.toContain("externalJwt:")
+    expect(pageDiagnosticEffect).not.toContain("merchantId")
   })
 
   it("Dynamic profile sync sends only Dynamic user, Base, and Solana addresses", () => {

@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useDynamicContext, useDynamicWaas, useEmbeddedWallet, useExternalAuth, useRefreshUser, useSwitchWallet, useUserWallets } from "@dynamic-labs/sdk-react-core"
+import { useDynamicContext, useDynamicEvents, useDynamicWaas, useEmbeddedWallet, useExternalAuth, useRefreshUser, useSwitchWallet, useUserWallets } from "@dynamic-labs/sdk-react-core"
 import { Transaction } from "@solana/web3.js"
 import { AlertTriangle, CheckCircle2, ChevronDown, Copy, X } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
@@ -254,6 +254,7 @@ type WalletCreationStep =
   | "idle"
   | "repairing_profile"
   | "opening_dynamic"
+  | "verification_required"
   | "waiting_for_dynamic_auth"
   | "dynamic_authenticated"
   | "provisioning_wallet"
@@ -985,6 +986,7 @@ function EmptyWalletPanel({ title, detail }: { title: string; detail: string }) 
 function walletCreationStepMessage(step: WalletCreationStep) {
   if (step === "repairing_profile") return "Repairing PineTree Wallet setup..."
   if (step === "opening_dynamic") return "Creating PineTree Wallet..."
+  if (step === "verification_required") return "Verification required"
   if (step === "waiting_for_dynamic_auth") return "Securing wallet access..."
   if (step === "dynamic_authenticated") return "Wallet access verified..."
   if (step === "provisioning_wallet") return "Creating PineTree Wallet..."
@@ -2282,6 +2284,7 @@ function PineTreeWalletRuntime() {
   // pendingSync: merchant explicitly clicked "Create PineTree Wallet"
   const [pendingSync, setPendingSync] = useState(false)
   const [walletCreationStep, setWalletCreationStep] = useState<WalletCreationStep>("idle")
+  const [dynamicVerificationPromptReason, setDynamicVerificationPromptReason] = useState<string | null>(null)
   // logoutPending: waiting for Dynamic logout to complete before opening auth flow
   const [logoutPending, setLogoutPending] = useState(false)
   const [repairPendingAfterLogout, setRepairPendingAfterLogout] = useState(false)
@@ -2360,6 +2363,18 @@ function PineTreeWalletRuntime() {
         params.get("debugPineTreeWallet") === "true"
     )
   }, [])
+
+  // Dev-only wallet auth diagnostic. Never logs JWTs, signing keys, emails,
+  // wallet addresses, or merchant IDs - only presence/mode booleans.
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return
+    console.debug("[pinetree-wallets] dynamic_auth_diagnostic", {
+      authMode: dynamicAuthConfig.mode,
+      emailFallbackEnabled: dynamicAuthConfig.emailFallbackEnabled,
+      externalJwtEndpointConfigured: dynamicAuthConfig.externalJwtConfigured,
+      merchantEmailPresent: Boolean(merchantEmail),
+    })
+  }, [dynamicAuthConfig.mode, dynamicAuthConfig.emailFallbackEnabled, dynamicAuthConfig.externalJwtConfigured, merchantEmail])
 
   // --- SDK load timeout ---
   useEffect(() => {
@@ -2488,6 +2503,7 @@ function PineTreeWalletRuntime() {
               setProvisioningRetryExhausted(false)
               setFinalProvisioningRefreshAttempted(false)
               setWalletCreationStep("idle")
+              setDynamicVerificationPromptReason(null)
               console.info("[pinetree-wallets] wallet_profile_load_state", {
                 profileExists: false,
                 setupFlagPresent: setupStarted,
@@ -2727,6 +2743,7 @@ function PineTreeWalletRuntime() {
     const nextStage: Partial<Record<WalletCreationStep, WalletSetupStage>> = {
       idle: "idle",
       opening_dynamic: "dynamic_auth_opened",
+      verification_required: "dynamic_auth_opened",
       waiting_for_dynamic_auth: "dynamic_auth_opened",
       dynamic_authenticated: "dynamic_auth_completed",
       provisioning_wallet: "waiting_for_dynamic_wallets",
@@ -2795,7 +2812,24 @@ function PineTreeWalletRuntime() {
     profileSyncDiagnostics.providerSyncStatus,
   ])
 
+  useDynamicEvents("authFlowCancelled", () => {
+    if (!pendingSync && !dynamicVerificationPromptReason) return
+    console.info("[pinetree-wallets] dynamic_auth_cancelled", {
+      pendingSync,
+      verificationPromptOpen: Boolean(dynamicVerificationPromptReason),
+    })
+    setDynamicVerificationPromptReason(null)
+    setPendingSync(false)
+    setSyncing(false)
+    clearWalletSetupInProgress()
+    recordWalletSetupFailure("dynamic_auth_cancelled", "failed", {
+      reason: dynamicVerificationPromptReason || "dynamic_auth_cancelled",
+    })
+    logWalletCreationStep("failed", { reason: "dynamic_auth_cancelled" })
+  })
+
   const openDynamicEmailFallbackAuth = useCallback((reason: string) => {
+    setDynamicVerificationPromptReason(null)
     if (pineTreeControlledDynamicAuthAvailable) {
       const token = accessTokenRef.current
       setShowAuthFlow(false)
@@ -2991,6 +3025,46 @@ function PineTreeWalletRuntime() {
     setShowAuthFlow,
     setShowDynamicUserProfile,
     signInWithExternalJwt,
+  ])
+
+  const requestDynamicVerificationPrompt = useCallback((reason: string) => {
+    setPendingSync(false)
+    setDynamicVerificationPromptReason(reason)
+    logWalletCreationStep("verification_required", {
+      reason,
+      authMode: dynamicAuthConfig.mode,
+      merchantEmailPresent: Boolean(merchantEmail),
+    })
+    console.info("[pinetree-wallets] dynamic_verification_required", {
+      reason,
+      authMode: dynamicAuthConfig.mode,
+      externalJwtConfigured: pineTreeControlledDynamicAuthAvailable,
+      emailFallbackEnabled: dynamicAuthConfig.emailFallbackEnabled,
+      merchantEmailPresent: Boolean(merchantEmail),
+    })
+  }, [
+    dynamicAuthConfig.emailFallbackEnabled,
+    dynamicAuthConfig.mode,
+    logWalletCreationStep,
+    merchantEmail,
+    pineTreeControlledDynamicAuthAvailable,
+  ])
+
+  const continueDynamicVerification = useCallback(() => {
+    const reason = dynamicVerificationPromptReason || "create_pinetree_wallet"
+    setDynamicVerificationPromptReason(null)
+    setPendingSync(true)
+    markWalletSetupInProgress()
+    logWalletCreationStep("waiting_for_dynamic_auth", {
+      reason,
+      merchantEmailPresent: Boolean(merchantEmail),
+    })
+    openDynamicEmailFallbackAuth(reason)
+  }, [
+    dynamicVerificationPromptReason,
+    logWalletCreationStep,
+    merchantEmail,
+    openDynamicEmailFallbackAuth,
   ])
 
   const scheduleDynamicEmailFallbackAuth = useCallback((reason: string) => {
@@ -4272,6 +4346,7 @@ function PineTreeWalletRuntime() {
     setIdentityUnverified(false)
     setWalletSetupStage("ready")
     setWalletSetupFailureReason(null)
+    setDynamicVerificationPromptReason(null)
     clearWalletSetupInProgress()
     setWalletCreationStep("profile_synced")
   }, [dynamicProfileReady])
@@ -4578,13 +4653,19 @@ function PineTreeWalletRuntime() {
     setRepairFailedIncomplete(false)
     setProvisioningRetryExhausted(false)
     setFinalProvisioningRefreshAttempted(false)
-    setPendingSync(true)
-    markWalletSetupInProgress()
     if (sdkHasLoaded && user) {
+      setPendingSync(true)
+      markWalletSetupInProgress()
       void refreshDynamicWalletRuntime("create_embedded_wallet_setup", { requireApprovalWallet: false })
       return
     }
-    openDynamicEmailFallbackAuth("create_pinetree_wallet")
+    if (pineTreeControlledDynamicAuthAvailable) {
+      setPendingSync(true)
+      markWalletSetupInProgress()
+      openDynamicEmailFallbackAuth("create_pinetree_wallet")
+      return
+    }
+    requestDynamicVerificationPrompt("create_pinetree_wallet")
   }
 
   function handleUsePineTreeAccountEmail() {
@@ -5147,6 +5228,20 @@ function PineTreeWalletRuntime() {
           </div>
         ) : null}
 
+        {dynamicVerificationPromptReason ? (
+          <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-3">
+            <p className="text-xs font-semibold leading-5 text-blue-900">Verification required</p>
+            <p className="mt-1 text-xs leading-5 text-blue-800">
+              For security, we need to verify access to your PineTree Wallet before enabling wallet creation and withdrawals.
+            </p>
+            {merchantEmail ? (
+              <p className="mt-1 text-xs leading-5 text-blue-700">
+                Using your PineTree account email: {merchantEmail}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
         {showDynamicAuthMisconfigurationWarning ? (
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-3 text-xs text-amber-900">
             <p className="font-semibold">Dynamic auth configuration warning</p>
@@ -5243,7 +5338,16 @@ function PineTreeWalletRuntime() {
         ) : null}
 
         <div className="mt-6 flex justify-start">
-          {walletSetupPrimaryState === "email_mismatch" || walletSetupPrimaryState === "email_unverified" ? (
+          {dynamicVerificationPromptReason ? (
+            <button
+              type="button"
+              onClick={continueDynamicVerification}
+              disabled={syncing || logoutPending}
+              className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+            >
+              Verify PineTree Wallet access
+            </button>
+          ) : walletSetupPrimaryState === "email_mismatch" || walletSetupPrimaryState === "email_unverified" ? (
             <button
               type="button"
               onClick={handleUsePineTreeAccountEmail}

@@ -243,7 +243,10 @@ describe("PineTree Dynamic provisioning flow", () => {
     )
     expect(createFn).toContain('refreshDynamicWalletRuntime("create_embedded_wallet_setup"')
     expect(createFn).toContain("if (sdkHasLoaded && user) {")
-    expect(createFn).toContain("return\n    }\n    openDynamicEmailFallbackAuth(\"create_pinetree_wallet\")")
+    expect(createFn).toContain('if (pineTreeControlledDynamicAuthAvailable) {')
+    expect(createFn).toContain('openDynamicEmailFallbackAuth("create_pinetree_wallet")')
+    expect(createFn).toContain('requestDynamicVerificationPrompt("create_pinetree_wallet")')
+    expect(createFn.indexOf('if (sdkHasLoaded && user) {')).toBeLessThan(createFn.indexOf('requestDynamicVerificationPrompt("create_pinetree_wallet")'))
   })
 
   it("Try again during first-time provisioning restarts PineTree polling instead of link-new-wallet auth", () => {
@@ -341,10 +344,10 @@ describe("PineTree Dynamic provisioning flow", () => {
 
   it("Create PineTree Wallet is hidden while a mismatched Dynamic session is active", () => {
     expect(page).toContain('const showProvisioningRetryOnly = walletSetupPrimaryState === "failed" && Boolean(user)')
-    expect(page).toContain('{walletSetupPrimaryState === "email_mismatch" || walletSetupPrimaryState === "email_unverified" ? (')
+    expect(page).toContain(') : walletSetupPrimaryState === "email_mismatch" ? (')
     expect(page).toContain("Use PineTree account email")
     const ctaBlock = page.slice(
-      page.indexOf('{walletSetupPrimaryState === "email_mismatch" || walletSetupPrimaryState === "email_unverified" ? ('),
+      page.indexOf('<div className="mt-6 flex justify-start">'),
       page.indexOf(") : hasWallet ? (")
     )
     expect(ctaBlock).not.toContain("Create PineTree Wallet")
@@ -492,7 +495,7 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain('walletSetupPrimaryState === "email_mismatch" ? "Wrong sign-in" :')
     expect(page).toContain("This browser is signed into a different wallet session.")
     const ctaBlock = page.slice(
-      page.indexOf('{walletSetupPrimaryState === "email_mismatch" || walletSetupPrimaryState === "email_unverified" ? ('),
+      page.indexOf('<div className="mt-6 flex justify-start">'),
       page.indexOf(') : walletSetupPrimaryState === "reconnect_needed" ? (')
     )
     expect(ctaBlock).toContain("Switch PineTree Wallet sign-in")
@@ -611,7 +614,7 @@ describe("PineTree Dynamic provisioning flow", () => {
   it("ready profile still shows Base/Solana chips and Open PineTree Wallet", () => {
     expect(page).toContain("<EnabledRailChips rows={walletRailRows} />")
     const ctaBlock = page.slice(
-      page.indexOf('{walletSetupPrimaryState === "email_mismatch" || walletSetupPrimaryState === "email_unverified" ? ('),
+      page.indexOf('<div className="mt-6 flex justify-start">'),
       page.indexOf(") : showProvisioningRetryOnly ? null : (")
     )
     expect(ctaBlock).toContain("hasWallet ? (")
@@ -650,7 +653,7 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(mismatchIndex).toBeGreaterThan(-1)
     expect(repairIndex).toBeGreaterThan(mismatchIndex)
     const mismatchBranch = page.slice(
-      page.indexOf('{walletSetupPrimaryState === "email_mismatch" || walletSetupPrimaryState === "email_unverified" ? ('),
+      page.indexOf('<div className="mt-6 flex justify-start">'),
       page.indexOf(') : walletSetupPrimaryState === "reconnect_needed" ? (')
     )
     expect(mismatchBranch).not.toContain("Repair PineTree Wallet setup")
@@ -672,7 +675,7 @@ describe("PineTree Dynamic provisioning flow", () => {
   it("ready profile with a matching Dynamic session shows Ready and Open PineTree Wallet only", () => {
     expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
     const ctaChain = page.slice(
-      page.indexOf('{walletSetupPrimaryState === "email_mismatch" || walletSetupPrimaryState === "email_unverified" ? ('),
+      page.indexOf('<div className="mt-6 flex justify-start">'),
       page.indexOf(") : showProvisioningRetryOnly ? null : (")
     )
     // When primaryState is "ready", every earlier CTA branch (mismatch/unverified/
@@ -759,7 +762,7 @@ describe("PineTree Dynamic provisioning flow", () => {
       page.indexOf(') : walletSetupPrimaryState === "failed" ? (')
     )
     const identityCta = page.slice(
-      page.indexOf('{walletSetupPrimaryState === "email_mismatch" || walletSetupPrimaryState === "email_unverified" ? ('),
+      page.indexOf('<div className="mt-6 flex justify-start">'),
       page.indexOf(') : walletSetupPrimaryState === "reconnect_needed" ? (')
     )
     expect(identityCta).toContain("handleUsePineTreeAccountEmail")

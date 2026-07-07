@@ -141,6 +141,7 @@ export default function PineTreeDynamicProvider({ children }: { children: ReactN
   const dynamicAuthConfig = getPineTreeDynamicAuthConfig()
 
   useEffect(() => {
+    if (process.env.NODE_ENV === "production") return
     console.info("[pinetree-wallets] dynamic_environment_config", {
       NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID: environmentId ? "present" : "missing",
       pineTreeDynamicAuthMode: dynamicAuthConfig.mode,
