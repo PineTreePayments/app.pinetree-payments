@@ -35,7 +35,10 @@ function getExternalJwtConfigDiagnostics() {
     audienceConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE?.trim()),
     kidConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_KID || process.env.DYNAMIC_EXTERNAL_JWT_KEY_ID),
     signingKeyConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64 || process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY),
-    jwksPublicConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC?.trim()),
+    jwksDerivedFromSigningKey: Boolean(
+      (process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64 || process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY) &&
+        (process.env.DYNAMIC_EXTERNAL_JWT_KID || process.env.DYNAMIC_EXTERNAL_JWT_KEY_ID)
+    ),
   }
 }
 

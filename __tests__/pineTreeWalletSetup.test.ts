@@ -158,7 +158,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("externalJwtEnabled")
     expect(page).toContain("externalJwtIssuerConfigured")
     expect(page).toContain("externalJwtAudienceConfigured")
-    expect(page).toContain("externalJwtJwksPublicConfigured")
+    expect(page).toContain("externalJwtJwksDerivedFromSigningKey")
     expect(page).toContain("kidConfigured")
     expect(page).toContain("signingKeyConfigured")
     expect(page).toContain("externalJwtEndpointStatus")

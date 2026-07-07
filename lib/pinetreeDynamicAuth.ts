@@ -17,7 +17,7 @@ export type PineTreeDynamicExternalJwtPayload = {
     audienceConfigured: boolean
     kidConfigured: boolean
     signingKeyConfigured: boolean
-    jwksPublicConfigured: boolean
+    jwksDerivedFromSigningKey: boolean
   }
 }
 

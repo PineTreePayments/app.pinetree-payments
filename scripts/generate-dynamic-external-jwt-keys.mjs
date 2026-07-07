@@ -16,7 +16,6 @@ const jwk = {
   use: "sig",
 }
 const jwks = { keys: [jwk] }
-const jwksJson = JSON.stringify(jwks)
 const signingKeyB64 = Buffer.from(privateKeyPem, "utf8").toString("base64")
 
 const output = {
@@ -42,7 +41,6 @@ console.log(`DYNAMIC_EXTERNAL_JWT_ISSUER=${issuer}`)
 console.log(`DYNAMIC_EXTERNAL_JWT_AUDIENCE=${audience}`)
 console.log(`DYNAMIC_EXTERNAL_JWT_KID=${kid}`)
 console.log(`DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64=${signingKeyB64}`)
-console.log(`DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC='${jwksJson}'`)
 console.log("```")
 console.log("")
 console.log("B) Vercel public env vars")

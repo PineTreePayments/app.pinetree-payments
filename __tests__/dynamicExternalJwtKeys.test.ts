@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process"
 import os from "node:os"
 import path from "node:path"
-import { exportJWK, exportPKCS8, generateKeyPair } from "jose"
+import { exportPKCS8, generateKeyPair } from "jose"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { GET } from "@/app/.well-known/dynamic-jwks.json/route"
 
-const envKeys = ["DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC", "DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64", "DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY"] as const
+const envKeys = ["DYNAMIC_EXTERNAL_JWT_KID", "DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64", "DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY"] as const
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]])) as Record<(typeof envKeys)[number], string | undefined>
 
 function execNodeAllowFailure(args: string[], env: NodeJS.ProcessEnv) {
@@ -23,7 +23,7 @@ function execNodeAllowFailure(args: string[], env: NodeJS.ProcessEnv) {
 
 describe("Dynamic external JWT key material", () => {
   beforeEach(() => {
-    delete process.env.DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC
+    delete process.env.DYNAMIC_EXTERNAL_JWT_KID
     delete process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64
     delete process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY
   })
@@ -50,6 +50,7 @@ describe("Dynamic external JWT key material", () => {
       jwks: { keys: Array<Record<string, unknown>> }
     }
 
+    expect(output).not.toContain("JWKS_PUBLIC")
     expect(parsed.kid).toMatch(/^pinetree-dynamic-/)
     expect(parsed.issuer).toBeTruthy()
     expect(parsed.audience).toBe("dynamic")
@@ -69,14 +70,9 @@ describe("Dynamic external JWT key material", () => {
   async function createTestEnv(overrides: Record<string, string> = {}) {
     const keys = await generateKeyPair("RS256", { extractable: true })
     const privateKeyPem = await exportPKCS8(keys.privateKey)
-    const publicJwk = await exportJWK(keys.publicKey)
     const signingKeyB64 = Buffer.from(privateKeyPem, "utf8").toString("base64")
-    const jwks = JSON.stringify({
-      keys: [{ ...publicJwk, kid: "pinetree-test-kid", alg: "RS256", use: "sig" }],
-    })
     return {
       signingKeyB64,
-      jwks,
       env: {
         ...process.env,
         DYNAMIC_EXTERNAL_JWT_ENABLED: "true",
@@ -84,7 +80,6 @@ describe("Dynamic external JWT key material", () => {
         DYNAMIC_EXTERNAL_JWT_AUDIENCE: "dynamic",
         DYNAMIC_EXTERNAL_JWT_KID: "pinetree-test-kid",
         DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64: signingKeyB64,
-        DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC: `'${jwks}'`,
         ...overrides,
       },
     }
@@ -119,7 +114,7 @@ describe("Dynamic external JWT key material", () => {
   })
 
   it("dynamic:jwt:test --debug-env masks secrets and reports repo env paths", async () => {
-    const { env, signingKeyB64, jwks } = await createTestEnv()
+    const { env, signingKeyB64 } = await createTestEnv()
     const output = execFileSync("node", ["scripts/test-dynamic-external-jwt.mjs", "--debug-env"], {
       cwd: process.cwd(),
       encoding: "utf8",
@@ -133,8 +128,7 @@ describe("Dynamic external JWT key material", () => {
         enabledValue: boolean
         signingKeyConfigured: boolean
         signingKeyLength: number
-        jwksPublicConfigured: boolean
-        jwksPublicLength: number
+        jwksDerivationSucceeded: boolean
         jwksKidMatchesEnvKid: boolean
       }
     }
@@ -145,15 +139,14 @@ describe("Dynamic external JWT key material", () => {
     expect(parsed.debugEnv.enabledValue).toBe(true)
     expect(parsed.debugEnv.signingKeyConfigured).toBe(true)
     expect(parsed.debugEnv.signingKeyLength).toBe(signingKeyB64.length)
-    expect(parsed.debugEnv.jwksPublicConfigured).toBe(true)
-    expect(parsed.debugEnv.jwksPublicLength).toBe(jwks.length)
+    expect(parsed.debugEnv.jwksDerivationSucceeded).toBe(true)
     expect(parsed.debugEnv.jwksKidMatchesEnvKid).toBe(true)
     expect(output).not.toContain(signingKeyB64)
-    expect(output).not.toContain(jwks)
+    expect(output).not.toContain("jwksPublicConfigured")
     expect(output).not.toContain("BEGIN PRIVATE KEY")
   })
 
-  it("dynamic:jwt:test recognizes missing enabled and malformed JWKS clearly", async () => {
+  it("dynamic:jwt:test recognizes missing enabled and invalid signing key clearly", async () => {
     const missingEnabled = await createTestEnv({ DYNAMIC_EXTERNAL_JWT_ENABLED: "" })
     const missingOutput = execNodeAllowFailure(["scripts/test-dynamic-external-jwt.mjs"], missingEnabled.env)
     expect(JSON.parse(missingOutput)).toMatchObject({
@@ -161,39 +154,27 @@ describe("Dynamic external JWT key material", () => {
       code: "dynamic_external_jwt_not_enabled",
     })
 
-    const malformed = await createTestEnv({ DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC: "'{\"keys\":[" })
-    const malformedOutput = execNodeAllowFailure(["scripts/test-dynamic-external-jwt.mjs"], malformed.env)
-    expect(JSON.parse(malformedOutput)).toMatchObject({
+    const invalidKey = await createTestEnv({ DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64: "not-a-real-base64-key" })
+    const invalidKeyOutput = execNodeAllowFailure(["scripts/test-dynamic-external-jwt.mjs"], invalidKey.env)
+    expect(JSON.parse(invalidKeyOutput)).toMatchObject({
       ok: false,
-      code: "dynamic_external_jwt_jwks_invalid",
+      code: "dynamic_external_jwt_signing_key_invalid",
     })
   })
 
-  it("dynamic:jwt:test fails clearly when JWKS kid does not match env kid", async () => {
-    const mismatched = await createTestEnv({ DYNAMIC_EXTERNAL_JWT_KID: "different-kid" })
+  it("dynamic:jwt:test fails clearly when kid is missing", async () => {
+    const mismatched = await createTestEnv({ DYNAMIC_EXTERNAL_JWT_KID: "" })
     const output = execNodeAllowFailure(["scripts/test-dynamic-external-jwt.mjs"], mismatched.env)
     expect(JSON.parse(output)).toMatchObject({
       ok: false,
-      code: "dynamic_external_jwt_jwks_kid_mismatch",
+      code: "dynamic_external_jwt_kid_missing",
     })
   })
 
-  it("JWKS endpoint returns public key only and safe cache headers", async () => {
-    process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64 = Buffer.from(
-      "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----",
-      "utf8"
-    ).toString("base64")
-    process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\nlegacy-secret\n-----END PRIVATE KEY-----"
-    process.env.DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC = JSON.stringify({
-      keys: [{
-        kty: "RSA",
-        kid: "pinetree-test-kid",
-        alg: "RS256",
-        use: "sig",
-        n: "public-modulus",
-        e: "AQAB",
-      }],
-    })
+  it("JWKS endpoint derives public key from signing key and returns safe cache headers", async () => {
+    const { env, signingKeyB64 } = await createTestEnv()
+    process.env.DYNAMIC_EXTERNAL_JWT_KID = env.DYNAMIC_EXTERNAL_JWT_KID
+    process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64 = signingKeyB64
 
     const res = await GET()
     expect(res.status).toBe(200)
@@ -202,16 +183,33 @@ describe("Dynamic external JWT key material", () => {
     const serialized = JSON.stringify(json)
 
     expect(json.keys[0].kid).toBe("pinetree-test-kid")
-    expect(serialized).toContain("public-modulus")
     expect(serialized).not.toContain("PRIVATE KEY")
-    expect(serialized).not.toContain("secret")
-    expect(serialized).not.toContain(process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64)
+    expect(serialized).not.toContain(signingKeyB64)
     expect(serialized).not.toContain('"d"')
+    expect(json.keys[0]).toMatchObject({
+      alg: "RS256",
+      use: "sig",
+      kty: "RSA",
+    })
   })
 
-  it("JWKS endpoint fails clearly when public JWKS env is missing", async () => {
+  it("JWKS endpoint fails clearly when signing key or kid is missing", async () => {
     const res = await GET()
     expect(res.status).toBe(503)
-    await expect(res.json()).resolves.toEqual({ error: "dynamic_external_jwt_jwks_missing" })
+    await expect(res.json()).resolves.toEqual({ error: "dynamic_external_jwt_kid_missing" })
+
+    process.env.DYNAMIC_EXTERNAL_JWT_KID = "pinetree-test-kid"
+    const missingKey = await GET()
+    expect(missingKey.status).toBe(503)
+    await expect(missingKey.json()).resolves.toEqual({ error: "dynamic_external_jwt_signing_key_missing" })
+  })
+
+  it("JWKS endpoint fails clearly when signing key is invalid", async () => {
+    process.env.DYNAMIC_EXTERNAL_JWT_KID = "pinetree-test-kid"
+    process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64 = "not-a-real-base64-key"
+
+    const res = await GET()
+    expect(res.status).toBe(503)
+    await expect(res.json()).resolves.toEqual({ error: "dynamic_external_jwt_signing_key_invalid" })
   })
 })

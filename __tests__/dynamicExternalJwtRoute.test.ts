@@ -1,7 +1,8 @@
-import { exportPKCS8, exportJWK, generateKeyPair, importJWK, jwtVerify } from "jose"
+import { exportPKCS8, generateKeyPair, importJWK, jwtVerify } from "jose"
 import { NextRequest } from "next/server"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { POST } from "@/app/api/wallets/dynamic/external-jwt/route"
+import { GET as GET_JWKS } from "@/app/.well-known/dynamic-jwks.json/route"
 import { getMerchantById } from "@/database/merchants"
 
 const { getUser, createClient } = vi.hoisted(() => {
@@ -29,7 +30,6 @@ const envKeys = [
   "DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64",
   "DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY",
   "DYNAMIC_EXTERNAL_JWT_KID",
-  "DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC",
   "DYNAMIC_EXTERNAL_JWT_KEY_ID",
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
@@ -58,7 +58,6 @@ describe("Dynamic external JWT route", () => {
     vi.clearAllMocks()
     const keys = await generateKeyPair("RS256", { extractable: true })
     publicKey = keys.publicKey
-    const publicJwk = await exportJWK(keys.publicKey)
     const privateKeyPem = await exportPKCS8(keys.privateKey)
     process.env.NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE = "external_jwt"
     process.env.DYNAMIC_EXTERNAL_JWT_ENABLED = "true"
@@ -67,9 +66,6 @@ describe("Dynamic external JWT route", () => {
     process.env.DYNAMIC_EXTERNAL_JWT_KID = "pinetree-test-kid"
     process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64 = Buffer.from(privateKeyPem, "utf8").toString("base64")
     delete process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY
-    process.env.DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC = JSON.stringify({
-      keys: [{ ...publicJwk, kid: "pinetree-test-kid", alg: "RS256", use: "sig" }],
-    })
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.test"
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key"
     delete process.env.DYNAMIC_EXTERNAL_JWT_KEY_ID
@@ -121,7 +117,7 @@ describe("Dynamic external JWT route", () => {
         audienceConfigured: boolean
         kidConfigured: boolean
         signingKeyConfigured: boolean
-        jwksPublicConfigured: boolean
+        jwksDerivedFromSigningKey: boolean
       }
     }
 
@@ -154,17 +150,20 @@ describe("Dynamic external JWT route", () => {
       audienceConfigured: true,
       kidConfigured: true,
       signingKeyConfigured: true,
-      jwksPublicConfigured: true,
+      jwksDerivedFromSigningKey: true,
     })
     expect(json.diagnostics).not.toHaveProperty("issuer")
     expect(json.diagnostics).not.toHaveProperty("jwksUrl")
+    expect(json.diagnostics).not.toHaveProperty("jwksPublicConfigured")
   })
 
-  it("route-generated JWT verifies against the configured public JWKS", async () => {
+  it("route-generated JWT verifies against the derived public JWKS", async () => {
     const res = await POST(request())
     expect(res.status).toBe(200)
     const json = (await res.json()) as { externalJwt: string; externalUserId: string }
-    const jwks = JSON.parse(process.env.DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC || "{}") as { keys: Array<Record<string, unknown>> }
+    const jwksRes = await GET_JWKS()
+    expect(jwksRes.status).toBe(200)
+    const jwks = await jwksRes.json() as { keys: Array<Record<string, unknown>> }
     const jwk = jwks.keys.find((key) => key.kid === "pinetree-test-kid")
     expect(jwk).toBeTruthy()
     const verificationKey = await importJWK(jwk!, "RS256")
@@ -191,7 +190,7 @@ describe("Dynamic external JWT route", () => {
       audienceConfigured: true,
       kidConfigured: true,
       signingKeyConfigured: true,
-      jwksPublicConfigured: true,
+      jwksDerivedFromSigningKey: true,
       userPresent: true,
       merchantResolved: true,
       status: "issued",
@@ -201,6 +200,7 @@ describe("Dynamic external JWT route", () => {
     expect(serialized).not.toContain("merchant@example.com")
     expect(serialized).not.toContain("BEGIN PRIVATE KEY")
     expect(serialized).not.toContain(process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64)
+    expect(serialized).not.toContain("jwksPublicConfigured")
 
     info.mockRestore()
   })

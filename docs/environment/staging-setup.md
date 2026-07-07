@@ -51,9 +51,9 @@ DYNAMIC_EXTERNAL_JWT_ISSUER=https://app.pinetree-payments.com
 DYNAMIC_EXTERNAL_JWT_AUDIENCE=dynamic
 
 # Server-only signing material. Use npm run dynamic:jwt:generate.
+# PineTree derives /.well-known/dynamic-jwks.json from this key at runtime.
 DYNAMIC_EXTERNAL_JWT_KID=...
 DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64=...
-DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC='{"keys":[...]}'
 ```
 
 Full setup guide: [dynamic-external-jwt-setup.md](./dynamic-external-jwt-setup.md).

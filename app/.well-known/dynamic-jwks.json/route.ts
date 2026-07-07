@@ -1,44 +1,71 @@
 import { NextResponse } from "next/server"
+import { createPrivateKey, createPublicKey } from "node:crypto"
+import { exportJWK, importPKCS8 } from "jose"
 
-function parsePublicJwks() {
-  const raw = process.env.DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC
-  if (!raw) return null
+function getSigningKeyPem() {
+  const encodedSigningKey = process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64?.trim()
+  if (!encodedSigningKey) {
+    throw Object.assign(new Error("dynamic_external_jwt_signing_key_missing"), { status: 503 })
+  }
+
   try {
-    const parsed = JSON.parse(raw) as unknown
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      "keys" in parsed &&
-      Array.isArray((parsed as { keys?: unknown }).keys)
-    ) {
-      return parsed
+    const decoded = Buffer.from(encodedSigningKey, "base64").toString("utf8")
+    if (!decoded.includes("-----BEGIN PRIVATE KEY-----") || !decoded.includes("-----END PRIVATE KEY-----")) {
+      throw new Error("invalid_pem")
     }
-    if (typeof parsed === "object" && parsed !== null && "kty" in parsed) {
-      return { keys: [parsed] }
+    return decoded
+  } catch {
+    throw Object.assign(new Error("dynamic_external_jwt_signing_key_invalid"), { status: 503 })
+  }
+}
+
+async function derivePublicJwks() {
+  const kid = process.env.DYNAMIC_EXTERNAL_JWT_KID || process.env.DYNAMIC_EXTERNAL_JWT_KEY_ID
+  if (!kid) {
+    throw Object.assign(new Error("dynamic_external_jwt_kid_missing"), { status: 503 })
+  }
+
+  const signingKeyPem = getSigningKeyPem()
+  try {
+    await importPKCS8(signingKeyPem, "RS256")
+    const privateKey = createPrivateKey(signingKeyPem)
+    const publicKey = createPublicKey(privateKey)
+    const publicJwk = await exportJWK(publicKey)
+    return {
+      keys: [{
+        ...publicJwk,
+        kid,
+        alg: "RS256",
+        use: "sig",
+      }],
     }
   } catch {
-    return null
+    throw Object.assign(new Error("dynamic_external_jwt_signing_key_invalid"), { status: 503 })
   }
-  return null
 }
 
 export async function GET() {
-  const jwks = parsePublicJwks()
-  if (!jwks) {
+  try {
+    const jwks = await derivePublicJwks()
+    return NextResponse.json(jwks, {
+      headers: {
+        "Cache-Control": "public, max-age=300, stale-while-revalidate=300",
+      },
+    })
+  } catch (error) {
+    const status =
+      typeof error === "object" && error !== null && "status" in error && typeof (error as { status?: unknown }).status === "number"
+        ? (error as { status: number }).status
+        : 500
+    const code = error instanceof Error ? error.message : "dynamic_external_jwt_jwks_failed"
     return NextResponse.json(
-      { error: "dynamic_external_jwt_jwks_missing" },
+      { error: code },
       {
-        status: 503,
+        status,
         headers: {
           "Cache-Control": "no-store",
         },
       }
     )
   }
-
-  return NextResponse.json(jwks, {
-    headers: {
-      "Cache-Control": "public, max-age=300, stale-while-revalidate=300",
-    },
-  })
 }

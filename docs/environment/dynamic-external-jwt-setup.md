@@ -5,8 +5,9 @@ External JWT / BYOA lets Dynamic restore the embedded wallet signer session from
 a PineTree-issued JWT instead of asking merchants for a second email login.
 
 Dynamic's current BYOA docs require a configured issuer and a public JWKS URL.
-PineTree can generate the signing key, JWKS, issuer, audience, and JWTs. Dynamic
-must enable/configure BYOA on the project.
+PineTree generates one RS256 signing key and derives the public JWKS at
+`/.well-known/dynamic-jwks.json` from that signing key at runtime. Dynamic must
+enable/configure BYOA on the project.
 
 ## Generate PineTree Values
 
@@ -19,7 +20,7 @@ npm run dynamic:jwt:generate
 This prints:
 
 - Base64-encoded RS256 PEM signing key for server-only env.
-- Public JWKS JSON for Dynamic verification.
+- Public JWKS URL for Dynamic verification.
 - Stable `kid`.
 - Vercel env blocks.
 - Dynamic dashboard values.
@@ -36,7 +37,6 @@ DYNAMIC_EXTERNAL_JWT_ISSUER=https://app.pinetree-payments.com
 DYNAMIC_EXTERNAL_JWT_AUDIENCE=dynamic
 DYNAMIC_EXTERNAL_JWT_KID=<generated kid>
 DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64=<generated base64 signing key>
-DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC='<generated public JWKS JSON>'
 ```
 
 Public/client:
@@ -102,7 +102,7 @@ Please confirm:
 2. Add server-only env vars in staging.
 3. Add public/client env vars in staging.
 4. Deploy staging.
-5. Confirm `/.well-known/dynamic-jwks.json` returns only public JWKS.
+5. Confirm `/.well-known/dynamic-jwks.json` derives and returns only public JWKS.
 6. Ask Dynamic to enable/configure BYOA using the values above.
 7. Test PineTree Wallet setup and reconnect with `?walletDebug=1`.
 8. Confirm debug fields show `dynamicExternalAuthAttempted=true` and

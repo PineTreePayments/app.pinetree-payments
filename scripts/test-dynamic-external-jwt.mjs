@@ -1,8 +1,8 @@
 import fs from "node:fs"
 import path from "node:path"
-import { randomUUID } from "node:crypto"
+import { createPrivateKey, createPublicKey, randomUUID } from "node:crypto"
 import { fileURLToPath } from "node:url"
-import { SignJWT, importJWK, importPKCS8, jwtVerify } from "jose"
+import { SignJWT, exportJWK, importJWK, importPKCS8, jwtVerify } from "jose"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const envPath = path.join(repoRoot, ".env")
@@ -85,37 +85,44 @@ function getSigningKeyPem() {
   throw new Error("dynamic_external_jwt_signing_key_missing")
 }
 
-function parsePublicJwks() {
-  const raw = unwrapEnvValue(process.env.DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC)
-  if (!raw) throw new Error("dynamic_external_jwt_jwks_missing")
-  let parsed
+async function derivePublicJwks(signingKeyPem, kid) {
+  if (!kid) throw new Error("dynamic_external_jwt_kid_missing")
   try {
-    parsed = JSON.parse(raw)
+    await importPKCS8(signingKeyPem, "RS256")
+    const privateKey = createPrivateKey(signingKeyPem)
+    const publicKey = createPublicKey(privateKey)
+    const publicJwk = await exportJWK(publicKey)
+    return {
+      keys: [{
+        ...publicJwk,
+        kid,
+        alg: "RS256",
+        use: "sig",
+      }],
+    }
   } catch {
-    throw new Error("dynamic_external_jwt_jwks_invalid")
+    throw new Error("dynamic_external_jwt_signing_key_invalid")
   }
-  if (parsed && Array.isArray(parsed.keys)) return parsed
-  if (parsed && parsed.kty) return { keys: [parsed] }
-  throw new Error("dynamic_external_jwt_jwks_invalid")
 }
 
 function decodeJwtPart(part) {
   return JSON.parse(Buffer.from(part, "base64url").toString("utf8"))
 }
 
-function getSafeEnvDiagnostics(loadResult) {
+async function getSafeEnvDiagnostics(loadResult) {
   let jwksKid = null
-  let jwksParseError = null
-  try {
-    const jwks = parsePublicJwks()
-    jwksKid = jwks.keys[0]?.kid ?? null
-  } catch (error) {
-    jwksParseError = error instanceof Error ? error.message : "dynamic_external_jwt_jwks_invalid"
-  }
-
+  let jwksDerivationSucceeded = false
+  let jwksDerivationError = null
   const kid = process.env.DYNAMIC_EXTERNAL_JWT_KID || process.env.DYNAMIC_EXTERNAL_JWT_KEY_ID || ""
   const signingKey = unwrapEnvValue(process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64) || unwrapEnvValue(process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY) || ""
-  const jwksPublic = unwrapEnvValue(process.env.DYNAMIC_EXTERNAL_JWT_JWKS_PUBLIC)
+  try {
+    const signingKeyPem = getSigningKeyPem()
+    const jwks = await derivePublicJwks(signingKeyPem, kid)
+    jwksKid = jwks.keys[0]?.kid ?? null
+    jwksDerivationSucceeded = true
+  } catch (error) {
+    jwksDerivationError = error instanceof Error ? error.message : "dynamic_external_jwt_jwks_derivation_failed"
+  }
 
   return {
     cwd: process.cwd(),
@@ -135,11 +142,10 @@ function getSafeEnvDiagnostics(loadResult) {
     kidConfigured: Boolean(kid),
     signingKeyConfigured: Boolean(signingKey),
     signingKeyLength: signingKey ? signingKey.length : 0,
-    jwksPublicConfigured: Boolean(jwksPublic),
-    jwksPublicLength: jwksPublic ? jwksPublic.length : 0,
+    jwksDerivationSucceeded,
     jwksKidConfigured: Boolean(jwksKid),
     jwksKidMatchesEnvKid: Boolean(kid && jwksKid && jwksKid === kid),
-    jwksParseError,
+    jwksDerivationError,
   }
 }
 
@@ -149,7 +155,7 @@ async function main() {
   if (debugEnv) {
     console.log(JSON.stringify({
       ok: true,
-      debugEnv: getSafeEnvDiagnostics(loadResult),
+      debugEnv: await getSafeEnvDiagnostics(loadResult),
     }, null, 2))
     return
   }
@@ -168,7 +174,7 @@ async function main() {
 
   const signingKeyPem = getSigningKeyPem()
   const signingKey = await importPKCS8(signingKeyPem, "RS256")
-  const jwks = parsePublicJwks()
+  const jwks = await derivePublicJwks(signingKeyPem, kid)
   const publicJwk = jwks.keys.find((key) => key?.kid === kid)
   if (!publicJwk) throw new Error("dynamic_external_jwt_jwks_kid_mismatch")
   const verificationKey = await importJWK(publicJwk, "RS256")
@@ -205,7 +211,7 @@ async function main() {
   assertCheck(checks, "payload.exp exists", typeof payload.exp === "number")
   assertCheck(checks, "payload.exp is short-lived", Number(payload.exp) - Number(payload.iat) <= ttlSeconds)
   assertCheck(checks, "payload.email exists for test identity", payload.email === testEmail)
-  assertCheck(checks, "JWT verifies against configured public JWKS", verified.payload.sub === testSubject)
+  assertCheck(checks, "JWT verifies against derived public JWKS", verified.payload.sub === testSubject)
   assertCheck(checks, "JWKS key is public signing material only", publicJwk.alg === "RS256" && publicJwk.use === "sig" && !("d" in publicJwk))
 
   const ok = checks.every((check) => check.pass)
