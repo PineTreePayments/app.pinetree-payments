@@ -8,6 +8,7 @@ function read(file: string) {
 
 describe("check-environment.mjs PineTree Wallet Dynamic auth coverage", () => {
   const script = read("scripts/check-environment.mjs")
+  const debugWalletAuthRoute = read("app/api/debug/pinetree-wallet-auth/route.ts")
 
   it("validates every env var the Dynamic auth code actually reads", () => {
     expect(script).toContain('name: "PineTree Wallet Dynamic auth"')
@@ -39,5 +40,20 @@ describe("check-environment.mjs PineTree Wallet Dynamic auth coverage", () => {
   it("never prints raw env values", () => {
     expect(script).toContain("Values are never printed.")
     expect(script).not.toContain("console.log(env[")
+  })
+
+  it("exposes deployed wallet auth env sanity only through an admin-gated safe route", () => {
+    expect(debugWalletAuthRoute).toContain("requireAdminFromRequest(req)")
+    expect(debugWalletAuthRoute).toContain("dynamicEnvironmentIdPresent")
+    expect(debugWalletAuthRoute).toContain("pineTreeDynamicAuthMode")
+    expect(debugWalletAuthRoute).toContain("pineTreeDynamicEmailFallback")
+    expect(debugWalletAuthRoute).toContain("dynamicExternalJwtEnabled")
+    expect(debugWalletAuthRoute).toContain("issuerConfigured")
+    expect(debugWalletAuthRoute).toContain("audienceConfigured")
+    expect(debugWalletAuthRoute).toContain("kidConfigured")
+    expect(debugWalletAuthRoute).toContain("signingKeyConfigured")
+    expect(debugWalletAuthRoute).toContain("nextPublicAppUrl")
+    expect(debugWalletAuthRoute).not.toContain("DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64,")
+    expect(debugWalletAuthRoute).not.toContain("DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY,")
   })
 })

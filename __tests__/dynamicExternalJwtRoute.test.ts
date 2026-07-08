@@ -104,7 +104,7 @@ describe("Dynamic external JWT route", () => {
   })
 
   it("uses PineTree merchant email, not client email, and emits a short-lived JWT payload", async () => {
-    const res = await POST(request({ email: "attacker@example.com" }))
+    const res = await POST(request({ email: "attacker@example.com", walletDebug: true }))
     expect(res.status).toBe(200)
     const json = (await res.json()) as {
       externalJwt: string
@@ -118,6 +118,7 @@ describe("Dynamic external JWT route", () => {
         kidConfigured: boolean
         signingKeyConfigured: boolean
         jwksDerivedFromSigningKey: boolean
+        merchantResolved: boolean
       }
     }
 
@@ -151,6 +152,7 @@ describe("Dynamic external JWT route", () => {
       kidConfigured: true,
       signingKeyConfigured: true,
       jwksDerivedFromSigningKey: true,
+      merchantResolved: true,
     })
     expect(json.diagnostics).not.toHaveProperty("issuer")
     expect(json.diagnostics).not.toHaveProperty("jwksUrl")
@@ -158,7 +160,7 @@ describe("Dynamic external JWT route", () => {
   })
 
   it("route-generated JWT verifies against the derived public JWKS", async () => {
-    const res = await POST(request())
+    const res = await POST(request({ walletDebug: true }))
     expect(res.status).toBe(200)
     const json = (await res.json()) as { externalJwt: string; externalUserId: string }
     const jwksRes = await GET_JWKS()
@@ -180,7 +182,7 @@ describe("Dynamic external JWT route", () => {
   it("logs safe route diagnostics only", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined)
 
-    const res = await POST(request())
+    const res = await POST(request({ walletDebug: true }))
     expect(res.status).toBe(200)
 
     const routeLog = info.mock.calls.findLast((call) => call[0] === "[pinetree-dynamic-auth] external_jwt_route")
@@ -206,7 +208,7 @@ describe("Dynamic external JWT route", () => {
   })
 
   it("decodes the base64 PEM signing key before signing", async () => {
-    const res = await POST(request())
+    const res = await POST(request({ walletDebug: true }))
     expect(res.status).toBe(200)
     const json = (await res.json()) as { externalJwt: string }
 
@@ -262,7 +264,13 @@ describe("Dynamic external JWT route", () => {
 
     const res = await POST(request())
     expect(res.status).toBe(503)
-    await expect(res.json()).resolves.toEqual({ error: "dynamic_external_jwt_not_enabled" })
+    await expect(res.json()).resolves.toMatchObject({
+      error: "dynamic_external_jwt_not_enabled",
+      diagnostics: {
+        enabled: false,
+        merchantResolved: false,
+      },
+    })
   })
 
   it("requires server-only signing key and configured kid before issuing tokens", async () => {
@@ -271,12 +279,25 @@ describe("Dynamic external JWT route", () => {
 
     const res = await POST(request())
     expect(res.status).toBe(503)
-    await expect(res.json()).resolves.toEqual({ error: "dynamic_external_jwt_signing_key_missing" })
+    await expect(res.json()).resolves.toMatchObject({
+      error: "dynamic_external_jwt_signing_key_missing",
+      diagnostics: {
+        signingKeyConfigured: false,
+        merchantResolved: true,
+      },
+    })
 
     delete process.env.DYNAMIC_EXTERNAL_JWT_KID
     const missingKid = await POST(request())
     expect(missingKid.status).toBe(503)
-    await expect(missingKid.json()).resolves.toEqual({ error: "dynamic_external_jwt_kid_missing" })
+    await expect(missingKid.json()).resolves.toMatchObject({
+      error: "dynamic_external_jwt_kid_missing",
+      diagnostics: {
+        kidConfigured: false,
+        signingKeyConfigured: false,
+        merchantResolved: true,
+      },
+    })
   })
 
   it("fails clearly when the base64 signing key is invalid", async () => {
@@ -284,6 +305,12 @@ describe("Dynamic external JWT route", () => {
 
     const res = await POST(request())
     expect(res.status).toBe(503)
-    await expect(res.json()).resolves.toEqual({ error: "dynamic_external_jwt_signing_key_invalid" })
+    await expect(res.json()).resolves.toMatchObject({
+      error: "dynamic_external_jwt_signing_key_invalid",
+      diagnostics: {
+        signingKeyConfigured: true,
+        merchantResolved: true,
+      },
+    })
   })
 })

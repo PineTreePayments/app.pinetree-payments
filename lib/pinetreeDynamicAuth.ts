@@ -18,6 +18,7 @@ export type PineTreeDynamicExternalJwtPayload = {
     kidConfigured: boolean
     signingKeyConfigured: boolean
     jwksDerivedFromSigningKey: boolean
+    merchantResolved?: boolean
   }
 }
 
@@ -26,6 +27,9 @@ export const pineTreeDynamicEmailFallbackMisconfiguredWarning =
 
 export const pineTreeDynamicExternalJwtRestoreFailedMessage =
   "PineTree Wallet access could not be verified. Please try again."
+
+export const pineTreeDynamicConfigurationErrorMessage =
+  "PineTree Wallet verification is not configured correctly. Please contact support."
 
 export function getPineTreeDynamicAuthConfig(env: Record<string, string | undefined> = process.env): PineTreeDynamicAuthConfig {
   const externalJwtConfigured = env.NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE === "external_jwt"
@@ -45,7 +49,16 @@ export function shouldOpenDynamicEmailFallbackAuth(config: PineTreeDynamicAuthCo
   return config.mode !== "external_jwt" && config.emailFallbackEnabled
 }
 
-export async function requestPineTreeDynamicExternalJwtAuth(accessToken: string): Promise<PineTreeDynamicExternalJwtPayload> {
+export function assertCanOpenDynamicEmailFallbackAuth(config: PineTreeDynamicAuthConfig) {
+  if (!shouldOpenDynamicEmailFallbackAuth(config)) {
+    throw Object.assign(new Error("dynamic_email_fallback_blocked"), { code: "dynamic_email_fallback_blocked" })
+  }
+}
+
+export async function requestPineTreeDynamicExternalJwtAuth(
+  accessToken: string,
+  options?: { walletDebug?: boolean }
+): Promise<PineTreeDynamicExternalJwtPayload> {
   // PineTree Supabase user/session
   // -> PineTree backend issues/verifies JWT for Dynamic
   // -> Dynamic session initializes for same PineTree user/email
@@ -56,7 +69,7 @@ export async function requestPineTreeDynamicExternalJwtAuth(accessToken: string)
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({}),
+    body: JSON.stringify({ walletDebug: Boolean(options?.walletDebug) }),
     credentials: "include",
     cache: "no-store",
   })

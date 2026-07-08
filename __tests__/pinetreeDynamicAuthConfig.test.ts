@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  assertCanOpenDynamicEmailFallbackAuth,
   getPineTreeDynamicAuthConfig,
   pineTreeDynamicEmailFallbackMisconfiguredWarning,
   shouldOpenDynamicEmailFallbackAuth,
@@ -40,5 +41,6 @@ describe("PineTree Dynamic auth config", () => {
     expect(config.emailFallbackEnabled).toBe(false)
     expect(config.emailFallbackMisconfigured).toBe(false)
     expect(shouldOpenDynamicEmailFallbackAuth(config)).toBe(false)
+    expect(() => assertCanOpenDynamicEmailFallbackAuth(config)).toThrow("dynamic_email_fallback_blocked")
   })
 })

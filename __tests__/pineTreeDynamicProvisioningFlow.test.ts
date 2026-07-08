@@ -446,13 +446,19 @@ describe("PineTree Dynamic provisioning flow", () => {
   it("?walletDebug=1 shows safe diagnostics and default UI does not", () => {
     expect(page).toContain('params.get("walletDebug") === "1"')
     expect(page).toContain("const showProfileSyncDebugPanel = walletSyncDebugQueryEnabled")
-    expect(page).toContain("attemptId: {walletSetupAttemptId}")
+    expect(page).toContain("Wallet auth diagnostics")
+    expect(page).toContain("attemptPresent: {String(Boolean(walletSetupAttemptId))}")
     expect(page).toContain("stage: {walletSetupStage}")
     expect(page).toContain("failureReason: {walletSetupFailureReason || \"none\"}")
     expect(page).toContain("dynamicUserIdPresent: {String(Boolean(profileSyncDiagnostics.dynamicUserId))}")
     expect(page).toContain("extractedBaseAddressPresent: {String(Boolean(profileSyncDiagnostics.extractedBaseAddress))}")
     expect(page).toContain("providerSyncStatus: {profileSyncDiagnostics.providerSyncStatus || \"none\"}")
+    expect(page).toContain("merchantEmailPresent")
+    expect(page).toContain("dynamicEmailPresent")
     expect(page).not.toContain("JSON.stringify(profileSyncDiagnostics)")
+    expect(page).not.toContain('merchantEmail: {merchantEmail || "missing"}')
+    expect(page).not.toContain("merchantId: {merchantId || \"missing\"}")
+    expect(page).not.toContain('dynamicEmailDetected: {dynamicUserEmail || "missing"}')
   })
 
   it("Reconnect PineTree Wallet opens Dynamic auth only when no matching session exists yet", () => {
@@ -808,8 +814,8 @@ describe("PineTree Dynamic provisioning flow", () => {
 
   it("generic failed/timeout card shows named diagnostics fields, not raw JSON", () => {
     expect(page).toContain("Setup diagnostics")
-    expect(page).toContain('merchantEmail: {merchantEmail || "missing"}')
-    expect(page).toContain('dynamicEmailDetected: {dynamicUserEmail || "missing"}')
+    expect(page).toContain("merchantEmailPresent: {String(Boolean(merchantEmail))}")
+    expect(page).toContain("dynamicEmailPresent: {String(Boolean(dynamicUserEmail))}")
     expect(page).toContain("dynamicAuthenticated: {String(Boolean(user))}")
     expect(page).toContain("dynamicUserIdPresent: {String(Boolean(user?.userId))}")
     expect(page).toContain('dynamicEmailSource: {dynamicEmailSource || "none"}')

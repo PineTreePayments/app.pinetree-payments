@@ -147,9 +147,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(dynamicAuthConfig).toContain("NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK")
     expect(dynamicAuthConfig).toContain("Sandbox/dev should keep Dynamic Email login enabled")
     expect(dynamicAuthConfig).toContain('NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE === "external_jwt"')
+    expect(dynamicAuthConfig).toContain("assertCanOpenDynamicEmailFallbackAuth")
     expect(page).toContain("const dynamicEmailFallbackAllowed =")
     expect(page).toContain("shouldOpenDynamicEmailFallbackAuth(dynamicAuthConfig)")
+    expect(page).toContain("blockDynamicEmailFallbackAuth")
     expect(page).toContain("[pinetree-wallets] dynamic_email_fallback_blocked")
+    expect(dynamicAuthConfig).toContain("PineTree Wallet verification is not configured correctly. Please contact support.")
     expect(page).toContain("dynamicUserEmail !== merchantEmail")
     expect(apiRoute).toContain("dynamicEmail !== merchantEmail")
   })
@@ -174,6 +177,15 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("externalJwtErrorCode")
     expect(page).toContain("dynamicExternalAuthAttempted")
     expect(page).toContain("dynamicExternalAuthSucceeded")
+    expect(page).toContain("lastWalletAuthAttemptState")
+    expect(page).toContain("lastExternalJwtRouteStatus")
+    expect(page).toContain("lastExternalJwtFailureCode")
+    expect(page).toContain("dynamicEmailFallbackBlocked")
+    expect(page).toContain("Wallet auth diagnostics")
+    expect(page).toContain("merchantEmailPresent")
+    expect(page).not.toContain('merchantEmail: {merchantEmail || "missing"}')
+    expect(page).not.toContain("merchantId: {merchantId || \"missing\"}")
+    expect(page).not.toContain("dynamicEmailDetected: {dynamicUserEmail || \"missing\"}")
   })
 
   it("external_jwt mode attempts Dynamic external auth and bypasses the email fallback modal", () => {
@@ -190,7 +202,7 @@ describe("PineTree embedded wallet setup", () => {
       page.indexOf("const scheduleDynamicEmailFallbackAuth = useCallback")
     )
     expect(openFallbackFn).toContain("if (pineTreeControlledDynamicAuthAvailable)")
-    expect(openFallbackFn).toContain("requestPineTreeDynamicExternalJwtAuth(token)")
+    expect(openFallbackFn).toContain("requestPineTreeDynamicExternalJwtAuth(token, { walletDebug: walletSyncDebugQueryEnabled })")
     expect(openFallbackFn).toContain("signInWithExternalJwt({")
     expect(openFallbackFn).toContain("[pinetree-dynamic-auth] external_jwt_client")
     expect(openFallbackFn).toContain("signInWithExternalJwtCalled")
@@ -201,6 +213,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(openFallbackFn).toContain('logWalletCreationStep("dynamic_authenticated"')
     expect(openFallbackFn).toContain("return false")
     expect(openFallbackFn).toContain("setShowAuthFlow(true)")
+    expect(openFallbackFn).toContain("assertCanOpenDynamicEmailFallbackAuth(dynamicAuthConfig)")
     expect(openFallbackFn.indexOf("return false")).toBeLessThan(openFallbackFn.indexOf("setShowAuthFlow(true)"))
   })
 
@@ -218,9 +231,9 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("external auth failure shows PineTree-controlled copy", () => {
-    expect(dynamicAuthConfig).toContain("pineTreeDynamicExternalJwtRestoreFailedMessage")
-    expect(dynamicAuthConfig).toContain("PineTree Wallet access could not be verified. Please try again.")
-    expect(page).toContain("pineTreeDynamicExternalJwtRestoreFailedMessage")
+    expect(dynamicAuthConfig).toContain("pineTreeDynamicConfigurationErrorMessage")
+    expect(dynamicAuthConfig).toContain("PineTree Wallet verification is not configured correctly. Please contact support.")
+    expect(page).toContain("pineTreeDynamicConfigurationErrorMessage")
     expect(page).toContain('"dynamic_external_jwt_failed"')
   })
 

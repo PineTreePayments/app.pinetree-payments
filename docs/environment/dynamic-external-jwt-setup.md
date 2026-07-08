@@ -63,6 +63,17 @@ Email claim: PineTree merchant email
 If Dynamic says audience is not required, set `DYNAMIC_EXTERNAL_JWT_AUDIENCE`
 to an empty value and configure no audience restriction in Dynamic.
 
+If the Dynamic auth sheet shows `Sandbox`, `NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID`
+is pointing at a Dynamic sandbox environment. That is fine for staging only when
+the sandbox project also has External JWT/BYOA enabled with:
+
+- Issuer: `https://app.pinetree-payments.com`
+- Audience: `dynamic`
+- JWKS URL: `https://app.pinetree-payments.com/.well-known/dynamic-jwks.json`
+  or the matching public key
+- KID matching `DYNAMIC_EXTERNAL_JWT_KID`
+- Public key derived from `DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64`
+
 ## Dynamic Support Request
 
 ```text

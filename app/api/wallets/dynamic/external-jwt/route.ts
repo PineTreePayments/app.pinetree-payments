@@ -20,8 +20,8 @@ type ExternalJwtRouteStatus =
   | "issued"
   | "failed"
 
-function jsonError(error: string, status: number) {
-  return NextResponse.json({ error }, { status })
+function jsonError(error: string, status: number, diagnostics?: ReturnType<typeof getExternalJwtConfigDiagnostics> & { merchantResolved: boolean }) {
+  return NextResponse.json({ error, ...(diagnostics ? { diagnostics } : {}) }, { status })
 }
 
 function isEnabled(value: string | undefined) {
@@ -106,6 +106,14 @@ async function requireSupabaseMerchant(req: NextRequest): Promise<AuthenticatedM
   }
 }
 
+async function shouldIncludeDebugResponse(req: NextRequest) {
+  if (process.env.NODE_ENV !== "production") return true
+  const urlDebug = req.nextUrl.searchParams.get("walletDebug") === "1"
+  if (urlDebug) return true
+  const body = await req.json().catch(() => null) as { walletDebug?: unknown } | null
+  return body?.walletDebug === true || body?.walletDebug === "1"
+}
+
 async function signPineTreeDynamicJwt(input: AuthenticatedMerchant) {
   const issuer = process.env.DYNAMIC_EXTERNAL_JWT_ISSUER || "https://app.pinetree-payments.com"
   const audience = process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE?.trim()
@@ -148,18 +156,20 @@ export async function POST(req: NextRequest) {
   let userPresent = false
   let merchantResolved = false
   let routeStatus: ExternalJwtRouteStatus = "starting"
+  const includeDebugResponse = await shouldIncludeDebugResponse(req)
   try {
     const diagnostics = getExternalJwtConfigDiagnostics()
+    const responseDiagnostics = includeDebugResponse ? { ...diagnostics, merchantResolved } : undefined
     logExternalJwtRoute({ ...diagnostics, userPresent, merchantResolved, status: routeStatus })
     if (process.env.NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE !== "external_jwt") {
       routeStatus = "mode_disabled"
       logExternalJwtRoute({ ...diagnostics, userPresent, merchantResolved, status: routeStatus })
-      return jsonError("dynamic_external_jwt_mode_disabled", 409)
+      return jsonError("dynamic_external_jwt_mode_disabled", 409, responseDiagnostics)
     }
     if (!isEnabled(process.env.DYNAMIC_EXTERNAL_JWT_ENABLED)) {
       routeStatus = "not_enabled"
       logExternalJwtRoute({ ...diagnostics, userPresent, merchantResolved, status: routeStatus })
-      return jsonError("dynamic_external_jwt_not_enabled", 503)
+      return jsonError("dynamic_external_jwt_not_enabled", 503, responseDiagnostics)
     }
 
     routeStatus = "authenticating"
@@ -184,7 +194,7 @@ export async function POST(req: NextRequest) {
       externalJwt: signed.externalJwt,
       externalUserId: auth.merchantId,
       expiresAt: signed.expiresAt.toISOString(),
-      diagnostics,
+      ...(includeDebugResponse ? { diagnostics: { ...diagnostics, merchantResolved } } : {}),
     })
   } catch (error) {
     routeStatus = "failed"
@@ -199,6 +209,6 @@ export async function POST(req: NextRequest) {
       status,
       code,
     })
-    return jsonError(code, status)
+    return jsonError(code, status, includeDebugResponse ? { ...diagnostics, merchantResolved } : undefined)
   }
 }
