@@ -9,7 +9,8 @@ vi.mock("@/database", () => ({
 }))
 
 vi.mock("@/database/paymentEvents", () => ({
-  getPaymentEvents: vi.fn().mockResolvedValue([])
+  getPaymentEvents: vi.fn().mockResolvedValue([]),
+  getPaymentEventByProviderEvent: vi.fn().mockResolvedValue(null)
 }))
 
 vi.mock("@/database/transactions", () => ({

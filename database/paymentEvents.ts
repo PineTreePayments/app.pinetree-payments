@@ -94,6 +94,21 @@ export async function getLatestPaymentEvent(paymentId: string) {
   return data as PaymentEvent | null
 }
 
+export async function getPaymentEventByProviderEvent(providerEvent: string) {
+  const providerEventId = String(providerEvent || "").trim()
+  if (!providerEventId) return null
+
+  const { data, error } = await supabase
+    .from("payment_events")
+    .select("*")
+    .eq("provider_event", providerEventId)
+    .limit(1)
+    .maybeSingle()
+
+  if (error || !data) return null
+  return data as PaymentEvent
+}
+
 /**
  * Get events by type
  */

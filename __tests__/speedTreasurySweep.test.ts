@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   SPEED_PLATFORM_TREASURY_SWEEP_MODE,
+  createSpeedConnectedAccountWebhook,
+  createSpeedCustomConnectedAccount,
   createSpeedLightningPayment,
   createSpeedWithdrawRequest,
   getLightningProviderConfig,
@@ -57,12 +59,88 @@ describe("Speed treasury-sweep invoice creation", () => {
     const body = JSON.parse(String(init?.body || "{}"))
 
     expect(body.transfers).toBeUndefined()
+    expect(body.ttl).toBe(300)
     expect(body.metadata).toMatchObject({
       merchantId: "merchant_1",
       pineTreePaymentId: "pay_1",
       platform_fee_usd: 0.25,
       merchant_net_usd: 10,
       settlement_mode: "speed_platform_treasury_sweep",
+    })
+  })
+
+  it("creates a Speed Custom Connect merchant account with the documented payload", async () => {
+    await createSpeedCustomConnectedAccount({
+      country: "us",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      email: "ADA@example.test",
+      password: "temporary-secret"
+    })
+
+    const fetchMock = vi.mocked(fetch)
+    const [url, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String(init?.body || "{}"))
+
+    expect(url).toBe("https://api.tryspeed.test/connect/custom")
+    expect(init?.method).toBe("POST")
+    expect(body).toEqual({
+      country: "US",
+      account_type: "merchant",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      email: "ada@example.test",
+      password: "temporary-secret"
+    })
+  })
+
+  it("creates connected-account payments with account_id and fixed application_fee", async () => {
+    await createSpeedLightningPayment({
+      amount: 10.25,
+      currency: "USD",
+      merchantAmount: 10,
+      pineTreeFeeAmount: 0.25,
+      merchantSpeedAccountId: "acct_speed_merchant",
+      pineTreePaymentId: "pay_1",
+      merchantId: "merchant_1",
+      settlementMode: "speed_merchant_account",
+    })
+
+    const fetchMock = vi.mocked(fetch)
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String(init?.body || "{}"))
+
+    expect(body).toMatchObject({
+      currency: "USD",
+      amount: 10.25,
+      target_currency: "SATS",
+      ttl: 300,
+      account_id: "acct_speed_merchant",
+      application_fee: 0.25,
+      statement_descriptor: "PineTree",
+    })
+    expect(body.transfers).toBeUndefined()
+    expect(body.application_fee_percentage).toBeUndefined()
+  })
+
+  it("creates a connected-account webhook registration with connect true", async () => {
+    await createSpeedConnectedAccountWebhook({
+      url: "https://app.pinetree-payments.com/api/webhooks/speed",
+      description: "PineTree production connected webhook"
+    })
+
+    const fetchMock = vi.mocked(fetch)
+    const [url, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String(init?.body || "{}"))
+
+    expect(url).toBe("https://api.tryspeed.test/webhooks")
+    expect(init?.method).toBe("POST")
+    expect(body).toEqual({
+      enabled_events: ["payment.created", "payment.paid"],
+      api_version: "2022-10-15",
+      url: "https://app.pinetree-payments.com/api/webhooks/speed",
+      description: "PineTree production connected webhook",
+      connect: true
     })
   })
 

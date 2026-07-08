@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const speedClientMocks = vi.hoisted(() => ({
+  createSpeedCustomConnectedAccount: vi.fn(),
   createSpeedConnectAccountLink: vi.fn(),
   getPineTreeSpeedConfigStatus: vi.fn(),
   listSpeedConnectedAccounts: vi.fn(),
@@ -8,13 +9,17 @@ const speedClientMocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/providers/lightning/speedClient", () => ({
+  createSpeedCustomConnectedAccount: speedClientMocks.createSpeedCustomConnectedAccount,
   createSpeedConnectAccountLink: speedClientMocks.createSpeedConnectAccountLink,
   getPineTreeSpeedConfigStatus: speedClientMocks.getPineTreeSpeedConfigStatus,
   listSpeedConnectedAccounts: speedClientMocks.listSpeedConnectedAccounts,
   retrieveSpeedConnectedAccount: speedClientMocks.retrieveSpeedConnectedAccount,
 }))
 
-import { createOrLinkSpeedConnectedAccountForMerchant } from "@/providers/lightning/speedConnectedAccounts"
+import {
+  createOrLinkSpeedConnectedAccountForMerchant,
+  createSpeedCustomConnectedAccountForMerchant
+} from "@/providers/lightning/speedConnectedAccounts"
 
 const originalEnv = process.env
 
@@ -110,6 +115,8 @@ describe("createOrLinkSpeedConnectedAccountForMerchant", () => {
 
     expect(result.readiness).toBe("ready")
     expect(result.speed_connected_account_id).toBe("acct_123")
+    expect(result.speed_connected_account_relationship_id).toBe("ca_123")
+    expect(result.speed_account_id).toBe("acct_123")
     expect(result.speed_connected_account_status).toBe("active")
     expect(result.provider_response_summary.source).toBe("existing_connected_account")
     expect(speedClientMocks.createSpeedConnectAccountLink).not.toHaveBeenCalled()
@@ -127,5 +134,37 @@ describe("createOrLinkSpeedConnectedAccountForMerchant", () => {
     expect(result.error_message).toContain("sk_live_[redacted]")
     expect(result.error_message).not.toContain("sk_live_should_not_leak")
     expect(result.provider_response_summary.source).toBe("error")
+  })
+
+  it("creates a custom connected account and returns both Speed ids", async () => {
+    speedClientMocks.createSpeedCustomConnectedAccount.mockResolvedValue({
+      id: "ca_custom_123",
+      platform_account_id: "acct_platform",
+      account_id: "acct_custom_123",
+      account_name: "Merchant",
+      owner_email: "merchant@example.test",
+      status: "Active",
+      type: "merchant",
+    })
+
+    const result = await createSpeedCustomConnectedAccountForMerchant({
+      merchant_id: "merchant_123",
+      country: "US",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      email: "merchant@example.test",
+      password: "temporary-secret",
+    })
+
+    expect(result.readiness).toBe("ready")
+    expect(result.speed_connected_account_relationship_id).toBe("ca_custom_123")
+    expect(result.speed_account_id).toBe("acct_custom_123")
+    expect(result.speed_connected_account_id).toBe("acct_custom_123")
+    expect(result.provider_response_summary).toMatchObject({
+      connected_account_id: "ca_custom_123",
+      platform_account_id: "acct_platform",
+      account_id: "acct_custom_123",
+      status: "Active",
+    })
   })
 })

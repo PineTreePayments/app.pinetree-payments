@@ -91,13 +91,13 @@ export const speedAdapter: ProviderAdapter = {
     const merchantSpeed = treasurySweepEnabled ? null : await getMerchantSpeedProvider(input.merchantId)
     const merchantSpeedAccountId = treasurySweepEnabled
       ? ""
-      : merchantSpeed?.accountId || input.merchantWallet || ""
+      : input.merchantWallet || merchantSpeed?.accountId || ""
 
     if (!treasurySweepEnabled) {
       if (!merchantSpeedAccountId) {
         throw new Error("Merchant Speed Account ID is required for Speed Lightning payments.")
       }
-      if (!merchantSpeed?.readyForPayments) {
+      if (!merchantSpeed?.readyForPayments && merchantSpeedAccountId !== input.merchantWallet) {
         throw new Error("Speed Lightning is not ready for this merchant. Run the Speed setup test and save a Merchant Speed Account ID.")
       }
     }
@@ -171,8 +171,8 @@ export const speedAdapter: ProviderAdapter = {
     return { status: normalizeSpeedStatus(String(payment.status || "")) }
   },
 
-  verifyWebhook(_payload, _signature, rawBody, headers) {
-    return verifySpeedWebhookSignature(rawBody || "", headers || {})
+  verifyWebhook(payload, _signature, rawBody, headers) {
+    return verifySpeedWebhookSignature(rawBody || "", headers || {}, payload)
   },
 
   translateEvent(payload) {

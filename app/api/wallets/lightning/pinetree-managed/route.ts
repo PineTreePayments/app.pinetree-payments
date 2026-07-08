@@ -46,6 +46,8 @@ function safeLightningProfile(profile: MerchantLightningProfile | null) {
     provider: profile.provider,
     status: profile.status,
     speed_connected_account_id: profile.speed_connected_account_id,
+    speed_connected_account_relationship_id: profile.speed_connected_account_relationship_id,
+    speed_account_id: profile.speed_account_id,
     speed_connected_account_status: profile.speed_connected_account_status,
     setup_url: profile.speed_connect_setup_url,
     receive_mode: profile.receive_mode,
@@ -94,6 +96,8 @@ function failedSpeedSetupResult(error: unknown): CreateOrLinkSpeedConnectedAccou
   return {
     status: "needs_attention",
     speed_connected_account_id: null,
+    speed_connected_account_relationship_id: null,
+    speed_account_id: null,
     speed_connected_account_status: "speed_connect_helper_failed",
     setup_url: null,
     provider_response_summary: {
@@ -138,6 +142,8 @@ export async function GET(req: NextRequest) {
           provider: "speed",
           status,
           speed_connected_account_id: null,
+          speed_connected_account_relationship_id: null,
+          speed_account_id: null,
           speed_connected_account_status: null,
           setup_url: null,
           receive_mode: "invoice",
@@ -259,6 +265,8 @@ export async function POST(req: NextRequest) {
       merchantId,
       status: nextStatus,
       speedConnectedAccountId: speedSetup.speed_connected_account_id,
+      speedConnectedAccountRelationshipId: speedSetup.speed_connected_account_relationship_id,
+      speedAccountId: speedSetup.speed_account_id,
       speedConnectedAccountStatus: speedSetup.speed_connected_account_status,
       speedConnectSetupUrl: speedSetup.setup_url,
       providerResponseSummary: speedSetup.provider_response_summary,
@@ -278,7 +286,7 @@ export async function POST(req: NextRequest) {
         merchantId,
         bitcoinLightningStatus: lightningProfile.status,
         bitcoinLightningProvider: "speed",
-        bitcoinLightningAccountId: lightningProfile.speed_connected_account_id,
+        bitcoinLightningAccountId: lightningProfile.speed_account_id || lightningProfile.speed_connected_account_id,
         bitcoinLightningReceiveMode: "invoice",
       })
     }

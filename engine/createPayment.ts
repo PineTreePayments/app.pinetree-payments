@@ -32,6 +32,7 @@ import { getMerchantStripeAccountId } from "./stripeConnect"
 import { getMerchantNwcUriForPayment } from "./lightningNwc"
 import { getMerchantSpeedProvider, SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { isSpeedPlatformTreasurySweepEnabled } from "@/providers/lightning/speedClient"
+import { getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
 import { getMarketPricesUSD } from "./marketPrices"
 
 type PaymentMetadata = {
@@ -456,11 +457,24 @@ export async function createPayment(
       if (isSpeedPlatformTreasurySweepEnabled()) {
         merchantWalletAddress = `pinetree_btc_wallet_${input.merchantId}`
       } else {
-        const speedSetup = await getMerchantSpeedProvider(input.merchantId)
-        if (!speedSetup?.accountId || !speedSetup.readyForPayments) {
+        const [speedSetup, lightningProfile] = await Promise.all([
+          getMerchantSpeedProvider(input.merchantId),
+          getMerchantLightningProfile(input.merchantId).catch(() => null)
+        ])
+        const speedAccountId = String(
+          lightningProfile?.speed_account_id ||
+            speedSetup?.accountId ||
+            lightningProfile?.speed_connected_account_id ||
+            ""
+        ).trim()
+        const speedReady = Boolean(
+          speedAccountId &&
+          (lightningProfile?.status === "ready" || speedSetup?.readyForPayments)
+        )
+        if (!speedReady) {
           throw new Error("Bitcoin Lightning is not ready for this merchant.")
         }
-        speedMerchantAccountId = speedSetup.accountId
+        speedMerchantAccountId = speedAccountId
         merchantWalletAddress = speedMerchantAccountId
       }
     } else {

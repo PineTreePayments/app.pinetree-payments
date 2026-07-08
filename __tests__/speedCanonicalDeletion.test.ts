@@ -29,8 +29,8 @@ describe("speedCapabilities.ts", () => {
     expect(src).toContain('"/send"')
   })
 
-  it("probes /connect/accounts for merchant account capability", () => {
-    expect(src).toContain('"/connect/accounts"')
+  it("probes /connect/custom for merchant account capability", () => {
+    expect(src).toContain('"/connect/custom"')
   })
 
   it("probes /account for balance read capability", () => {

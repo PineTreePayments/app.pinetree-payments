@@ -16,6 +16,8 @@ export type MerchantLightningProfile = {
   provider: "speed"
   status: MerchantLightningProfileStatus
   speed_connected_account_id: string | null
+  speed_connected_account_relationship_id: string | null
+  speed_account_id: string | null
   speed_connected_account_status: string | null
   speed_connect_setup_url: string | null
   provider_response_summary: Record<string, unknown> | null
@@ -31,6 +33,8 @@ export type UpsertLightningProfileInput = {
   merchantId: string
   status?: MerchantLightningProfileStatus
   speedConnectedAccountId?: string | null
+  speedConnectedAccountRelationshipId?: string | null
+  speedAccountId?: string | null
   speedConnectedAccountStatus?: string | null
   speedConnectSetupUrl?: string | null
   providerResponseSummary?: Record<string, unknown> | null
@@ -87,6 +91,12 @@ export async function upsertMerchantLightningProfile(
     speed_connected_account_id: input.speedConnectedAccountId !== undefined
       ? input.speedConnectedAccountId
       : existing?.speed_connected_account_id ?? null,
+    speed_connected_account_relationship_id: input.speedConnectedAccountRelationshipId !== undefined
+      ? input.speedConnectedAccountRelationshipId
+      : existing?.speed_connected_account_relationship_id ?? null,
+    speed_account_id: input.speedAccountId !== undefined
+      ? input.speedAccountId
+      : existing?.speed_account_id ?? null,
     speed_connected_account_status: input.speedConnectedAccountStatus !== undefined
       ? input.speedConnectedAccountStatus
       : existing?.speed_connected_account_status ?? null,
@@ -132,6 +142,6 @@ export async function markMerchantLightningReady(
   return upsertMerchantLightningProfile({
     merchantId,
     status: "ready",
-    ...(speedAccountId ? { speedConnectedAccountId: speedAccountId } : {}),
+    ...(speedAccountId ? { speedConnectedAccountId: speedAccountId, speedAccountId } : {}),
   })
 }

@@ -399,6 +399,11 @@ export const PAYMENT_EXPIRATION_MINUTES = 30
  *   TERMINAL_SESSION_SECRET — HMAC key for POS terminal session tokens
  *   SPEED_WEBHOOK_SECRET    — Lightning webhook signature verification
  *
+ * SPEED_CONNECT_WEBHOOK_SECRET (connected-account Lightning webhook signing)
+ * is warn-only, never fail-closed: verifySpeedWebhookSignature falls back to
+ * SPEED_WEBHOOK_SECRET when it is unset, so a missing value degrades rather
+ * than breaks webhook verification.
+ *
  * Rationale for production-only: local dev commonly runs without these vars
  * and fails gracefully when the code path is hit.  In production a missing
  * secret is a silent security hole, so we fail closed at startup.
@@ -444,6 +449,13 @@ export function validateConfig(): void {
         "These must be set before processing payments."
       )
     }
+
+    if (!String(process.env.SPEED_CONNECT_WEBHOOK_SECRET || "").trim()) {
+      console.warn(
+        "[config] WARNING: SPEED_CONNECT_WEBHOOK_SECRET is not set. Connected-account Speed " +
+        "webhook events will fall back to SPEED_WEBHOOK_SECRET for signature verification."
+      )
+    }
   } else {
     // In dev/test: warn (do not throw) so local development still works
     // without a full secrets setup.
@@ -451,6 +463,7 @@ export function validateConfig(): void {
     if (!String(process.env.CHECKOUT_SESSION_SECRET || "").trim()) devWarn.push("CHECKOUT_SESSION_SECRET")
     if (!String(process.env.TERMINAL_SESSION_SECRET || "").trim()) devWarn.push("TERMINAL_SESSION_SECRET")
     if (!String(process.env.SPEED_WEBHOOK_SECRET    || "").trim()) devWarn.push("SPEED_WEBHOOK_SECRET")
+    if (!String(process.env.SPEED_CONNECT_WEBHOOK_SECRET || "").trim()) devWarn.push("SPEED_CONNECT_WEBHOOK_SECRET")
 
     if (devWarn.length > 0) {
       console.warn(

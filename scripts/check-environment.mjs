@@ -123,6 +123,7 @@ const groups = [
     name: "Provider webhook signing",
     entries: [
       ["SPEED_WEBHOOK_SECRET", true, "secret16"],
+      ["SPEED_CONNECT_WEBHOOK_SECRET", false, "secret16"],
       ["ALCHEMY_WEBHOOK_SIGNING_KEY_SOLANA", false, "secret16"],
       ["ALCHEMY_WEBHOOK_SIGNING_KEY_BASE", false, "secret16"],
       ["ALCHEMY_WEBHOOK_SIGNING_KEY", false, "secret16"],

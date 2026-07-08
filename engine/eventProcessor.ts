@@ -15,6 +15,7 @@ import {
   getTransactionByProviderReference,
   updateTransactionProviderReference
 } from "@/database/transactions"
+import { getPaymentEventByProviderEvent } from "@/database/paymentEvents"
 import { syncTransactionProgressForPayment } from "./transactionProgress"
 
 const SPEED_PROVIDER_NAME = "lightning_speed"
@@ -88,6 +89,15 @@ function getProviderReferenceCandidates(payload: unknown): string[] {
   ]
 
   return [...new Set(candidates.map((value) => String(value || "").trim()).filter(Boolean))]
+}
+
+function getProviderEventId(payload: unknown): string {
+  return String(
+    readPath(payload, ["id"]) ||
+      readPath(payload, ["event", "id"]) ||
+      readPath(payload, ["event_id"]) ||
+      ""
+  ).trim()
 }
 
 async function ensureSpeedTreasurySweepPayoutJob(paymentId: string, payload: unknown): Promise<void> {
@@ -289,6 +299,21 @@ export async function processWebhook({
   const paymentId = resolution.paymentId
   const providerReferences = getProviderReferenceCandidates(payload)
   const status = eventToStatus[event.event]
+  const providerEventType = getProviderEventType(payload)
+  const providerEventId = getProviderEventId(payload)
+
+  if (provider === SPEED_PROVIDER_NAME && providerEventId) {
+    const existingEvent = await getPaymentEventByProviderEvent(providerEventId)
+    if (existingEvent) {
+      console.info("[eventProcessor] idempotent:provider_event_skip", {
+        provider,
+        paymentId,
+        providerEventId,
+        incomingEvent: event.event
+      })
+      return
+    }
+  }
 
   const payment = await getPaymentById(paymentId)
   if (!payment) {
@@ -351,7 +376,9 @@ export async function processWebhook({
 
   try {
     await advancePaymentToTargetStatus(paymentId, status, {
-      providerEvent: getProviderEventType(payload),
+      providerEvent: provider === SPEED_PROVIDER_NAME && providerEventId
+        ? providerEventId
+        : providerEventType,
       rawPayload: payload
     })
 

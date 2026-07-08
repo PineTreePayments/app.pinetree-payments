@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS merchant_lightning_profiles (
   provider                       TEXT         NOT NULL DEFAULT 'speed',
   status                         TEXT         NOT NULL DEFAULT 'not_configured',
   speed_connected_account_id     TEXT,
+  speed_connected_account_relationship_id TEXT,
+  speed_account_id               TEXT,
   speed_connected_account_status TEXT,
   speed_connect_setup_url        TEXT,
   provider_response_summary      JSONB,

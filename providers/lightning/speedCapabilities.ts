@@ -103,8 +103,8 @@ export async function checkSpeedCapabilities(): Promise<SpeedCapabilitiesResult>
   }
   if (canCreateSend.error && !lastError) lastError = canCreateSend.error
 
-  // Merchant / sub-account creation — Speed Connect endpoint
-  const accountProbe = await trySpeedEndpoint("/connect/accounts", "POST", { probe: true })
+  // Merchant / sub-account creation — Speed Custom Connect endpoint
+  const accountProbe = await trySpeedEndpoint("/connect/custom", "POST", { probe: true })
   const canCreateMerchantAccount: CapabilityCheck = {
     checked: true,
     available:

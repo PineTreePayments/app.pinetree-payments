@@ -58,9 +58,10 @@ Recommended/optional env vars:
 SPEED_ENVIRONMENT=production
 SPEED_PLATFORM_ACCOUNT_ID=<PineTree Speed platform/account id>
 SPEED_DASHBOARD_URL=https://app.tryspeed.com
+SPEED_CONNECT_WEBHOOK_SECRET=<Speed connected-account webhook secret>
 ```
 
-Never expose `SPEED_API_KEY`, `SPEED_WEBHOOK_SECRET`, `INTERNAL_API_SECRET`, or `CRON_SECRET` to the browser. Speed Connect env vars are **not required** for `speed_platform_treasury_sweep`.
+Never expose `SPEED_API_KEY`, `SPEED_WEBHOOK_SECRET`, `SPEED_CONNECT_WEBHOOK_SECRET`, `INTERNAL_API_SECRET`, or `CRON_SECRET` to the browser. Speed Connect env vars are **not required** for `speed_platform_treasury_sweep`. If `SPEED_CONNECT_WEBHOOK_SECRET` is unset, connected-account webhook events fall back to verifying against `SPEED_WEBHOOK_SECRET` and log a server warning.
 
 Canonical live Speed Lightning flow:
 
@@ -83,6 +84,7 @@ Speed webhook setup:
 
 - Configure the Speed endpoint as `https://app.pinetree-payments.com/api/webhooks/speed`.
 - Configure this endpoint inside PineTree's Speed dashboard, not inside each merchant account.
+- The Speed dashboard also has a separate connected-account webhook pointing at the same URL. Its signing secret is `SPEED_CONNECT_WEBHOOK_SECRET`; the account-level webhook above uses `SPEED_WEBHOOK_SECRET`. Both post to `/api/webhooks/speed`, and the handler picks the right secret per event.
 - Keep `/api/webhooks/lightning` in place for legacy/generic Lightning routing; canonical Speed platform payments use `/api/webhooks/speed`.
 
 Environment/key safety:

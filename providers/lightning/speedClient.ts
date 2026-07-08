@@ -102,10 +102,14 @@ export type SpeedConnectedAccountObject = {
   object?: string
   type?: string
   status?: string
+  platform_account_id?: string
   account_id?: string
   account_name?: string
   country?: string
   owner_email?: string
+  first_name?: string
+  last_name?: string
+  email?: string
   total_fee_collected?: number
   created?: number
   modified?: number
@@ -119,6 +123,31 @@ export type SpeedConnectedAccountList = {
 
 export type SpeedConnectAccountLink = {
   link?: string
+}
+
+export type CreateSpeedCustomConnectedAccountParams = {
+  country: string
+  firstName: string
+  lastName: string
+  email: string
+  password: string
+}
+
+export type CreateSpeedConnectedWebhookParams = {
+  url: string
+  description?: string
+}
+
+export type SpeedWebhookObject = {
+  id?: string
+  url?: string
+  secret?: string
+  enabled_events?: string[]
+  api_version?: string
+  connect?: boolean
+  description?: string
+  status?: string
+  [key: string]: unknown
 }
 
 export type CreateSpeedLightningPaymentParams = {
@@ -489,20 +518,17 @@ export async function createSpeedLightningPayment(
     currency: params.currency || "USD",
     amount: grossAmount,
     target_currency: "SATS",
+    ttl: params.ttlSeconds ?? 300,
     payment_methods: ["lightning"],
+    statement_descriptor: "PineTree",
+    description: `PineTree payment ${params.pineTreePaymentId}`,
     metadata,
     ...(useTreasurySweep
       ? {}
       : {
-          transfers: [
-            {
-              destination_account: merchantSpeedAccountId,
-              percentage: merchantTransferPercentage,
-              description: `Merchant settlement for PineTree payment ${params.pineTreePaymentId}`
-            }
-          ]
+          account_id: merchantSpeedAccountId,
+          application_fee: pineTreeFeeAmount
         }),
-    ...(params.ttlSeconds ? { ttl: params.ttlSeconds } : {})
   }
 
   const payment = await speedRequest<SpeedPaymentObject>("/payments", {
@@ -594,6 +620,52 @@ export async function createSpeedConnectAccountLink(params: {
   })
 }
 
+export async function createSpeedCustomConnectedAccount(
+  params: CreateSpeedCustomConnectedAccountParams
+): Promise<SpeedConnectedAccountObject> {
+  const country = String(params.country || "").trim().toUpperCase()
+  const firstName = String(params.firstName || "").trim()
+  const lastName = String(params.lastName || "").trim()
+  const email = String(params.email || "").trim().toLowerCase()
+  const password = String(params.password || "").trim()
+
+  if (!country) throw new Error("Speed custom connected account country is required.")
+  if (!firstName) throw new Error("Speed custom connected account first name is required.")
+  if (!lastName) throw new Error("Speed custom connected account last name is required.")
+  if (!email) throw new Error("Speed custom connected account email is required.")
+  if (!password) throw new Error("Speed custom connected account password is required.")
+
+  return speedRequest<SpeedConnectedAccountObject>("/connect/custom", {
+    method: "POST",
+    body: JSON.stringify({
+      country,
+      account_type: "merchant",
+      first_name: firstName,
+      last_name: lastName,
+      email,
+      password
+    })
+  })
+}
+
+export async function createSpeedConnectedAccountWebhook(
+  params: CreateSpeedConnectedWebhookParams
+): Promise<SpeedWebhookObject> {
+  const url = String(params.url || "").trim()
+  if (!url) throw new Error("Speed connected-account webhook URL is required.")
+
+  return speedRequest<SpeedWebhookObject>("/webhooks", {
+    method: "POST",
+    body: JSON.stringify({
+      enabled_events: ["payment.created", "payment.paid"],
+      api_version: SPEED_VERSION,
+      url,
+      description: params.description || "PineTree Speed connected-account payment webhook",
+      connect: true
+    })
+  })
+}
+
 export async function retrieveSpeedConnectedAccount(
   connectedAccountId: string
 ): Promise<SpeedConnectedAccountObject> {
@@ -608,11 +680,48 @@ export async function listSpeedConnectedAccounts(): Promise<SpeedConnectedAccoun
   return speedRequest<SpeedConnectedAccountList>("/connect", { method: "GET" })
 }
 
+function readSpeedWebhookField(payload: unknown, path: string[]): unknown {
+  let cursor: unknown = payload
+  for (const key of path) {
+    if (!cursor || typeof cursor !== "object") return undefined
+    cursor = (cursor as Record<string, unknown>)[key]
+  }
+  return cursor
+}
+
+/**
+ * Speed marks connected-account/sub-account events with an `account_id` on the
+ * event payload (top-level or nested under data.object), mirroring how those
+ * payments are created with `account_id` set. Account-level (platform) events
+ * never carry this field.
+ */
+export function isSpeedConnectedAccountWebhookPayload(payload: unknown): boolean {
+  const accountId =
+    readSpeedWebhookField(payload, ["account_id"]) ||
+    readSpeedWebhookField(payload, ["data", "object", "account_id"]) ||
+    readSpeedWebhookField(payload, ["event", "data", "object", "account_id"])
+  return Boolean(accountId && String(accountId).trim())
+}
+
+function resolveSpeedWebhookSecret(payload: unknown): string {
+  const accountSecret = String(process.env.SPEED_WEBHOOK_SECRET || "").trim()
+  if (!isSpeedConnectedAccountWebhookPayload(payload)) return accountSecret
+
+  const connectSecret = String(process.env.SPEED_CONNECT_WEBHOOK_SECRET || "").trim()
+  if (connectSecret) return connectSecret
+
+  console.warn(
+    "[speed] SPEED_CONNECT_WEBHOOK_SECRET is not configured; falling back to SPEED_WEBHOOK_SECRET to verify a connected-account webhook event"
+  )
+  return accountSecret
+}
+
 export function verifySpeedWebhookSignature(
   rawBody: string,
-  headers: Record<string, string | undefined | null>
+  headers: Record<string, string | undefined | null>,
+  payload?: unknown
 ): boolean {
-  const secret = String(process.env.SPEED_WEBHOOK_SECRET || "").trim()
+  const secret = resolveSpeedWebhookSecret(payload)
   if (!secret || !secret.startsWith("wsec_")) return false
 
   const signatureHeader = String(headers["webhook-signature"] || "").trim()

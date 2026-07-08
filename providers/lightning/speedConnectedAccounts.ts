@@ -8,6 +8,7 @@
 
 import {
   createSpeedConnectAccountLink,
+  createSpeedCustomConnectedAccount,
   getPineTreeSpeedConfigStatus,
   listSpeedConnectedAccounts,
   retrieveSpeedConnectedAccount,
@@ -24,8 +25,18 @@ export type CreateOrLinkSpeedConnectedAccountInput = {
   pinetree_reference_id: string
 }
 
+export type CreateSpeedCustomConnectedAccountForMerchantInput = {
+  merchant_id: string
+  country: string
+  first_name: string
+  last_name: string
+  email: string
+  password: string
+}
+
 export type SpeedConnectedAccountSummary = {
   connected_account_id: string | null
+  platform_account_id?: string | null
   account_id: string | null
   account_name: string | null
   owner_email_present: boolean
@@ -38,6 +49,8 @@ export type SpeedConnectedAccountSummary = {
 export type CreateOrLinkSpeedConnectedAccountResult = {
   status: SpeedConnectedAccountReadiness
   speed_connected_account_id: string | null
+  speed_connected_account_relationship_id: string | null
+  speed_account_id: string | null
   speed_connected_account_status: string | null
   setup_url: string | null
   provider_response_summary: SpeedConnectedAccountSummary
@@ -95,6 +108,7 @@ function summarizeConnectedAccount(
 ): SpeedConnectedAccountSummary {
   return {
     connected_account_id: account?.id ? String(account.id) : null,
+    platform_account_id: account?.platform_account_id ? String(account.platform_account_id) : null,
     account_id: account?.account_id ? String(account.account_id) : null,
     account_name: account?.account_name ? String(account.account_name) : null,
     owner_email_present: Boolean(account?.owner_email),
@@ -148,6 +162,8 @@ function result(input: {
   return {
     status: input.status,
     speed_connected_account_id: input.speedConnectedAccountId || null,
+    speed_connected_account_relationship_id: input.summary.connected_account_id || null,
+    speed_account_id: input.summary.account_id || null,
     speed_connected_account_status: input.speedConnectedAccountStatus || null,
     setup_url: input.setupUrl || null,
     provider_response_summary: input.summary,
@@ -156,6 +172,79 @@ function result(input: {
     readiness: input.status,
     mode: input.mode,
     used_live_api: input.usedLiveApi,
+  }
+}
+
+export async function createSpeedCustomConnectedAccountForMerchant(
+  input: CreateSpeedCustomConnectedAccountForMerchantInput
+): Promise<CreateOrLinkSpeedConnectedAccountResult> {
+  const config = getPineTreeSpeedConfigStatus()
+
+  if (!isSpeedConnectEnabled()) {
+    return result({
+      status: "pending",
+      speedConnectedAccountStatus: "speed_connect_disabled",
+      summary: emptySummary("not_configured"),
+      errorMessage: "Speed Connect is disabled until SPEED_CONNECT_ENABLED=true is configured.",
+      mode: config.mode,
+      usedLiveApi: false,
+    })
+  }
+
+  if (!String(process.env.SPEED_API_KEY || "").trim()) {
+    return result({
+      status: "needs_attention",
+      speedConnectedAccountStatus: "speed_api_key_missing",
+      summary: emptySummary("not_configured"),
+      errorMessage: "PineTree Speed platform is missing SPEED_API_KEY.",
+      mode: config.mode,
+      usedLiveApi: false,
+    })
+  }
+
+  if (config.environmentKeyMismatch) {
+    return result({
+      status: "needs_attention",
+      speedConnectedAccountStatus: "speed_platform_configuration_invalid",
+      summary: emptySummary("not_configured"),
+      errorMessage: "Speed platform configuration has an environment/key mismatch.",
+      mode: config.mode,
+      usedLiveApi: false,
+    })
+  }
+
+  try {
+    const account = await createSpeedCustomConnectedAccount({
+      country: input.country,
+      firstName: input.first_name,
+      lastName: input.last_name,
+      email: input.email,
+      password: input.password
+    })
+    const summary = summarizeConnectedAccount(account, "existing_connected_account")
+    const accountReference = summary.account_id || summary.connected_account_id
+    const readiness = normalizeSpeedConnectedAccountReadiness({
+      speedConnectedAccountId: accountReference,
+      rawProviderStatus: summary.status,
+    })
+
+    return result({
+      status: readiness,
+      speedConnectedAccountId: accountReference,
+      speedConnectedAccountStatus: summary.status || "unknown",
+      summary,
+      mode: config.mode,
+      usedLiveApi: true,
+    })
+  } catch (error) {
+    return result({
+      status: "needs_attention",
+      speedConnectedAccountStatus: "speed_custom_connect_failed",
+      summary: emptySummary("error"),
+      errorMessage: safeProviderErrorMessage(error, "Speed custom connected account creation failed."),
+      mode: config.mode,
+      usedLiveApi: true,
+    })
   }
 }
 
