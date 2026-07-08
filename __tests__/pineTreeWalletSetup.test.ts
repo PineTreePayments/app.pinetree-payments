@@ -374,7 +374,7 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("does not render a persistent synced banner after profile sync succeeds", () => {
-    expect(page).toContain('if (step === "profile_synced") return ""')
+    expect(page).toContain('if (step === "profile_synced") return "Wallet ready"')
     expect(page).not.toContain("PineTree Wallet synced.")
   })
 
@@ -1317,6 +1317,11 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("sanitizeWithdrawalSubmitErrorForMerchant(error instanceof Error ? error.message : undefined)")
     expect(page).toContain('setWithdrawalScreen("failed")')
     expect(page).not.toContain("// Signing failure (Dynamic path) reaches here. Clear the stale review")
+  })
+
+  it("merchant rejection gets explicit no-funds-moved withdrawal copy", () => {
+    expect(page).toContain("Withdrawal approval was rejected. No funds were moved.")
+    expect(page).toContain("user rejected|user denied|rejected by user|approval rejected|request rejected|denied transaction")
   })
 
   it("missing Dynamic signer fails instead of creating a manual review request", () => {

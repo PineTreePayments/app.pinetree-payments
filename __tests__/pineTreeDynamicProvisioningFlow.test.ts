@@ -187,10 +187,19 @@ describe("PineTree Dynamic provisioning flow", () => {
   it("first-time Dynamic auth with delayed wallet addresses stays in provisioning, not setup incomplete", () => {
     expect(page).toContain('| "provisioning_wallet"')
     expect(page).toContain('if (step === "provisioning_wallet") return "Creating PineTree Wallet..."')
+    expect(page).toContain('if (step === "profile_synced") return "Wallet ready"')
     expect(page).toContain("Securing Base and Solana wallet addresses... This usually takes a few seconds.")
     expect(page).toContain("const walletProvisioningInProgress =")
     expect(page).toContain("const walletSetupIncomplete = hasWallet && dbOnlyWalletProfile && !walletProvisioningInProgress")
     expect(page).toContain("const repairOrSetupIncomplete = (repairFailedIncomplete || walletSetupIncomplete) && !walletProvisioningInProgress")
+  })
+
+  it("Create and retry share one idempotent wallet provisioning starter", () => {
+    expect(page).toContain("const walletSetupStartInFlightRef = useRef<string | null>(null)")
+    expect(page).toContain("function beginWalletProvisioningAttempt(step: WalletCreationStep, reason: string, options?: { retry?: boolean })")
+    expect(page).toContain("if (walletSetupStartInFlightRef.current || (pendingSync && !provisioningRetryExhausted)) return false")
+    expect(page).toContain('beginWalletProvisioningAttempt("opening_dynamic", "create_authenticated_dynamic_user")')
+    expect(page).toContain('beginWalletProvisioningAttempt("provisioning_wallet", "restart_embedded_wallet_runtime_polling", { retry: true })')
   })
 
   it("delayed Base/Solana hydration retries before saving the profile and then clears Preparing/Saving", () => {
@@ -254,7 +263,7 @@ describe("PineTree Dynamic provisioning flow", () => {
       page.indexOf("function handleRetryWalletSetup()"),
       page.indexOf("function handleWithdrawalAssetSelect")
     )
-    expect(retryFn).toContain('reason: "restart_embedded_wallet_runtime_polling"')
+    expect(retryFn).toContain('"restart_embedded_wallet_runtime_polling"')
     expect(retryFn).toContain('refreshDynamicWalletRuntime("retry_embedded_wallet_setup"')
     expect(retryFn).toContain("} else {\n        openDynamicEmailFallbackAuth(\"retry_embedded_wallet_setup_missing_dynamic_user\")")
   })
@@ -336,7 +345,8 @@ describe("PineTree Dynamic provisioning flow", () => {
   })
 
   it("mismatched Dynamic email shows explicit PineTree account email copy instead of generic timeout copy", () => {
-    expect(page).toContain('walletSetupPrimaryState === "provisioning" || walletSetupPrimaryState === "failed")')
+    expect(page).toContain('walletSetupPrimaryState === "provisioning" ||')
+    expect(page).toContain('walletSetupPrimaryState === "failed" ||')
     expect(page).toContain("Use your PineTree account email to verify wallet access.")
     expect(page).toContain("PineTree account email: {identityMismatchError?.merchantEmail ?? merchantEmail}")
     expect(page).toContain("Use PineTree account email")
@@ -596,7 +606,7 @@ describe("PineTree Dynamic provisioning flow", () => {
 
   it("ready profile suppresses the generic failed/timeout message and every problem banner", () => {
     expect(page).toContain(
-      '(walletSetupPrimaryState === "provisioning" || walletSetupPrimaryState === "failed")\n      ? walletCreationStepMessage(walletCreationStep)\n      : ""'
+      '(walletSetupPrimaryState === "ready" && walletCreationStep === "profile_synced")'
     )
     const messageBlock = page.slice(
       page.indexOf("{walletCreationMessage ? ("),
