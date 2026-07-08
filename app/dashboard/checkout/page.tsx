@@ -1488,6 +1488,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
           eyebrow="ONLINE CHECKOUT"
           title={checkoutReadinessCopy}
           value={checkoutReadinessStatus}
+          valueClassName="text-2xl font-bold leading-[1.15] tracking-tight text-gray-950 sm:text-[1.75rem] md:text-[1.875rem]"
           secondary={
             <div
               data-checkout-hero-metrics

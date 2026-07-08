@@ -12,6 +12,7 @@ describe("mobile dashboard hero cleanup", () => {
 
     expect(checkout).toContain(': "Set up checkout"')
     expect(checkout).toContain("Create a payment link or add a checkout button to start accepting online payments.")
+    expect(checkout).toContain('valueClassName="text-2xl font-bold leading-[1.15] tracking-tight text-gray-950 sm:text-[1.75rem] md:text-[1.875rem]"')
     expect(checkout).not.toContain('? "Needs attention"')
   })
 

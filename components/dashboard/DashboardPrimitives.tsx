@@ -212,7 +212,8 @@ export function DashboardHeroCard({
   value,
   detail,
   action,
-  secondary
+  secondary,
+  valueClassName
 }: {
   eyebrow: string
   title: string
@@ -220,6 +221,7 @@ export function DashboardHeroCard({
   detail?: ReactNode
   action?: ReactNode
   secondary?: ReactNode
+  valueClassName?: string
 }) {
   const hasValue = value !== undefined && value !== null
 
@@ -233,7 +235,7 @@ export function DashboardHeroCard({
           </p>
           <h2 className={cx("mt-2 font-medium", dashboardSupportingTextClass)}>{title}</h2>
           {hasValue && (
-            <div className={cx("mt-1", dashboardHeroValueClass)}>
+            <div className={cx("mt-1", valueClassName || dashboardHeroValueClass)}>
               {value}
             </div>
           )}
