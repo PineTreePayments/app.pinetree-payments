@@ -130,6 +130,10 @@ type ProvidersApiResponse = {
     smart_routing_enabled: boolean
     auto_conversion_enabled: boolean
   }
+  businessProfile?: {
+    profile_status: "incomplete" | "complete" | "needs_attention"
+    missing_fields: string[]
+  }
   error?: string
 }
 
@@ -168,6 +172,7 @@ export default function ProvidersPage() {
   const [wallets, setWallets] = useState<WalletRecord[]>([])
   const [railReadiness, setRailReadiness] = useState<PineTreeRailReadinessMap | null>(null)
   const [pineTreeWalletProfile, setPineTreeWalletProfile] = useState<ProvidersApiResponse["pineTreeWalletProfile"]>(null)
+  const [businessProfileStatus, setBusinessProfileStatus] = useState<ProvidersApiResponse["businessProfile"] | null>(null)
   const [activeProvider, setActiveProvider] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState("")
   const [shift4ApplicationStatusOverride, setShift4ApplicationStatusOverride] = useState<"Pending" | null>(null)
@@ -222,6 +227,7 @@ export default function ProvidersPage() {
     setWallets(payload.wallets || [])
     setRailReadiness(payload.railReadiness || null)
     setPineTreeWalletProfile(payload.pineTreeWalletProfile || null)
+    setBusinessProfileStatus(payload.businessProfile || null)
     setSmartRouting(Boolean(payload.settings?.smart_routing_enabled))
     setAutoConversion(Boolean(payload.settings?.auto_conversion_enabled))
   }, [])
@@ -516,6 +522,11 @@ function EngineSettingStatus({
   }
 
   async function toggleProvider(provider: string, value: boolean) {
+    if (value && businessProfileStatus && businessProfileStatus.profile_status !== "complete") {
+      toast.error("Complete your Business Profile to activate payments.")
+      return
+    }
+
     if (value && (provider === "solana" || provider === "base")) {
       const railReady = canonicalWalletMode
         ? Boolean(getManagedRailReadiness(provider as "solana" | "base")?.walletProvisioned)
@@ -555,6 +566,14 @@ function EngineSettingStatus({
 
   async function beginCardProviderSetup(provider: CardOnboardingProvider) {
     setSetupErrors((current) => ({ ...current, [provider]: "" }))
+
+    if (businessProfileStatus && businessProfileStatus.profile_status !== "complete") {
+      setSetupErrors((current) => ({
+        ...current,
+        [provider]: "Complete your Business Profile before starting provider setup."
+      }))
+      return
+    }
 
     if (provider === "shift4") {
       const url = getCardProviderSetupUrl(provider).trim()
@@ -1207,6 +1226,16 @@ function EngineSettingStatus({
       )}
 
       <div className="space-y-2">
+        {businessProfileStatus && businessProfileStatus.profile_status !== "complete" ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="font-semibold">Complete your Business Profile to activate payments.</p>
+              <a href="/dashboard/settings#business-profile" className="font-semibold text-blue-700 hover:text-blue-800">
+                Complete Business Profile
+              </a>
+            </div>
+          </div>
+        ) : null}
         <p className={dashboardSectionLabelClass}>Payment Providers</p>
         <div className="flex flex-wrap gap-1.5">
           {(["all", "card", "crypto"] as const).map((f) => (

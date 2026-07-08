@@ -12,6 +12,8 @@ import ToggleSwitch from "@/components/ui/ToggleSwitch"
 
 type MerchantSettingsPayload = {
   business_name: string | null
+  legal_business_name?: string | null
+  business_dba?: string | null
   contact_email: string | null
   address: string | null
   address_line_2: string | null
@@ -22,6 +24,12 @@ type MerchantSettingsPayload = {
   phone: string | null
   website: string | null
   business_type: string | null
+  owner_first_name?: string | null
+  owner_last_name?: string | null
+  owner_email?: string | null
+  owner_phone?: string | null
+  profile_status?: "incomplete" | "complete" | "needs_attention"
+  completed_at?: string | null
   closeout_time: string
   report_toast: boolean
 }
@@ -114,6 +122,7 @@ function parseCloseoutTime(value: string) {
 
 export default function SettingsPage() {
   const [businessName, setBusinessName] = useState("")
+  const [businessDba, setBusinessDba] = useState("")
   const [accountEmail, setAccountEmail] = useState("")
   const [contactEmail, setContactEmail] = useState("")
 
@@ -126,6 +135,11 @@ export default function SettingsPage() {
   const [phone, setPhone] = useState("")
   const [website, setWebsite] = useState("")
   const [businessType, setBusinessType] = useState("")
+  const [ownerFirstName, setOwnerFirstName] = useState("")
+  const [ownerLastName, setOwnerLastName] = useState("")
+  const [ownerEmail, setOwnerEmail] = useState("")
+  const [ownerPhone, setOwnerPhone] = useState("")
+  const [profileStatus, setProfileStatus] = useState<"incomplete" | "complete" | "needs_attention">("incomplete")
 
   const [closeHour, setCloseHour] = useState("12")
   const [closeMinute, setCloseMinute] = useState("00")
@@ -187,7 +201,8 @@ export default function SettingsPage() {
     setSchemaReady(payload.schemaReady !== false)
 
     if (settings) {
-      setBusinessName(settings.business_name || "")
+      setBusinessName(settings.legal_business_name || settings.business_name || "")
+      setBusinessDba(settings.business_dba || "")
       setContactEmail(settings.contact_email || "")
       setAddress(settings.address || "")
       setAddressLine2(settings.address_line_2 || "")
@@ -198,6 +213,11 @@ export default function SettingsPage() {
       setPhone(settings.phone || "")
       setWebsite(settings.website || "")
       setBusinessType(settings.business_type || "")
+      setOwnerFirstName(settings.owner_first_name || "")
+      setOwnerLastName(settings.owner_last_name || "")
+      setOwnerEmail(settings.owner_email || "")
+      setOwnerPhone(settings.owner_phone || "")
+      setProfileStatus(settings.profile_status || "incomplete")
       setReportToast(settings.report_toast ?? true)
 
       const parsed = parseCloseoutTime(settings.closeout_time || "12:00")
@@ -292,6 +312,8 @@ export default function SettingsPage() {
       const payload = await callSettingsApi("POST", {
         settings: {
           business_name: businessName || null,
+          legal_business_name: businessName || null,
+          business_dba: businessDba || null,
           contact_email: contactEmail || null,
           address: address || null,
           address_line_2: addressLine2 || null,
@@ -302,6 +324,18 @@ export default function SettingsPage() {
           phone: phone || null,
           website: website || null,
           business_type: businessType || null,
+          business_country: country || null,
+          business_state: state || null,
+          business_city: city || null,
+          business_address_line1: address || null,
+          business_address_line2: addressLine2 || null,
+          business_postal_code: zip || null,
+          business_phone: phone || null,
+          business_website: website || null,
+          owner_first_name: ownerFirstName || null,
+          owner_last_name: ownerLastName || null,
+          owner_email: ownerEmail || null,
+          owner_phone: ownerPhone || null,
           closeout_time: `${closeHour}:${closeMinute}`,
           report_toast: reportToast
         },
@@ -392,14 +426,29 @@ export default function SettingsPage() {
       )}
 
       <DashboardSection title="Business Profile" titleTone="blue">
+      <div id="business-profile" />
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+        {profileStatus !== "complete" ? (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-900">
+            <p className="font-semibold">Complete your Business Profile to activate payments.</p>
+          </div>
+        ) : null}
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <div>
-            <label className={labelClass}>Business Name</label>
+            <label className={labelClass}>Legal Business Name</label>
             <input
               value={businessName}
               onChange={(e) => setBusinessName(e.target.value)}
+              className={fieldClass}
+            />
+          </div>
+
+          <div>
+            <label className={labelClass}>Business DBA</label>
+            <input
+              value={businessDba}
+              onChange={(e) => setBusinessDba(e.target.value)}
               className={fieldClass}
             />
           </div>
@@ -415,7 +464,7 @@ export default function SettingsPage() {
           </div>
 
           <div>
-            <label className={labelClass}>Business Address</label>
+            <label className={labelClass}>Business Address Line 1</label>
             <input
               value={address}
               onChange={(e) => setAddress(e.target.value)}
@@ -490,6 +539,43 @@ export default function SettingsPage() {
               <option value="services">Services</option>
               <option value="online">Online</option>
             </select>
+          </div>
+
+          <div>
+            <label className={labelClass}>Owner First Name</label>
+            <input
+              value={ownerFirstName}
+              onChange={(e) => setOwnerFirstName(e.target.value)}
+              className={fieldClass}
+            />
+          </div>
+
+          <div>
+            <label className={labelClass}>Owner Last Name</label>
+            <input
+              value={ownerLastName}
+              onChange={(e) => setOwnerLastName(e.target.value)}
+              className={fieldClass}
+            />
+          </div>
+
+          <div>
+            <label className={labelClass}>Owner Email</label>
+            <input
+              value={ownerEmail}
+              onChange={(e) => setOwnerEmail(e.target.value)}
+              className={fieldClass}
+              placeholder={accountEmail || "owner@example.com"}
+            />
+          </div>
+
+          <div>
+            <label className={labelClass}>Owner Phone</label>
+            <input
+              value={ownerPhone}
+              onChange={(e) => setOwnerPhone(e.target.value)}
+              className={fieldClass}
+            />
           </div>
         </div>
       </div>

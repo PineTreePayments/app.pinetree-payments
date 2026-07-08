@@ -10,6 +10,8 @@ const db = supabaseAdmin || supabase
 
 export type MerchantSettingsPayload = {
   business_name: string | null
+  legal_business_name?: string | null
+  business_dba?: string | null
   contact_email: string | null
   address: string | null
   address_line_2: string | null
@@ -17,9 +19,23 @@ export type MerchantSettingsPayload = {
   state: string | null
   zip: string | null
   country: string | null
+  business_country?: string | null
+  business_state?: string | null
+  business_city?: string | null
+  business_address_line1?: string | null
+  business_address_line2?: string | null
+  business_postal_code?: string | null
+  business_phone?: string | null
+  business_website?: string | null
   phone: string | null
   website: string | null
   business_type: string | null
+  owner_first_name?: string | null
+  owner_last_name?: string | null
+  owner_email?: string | null
+  owner_phone?: string | null
+  profile_status?: "incomplete" | "complete" | "needs_attention"
+  completed_at?: string | null
   closeout_time: string
   report_toast: boolean
 }
@@ -69,6 +85,8 @@ export type MerchantSettingsReadiness = {
 
 const DEFAULT_SETTINGS: MerchantSettingsPayload = {
   business_name: null,
+  legal_business_name: null,
+  business_dba: null,
   contact_email: null,
   address: null,
   address_line_2: null,
@@ -76,9 +94,23 @@ const DEFAULT_SETTINGS: MerchantSettingsPayload = {
   state: null,
   zip: null,
   country: null,
+  business_country: null,
+  business_state: null,
+  business_city: null,
+  business_address_line1: null,
+  business_address_line2: null,
+  business_postal_code: null,
+  business_phone: null,
+  business_website: null,
   phone: null,
   website: null,
   business_type: null,
+  owner_first_name: null,
+  owner_last_name: null,
+  owner_email: null,
+  owner_phone: null,
+  profile_status: "incomplete",
+  completed_at: null,
   closeout_time: "12:00",
   report_toast: true
 }
@@ -129,18 +161,67 @@ function normalizeSettings(input: Partial<MerchantSettingsPayload>): MerchantSet
     throw new Error("Closeout time must use HH:MM format")
   }
 
+  const legalBusinessName = text(input.legal_business_name ?? input.business_name, 160)
+  const businessCountry = text(input.business_country ?? input.country, 2)?.toUpperCase() || null
+  if (businessCountry && !/^[A-Z]{2}$/.test(businessCountry)) {
+    throw new Error("Business country must be a 2-letter country code")
+  }
+  const businessState = text(input.business_state ?? input.state, 120)
+  const businessCity = text(input.business_city ?? input.city, 120)
+  const businessAddressLine1 = text(input.business_address_line1 ?? input.address, 240)
+  const businessAddressLine2 = text(input.business_address_line2 ?? input.address_line_2, 240)
+  const businessPostalCode = text(input.business_postal_code ?? input.zip, 32)
+  const businessPhone = text(input.business_phone ?? input.phone, 50)
+  const businessWebsite = text(input.business_website ?? input.website, 500)
+  const ownerEmail = text(input.owner_email, 320)
+  if (ownerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(ownerEmail)) {
+    throw new Error("Owner email must be a valid email address")
+  }
+  const requiredProfileFields = [
+    legalBusinessName,
+    input.business_type,
+    businessCountry,
+    businessState,
+    businessCity,
+    businessAddressLine1,
+    businessPostalCode,
+    businessPhone,
+    input.owner_first_name,
+    input.owner_last_name,
+    ownerEmail,
+  ]
+  const profileStatus = requiredProfileFields.every((value) => String(value || "").trim())
+    ? "complete"
+    : "incomplete"
+
   return {
-    business_name: text(input.business_name, 160),
+    business_name: legalBusinessName,
+    legal_business_name: legalBusinessName,
+    business_dba: text(input.business_dba, 160),
     contact_email: text(input.contact_email, 320),
-    address: text(input.address, 240),
-    address_line_2: text(input.address_line_2, 240),
-    city: text(input.city, 120),
-    state: text(input.state, 120),
-    zip: text(input.zip, 32),
-    country: text(input.country, 120),
-    phone: text(input.phone, 50),
-    website: text(input.website, 500),
+    address: businessAddressLine1,
+    address_line_2: businessAddressLine2,
+    city: businessCity,
+    state: businessState,
+    zip: businessPostalCode,
+    country: businessCountry,
+    business_country: businessCountry,
+    business_state: businessState,
+    business_city: businessCity,
+    business_address_line1: businessAddressLine1,
+    business_address_line2: businessAddressLine2,
+    business_postal_code: businessPostalCode,
+    business_phone: businessPhone,
+    business_website: businessWebsite,
+    phone: businessPhone,
+    website: businessWebsite,
     business_type: text(input.business_type, 80),
+    owner_first_name: text(input.owner_first_name, 120),
+    owner_last_name: text(input.owner_last_name, 120),
+    owner_email: ownerEmail,
+    owner_phone: text(input.owner_phone, 50),
+    profile_status: profileStatus,
+    completed_at: profileStatus === "complete" ? text(input.completed_at, 80) || new Date().toISOString() : null,
     closeout_time: closeoutTime,
     report_toast: input.report_toast !== false
   }
@@ -203,7 +284,7 @@ export async function getSettingsDashboardEngine(merchantId: string): Promise<Se
   let schemaReady = true
   let settingsResult = await db
     .from("merchant_settings")
-    .select("business_name,contact_email,address,address_line_2,city,state,zip,country,phone,website,business_type,closeout_time,report_toast")
+    .select("business_name,legal_business_name,business_dba,contact_email,address,address_line_2,city,state,zip,country,business_country,business_state,business_city,business_address_line1,business_address_line2,business_postal_code,business_phone,business_website,phone,website,business_type,owner_first_name,owner_last_name,owner_email,owner_phone,profile_status,completed_at,closeout_time,report_toast")
     .eq("merchant_id", merchantId)
     .maybeSingle()
 

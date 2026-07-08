@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useDynamicContext, useDynamicEvents, useDynamicWaas, useEmbeddedWallet, useExternalAuth, useRefreshUser, useSwitchWallet, useUserWallets } from "@dynamic-labs/sdk-react-core"
 import { Transaction } from "@solana/web3.js"
 import { AlertTriangle, CheckCircle2, ChevronDown, Copy, X } from "lucide-react"
+import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import {
   extractDynamicWalletAddresses,
@@ -44,6 +45,9 @@ import {
   requestPineTreeDynamicExternalJwtAuth,
   shouldOpenDynamicEmailFallbackAuth,
 } from "@/lib/pinetreeDynamicAuth"
+
+// Legacy compatibility route exists server-side but is not called by PineTree Wallet:
+// "/api/merchant/business-owner-profile"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -736,12 +740,12 @@ async function sendDynamicPreparedWithdrawal(
       throw new Error("Reconnect your Solana wallet session before approving this withdrawal.")
     }
     if (hasAnyDynamicWallet) {
-      // Wallets are loaded but none match the saved DB address — different account/session.
+      // Wallets are loaded but none match the saved DB address â€” different account/session.
       throw new Error(
         "This browser is connected to a different PineTree Wallet session. Reopen PineTree Wallet or verify access."
       )
     }
-    // No Dynamic wallets present at all — session expired or SDK not yet loaded.
+    // No Dynamic wallets present at all â€” session expired or SDK not yet loaded.
     throw new Error(pineTreeSignerReconnectMessage)
   }
 
@@ -1355,7 +1359,7 @@ function WalletDiagnosticsPanel({
       String((w.connector as unknown as Record<string, unknown>)["key"] ?? "")
     ),
     hasAddress: Boolean(w.address),
-    addressPrefix: w.address ? `${w.address.slice(0, 6)}…` : "—",
+    addressPrefix: w.address ? `${w.address.slice(0, 6)}â€¦` : "â€”",
     extraAddressCount: (w.additionalAddresses ?? []).length,
     additionalAddresses: (w.additionalAddresses ?? []).map((extra, index) =>
       sanitizeAdditionalAddress(extra as DynamicAddressMetadata, index)
@@ -1378,7 +1382,7 @@ function WalletDiagnosticsPanel({
 
   return (
     <div className="rounded-xl border border-dashed border-yellow-300 bg-yellow-50/60 px-4 py-3 text-[11px] font-mono">
-      <p className="mb-2 font-sans text-xs font-semibold text-yellow-700">DEV — wallet SDK diagnostics (hidden in production)</p>
+      <p className="mb-2 font-sans text-xs font-semibold text-yellow-700">DEV â€” wallet SDK diagnostics (hidden in production)</p>
       {rows.length === 0 ? (
         <p className="text-yellow-700">No wallet objects returned by useUserWallets() yet</p>
       ) : (
@@ -1681,7 +1685,7 @@ function WithdrawalFormShell({
             balanceLabel: formatBalanceLabel(option.balance, option.asset),
             usdLabel:
               option.balance?.status === "synced" && option.balance.usdValue !== null
-                ? `≈ ${formatUsd(option.balance.usdValue)}`
+                ? `â‰ˆ ${formatUsd(option.balance.usdValue)}`
                 : null,
           }))}
           selectedKey={assetOptionKey({ rail, asset })}
@@ -1764,7 +1768,7 @@ function WithdrawalFormShell({
               ? `Available: ${formattedAvailable} ${asset}`
               : "Balance indexing pending"}
             {selectedBalanceKnown && selectedBalance?.usdValue !== null && selectedBalance?.usdValue !== undefined
-              ? ` · ≈ ${formatUsd(selectedBalance.usdValue)}`
+              ? ` Â· â‰ˆ ${formatUsd(selectedBalance.usdValue)}`
               : null}
           </span>
           {!selectedBalanceKnown ? <span>Balance will be verified before processing.</span> : nativeMaxNote ? <span>Network fee may apply.</span> : null}
@@ -1808,7 +1812,7 @@ function WithdrawalFormShell({
 }
 
 function formatUsd(value: number | null) {
-  if (value === null) return "—"
+  if (value === null) return "â€”"
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
@@ -1847,56 +1851,19 @@ function formatActivityTimestamp(value: string | null) {
   return `${datePart} at ${timePart}`
 }
 
-function BusinessOwnerProfileBanner({
-  form,
-  onChange,
-  onSave,
-  saving,
-  error,
-}: {
-  form: { firstName: string; lastName: string; country: string }
-  onChange: (next: { firstName: string; lastName: string; country: string }) => void
-  onSave: () => void
-  saving: boolean
-  error: string | null
-}) {
+function BusinessProfileRequiredBanner() {
   return (
     <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-4 sm:px-5">
-      <p className="text-sm font-semibold text-amber-900">Finish Bitcoin Lightning setup</p>
+      <p className="text-sm font-semibold text-amber-900">Complete your Business Profile to activate payments.</p>
       <p className="mt-1 text-xs leading-5 text-amber-800">
-        Enter the business owner&apos;s name and country once to enable Bitcoin Lightning. PineTree
-        provisions the Lightning account automatically — you never sign up with Speed directly.
+        PineTree Wallet setup stays automatic after your Business Profile is complete.
       </p>
-      <div className="mt-3 grid gap-2.5 sm:grid-cols-3">
-        <input
-          value={form.firstName}
-          onChange={(e) => onChange({ ...form, firstName: e.target.value })}
-          placeholder="First name"
-          className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-gray-950 outline-none focus:border-amber-400"
-        />
-        <input
-          value={form.lastName}
-          onChange={(e) => onChange({ ...form, lastName: e.target.value })}
-          placeholder="Last name"
-          className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-gray-950 outline-none focus:border-amber-400"
-        />
-        <input
-          value={form.country}
-          onChange={(e) => onChange({ ...form, country: e.target.value.toUpperCase().slice(0, 2) })}
-          placeholder="Country (US)"
-          maxLength={2}
-          className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm uppercase text-gray-950 outline-none focus:border-amber-400"
-        />
-      </div>
-      {error ? <p className="mt-2 text-xs font-medium text-red-600">{error}</p> : null}
-      <button
-        type="button"
-        onClick={onSave}
-        disabled={saving}
-        className="mt-3 inline-flex h-9 items-center justify-center rounded-lg bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+      <Link
+        href="/dashboard/settings#business-profile"
+        className="mt-3 inline-flex h-9 items-center justify-center rounded-lg bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
       >
-        {saving ? "Saving..." : "Save and enable Lightning"}
-      </button>
+        Complete Business Profile
+      </Link>
     </div>
   )
 }
@@ -2107,7 +2074,7 @@ function BalanceRows({
     asset: row.asset,
     railLabel: assetRailLabel(row.rail),
     balanceLabel: formatBalance(row.balance, row.asset),
-    usdLabel: row.status === "synced" && row.usdValue !== null ? `≈ ${formatUsd(row.usdValue)}` : null,
+    usdLabel: row.status === "synced" && row.usdValue !== null ? `â‰ˆ ${formatUsd(row.usdValue)}` : null,
   }))
   const lastSynced = formatLastSynced(sync?.lastSyncedAt ?? null)
 
@@ -2285,7 +2252,7 @@ function ActivityTab({
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-gray-900">{item.label}</p>
                     <p className="mt-0.5 text-xs text-gray-500">
-                      {railDisplayName(item.rail)} · {formatActivityTimestamp(item.createdAt) ?? item.createdAt}
+                      {railDisplayName(item.rail)} Â· {formatActivityTimestamp(item.createdAt) ?? item.createdAt}
                     </p>
                   </div>
                   <ActivityStatusPill status={item.status} />
@@ -2307,9 +2274,6 @@ function PineTreeWalletRuntime() {
   // --- Supabase session & DB profiles ---
   const [profileState, setProfileState] = useState<ProfileState>({ kind: "loading" })
   const [lightningProfileState, setLightningProfileState] = useState<LightningProfileState>({ kind: "loading" })
-  const [businessOwnerForm, setBusinessOwnerForm] = useState({ firstName: "", lastName: "", country: "" })
-  const [businessOwnerSaving, setBusinessOwnerSaving] = useState(false)
-  const [businessOwnerError, setBusinessOwnerError] = useState<string | null>(null)
   const accessTokenRef = useRef<string | null>(null)
 
   // --- Dynamic SDK ---
@@ -2318,7 +2282,7 @@ function PineTreeWalletRuntime() {
   const refreshDynamicUser = useRefreshUser()
   const switchDynamicWallet = useSwitchWallet()
   // Literal process.env.NEXT_PUBLIC_X reads are required here so webpack can
-  // statically inline them into the client bundle — see PineTreeDynamicProvider.tsx.
+  // statically inline them into the client bundle â€” see PineTreeDynamicProvider.tsx.
   const dynamicAuthConfig = getPineTreeDynamicAuthConfig({
     NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE: process.env.NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE,
     NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK: process.env.NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK,
@@ -2635,7 +2599,7 @@ function PineTreeWalletRuntime() {
     void fetchAllProfiles()
   }, [fetchAllProfiles])
 
-  // --- Live Dynamic wallet addresses — used only for sync, never for display ---
+  // --- Live Dynamic wallet addresses â€” used only for sync, never for display ---
   const waasRuntimeWallets = useMemo(() => {
     if (!dynamicWaasIsEnabled) return []
     try {
@@ -3300,7 +3264,7 @@ function PineTreeWalletRuntime() {
           await initializeWaas({ forceClientRebuild: true })
         }
         // When WaaS wallets are absent after initialization, provision them.
-        // createWalletAccount uses needsAutoCreateWalletChains — the SDK-populated list of chains
+        // createWalletAccount uses needsAutoCreateWalletChains â€” the SDK-populated list of chains
         // that require wallet creation for this user.
         const runtimeWallets = getWaasWallets()
         if (runtimeWallets.length === 0 && needsAutoCreateWalletChains.length > 0) {
@@ -3322,7 +3286,7 @@ function PineTreeWalletRuntime() {
           await createOrRestoreSession()
           setDynamicWalletRuntimeRefreshNonce((value) => value + 1)
         } else {
-          // No embedded wallet exists yet — create one using the legacy embedded wallet API.
+          // No embedded wallet exists yet â€” create one using the legacy embedded wallet API.
           if (walletCreationDebugEnabled) {
             console.info("[pinetree-wallets] provisioning_embedded_wallet_first_time", {
               reason,
@@ -3443,44 +3407,6 @@ function PineTreeWalletRuntime() {
     } finally {
     }
   }, [])
-
-  const saveBusinessOwnerProfile = useCallback(async () => {
-    const token = accessTokenRef.current
-    if (!token) return
-
-    const firstName = businessOwnerForm.firstName.trim()
-    const lastName = businessOwnerForm.lastName.trim()
-    const country = businessOwnerForm.country.trim().toUpperCase()
-
-    if (!firstName || !lastName || !/^[A-Z]{2}$/.test(country)) {
-      setBusinessOwnerError("Enter a first name, last name, and 2-letter country code (e.g. US).")
-      return
-    }
-
-    setBusinessOwnerSaving(true)
-    setBusinessOwnerError(null)
-    try {
-      const res = await fetch("/api/merchant/business-owner-profile", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          owner_first_name: firstName,
-          owner_last_name: lastName,
-          business_country: country,
-        }),
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        setBusinessOwnerError(String(body?.error || "Failed to save business owner details."))
-        return
-      }
-      await syncPineTreeManagedLightning()
-    } catch {
-      setBusinessOwnerError("Failed to save business owner details.")
-    } finally {
-      setBusinessOwnerSaving(false)
-    }
-  }, [businessOwnerForm, syncPineTreeManagedLightning])
 
   // --- Sync Dynamic wallet addresses (Base/Solana) to the merchant profile DB record ---
   const syncProfileFromDynamic = useCallback(async (options?: { autoEnableLightning?: boolean; requireBaseAndSolanaSigners?: boolean }) => {
@@ -4240,7 +4166,7 @@ function PineTreeWalletRuntime() {
   }, [repairPendingAfterLogout, user, openDynamicEmailFallbackAuth, setShowDynamicUserProfile, logWalletCreationStep])
 
   // ---------------------------------------------------------------------------
-  // Derived state — wallet profile (Base/Solana from Dynamic, DB-backed)
+  // Derived state â€” wallet profile (Base/Solana from Dynamic, DB-backed)
   // ---------------------------------------------------------------------------
 
   const profile = profileState.kind === "loaded" ? profileState.profile : null
@@ -4266,7 +4192,7 @@ function PineTreeWalletRuntime() {
   )
 
   // ---------------------------------------------------------------------------
-  // Derived state — Lightning (PineTree-managed backend, NOT Dynamic Spark)
+  // Derived state â€” Lightning (PineTree-managed backend, NOT Dynamic Spark)
   // ---------------------------------------------------------------------------
 
   const btcPayoutReady = railReadiness?.bitcoin_lightning.withdrawalReady ?? Boolean(profile?.btc_address && profile.btc_payout_enabled)
@@ -4890,12 +4816,12 @@ function PineTreeWalletRuntime() {
         })
       }
       if (matched) {
-        // Wallet is already active and matches — return to form; values are preserved.
+        // Wallet is already active and matches â€” return to form; values are preserved.
         await syncProfileFromDynamic()
         setWithdrawalScreen(withdrawalReview ? "review" : "form")
         return
       }
-      // Wallets are loaded but none match the saved address — different account or session.
+      // Wallets are loaded but none match the saved address â€” different account or session.
     }
 
     // No Dynamic wallets are active. Trigger the Dynamic auth flow to reconnect the session.
@@ -5084,7 +5010,7 @@ function PineTreeWalletRuntime() {
     const token = accessTokenRef.current
     const destination = withdrawalDestination.trim()
     const rawAmount = withdrawalAmount.trim()
-    // Normalize leading-dot input (.01 → 0.01) so the review card and API payload
+    // Normalize leading-dot input (.01 â†’ 0.01) so the review card and API payload
     // always receive a canonical decimal string.
     const amount = rawAmount.startsWith(".") ? `0${rawAmount}` : rawAmount
 
@@ -5132,7 +5058,7 @@ function PineTreeWalletRuntime() {
       withdrawalRail === "base" || withdrawalRail === "solana"
         ? findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, withdrawalRail, reviewSourceAddress)
         : true
-    // Block review when the Dynamic wallet runtime has no usable signer — creating a withdrawal request
+    // Block review when the Dynamic wallet runtime has no usable signer â€” creating a withdrawal request
     // row now would result in pending spam that can never be signed in this session.
     if (sdkHasLoaded && user && (dynamicWalletRuntimeCount === 0 || !reviewSigner)) {
       if (walletCreationDebugEnabled) {
@@ -5294,7 +5220,7 @@ function PineTreeWalletRuntime() {
     setWithdrawalScreen("approving")
     try {
       // Route by the server's approvalMethod decision, not by client wallet-lookup state.
-      // When the server says dynamic_browser, always use prepare→sign→complete. If the
+      // When the server says dynamic_browser, always use prepareâ†’signâ†’complete. If the
       // Dynamic wallet is not found at signing time, the user gets a clear error to retry.
       if (withdrawalReview?.review.approvalMethod === "dynamic_browser") {
         const prepareRes = await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/prepare`, {
@@ -5767,14 +5693,8 @@ function PineTreeWalletRuntime() {
                 <>
                   {lightningProfileState.kind === "loaded" &&
                   lightningProfileState.profile.status === "needs_attention" &&
-                  lightningProfileState.profile.speed_connected_account_status === "business_owner_profile_required" ? (
-                    <BusinessOwnerProfileBanner
-                      form={businessOwnerForm}
-                      onChange={setBusinessOwnerForm}
-                      onSave={saveBusinessOwnerProfile}
-                      saving={businessOwnerSaving}
-                      error={businessOwnerError}
-                    />
+                  ["business_profile_required", "business_owner_profile_required"].includes(String(lightningProfileState.profile.speed_connected_account_status || "")) ? (
+                    <BusinessProfileRequiredBanner />
                   ) : null}
                   <WalletOverviewSummary
                     rows={walletRailRows}

@@ -11,36 +11,7 @@ import { getMerchantById } from "@/database/merchants"
 import { syncPineTreeWalletProfileProviders } from "@/database/pineTreeWalletProfileProviderSync"
 import { provisionMerchantBitcoinAddress } from "@/engine/pineTreeBitcoinAddressProvisioning"
 import { ensureManagedLightningForMerchant } from "@/engine/pineTreeWalletReadiness"
-
-/**
- * GET /api/wallets/pinetree-profile
- * Returns the current merchant's PineTree Wallet profile, or { profile: null } if none exists.
- * Opening PineTree Wallet also ensures Lightning readiness (Speed Custom Connect)
- * server-side; this is a no-op past the first successful provisioning.
- */
-export async function GET(req: NextRequest) {
-  try {
-    const merchantId = await requireMerchantIdFromRequest(req)
-    const profile = await getPineTreeWalletProfile(merchantId)
-    try {
-      // Serverless functions can be frozen once the response is sent, so this
-      // is awaited rather than fired-and-forgotten. It short-circuits on a
-      // single DB read once the Speed connected account is already active.
-      await ensureManagedLightningForMerchant(merchantId)
-    } catch (error) {
-      console.warn("[pinetree-wallets] ensure_managed_lightning_failed", {
-        merchantId,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
-    return NextResponse.json({ profile })
-  } catch (error) {
-    return NextResponse.json(
-      { error: "Failed to load wallet profile" },
-      { status: getRouteErrorStatus(error) }
-    )
-  }
-}
+import { assertMerchantBusinessProfileComplete } from "@/engine/businessProfile"
 
 /**
  * POST /api/wallets/pinetree-profile
@@ -88,6 +59,8 @@ export async function POST(req: NextRequest) {
       })
       return NextResponse.json({ profile, merchantId })
     }
+
+    await assertMerchantBusinessProfileComplete(merchantId)
 
     const syncsDynamicProfile =
       "dynamic_user_id" in body ||
@@ -206,6 +179,33 @@ export async function POST(req: NextRequest) {
     })
     return NextResponse.json(
       { error: "Failed to save wallet profile" },
+      { status: getRouteErrorStatus(error) }
+    )
+  }
+}
+
+/**
+ * GET /api/wallets/pinetree-profile
+ * Returns the current merchant's PineTree Wallet profile, or { profile: null } if none exists.
+ * Opening PineTree Wallet also ensures Lightning readiness server-side; this is
+ * a no-op past the first successful provisioning.
+ */
+export async function GET(req: NextRequest) {
+  try {
+    const merchantId = await requireMerchantIdFromRequest(req)
+    const profile = await getPineTreeWalletProfile(merchantId)
+    try {
+      await ensureManagedLightningForMerchant(merchantId)
+    } catch (error) {
+      console.warn("[pinetree-wallets] ensure_managed_lightning_failed", {
+        merchantId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+    return NextResponse.json({ profile })
+  } catch (error) {
+    return NextResponse.json(
+      { error: "Failed to load wallet profile" },
       { status: getRouteErrorStatus(error) }
     )
   }

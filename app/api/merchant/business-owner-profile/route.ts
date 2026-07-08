@@ -7,11 +7,6 @@ import {
 } from "@/database/merchants"
 import { ensureManagedLightningForMerchant } from "@/engine/pineTreeWalletReadiness"
 
-/**
- * GET /api/merchant/business-owner-profile
- * Returns whether the merchant has already saved the business-owner identity
- * fields required for automatic Speed Custom Connect provisioning.
- */
 export async function GET(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
@@ -20,20 +15,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ profile })
   } catch (error) {
     return NextResponse.json(
-      { error: "Failed to load business owner profile" },
+      { error: "Failed to load Business Profile" },
       { status: getRouteErrorStatus(error) }
     )
   }
 }
 
-/**
- * POST /api/merchant/business-owner-profile
- * Saves the merchant's business-owner identity fields (first/last name,
- * country) once, then triggers Lightning readiness so Speed Custom Connect
- * provisioning can run immediately without a separate step.
- *
- * SECURITY: No Speed credentials are collected or returned here.
- */
 export async function POST(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
@@ -67,7 +54,7 @@ export async function POST(req: NextRequest) {
     })
   } catch (error) {
     return NextResponse.json(
-      { error: "Failed to save business owner profile" },
+      { error: "Failed to save Business Profile" },
       { status: getRouteErrorStatus(error) }
     )
   }

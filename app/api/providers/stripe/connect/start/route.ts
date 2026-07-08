@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { startStripeConnectOnboarding } from "@/engine/stripeConnect"
+import { assertMerchantBusinessProfileComplete } from "@/engine/businessProfile"
 import {
   getRouteErrorStatus,
   requireMerchantIdFromRequest
@@ -8,6 +9,7 @@ import {
 export async function POST(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
+    await assertMerchantBusinessProfileComplete(merchantId)
     const result = await startStripeConnectOnboarding({ merchantId })
 
     if (!result.ok) {

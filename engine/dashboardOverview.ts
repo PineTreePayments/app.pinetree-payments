@@ -7,6 +7,7 @@ import {
   type OverviewRailReadiness
 } from "./providersDashboard"
 import { getPaymentStatusLabel } from "@/lib/utils/paymentStatus"
+import { getMerchantBusinessProfile, type MerchantBusinessProfile } from "./businessProfile"
 
 const db = supabaseAdmin || supabase
 
@@ -81,13 +82,15 @@ export type DashboardOverviewResult = {
     connectedProviders: number
     lastSyncAt: string | null
   }
+  businessProfile: Pick<MerchantBusinessProfile, "profile_status" | "missing_fields">
 }
 
 export async function getDashboardOverviewEngine(merchantId: string): Promise<DashboardOverviewResult> {
-  const [walletOverview, inventoryOverview, providersOverview] = await Promise.all([
+  const [walletOverview, inventoryOverview, providersOverview, businessProfile] = await Promise.all([
     getWalletOverviewEngine(merchantId, { refresh: false }),
     getInventoryEngine(merchantId),
-    getProvidersDashboardEngine(merchantId)
+    getProvidersDashboardEngine(merchantId),
+    getMerchantBusinessProfile(merchantId)
   ])
 
   const [{ data: tx }, { data: payments, error: paymentError }] = await Promise.all([
@@ -224,7 +227,11 @@ export async function getDashboardOverviewEngine(merchantId: string): Promise<Da
         .filter((value): value is string => Boolean(value))
         .sort()
         .at(-1) || null
-    }
+    },
+    businessProfile: {
+      profile_status: businessProfile.profile_status,
+      missing_fields: businessProfile.missing_fields,
+    },
   }
 }
 

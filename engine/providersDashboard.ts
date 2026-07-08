@@ -10,6 +10,7 @@ import {
   getPineTreeRailReadinessDiagnostics,
   type PineTreeRailReadinessMap
 } from "@/lib/pinetreeRailReadiness"
+import { assertMerchantBusinessProfileComplete, getMerchantBusinessProfile, type MerchantBusinessProfile } from "./businessProfile"
 
 const db = supabaseAdmin || supabase
 
@@ -75,6 +76,7 @@ export type ProvidersDashboardData = {
     smart_routing_enabled: boolean
     auto_conversion_enabled: boolean
   }
+  businessProfile: Pick<MerchantBusinessProfile, "profile_status" | "missing_fields">
 }
 
 export type OverviewRailReadiness = {
@@ -478,12 +480,13 @@ export async function getProvidersDashboardEngine(merchantId: string): Promise<P
   await loadProviders()
   await ensureMerchant(merchantId)
 
-  const [providersRes, walletsRes, pineTreeWalletProfile, lightningProfile, settings] = await Promise.all([
+  const [providersRes, walletsRes, pineTreeWalletProfile, lightningProfile, settings, businessProfile] = await Promise.all([
     db.from("merchant_providers").select("*").eq("merchant_id", merchantId),
     db.from("merchant_wallets").select("*").eq("merchant_id", merchantId),
     getPineTreeWalletProfile(merchantId),
     import("@/database/merchantLightningProfiles").then((mod) => mod.getMerchantLightningProfile(merchantId)),
-    ensureMerchantSettings(merchantId)
+    ensureMerchantSettings(merchantId),
+    getMerchantBusinessProfile(merchantId)
   ])
 
   if (providersRes.error) {
@@ -514,7 +517,8 @@ export async function getProvidersDashboardEngine(merchantId: string): Promise<P
       accountReady: speedAccountReady,
       payoutReady: Boolean(speedAccountReady && pineTreeWalletProfile?.btc_payout_enabled),
       status: lightningProfile?.status || String(speedCredentials.setup_status || speedProvider?.status || "")
-    }
+    },
+    businessProfileComplete: businessProfile.profile_status === "complete"
   })
 
   if (process.env.NODE_ENV !== "production" || process.env.PINETREE_RAIL_READINESS_DEBUG === "true") {
@@ -535,7 +539,11 @@ export async function getProvidersDashboardEngine(merchantId: string): Promise<P
           bitcoinAddressPresent: railReadiness.bitcoin_lightning.walletProvisioned
         }
       : null,
-    settings
+    settings,
+    businessProfile: {
+      profile_status: businessProfile.profile_status,
+      missing_fields: businessProfile.missing_fields,
+    }
   }
 }
 
@@ -566,6 +574,10 @@ export async function toggleProviderEngine(
   enabled: boolean
 ) {
   await loadProviders()
+
+  if (enabled) {
+    await assertMerchantBusinessProfileComplete(merchantId)
+  }
 
   const canonicalWalletMode =
     process.env.PINE_TREE_WALLET_CANONICAL === "true" ||

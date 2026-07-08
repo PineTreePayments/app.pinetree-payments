@@ -68,6 +68,10 @@ type DashboardOverviewResponse = {
     connectedProviders?: number
     lastSyncAt?: string | null
   }
+  businessProfile?: {
+    profile_status: "incomplete" | "complete" | "needs_attention"
+    missing_fields: string[]
+  }
   error?: string
 }
 
@@ -101,6 +105,7 @@ export default function DashboardPage() {
     failed: 0
   })
   const [railReadiness, setRailReadiness] = useState<NonNullable<DashboardOverviewResponse["railReadiness"]>>([])
+  const [businessProfileStatus, setBusinessProfileStatus] = useState<DashboardOverviewResponse["businessProfile"] | null>(null)
   const [chartRange, setChartRange] = useState<ChartRange>("30D")
   const [chartExpanded, setChartExpanded] = useState(false)
 
@@ -138,6 +143,7 @@ export default function DashboardPage() {
     setRecentTx(payload.recentTx || [])
     if (payload.today) setToday(payload.today)
     setRailReadiness(payload.railReadiness || [])
+    setBusinessProfileStatus(payload.businessProfile || null)
   }, [])
 
   const loadOverview = useCallback(async () => {
@@ -244,6 +250,17 @@ export default function DashboardPage() {
     <div className="space-y-5 md:space-y-7">
 
       <h1 className={dashboardPageTitleClass}>Overview</h1>
+
+      {businessProfileStatus && businessProfileStatus.profile_status !== "complete" ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 shadow-[0_8px_24px_rgba(217,119,6,0.08)] sm:px-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm font-semibold">Complete your Business Profile to activate payments.</p>
+            <Link href="/dashboard/settings#business-profile" className="text-sm font-semibold text-blue-700 hover:text-blue-800">
+              Complete Business Profile
+            </Link>
+          </div>
+        </div>
+      ) : null}
 
       {/* 1 — Today's Successful Sales */}
       <div className="relative overflow-hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] px-4 py-3 shadow-[0_10px_28px_rgba(37,99,235,0.09)] sm:px-5 sm:py-3.5">

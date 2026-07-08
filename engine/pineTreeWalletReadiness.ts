@@ -28,6 +28,7 @@ export type EnsureManagedLightningAction =
   | "already_active"
   | "provisioned"
   | "provisioning_incomplete"
+  | "needs_business_profile"
   | "needs_business_owner_profile"
   | "treasury_sweep_mode"
 
@@ -88,8 +89,8 @@ async function syncLightningStatusIntoWalletProfile(
  * Connect connected account.
  *
  *  - If merchant_lightning_profiles already has an active account: no-op.
- *  - If the merchant hasn't saved their business-owner profile (first/last
- *    name, country) yet: marks the profile needs_attention and returns
+ *  - If the merchant hasn't completed their Business Profile yet: marks the
+ *    profile needs_attention and returns
  *    without calling Speed — there is nothing to submit yet.
  *  - Otherwise: calls the existing Speed Custom Connect helper and persists
  *    both the ca_ relationship id and the acct_ connected account id.
@@ -190,7 +191,7 @@ export async function ensureManagedLightningForMerchant(
       status: "needs_attention",
       speedConnectedAccountStatus: "business_owner_profile_required",
       providerErrorMessage:
-        "Save the business owner's first name, last name, and country to enable Bitcoin Lightning.",
+        "Complete your Business Profile to activate payments.",
     })
     return {
       status: lightningProfile.status,

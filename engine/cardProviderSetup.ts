@@ -1,5 +1,6 @@
 import { supabase, supabaseAdmin } from "@/database"
 import { startStripeConnectOnboarding } from "./stripeConnect"
+import { assertMerchantBusinessProfileComplete } from "./businessProfile"
 
 const db = supabaseAdmin || supabase
 
@@ -88,6 +89,8 @@ export async function startCardProviderSetup(args: {
   provider: CardSetupProvider
   returnUrl: string
 }): Promise<{ ok: true; url: string; applicationStatus: "pending" } | { ok: false; error: string }> {
+  await assertMerchantBusinessProfileComplete(args.merchantId)
+
   if (args.provider === "stripe") {
     return startStripeConnectOnboarding({ merchantId: args.merchantId })
   }

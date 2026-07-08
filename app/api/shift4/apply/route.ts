@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { applyShift4OnboardingEngine } from "@/engine/shift4Onboarding"
+import { assertMerchantBusinessProfileComplete } from "@/engine/businessProfile"
 import {
   getRouteErrorStatus,
   requireMerchantIdFromRequest
@@ -16,7 +17,8 @@ function getErrorMessage(error: unknown, fallback: string) {
 export async function POST(req: NextRequest) {
   try {
     // Must be an authenticated merchant — prevents anonymous onboarding attempts
-    await requireMerchantIdFromRequest(req)
+    const merchantId = await requireMerchantIdFromRequest(req)
+    await assertMerchantBusinessProfileComplete(merchantId)
 
     const body = (await req.json().catch(() => null)) as { email?: string } | null
 

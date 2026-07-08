@@ -7,6 +7,7 @@ export type PineTreeRailReasonCode =
   | "missing_solana_address"
   | "missing_base_address"
   | "missing_speed_account"
+  | "missing_business_profile"
   | "missing_dynamic_signer"
   | "btc_placeholder_only"
   | "ready"
@@ -56,6 +57,7 @@ export type BuildPineTreeRailReadinessInput = {
   walletProfile?: PineTreeWalletProfileReadinessInput | null
   speed?: PineTreeSpeedReadinessInput | null
   dynamicSigners?: PineTreeDynamicSignerReadinessInput | null
+  businessProfileComplete?: boolean | null
 }
 
 function normalizeProviderId(provider?: string | null) {
@@ -101,6 +103,7 @@ export function buildPineTreeRailReadiness(
   const speed = input.speed || null
   const dynamicSigners = input.dynamicSigners || null
   const hasProfile = Boolean(profile)
+  const businessProfileComplete = input.businessProfileComplete !== false
 
   const solanaEnabled = providerEnabled(input.providers, "solana")
   const baseEnabled = providerEnabled(input.providers, "base")
@@ -117,15 +120,16 @@ export function buildPineTreeRailReadiness(
   const speedAccountReady = Boolean(speed?.configured && speed?.accountReady)
   const speedPayoutReady = Boolean(speedAccountReady && speed?.payoutReady)
 
-  const solanaPaymentReady = solanaEnabled && solanaConnected && solanaAddressPresent
-  const basePaymentReady = baseEnabled && baseConnected && baseAddressPresent
-  const lightningPaymentReady = lightningEnabled && lightningConnected && speedAccountReady
+  const solanaPaymentReady = businessProfileComplete && solanaEnabled && solanaConnected && solanaAddressPresent
+  const basePaymentReady = businessProfileComplete && baseEnabled && baseConnected && baseAddressPresent
+  const lightningPaymentReady = businessProfileComplete && lightningEnabled && lightningConnected && speedAccountReady
 
   const solanaWithdrawalReady = solanaPaymentReady && Boolean(dynamicSigners?.solana)
   const baseWithdrawalReady = basePaymentReady && Boolean(dynamicSigners?.base)
   const lightningWithdrawalReady = lightningEnabled && speedPayoutReady
 
   const solanaReasons: PineTreeRailReasonCode[] = []
+  if (!businessProfileComplete) solanaReasons.push("missing_business_profile")
   if (!solanaEnabled) solanaReasons.push("provider_disabled")
   if (solanaEnabled && !solanaConnected) solanaReasons.push("provider_not_connected")
   if (!hasProfile) solanaReasons.push("missing_wallet_profile")
@@ -133,6 +137,7 @@ export function buildPineTreeRailReadiness(
   if (solanaPaymentReady && !dynamicSigners?.solana) solanaReasons.push("missing_dynamic_signer")
 
   const baseReasons: PineTreeRailReasonCode[] = []
+  if (!businessProfileComplete) baseReasons.push("missing_business_profile")
   if (!baseEnabled) baseReasons.push("provider_disabled")
   if (baseEnabled && !baseConnected) baseReasons.push("provider_not_connected")
   if (!hasProfile) baseReasons.push("missing_wallet_profile")
@@ -140,6 +145,7 @@ export function buildPineTreeRailReadiness(
   if (basePaymentReady && !dynamicSigners?.base) baseReasons.push("missing_dynamic_signer")
 
   const lightningReasons: PineTreeRailReasonCode[] = []
+  if (!businessProfileComplete) lightningReasons.push("missing_business_profile")
   if (!lightningEnabled) lightningReasons.push("provider_disabled")
   if (lightningEnabled && !lightningConnected) lightningReasons.push("provider_not_connected")
   if (!speedAccountReady) lightningReasons.push("missing_speed_account")
@@ -157,6 +163,7 @@ export function buildPineTreeRailReadiness(
       reasonCodes: withReadyReason(solanaWithdrawalReady, solanaReasons),
       sourceFields: {
         provider_enabled: solanaEnabled,
+        business_profile_complete: businessProfileComplete,
         provider_connected: solanaConnected,
         wallet_profile_present: hasProfile,
         solana_address_present: solanaAddressPresent,
@@ -172,6 +179,7 @@ export function buildPineTreeRailReadiness(
       reasonCodes: withReadyReason(baseWithdrawalReady, baseReasons),
       sourceFields: {
         provider_enabled: baseEnabled,
+        business_profile_complete: businessProfileComplete,
         provider_connected: baseConnected,
         wallet_profile_present: hasProfile,
         base_address_present: baseAddressPresent,
@@ -187,6 +195,7 @@ export function buildPineTreeRailReadiness(
       reasonCodes: withReadyReason(lightningWithdrawalReady, lightningReasons),
       sourceFields: {
         provider_enabled: lightningEnabled,
+        business_profile_complete: businessProfileComplete,
         provider_connected: lightningConnected,
         speed_configured: Boolean(speed?.configured),
         speed_account_ready: speedAccountReady,

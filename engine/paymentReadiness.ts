@@ -20,6 +20,7 @@ import {
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 import { isProviderHealthy } from "./providerRegistry"
 import { buildPineTreeRailReadiness } from "@/lib/pinetreeRailReadiness"
+import { getMerchantBusinessProfile } from "./businessProfile"
 
 type ReadinessNetwork = "solana" | "base" | "bitcoin_lightning"
 
@@ -58,9 +59,13 @@ export async function getPaymentReadinessEngine(input: { merchantId?: string }) 
 
   const networks: ReadinessNetwork[] = ["solana", "base", "bitcoin_lightning"]
 
-  const [connectedProviders, lightningProfile] = merchantId
-    ? await Promise.all([getMerchantProviders(merchantId), getMerchantLightningProfile(merchantId)])
-    : [[], null]
+  const [connectedProviders, lightningProfile, businessProfile] = merchantId
+    ? await Promise.all([
+        getMerchantProviders(merchantId),
+        getMerchantLightningProfile(merchantId),
+        getMerchantBusinessProfile(merchantId)
+      ])
+    : [[], null, null]
   const connectedAdapterIds = connectedProviders
     .map((row) => normalizePaymentAdapter(String(row.provider || "")))
     .filter((value): value is PaymentAdapterId => Boolean(value))
@@ -218,7 +223,8 @@ export async function getPaymentReadinessEngine(input: { merchantId?: string }) 
       accountReady: speedAccountReady,
       payoutReady: Boolean(speedAccountReady && pineTreeWalletProfile?.btc_payout_enabled),
       status: lightningProfile?.status || String(speedCredentials.setup_status || "")
-    }
+    },
+    businessProfileComplete: businessProfile?.profile_status === "complete"
   })
 
   const supportedIntentNetworks = details.filter((item) =>
