@@ -1,16 +1,17 @@
 import { exportPKCS8, generateKeyPair, importJWK, jwtVerify } from "jose"
 import { NextRequest } from "next/server"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { POST } from "@/app/api/wallets/dynamic/external-jwt/route"
+import { GET, POST } from "@/app/api/wallets/dynamic/external-jwt/route"
 import { GET as GET_JWKS } from "@/app/.well-known/dynamic-jwks.json/route"
 import { getMerchantById } from "@/database/merchants"
 
-const { getUser, createClient } = vi.hoisted(() => {
+const { getUser, createClient, requireMerchantIdFromRequest } = vi.hoisted(() => {
   const getUser = vi.fn()
   const createClient = vi.fn(() => ({
     auth: { getUser },
   }))
-  return { getUser, createClient }
+  const requireMerchantIdFromRequest = vi.fn()
+  return { getUser, createClient, requireMerchantIdFromRequest }
 })
 
 vi.mock("@supabase/supabase-js", () => ({
@@ -19,6 +20,10 @@ vi.mock("@supabase/supabase-js", () => ({
 
 vi.mock("@/database/merchants", () => ({
   getMerchantById: vi.fn(),
+}))
+
+vi.mock("@/lib/api/merchantAuth", () => ({
+  requireMerchantIdFromRequest,
 }))
 
 const envKeys = [
@@ -73,6 +78,7 @@ describe("Dynamic external JWT route", () => {
       data: { user: { id: "merchant-1", email: "session@example.com" } },
       error: null,
     })
+    requireMerchantIdFromRequest.mockResolvedValue("merchant-1")
     vi.mocked(getMerchantById).mockResolvedValue({
       id: "merchant-1",
       business_name: "PineTree Merchant",
@@ -312,5 +318,26 @@ describe("Dynamic external JWT route", () => {
         merchantResolved: true,
       },
     })
+  })
+
+  it("GET returns safe diagnostics only and never issues a token", async () => {
+    const res = await GET(request())
+    expect(res.status).toBe(200)
+    const json = await res.json() as Record<string, unknown>
+
+    expect(json).toMatchObject({
+      diagnostics: {
+        enabled: true,
+        issuerConfigured: true,
+        audienceConfigured: true,
+        kidConfigured: true,
+        signingKeyConfigured: true,
+        merchantResolved: true,
+      },
+    })
+    expect(json).not.toHaveProperty("externalJwt")
+    expect(json).not.toHaveProperty("externalUserId")
+    expect(JSON.stringify(json)).not.toContain("merchant@example.com")
+    expect(JSON.stringify(json)).not.toContain("BEGIN PRIVATE KEY")
   })
 })

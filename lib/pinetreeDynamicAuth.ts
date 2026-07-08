@@ -1,10 +1,15 @@
-export type PineTreeDynamicAuthMode = "dynamic_email_fallback" | "external_jwt"
+export type PineTreeDynamicAuthMode = "disabled" | "dynamic_email_fallback" | "external_jwt"
 
 export type PineTreeDynamicAuthConfig = {
   mode: PineTreeDynamicAuthMode
+  rawMode: string
+  rawEmailFallback: string
+  nodeEnv: string
   externalJwtConfigured: boolean
   emailFallbackEnabled: boolean
   emailFallbackMisconfigured: boolean
+  configValid: boolean
+  invalidReason: string | null
 }
 
 export type PineTreeDynamicExternalJwtPayload = {
@@ -32,21 +37,44 @@ export const pineTreeDynamicConfigurationErrorMessage =
   "PineTree Wallet verification is not configured correctly. Please contact support."
 
 export function getPineTreeDynamicAuthConfig(env: Record<string, string | undefined> = process.env): PineTreeDynamicAuthConfig {
-  const externalJwtConfigured = env.NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE === "external_jwt"
-  // Sandbox/dev should keep Dynamic Email login enabled until PineTree external
-  // JWT/BYOA auth is fully configured in both PineTree and the Dynamic dashboard.
-  const emailFallbackEnabled = !externalJwtConfigured && env.NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK !== "false"
+  const rawMode = (env.NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE || "").trim()
+  const rawEmailFallback = (env.NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK || "").trim()
+  const nodeEnv = (env.NODE_ENV || "").trim() || "unknown"
+  const mode: PineTreeDynamicAuthMode =
+    rawMode === "external_jwt"
+      ? "external_jwt"
+      : rawMode === "dynamic_email_fallback"
+        ? "dynamic_email_fallback"
+        : "disabled"
+  const externalJwtConfigured = mode === "external_jwt"
+  // Dynamic email fallback is an explicit opt-in only. Missing/invalid public
+  // auth env must fail closed so production can never silently open Dynamic's
+  // generic login/signup sheet.
+  const emailFallbackEnabled = mode === "dynamic_email_fallback" && rawEmailFallback === "true"
+  const invalidReason =
+    !rawMode
+      ? "missing_auth_mode"
+      : mode === "disabled"
+        ? "invalid_auth_mode"
+        : mode === "dynamic_email_fallback" && rawEmailFallback !== "true"
+          ? "email_fallback_not_explicitly_enabled"
+          : null
 
   return {
-    mode: externalJwtConfigured ? "external_jwt" : "dynamic_email_fallback",
+    mode,
+    rawMode,
+    rawEmailFallback,
+    nodeEnv,
     externalJwtConfigured,
     emailFallbackEnabled,
     emailFallbackMisconfigured: !externalJwtConfigured && !emailFallbackEnabled,
+    configValid: invalidReason === null,
+    invalidReason,
   }
 }
 
 export function shouldOpenDynamicEmailFallbackAuth(config: PineTreeDynamicAuthConfig) {
-  return config.mode !== "external_jwt" && config.emailFallbackEnabled
+  return config.configValid && config.mode === "dynamic_email_fallback" && config.emailFallbackEnabled
 }
 
 export function assertCanOpenDynamicEmailFallbackAuth(config: PineTreeDynamicAuthConfig) {

@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { SignJWT, importPKCS8 } from "jose"
 import { getMerchantById } from "@/database/merchants"
+import { requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
 
 type AuthenticatedMerchant = {
   merchantId: string
@@ -150,6 +151,33 @@ async function signPineTreeDynamicJwt(input: AuthenticatedMerchant) {
     throw Object.assign(new Error("dynamic_external_jwt_signing_key_invalid"), { status: 503 })
   }
   return { externalJwt: await jwt.sign(signingKey), expiresAt, issuer, audience, keyId }
+}
+
+export async function GET(req: NextRequest) {
+  let merchantResolved = false
+  const diagnostics = getExternalJwtConfigDiagnostics()
+  try {
+    await requireMerchantIdFromRequest(req)
+    merchantResolved = true
+    return NextResponse.json({
+      diagnostics: {
+        ...diagnostics,
+        merchantResolved,
+      },
+    })
+  } catch (error) {
+    const status =
+      typeof error === "object" && error !== null && "status" in error && typeof (error as { status?: unknown }).status === "number"
+        ? (error as { status: number }).status
+        : 500
+    return NextResponse.json({
+      error: error instanceof Error ? error.message : "dynamic_external_jwt_debug_failed",
+      diagnostics: {
+        ...diagnostics,
+        merchantResolved,
+      },
+    }, { status })
+  }
 }
 
 export async function POST(req: NextRequest) {

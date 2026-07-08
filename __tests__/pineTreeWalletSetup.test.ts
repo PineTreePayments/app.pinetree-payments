@@ -53,7 +53,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(provider).toContain('appName: "PineTree Wallet"')
     expect(provider).toContain("getPineTreeDynamicAuthConfig")
     expect(dynamicAuthConfig).toContain("NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK")
-    expect(dynamicAuthConfig).toContain("Sandbox/dev should keep Dynamic Email login enabled")
+    expect(dynamicAuthConfig).toContain("generic login/signup sheet")
   })
 
   it("registers EVM, Solana, and Bitcoin wallet connectors without Spark", () => {
@@ -145,13 +145,15 @@ describe("PineTree embedded wallet setup", () => {
 
   it("Dynamic email fallback is temporary and guarded by PineTree identity checks", () => {
     expect(dynamicAuthConfig).toContain("NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK")
-    expect(dynamicAuthConfig).toContain("Sandbox/dev should keep Dynamic Email login enabled")
-    expect(dynamicAuthConfig).toContain('NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE === "external_jwt"')
+    expect(dynamicAuthConfig).toContain('rawMode === "external_jwt"')
+    expect(dynamicAuthConfig).toContain('rawMode === "dynamic_email_fallback"')
+    expect(dynamicAuthConfig).toContain('rawEmailFallback === "true"')
     expect(dynamicAuthConfig).toContain("assertCanOpenDynamicEmailFallbackAuth")
     expect(page).toContain("const dynamicEmailFallbackAllowed =")
     expect(page).toContain("shouldOpenDynamicEmailFallbackAuth(dynamicAuthConfig)")
     expect(page).toContain("blockDynamicEmailFallbackAuth")
     expect(page).toContain("[pinetree-wallets] dynamic_email_fallback_blocked")
+    expect(page).toContain("[pinetree-wallets] dynamic_auth_config_invalid")
     expect(dynamicAuthConfig).toContain("PineTree Wallet verification is not configured correctly. Please contact support.")
     expect(page).toContain("dynamicUserEmail !== merchantEmail")
     expect(apiRoute).toContain("dynamicEmail !== merchantEmail")
@@ -159,6 +161,9 @@ describe("PineTree embedded wallet setup", () => {
 
   it("email fallback disabled without external_jwt shows only a wallet debug warning", () => {
     expect(dynamicAuthConfig).toContain("emailFallbackMisconfigured: !externalJwtConfigured && !emailFallbackEnabled")
+    expect(dynamicAuthConfig).toContain("missing_auth_mode")
+    expect(dynamicAuthConfig).toContain("invalid_auth_mode")
+    expect(dynamicAuthConfig).toContain("email_fallback_not_explicitly_enabled")
     expect(dynamicAuthConfig).toContain("pineTreeDynamicEmailFallbackMisconfiguredWarning")
     expect(dynamicAuthConfig).toContain("Dynamic email fallback is disabled, but PineTree external JWT auth is not configured.")
     expect(page).toContain("const showDynamicAuthMisconfigurationWarning =")
@@ -177,6 +182,14 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("externalJwtErrorCode")
     expect(page).toContain("dynamicExternalAuthAttempted")
     expect(page).toContain("dynamicExternalAuthSucceeded")
+    expect(page).toContain("nodeEnv: {dynamicAuthConfig.nodeEnv}")
+    expect(page).toContain("clientAuthModeRaw")
+    expect(page).toContain("clientAuthModeResolved")
+    expect(page).toContain("clientEmailFallbackRaw")
+    expect(page).toContain("clientEmailFallbackEnabledResolved")
+    expect(page).toContain("clientAuthInvalidReason")
+    expect(page).toContain("buildFingerprint")
+    expect(page).toContain("publicAppUrl")
     expect(page).toContain("lastWalletAuthAttemptState")
     expect(page).toContain("lastExternalJwtRouteStatus")
     expect(page).toContain("lastExternalJwtFailureCode")
