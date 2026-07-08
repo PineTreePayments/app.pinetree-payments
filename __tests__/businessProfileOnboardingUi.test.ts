@@ -7,22 +7,23 @@ function read(relativePath: string) {
 }
 
 describe("Business Profile onboarding UI", () => {
-  it("uses onboarding copy and PineTree blue styling across dashboard surfaces", () => {
+  it("uses compact red onboarding copy and styling across dashboard surfaces", () => {
     const dashboard = read("app/dashboard/page.tsx")
     const settings = read("app/dashboard/settings/page.tsx")
     const providers = read("app/dashboard/providers/page.tsx")
     const wallet = read("app/dashboard/wallet-setup/page.tsx")
 
     for (const source of [dashboard, settings, providers, wallet]) {
-      expect(source).toContain("Complete your Business Profile")
-      expect(source).toContain("Add your business details to activate wallets, providers, and live payments.")
+      expect(source).toContain("Business Profile Required")
+      expect(source).toContain("Complete your Business Profile to activate wallets, providers, and live payments.")
       expect(source).toContain("Complete Business Profile")
-      expect(source).toContain("bg-blue-600")
+      expect(source).toContain("bg-red-50/70")
+      expect(source).toContain("border-red-200")
       expect(source).not.toContain("Complete your Business Profile to activate payments.")
     }
 
     const businessProfileSections = [dashboard, settings, providers, wallet]
-      .map((source) => source.slice(source.indexOf("Complete your Business Profile") - 600, source.indexOf("Complete your Business Profile") + 1200))
+      .map((source) => source.slice(source.indexOf("Business Profile Required") - 600, source.indexOf("Business Profile Required") + 1200))
 
     for (const section of businessProfileSections) {
       expect(section).not.toContain("bg-amber-50")
@@ -41,11 +42,19 @@ describe("Business Profile onboarding UI", () => {
   })
 
   it("keeps schema warning behavior tied to actual schema errors", () => {
+    const settings = read("app/dashboard/settings/page.tsx")
     const settingsEngine = read("engine/settingsDashboard.ts")
 
     expect(settingsEngine).toContain("settingsResult.error && isSchemaMissing")
     expect(settingsEngine).toContain("operationsResult.error")
+    expect(settingsEngine).toContain("MERCHANT_SETTINGS_SELECT_COLUMNS")
+    expect(settingsEngine).toContain("\"business_dba\"")
+    expect(settingsEngine).toContain("\"owner_first_name\"")
+    expect(settingsEngine).toContain("\"profile_status\"")
     expect(settingsEngine).not.toContain("if (!deviceResult.available) schemaReady = false")
     expect(settingsEngine).toContain("Settings schema update required before saving extended preferences")
+    expect(settings).toContain("settingsLoadWarning")
+    expect(settings).toContain("payload.schemaReady === false")
+    expect(settings).not.toContain("{!schemaReady && (")
   })
 })

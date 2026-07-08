@@ -75,6 +75,7 @@ export type SettingsDashboardData = {
   operations: MerchantOperationsSettingsPayload
   receiptDevices: ReceiptDevice[]
   schemaReady: boolean
+  schemaWarning: string | null
 }
 
 export type MerchantSettingsReadiness = {
@@ -143,6 +144,38 @@ const DEFAULT_OPERATIONS: MerchantOperationsSettingsPayload = {
   daily_summary: false,
   low_inventory_alerts: true
 }
+
+const MERCHANT_SETTINGS_SELECT_COLUMNS = [
+  "business_name",
+  "legal_business_name",
+  "business_dba",
+  "contact_email",
+  "address",
+  "address_line_2",
+  "city",
+  "state",
+  "zip",
+  "country",
+  "business_country",
+  "business_state",
+  "business_city",
+  "business_address_line1",
+  "business_address_line2",
+  "business_postal_code",
+  "business_phone",
+  "business_website",
+  "phone",
+  "website",
+  "business_type",
+  "owner_first_name",
+  "owner_last_name",
+  "owner_email",
+  "owner_phone",
+  "profile_status",
+  "completed_at",
+  "closeout_time",
+  "report_toast"
+].join(",")
 
 function text(value: unknown, maxLength: number) {
   const normalized = String(value || "").trim()
@@ -282,14 +315,16 @@ function isSchemaMissing(message: string) {
 
 export async function getSettingsDashboardEngine(merchantId: string): Promise<SettingsDashboardData> {
   let schemaReady = true
+  let schemaWarning: string | null = null
   let settingsResult = await db
     .from("merchant_settings")
-    .select("business_name,legal_business_name,business_dba,contact_email,address,address_line_2,city,state,zip,country,business_country,business_state,business_city,business_address_line1,business_address_line2,business_postal_code,business_phone,business_website,phone,website,business_type,owner_first_name,owner_last_name,owner_email,owner_phone,profile_status,completed_at,closeout_time,report_toast")
+    .select(MERCHANT_SETTINGS_SELECT_COLUMNS)
     .eq("merchant_id", merchantId)
     .maybeSingle()
 
   if (settingsResult.error && isSchemaMissing(settingsResult.error.message)) {
     schemaReady = false
+    schemaWarning = "Saving may be limited until the settings schema is available."
     settingsResult = await db
       .from("merchant_settings")
       .select("business_name,address,city,state,zip,country,phone,business_type,closeout_time,report_toast")
@@ -316,6 +351,7 @@ export async function getSettingsDashboardEngine(merchantId: string): Promise<Se
   if (operationsResult.error) {
     if (isSchemaMissing(operationsResult.error.message)) {
       schemaReady = false
+      schemaWarning = "Saving may be limited until the settings schema is available."
     } else {
       throw new Error(`Failed to load operations settings: ${operationsResult.error.message}`)
     }
@@ -326,12 +362,23 @@ export async function getSettingsDashboardEngine(merchantId: string): Promise<Se
     deviceResult.devices.splice(0, deviceResult.devices.length, ...refreshed.devices)
   }
 
+  const settingsData = settingsResult.data && typeof settingsResult.data === "object"
+    ? settingsResult.data as Partial<MerchantSettingsPayload>
+    : {}
+  const taxData = taxResult.data && typeof taxResult.data === "object"
+    ? taxResult.data as Partial<MerchantTaxSettingsPayload>
+    : {}
+  const operationsData = operationsResult.data && typeof operationsResult.data === "object"
+    ? operationsResult.data as Partial<MerchantOperationsSettingsPayload>
+    : {}
+
   return {
-    settings: { ...DEFAULT_SETTINGS, ...(settingsResult.data || {}) },
-    tax: { ...DEFAULT_TAX, ...(taxResult.data || {}) },
-    operations: { ...DEFAULT_OPERATIONS, ...(operationsResult.data || {}) },
+    settings: { ...DEFAULT_SETTINGS, ...settingsData },
+    tax: { ...DEFAULT_TAX, ...taxData },
+    operations: { ...DEFAULT_OPERATIONS, ...operationsData },
     receiptDevices: deviceResult.devices,
-    schemaReady
+    schemaReady,
+    schemaWarning
   }
 }
 

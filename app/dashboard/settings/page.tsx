@@ -69,6 +69,7 @@ type SettingsApiResponse = {
   tax?: MerchantTaxSettingsPayload
   operations?: MerchantOperationsSettingsPayload
   schemaReady?: boolean
+  schemaWarning?: string | null
   error?: string
 }
 
@@ -156,6 +157,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [schemaReady, setSchemaReady] = useState(true)
+  const [settingsLoadWarning, setSettingsLoadWarning] = useState<string | null>(null)
   const [providerSummary, setProviderSummary] = useState<ProviderSummary[]>([])
   const [integrationSummary, setIntegrationSummary] = useState<IntegrationSummary>({
     wallets: 0,
@@ -199,6 +201,9 @@ export default function SettingsPage() {
     const settings = payload.settings
     const tax = payload.tax
     setSchemaReady(payload.schemaReady !== false)
+    setSettingsLoadWarning(payload.schemaReady === false
+      ? payload.schemaWarning || "Saving may be limited until the settings schema is available."
+      : null)
 
     if (settings) {
       setBusinessName(settings.legal_business_name || settings.business_name || "")
@@ -289,6 +294,8 @@ export default function SettingsPage() {
       }
     } catch (error) {
       console.error(error)
+      setSchemaReady(false)
+      setSettingsLoadWarning(error instanceof Error ? error.message : "Failed to load settings")
       toast.error(error instanceof Error ? error.message : "Failed to load settings")
     } finally {
       setLoading(false)
@@ -416,12 +423,10 @@ export default function SettingsPage() {
         <h1 className={dashboardPageTitleClass}>Settings</h1>
       </div>
 
-      {!schemaReady && (
-        <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+      {settingsLoadWarning && (
+        <div className="rounded-lg border border-red-200 bg-red-50/70 px-3 py-2.5 text-sm text-red-800 shadow-none">
           <p className="font-semibold text-gray-950">Some settings could not load</p>
-          <p className="mt-1 leading-5">
-            Saving may be limited until the settings schema is available.
-          </p>
+          <p className="mt-0.5 leading-5">{settingsLoadWarning}</p>
         </div>
       )}
 
@@ -429,16 +434,16 @@ export default function SettingsPage() {
       <div id="business-profile" />
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
         {profileStatus !== "complete" ? (
-          <div className="mb-4 rounded-2xl border border-blue-100 bg-blue-50/45 px-4 py-3 text-sm">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mb-3 rounded-lg border border-red-200 bg-red-50/70 px-3 py-2.5 text-sm">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-start gap-3">
-                <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-blue-600 shadow-[0_0_0_4px_rgba(37,99,235,0.10)]" />
+                <span className="mt-0.5 h-8 w-1 shrink-0 rounded-full bg-red-500" />
                 <div>
-                  <p className="font-semibold text-gray-950">Complete your Business Profile</p>
-                  <p className="mt-0.5 leading-5 text-gray-600">Add your business details to activate wallets, providers, and live payments.</p>
+                  <p className="font-semibold text-red-950">Business Profile Required</p>
+                  <p className="mt-0.5 leading-5 text-red-800/80">Complete your Business Profile to activate wallets, providers, and live payments.</p>
                 </div>
               </div>
-              <span className="shrink-0 font-semibold text-blue-700">Complete Business Profile</span>
+              <span className="shrink-0 font-semibold text-red-700">Complete Business Profile</span>
             </div>
           </div>
         ) : null}
