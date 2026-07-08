@@ -28,6 +28,7 @@ describe("PineTree embedded wallet setup", () => {
   const speedConnectMigration = read("database/migrations/20260623_add_speed_connect_fields_to_merchant_lightning_profiles.sql")
   const lightningDbHelper = read("database/merchantLightningProfiles.ts")
   const lightningApiRoute = read("app/api/wallets/lightning/pinetree-managed/route.ts")
+  const lightningReadinessEngine = read("engine/pineTreeWalletReadiness.ts")
   // connect-return was deleted when merchant-facing Speed Connect was removed.
   // Tests below assert it is absent instead of reading it.
   const speedConnectReturnRouteExists = (() => {
@@ -1076,7 +1077,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("speed_secret")
     // The lightning API route response only contains a safe profile shape, not secrets
     expect(lightningApiRoute).toContain("safeLightningProfile")
-    expect(lightningApiRoute).toContain("SPEED_API_KEY_present")
+    expect(lightningReadinessEngine).toContain("SPEED_API_KEY_present")
     expect(lightningApiRoute).not.toContain("speed_account_secret")
     expect(lightningApiRoute).not.toContain("sk_live_")
     expect(lightningApiRoute).not.toContain("sk_test_")
@@ -1118,14 +1119,13 @@ describe("PineTree embedded wallet setup", () => {
     expect(lightningApiRoute).toContain("GET")
     expect(lightningApiRoute).toContain("POST")
     expect(lightningApiRoute).toContain("getMerchantLightningProfile")
-    expect(lightningApiRoute).toContain("upsertMerchantLightningProfile")
     expect(lightningApiRoute).toContain("isSpeedPlatformTreasurySweepEnabled")
-    expect(lightningApiRoute).toContain("getSafeTreasurySweepLogContext")
     expect(lightningApiRoute).toContain("btc_address_present")
     expect(lightningApiRoute).toContain("btc_payout_enabled")
-    expect(lightningApiRoute).toContain("createOrLinkSpeedConnectedAccountForMerchant")
-    expect(lightningApiRoute).toContain("mapSpeedReadinessToLightningStatus")
-    expect(lightningApiRoute).toContain("SPEED_API_KEY_present")
+    // POST delegates provisioning to the shared ensure-function rather than
+    // calling the merchant-facing invite-link Speed Connect helper directly.
+    expect(lightningApiRoute).toContain("ensureManagedLightningForMerchant")
+    expect(lightningApiRoute).not.toContain("createOrLinkSpeedConnectedAccountForMerchant")
   })
 
   it("Speed connected-account helper is server-side and uses documented Speed Connect account links", () => {
@@ -1169,32 +1169,32 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("canonical mode does not save a merchant Speed connected account", () => {
-    expect(lightningApiRoute).toContain('speedConnectedAccountId: null')
-    expect(lightningApiRoute).toContain('"pinetree_wallet_btc_payout_ready"')
-    expect(lightningApiRoute).toContain('"btc_address_missing_internal"')
-    expect(lightningApiRoute).toContain('internal_readiness_issue: btcAddressReady ? null : "btc_address_missing"')
-    expect(lightningApiRoute).toContain("bitcoinLightningAccountId: null")
-    expect(lightningApiRoute).toContain("speedSetup.speed_connected_account_id")
+    expect(lightningReadinessEngine).toContain('speedConnectedAccountId: null')
+    expect(lightningReadinessEngine).toContain('"pinetree_wallet_btc_payout_ready"')
+    expect(lightningReadinessEngine).toContain('"btc_address_missing_internal"')
+    expect(lightningReadinessEngine).toContain('internal_readiness_issue: btcAddressReady ? null : "btc_address_missing"')
+    expect(lightningReadinessEngine).toContain("bitcoinLightningAccountId: null")
+    expect(lightningReadinessEngine).toContain("speedSetup.speed_connected_account_id")
   })
 
   it("managed Lightning POST records canonical treasury-sweep state without secrets", () => {
-    expect(lightningApiRoute).toContain("[pinetree-managed-lightning] treasury_sweep_post_start")
-    expect(lightningApiRoute).toContain("lightning_provider")
-    expect(lightningApiRoute).toContain("settlement_mode")
-    expect(lightningApiRoute).toContain("SPEED_API_KEY_present")
-    expect(lightningApiRoute).toContain("SPEED_WEBHOOK_SECRET_present")
-    expect(lightningApiRoute).toContain("SPEED_API_BASE_URL")
-    expect(lightningApiRoute).toContain("final_saved_profile_status")
-    expect(lightningApiRoute).toContain("speed_platform_config_missing")
+    expect(lightningReadinessEngine).toContain("[pinetree-managed-lightning] treasury_sweep_post_start")
+    expect(lightningReadinessEngine).toContain("lightning_provider")
+    expect(lightningReadinessEngine).toContain("settlement_mode")
+    expect(lightningReadinessEngine).toContain("SPEED_API_KEY_present")
+    expect(lightningReadinessEngine).toContain("SPEED_WEBHOOK_SECRET_present")
+    expect(lightningReadinessEngine).toContain("SPEED_API_BASE_URL")
+    expect(lightningReadinessEngine).toContain("final_saved_profile_status")
+    expect(lightningReadinessEngine).toContain("speed_platform_config_missing")
   })
 
   it("merchant Lightning profile requires BTC address to be ready before status is ready", () => {
-    expect(lightningApiRoute).toContain("const btcAddressReady = Boolean(walletProfile?.btc_address && walletProfile.btc_payout_enabled)")
-    expect(lightningApiRoute).toContain("walletProfile?.btc_address && walletProfile.btc_payout_enabled")
-    expect(lightningApiRoute).toContain("const nextStatus: MerchantLightningProfileStatus = !speedConfig.configured")
-    expect(lightningApiRoute).toContain("!btcAddressReady")
-    expect(lightningApiRoute).toContain('internal_readiness_issue: btcAddressReady ? null : "btc_address_missing"')
-    expect(lightningApiRoute).not.toContain('"Bitcoin address pending for PineTree Wallet."')
+    expect(lightningReadinessEngine).toContain("const btcAddressReady = Boolean(walletProfile?.btc_address && walletProfile.btc_payout_enabled)")
+    expect(lightningReadinessEngine).toContain("walletProfile?.btc_address && walletProfile.btc_payout_enabled")
+    expect(lightningReadinessEngine).toContain("const status: MerchantLightningProfileStatus = !speedConfig.configured")
+    expect(lightningReadinessEngine).toContain("!btcAddressReady")
+    expect(lightningReadinessEngine).toContain('internal_readiness_issue: btcAddressReady ? null : "btc_address_missing"')
+    expect(lightningReadinessEngine).not.toContain('"Bitcoin address pending for PineTree Wallet."')
   })
 
   it("Lightning stays pending when Speed returns only an invite/setup link", () => {
@@ -1210,14 +1210,14 @@ describe("PineTree embedded wallet setup", () => {
     expect(speedConnectedAccountHelper).toContain("speed_api_key_missing")
     expect(speedConnectedAccountHelper).toContain("speed_connect_return_url_missing")
     expect(speedConnectedAccountHelper).toContain("Speed connected account was not found")
-    expect(lightningApiRoute).toContain('"btc_address_missing_internal"')
-    expect(lightningApiRoute).toContain("const nextStatus = mapSpeedReadinessToLightningStatus(speedSetup.readiness)")
+    expect(lightningReadinessEngine).toContain('"btc_address_missing_internal"')
+    expect(lightningReadinessEngine).toContain('speedSetup.readiness === "ready"')
   })
 
   it("syncs PineTree Wallet Lightning fields from the managed Lightning profile", () => {
-    expect(lightningApiRoute).toContain('bitcoinLightningProvider: "speed"')
-    expect(lightningApiRoute).toContain('bitcoinLightningReceiveMode: "invoice"')
-    expect(lightningApiRoute).toContain("bitcoinLightningStatus: lightningProfile.status")
+    expect(lightningReadinessEngine).toContain('bitcoinLightningProvider: "speed"')
+    expect(lightningReadinessEngine).toContain('bitcoinLightningReceiveMode: "invoice"')
+    expect(lightningReadinessEngine).toContain("bitcoinLightningStatus: lightningProfile.status")
     expect(dbHelper).toContain("bitcoinLightningReceiveMode")
   })
 

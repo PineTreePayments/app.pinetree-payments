@@ -500,8 +500,10 @@ describe("Provider connected/not connected behavior", () => {
     expect(walletPage).toContain('"Connected" : "Not connected"')
   })
 
-  it("providers page uses Connected/Setup needed/Not connected with no Disabled pill for crypto rails", () => {
-    expect(providersPage).not.toContain('"Disabled"')
-    expect(providersPage).toContain('"Connected" : merchantPreferenceEnabled || readiness ? "Setup needed" : "Not connected"')
+  it("providers page uses Connected/Setup needed/Not connected for the crypto rail status pill, independent of enabled state", () => {
+    // "Disabled" is a legitimate toggle label now, but the status pill union
+    // still only ever resolves to Connected/Setup needed/Not connected.
+    expect(providersPage).toContain('"Connected" | "Setup needed" | "Not connected"')
+    expect(providersPage).toContain('const statusLabel = connected ? "Connected" : readiness ? "Setup needed" : "Not connected"')
   })
 })

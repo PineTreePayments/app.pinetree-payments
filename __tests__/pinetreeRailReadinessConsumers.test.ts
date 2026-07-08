@@ -44,15 +44,20 @@ describe("PineTree rail readiness consumers", () => {
     expect(src).toContain('validated.rail === "bitcoin" && !readiness.withdrawalReady')
   })
 
-  it("Providers page status and visible availability toggles use normalized paymentReady", () => {
+  it("Providers page setup/status pill is decoupled from the enabled toggle", () => {
     const src = read("app/dashboard/providers/page.tsx")
 
-    expect(src).toContain("readiness.paymentReady")
-    expect(src).toContain("function isManagedRailToggleOn")
-    expect(src).toContain("return Boolean(readiness.paymentReady)")
+    // Status pill reflects wallet/account setup readiness only.
+    expect(src).toContain("readiness.walletProvisioned")
+    expect(src).toContain('const statusLabel = connected ? "Connected" : readiness ? "Setup needed" : "Not connected"')
+    // Toggle reflects the raw merchant enabled/disabled preference, never a
+    // readiness-derived value, so it can always be flipped back on once set up.
+    expect(src).toContain("function canEnableManagedRail")
+    expect(src).toContain("const toggleOn = merchantPreferenceEnabled")
     expect(src).toContain("checked={toggleOn}")
-    expect(src).toContain('merchantPreferenceEnabled || readiness ? "Setup needed" : "Not connected"')
+    expect(src).toContain("const toggleDisabled = !merchantPreferenceEnabled && !canEnable")
     expect(src).toContain("isMerchantPreferenceEnabled")
+    expect(src).not.toContain('"Available"')
   })
 
   it("Wallet page connected pills use walletProvisioned and withdrawal assets use payout/address gates", () => {

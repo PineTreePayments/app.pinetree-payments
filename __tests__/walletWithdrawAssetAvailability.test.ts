@@ -154,7 +154,7 @@ describe("enabledRails reflects toggle state, not connection status", () => {
 
 describe("Providers page and Wallet page readiness agreement", () => {
   it("ManagedCryptoRailCard uses normalized walletProvisioned for address-based connected check", () => {
-    expect(providersPage).toContain("const connected = readiness?.walletProvisioned ?? isCanonicalRailConfigured(provider)")
+    expect(providersPage).toContain("const connected = Boolean(readiness?.walletProvisioned ?? isCanonicalRailConfigured(provider))")
   })
 
   it("isCanonicalRailConfigured checks pineTreeWalletProfile address flags", () => {
@@ -163,18 +163,19 @@ describe("Providers page and Wallet page readiness agreement", () => {
     expect(providersPage).toContain("pineTreeWalletProfile?.bitcoinAddressPresent")
   })
 
-  it("ManagedCryptoRailCard status is Connected only when paymentReady is true", () => {
-    expect(providersPage).toContain("const usable = Boolean(readiness?.paymentReady)")
-    expect(providersPage).toContain('usable ? "Connected" : merchantPreferenceEnabled || readiness ? "Setup needed" : "Not connected"')
+  it("ManagedCryptoRailCard status is Connected whenever the wallet/account is provisioned, regardless of the enabled toggle", () => {
+    expect(providersPage).toContain('const statusLabel = connected ? "Connected" : readiness ? "Setup needed" : "Not connected"')
   })
 
-  it("enabled preference alone does not mark a rail connected or visually on in providers page", () => {
-    // usable requires central payment readiness. Toggle alone is not enough.
-    expect(providersPage).toContain("const usable = Boolean(readiness?.paymentReady)")
-    expect(providersPage).toContain("const toggleOn = isManagedRailToggleOn(provider)")
+  it("toggling the enabled preference off does not change the connected/setup status pill", () => {
+    // The pill is driven entirely by `connected` (walletProvisioned); merchantPreferenceEnabled
+    // only drives the toggle's checked state and whether it can be turned back on.
+    expect(providersPage).toContain("const toggleOn = merchantPreferenceEnabled")
     expect(providersPage).toContain("checked={toggleOn}")
-    expect(providersPage).toContain("return Boolean(readiness.paymentReady)")
+    expect(providersPage).toContain("function canEnableManagedRail")
+    expect(providersPage).toContain("const toggleDisabled = !merchantPreferenceEnabled && !canEnable")
     expect(providersPage).not.toContain('statusLabel = enabled ? "Connected"')
+    expect(providersPage).not.toContain("statusLabel = merchantPreferenceEnabled")
   })
 
   it("walletRailRows connected display requires both configured (address) and enabled (toggle)", () => {

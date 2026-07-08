@@ -352,11 +352,13 @@ export default function ProvidersPage() {
     }
 
     if (canonicalWalletMode && (provider === "solana" || provider === "base")) {
+      // Setup/readiness status is intentionally independent of the merchant
+      // acceptance toggle (enabled) — a rail with a provisioned PineTree
+      // Wallet address is "Connected" whether or not it's currently enabled.
       const readiness = getManagedRailReadiness(provider)
       if (!readiness) return "Not connected"
-      if (readiness.paymentReady) return "Connected"
-      if (!readiness.walletProvisioned || readiness.reasonCodes.includes("provider_not_connected")) return "Setup needed"
-      return "Not connected"
+      if (readiness.walletProvisioned) return "Connected"
+      return "Setup needed"
     }
 
     const wallet = getWallet(provider)
@@ -392,8 +394,7 @@ export default function ProvidersPage() {
   function isEnabled(provider: string) {
     if (provider === "lightning") {
       if (canonicalWalletMode) {
-        const readiness = getManagedRailReadiness("lightning")
-        return Boolean(readiness?.paymentReady)
+        return isMerchantPreferenceEnabled("lightning")
       }
       const speedProv = getProvider("lightning_speed")
       if (speedProv?.enabled) return true
@@ -418,9 +419,11 @@ export default function ProvidersPage() {
     return Boolean(getProvider(dbProvider)?.enabled)
   }
 
-  function isManagedRailToggleOn(provider: "solana" | "base" | "lightning") {
+  // Setup/readiness (can this rail be turned on at all) is independent of
+  // whether the merchant currently has it enabled for acceptance.
+  function canEnableManagedRail(provider: "solana" | "base" | "lightning") {
     const readiness = getManagedRailReadiness(provider)
-    if (readiness) return Boolean(readiness.paymentReady)
+    if (readiness) return Boolean(readiness.walletProvisioned)
     if (provider === "solana" || provider === "base") {
       const p = getProvider(provider)
       const connected = p?.status === "connected" || p?.status === "active"
@@ -515,7 +518,7 @@ function EngineSettingStatus({
   async function toggleProvider(provider: string, value: boolean) {
     if (value && (provider === "solana" || provider === "base")) {
       const railReady = canonicalWalletMode
-        ? Boolean(getManagedRailReadiness(provider as "solana" | "base")?.paymentReady)
+        ? Boolean(getManagedRailReadiness(provider as "solana" | "base")?.walletProvisioned)
         : Boolean(getWallet(provider))
       if (!railReady) {
         toast.error(canonicalWalletMode ? "Create PineTree Wallet before enabling this rail." : "Connect wallet first")
@@ -525,7 +528,7 @@ function EngineSettingStatus({
 
     if (value && provider === "lightning" && canonicalWalletMode) {
       const readiness = getManagedRailReadiness("lightning")
-      if (!readiness?.paymentReady) {
+      if (!readiness?.walletProvisioned) {
         toast.error("Complete PineTree Wallet Lightning setup before enabling this rail.")
         return
       }
@@ -650,10 +653,9 @@ function EngineSettingStatus({
   function getLightningCardState() {
     if (canonicalWalletMode || canonicalLightningMode) {
       const readiness = getManagedRailReadiness("lightning")
-      const lightningPreferenceEnabled = isMerchantPreferenceEnabled("lightning")
-      const isConnected = Boolean(readiness?.paymentReady)
+      const isConnected = Boolean(readiness?.walletProvisioned)
       return {
-        status: (isConnected ? "Connected" : lightningPreferenceEnabled || readiness ? "Setup needed" : "Not connected") as "Connected" | "Setup needed" | "Not connected",
+        status: (isConnected ? "Connected" : readiness ? "Setup needed" : "Not connected") as "Connected" | "Setup needed" | "Not connected",
         connectionType: "pinetree" as const,
         summary: "Bitcoin Lightning payments settle to the merchant's PineTree Wallet.",
         detail: "PineTree Wallet"
@@ -749,14 +751,17 @@ function EngineSettingStatus({
     description: string
   }) {
     const readiness = getManagedRailReadiness(provider)
-    const connected = readiness?.walletProvisioned ?? isCanonicalRailConfigured(provider)
+    const connected = Boolean(readiness?.walletProvisioned ?? isCanonicalRailConfigured(provider))
+    // Merchant acceptance (enabled/disabled) is a separate concept from setup
+    // readiness — the toggle reflects the raw preference, never a derived
+    // "ready AND enabled" value, so turning it off never changes the pill
+    // and turning it back on is never permanently blocked.
     const merchantPreferenceEnabled = isMerchantPreferenceEnabled(provider)
-    const toggleOn = isManagedRailToggleOn(provider)
-    const usable = Boolean(readiness?.paymentReady)
-    const statusLabel = usable ? "Connected" : merchantPreferenceEnabled || readiness ? "Setup needed" : "Not connected"
-    const statusPillTone = usable ? "blue" : statusLabel === "Setup needed" ? "amber" : ("default" as const)
-    const canDisablePreference = merchantPreferenceEnabled && !usable
-    const toggleDisabled = toggleOn ? false : !canDisablePreference
+    const canEnable = canEnableManagedRail(provider)
+    const toggleOn = merchantPreferenceEnabled
+    const statusLabel = connected ? "Connected" : readiness ? "Setup needed" : "Not connected"
+    const statusPillTone = connected ? "blue" : statusLabel === "Setup needed" ? "amber" : ("default" as const)
+    const toggleDisabled = !merchantPreferenceEnabled && !canEnable
 
     return (
       <div className="flex min-h-[226px] flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
@@ -782,7 +787,7 @@ function EngineSettingStatus({
         <div className="mt-auto flex items-center justify-between gap-3 border-t border-gray-100 pt-4">
           <p className="text-xs font-semibold text-blue-700">Manage from PineTree Wallet</p>
           <div className="flex shrink-0 items-center gap-2">
-            <span className="text-sm font-medium text-gray-700">Available</span>
+            <span className="text-sm font-medium text-gray-700">{toggleOn ? "Enabled" : "Disabled"}</span>
             <ToggleSwitch
               checked={toggleOn}
               disabled={toggleDisabled}
@@ -993,7 +998,7 @@ function EngineSettingStatus({
           </button>
 
           <div className="flex shrink-0 items-center gap-2">
-            <span className="text-sm font-medium text-gray-700">Enabled</span>
+            <span className="text-sm font-medium text-gray-700">{enabled ? "Enabled" : "Disabled"}</span>
             <ToggleSwitch
               checked={enabled}
               disabled={provider === "lightning" ? status !== "Connected" : !connected}
@@ -1367,7 +1372,7 @@ function EngineSettingStatus({
                       </button>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
-                      <span className="text-sm font-medium text-gray-700">Enabled</span>
+                      <span className="text-sm font-medium text-gray-700">{isEnabled("lightning") ? "Enabled" : "Disabled"}</span>
                       <ToggleSwitch
                         checked={isEnabled("lightning")}
                         disabled={!connected}

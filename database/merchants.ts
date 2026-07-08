@@ -10,6 +10,15 @@ export type Merchant = {
   updated_at: string
   status: "active" | "suspended"
   role?: string | null
+  owner_first_name?: string | null
+  owner_last_name?: string | null
+  business_country?: string | null
+}
+
+export type MerchantBusinessOwnerProfile = {
+  ownerFirstName: string
+  ownerLastName: string
+  businessCountry: string
 }
 
 export type MerchantSettings = {
@@ -47,6 +56,52 @@ export async function getMerchantById(merchantId: string) {
   }
 
   return data as Merchant | null
+}
+
+/**
+ * Returns the merchant's saved business-owner identity fields (first/last name,
+ * country), or null if any of them are still missing. These are collected once
+ * from the merchant and are required before Speed Custom Connect account
+ * creation can run automatically.
+ */
+export function getMerchantBusinessOwnerProfile(
+  merchant: Pick<Merchant, "owner_first_name" | "owner_last_name" | "business_country"> | null | undefined
+): MerchantBusinessOwnerProfile | null {
+  const ownerFirstName = String(merchant?.owner_first_name || "").trim()
+  const ownerLastName = String(merchant?.owner_last_name || "").trim()
+  const businessCountry = String(merchant?.business_country || "").trim().toUpperCase()
+
+  if (!ownerFirstName || !ownerLastName || !businessCountry) return null
+
+  return { ownerFirstName, ownerLastName, businessCountry }
+}
+
+/**
+ * Save the merchant's business-owner identity fields. This is a one-time
+ * form filled in by the merchant; it never collects a Speed password —
+ * Speed Custom Connect account creation generates and discards one.
+ */
+export async function updateMerchantBusinessOwnerProfile(
+  merchantId: string,
+  profile: MerchantBusinessOwnerProfile
+): Promise<Merchant> {
+  const { data, error } = await db
+    .from("merchants")
+    .update({
+      owner_first_name: profile.ownerFirstName,
+      owner_last_name: profile.ownerLastName,
+      business_country: profile.businessCountry.toUpperCase(),
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", merchantId)
+    .select()
+    .single()
+
+  if (error || !data) {
+    throw new Error(`Failed to update business owner profile: ${error?.message || "unknown error"}`)
+  }
+
+  return data as Merchant
 }
 
 /**

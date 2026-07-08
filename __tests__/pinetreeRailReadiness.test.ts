@@ -202,4 +202,30 @@ describe("PineTree rail readiness", () => {
     expect(readiness.solana.reasonCodes).toContain("missing_wallet_profile")
     expect(readiness.base.reasonCodes).toContain("missing_wallet_profile")
   })
+
+  it("merchant disabling a fully set-up rail removes it from POS/Checkout paymentReady, but wallet provisioning stays true", () => {
+    const readiness = buildPineTreeRailReadiness({
+      providers: [
+        { provider: "solana", enabled: false, status: "connected" },
+        { provider: "base", enabled: false, status: "connected" },
+        { provider: "lightning_speed", enabled: false, status: "connected" },
+      ],
+      walletProfile: {
+        solana_address: "So11111111111111111111111111111111111111112",
+        base_address: "0x1111111111111111111111111111111111111111",
+      },
+      speed: { configured: true, accountReady: true, payoutReady: true, status: "ready" },
+    })
+
+    // POS/Checkout gates on paymentReady — disabling a rail must remove it from checkout.
+    expect(readiness.solana.paymentReady).toBe(false)
+    expect(readiness.base.paymentReady).toBe(false)
+    expect(readiness.bitcoin_lightning.paymentReady).toBe(false)
+
+    // But the setup/readiness signal used for the Providers page status pill
+    // (walletProvisioned) is untouched by the enabled toggle.
+    expect(readiness.solana.walletProvisioned).toBe(true)
+    expect(readiness.base.walletProvisioned).toBe(true)
+    expect(readiness.bitcoin_lightning.walletProvisioned).toBe(true)
+  })
 })

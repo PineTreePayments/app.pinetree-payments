@@ -41,13 +41,15 @@ describe("Bitcoin Lightning provider card cleanup", () => {
 })
 
 describe("rail status vocabulary - Connected / Setup needed / Not connected", () => {
-  it("ManagedCryptoRailCard uses normalized payment readiness status labels", () => {
-    expect(providersPage).toContain('"Connected" : merchantPreferenceEnabled || readiness ? "Setup needed" : "Not connected"')
+  it("ManagedCryptoRailCard uses normalized wallet-provisioning status labels, independent of the enabled toggle", () => {
+    expect(providersPage).toContain('const statusLabel = connected ? "Connected" : readiness ? "Setup needed" : "Not connected"')
     expect(providersPage).toContain("checked={toggleOn}")
   })
 
-  it("providers page does not use a yellow Disabled pill for crypto rails", () => {
-    expect(providersPage).not.toContain('"Disabled"')
+  it("crypto rail status pill can only ever be Connected, Setup needed, or Not connected — never Disabled", () => {
+    // The toggle label legitimately reads "Enabled"/"Disabled"; the status pill type
+    // constrains statusLabel so "Disabled" can never appear as a setup-status pill.
+    expect(providersPage).toContain('"Connected" | "Setup needed" | "Not connected"')
   })
 
   it("getLightningCardState returns Connected, Setup needed, or Not connected, never Managed", () => {
@@ -136,14 +138,13 @@ describe("Balances tab wallet details", () => {
 })
 
 describe("Lightning connected state derives from real readiness", () => {
-  it("getLightningCardState checks BTC address presence, platform config, and enabled flag", () => {
+  it("getLightningCardState checks Speed connected account readiness, independent of the enabled flag", () => {
     expect(providersPage).toContain('getManagedRailReadiness("lightning")')
-    expect(providersPage).toContain("readiness?.paymentReady")
+    expect(providersPage).toContain("readiness?.walletProvisioned")
     expect(providersPage).toContain('isEnabled("lightning")')
   })
 
-  it("ManagedCryptoRailCard checks lightning platform readiness for status pill", () => {
-    expect(providersPage).toContain("readiness?.paymentReady")
+  it("ManagedCryptoRailCard checks lightning wallet-provisioning readiness for status pill", () => {
     expect(providersPage).toContain("readiness?.walletProvisioned")
   })
 })

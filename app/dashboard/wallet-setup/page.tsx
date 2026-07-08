@@ -1847,6 +1847,60 @@ function formatActivityTimestamp(value: string | null) {
   return `${datePart} at ${timePart}`
 }
 
+function BusinessOwnerProfileBanner({
+  form,
+  onChange,
+  onSave,
+  saving,
+  error,
+}: {
+  form: { firstName: string; lastName: string; country: string }
+  onChange: (next: { firstName: string; lastName: string; country: string }) => void
+  onSave: () => void
+  saving: boolean
+  error: string | null
+}) {
+  return (
+    <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-4 sm:px-5">
+      <p className="text-sm font-semibold text-amber-900">Finish Bitcoin Lightning setup</p>
+      <p className="mt-1 text-xs leading-5 text-amber-800">
+        Enter the business owner&apos;s name and country once to enable Bitcoin Lightning. PineTree
+        provisions the Lightning account automatically — you never sign up with Speed directly.
+      </p>
+      <div className="mt-3 grid gap-2.5 sm:grid-cols-3">
+        <input
+          value={form.firstName}
+          onChange={(e) => onChange({ ...form, firstName: e.target.value })}
+          placeholder="First name"
+          className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-gray-950 outline-none focus:border-amber-400"
+        />
+        <input
+          value={form.lastName}
+          onChange={(e) => onChange({ ...form, lastName: e.target.value })}
+          placeholder="Last name"
+          className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-gray-950 outline-none focus:border-amber-400"
+        />
+        <input
+          value={form.country}
+          onChange={(e) => onChange({ ...form, country: e.target.value.toUpperCase().slice(0, 2) })}
+          placeholder="Country (US)"
+          maxLength={2}
+          className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm uppercase text-gray-950 outline-none focus:border-amber-400"
+        />
+      </div>
+      {error ? <p className="mt-2 text-xs font-medium text-red-600">{error}</p> : null}
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={saving}
+        className="mt-3 inline-flex h-9 items-center justify-center rounded-lg bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {saving ? "Saving..." : "Save and enable Lightning"}
+      </button>
+    </div>
+  )
+}
+
 function WalletOverviewSummary({
   rows,
   sync,
@@ -2253,6 +2307,9 @@ function PineTreeWalletRuntime() {
   // --- Supabase session & DB profiles ---
   const [profileState, setProfileState] = useState<ProfileState>({ kind: "loading" })
   const [lightningProfileState, setLightningProfileState] = useState<LightningProfileState>({ kind: "loading" })
+  const [businessOwnerForm, setBusinessOwnerForm] = useState({ firstName: "", lastName: "", country: "" })
+  const [businessOwnerSaving, setBusinessOwnerSaving] = useState(false)
+  const [businessOwnerError, setBusinessOwnerError] = useState<string | null>(null)
   const accessTokenRef = useRef<string | null>(null)
 
   // --- Dynamic SDK ---
@@ -3386,6 +3443,44 @@ function PineTreeWalletRuntime() {
     } finally {
     }
   }, [])
+
+  const saveBusinessOwnerProfile = useCallback(async () => {
+    const token = accessTokenRef.current
+    if (!token) return
+
+    const firstName = businessOwnerForm.firstName.trim()
+    const lastName = businessOwnerForm.lastName.trim()
+    const country = businessOwnerForm.country.trim().toUpperCase()
+
+    if (!firstName || !lastName || !/^[A-Z]{2}$/.test(country)) {
+      setBusinessOwnerError("Enter a first name, last name, and 2-letter country code (e.g. US).")
+      return
+    }
+
+    setBusinessOwnerSaving(true)
+    setBusinessOwnerError(null)
+    try {
+      const res = await fetch("/api/merchant/business-owner-profile", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          owner_first_name: firstName,
+          owner_last_name: lastName,
+          business_country: country,
+        }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setBusinessOwnerError(String(body?.error || "Failed to save business owner details."))
+        return
+      }
+      await syncPineTreeManagedLightning()
+    } catch {
+      setBusinessOwnerError("Failed to save business owner details.")
+    } finally {
+      setBusinessOwnerSaving(false)
+    }
+  }, [businessOwnerForm, syncPineTreeManagedLightning])
 
   // --- Sync Dynamic wallet addresses (Base/Solana) to the merchant profile DB record ---
   const syncProfileFromDynamic = useCallback(async (options?: { autoEnableLightning?: boolean; requireBaseAndSolanaSigners?: boolean }) => {
@@ -5669,11 +5764,24 @@ function PineTreeWalletRuntime() {
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6 sm:py-6">
 
               {activeTab === "overview" ? (
-                <WalletOverviewSummary
-                  rows={walletRailRows}
-                  sync={walletSync}
-                  syncing={walletSyncing}
-                />
+                <>
+                  {lightningProfileState.kind === "loaded" &&
+                  lightningProfileState.profile.status === "needs_attention" &&
+                  lightningProfileState.profile.speed_connected_account_status === "business_owner_profile_required" ? (
+                    <BusinessOwnerProfileBanner
+                      form={businessOwnerForm}
+                      onChange={setBusinessOwnerForm}
+                      onSave={saveBusinessOwnerProfile}
+                      saving={businessOwnerSaving}
+                      error={businessOwnerError}
+                    />
+                  ) : null}
+                  <WalletOverviewSummary
+                    rows={walletRailRows}
+                    sync={walletSync}
+                    syncing={walletSyncing}
+                  />
+                </>
               ) : null}
 
               {activeTab === "balances" ? (
