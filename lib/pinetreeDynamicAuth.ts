@@ -36,6 +36,15 @@ export const pineTreeDynamicExternalJwtRestoreFailedMessage =
 export const pineTreeDynamicConfigurationErrorMessage =
   "PineTree Wallet verification is not configured correctly. Please contact support."
 
+// Client callers MUST NOT invoke this with no argument. The `= process.env`
+// default only resolves correctly in Node (server routes, tests); Next.js/webpack
+// inlines NEXT_PUBLIC_* values by statically matching the literal expression
+// `process.env.NEXT_PUBLIC_X` wherever it appears in source, not by evaluating
+// `process.env` as a whole object. Client call sites must pass an explicit
+// object built from literal `process.env.NEXT_PUBLIC_...` reads at the call
+// site (see PineTreeDynamicProvider.tsx / wallet-setup/page.tsx), or the vars
+// will silently resolve to "missing" in the deployed browser bundle even when
+// correctly set in Vercel.
 export function getPineTreeDynamicAuthConfig(env: Record<string, string | undefined> = process.env): PineTreeDynamicAuthConfig {
   const rawMode = (env.NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE || "").trim()
   const rawEmailFallback = (env.NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK || "").trim()

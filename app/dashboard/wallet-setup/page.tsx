@@ -2257,7 +2257,12 @@ function PineTreeWalletRuntime() {
   const { signInWithExternalJwt } = useExternalAuth()
   const refreshDynamicUser = useRefreshUser()
   const switchDynamicWallet = useSwitchWallet()
-  const dynamicAuthConfig = getPineTreeDynamicAuthConfig()
+  // Literal process.env.NEXT_PUBLIC_X reads are required here so webpack can
+  // statically inline them into the client bundle — see PineTreeDynamicProvider.tsx.
+  const dynamicAuthConfig = getPineTreeDynamicAuthConfig({
+    NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE: process.env.NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE,
+    NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK: process.env.NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK,
+  })
   const pineTreeControlledDynamicAuthAvailable = dynamicAuthConfig.externalJwtConfigured
   const dynamicEmailFallbackAllowed = shouldOpenDynamicEmailFallbackAuth(dynamicAuthConfig)
   const {

@@ -138,7 +138,15 @@ class WalletInfrastructureErrorBoundary extends Component<
 
 export default function PineTreeDynamicProvider({ children }: { children: ReactNode }) {
   const environmentId = process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?.trim()
-  const dynamicAuthConfig = getPineTreeDynamicAuthConfig()
+  // Next.js/webpack only inlines NEXT_PUBLIC_* values when the literal
+  // `process.env.NEXT_PUBLIC_X` expression appears directly in source. Passing
+  // process.env through as a whole object (the function's default param) is
+  // not statically inlined and resolves to undefined in the browser bundle,
+  // so each NEXT_PUBLIC_ var must be read literally here at the call site.
+  const dynamicAuthConfig = getPineTreeDynamicAuthConfig({
+    NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE: process.env.NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE,
+    NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK: process.env.NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK,
+  })
 
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return
