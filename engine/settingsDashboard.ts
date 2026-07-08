@@ -320,7 +320,6 @@ export async function getSettingsDashboardEngine(merchantId: string): Promise<Se
       throw new Error(`Failed to load operations settings: ${operationsResult.error.message}`)
     }
   }
-  if (!deviceResult.available) schemaReady = false
   if (deviceResult.available && deviceResult.devices.length < 4) {
     await ensureDefaultReceiptDevices(merchantId)
     const refreshed = await listReceiptDevices(merchantId)
@@ -348,7 +347,7 @@ export async function saveSettingsDashboardEngine(
   const updatedAt = new Date().toISOString()
   const schema = await getSettingsDashboardEngine(merchantId)
   if (!schema.schemaReady) {
-    throw new Error("Settings database migration required before saving extended preferences")
+    throw new Error("Settings schema update required before saving extended preferences")
   }
 
   const [settingsResult, taxResult, operationsResult] = await Promise.all([
@@ -429,7 +428,7 @@ export async function getMerchantSettingsReadiness(merchantId: string): Promise<
       return {
         complete: false,
         missing: ["POS preferences"],
-        reason: "Settings database migration required before POS terminals can be enabled."
+        reason: "Settings schema is unavailable before POS terminals can be enabled."
       }
     }
     throw new Error(`Failed to load POS readiness: ${operationsResult.error.message}`)

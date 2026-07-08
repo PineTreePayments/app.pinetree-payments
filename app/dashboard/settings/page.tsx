@@ -417,10 +417,10 @@ export default function SettingsPage() {
       </div>
 
       {!schemaReady && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          <p className="font-semibold">Settings database migration required</p>
-          <p className="mt-1 leading-6">
-            Apply the June 7, 2026 merchant operations settings migration before saving extended receipt, POS, notification, and profile fields.
+        <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <p className="font-semibold text-gray-950">Some settings could not load</p>
+          <p className="mt-1 leading-5">
+            Saving may be limited until the settings schema is available.
           </p>
         </div>
       )}
@@ -429,8 +429,17 @@ export default function SettingsPage() {
       <div id="business-profile" />
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
         {profileStatus !== "complete" ? (
-          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-900">
-            <p className="font-semibold">Complete your Business Profile to activate payments.</p>
+          <div className="mb-4 rounded-2xl border border-blue-100 bg-blue-50/45 px-4 py-3 text-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-blue-600 shadow-[0_0_0_4px_rgba(37,99,235,0.10)]" />
+                <div>
+                  <p className="font-semibold text-gray-950">Complete your Business Profile</p>
+                  <p className="mt-0.5 leading-5 text-gray-600">Add your business details to activate wallets, providers, and live payments.</p>
+                </div>
+              </div>
+              <span className="shrink-0 font-semibold text-blue-700">Complete Business Profile</span>
+            </div>
           </div>
         ) : null}
 

@@ -51,7 +51,7 @@ async function save(req: NextRequest) {
     return NextResponse.json({ success: true, ...data })
   } catch (error: unknown) {
     const message = getErrorMessage(error, "Failed to save settings")
-    const status = message.includes("migration required")
+    const status = message.includes("schema update required") || message.includes("schema is unavailable")
       ? 409
       : message.includes("must be") || message.includes("required") || message.includes("too long")
         ? 400

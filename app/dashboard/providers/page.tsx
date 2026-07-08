@@ -523,7 +523,7 @@ function EngineSettingStatus({
 
   async function toggleProvider(provider: string, value: boolean) {
     if (value && businessProfileStatus && businessProfileStatus.profile_status !== "complete") {
-      toast.error("Complete your Business Profile to activate payments.")
+      toast.error("Complete your Business Profile before enabling live payments.")
       return
     }
 
@@ -1227,10 +1227,16 @@ function EngineSettingStatus({
 
       <div className="space-y-2">
         {businessProfileStatus && businessProfileStatus.profile_status !== "complete" ? (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="font-semibold">Complete your Business Profile to activate payments.</p>
-              <a href="/dashboard/settings#business-profile" className="font-semibold text-blue-700 hover:text-blue-800">
+          <div className="rounded-2xl border border-blue-100 bg-white/85 px-4 py-3 text-sm shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-blue-600 shadow-[0_0_0_4px_rgba(37,99,235,0.10)]" />
+                <div>
+                  <p className="font-semibold text-gray-950">Complete your Business Profile</p>
+                  <p className="mt-0.5 leading-5 text-gray-600">Add your business details to activate wallets, providers, and live payments.</p>
+                </div>
+              </div>
+              <a href="/dashboard/settings#business-profile" className="shrink-0 font-semibold text-blue-700 hover:text-blue-800">
                 Complete Business Profile
               </a>
             </div>

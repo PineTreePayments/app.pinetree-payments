@@ -252,10 +252,16 @@ export default function DashboardPage() {
       <h1 className={dashboardPageTitleClass}>Overview</h1>
 
       {businessProfileStatus && businessProfileStatus.profile_status !== "complete" ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 shadow-[0_8px_24px_rgba(217,119,6,0.08)] sm:px-5">
+        <div className="rounded-2xl border border-blue-100 bg-white/85 px-4 py-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur sm:px-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm font-semibold">Complete your Business Profile to activate payments.</p>
-            <Link href="/dashboard/settings#business-profile" className="text-sm font-semibold text-blue-700 hover:text-blue-800">
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full bg-blue-600 shadow-[0_0_0_4px_rgba(37,99,235,0.10)]" />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-950">Complete your Business Profile</p>
+                <p className="mt-0.5 text-sm leading-5 text-gray-600">Add your business details to activate wallets, providers, and live payments.</p>
+              </div>
+            </div>
+            <Link href="/dashboard/settings#business-profile" className="shrink-0 text-sm font-semibold text-blue-700 hover:text-blue-800">
               Complete Business Profile
             </Link>
           </div>
