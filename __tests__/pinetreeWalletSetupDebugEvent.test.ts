@@ -126,6 +126,50 @@ describe("POST /api/debug/pinetree-wallet/setup-event", () => {
     }
   })
 
+  it("logs the full classified wallet_dynamic_signin_failed payload (reason/errorName/errorCode/status/messageHint) safely", async () => {
+    const { POST } = await import("@/app/api/debug/pinetree-wallet/setup-event/route")
+    const response = await POST(request({
+      event: "wallet_dynamic_signin_failed",
+      details: {
+        reason: "dynamic_signin_threw",
+        errorName: "SecurityError",
+        errorCode: "storage_denied",
+        status: 0,
+        messageHint: "popup_or_storage_blocked",
+      },
+    }))
+
+    expect(response.status).toBe(200)
+    const loggedDetails = (console.info as ReturnType<typeof vi.fn>).mock.calls[0][1].details
+    expect(loggedDetails).toEqual({
+      reason: "dynamic_signin_threw",
+      errorName: "SecurityError",
+      errorCode: "storage_denied",
+      status: 0,
+      messageHint: "popup_or_storage_blocked",
+    })
+  })
+
+  it("drops a raw error message or stack if one is accidentally passed as a detail", async () => {
+    const { POST } = await import("@/app/api/debug/pinetree-wallet/setup-event/route")
+    const response = await POST(request({
+      event: "wallet_dynamic_signin_failed",
+      details: {
+        reason: "dynamic_signin_threw",
+        messageHint: "unknown_dynamic_signin_throw",
+        rawMessage: "Failed to execute 'setItem' on 'Storage': at https://app.pinetree-payments.com/secret-internal-path",
+        stack: "Error: boom\n    at generateAndSaveSessionKey (/app/internal.js:42:11)",
+      },
+    }))
+
+    expect(response.status).toBe(200)
+    const loggedDetails = (console.info as ReturnType<typeof vi.fn>).mock.calls[0][1].details
+    expect(loggedDetails).toEqual({
+      reason: "dynamic_signin_threw",
+      messageHint: "unknown_dynamic_signin_throw",
+    })
+  })
+
   it("drops nested objects and arrays instead of logging them raw", async () => {
     const { POST } = await import("@/app/api/debug/pinetree-wallet/setup-event/route")
     await POST(request({

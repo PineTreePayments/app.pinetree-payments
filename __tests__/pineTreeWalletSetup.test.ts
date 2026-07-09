@@ -331,7 +331,7 @@ describe("PineTree embedded wallet setup", () => {
       page.indexOf("const scheduleDynamicEmailFallbackAuth = useCallback")
     )
     expect(openFallbackFn).toContain(
-      "dynamicProfile = await signInWithExternalJwt({\n              externalJwt: payload.externalJwt,\n              externalUserId: payload.externalUserId,\n            })"
+      "dynamicProfile = await signInWithExternalJwt({\n                externalJwt: payload.externalJwt,\n                externalUserId: payload.externalUserId,\n              })"
     )
   })
 
@@ -351,7 +351,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(terminalFailureIdx).toBeGreaterThan(noProfileIdx + pollBlock.indexOf("pollTimeoutMs"))
   })
 
-  it("signInWithExternalJwt throwing is caught, classified, and never left unhandled", () => {
+  it("signInWithExternalJwt throwing is caught, classified via classifyDynamicSignInError, and never left unhandled", () => {
     const openFallbackFn = page.slice(
       page.indexOf("const openDynamicEmailFallbackAuth = useCallback"),
       page.indexOf("const scheduleDynamicEmailFallbackAuth = useCallback")
@@ -359,14 +359,57 @@ describe("PineTree embedded wallet setup", () => {
     const signInTryIdx = openFallbackFn.indexOf("dynamicProfile = await signInWithExternalJwt({")
     const catchIdx = openFallbackFn.indexOf("} catch (signInError) {", signInTryIdx)
     expect(catchIdx).toBeGreaterThan(signInTryIdx)
-    const catchBlock = openFallbackFn.slice(catchIdx, catchIdx + 400)
-    expect(catchBlock).toContain('"dynamic_environment_mismatch"')
-    expect(catchBlock).toContain('"dynamic_signin_threw"')
+    const catchBlock = openFallbackFn.slice(catchIdx, catchIdx + 1000)
+    expect(catchBlock).toContain("const classified = classifyDynamicSignInError(signInError)")
+    expect(catchBlock).toContain("signinFailureReason = classified.reason")
+    expect(catchBlock).toContain("signinMessageHint = classified.messageHint")
     expect(catchBlock).toContain("throw signInError")
+    // A retryable classification (blocked storage/keychain, SDK not ready, network
+    // blip) gets one bounded retry with a state refresh first, not an immediate throw.
+    expect(catchBlock).toContain("const canRetry = signInAttempt < maxSignInAttempts && DYNAMIC_SIGNIN_RETRYABLE_HINTS.has(classified.messageHint)")
+    expect(catchBlock).toContain("await refreshDynamicUser().catch(() => undefined)")
     // The final classification (and only emission point for wallet_dynamic_signin_failed)
-    // happens once in the outer catch, not duplicated at every throw site.
-    expect(openFallbackFn).toContain('emitWalletSetupDebugEvent("wallet_dynamic_signin_failed", { reason: signinFailureReason })')
+    // happens once in the outer catch, not duplicated at every throw/retry site.
+    expect(openFallbackFn).toContain('emitWalletSetupDebugEvent("wallet_dynamic_signin_failed", {')
     expect((openFallbackFn.match(/wallet_dynamic_signin_failed/g) || []).length).toBe(1)
+  })
+
+  it("classifyDynamicSignInError never returns raw error.message or stack, only safe short fields", () => {
+    const classifierFn = page.slice(
+      page.indexOf("function classifyDynamicSignInError("),
+      page.indexOf("// A thrown signInWithExternalJwt is retried once")
+    )
+    expect(classifierFn).not.toContain("message: rawMessage")
+    expect(classifierFn).not.toContain("stack")
+    expect(classifierFn).toContain("errorName: errorName ? errorName.slice(0, 40) : undefined")
+    expect(classifierFn).toContain("errorCode: errorCode ? errorCode.slice(0, 40) : undefined")
+    expect(classifierFn).toContain("messageHint,")
+    // messageHint is the safe classification derived from the message, not the message itself.
+    expect(classifierFn).not.toContain("messageHint: rawMessage")
+    expect(classifierFn).not.toContain("messageHint: message")
+  })
+
+  it("classifyDynamicSignInError maps JWT/audience/issuer/kid/JWKS/env/storage/network errors to the documented safe enum hints", () => {
+    for (const hint of [
+      "invalid_jwt",
+      "jwt_verification_failed",
+      "invalid_audience",
+      "invalid_issuer",
+      "invalid_kid",
+      "jwks_fetch_failed",
+      "jwks_key_not_found",
+      "environment_mismatch",
+      "project_environment_mismatch",
+      "external_auth_not_enabled",
+      "missing_external_user_id",
+      "invalid_argument_shape",
+      "network_error",
+      "popup_or_storage_blocked",
+      "sdk_not_ready",
+      "unknown_dynamic_signin_throw",
+    ]) {
+      expect(page).toContain(hint)
+    }
   })
 
   it("wallet_dynamic_jwt_authenticated fires before pendingSync flips true, so wallet create/restore only starts after auth succeeds", () => {

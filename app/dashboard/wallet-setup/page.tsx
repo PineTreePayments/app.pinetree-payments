@@ -1199,6 +1199,88 @@ function isWalletDebugEventsEnabled() {
   }
 }
 
+// Safe enum hints for a thrown signInWithExternalJwt error. Order matters - first
+// match wins, so more specific patterns (e.g. "kid") are checked before generic
+// ones. Never derived from raw error.message in the emitted event - only this
+// classified hint, plus a short error name/code, ever leaves the browser.
+const DYNAMIC_SIGNIN_MESSAGE_HINTS: Array<{ pattern: RegExp; hint: string }> = [
+  { pattern: /\bkid\b/, hint: "invalid_kid" },
+  { pattern: /jwks.*(key not found|no matching key)|key not found/, hint: "jwks_key_not_found" },
+  { pattern: /jwks.*(fetch|fail|unreachable|timeout|unavailable)/, hint: "jwks_fetch_failed" },
+  { pattern: /\baudience\b|\baud\b/, hint: "invalid_audience" },
+  { pattern: /\bissuer\b|\biss\b/, hint: "invalid_issuer" },
+  { pattern: /verif(y|ication).*(fail|invalid)|signature.*(invalid|fail)/, hint: "jwt_verification_failed" },
+  { pattern: /invalid[_ ]?jwt|malformed jwt|jwt.*(malformed|invalid)/, hint: "invalid_jwt" },
+  { pattern: /project.*(environment|mismatch)/, hint: "project_environment_mismatch" },
+  { pattern: /environment.*(mismatch|not found|invalid)/, hint: "environment_mismatch" },
+  { pattern: /external ?auth.*(not enabled|disabled)|byoa.*(not enabled|disabled)/, hint: "external_auth_not_enabled" },
+  { pattern: /external ?user ?id/, hint: "missing_external_user_id" },
+  { pattern: /invalid (argument|parameter|params|payload shape)/, hint: "invalid_argument_shape" },
+  { pattern: /storage|quota|denied|securityerror|private browsing|indexeddb|keychain/, hint: "popup_or_storage_blocked" },
+  { pattern: /popup|window.*(closed|blocked)/, hint: "popup_or_storage_blocked" },
+  { pattern: /not ready|not initialized|sdk.*(not ready|not loaded)|client not found/, hint: "sdk_not_ready" },
+  { pattern: /network|fetch failed|failed to fetch|econnrefused|enotfound/, hint: "network_error" },
+]
+
+type ClassifiedDynamicSignInError = {
+  reason: "dynamic_signin_threw"
+  errorName?: string
+  errorCode?: string
+  status?: number
+  messageHint: string
+}
+
+/**
+ * Classifies a thrown signInWithExternalJwt error into a safe enum reason for the
+ * server-visible beacon. Never returns the raw error.message or stack - only a
+ * short error name/code (standard JS error identifiers, not user content) and the
+ * matched hint enum.
+ */
+function classifyDynamicSignInError(error: unknown): ClassifiedDynamicSignInError {
+  const row = typeof error === "object" && error !== null ? (error as Record<string, unknown>) : {}
+  const errorName = error instanceof Error
+    ? error.name
+    : typeof row.name === "string" ? row.name : undefined
+  const rawMessage = error instanceof Error
+    ? error.message
+    : typeof row.message === "string" ? row.message : ""
+  const message = rawMessage.toLowerCase()
+  const status = typeof row.status === "number" ? row.status : undefined
+  const errorCode = typeof row.code === "string" ? row.code : undefined
+
+  let messageHint = "unknown_dynamic_signin_throw"
+  if (errorName === "QuotaExceededError" || errorName === "SecurityError") {
+    messageHint = "popup_or_storage_blocked"
+  } else if (errorName === "TypeError" && /fetch/.test(message)) {
+    messageHint = "network_error"
+  } else {
+    for (const { pattern, hint } of DYNAMIC_SIGNIN_MESSAGE_HINTS) {
+      if (pattern.test(message)) {
+        messageHint = hint
+        break
+      }
+    }
+  }
+
+  return {
+    reason: "dynamic_signin_threw",
+    errorName: errorName ? errorName.slice(0, 40) : undefined,
+    errorCode: errorCode ? errorCode.slice(0, 40) : undefined,
+    status,
+    messageHint,
+  }
+}
+
+// A thrown signInWithExternalJwt is retried once for hints that plausibly describe
+// a transient condition (blocked storage/keychain access, SDK still initializing, a
+// dropped network request) rather than a hard configuration error that a retry
+// cannot fix.
+const DYNAMIC_SIGNIN_RETRYABLE_HINTS = new Set([
+  "popup_or_storage_blocked",
+  "sdk_not_ready",
+  "network_error",
+])
+
 function walletConnectorRecord(wallet: unknown) {
   return toRecord(toRecord(wallet).connector)
 }
@@ -3033,6 +3115,10 @@ function PineTreeWalletRuntime() {
         let signInWithExternalJwtCalled = false
         let signInWithExternalJwtSucceeded = false
         let signinFailureReason = "unknown_dynamic_auth_failure"
+        let signinErrorName: string | undefined
+        let signinErrorCode: string | undefined
+        let signinErrorStatus: number | undefined
+        let signinMessageHint: string | undefined
         try {
           console.info("[pinetree-wallets] wallet_dynamic_jwt_requested", {})
           emitWalletSetupDebugEvent("wallet_dynamic_jwt_requested", {})
@@ -3073,17 +3159,33 @@ function PineTreeWalletRuntime() {
           signInWithExternalJwtCalled = true
           emitWalletSetupDebugEvent("wallet_dynamic_signin_started", {})
           let dynamicProfile: Awaited<ReturnType<typeof signInWithExternalJwt>>
-          try {
-            dynamicProfile = await signInWithExternalJwt({
-              externalJwt: payload.externalJwt,
-              externalUserId: payload.externalUserId,
-            })
-          } catch (signInError) {
-            const signInErrorMessage = signInError instanceof Error ? signInError.message.toLowerCase() : ""
-            signinFailureReason = /environment|audience|issuer/.test(signInErrorMessage)
-              ? "dynamic_environment_mismatch"
-              : "dynamic_signin_threw"
-            throw signInError
+          const maxSignInAttempts = 2
+          let signInAttempt = 0
+          while (true) {
+            signInAttempt += 1
+            try {
+              dynamicProfile = await signInWithExternalJwt({
+                externalJwt: payload.externalJwt,
+                externalUserId: payload.externalUserId,
+              })
+              break
+            } catch (signInError) {
+              const classified = classifyDynamicSignInError(signInError)
+              signinFailureReason = classified.reason
+              signinErrorName = classified.errorName
+              signinErrorCode = classified.errorCode
+              signinErrorStatus = classified.status
+              signinMessageHint = classified.messageHint
+              const canRetry = signInAttempt < maxSignInAttempts && DYNAMIC_SIGNIN_RETRYABLE_HINTS.has(classified.messageHint)
+              if (!canRetry) {
+                throw signInError
+              }
+              // Session-key generation/storage access can transiently fail (e.g. a
+              // temporarily blocked keychain/IndexedDB write) - refresh Dynamic's auth
+              // state and retry once before treating this as a hard failure.
+              await refreshDynamicUser().catch(() => undefined)
+              await new Promise((resolve) => window.setTimeout(resolve, 400))
+            }
           }
           emitWalletSetupDebugEvent("wallet_dynamic_signin_returned", {
             profilePresent: Boolean(dynamicProfile),
@@ -3176,7 +3278,13 @@ function PineTreeWalletRuntime() {
           if (signinFailureReason === "unknown_dynamic_auth_failure" && endpointStatus !== 200) {
             signinFailureReason = "jwt_response_not_ok"
           }
-          emitWalletSetupDebugEvent("wallet_dynamic_signin_failed", { reason: signinFailureReason })
+          emitWalletSetupDebugEvent("wallet_dynamic_signin_failed", {
+            reason: signinFailureReason,
+            ...(signinErrorName ? { errorName: signinErrorName } : {}),
+            ...(signinErrorCode ? { errorCode: signinErrorCode } : {}),
+            ...(signinErrorStatus !== undefined ? { status: signinErrorStatus } : {}),
+            ...(signinMessageHint ? { messageHint: signinMessageHint } : {}),
+          })
           console.info("[pinetree-dynamic-auth] external_jwt_client", {
             authMode: dynamicAuthConfig.mode,
             emailFallbackEnabled: dynamicAuthConfig.emailFallbackEnabled,
