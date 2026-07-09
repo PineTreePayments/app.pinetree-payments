@@ -6,6 +6,7 @@ import {
   updateMerchantBusinessOwnerProfile
 } from "@/database/merchants"
 import { ensureManagedLightningForMerchant } from "@/engine/pineTreeWalletReadiness"
+import { normalizeBusinessCountry } from "@/engine/businessProfileLocation"
 
 export async function GET(req: NextRequest) {
   try {
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest) {
 
     const ownerFirstName = String(body.owner_first_name || "").trim()
     const ownerLastName = String(body.owner_last_name || "").trim()
-    const businessCountry = String(body.business_country || "").trim().toUpperCase()
+    const rawBusinessCountry = String(body.business_country || "").trim()
 
     if (!ownerFirstName) {
       return NextResponse.json({ error: "owner_first_name is required" }, { status: 400 })
@@ -36,8 +37,18 @@ export async function POST(req: NextRequest) {
     if (!ownerLastName) {
       return NextResponse.json({ error: "owner_last_name is required" }, { status: 400 })
     }
-    if (!/^[A-Z]{2}$/.test(businessCountry)) {
-      return NextResponse.json({ error: "business_country must be a 2-letter country code" }, { status: 400 })
+    if (!rawBusinessCountry) {
+      return NextResponse.json({ error: "Business country is required" }, { status: 400 })
+    }
+
+    let businessCountry: string
+    try {
+      businessCountry = normalizeBusinessCountry(rawBusinessCountry) as string
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Business country is invalid" },
+        { status: 400 }
+      )
     }
 
     await updateMerchantBusinessOwnerProfile(merchantId, {

@@ -9,6 +9,10 @@ import {
 } from "@/components/dashboard/DashboardPrimitives"
 import Link from "next/link"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
+import {
+  BUSINESS_PROFILE_COUNTRIES,
+  US_STATES
+} from "@/engine/businessProfileLocation"
 
 type MerchantSettingsPayload = {
   business_name: string | null
@@ -501,15 +505,29 @@ export default function SettingsPage() {
 
           <div>
             <label className={labelClass}>State</label>
-            <input
-              value={state}
-              onChange={(e) => setState(e.target.value)}
-              className={fieldClass}
-            />
+            {country === "US" ? (
+              <select
+                value={state}
+                onChange={(e) => setState(e.target.value)}
+                className={fieldClass}
+              >
+                <option value="">Select a state</option>
+                {US_STATES.map(({ code, name }) => (
+                  <option key={code} value={code}>{name}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={state}
+                onChange={(e) => setState(e.target.value)}
+                className={fieldClass}
+                placeholder="State / province / region"
+              />
+            )}
           </div>
 
           <div>
-            <label className={labelClass}>ZIP</label>
+            <label className={labelClass}>ZIP / Postal Code</label>
             <input
               value={zip}
               onChange={(e) => setZip(e.target.value)}
@@ -518,14 +536,21 @@ export default function SettingsPage() {
           </div>
 
           <div>
-            <label className={labelClass}>Country Code</label>
-            <input
+            <label className={labelClass}>Country</label>
+            <select
               value={country}
-              onChange={(e) => setCountry(e.target.value)}
+              onChange={(e) => {
+                const nextCountry = e.target.value
+                setCountry(nextCountry)
+                if (nextCountry === "US" || country === "US") setState("")
+              }}
               className={fieldClass}
-              maxLength={2}
-              placeholder="US"
-            />
+            >
+              <option value="">Select a country</option>
+              {BUSINESS_PROFILE_COUNTRIES.map(({ code, name }) => (
+                <option key={code} value={code}>{name}</option>
+              ))}
+            </select>
           </div>
 
           <div>

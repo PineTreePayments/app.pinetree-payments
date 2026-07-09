@@ -10,8 +10,13 @@ vi.mock("@/database", () => ({
 import {
   getMissingSettingsRequirements,
   normalizeSettings,
+  TAX_SETTINGS_NOT_READY_MESSAGE,
   normalizeTax
 } from "@/engine/settingsDashboard"
+import {
+  normalizeBusinessCountry,
+  normalizeBusinessState
+} from "@/engine/businessProfileLocation"
 
 describe("merchant settings readiness", () => {
   it("blocks terminal readiness when required settings are missing", () => {
@@ -53,6 +58,13 @@ describe("merchant settings readiness", () => {
 })
 
 describe("tax settings normalization", () => {
+  it("uses a merchant-safe schema readiness message", () => {
+    expect(TAX_SETTINGS_NOT_READY_MESSAGE).toBe(
+      "Tax settings are not ready yet. Please refresh and try again."
+    )
+    expect(TAX_SETTINGS_NOT_READY_MESSAGE).not.toContain("schema cache")
+  })
+
   it("saves taxes disabled without requiring a tax rate", () => {
     expect(normalizeTax({ tax_enabled: false, tax_rate: 0 })).toMatchObject({
       tax_enabled: false,
@@ -82,7 +94,7 @@ describe("Business Profile settings normalization", () => {
       business_city: "C".repeat(80),
       business_state: "S".repeat(80),
       business_postal_code: "P".repeat(32),
-      business_country: "US",
+      business_country: "CA",
       business_phone: "3".repeat(40),
       business_website: `https://example.com/${"w".repeat(180)}`,
       business_type: "retail",
@@ -104,5 +116,19 @@ describe("Business Profile settings normalization", () => {
       closeout_time: "12:00",
       report_toast: true
     })).toThrow("Business address is too long")
+  })
+
+  it("normalizes supported country and US state codes", () => {
+    expect(normalizeBusinessCountry("us")).toBe("US")
+    expect(normalizeBusinessState("ky", "US")).toBe("KY")
+  })
+
+  it("rejects unsupported countries and invalid US states with field-specific errors", () => {
+    expect(() => normalizeBusinessCountry("United States")).toThrow(
+      "Business country must be a supported country code"
+    )
+    expect(() => normalizeBusinessState("Kentucky", "US")).toThrow(
+      "Business state must be a valid US state code"
+    )
   })
 })

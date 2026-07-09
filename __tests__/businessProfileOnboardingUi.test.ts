@@ -58,4 +58,17 @@ describe("Business Profile onboarding UI", () => {
     expect(settings).toContain("payload.schemaReady === false")
     expect(settings).not.toContain("{!schemaReady && (")
   })
+
+  it("uses normalized country and US state selects without changing the approved banner", () => {
+    const settings = read("app/dashboard/settings/page.tsx")
+    const locations = read("engine/businessProfileLocation.ts")
+
+    expect(settings).toContain("BUSINESS_PROFILE_COUNTRIES.map")
+    expect(settings).toContain("US_STATES.map")
+    expect(settings).toContain("<label className={labelClass}>Country</label>")
+    expect(settings).toContain("<label className={labelClass}>State</label>")
+    expect(settings).toContain("<label className={labelClass}>ZIP / Postal Code</label>")
+    expect(locations).toContain('{ code: "US", name: "United States" }')
+    expect(locations).toContain('{ code: "DC", name: "District of Columbia" }')
+  })
 })

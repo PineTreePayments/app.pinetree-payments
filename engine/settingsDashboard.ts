@@ -5,6 +5,10 @@ import {
   supabase,
   type ReceiptDevice
 } from "@/database"
+import {
+  normalizeBusinessCountry,
+  normalizeBusinessState
+} from "@/engine/businessProfileLocation"
 
 const db = supabaseAdmin || supabase
 
@@ -195,11 +199,8 @@ export function normalizeSettings(input: Partial<MerchantSettingsPayload>): Merc
   }
 
   const legalBusinessName = text(input.legal_business_name ?? input.business_name, 160, "Legal business name")
-  const businessCountry = text(input.business_country ?? input.country, 2, "Business country")?.toUpperCase() || null
-  if (businessCountry && !/^[A-Z]{2}$/.test(businessCountry)) {
-    throw new Error("Business country must be a 2-letter country code")
-  }
-  const businessState = text(input.business_state ?? input.state, 120, "Business state")
+  const businessCountry = normalizeBusinessCountry(input.business_country ?? input.country)
+  const businessState = normalizeBusinessState(input.business_state ?? input.state, businessCountry)
   const businessCity = text(input.business_city ?? input.city, 120, "Business city")
   const businessAddressLine1 = text(input.business_address_line1 ?? input.address, 240, "Business address")
   const businessAddressLine2 = text(input.business_address_line2 ?? input.address_line_2, 240, "Business address line 2")
@@ -313,6 +314,21 @@ function isSchemaMissing(message: string) {
     normalized.includes("column")
 }
 
+export const TAX_SETTINGS_NOT_READY_MESSAGE =
+  "Tax settings are not ready yet. Please refresh and try again."
+
+function databaseSettingsError(
+  area: "Business" | "Tax" | "Operations",
+  action: "load" | "save",
+  message: string
+) {
+  if (area === "Tax" && isSchemaMissing(message)) return TAX_SETTINGS_NOT_READY_MESSAGE
+  if (isSchemaMissing(message)) {
+    return `${area} settings are not ready yet. Please refresh and try again.`
+  }
+  return `Unable to ${action.toLowerCase()} ${area.toLowerCase()} settings. Please try again.`
+}
+
 export async function getSettingsDashboardEngine(merchantId: string): Promise<SettingsDashboardData> {
   let schemaReady = true
   let schemaWarning: string | null = null
@@ -346,14 +362,18 @@ export async function getSettingsDashboardEngine(merchantId: string): Promise<Se
     listReceiptDevices(merchantId)
   ])
 
-  if (settingsResult.error) throw new Error(`Failed to load settings: ${settingsResult.error.message}`)
-  if (taxResult.error) throw new Error(`Failed to load tax settings: ${taxResult.error.message}`)
+  if (settingsResult.error) {
+    throw new Error(databaseSettingsError("Business", "load", settingsResult.error.message))
+  }
+  if (taxResult.error) {
+    throw new Error(databaseSettingsError("Tax", "load", taxResult.error.message))
+  }
   if (operationsResult.error) {
     if (isSchemaMissing(operationsResult.error.message)) {
       schemaReady = false
       schemaWarning = "Saving may be limited until the settings schema is available."
     } else {
-      throw new Error(`Failed to load operations settings: ${operationsResult.error.message}`)
+      throw new Error(databaseSettingsError("Operations", "load", operationsResult.error.message))
     }
   }
   if (deviceResult.available && deviceResult.devices.length < 4) {
@@ -403,7 +423,7 @@ export async function saveSettingsDashboardEngine(
       { onConflict: "merchant_id" }
     ),
     db.from("merchant_tax_settings").upsert(
-      { merchant_id: merchantId, ...tax, updated_at: updatedAt },
+      { merchant_id: merchantId, ...tax },
       { onConflict: "merchant_id" }
     ),
     db.from("merchant_operations_settings").upsert(
@@ -412,10 +432,14 @@ export async function saveSettingsDashboardEngine(
     )
   ])
 
-  if (settingsResult.error) throw new Error(`Failed to save settings: ${settingsResult.error.message}`)
-  if (taxResult.error) throw new Error(`Failed to save tax settings: ${taxResult.error.message}`)
+  if (settingsResult.error) {
+    throw new Error(databaseSettingsError("Business", "save", settingsResult.error.message))
+  }
+  if (taxResult.error) {
+    throw new Error(databaseSettingsError("Tax", "save", taxResult.error.message))
+  }
   if (operationsResult.error) {
-    throw new Error(`Failed to save operations settings: ${operationsResult.error.message}`)
+    throw new Error(databaseSettingsError("Operations", "save", operationsResult.error.message))
   }
 }
 

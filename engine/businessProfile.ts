@@ -1,4 +1,8 @@
 import { supabase, supabaseAdmin } from "@/database"
+import {
+  normalizeBusinessCountry,
+  normalizeBusinessState
+} from "@/engine/businessProfileLocation"
 
 const db = supabaseAdmin || supabase
 
@@ -51,14 +55,6 @@ function text(value: unknown, maxLength = 320, fieldName = "Business Profile fie
   return normalized
 }
 
-function country(value: unknown) {
-  const normalized = text(value, 2, "Business country")?.toUpperCase() || null
-  if (normalized && !/^[A-Z]{2}$/.test(normalized)) {
-    throw new Error("Business country must be a 2-letter country code")
-  }
-  return normalized
-}
-
 function email(value: unknown) {
   const normalized = text(value, 254, "Owner email")
   if (normalized && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(normalized)) {
@@ -72,12 +68,13 @@ function read(row: Record<string, unknown> | null | undefined, canonical: string
 }
 
 export function normalizeBusinessProfile(input: MerchantBusinessProfileInput): MerchantBusinessProfile {
+  const businessCountry = normalizeBusinessCountry(input.business_country)
   const profile: MerchantBusinessProfile = {
     legal_business_name: text(input.legal_business_name, 160, "Legal business name"),
     business_dba: text(input.business_dba, 160, "Business DBA"),
     business_type: text(input.business_type, 80, "Business type"),
-    business_country: country(input.business_country),
-    business_state: text(input.business_state, 120, "Business state"),
+    business_country: businessCountry,
+    business_state: normalizeBusinessState(input.business_state, businessCountry),
     business_city: text(input.business_city, 120, "Business city"),
     business_address_line1: text(input.business_address_line1, 240, "Business address"),
     business_address_line2: text(input.business_address_line2, 240, "Business address line 2"),
