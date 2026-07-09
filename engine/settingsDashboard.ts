@@ -177,10 +177,10 @@ const MERCHANT_SETTINGS_SELECT_COLUMNS = [
   "report_toast"
 ].join(",")
 
-function text(value: unknown, maxLength: number) {
+function text(value: unknown, maxLength: number, fieldName: string) {
   const normalized = String(value || "").trim()
   if (!normalized) return null
-  if (normalized.length > maxLength) throw new Error("Settings field is too long")
+  if (normalized.length > maxLength) throw new Error(`${fieldName} is too long`)
   return normalized
 }
 
@@ -188,25 +188,25 @@ function bool(value: unknown) {
   return value === true
 }
 
-function normalizeSettings(input: Partial<MerchantSettingsPayload>): MerchantSettingsPayload {
+export function normalizeSettings(input: Partial<MerchantSettingsPayload>): MerchantSettingsPayload {
   const closeoutTime = String(input.closeout_time || "12:00")
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(closeoutTime)) {
     throw new Error("Closeout time must use HH:MM format")
   }
 
-  const legalBusinessName = text(input.legal_business_name ?? input.business_name, 160)
-  const businessCountry = text(input.business_country ?? input.country, 2)?.toUpperCase() || null
+  const legalBusinessName = text(input.legal_business_name ?? input.business_name, 160, "Legal business name")
+  const businessCountry = text(input.business_country ?? input.country, 2, "Business country")?.toUpperCase() || null
   if (businessCountry && !/^[A-Z]{2}$/.test(businessCountry)) {
     throw new Error("Business country must be a 2-letter country code")
   }
-  const businessState = text(input.business_state ?? input.state, 120)
-  const businessCity = text(input.business_city ?? input.city, 120)
-  const businessAddressLine1 = text(input.business_address_line1 ?? input.address, 240)
-  const businessAddressLine2 = text(input.business_address_line2 ?? input.address_line_2, 240)
-  const businessPostalCode = text(input.business_postal_code ?? input.zip, 32)
-  const businessPhone = text(input.business_phone ?? input.phone, 50)
-  const businessWebsite = text(input.business_website ?? input.website, 500)
-  const ownerEmail = text(input.owner_email, 320)
+  const businessState = text(input.business_state ?? input.state, 120, "Business state")
+  const businessCity = text(input.business_city ?? input.city, 120, "Business city")
+  const businessAddressLine1 = text(input.business_address_line1 ?? input.address, 240, "Business address")
+  const businessAddressLine2 = text(input.business_address_line2 ?? input.address_line_2, 240, "Business address line 2")
+  const businessPostalCode = text(input.business_postal_code ?? input.zip, 32, "Business postal code")
+  const businessPhone = text(input.business_phone ?? input.phone, 50, "Business phone")
+  const businessWebsite = text(input.business_website ?? input.website, 500, "Business website")
+  const ownerEmail = text(input.owner_email, 254, "Owner email")
   if (ownerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(ownerEmail)) {
     throw new Error("Owner email must be a valid email address")
   }
@@ -230,8 +230,8 @@ function normalizeSettings(input: Partial<MerchantSettingsPayload>): MerchantSet
   return {
     business_name: legalBusinessName,
     legal_business_name: legalBusinessName,
-    business_dba: text(input.business_dba, 160),
-    contact_email: text(input.contact_email, 320),
+    business_dba: text(input.business_dba, 160, "Business DBA"),
+    contact_email: text(input.contact_email, 254, "Contact email"),
     address: businessAddressLine1,
     address_line_2: businessAddressLine2,
     city: businessCity,
@@ -248,13 +248,13 @@ function normalizeSettings(input: Partial<MerchantSettingsPayload>): MerchantSet
     business_website: businessWebsite,
     phone: businessPhone,
     website: businessWebsite,
-    business_type: text(input.business_type, 80),
-    owner_first_name: text(input.owner_first_name, 120),
-    owner_last_name: text(input.owner_last_name, 120),
+    business_type: text(input.business_type, 80, "Business type"),
+    owner_first_name: text(input.owner_first_name, 120, "Owner first name"),
+    owner_last_name: text(input.owner_last_name, 120, "Owner last name"),
     owner_email: ownerEmail,
-    owner_phone: text(input.owner_phone, 50),
+    owner_phone: text(input.owner_phone, 50, "Owner phone"),
     profile_status: profileStatus,
-    completed_at: profileStatus === "complete" ? text(input.completed_at, 80) || new Date().toISOString() : null,
+    completed_at: profileStatus === "complete" ? text(input.completed_at, 80, "Business Profile completion date") || new Date().toISOString() : null,
     closeout_time: closeoutTime,
     report_toast: input.report_toast !== false
   }
@@ -275,7 +275,7 @@ export function normalizeTax(input: Partial<MerchantTaxSettingsPayload>): Mercha
   return {
     tax_enabled: taxEnabled,
     tax_rate: taxEnabled ? rate : rate || 0,
-    tax_name: text(input.tax_name, 80) || "Sales Tax"
+    tax_name: text(input.tax_name, 80, "Tax name") || "Sales Tax"
   }
 }
 
@@ -289,13 +289,13 @@ function normalizeOperations(
     show_network: input.show_network !== false,
     show_provider: input.show_provider !== false,
     show_wallet_reference: bool(input.show_wallet_reference),
-    receipt_footer: text(input.receipt_footer, 500),
+    receipt_footer: text(input.receipt_footer, 500, "Receipt footer"),
     auto_print: bool(input.auto_print),
     email_receipt_enabled: bool(input.email_receipt_enabled),
     sms_receipt_enabled: bool(input.sms_receipt_enabled),
     cash_drawer_enabled: bool(input.cash_drawer_enabled),
     require_cashier_note: bool(input.require_cashier_note),
-    default_terminal_label: text(input.default_terminal_label, 120),
+    default_terminal_label: text(input.default_terminal_label, 120, "Default terminal label"),
     receipt_prompt_after_payment: input.receipt_prompt_after_payment !== false,
     tipping_enabled: bool(input.tipping_enabled),
     successful_payment_alerts: input.successful_payment_alerts !== false,

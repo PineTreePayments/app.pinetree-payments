@@ -44,15 +44,15 @@ const REQUIRED_FIELDS: Array<keyof Omit<MerchantBusinessProfile, "profile_status
   "owner_email",
 ]
 
-function text(value: unknown, maxLength = 320) {
+function text(value: unknown, maxLength = 320, fieldName = "Business Profile field") {
   const normalized = String(value || "").trim()
   if (!normalized) return null
-  if (normalized.length > maxLength) throw new Error("Business Profile field is too long")
+  if (normalized.length > maxLength) throw new Error(`${fieldName} is too long`)
   return normalized
 }
 
 function country(value: unknown) {
-  const normalized = text(value, 2)?.toUpperCase() || null
+  const normalized = text(value, 2, "Business country")?.toUpperCase() || null
   if (normalized && !/^[A-Z]{2}$/.test(normalized)) {
     throw new Error("Business country must be a 2-letter country code")
   }
@@ -60,7 +60,7 @@ function country(value: unknown) {
 }
 
 function email(value: unknown) {
-  const normalized = text(value, 320)
+  const normalized = text(value, 254, "Owner email")
   if (normalized && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(normalized)) {
     throw new Error("Owner email must be a valid email address")
   }
@@ -73,21 +73,21 @@ function read(row: Record<string, unknown> | null | undefined, canonical: string
 
 export function normalizeBusinessProfile(input: MerchantBusinessProfileInput): MerchantBusinessProfile {
   const profile: MerchantBusinessProfile = {
-    legal_business_name: text(input.legal_business_name, 160),
-    business_dba: text(input.business_dba, 160),
-    business_type: text(input.business_type, 80),
+    legal_business_name: text(input.legal_business_name, 160, "Legal business name"),
+    business_dba: text(input.business_dba, 160, "Business DBA"),
+    business_type: text(input.business_type, 80, "Business type"),
     business_country: country(input.business_country),
-    business_state: text(input.business_state, 120),
-    business_city: text(input.business_city, 120),
-    business_address_line1: text(input.business_address_line1, 240),
-    business_address_line2: text(input.business_address_line2, 240),
-    business_postal_code: text(input.business_postal_code, 32),
-    business_phone: text(input.business_phone, 50),
-    business_website: text(input.business_website, 500),
-    owner_first_name: text(input.owner_first_name, 120),
-    owner_last_name: text(input.owner_last_name, 120),
+    business_state: text(input.business_state, 120, "Business state"),
+    business_city: text(input.business_city, 120, "Business city"),
+    business_address_line1: text(input.business_address_line1, 240, "Business address"),
+    business_address_line2: text(input.business_address_line2, 240, "Business address line 2"),
+    business_postal_code: text(input.business_postal_code, 32, "Business postal code"),
+    business_phone: text(input.business_phone, 50, "Business phone"),
+    business_website: text(input.business_website, 500, "Business website"),
+    owner_first_name: text(input.owner_first_name, 120, "Owner first name"),
+    owner_last_name: text(input.owner_last_name, 120, "Owner last name"),
     owner_email: email(input.owner_email),
-    owner_phone: text(input.owner_phone, 50),
+    owner_phone: text(input.owner_phone, 50, "Owner phone"),
     profile_status: "incomplete",
     completed_at: null,
     missing_fields: [],

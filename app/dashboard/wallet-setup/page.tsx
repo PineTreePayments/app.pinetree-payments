@@ -1853,20 +1853,15 @@ function formatActivityTimestamp(value: string | null) {
 
 function BusinessProfileRequiredBanner() {
   return (
-    <div className="mb-3 rounded-lg border border-red-200 bg-red-50/70 px-3 py-2.5 text-sm shadow-none">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-start gap-3">
-          <span className="mt-0.5 h-8 w-1 shrink-0 rounded-full bg-red-500" />
-          <div>
-            <p className="font-semibold text-red-950">Business Profile Required</p>
-            <p className="mt-0.5 leading-5 text-red-800/80">Complete your Business Profile to activate wallets, providers, and live payments.</p>
-          </div>
-        </div>
+    <div className="mb-3 rounded-lg border border-red-200 bg-red-50/70 px-3 py-2 text-sm shadow-none">
+      <div className="flex items-center gap-2">
+        <span className="h-4 w-1 shrink-0 rounded-full bg-red-500" />
+        <p className="min-w-0 flex-1 font-semibold leading-5 text-red-950">Complete Business Profile before continuing</p>
         <Link
           href="/dashboard/settings#business-profile"
-          className="shrink-0 font-semibold text-red-700 transition hover:text-red-800"
+          className="hidden shrink-0 font-semibold text-red-700 transition hover:text-red-800 sm:inline"
         >
-          Complete Business Profile
+          Complete
         </Link>
       </div>
     </div>

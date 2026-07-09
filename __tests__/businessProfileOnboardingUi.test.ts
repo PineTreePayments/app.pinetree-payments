@@ -14,16 +14,17 @@ describe("Business Profile onboarding UI", () => {
     const wallet = read("app/dashboard/wallet-setup/page.tsx")
 
     for (const source of [dashboard, settings, providers, wallet]) {
-      expect(source).toContain("Business Profile Required")
-      expect(source).toContain("Complete your Business Profile to activate wallets, providers, and live payments.")
-      expect(source).toContain("Complete Business Profile")
+      expect(source).toContain("Complete Business Profile before continuing")
       expect(source).toContain("bg-red-50/70")
       expect(source).toContain("border-red-200")
+      expect(source).toContain("flex items-center gap-2")
+      expect(source).not.toContain("Business Profile Required")
+      expect(source).not.toContain("Complete your Business Profile to activate wallets, providers, and live payments.")
       expect(source).not.toContain("Complete your Business Profile to activate payments.")
     }
 
     const businessProfileSections = [dashboard, settings, providers, wallet]
-      .map((source) => source.slice(source.indexOf("Business Profile Required") - 600, source.indexOf("Business Profile Required") + 1200))
+      .map((source) => source.slice(source.indexOf("Complete Business Profile before continuing") - 600, source.indexOf("Complete Business Profile before continuing") + 1200))
 
     for (const section of businessProfileSections) {
       expect(section).not.toContain("bg-amber-50")

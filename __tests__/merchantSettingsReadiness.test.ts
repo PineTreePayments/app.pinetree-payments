@@ -9,6 +9,7 @@ vi.mock("@/database", () => ({
 
 import {
   getMissingSettingsRequirements,
+  normalizeSettings,
   normalizeTax
 } from "@/engine/settingsDashboard"
 
@@ -67,5 +68,41 @@ describe("tax settings normalization", () => {
       tax_enabled: true,
       tax_rate: 8.25
     })
+  })
+})
+
+describe("Business Profile settings normalization", () => {
+  it("accepts realistic Business Profile field lengths", () => {
+    const settings = normalizeSettings({
+      legal_business_name: "L".repeat(120),
+      business_dba: "D".repeat(120),
+      contact_email: `${"c".repeat(242)}@example.com`,
+      business_address_line1: "1".repeat(160),
+      business_address_line2: "2".repeat(160),
+      business_city: "C".repeat(80),
+      business_state: "S".repeat(80),
+      business_postal_code: "P".repeat(32),
+      business_country: "US",
+      business_phone: "3".repeat(40),
+      business_website: `https://example.com/${"w".repeat(180)}`,
+      business_type: "retail",
+      owner_first_name: "F".repeat(80),
+      owner_last_name: "L".repeat(80),
+      owner_email: `${"o".repeat(242)}@example.com`,
+      owner_phone: "4".repeat(40),
+      closeout_time: "12:00",
+      report_toast: true
+    })
+
+    expect(settings.business_address_line1).toHaveLength(160)
+    expect(settings.owner_email).toHaveLength(254)
+  })
+
+  it("identifies the specific overlong Business Profile field", () => {
+    expect(() => normalizeSettings({
+      business_address_line1: "x".repeat(241),
+      closeout_time: "12:00",
+      report_toast: true
+    })).toThrow("Business address is too long")
   })
 })
