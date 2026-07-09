@@ -1176,6 +1176,29 @@ function safeBooleanCall(fn: unknown) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Server-visible wallet setup diagnostics (temporary beacon)
+// ---------------------------------------------------------------------------
+
+type WalletSetupDebugDetailValue = boolean | number | string | null
+type WalletSetupDebugDetails = Record<string, WalletSetupDebugDetailValue>
+type WalletSetupDebugEventLogEntry = {
+  event: string
+  details: WalletSetupDebugDetails
+  at: string
+}
+
+function isWalletDebugEventsEnabled() {
+  if (process.env.NEXT_PUBLIC_WALLET_DEBUG_EVENTS === "true") return true
+  if (typeof window === "undefined") return false
+  try {
+    const params = new URLSearchParams(window.location.search)
+    return params.get("walletDebug") === "1" || params.get("walletDebug") === "true"
+  } catch {
+    return false
+  }
+}
+
 function walletConnectorRecord(wallet: unknown) {
   return toRecord(toRecord(wallet).connector)
 }
@@ -2288,6 +2311,7 @@ function PineTreeWalletRuntime() {
     createEmbeddedWallet,
     createOrRestoreSession,
     isSessionActive: embeddedWalletSessionActive,
+    shouldAutoCreateEmbeddedWallet,
     userHasEmbeddedWallet,
   } = useEmbeddedWallet()
   const wallets = useUserWallets()
@@ -2362,6 +2386,7 @@ function PineTreeWalletRuntime() {
     updatedAt: null,
   })
   const [walletSyncDebugQueryEnabled, setWalletSyncDebugQueryEnabled] = useState(false)
+  const [lastDebugEvents, setLastDebugEvents] = useState<WalletSetupDebugEventLogEntry[]>([])
   const [withdrawalRail, setWithdrawalRail] = useState<WithdrawalRail>("base")
   const [withdrawalAsset, setWithdrawalAsset] = useState<WithdrawalAsset>("ETH")
   const [withdrawalDestination, setWithdrawalDestination] = useState("")
@@ -2398,6 +2423,14 @@ function PineTreeWalletRuntime() {
     )
   }, [])
 
+  // Fires once per mount so a server-visible beacon exists even before Dynamic auth
+  // or a DB profile fetch resolves - lets us confirm the page itself actually loaded
+  // on a device where nothing further ever shows up in Vercel logs.
+  useEffect(() => {
+    emitWalletSetupDebugEvent("wallet_page_loaded", {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Dev-only wallet auth diagnostic. Never logs JWTs, signing keys, emails,
   // wallet addresses, or merchant IDs - only presence/mode booleans.
   useEffect(() => {
@@ -2420,6 +2453,7 @@ function PineTreeWalletRuntime() {
   useEffect(() => {
     if (sdkHasLoaded) {
       console.info("[pinetree-wallets] wallet_dynamic_sdk_loaded", {})
+      emitWalletSetupDebugEvent("wallet_dynamic_sdk_loaded", {})
     }
   }, [sdkHasLoaded])
 
@@ -3000,6 +3034,7 @@ function PineTreeWalletRuntime() {
         let signInWithExternalJwtSucceeded = false
         try {
           console.info("[pinetree-wallets] wallet_dynamic_jwt_requested", {})
+          emitWalletSetupDebugEvent("wallet_dynamic_jwt_requested", {})
           const payload = await requestPineTreeDynamicExternalJwtAuth(token, { walletDebug: walletSyncDebugQueryEnabled })
           endpointStatus = 200
           setProfileSyncDiagnostics((prev) => ({
@@ -3028,6 +3063,7 @@ function PineTreeWalletRuntime() {
           signInWithExternalJwtSucceeded = Boolean(dynamicProfile)
           if (signInWithExternalJwtSucceeded) {
             console.info("[pinetree-wallets] wallet_dynamic_jwt_authenticated", {})
+            emitWalletSetupDebugEvent("wallet_dynamic_jwt_authenticated", {})
           }
           setProfileSyncDiagnostics((prev) => ({
             ...prev,
@@ -3255,6 +3291,11 @@ function PineTreeWalletRuntime() {
   const refreshDynamicWalletRuntime = useCallback(async (reason: string, options?: { requireApprovalWallet?: boolean }) => {
     if (!sdkHasLoaded || !user) return false
     console.info("[pinetree-wallets] wallet_dynamic_wallets_refresh_started", { reason })
+    emitWalletSetupDebugEvent("wallet_dynamic_wallets_refresh_started", {
+      reason,
+      dynamicWaasIsEnabled,
+      runtimeWalletCount: dynamicWalletRuntimeCountRef.current,
+    })
     try {
       await refreshDynamicUser()
       if (dynamicWaasIsEnabled) {
@@ -3272,9 +3313,15 @@ function PineTreeWalletRuntime() {
         // falling through to explicit creation, which would attempt to create a duplicate.
         if (runtimeWallets.length === 0 && runtimeCredentials.length > 0 && !shouldInitializeWaas) {
           console.info("[pinetree-wallets] wallet_dynamic_create_or_restore_started", { reason, path: "restore_existing" })
+          emitWalletSetupDebugEvent("wallet_dynamic_create_or_restore_started", { reason, path: "restore_existing" })
           await initializeWaas({ forceClientRebuild: true })
           runtimeWallets = getWaasWallets()
           console.info("[pinetree-wallets] wallet_dynamic_create_or_restore_complete", {
+            reason,
+            path: "restore_existing",
+            walletsRestored: runtimeWallets.length > 0,
+          })
+          emitWalletSetupDebugEvent("wallet_dynamic_create_or_restore_complete", {
             reason,
             path: "restore_existing",
             walletsRestored: runtimeWallets.length > 0,
@@ -3309,19 +3356,39 @@ function PineTreeWalletRuntime() {
                 reason,
                 usedExplicitFallbackChains: needsAutoCreateWalletChains.length === 0,
               })
+              emitWalletSetupDebugEvent("wallet_dynamic_create_embedded_wallet_started", {
+                reason,
+                path: "waas_create",
+                usedExplicitFallbackChains: needsAutoCreateWalletChains.length === 0,
+              })
               await createWalletAccount(requiredChains)
               console.info("[pinetree-wallets] wallet_dynamic_create_embedded_wallet_complete", { reason })
+              emitWalletSetupDebugEvent("wallet_dynamic_create_embedded_wallet_complete", { reason, path: "waas_create" })
               setDynamicWalletRuntimeRefreshNonce((value) => value + 1)
             } finally {
               creatingEmbeddedWalletRef.current = false
             }
+          } else if (requiredChains.length === 0) {
+            // Neither needsAutoCreateWalletChains nor the explicit fallback applied, and a
+            // WaaS credential already exists - the runtime restore above should have found
+            // it. If we reach here with zero wallets, that restore silently failed.
+            emitWalletSetupDebugEvent("wallet_dynamic_missing_required_addresses", {
+              reason: "waas_credential_exists_but_restore_failed",
+            })
           }
         }
       } else {
-        if (userHasEmbeddedWallet()) {
+        // shouldAutoCreateEmbeddedWallet is the SDK's own signal for this decision - trust
+        // it over userHasEmbeddedWallet() alone, which has been seen to report a wallet
+        // exists for a brand-new user and silently no-op createOrRestoreSession() instead
+        // of ever calling createEmbeddedWallet().
+        const sdkWantsAutoCreate = safeBooleanCall(shouldAutoCreateEmbeddedWallet) === true
+        if (userHasEmbeddedWallet() && !sdkWantsAutoCreate) {
           console.info("[pinetree-wallets] wallet_dynamic_create_or_restore_started", { reason, path: "legacy_restore" })
+          emitWalletSetupDebugEvent("wallet_dynamic_create_or_restore_started", { reason, path: "legacy_restore" })
           await createOrRestoreSession()
           console.info("[pinetree-wallets] wallet_dynamic_create_or_restore_complete", { reason, path: "legacy_restore" })
+          emitWalletSetupDebugEvent("wallet_dynamic_create_or_restore_complete", { reason, path: "legacy_restore" })
           setDynamicWalletRuntimeRefreshNonce((value) => value + 1)
         } else if (!creatingEmbeddedWalletRef.current) {
           // No embedded wallet exists yet â€” create one using the legacy embedded wallet API.
@@ -3335,8 +3402,10 @@ function PineTreeWalletRuntime() {
               })
             }
             console.info("[pinetree-wallets] wallet_dynamic_create_embedded_wallet_started", { reason, path: "legacy_create" })
+            emitWalletSetupDebugEvent("wallet_dynamic_create_embedded_wallet_started", { reason, path: "legacy_create" })
             await createEmbeddedWallet()
             console.info("[pinetree-wallets] wallet_dynamic_create_embedded_wallet_complete", { reason, path: "legacy_create" })
+            emitWalletSetupDebugEvent("wallet_dynamic_create_embedded_wallet_complete", { reason, path: "legacy_create" })
             setDynamicWalletRuntimeRefreshNonce((value) => value + 1)
           } finally {
             creatingEmbeddedWalletRef.current = false
@@ -3347,6 +3416,11 @@ function PineTreeWalletRuntime() {
       setDynamicWalletRuntimeRefreshNonce((value) => value + 1)
       const hydrated = await waitForDynamicWalletRuntime(options)
       console.info("[pinetree-wallets] wallet_dynamic_wallets_refresh_complete", { reason, hydrated })
+      emitWalletSetupDebugEvent("wallet_dynamic_wallets_refresh_complete", {
+        reason,
+        hydrated,
+        runtimeWalletCount: dynamicWalletRuntimeCountRef.current,
+      })
       if (walletCreationDebugEnabled) {
         const primaryWalletLike = primaryWallet as DynamicWalletLike | null
         const waasCredentials = getWaasWalletsByCredentials()
@@ -3403,6 +3477,16 @@ function PineTreeWalletRuntime() {
         dynamicUserId: user.userId ?? null,
         error: error instanceof Error ? error.message : String(error),
       })
+      creatingEmbeddedWalletRef.current = false
+      // Surface the throw server-side too - this is the "createWalletAccount /
+      // createEmbeddedWallet threw but was swallowed client-side" case that's
+      // otherwise invisible in Vercel logs from a mobile browser.
+      emitWalletSetupDebugEvent("wallet_dynamic_wallets_refresh_complete", {
+        reason,
+        hydrated: false,
+        threw: true,
+        errorName: error instanceof Error ? error.name.slice(0, 40) : "unknown_error",
+      })
       return false
     }
   }, [
@@ -3419,6 +3503,7 @@ function PineTreeWalletRuntime() {
     primaryWallet,
     refreshDynamicUser,
     sdkHasLoaded,
+    shouldAutoCreateEmbeddedWallet,
     shouldInitializeWaas,
     user,
     userHasEmbeddedWallet,
@@ -3440,6 +3525,7 @@ function PineTreeWalletRuntime() {
   // --- Sync Dynamic wallet addresses (Base/Solana) to the merchant profile DB record ---
   const syncProfileFromDynamic = useCallback(async (options?: { requireBaseAndSolanaSigners?: boolean }) => {
     console.info("[pinetree-wallets] wallet_sync_start", {})
+    emitWalletSetupDebugEvent("wallet_sync_start", {})
     const token = accessTokenRef.current
     if (!token || !user) {
       const diagnostics: ProfileSyncDiagnosticsState = {
@@ -3461,6 +3547,9 @@ function PineTreeWalletRuntime() {
       }
       setProfileSyncDiagnostics(diagnostics)
       console.info("[pinetree-wallets] profile_sync_not_called", diagnostics)
+      // Explains the "JWT returned 200 but POST never happened" case: the profile sync
+      // was attempted but bailed out before ever reaching the fetch call.
+      emitWalletSetupDebugEvent("wallet_profile_sync_skipped_reason", { reason: diagnostics.skippedReason })
       logWalletCreationStep("failed", { reason: "missing_auth_context" })
       recordWalletSetupFailure(!token ? "pine_tree_auth_missing" : "dynamic_user_missing", "failed", {
         skippedReason: diagnostics.skippedReason,
@@ -3515,6 +3604,7 @@ function PineTreeWalletRuntime() {
       recordWalletSetupFailure("dynamic_email_mismatch", "dynamic_identity_mismatch", {
         dynamicEmailSource,
       })
+      emitWalletSetupDebugEvent("wallet_profile_sync_skipped_reason", { reason: "dynamic_email_mismatch" })
       return null
     }
     if (!merchantEmail || !dynamicUserEmail) {
@@ -3560,6 +3650,7 @@ function PineTreeWalletRuntime() {
       recordWalletSetupFailure(!merchantEmail ? "merchant_email_missing" : "dynamic_email_missing", "dynamic_identity_unverified", {
         dynamicEmailSource,
       })
+      emitWalletSetupDebugEvent("wallet_profile_sync_skipped_reason", { reason: skippedReason })
       return null
     }
 
@@ -3715,6 +3806,7 @@ function PineTreeWalletRuntime() {
         profile_sync_request_sent: true,
       })
       console.info("[pinetree-wallets] wallet_profile_post_attempting", {})
+      emitWalletSetupDebugEvent("wallet_profile_post_attempting", {})
       const profileSaveStartedAt = Date.now()
       const res = await fetch("/api/wallets/pinetree-profile", {
         method: "POST",
@@ -3749,6 +3841,10 @@ function PineTreeWalletRuntime() {
         status: res.status,
         ok: res.ok,
         body: responseBody,
+      })
+      emitWalletSetupDebugEvent("wallet_profile_post_response", {
+        status: res.status,
+        ok: res.ok,
       })
       if (walletCreationDebugEnabled) {
         console.debug("[pinetree-wallets] profile_sync_response", {
@@ -4040,25 +4136,41 @@ function PineTreeWalletRuntime() {
       console.info("[pinetree-wallets] wallet_dynamic_wallets_detected_count", {
         count: dynamicWalletRuntimeCount,
       })
+      emitWalletSetupDebugEvent("wallet_dynamic_wallets_detected_count", {
+        count: dynamicWalletRuntimeCount,
+      })
       console.info("[pinetree-wallets] wallet_dynamic_base_address_detected", {
+        detected: Boolean(baseAddress),
+      })
+      emitWalletSetupDebugEvent("wallet_dynamic_base_address_detected", {
         detected: Boolean(baseAddress),
       })
       console.info("[pinetree-wallets] wallet_dynamic_solana_address_detected", {
         detected: Boolean(solanaAddress),
       })
+      emitWalletSetupDebugEvent("wallet_dynamic_solana_address_detected", {
+        detected: Boolean(solanaAddress),
+      })
 
       if (!baseAddress || !solanaAddress) {
+        const missingReason = !baseAddress && !solanaAddress
+          ? "missing_base_and_solana"
+          : !baseAddress
+            ? "missing_base"
+            : "missing_solana"
         console.info("[pinetree-wallets] wallet_dynamic_missing_required_addresses", {
           missingBase: !baseAddress,
           missingSolana: !solanaAddress,
         })
-        console.info("[pinetree-wallets] wallet_profile_sync_skipped_reason", {
-          reason: !baseAddress && !solanaAddress
-            ? "missing_base_and_solana"
-            : !baseAddress
-              ? "missing_base"
-              : "missing_solana",
+        emitWalletSetupDebugEvent("wallet_dynamic_missing_required_addresses", {
+          missingBase: !baseAddress,
+          missingSolana: !solanaAddress,
+          runtimeWalletCount: dynamicWalletRuntimeCount,
         })
+        console.info("[pinetree-wallets] wallet_profile_sync_skipped_reason", {
+          reason: missingReason,
+        })
+        emitWalletSetupDebugEvent("wallet_profile_sync_skipped_reason", { reason: missingReason })
         logWalletCreationStep("provisioning_wallet", {
           reason: "waiting_for_dynamic_addresses",
           base_address_present: Boolean(baseAddress),
@@ -4080,6 +4192,7 @@ function PineTreeWalletRuntime() {
         solanaAddressPresent: true,
       })
       console.info("[pinetree-wallets] wallet_profile_sync_eligible", {})
+      emitWalletSetupDebugEvent("wallet_profile_sync_eligible", {})
       logWalletCreationStep("wallets_detected")
       if (repairInProgress) {
         console.info("[pinetree-wallets] repair_dynamic_wallets_after_provisioning", {
@@ -4174,6 +4287,16 @@ function PineTreeWalletRuntime() {
       setWalletCreationStep("timeout")
       recordWalletSetupFailure(inferWalletSetupFailureReason(), "failed", {
         finalProvisioningRefreshAttempted: true,
+      })
+      // The single most useful log line for "why did this time out": the exact reason
+      // classifier plus the runtime state it was computed from.
+      emitWalletSetupDebugEvent("wallet_setup_timeout", {
+        reason: inferWalletSetupFailureReason(),
+        sdkLoaded: sdkHasLoaded,
+        userPresent: Boolean(user),
+        runtimeWalletCount: dynamicWalletRuntimeCount,
+        baseDetected: dynamicNetworkAddresses.base.length > 0,
+        solanaDetected: dynamicNetworkAddresses.solana.length > 0,
       })
     }, walletProvisioningFinalRefreshGraceMs)
     return () => window.clearTimeout(timer)
@@ -4332,6 +4455,7 @@ function PineTreeWalletRuntime() {
     if (coreWalletProfileReady) {
       setWalletSetupFailureReason(null)
       console.info("[pinetree-wallets] wallet_core_ready", {})
+      emitWalletSetupDebugEvent("wallet_core_ready", {})
     }
   }, [coreWalletProfileReady])
 
@@ -4590,6 +4714,14 @@ function PineTreeWalletRuntime() {
     openWalletReconnectNeeded,
   ])
 
+  useEffect(() => {
+    if (walletSetupPrimaryState === "failed") {
+      emitWalletSetupDebugEvent("wallet_setup_retry_shown", {
+        reason: walletSetupFailureReason || "none",
+      })
+    }
+  }, [walletSetupPrimaryState, walletSetupFailureReason])
+
   const walletStatus =
     repairInProgress ? "Repairing" :
     syncing ? "Saving..." :
@@ -4700,6 +4832,32 @@ function PineTreeWalletRuntime() {
     const setupKey = walletSetupStorageKeyForMerchant(merchantId)
     if (!setupKey) return
     window.localStorage.removeItem(setupKey)
+  }
+
+  // Server-visible mirror of the wallet_dynamic_* console diagnostics below - frontend
+  // console.info never reaches Vercel logs from a mobile browser, so this fires a small
+  // sanitized beacon at the same checkpoints. Fire-and-forget: never awaited, never
+  // throws into the UI, and never blocks wallet creation. Reads window.location.search
+  // directly (rather than walletSyncDebugQueryEnabled state) so it has no dependency-array
+  // staleness concerns and can be called from anywhere in this component.
+  function emitWalletSetupDebugEvent(event: string, details?: WalletSetupDebugDetails) {
+    if (!isWalletDebugEventsEnabled()) return
+    const safeDetails = details ?? {}
+    setLastDebugEvents((prev) => [{ event, details: safeDetails, at: new Date().toISOString() }, ...prev].slice(0, 12))
+    try {
+      const token = accessTokenRef.current
+      void fetch("/api/debug/pinetree-wallet/setup-event", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ event, details: safeDetails }),
+        keepalive: true,
+      }).catch(() => undefined)
+    } catch {
+      // Diagnostics must never break wallet creation.
+    }
   }
 
   function beginWalletProvisioningAttempt(step: WalletCreationStep, reason: string, options?: { retry?: boolean }) {
@@ -4978,6 +5136,10 @@ function PineTreeWalletRuntime() {
   }
 
   function handleCreateWallet() {
+    emitWalletSetupDebugEvent("wallet_create_clicked", {
+      sdkLoaded: sdkHasLoaded,
+      userPresent: Boolean(user),
+    })
     if (walletSetupStartInFlightRef.current || (pendingSync && !provisioningRetryExhausted)) return
     if (hasStaleDynamicSession && user) {
       logWalletCreationStep("opening_dynamic", { reason: "stale_dynamic_session_logout" })
@@ -5036,6 +5198,12 @@ function PineTreeWalletRuntime() {
 
   function handleRetryWalletSetup() {
     const retryFailureReason = walletSetupFailureReason
+    emitWalletSetupDebugEvent("wallet_retry_clicked", {
+      reason: retryFailureReason || "none",
+      sdkLoaded: sdkHasLoaded,
+      userPresent: Boolean(user),
+      runtimeWalletCount: dynamicWalletRuntimeCount,
+    })
     if (emailMismatchActive || emailUnverifiedActive || (walletIdentityError && user)) {
       handleUsePineTreeAccountEmail()
       return
@@ -5587,6 +5755,24 @@ function PineTreeWalletRuntime() {
               <p>dynamicEmailFallbackBlocked: {String(Boolean(profileSyncDiagnostics.dynamicEmailFallbackBlocked))}</p>
               <p>signInWithExternalJwtCalled: {String(Boolean(profileSyncDiagnostics.signInWithExternalJwtCalled))}</p>
               <p>signInWithExternalJwtSucceeded: {String(Boolean(profileSyncDiagnostics.signInWithExternalJwtSucceeded))}</p>
+            </div>
+          </div>
+        ) : null}
+
+        {showProfileSyncDebugPanel && lastDebugEvents.length > 0 ? (
+          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-3 text-xs text-slate-700">
+            <p className="font-semibold text-slate-900">Wallet setup event log</p>
+            <div className="mt-2 space-y-1">
+              {lastDebugEvents.map((entry, index) => (
+                <p key={`${entry.event}-${entry.at}-${index}`}>
+                  {entry.event}
+                  {Object.keys(entry.details).length > 0
+                    ? ` — ${Object.entries(entry.details)
+                        .map(([key, value]) => `${key}=${String(value)}`)
+                        .join(", ")}`
+                    : ""}
+                </p>
+              ))}
             </div>
           </div>
         ) : null}

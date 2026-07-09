@@ -558,6 +558,76 @@ describe("PineTree embedded wallet setup", () => {
     expect(partialBranch).not.toContain("wallet_profile_sync_eligible")
   })
 
+  it("mirrors the wallet_dynamic_* diagnostics server-side with a fire-and-forget beacon", () => {
+    // console.info alone never reaches Vercel logs from a mobile browser - every
+    // wallet_dynamic_* checkpoint needs a server-visible emitWalletSetupDebugEvent sibling.
+    expect(page).toContain("function emitWalletSetupDebugEvent(event: string, details?: WalletSetupDebugDetails)")
+    expect(page).toContain("function isWalletDebugEventsEnabled()")
+    expect(page).toContain('fetch("/api/debug/pinetree-wallet/setup-event"')
+    expect(page).toContain("keepalive: true")
+    const emitFn = page.slice(
+      page.indexOf("function emitWalletSetupDebugEvent("),
+      page.indexOf("function beginWalletProvisioningAttempt(")
+    )
+    // Never blocks wallet creation: the fetch is fired without being awaited.
+    expect(emitFn).toContain("void fetch(")
+    expect(emitFn).toContain(".catch(() => undefined)")
+    // Never throws into the UI.
+    expect(emitFn).toContain("try {")
+    expect(emitFn).toContain("} catch {")
+  })
+
+  it("emits wallet_create_clicked and wallet_retry_clicked", () => {
+    const createFn = page.slice(
+      page.indexOf("function handleCreateWallet()"),
+      page.indexOf("function handleUsePineTreeAccountEmail()")
+    )
+    expect(createFn).toContain('emitWalletSetupDebugEvent("wallet_create_clicked"')
+    const retryFn = page.slice(
+      page.indexOf("function handleRetryWalletSetup()"),
+      page.indexOf("function handleWithdrawalAssetSelect")
+    )
+    expect(retryFn).toContain('emitWalletSetupDebugEvent("wallet_retry_clicked"')
+  })
+
+  it("emits wallet_dynamic_wallets_detected_count as a plain count, never a raw wallet list", () => {
+    expect(page).toContain('emitWalletSetupDebugEvent("wallet_dynamic_wallets_detected_count", {\n        count: dynamicWalletRuntimeCount,\n      })')
+  })
+
+  it("emits wallet_dynamic_missing_required_addresses with only booleans and a reason", () => {
+    expect(page).toContain('emitWalletSetupDebugEvent("wallet_dynamic_missing_required_addresses", {\n          missingBase: !baseAddress,\n          missingSolana: !solanaAddress,')
+    expect(page).toContain('emitWalletSetupDebugEvent("wallet_profile_sync_skipped_reason", { reason: missingReason })')
+  })
+
+  it("emits wallet_profile_post_attempting immediately before the profile POST fetch", () => {
+    const syncFn = page.slice(
+      page.indexOf("const syncProfileFromDynamic = useCallback"),
+      page.indexOf("// --- Post-reconnect wallet match check ---")
+    )
+    const emitIdx = syncFn.indexOf('emitWalletSetupDebugEvent("wallet_profile_post_attempting"')
+    const fetchIdx = syncFn.indexOf('fetch("/api/wallets/pinetree-profile"')
+    expect(emitIdx).toBeGreaterThan(-1)
+    expect(fetchIdx).toBeGreaterThan(emitIdx)
+    expect(syncFn).toContain('emitWalletSetupDebugEvent("wallet_profile_post_response"')
+  })
+
+  it("gates the wallet setup event log panel behind walletDebug=1 and shows only safe values", () => {
+    expect(page).toContain("showProfileSyncDebugPanel && lastDebugEvents.length > 0")
+    expect(page).toContain("Wallet setup event log")
+    expect(page).not.toContain("lastDebugEvents.length > 0 ? null :")
+  })
+
+  it("normal merchant UI still shows only Creating PineTree Wallet / Try Again copy", () => {
+    expect(page).toContain('return "Creating PineTree Wallet..."')
+    expect(page).toContain('return "Try Again"')
+    // The event-log panel exists in source but is gated behind ?walletDebug=1, same as
+    // every other diagnostics block on this page - it never renders in the default UI.
+    const panelIdx = page.indexOf("Wallet setup event log")
+    const gateIdx = page.lastIndexOf("showProfileSyncDebugPanel && lastDebugEvents.length > 0", panelIdx)
+    expect(gateIdx).toBeGreaterThan(-1)
+    expect(panelIdx - gateIdx).toBeLessThan(400)
+  })
+
   it("saves detected core wallet addresses without waiting for browser signers", () => {
     const coreSaveEffect = page.slice(
       page.indexOf("if (!pendingSync || !sdkHasLoaded || !user || pendingProfileSyncAttemptRef.current) return"),
