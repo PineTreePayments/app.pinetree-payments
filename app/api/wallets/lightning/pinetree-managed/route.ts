@@ -18,11 +18,14 @@ import {
 } from "@/database/merchantLightningProfiles"
 import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import { ensureManagedLightningForMerchant } from "@/engine/pineTreeWalletReadiness"
+import { withOperationTimeout } from "@/engine/promiseTimeout"
 import {
   getPineTreeSpeedConfigStatus,
   isSpeedPlatformTreasurySweepEnabled,
   SPEED_PLATFORM_TREASURY_SWEEP_MODE
 } from "@/providers/lightning/speedClient"
+
+const LIGHTNING_PROVISIONING_TIMEOUT_MS = 12_000
 
 function safeLightningProfile(profile: MerchantLightningProfile | null) {
   if (!profile) return null
@@ -108,17 +111,37 @@ export async function POST(req: NextRequest) {
     const merchantId = await requireMerchantIdFromRequest(req)
     console.info("[pinetree-managed-lightning] POST start", { merchant_id: merchantId })
 
-    const result = await ensureManagedLightningForMerchant(merchantId)
+    try {
+      const result = await withOperationTimeout(
+        ensureManagedLightningForMerchant(merchantId),
+        LIGHTNING_PROVISIONING_TIMEOUT_MS,
+        "managed lightning provisioning"
+      )
 
-    console.info("[pinetree-managed-lightning] ensure result", {
-      merchant_id: merchantId,
-      action: result.action,
-      status: result.status,
-      connected_account_id_present: Boolean(result.speedConnectedAccountId),
-    })
+      console.info("[pinetree-managed-lightning] ensure result", {
+        merchant_id: merchantId,
+        action: result.action,
+        status: result.status,
+        connected_account_id_present: Boolean(result.speedConnectedAccountId),
+      })
+    } catch (error) {
+      console.warn("[pinetree-managed-lightning] provisioning_deferred", {
+        merchant_id: merchantId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      const profile = await getMerchantLightningProfile(merchantId).catch(() => null)
+      return NextResponse.json({
+        profile: safeLightningProfile(profile),
+        setup_status: profile?.status === "needs_attention" ? "needs_attention" : "retryable",
+        message: "Wallet setup is still processing. Please try again shortly.",
+      })
+    }
 
     const profile = await getMerchantLightningProfile(merchantId)
-    return NextResponse.json({ profile: safeLightningProfile(profile) })
+    return NextResponse.json({
+      profile: safeLightningProfile(profile),
+      setup_status: profile?.status || "pending",
+    })
   } catch (error) {
     return NextResponse.json(
       { error: "Failed to enable Lightning" },

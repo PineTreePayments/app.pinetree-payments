@@ -80,8 +80,8 @@ describe("PineTree embedded wallet setup", () => {
   it("binds PineTree Wallet creation to the merchant account email", () => {
     expect(page).toContain("setMerchantEmail(canonicalMerchantEmail)")
     expect(page).toContain("extractDynamicUserEmail(user)")
-    expect(page).toContain("Use your PineTree account email to verify wallet access.")
-    expect(page).toContain("Using your PineTree account email: {merchantEmail}")
+    expect(page).not.toContain("Using your PineTree account email: {merchantEmail}")
+    expect(page).not.toContain("PineTree account email: {identityMismatchError?.merchantEmail ?? merchantEmail}")
     expect(apiRoute).toContain("getMerchantById(merchantId)")
     expect(apiRoute).toContain("dynamicEmail !== merchantEmail")
     expect(dbHelper).toContain("dynamic_email: string | null")
@@ -272,7 +272,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(createFn).toContain('requestDynamicVerificationPrompt("create_pinetree_wallet")')
     expect(page).toContain("For security, we need to verify access to your PineTree Wallet before enabling wallet creation and withdrawals.")
     expect(page).toContain("Verify PineTree Wallet access")
-    expect(page).toContain("Using your PineTree account email: {merchantEmail}")
+    expect(page).not.toContain("Using your PineTree account email: {merchantEmail}")
   })
 
   it("cancelled Dynamic verification clears pending setup instead of spinning forever", () => {
@@ -327,7 +327,7 @@ describe("PineTree embedded wallet setup", () => {
     // logoutPending flow: detect stale session → call handleLogOut → wait → open auth flow
     expect(page).toContain("logoutPending")
     expect(page).toContain("handleLogOut")
-    expect(page).toContain("Securing wallet access")
+    expect(page).toContain('logoutPending ? "Creating PineTree Wallet..." : "Try Again"')
   })
 
   it("wallet status shows Connected from a ready DB profile and keeps signer readiness separate", () => {
@@ -365,13 +365,31 @@ describe("PineTree embedded wallet setup", () => {
 
   it("tracks wallet creation steps and times out instead of waiting forever", () => {
     expect(page).toContain("type WalletCreationStep")
-    expect(page).toContain("walletCreationTimeoutMs = 30_000")
+    expect(page).toContain("walletCreationTimeoutMs = 20_000")
+    expect(page).toContain("walletProvisioningFinalRefreshGraceMs = 5_000")
     expect(page).toContain("walletProvisioningRetryIntervalMs = 1_800")
     expect(page).toContain('logWalletCreationStep("waiting_for_dynamic_auth")')
     expect(page).toContain('logWalletCreationStep("provisioning_wallet"')
     expect(page).toContain('setWalletCreationStep("timeout")')
-    expect(page).toContain("Wallet setup timed out before PineTree could confirm wallet readiness.")
-    expect(page).not.toContain("Wallet setup could not finish. Please try again.")
+    expect(page).toContain("Wallet setup is taking longer than expected. Please try again.")
+    expect(page).toContain('return "Try Again"')
+  })
+
+  it("shows one merchant-safe creation state without provisioning details or email", () => {
+    expect(page).toContain('return "Creating PineTree Wallet..."')
+    expect(page).toContain('"Wallet setup is taking longer than expected. Please try again."')
+    expect(page).toContain('return "Try Again"')
+    expect(page).not.toContain("Securing Base and Solana wallet addresses")
+    expect(page).not.toContain("Using your PineTree account email:")
+    expect(page).not.toContain("PineTree account email: {identityMismatchError")
+  })
+
+  it("returns the ready wallet profile before background provider provisioning finishes", () => {
+    expect(apiRoute).toContain("scheduleWalletReadiness(profile)")
+    expect(apiRoute).toContain('const setupStatus = profile.status === "ready" ? "ready" : "pending"')
+    expect(apiRoute).toContain("after(async () => {")
+    expect(apiRoute).not.toContain("await ensureManagedLightningForMerchant(merchantId)")
+    expect(apiRoute).toContain("BACKGROUND_PROVISIONING_TIMEOUT_MS = 12_000")
   })
 
   it("does not render a persistent synced banner after profile sync succeeds", () => {
@@ -562,7 +580,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("Merchant wallet</p>")
     expect(page).not.toContain("MERCHANT WALLET")
     expect(page).toContain(">PineTree Wallet</h1>")
-    expect(page).toContain("Create and open one merchant wallet for Base, Solana, and Bitcoin.")
+    expect(page).toContain("Create and open your merchant wallet.")
   })
 
   it("overview shows wallet summary balances instead of duplicating receive addresses", () => {

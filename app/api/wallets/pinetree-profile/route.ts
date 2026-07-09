@@ -1,4 +1,4 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { after, type NextRequest, NextResponse } from "next/server"
 import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
 import {
   getPineTreeWalletProfile,
@@ -12,6 +12,39 @@ import { syncPineTreeWalletProfileProviders } from "@/database/pineTreeWalletPro
 import { provisionMerchantBitcoinAddress } from "@/engine/pineTreeBitcoinAddressProvisioning"
 import { ensureManagedLightningForMerchant } from "@/engine/pineTreeWalletReadiness"
 import { assertMerchantBusinessProfileComplete } from "@/engine/businessProfile"
+import { withOperationTimeout } from "@/engine/promiseTimeout"
+
+const BACKGROUND_PROVISIONING_TIMEOUT_MS = 12_000
+
+function scheduleWalletReadiness(profile: Awaited<ReturnType<typeof upsertPineTreeWalletProfile>>) {
+  after(async () => {
+    try {
+      await withOperationTimeout(
+        syncPineTreeWalletProfileProviders(profile),
+        BACKGROUND_PROVISIONING_TIMEOUT_MS,
+        "wallet provider sync"
+      )
+    } catch (error) {
+      console.warn("[pinetree-wallets] background_provider_sync_failed", {
+        merchantId: profile.merchant_id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+
+    try {
+      await withOperationTimeout(
+        ensureManagedLightningForMerchant(profile.merchant_id),
+        BACKGROUND_PROVISIONING_TIMEOUT_MS,
+        "managed lightning provisioning"
+      )
+    } catch (error) {
+      console.warn("[pinetree-wallets] background_lightning_provisioning_failed", {
+        merchantId: profile.merchant_id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  })
+}
 
 /**
  * POST /api/wallets/pinetree-profile
@@ -36,7 +69,6 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as Record<string, unknown>
     console.info("[pinetree-wallets] profile_route_post_received", {
       merchantId,
-      payload: body,
       dynamicUserIdPresent: Boolean(body.dynamic_user_id),
       baseAddressPresent: Boolean(body.base_address),
       solanaAddressPresent: Boolean(body.solana_address),
@@ -147,16 +179,9 @@ export async function POST(req: NextRequest) {
         : undefined,
     })
 
-    const providerSync = await syncPineTreeWalletProfileProviders(profile)
-
-    try {
-      await ensureManagedLightningForMerchant(merchantId)
-    } catch (error) {
-      console.warn("[pinetree-wallets] ensure_managed_lightning_failed", {
-        merchantId,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
+    scheduleWalletReadiness(profile)
+    const providerSync = { status: "pending" as const }
+    const setupStatus = profile.status === "ready" ? "ready" : "pending"
 
     console.info("[pinetree-wallets] profile_route_upsert_success", {
       merchantId,
@@ -170,9 +195,10 @@ export async function POST(req: NextRequest) {
       btcPayoutEnabled: Boolean(profile.btc_payout_enabled),
       bitcoinProvisioningStatus: bitcoinProvisioning?.status ?? "not_requested",
       providerSync,
+      setupStatus,
     })
 
-    return NextResponse.json({ profile, merchantId, providerSync })
+    return NextResponse.json({ profile, merchantId, providerSync, setupStatus })
   } catch (error) {
     console.warn("[pinetree-wallets] profile_route_upsert_failed", {
       error: error instanceof Error ? error.message : String(error),
@@ -187,21 +213,12 @@ export async function POST(req: NextRequest) {
 /**
  * GET /api/wallets/pinetree-profile
  * Returns the current merchant's PineTree Wallet profile, or { profile: null } if none exists.
- * Opening PineTree Wallet also ensures Lightning readiness server-side; this is
- * a no-op past the first successful provisioning.
+ * Lightning readiness is loaded independently and never blocks this profile read.
  */
 export async function GET(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
     const profile = await getPineTreeWalletProfile(merchantId)
-    try {
-      await ensureManagedLightningForMerchant(merchantId)
-    } catch (error) {
-      console.warn("[pinetree-wallets] ensure_managed_lightning_failed", {
-        merchantId,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
     return NextResponse.json({ profile })
   } catch (error) {
     return NextResponse.json(

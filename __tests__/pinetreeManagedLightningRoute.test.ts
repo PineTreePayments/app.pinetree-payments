@@ -118,6 +118,43 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
 
     expect(response.status).toBe(200)
     expect(body.profile.status).toBe("needs_attention")
+    expect(body.setup_status).toBe("needs_attention")
+  })
+
+  it("returns a sanitized retryable status when provider provisioning fails", async () => {
+    mocks.ensureManagedLightningForMerchant.mockRejectedValue(
+      new Error("Speed secret provider failure: sk_live_do_not_expose")
+    )
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+
+    const { POST } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
+    const response = await POST(request())
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.setup_status).toBe("retryable")
+    expect(body.message).toBe("Wallet setup is still processing. Please try again shortly.")
+    expect(JSON.stringify(body)).not.toContain("Speed")
+    expect(JSON.stringify(body)).not.toContain("sk_live")
+  })
+
+  it("stops waiting and returns retryable when provider provisioning hangs", async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.ensureManagedLightningForMerchant.mockReturnValue(new Promise(() => undefined))
+      mocks.getMerchantLightningProfile.mockResolvedValue(null)
+
+      const { POST } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
+      const responsePromise = POST(request())
+      await vi.advanceTimersByTimeAsync(12_001)
+      const response = await responsePromise
+      const body = await response.json()
+
+      expect(response.status).toBe(200)
+      expect(body.setup_status).toBe("retryable")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("returns 500 when the merchant JWT/session cannot be resolved", async () => {
