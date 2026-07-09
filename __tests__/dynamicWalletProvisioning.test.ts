@@ -9,8 +9,13 @@ const page = fs.readFileSync(
 
 describe("Dynamic wallet provisioning — zero-wallet case", () => {
   it("WaaS path provisions wallets via createWalletAccount when runtime is empty", () => {
-    expect(page).toContain("createWalletAccount(needsAutoCreateWalletChains)")
-    expect(page).toContain("runtimeWallets.length === 0 && needsAutoCreateWalletChains.length > 0")
+    // needsAutoCreateWalletChains drives creation when the SDK has populated it, but a fresh
+    // user can hit a window where it's empty before the SDK catches up — requiredChains falls
+    // back to an explicit EVM+SOL request so creation is never silently skipped (see
+    // pineTreeDynamicProvisioningFlow.test.ts for the fallback-path coverage).
+    expect(page).toContain("await createWalletAccount(requiredChains)")
+    expect(page).toContain("needsAutoCreateWalletChains.length > 0\n            ? needsAutoCreateWalletChains")
+    expect(page).toContain("if (runtimeWallets.length === 0) {")
   })
 
   it("legacy embedded wallet path creates wallet when none exists", () => {

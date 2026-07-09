@@ -32,7 +32,8 @@ describe("Dynamic embedded wallet setup repair", () => {
   })
 
   it("Connected appears when DB profile is ready; runtime signers are separately required for approvals", () => {
-    expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
+    expect(page).toContain('const coreWalletProfileReady = profile?.status === "ready" && baseReady && solanaReady')
+    expect(page).toContain("const dynamicProfileReady = coreWalletProfileReady && baseSignerReady && solanaSignerReady")
     expect(page).toContain('if (dynamicProfileReady || hasReadyBaseAndSolanaProfile) return "ready"')
     expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected"')
   })
@@ -51,10 +52,22 @@ describe("Dynamic embedded wallet setup repair", () => {
   it("Finish setup provisions or restores embedded Base and Solana wallets before saving", () => {
     expect(page).toContain('beginWalletSetupRepair("finish_embedded_wallet_setup")')
     expect(page).toContain("refreshDynamicWalletRuntime(reason, { requireApprovalWallet: false })")
-    expect(page).toContain("createWalletAccount(needsAutoCreateWalletChains)")
+    expect(page).toContain("await createWalletAccount(requiredChains)")
     expect(page).toContain("await createOrRestoreSession()")
     expect(page).toContain("await createEmbeddedWallet()")
-    expect(page).toContain("requireBaseAndSolanaSigners: true")
+    // Product rule: signer hydration is required for withdrawals only, never for wallet
+    // creation/readiness, so Finish setup must not gate the profile save on live signers.
+    expect(page).not.toContain("requireBaseAndSolanaSigners: true")
+  })
+
+  it("wallet creation never blocks on Dynamic signer hydration, only on saved DB addresses", () => {
+    for (const call of [
+      "await syncProfileFromDynamic()",
+      "void syncProfileFromDynamic()",
+    ]) {
+      expect(page).toContain(call)
+    }
+    expect(page).not.toContain("syncProfileFromDynamic({ requireBaseAndSolanaSigners: true })")
   })
 
   it("profile is saved only after runtime wallets expose Base and Solana signers", () => {

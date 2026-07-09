@@ -202,6 +202,42 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain('beginWalletProvisioningAttempt("provisioning_wallet", "restart_embedded_wallet_runtime_polling", { retry: true })')
   })
 
+  it("explicit wallet creation fires when Dynamic reports no chains to auto-create and no wallet/credential exists yet", () => {
+    // Root cause of the stuck "Creating PineTree Wallet..." timeout: needsAutoCreateWalletChains
+    // can legitimately be empty right after a fresh external-JWT sign-in, and the old code only
+    // ever called createWalletAccount when that array was non-empty, so nothing ever created a
+    // wallet and the app silently polled forever without ever reaching profile POST.
+    const refreshFn = page.slice(
+      page.indexOf("const refreshDynamicWalletRuntime = useCallback"),
+      page.indexOf("}, [\n    createEmbeddedWallet,")
+    )
+    expect(page).toContain("const REQUIRED_WAAS_WALLET_CHAINS = [{ chain: \"EVM\" }, { chain: \"SOL\" }]")
+    expect(refreshFn).toContain("const runtimeCredentials = getWaasWalletsByCredentials()")
+    expect(refreshFn).toContain("runtimeCredentials.length === 0")
+    expect(refreshFn).toContain("(REQUIRED_WAAS_WALLET_CHAINS as unknown as typeof needsAutoCreateWalletChains)")
+    expect(refreshFn).toContain("await createWalletAccount(requiredChains)")
+  })
+
+  it("existing WaaS credentials without runtime wallets force a restore instead of a duplicate create", () => {
+    const refreshFn = page.slice(
+      page.indexOf("const refreshDynamicWalletRuntime = useCallback"),
+      page.indexOf("}, [\n    createEmbeddedWallet,")
+    )
+    expect(refreshFn).toContain("if (runtimeWallets.length === 0 && runtimeCredentials.length > 0 && !shouldInitializeWaas)")
+    expect(refreshFn).toContain('path: "restore_existing"')
+  })
+
+  it("wallet creation calls are guarded against concurrent duplicate attempts", () => {
+    expect(page).toContain("const creatingEmbeddedWalletRef = useRef(false)")
+    const refreshFn = page.slice(
+      page.indexOf("const refreshDynamicWalletRuntime = useCallback"),
+      page.indexOf("}, [\n    createEmbeddedWallet,")
+    )
+    expect(refreshFn).toContain("requiredChains.length > 0 && !creatingEmbeddedWalletRef.current")
+    expect(refreshFn).toContain("creatingEmbeddedWalletRef.current = true")
+    expect(refreshFn).toContain("creatingEmbeddedWalletRef.current = false")
+  })
+
   it("delayed Base/Solana hydration retries before saving the profile and then clears Preparing/Saving", () => {
     expect(page).toContain("walletProvisioningRetryIntervalMs = 1_800")
     expect(page).toContain("window.setInterval(() => {")

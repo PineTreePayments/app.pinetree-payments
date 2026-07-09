@@ -505,11 +505,57 @@ describe("PineTree embedded wallet setup", () => {
       "wallet_lightning_needs_attention",
       "wallet_provider_sync_background_started",
       "wallet_provider_sync_background_failed",
+      "wallet_dynamic_sdk_loaded",
+      "wallet_dynamic_jwt_requested",
+      "wallet_dynamic_jwt_authenticated",
+      "wallet_dynamic_create_or_restore_started",
+      "wallet_dynamic_create_or_restore_complete",
+      "wallet_dynamic_create_embedded_wallet_started",
+      "wallet_dynamic_create_embedded_wallet_complete",
+      "wallet_dynamic_wallets_refresh_started",
+      "wallet_dynamic_wallets_refresh_complete",
+      "wallet_dynamic_wallets_detected_count",
+      "wallet_dynamic_base_address_detected",
+      "wallet_dynamic_solana_address_detected",
+      "wallet_dynamic_missing_required_addresses",
+      "wallet_profile_sync_eligible",
+      "wallet_profile_sync_skipped_reason",
+      "wallet_profile_post_attempting",
     ]
     const combined = `${page}\n${apiRoute}`
     for (const event of expectedEvents) {
       expect(combined).toContain(event)
     }
+  })
+
+  it("logs which required address is missing without ever logging a raw address", () => {
+    const detectionEffect = page.slice(
+      page.indexOf("console.info(\"[pinetree-wallets] wallet_dynamic_wallets_detected_count\""),
+      page.indexOf("const detectionStartedAt = pendingWalletProvisionStartedAtRef.current")
+    )
+    expect(detectionEffect).toContain("missingBase: !baseAddress")
+    expect(detectionEffect).toContain("missingSolana: !solanaAddress")
+    // Only booleans/reason strings are logged here, never the extracted address value itself.
+    expect(detectionEffect).not.toContain("address: baseAddress")
+    expect(detectionEffect).not.toContain("address: solanaAddress")
+    expect(detectionEffect).not.toMatch(/(?<!!)baseAddress\s*,\s*\n/)
+    expect(detectionEffect).not.toMatch(/(?<!!)solanaAddress\s*,\s*\n/)
+  })
+
+  it("profile POST is attempted only once both addresses are detected, not on partial detection", () => {
+    const detectionEffect = page.slice(
+      page.indexOf("console.info(\"[pinetree-wallets] wallet_dynamic_wallets_detected_count\""),
+      page.indexOf("function inferWalletSetupFailureReason()")
+    )
+    const missingGuardIdx = detectionEffect.indexOf("if (!baseAddress || !solanaAddress) {")
+    const eligibleIdx = detectionEffect.indexOf("wallet_profile_sync_eligible")
+    const syncCallIdx = detectionEffect.indexOf("await syncProfileFromDynamic()")
+    expect(missingGuardIdx).toBeGreaterThan(-1)
+    expect(eligibleIdx).toBeGreaterThan(missingGuardIdx)
+    expect(syncCallIdx).toBeGreaterThan(eligibleIdx)
+    // The partial-detection branch returns before reaching sync-eligible or the POST call.
+    const partialBranch = detectionEffect.slice(missingGuardIdx, detectionEffect.indexOf("return", missingGuardIdx))
+    expect(partialBranch).not.toContain("wallet_profile_sync_eligible")
   })
 
   it("saves detected core wallet addresses without waiting for browser signers", () => {
@@ -548,8 +594,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("wallet_count")
     expect(page).toContain("wallet_addresses_present")
     expect(page).toContain("profile_sync_response_status")
-    expect(page).not.toContain("dynamic_jwt")
-    expect(page).not.toContain("session_token")
+    const safeDiagnosticsFn = page.slice(
+      page.indexOf("function safeWalletSetupDiagnostics("),
+      page.indexOf("function toRecord(value: unknown)")
+    )
+    expect(safeDiagnosticsFn).not.toContain("dynamic_jwt")
+    expect(safeDiagnosticsFn).not.toContain("session_token")
     expect(page).not.toContain("DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY")
     expect(page).not.toContain("DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64")
     expect(page).not.toContain("recoveryPhrase")

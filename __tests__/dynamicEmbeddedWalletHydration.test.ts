@@ -59,7 +59,11 @@ describe("Dynamic embedded wallet hydration", () => {
   it("ready DB profile with zero Dynamic wallets still maps to Connected for viewing", () => {
     expect(page).toContain("const baseSignerReady = Boolean(")
     expect(page).toContain("const solanaSignerReady = Boolean(")
-    expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
+    // Core readiness (drives Connected/Ready) depends only on the saved DB profile and
+    // addresses â€” never on live Dynamic signer hydration. Signer hydration is layered on
+    // top only for withdrawals/signing (dynamicProfileReady), never for creation/readiness.
+    expect(page).toContain('const coreWalletProfileReady = profile?.status === "ready" && baseReady && solanaReady')
+    expect(page).toContain("const dynamicProfileReady = coreWalletProfileReady && baseSignerReady && solanaSignerReady")
     expect(page).toContain('if (dynamicProfileReady || hasReadyBaseAndSolanaProfile) return "ready"')
     expect(page).toContain('if (repairOrSetupIncomplete) return "reconnect_needed"')
     expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
