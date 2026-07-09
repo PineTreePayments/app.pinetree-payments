@@ -1,18 +1,18 @@
 import { after, type NextRequest, NextResponse } from "next/server"
-import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
+import { requireMerchantAuthFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
 import {
   getPineTreeWalletProfile,
   inferBtcAddressType,
-  normalizeWalletIdentityEmail,
   normalizeBtcAddressType,
   upsertPineTreeWalletProfile
 } from "@/database/pineTreeWalletProfiles"
-import { getMerchantById } from "@/database/merchants"
+import { backfillMerchantEmailIfMissing, getMerchantById } from "@/database/merchants"
 import { syncPineTreeWalletProfileProviders } from "@/database/pineTreeWalletProfileProviderSync"
 import { provisionMerchantBitcoinAddress } from "@/engine/pineTreeBitcoinAddressProvisioning"
 import { ensureManagedLightningForMerchant } from "@/engine/pineTreeWalletReadiness"
 import { assertMerchantBusinessProfileComplete } from "@/engine/businessProfile"
 import { withOperationTimeout } from "@/engine/promiseTimeout"
+import { resolveWalletIdentity } from "@/lib/walletIdentity"
 
 const BACKGROUND_PROVISIONING_TIMEOUT_MS = 12_000
 
@@ -87,7 +87,8 @@ function scheduleWalletReadiness(profile: Awaited<ReturnType<typeof upsertPineTr
  */
 export async function POST(req: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(req)
+    const auth = await requireMerchantAuthFromRequest(req)
+    const merchantId = auth.merchantId
     const body = (await req.json()) as Record<string, unknown>
     console.info("[pinetree-wallets] profile_route_post_received", {
       merchantId,
@@ -123,25 +124,49 @@ export async function POST(req: NextRequest) {
       "solana_address" in body
     if (syncsDynamicProfile) {
       const merchant = await getMerchantById(merchantId)
-      const merchantEmail = normalizeWalletIdentityEmail(merchant?.email)
-      const bodyMerchantEmail = normalizeWalletIdentityEmail(body.merchant_email as string | null)
-      const dynamicEmail = normalizeWalletIdentityEmail(body.dynamic_email as string | null)
-      if (!merchantEmail || bodyMerchantEmail !== merchantEmail || dynamicEmail !== merchantEmail) {
+      const identity = resolveWalletIdentity({
+        merchantEmail: merchant?.email,
+        authEmail: auth.email,
+        bodyMerchantEmail: body.merchant_email,
+        dynamicEmail: body.dynamic_email,
+      })
+      if (!identity.ok) {
         console.warn("[pinetree-wallets] profile_route_identity_mismatch", {
           merchantId,
-          merchantEmailPresent: Boolean(merchantEmail),
-          bodyMerchantEmailMatches: Boolean(merchantEmail && bodyMerchantEmail === merchantEmail),
-          dynamicEmailMatches: Boolean(merchantEmail && dynamicEmail === merchantEmail),
+          merchantEmailPresent: Boolean(merchant?.email),
+          authEmailPresent: Boolean(auth.email),
+          reason: identity.code,
         })
         return NextResponse.json(
           {
-            error: "dynamic_email_mismatch",
-            message: "Use your PineTree account email to verify wallet access.",
-            merchantEmail,
-            dynamicEmail,
+            error: identity.code === "wallet_identity_unavailable"
+              ? "wallet_identity_unavailable"
+              : "dynamic_email_mismatch",
+            message: identity.code === "wallet_identity_unavailable"
+              ? "We could not verify your PineTree account identity. Please refresh and try again."
+              : "We could not verify wallet access. Please try again.",
+            retryable: true,
           },
           { status: 409 }
         )
+      }
+      if (identity.shouldBackfillMerchantEmail) {
+        try {
+          const backfilled = await backfillMerchantEmailIfMissing(
+            merchantId,
+            identity.canonicalEmail,
+            merchant?.email
+          )
+          console.info("[pinetree-wallets] merchant_email_backfilled", {
+            merchant_id: merchantId,
+            step: backfilled ? "merchant_email_backfilled" : "merchant_email_already_present",
+          })
+        } catch {
+          console.warn("[pinetree-wallets] merchant_email_backfill_deferred", {
+            merchant_id: merchantId,
+            step: "merchant_email_backfill_deferred",
+          })
+        }
       }
     }
 
@@ -245,7 +270,7 @@ export async function POST(req: NextRequest) {
  */
 export async function GET(req: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(req)
+    const merchantId = (await requireMerchantAuthFromRequest(req)).merchantId
     const profile = await getPineTreeWalletProfile(merchantId)
     return NextResponse.json({ profile })
   } catch (error) {

@@ -5,7 +5,7 @@ const db = supabaseAdmin || supabase
 export type Merchant = {
   id: string
   business_name: string
-  email: string
+  email: string | null
   created_at: string
   updated_at: string
   status: "active" | "suspended"
@@ -56,6 +56,34 @@ export async function getMerchantById(merchantId: string) {
   }
 
   return data as Merchant | null
+}
+
+export async function backfillMerchantEmailIfMissing(
+  merchantId: string,
+  email: string,
+  expectedExistingEmail: string | null | undefined
+) {
+  const normalizedEmail = email.trim().toLowerCase()
+  if (!normalizedEmail) return false
+
+  let query = db
+    .from("merchants")
+    .update({
+      email: normalizedEmail,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", merchantId)
+
+  query = expectedExistingEmail == null
+    ? query.is("email", null)
+    : query.eq("email", expectedExistingEmail)
+
+  const { data, error } = await query
+    .select("id")
+    .maybeSingle()
+
+  if (error) throw new Error("Failed to backfill merchant account email")
+  return Boolean(data)
 }
 
 /**

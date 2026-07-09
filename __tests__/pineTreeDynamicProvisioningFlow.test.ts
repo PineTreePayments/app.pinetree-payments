@@ -330,13 +330,14 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(identityGuard).toContain("clearWalletSetupInProgress()")
     expect(identityGuard).toContain("return null")
     expect(profileRoute).toContain("profile_route_identity_mismatch")
-    expect(profileRoute).toContain('error: "dynamic_email_mismatch"')
+    expect(profileRoute).toContain(': "dynamic_email_mismatch"')
     expect(profileRoute).toContain("{ status: 409 }")
   })
 
   it("matching Dynamic email can save profile and is stored for audit/debugging", () => {
-    expect(profileRoute).toContain("const merchantEmail = normalizeWalletIdentityEmail(merchant?.email)")
-    expect(profileRoute).toContain("bodyMerchantEmail !== merchantEmail || dynamicEmail !== merchantEmail")
+    expect(profileRoute).toContain("resolveWalletIdentity")
+    expect(profileRoute).toContain("merchantEmail: merchant?.email")
+    expect(profileRoute).toContain("authEmail: auth.email")
     expect(profileRoute).toContain('dynamicEmail: "dynamic_email" in body')
     expect(walletProfileDb).toContain("dynamic_email: string | null")
     expect(walletProfileDb).toContain("dynamic_email: input.dynamicEmail !== undefined")

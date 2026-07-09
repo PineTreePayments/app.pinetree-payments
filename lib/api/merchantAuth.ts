@@ -3,6 +3,11 @@ import { createClient } from "@supabase/supabase-js"
 import { verifyMerchantApiKey, type ApiKeyPermission } from "@/engine/merchantApiKeys"
 
 type ErrorWithStatus = Error & { status?: number }
+type MerchantRequestAuth = {
+  merchantId: string
+  email: string | null
+  source: "api_key" | "supabase"
+}
 
 function createStatusError(message: string, status: number): ErrorWithStatus {
   const error: ErrorWithStatus = new Error(message)
@@ -32,6 +37,13 @@ export async function requireMerchantIdFromRequest(
   req: NextRequest,
   requiredPermission?: ApiKeyPermission
 ): Promise<string> {
+  return (await requireMerchantAuthFromRequest(req, requiredPermission)).merchantId
+}
+
+export async function requireMerchantAuthFromRequest(
+  req: NextRequest,
+  requiredPermission?: ApiKeyPermission
+): Promise<MerchantRequestAuth> {
   const authHeader = req.headers.get("authorization") || ""
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : ""
 
@@ -45,7 +57,7 @@ export async function requireMerchantIdFromRequest(
     if (!verified) {
       throw createStatusError("Invalid or revoked API key", 401)
     }
-    return verified.merchantId
+    return { merchantId: verified.merchantId, email: null, source: "api_key" }
   }
 
   // ── Supabase session path ─────────────────────────────────────────────────
@@ -63,5 +75,17 @@ export async function requireMerchantIdFromRequest(
     throw createStatusError("Unauthorized", 401)
   }
 
-  return authData.user.id
+  const metadata = authData.user.user_metadata as Record<string, unknown> | undefined
+  const email = String(
+    authData.user.email ||
+    metadata?.email ||
+    metadata?.email_address ||
+    ""
+  ).trim().toLowerCase() || null
+
+  return {
+    merchantId: authData.user.id,
+    email,
+    source: "supabase",
+  }
 }

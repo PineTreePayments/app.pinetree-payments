@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
+import { resolveWalletIdentity } from "@/lib/walletIdentity"
 
 function read(file: string) {
   return fs.readFileSync(path.join(process.cwd(), file), "utf8")
@@ -28,6 +29,53 @@ describe("PineTree embedded wallet setup", () => {
   const speedConnectMigration = read("database/migrations/20260623_add_speed_connect_fields_to_merchant_lightning_profiles.sql")
   const lightningDbHelper = read("database/merchantLightningProfiles.ts")
   const lightningApiRoute = read("app/api/wallets/lightning/pinetree-managed/route.ts")
+
+  it("falls back to authenticated email and requests a safe merchant backfill", () => {
+    expect(resolveWalletIdentity({
+      merchantEmail: null,
+      authEmail: "Owner@Example.com",
+      bodyMerchantEmail: "owner@example.com",
+      dynamicEmail: "owner@example.com",
+    })).toEqual({
+      ok: true,
+      canonicalEmail: "owner@example.com",
+      shouldBackfillMerchantEmail: true,
+    })
+    expect(apiRoute).toContain("backfillMerchantEmailIfMissing")
+    expect(apiRoute).toContain('"[pinetree-wallets] merchant_email_backfilled"')
+    const backfillLog = apiRoute.slice(
+      apiRoute.indexOf('"[pinetree-wallets] merchant_email_backfilled"'),
+      apiRoute.indexOf('"[pinetree-wallets] merchant_email_backfill_deferred"')
+    )
+    expect(backfillLog).not.toContain("canonicalEmail")
+  })
+
+  it("rejects conflicting merchant, auth, body, and wallet identity emails", () => {
+    expect(resolveWalletIdentity({
+      merchantEmail: "merchant@example.com",
+      authEmail: "other@example.com",
+    })).toEqual({ ok: false, code: "wallet_identity_conflict" })
+    expect(resolveWalletIdentity({
+      merchantEmail: "merchant@example.com",
+      authEmail: "merchant@example.com",
+      bodyMerchantEmail: "other@example.com",
+    })).toEqual({ ok: false, code: "wallet_identity_conflict" })
+    expect(resolveWalletIdentity({
+      authEmail: "merchant@example.com",
+      dynamicEmail: "other@example.com",
+    })).toEqual({ ok: false, code: "wallet_identity_conflict" })
+  })
+
+  it("rejects only when no canonical account email can be resolved", () => {
+    expect(resolveWalletIdentity({
+      merchantEmail: null,
+      authEmail: null,
+      bodyMerchantEmail: "untrusted@example.com",
+      dynamicEmail: "untrusted@example.com",
+    })).toEqual({ ok: false, code: "wallet_identity_unavailable" })
+    expect(apiRoute).toContain('"wallet_identity_unavailable"')
+    expect(apiRoute).toContain("retryable: true")
+  })
   const lightningReadinessEngine = read("engine/pineTreeWalletReadiness.ts")
   // connect-return was deleted when merchant-facing Speed Connect was removed.
   // Tests below assert it is absent instead of reading it.
@@ -83,7 +131,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("Using your PineTree account email: {merchantEmail}")
     expect(page).not.toContain("PineTree account email: {identityMismatchError?.merchantEmail ?? merchantEmail}")
     expect(apiRoute).toContain("getMerchantById(merchantId)")
-    expect(apiRoute).toContain("dynamicEmail !== merchantEmail")
+    expect(apiRoute).toContain("resolveWalletIdentity")
     expect(dbHelper).toContain("dynamic_email: string | null")
     expect(dynamicEmailMigration).toContain("ADD COLUMN IF NOT EXISTS dynamic_email TEXT")
   })
@@ -91,8 +139,9 @@ describe("PineTree embedded wallet setup", () => {
   it("no flow allows a different Dynamic email to bind to the PineTree merchant profile", () => {
     expect(page).toContain("if (merchantEmail && dynamicUserEmail && dynamicUserEmail !== merchantEmail)")
     expect(page).toContain("return null")
-    expect(apiRoute).toContain("bodyMerchantEmail !== merchantEmail || dynamicEmail !== merchantEmail")
-    expect(apiRoute).toContain('error: "dynamic_email_mismatch"')
+    expect(apiRoute).toContain("bodyMerchantEmail: body.merchant_email")
+    expect(apiRoute).toContain("dynamicEmail: body.dynamic_email")
+    expect(apiRoute).toContain(': "dynamic_email_mismatch"')
     expect(apiRoute).toContain("{ status: 409 }")
   })
 
@@ -116,7 +165,8 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("loads merchant profile by PineTree merchant auth without requiring Dynamic auth", () => {
-    expect(apiRoute).toContain("const merchantId = await requireMerchantIdFromRequest(req)")
+    expect(apiRoute).toContain("const auth = await requireMerchantAuthFromRequest(req)")
+    expect(apiRoute).toContain("const merchantId = auth.merchantId")
     expect(apiRoute).toContain("const profile = await getPineTreeWalletProfile(merchantId)")
     expect(page).toContain('fetch("/api/wallets/pinetree-profile"')
     expect(page).toContain("headers: { Authorization: `Bearer ${token}` }")
@@ -157,7 +207,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("[pinetree-wallets] dynamic_auth_config_invalid")
     expect(dynamicAuthConfig).toContain("PineTree Wallet verification is not configured correctly. Please contact support.")
     expect(page).toContain("dynamicUserEmail !== merchantEmail")
-    expect(apiRoute).toContain("dynamicEmail !== merchantEmail")
+    expect(apiRoute).toContain("resolveWalletIdentity")
   })
 
   it("email fallback disabled without external_jwt shows only a wallet debug warning", () => {
@@ -946,7 +996,7 @@ describe("PineTree embedded wallet setup", () => {
   // -------------------------------------------------------------------------
 
   it("pinetree-profile API route authenticates via merchant JWT before reading or writing", () => {
-    expect(apiRoute).toContain("requireMerchantIdFromRequest")
+    expect(apiRoute).toContain("requireMerchantAuthFromRequest")
     expect(apiRoute).toContain("GET")
     expect(apiRoute).toContain("POST")
     expect(apiRoute).toContain("merchantId")

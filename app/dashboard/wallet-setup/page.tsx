@@ -366,8 +366,8 @@ type ProfileSyncDiagnosticsState = {
 }
 
 type IdentityMismatchError = {
-  dynamicEmail: string
-  merchantEmail: string
+  dynamicEmail: string | null
+  merchantEmail: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -1138,10 +1138,14 @@ function walletSetupStorageKeyForMerchant(merchantId: string | null | undefined)
 function getDynamicEmailMismatchResponse(value: unknown): IdentityMismatchError | null {
   const row = toRecord(value)
   if (row.error !== "dynamic_email_mismatch") return null
-  const merchantEmail = normalizeIdentityEmail(row.merchantEmail)
-  const dynamicEmail = normalizeIdentityEmail(row.dynamicEmail)
-  if (!merchantEmail || !dynamicEmail) return null
-  return { merchantEmail, dynamicEmail }
+  return {
+    merchantEmail: normalizeIdentityEmail(row.merchantEmail),
+    dynamicEmail: normalizeIdentityEmail(row.dynamicEmail),
+  }
+}
+
+function isWalletIdentityUnavailableResponse(value: unknown) {
+  return toRecord(value).error === "wallet_identity_unavailable"
 }
 
 function getProviderSyncStatus(value: unknown) {
@@ -3769,6 +3773,20 @@ function PineTreeWalletRuntime() {
         logWalletCreationStep("failed", { profile_sync_response_status: res.status, reason: "dynamic_email_mismatch" })
         recordWalletSetupFailure("dynamic_email_mismatch", "dynamic_identity_mismatch", {
           profileEndpointStatus: res.status,
+        })
+        return null
+      }
+      if (isWalletIdentityUnavailableResponse(responseBody)) {
+        setIdentityMismatchError(null)
+        setIdentityUnverified(true)
+        setWalletIdentityError("We could not verify wallet access. Please try again.")
+        clearWalletSetupInProgress()
+        recordWalletSetupFailure("merchant_email_missing", "dynamic_identity_unverified", {
+          profileEndpointStatus: res.status,
+        })
+        logWalletCreationStep("failed", {
+          profile_sync_response_status: res.status,
+          reason: "wallet_identity_unavailable",
         })
         return null
       }
