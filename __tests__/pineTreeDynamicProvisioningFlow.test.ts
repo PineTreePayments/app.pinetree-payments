@@ -915,6 +915,27 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(railSync).toContain("Address not provisioned")
   })
 
+  it("a stale or missing DB profile self-repairs once Dynamic already has both addresses, without a click", () => {
+    expect(page).toContain("const staleProfileAutoRepairAttemptRef = useRef<string | null>(null)")
+    const autoRepairEffect = page.slice(
+      page.indexOf("// --- Stale DB recovery (Case C):"),
+      page.indexOf("// Single prioritized state resolver.")
+    )
+    expect(autoRepairEffect).toContain("if (hasReadyBaseAndSolanaProfile) return")
+    expect(autoRepairEffect).toContain("setPendingSync(true)")
+    // Reuses the same pendingSync-driven core-sync pipeline as Create/Retry instead of a second code path.
+    expect(page).toContain('if (!pendingSync || !sdkHasLoaded || !user || pendingProfileSyncAttemptRef.current) return')
+  })
+
+  it("does not silently overwrite a saved ready profile with a different Dynamic address", () => {
+    expect(profileRoute).toContain("const existingIsComplete = Boolean(existingProfile?.base_address && existingProfile?.solana_address)")
+    expect(profileRoute).toContain('error: "wallet_address_conflict"')
+    expect(profileRoute).toContain('status: "needs_review"')
+    // Idempotent resync (same addresses) must not be treated as a conflict.
+    expect(profileRoute).toContain("incomingBaseAddress !== existingProfile.base_address")
+    expect(profileRoute).toContain("incomingSolanaAddress !== existingProfile.solana_address")
+  })
+
   it("wallet balances do not make a rail ready by themselves", () => {
     const readiness = buildPineTreeRailReadiness({
       providers: [

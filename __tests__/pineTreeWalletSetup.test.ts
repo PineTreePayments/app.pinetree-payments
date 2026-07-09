@@ -446,6 +446,72 @@ describe("PineTree embedded wallet setup", () => {
     expect(apiRoute).toContain('step: "lightning_ensure_complete"')
   })
 
+  it("automatically repairs a missing or stale DB profile once Dynamic already has both addresses", () => {
+    // Case C: Dynamic session/addresses already present on page load (no click needed) but
+    // the DB profile is missing/incomplete — repair must fire on its own, gated so it never loops.
+    expect(page).toContain("const staleProfileAutoRepairAttemptRef = useRef<string | null>(null)")
+    const autoRepairEffect = page.slice(
+      page.indexOf("// --- Stale DB recovery (Case C):"),
+      page.indexOf("// Single prioritized state resolver.")
+    )
+    expect(autoRepairEffect).toContain("if (!sdkHasLoaded || !user || pendingSync || repairInProgress) return")
+    expect(autoRepairEffect).toContain("if (profileState.kind === \"loading\") return")
+    expect(autoRepairEffect).toContain("if (hasReadyBaseAndSolanaProfile) return")
+    expect(autoRepairEffect).toContain("if (emailMismatchActive || emailUnverifiedActive) return")
+    expect(autoRepairEffect).toContain("if (!dynamicSessionMatchesProfile) return")
+    expect(autoRepairEffect).toContain('console.info("[pinetree-wallets] wallet_sync_start"')
+    expect(autoRepairEffect).toContain('console.info("[pinetree-wallets] wallet_dynamic_addresses_detected"')
+    expect(autoRepairEffect).toContain("setPendingSync(true)")
+    expect(autoRepairEffect).toContain("markWalletSetupInProgress()")
+  })
+
+  it("keeps wallet readiness independent of signer hydration and logs it as non-blocking", () => {
+    // Case D/E: a saved profile with both addresses is ready even before Dynamic signer
+    // objects hydrate; missing signers are logged, never treated as a creation failure.
+    expect(page).toContain('console.info("[pinetree-wallets] wallet_core_ready", {})')
+    expect(page).toContain("if (coreWalletProfileReady && !dynamicEmbeddedSignersReady)")
+    expect(page).toContain('console.info("[pinetree-wallets] wallet_signers_missing_non_blocking", {})')
+  })
+
+  it("rejects a conflicting wallet address instead of silently overwriting a saved profile", () => {
+    expect(apiRoute).toContain("const existingIsComplete = Boolean(existingProfile?.base_address && existingProfile?.solana_address)")
+    expect(apiRoute).toContain("if (baseConflict || solanaConflict)")
+    expect(apiRoute).toContain('error: "wallet_address_conflict"')
+    expect(apiRoute).toContain('status: "needs_review"')
+    expect(apiRoute).toContain("retryable: false")
+    expect(page).toContain("function isWalletAddressConflictResponse(value: unknown)")
+    expect(page).toContain("isWalletAddressConflictResponse(responseBody)")
+    expect(page).toContain(
+      "This PineTree Wallet doesn't match the one already saved for your account. Contact support to continue."
+    )
+  })
+
+  it("logs safe, low-cardinality wallet sync instrumentation without secrets or raw addresses", () => {
+    const expectedEvents = [
+      "wallet_sync_start",
+      "wallet_dynamic_addresses_detected",
+      "wallet_profile_get_start",
+      "wallet_profile_get_success",
+      "wallet_profile_get_missing",
+      "wallet_profile_get_error",
+      "wallet_profile_post_start",
+      "wallet_profile_post_success",
+      "wallet_profile_post_conflict",
+      "wallet_profile_post_error",
+      "wallet_core_ready",
+      "wallet_signers_missing_non_blocking",
+      "wallet_lightning_background_started",
+      "wallet_lightning_pending",
+      "wallet_lightning_needs_attention",
+      "wallet_provider_sync_background_started",
+      "wallet_provider_sync_background_failed",
+    ]
+    const combined = `${page}\n${apiRoute}`
+    for (const event of expectedEvents) {
+      expect(combined).toContain(event)
+    }
+  })
+
   it("saves detected core wallet addresses without waiting for browser signers", () => {
     const coreSaveEffect = page.slice(
       page.indexOf("if (!pendingSync || !sdkHasLoaded || !user || pendingProfileSyncAttemptRef.current) return"),

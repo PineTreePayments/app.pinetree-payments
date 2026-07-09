@@ -23,6 +23,7 @@ function scheduleWalletReadiness(profile: Awaited<ReturnType<typeof upsertPineTr
       merchant_id: profile.merchant_id,
       step: "provider_sync_start",
     })
+    console.info("[pinetree-wallets] wallet_provider_sync_background_started", { merchantId: profile.merchant_id })
     try {
       await withOperationTimeout(
         syncPineTreeWalletProfileProviders(profile),
@@ -34,6 +35,7 @@ function scheduleWalletReadiness(profile: Awaited<ReturnType<typeof upsertPineTr
         merchantId: profile.merchant_id,
         error: error instanceof Error ? error.message : String(error),
       })
+      console.warn("[pinetree-wallets] wallet_provider_sync_background_failed", { merchantId: profile.merchant_id })
     } finally {
       console.info("[pinetree-wallets] background_timing", {
         merchant_id: profile.merchant_id,
@@ -47,17 +49,24 @@ function scheduleWalletReadiness(profile: Awaited<ReturnType<typeof upsertPineTr
       merchant_id: profile.merchant_id,
       step: "lightning_ensure_start",
     })
+    console.info("[pinetree-wallets] wallet_lightning_background_started", { merchantId: profile.merchant_id })
     try {
-      await withOperationTimeout(
+      const lightningResult = await withOperationTimeout(
         ensureManagedLightningForMerchant(profile.merchant_id),
         BACKGROUND_PROVISIONING_TIMEOUT_MS,
         "managed lightning provisioning"
       )
+      if (lightningResult.status === "needs_attention") {
+        console.info("[pinetree-wallets] wallet_lightning_needs_attention", { merchantId: profile.merchant_id })
+      } else if (lightningResult.status === "pending") {
+        console.info("[pinetree-wallets] wallet_lightning_pending", { merchantId: profile.merchant_id })
+      }
     } catch (error) {
       console.warn("[pinetree-wallets] background_lightning_provisioning_failed", {
         merchantId: profile.merchant_id,
         error: error instanceof Error ? error.message : String(error),
       })
+      console.info("[pinetree-wallets] wallet_lightning_needs_attention", { merchantId: profile.merchant_id })
     } finally {
       console.info("[pinetree-wallets] background_timing", {
         merchant_id: profile.merchant_id,
@@ -90,6 +99,7 @@ export async function POST(req: NextRequest) {
     const auth = await requireMerchantAuthFromRequest(req)
     const merchantId = auth.merchantId
     const body = (await req.json()) as Record<string, unknown>
+    console.info("[pinetree-wallets] wallet_profile_post_start", { merchantId })
     console.info("[pinetree-wallets] profile_route_post_received", {
       merchantId,
       dynamicUserIdPresent: Boolean(body.dynamic_user_id),
@@ -135,6 +145,10 @@ export async function POST(req: NextRequest) {
           merchantId,
           merchantEmailPresent: Boolean(merchant?.email),
           authEmailPresent: Boolean(auth.email),
+          reason: identity.code,
+        })
+        console.warn("[pinetree-wallets] wallet_profile_post_conflict", {
+          merchantId,
           reason: identity.code,
         })
         return NextResponse.json(
@@ -183,6 +197,42 @@ export async function POST(req: NextRequest) {
         ? inferBtcAddressType(normalizedBtcAddress)
         : undefined
     const existingProfile = await getPineTreeWalletProfile(merchantId)
+
+    if (syncsDynamicProfile) {
+      const incomingBaseAddress = "base_address" in body ? (body.base_address as string | null) : undefined
+      const incomingSolanaAddress = "solana_address" in body ? (body.solana_address as string | null) : undefined
+      const existingIsComplete = Boolean(existingProfile?.base_address && existingProfile?.solana_address)
+      const baseConflict = Boolean(
+        existingIsComplete &&
+        incomingBaseAddress &&
+        existingProfile?.base_address &&
+        incomingBaseAddress !== existingProfile.base_address
+      )
+      const solanaConflict = Boolean(
+        existingIsComplete &&
+        incomingSolanaAddress &&
+        existingProfile?.solana_address &&
+        incomingSolanaAddress !== existingProfile.solana_address
+      )
+      if (baseConflict || solanaConflict) {
+        console.warn("[pinetree-wallets] wallet_profile_post_conflict", {
+          merchantId,
+          reason: "address_conflict",
+          baseConflict,
+          solanaConflict,
+        })
+        return NextResponse.json(
+          {
+            error: "wallet_address_conflict",
+            status: "needs_review",
+            message: "This wallet does not match the one already saved for your account. Please contact support before continuing.",
+            retryable: false,
+          },
+          { status: 409 }
+        )
+      }
+    }
+
     const bitcoinProvisioning = hasBtcAddressInput && normalizedBtcAddress
       ? await provisionMerchantBitcoinAddress({
         merchantId,
@@ -250,9 +300,16 @@ export async function POST(req: NextRequest) {
       providerSync,
       setupStatus,
     })
+    console.info("[pinetree-wallets] wallet_profile_post_success", { merchantId, status: profile.status })
+    if (profile.status === "ready") {
+      console.info("[pinetree-wallets] wallet_core_ready", { merchantId })
+    }
 
     return NextResponse.json({ profile, merchantId, providerSync, setupStatus })
   } catch (error) {
+    console.warn("[pinetree-wallets] wallet_profile_post_error", {
+      error: error instanceof Error ? error.message : String(error),
+    })
     console.warn("[pinetree-wallets] profile_route_upsert_failed", {
       error: error instanceof Error ? error.message : String(error),
     })
@@ -271,9 +328,17 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   try {
     const merchantId = (await requireMerchantAuthFromRequest(req)).merchantId
+    console.info("[pinetree-wallets] wallet_profile_get_start", { merchantId })
     const profile = await getPineTreeWalletProfile(merchantId)
+    console.info(
+      profile ? "[pinetree-wallets] wallet_profile_get_success" : "[pinetree-wallets] wallet_profile_get_missing",
+      { merchantId, status: profile?.status ?? null }
+    )
     return NextResponse.json({ profile })
   } catch (error) {
+    console.warn("[pinetree-wallets] wallet_profile_get_error", {
+      error: error instanceof Error ? error.message : String(error),
+    })
     return NextResponse.json(
       { error: "Failed to load wallet profile" },
       { status: getRouteErrorStatus(error) }

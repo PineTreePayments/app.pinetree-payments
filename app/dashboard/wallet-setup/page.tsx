@@ -324,6 +324,7 @@ type WalletSetupFailureReason =
   | "solana_signer_missing"
   | "profile_sync_failed"
   | "provider_sync_failed"
+  | "wallet_address_conflict"
   | "provisioning_timeout_unknown"
 
 type ProfileSyncDiagnosticsState = {
@@ -1146,6 +1147,10 @@ function getDynamicEmailMismatchResponse(value: unknown): IdentityMismatchError 
 
 function isWalletIdentityUnavailableResponse(value: unknown) {
   return toRecord(value).error === "wallet_identity_unavailable"
+}
+
+function isWalletAddressConflictResponse(value: unknown) {
+  return toRecord(value).error === "wallet_address_conflict"
 }
 
 function getProviderSyncStatus(value: unknown) {
@@ -2376,6 +2381,7 @@ function PineTreeWalletRuntime() {
   const pendingWalletProvisionStartedAtRef = useRef<number | null>(null)
   const pendingProfileSyncAttemptRef = useRef(false)
   const walletSetupStartInFlightRef = useRef<string | null>(null)
+  const staleProfileAutoRepairAttemptRef = useRef<string | null>(null)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -3369,6 +3375,7 @@ function PineTreeWalletRuntime() {
 
   // --- Sync Dynamic wallet addresses (Base/Solana) to the merchant profile DB record ---
   const syncProfileFromDynamic = useCallback(async (options?: { requireBaseAndSolanaSigners?: boolean }) => {
+    console.info("[pinetree-wallets] wallet_sync_start", {})
     const token = accessTokenRef.current
     if (!token || !user) {
       const diagnostics: ProfileSyncDiagnosticsState = {
@@ -3776,6 +3783,22 @@ function PineTreeWalletRuntime() {
         })
         return null
       }
+      if (isWalletAddressConflictResponse(responseBody)) {
+        setIdentityMismatchError(null)
+        setIdentityUnverified(false)
+        setWalletIdentityError(
+          "This PineTree Wallet doesn't match the one already saved for your account. Contact support to continue."
+        )
+        clearWalletSetupInProgress()
+        recordWalletSetupFailure("wallet_address_conflict", "failed", {
+          profileEndpointStatus: res.status,
+        })
+        logWalletCreationStep("failed", {
+          profile_sync_response_status: res.status,
+          reason: "wallet_address_conflict",
+        })
+        return null
+      }
       if (isWalletIdentityUnavailableResponse(responseBody)) {
         setIdentityMismatchError(null)
         setIdentityUnverified(true)
@@ -3966,6 +3989,10 @@ function PineTreeWalletRuntime() {
       })
       pendingProfileSyncAttemptRef.current = true
       pendingWalletProvisionAttemptRef.current = null
+      console.info("[pinetree-wallets] wallet_dynamic_addresses_detected", {
+        baseAddressPresent: true,
+        solanaAddressPresent: true,
+      })
       logWalletCreationStep("wallets_detected")
       if (repairInProgress) {
         console.info("[pinetree-wallets] repair_dynamic_wallets_after_provisioning", {
@@ -4217,8 +4244,17 @@ function PineTreeWalletRuntime() {
     dynamicProfileReadyRef.current = Boolean(coreWalletProfileReady)
     if (coreWalletProfileReady) {
       setWalletSetupFailureReason(null)
+      console.info("[pinetree-wallets] wallet_core_ready", {})
     }
   }, [coreWalletProfileReady])
+
+  // Signer hydration is required only for withdrawals/signing, never for wallet
+  // creation or readiness — surface it as informational, not a blocker.
+  useEffect(() => {
+    if (coreWalletProfileReady && !dynamicEmbeddedSignersReady) {
+      console.info("[pinetree-wallets] wallet_signers_missing_non_blocking", {})
+    }
+  }, [coreWalletProfileReady, dynamicEmbeddedSignersReady])
 
   const walletRailRows = useMemo<WalletRailRow[]>(() => [
     { rail: "base", label: "Base" as const, configured: baseReady, enabled: enabledRails.base },
@@ -4387,6 +4423,54 @@ function PineTreeWalletRuntime() {
     Boolean(user) && Boolean(merchantEmail) && !dynamicUserEmail
   const emailMismatchActive = Boolean(identityMismatchError) || liveEmailMismatch
   const emailUnverifiedActive = !emailMismatchActive && (identityUnverified || liveEmailUnverified)
+
+  // --- Stale DB recovery (Case C): Dynamic already has Base/Solana addresses (a
+  // persisted session, no click required) but the PineTree DB profile is missing
+  // or incomplete. Repair automatically instead of waiting for the merchant to
+  // press Create/Retry. Gated by attemptKey so it fires once per address pair and
+  // never loops if the repair attempt itself fails to complete.
+  useEffect(() => {
+    if (!sdkHasLoaded || !user || pendingSync || repairInProgress) return
+    if (profileState.kind === "loading") return
+    if (hasReadyBaseAndSolanaProfile) return
+    if (emailMismatchActive || emailUnverifiedActive) return
+    if (!dynamicSessionMatchesProfile) return
+
+    const baseAddress = dynamicNetworkAddresses.base[0]?.address ?? null
+    const solanaAddress = dynamicNetworkAddresses.solana[0]?.address ?? null
+    if (!baseAddress || !solanaAddress) return
+
+    const attemptKey = `${user.userId}:${baseAddress}:${solanaAddress}`
+    if (staleProfileAutoRepairAttemptRef.current === attemptKey) return
+    staleProfileAutoRepairAttemptRef.current = attemptKey
+
+    console.info("[pinetree-wallets] wallet_sync_start", { reason: "stale_profile_auto_repair" })
+    console.info("[pinetree-wallets] wallet_dynamic_addresses_detected", {
+      baseAddressPresent: true,
+      solanaAddressPresent: true,
+      trigger: "stale_profile_auto_repair",
+    })
+    pendingWalletProvisionStartedAtRef.current = null
+    pendingWalletProvisionAttemptRef.current = null
+    pendingProfileSyncAttemptRef.current = false
+    setFinalProvisioningRefreshAttempted(false)
+    setProvisioningRetryExhausted(false)
+    setPendingSync(true)
+    markWalletSetupInProgress()
+    logWalletCreationStep("wallets_detected", { reason: "stale_profile_auto_repair" })
+  }, [
+    sdkHasLoaded,
+    user,
+    pendingSync,
+    repairInProgress,
+    profileState,
+    hasReadyBaseAndSolanaProfile,
+    emailMismatchActive,
+    emailUnverifiedActive,
+    dynamicSessionMatchesProfile,
+    dynamicNetworkAddresses,
+    logWalletCreationStep,
+  ])
 
   // Single prioritized state resolver. The PineTree merchant profile is canonical for
   // viewing the wallet; Dynamic session state is required only when we need to create,
