@@ -407,9 +407,35 @@ describe("PineTree embedded wallet setup", () => {
       "popup_or_storage_blocked",
       "sdk_not_ready",
       "unknown_dynamic_signin_throw",
+      "external_auth_rejected",
     ]) {
       expect(page).toContain(hint)
     }
+  })
+
+  it("classifies Dynamic's InvalidExternalAuthError (code invalid_external_auth_error) as external_auth_rejected", () => {
+    // Confirmed from the installed SDK's clientErrorMapper: an APIError with
+    // code "invalid_external_auth" from Dynamic's backend is converted to
+    // InvalidExternalAuthError (name) / "invalid_external_auth_error" (code).
+    // This means Dynamic's backend was reached and rejected the JWT - most
+    // likely an issuer mismatch or BYOA not enabled for this environment,
+    // since aud is optional per Dynamic's own docs.
+    const classifierFn = page.slice(
+      page.indexOf("function classifyDynamicSignInError("),
+      page.indexOf("// A thrown signInWithExternalJwt is retried once")
+    )
+    expect(classifierFn).toContain('errorName === "InvalidExternalAuthError"')
+    expect(classifierFn).toContain('errorCode === "invalid_external_auth_error"')
+    expect(classifierFn).toContain('errorCode === "invalid_external_auth"')
+    expect(classifierFn).toContain('messageHint = "external_auth_rejected"')
+    // A genuine backend rejection is a config problem, not a transient one -
+    // it must not be in the auto-retry set (retrying would just get rejected again).
+    expect(page).toContain("const DYNAMIC_SIGNIN_RETRYABLE_HINTS = new Set([")
+    const retryableSetSrc = page.slice(
+      page.indexOf("const DYNAMIC_SIGNIN_RETRYABLE_HINTS = new Set(["),
+      page.indexOf("])", page.indexOf("const DYNAMIC_SIGNIN_RETRYABLE_HINTS = new Set(["))
+    )
+    expect(retryableSetSrc).not.toContain("external_auth_rejected")
   })
 
   it("wallet_dynamic_jwt_authenticated fires before pendingSync flips true, so wallet create/restore only starts after auth succeeds", () => {

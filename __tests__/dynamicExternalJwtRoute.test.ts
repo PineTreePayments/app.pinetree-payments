@@ -38,6 +38,7 @@ const envKeys = [
   "DYNAMIC_EXTERNAL_JWT_KEY_ID",
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+  "NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID",
 ] as const
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]])) as Record<(typeof envKeys)[number], string | undefined>
 
@@ -74,6 +75,7 @@ describe("Dynamic external JWT route", () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.test"
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key"
     delete process.env.DYNAMIC_EXTERNAL_JWT_KEY_ID
+    delete process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID
     getUser.mockResolvedValue({
       data: { user: { id: "merchant-1", email: "session@example.com" } },
       error: null,
@@ -263,6 +265,93 @@ describe("Dynamic external JWT route", () => {
 
     expect(json.externalUserId).toBe(verified.payload.sub)
     expect(verified.payload.aud).toBeUndefined()
+  })
+
+  it("falls back to NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID when DYNAMIC_EXTERNAL_JWT_AUDIENCE is unset", async () => {
+    process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE = ""
+    process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID = "ea6b03bc-04c8-43b0-9b21-98248857d020"
+
+    const res = await POST(request())
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as { externalJwt: string }
+    const verified = await jwtVerify(json.externalJwt, publicKey, {
+      issuer: "pinetree",
+      audience: "ea6b03bc-04c8-43b0-9b21-98248857d020",
+      subject: "merchant-1",
+    })
+
+    expect(verified.payload.aud).toBe("ea6b03bc-04c8-43b0-9b21-98248857d020")
+  })
+
+  it("falls back to NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID when DYNAMIC_EXTERNAL_JWT_AUDIENCE is still the placeholder value 'dynamic'", async () => {
+    process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE = "dynamic"
+    process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID = "ea6b03bc-04c8-43b0-9b21-98248857d020"
+
+    const res = await POST(request())
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as { externalJwt: string }
+    const verified = await jwtVerify(json.externalJwt, publicKey, {
+      issuer: "pinetree",
+      audience: "ea6b03bc-04c8-43b0-9b21-98248857d020",
+      subject: "merchant-1",
+    })
+
+    expect(verified.payload.aud).toBe("ea6b03bc-04c8-43b0-9b21-98248857d020")
+  })
+
+  it("keeps an explicitly configured non-placeholder audience unchanged even when NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID is set", async () => {
+    process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE = "custom-confirmed-audience"
+    process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID = "ea6b03bc-04c8-43b0-9b21-98248857d020"
+
+    const res = await POST(request())
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as { externalJwt: string }
+    const verified = await jwtVerify(json.externalJwt, publicKey, {
+      issuer: "pinetree",
+      audience: "custom-confirmed-audience",
+      subject: "merchant-1",
+    })
+
+    expect(verified.payload.aud).toBe("custom-confirmed-audience")
+  })
+
+  it("includes both the documented emailVerified claim and the standard email_verified claim", async () => {
+    const res = await POST(request())
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as { externalJwt: string }
+    const verified = await jwtVerify(json.externalJwt, publicKey, {
+      issuer: "pinetree",
+      audience: "dynamic",
+      subject: "merchant-1",
+    })
+
+    expect(verified.payload.emailVerified).toBe(true)
+    expect(verified.payload.email_verified).toBe(true)
+  })
+
+  it("logs dynamic_jwt_claims_config_check with booleans only, never raw claim values", async () => {
+    process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID = "ea6b03bc-04c8-43b0-9b21-98248857d020"
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined)
+
+    const res = await POST(request())
+    expect(res.status).toBe(200)
+
+    const configCheckLog = info.mock.calls.findLast((call) => call[0] === "[pinetree-wallets] dynamic_jwt_claims_config_check")
+    expect(configCheckLog?.[1]).toEqual({
+      issuerPresent: true,
+      audiencePresent: true,
+      audienceMatchesDynamicEnv: true,
+      kidPresent: true,
+      algRs256: true,
+      subjectPresent: true,
+      emailPresent: true,
+    })
+    const serialized = JSON.stringify(configCheckLog?.[1])
+    expect(serialized).not.toContain("merchant-1")
+    expect(serialized).not.toContain("merchant@example.com")
+    expect(serialized).not.toContain("pinetree")
+
+    info.mockRestore()
   })
 
   it("makes Dynamic BYOA feature failures explicit", async () => {

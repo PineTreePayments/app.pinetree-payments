@@ -115,9 +115,44 @@ async function shouldIncludeDebugResponse(req: NextRequest) {
   return body?.walletDebug === true || body?.walletDebug === "1"
 }
 
+// DYNAMIC_EXTERNAL_JWT_AUDIENCE was originally seeded with this literal placeholder
+// while BYOA audience expectations were still being confirmed with Dynamic support
+// (see docs/environment/dynamic-external-jwt-setup.md). Dynamic's own BYOA docs mark
+// `aud` as an optional, dashboard-configurable claim with no fixed convention - the
+// most common binding for a per-project value is the Dynamic environment ID, so
+// fall back to that instead of sending a placeholder string that was never actually
+// confirmed against Dynamic's dashboard configuration.
+function resolveDynamicJwtAudience() {
+  const configured = process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE?.trim()
+  const environmentId = process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?.trim()
+  if (!configured || configured === "dynamic") {
+    return environmentId || configured || undefined
+  }
+  return configured
+}
+
+function signPineTreeDynamicJwtClaimsConfigCheck(input: {
+  issuer: string
+  audience: string | undefined
+  keyId: string | undefined
+  subject: string
+  emailPresent: boolean
+}) {
+  const environmentId = process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?.trim()
+  console.info("[pinetree-wallets] dynamic_jwt_claims_config_check", {
+    issuerPresent: Boolean(input.issuer),
+    audiencePresent: Boolean(input.audience),
+    audienceMatchesDynamicEnv: Boolean(input.audience && environmentId && input.audience === environmentId),
+    kidPresent: Boolean(input.keyId),
+    algRs256: true,
+    subjectPresent: Boolean(input.subject),
+    emailPresent: input.emailPresent,
+  })
+}
+
 async function signPineTreeDynamicJwt(input: AuthenticatedMerchant) {
   const issuer = process.env.DYNAMIC_EXTERNAL_JWT_ISSUER || "https://app.pinetree-payments.com"
-  const audience = process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE?.trim()
+  const audience = resolveDynamicJwtAudience()
   const keyId = process.env.DYNAMIC_EXTERNAL_JWT_KID || process.env.DYNAMIC_EXTERNAL_JWT_KEY_ID || undefined
   const ttlSeconds = 5 * 60
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000)
@@ -127,9 +162,22 @@ async function signPineTreeDynamicJwt(input: AuthenticatedMerchant) {
   }
   const privateKey = getSigningKeyPem()
 
+  signPineTreeDynamicJwtClaimsConfigCheck({
+    issuer,
+    audience,
+    keyId,
+    subject: input.merchantId,
+    emailPresent: Boolean(input.email),
+  })
+
   let jwt = new SignJWT({
     email: input.email,
     emailVerified: true,
+    // Dynamic's BYOA docs use camelCase emailVerified, but the standard OIDC claim
+    // name is snake_case - send both so a stricter validator on Dynamic's side that
+    // looks for the standard name still finds it, without removing the one Dynamic's
+    // own docs document.
+    email_verified: true,
     merchant_id: input.merchantId,
   })
     .setProtectedHeader({

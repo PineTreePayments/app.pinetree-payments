@@ -109,6 +109,18 @@ function decodeJwtPart(part) {
   return JSON.parse(Buffer.from(part, "base64url").toString("utf8"))
 }
 
+// Mirrors resolveDynamicJwtAudience() in app/api/wallets/dynamic/external-jwt/route.ts -
+// DYNAMIC_EXTERNAL_JWT_AUDIENCE was seeded with the literal placeholder "dynamic"
+// before this was confirmed with Dynamic support; the route now falls back to the
+// Dynamic environment ID instead of sending that placeholder unmodified.
+function resolveConfiguredAudience() {
+  const configured = process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE?.trim()
+  const environmentId = process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?.trim()
+  const isPlaceholder = configured === "dynamic"
+  const resolved = !configured || isPlaceholder ? (environmentId || configured || undefined) : configured
+  return { configured, environmentId, isPlaceholder, resolved }
+}
+
 async function getSafeEnvDiagnostics(loadResult) {
   let jwksKid = null
   let jwksDerivationSucceeded = false
@@ -139,6 +151,13 @@ async function getSafeEnvDiagnostics(loadResult) {
           : process.env.DYNAMIC_EXTERNAL_JWT_ENABLED,
     issuerConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_ISSUER?.trim()),
     audienceConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE?.trim()),
+    audienceIsPlaceholder: resolveConfiguredAudience().isPlaceholder,
+    audienceMatchesDynamicEnv: Boolean(
+      resolveConfiguredAudience().resolved &&
+        resolveConfiguredAudience().environmentId &&
+        resolveConfiguredAudience().resolved === resolveConfiguredAudience().environmentId
+    ),
+    environmentIdConfigured: Boolean(process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?.trim()),
     kidConfigured: Boolean(kid),
     signingKeyConfigured: Boolean(signingKey),
     signingKeyLength: signingKey ? signingKey.length : 0,
@@ -161,9 +180,11 @@ async function main() {
   }
 
   const checks = []
+  const warnings = []
   const enabled = process.env.DYNAMIC_EXTERNAL_JWT_ENABLED === "true" || process.env.DYNAMIC_EXTERNAL_JWT_ENABLED === "1"
   const issuer = process.env.DYNAMIC_EXTERNAL_JWT_ISSUER || "https://app.pinetree-payments.com"
-  const audience = process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE?.trim()
+  const audienceInfo = resolveConfiguredAudience()
+  const audience = audienceInfo.resolved
   const kid = process.env.DYNAMIC_EXTERNAL_JWT_KID || process.env.DYNAMIC_EXTERNAL_JWT_KEY_ID
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000)
 
@@ -171,6 +192,17 @@ async function main() {
   assertCheck(checks, "DYNAMIC_EXTERNAL_JWT_KID is configured", Boolean(kid))
   if (!enabled) throw new Error("dynamic_external_jwt_not_enabled")
   if (!kid) throw new Error("dynamic_external_jwt_kid_missing")
+
+  if (audienceInfo.isPlaceholder) {
+    warnings.push(
+      audienceInfo.environmentId
+        ? "DYNAMIC_EXTERNAL_JWT_AUDIENCE is the literal placeholder \"dynamic\" - falling back to NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID. Confirm with Dynamic support whether this or another value is actually expected."
+        : "DYNAMIC_EXTERNAL_JWT_AUDIENCE is the literal placeholder \"dynamic\" and NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID is not set, so \"dynamic\" is being sent unmodified. Confirm the expected audience with Dynamic support."
+    )
+  }
+  if (!issuer.startsWith("https://") || issuer.endsWith("/") || issuer.includes("www.")) {
+    warnings.push(`DYNAMIC_EXTERNAL_JWT_ISSUER (${issuer}) has an unusual shape (must be exactly https://app.pinetree-payments.com, no trailing slash, no www).`)
+  }
 
   const signingKeyPem = getSigningKeyPem()
   const signingKey = await importPKCS8(signingKeyPem, "RS256")
@@ -182,6 +214,7 @@ async function main() {
   let jwt = new SignJWT({
     email: testEmail,
     emailVerified: true,
+    email_verified: true,
     merchant_id: testSubject,
   })
     .setProtectedHeader({ alg: "RS256", kid })
@@ -206,11 +239,14 @@ async function main() {
   assertCheck(checks, "header.kid matches DYNAMIC_EXTERNAL_JWT_KID", header.kid === kid)
   assertCheck(checks, "header.alg is RS256", header.alg === "RS256")
   assertCheck(checks, "payload.iss matches DYNAMIC_EXTERNAL_JWT_ISSUER", payload.iss === issuer)
-  assertCheck(checks, "payload.aud matches DYNAMIC_EXTERNAL_JWT_AUDIENCE when configured", audience ? payload.aud === audience : payload.aud === undefined)
+  assertCheck(checks, "payload.aud matches the resolved audience when configured", audience ? payload.aud === audience : payload.aud === undefined)
   assertCheck(checks, "payload.sub exists", Boolean(payload.sub))
+  assertCheck(checks, "payload.sub is used consistently as externalUserId (route.ts returns externalUserId: auth.merchantId, same value as sub)", payload.sub === testSubject)
   assertCheck(checks, "payload.exp exists", typeof payload.exp === "number")
   assertCheck(checks, "payload.exp is short-lived", Number(payload.exp) - Number(payload.iat) <= ttlSeconds)
   assertCheck(checks, "payload.email exists for test identity", payload.email === testEmail)
+  assertCheck(checks, "payload.emailVerified (camelCase, per Dynamic's documented BYOA claim name) is true", payload.emailVerified === true)
+  assertCheck(checks, "payload.email_verified (standard OIDC snake_case) is also true", payload.email_verified === true)
   assertCheck(checks, "JWT verifies against derived public JWKS", verified.payload.sub === testSubject)
   assertCheck(checks, "JWKS key is public signing material only", publicJwk.alg === "RS256" && publicJwk.use === "sig" && !("d" in publicJwk))
 
@@ -220,6 +256,14 @@ async function main() {
     decodedHeader: header,
     decodedPayload: payload,
     checks,
+    warnings,
+    audienceChecklist: {
+      DYNAMIC_EXTERNAL_JWT_AUDIENCE: audienceInfo.configured || null,
+      NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID: audienceInfo.environmentId || null,
+      isPlaceholderValue: audienceInfo.isPlaceholder,
+      resolvedAudienceSentInJwt: audience || null,
+      expDurationSeconds: Number(payload.exp) - Number(payload.iat),
+    },
   }, null, 2))
   if (!ok) process.exitCode = 1
 }

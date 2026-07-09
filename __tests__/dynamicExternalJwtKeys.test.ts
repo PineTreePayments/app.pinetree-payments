@@ -71,10 +71,17 @@ describe("Dynamic external JWT key material", () => {
     const keys = await generateKeyPair("RS256", { extractable: true })
     const privateKeyPem = await exportPKCS8(keys.privateKey)
     const signingKeyB64 = Buffer.from(privateKeyPem, "utf8").toString("base64")
+    // NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID is set to an empty string rather than
+    // deleted: the script's own loadEnvFiles() re-populates any key that's absent
+    // from process.env by reading the real repo .env.local, so deleting it here
+    // would silently reintroduce whatever value happens to be in that file on this
+    // machine. An empty string keeps the key present (skipping the file loader)
+    // while still reading as "not configured" to resolveConfiguredAudience().
+    const env = { ...process.env, NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID: "" }
     return {
       signingKeyB64,
       env: {
-        ...process.env,
+        ...env,
         DYNAMIC_EXTERNAL_JWT_ENABLED: "true",
         DYNAMIC_EXTERNAL_JWT_ISSUER: "https://app.pinetree-payments.com",
         DYNAMIC_EXTERNAL_JWT_AUDIENCE: "dynamic",
@@ -106,11 +113,45 @@ describe("Dynamic external JWT key material", () => {
       aud: "dynamic",
       sub: "pinetree-dynamic-test-merchant",
       email: "dynamic-jwt-test@pinetree-payments.com",
+      emailVerified: true,
+      email_verified: true,
     })
     expect(parsed.checks.every((check) => check.pass)).toBe(true)
     expect(output).not.toContain(signingKeyB64)
     expect(output).not.toContain("BEGIN PRIVATE KEY")
     expect(output).not.toContain("PRIVATE KEY")
+  })
+
+  it("dynamic:jwt:test falls back to NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID and warns when DYNAMIC_EXTERNAL_JWT_AUDIENCE is still the placeholder 'dynamic'", async () => {
+    const { env } = await createTestEnv({
+      NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID: "ea6b03bc-04c8-43b0-9b21-98248857d020",
+    })
+    const output = execFileSync("node", [path.join(process.cwd(), "scripts/test-dynamic-external-jwt.mjs")], {
+      cwd: os.tmpdir(),
+      encoding: "utf8",
+      env,
+    })
+    const parsed = JSON.parse(output) as {
+      ok: boolean
+      decodedPayload: Record<string, unknown>
+      warnings: string[]
+      audienceChecklist: {
+        DYNAMIC_EXTERNAL_JWT_AUDIENCE: string | null
+        NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID: string | null
+        isPlaceholderValue: boolean
+        resolvedAudienceSentInJwt: string | null
+      }
+    }
+
+    expect(parsed.ok).toBe(true)
+    expect(parsed.decodedPayload.aud).toBe("ea6b03bc-04c8-43b0-9b21-98248857d020")
+    expect(parsed.audienceChecklist).toMatchObject({
+      DYNAMIC_EXTERNAL_JWT_AUDIENCE: "dynamic",
+      NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID: "ea6b03bc-04c8-43b0-9b21-98248857d020",
+      isPlaceholderValue: true,
+      resolvedAudienceSentInJwt: "ea6b03bc-04c8-43b0-9b21-98248857d020",
+    })
+    expect(parsed.warnings.some((warning) => warning.includes("placeholder"))).toBe(true)
   })
 
   it("dynamic:jwt:test --debug-env masks secrets and reports repo env paths", async () => {

@@ -63,6 +63,30 @@ Email claim: PineTree merchant email
 If Dynamic says audience is not required, set `DYNAMIC_EXTERNAL_JWT_AUDIENCE`
 to an empty value and configure no audience restriction in Dynamic.
 
+**2026-07-09 finding:** per Dynamic's own BYOA docs, `aud` is an optional,
+dashboard-configurable claim with no fixed convention - Dynamic only requires
+`iss`, `sub`, and `exp`, and validates `iss` against the dashboard-configured
+value. `DYNAMIC_EXTERNAL_JWT_AUDIENCE=dynamic` was a placeholder entered before
+this was confirmed with Dynamic support and was never verified against what (if
+anything) Dynamic's dashboard actually expects. The route now falls back to
+signing `aud` as `NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID` whenever
+`DYNAMIC_EXTERNAL_JWT_AUDIENCE` is unset or still literally `dynamic`, since
+environment-ID-as-audience is the most common per-project binding for this kind
+of integration. If Dynamic support confirms a different required value, set
+`DYNAMIC_EXTERNAL_JWT_AUDIENCE` explicitly to override this fallback.
+
+If sign-in fails with `wallet_dynamic_signin_failed { errorName:
+"InvalidExternalAuthError", errorCode: "invalid_external_auth_error" }`, this
+means Dynamic's backend received and rejected the JWT (JWKS fetch succeeded,
+the SDK reached the network call) but does not expose which validation step
+failed. Given `aud` is optional, the more likely causes are: the `iss` claim
+not exactly matching what's configured in Dynamic's dashboard for this
+environment (check for a trailing slash, `www.`, `http://` vs `https://`, or a
+preview-deployment URL), or BYOA/External JWT not actually being enabled yet
+for the specific Dynamic environment `NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID`
+points at. Confirm both directly with Dynamic support - this cannot be fully
+diagnosed from application code or logs alone.
+
 If the Dynamic auth sheet shows `Sandbox`, `NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID`
 is pointing at a Dynamic sandbox environment. That is fine for staging only when
 the sandbox project also has External JWT/BYOA enabled with:

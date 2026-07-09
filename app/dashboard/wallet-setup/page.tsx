@@ -1253,6 +1253,15 @@ function classifyDynamicSignInError(error: unknown): ClassifiedDynamicSignInErro
     messageHint = "popup_or_storage_blocked"
   } else if (errorName === "TypeError" && /fetch/.test(message)) {
     messageHint = "network_error"
+  } else if (errorName === "InvalidExternalAuthError" || errorCode === "invalid_external_auth_error" || errorCode === "invalid_external_auth") {
+    // Dynamic's backend reached and rejected the sign-in (see clientErrorMapper in
+    // the installed SDK: APIError with code "invalid_external_auth" is converted to
+    // InvalidExternalAuthError / "invalid_external_auth_error"). Dynamic does not
+    // expose which validation step failed, so this is as specific as the SDK gets -
+    // check issuer/audience/kid/JWKS/BYOA-enablement server-side from here.
+    messageHint = "external_auth_rejected"
+  } else if (/invalid external ?auth/.test(message)) {
+    messageHint = "external_auth_rejected"
   } else {
     for (const { pattern, hint } of DYNAMIC_SIGNIN_MESSAGE_HINTS) {
       if (pattern.test(message)) {
