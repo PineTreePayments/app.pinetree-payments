@@ -18,6 +18,11 @@ const BACKGROUND_PROVISIONING_TIMEOUT_MS = 12_000
 
 function scheduleWalletReadiness(profile: Awaited<ReturnType<typeof upsertPineTreeWalletProfile>>) {
   after(async () => {
+    const providerSyncStartedAt = Date.now()
+    console.info("[pinetree-wallets] background_step", {
+      merchant_id: profile.merchant_id,
+      step: "provider_sync_start",
+    })
     try {
       await withOperationTimeout(
         syncPineTreeWalletProfileProviders(profile),
@@ -29,8 +34,19 @@ function scheduleWalletReadiness(profile: Awaited<ReturnType<typeof upsertPineTr
         merchantId: profile.merchant_id,
         error: error instanceof Error ? error.message : String(error),
       })
+    } finally {
+      console.info("[pinetree-wallets] background_timing", {
+        merchant_id: profile.merchant_id,
+        step: "provider_sync_complete",
+        duration_ms: Date.now() - providerSyncStartedAt,
+      })
     }
 
+    const lightningStartedAt = Date.now()
+    console.info("[pinetree-wallets] background_step", {
+      merchant_id: profile.merchant_id,
+      step: "lightning_ensure_start",
+    })
     try {
       await withOperationTimeout(
         ensureManagedLightningForMerchant(profile.merchant_id),
@@ -41,6 +57,12 @@ function scheduleWalletReadiness(profile: Awaited<ReturnType<typeof upsertPineTr
       console.warn("[pinetree-wallets] background_lightning_provisioning_failed", {
         merchantId: profile.merchant_id,
         error: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      console.info("[pinetree-wallets] background_timing", {
+        merchant_id: profile.merchant_id,
+        step: "lightning_ensure_complete",
+        duration_ms: Date.now() - lightningStartedAt,
       })
     }
   })
@@ -151,6 +173,7 @@ export async function POST(req: NextRequest) {
     const btcAddressAlreadyExists = bitcoinProvisioning?.status === "already_exists"
     const btcAddressIsReady = Boolean(provisionedBtcAddress)
 
+    const profileSaveStartedAt = Date.now()
     const profile = await upsertPineTreeWalletProfile({
       merchantId,
       dynamicUserId: "dynamic_user_id" in body ? (body.dynamic_user_id as string | null) : undefined,
@@ -177,6 +200,11 @@ export async function POST(req: NextRequest) {
       btcPayoutVerifiedAt: btcAddressIsReady || (btcAddressAlreadyExists && !existingProfile?.btc_payout_verified_at)
         ? now
         : undefined,
+    })
+    console.info("[pinetree-wallets] profile_timing", {
+      merchant_id: merchantId,
+      step: "core_profile_saved",
+      duration_ms: Date.now() - profileSaveStartedAt,
     })
 
     scheduleWalletReadiness(profile)

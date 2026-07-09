@@ -160,8 +160,8 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(successBranch).toContain('if (json.profile.status === "ready")')
     expect(successBranch).toContain("setSyncing(false)")
     expect(successBranch).toContain("setPendingSync(false)")
-    expect(successBranch).toContain("void syncPineTreeManagedLightning()")
-    expect(successBranch).not.toContain("await syncPineTreeManagedLightning()")
+    expect(successBranch).not.toContain("syncPineTreeManagedLightning")
+    expect(profileRoute).toContain("scheduleWalletReadiness(profile)")
   })
 
   it("debug panel is hidden in the default merchant UI", () => {
@@ -178,7 +178,7 @@ describe("PineTree Dynamic provisioning flow", () => {
   })
 
   it("ready Dynamic profile renders Ready without requiring Lightning to finish", () => {
-    expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
+    expect(page).toContain('const coreWalletProfileReady = profile?.status === "ready" && baseReady && solanaReady')
     expect(page).toContain('if (dynamicProfileReady || hasReadyBaseAndSolanaProfile) return "ready"')
     expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
     expect(page).not.toContain('const walletStatus = repairInProgress ? "Repairing" : allPrimaryRailsConnected ? "Ready"')
@@ -206,10 +206,8 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain("walletProvisioningRetryIntervalMs = 1_800")
     expect(page).toContain("window.setInterval(() => {")
     expect(page).toContain('reason: "dynamic_wallet_hydration_retry"')
-    expect(page).toContain('findDynamicApprovalWalletForSourceAsync(dynamicWalletSearchList as unknown[], primaryWallet, "base", baseAddress)')
-    expect(page).toContain('findDynamicApprovalWalletForSourceAsync(dynamicWalletSearchList as unknown[], primaryWallet, "solana", solanaAddress)')
-    expect(page).toContain('reason: "waiting_for_dynamic_addresses_or_signers"')
-    expect(page).toContain("await syncProfileFromDynamic({ autoEnableLightning: true, requireBaseAndSolanaSigners: true })")
+    expect(page).toContain('reason: "waiting_for_dynamic_addresses"')
+    expect(page).toContain("await syncProfileFromDynamic()")
     expect(page).toContain('if (json.profile.status === "ready")')
     expect(page).toContain("setSyncing(false)")
     expect(page).toContain("setPendingSync(false)")
@@ -294,7 +292,7 @@ describe("PineTree Dynamic provisioning flow", () => {
 
   it("ready profile clears timeout/error state even if timeout was previously pending", () => {
     const readyCleanupEffect = page.slice(
-      page.indexOf("if (!dynamicProfileReady) return"),
+      page.indexOf("if (!coreWalletProfileReady) return"),
       page.indexOf("// ---------------------------------------------------------------------------\n  // Actions")
     )
     expect(readyCleanupEffect).toContain("setPendingSync(false)")
@@ -637,9 +635,9 @@ describe("PineTree Dynamic provisioning flow", () => {
   it("a stale failed/timeout step self-corrects once the profile is ready, instead of only clearing on the false->true transition", () => {
     const selfCorrectEffect = page.slice(
       page.indexOf("// Defense in depth: the effect above only fires"),
-      page.indexOf("}, [dynamicProfileReady, walletCreationStep])") + "}, [dynamicProfileReady, walletCreationStep])".length
+      page.indexOf("}, [coreWalletProfileReady, walletCreationStep])") + "}, [coreWalletProfileReady, walletCreationStep])".length
     )
-    expect(selfCorrectEffect).toContain("if (!dynamicProfileReady) return")
+    expect(selfCorrectEffect).toContain("if (!coreWalletProfileReady) return")
     expect(selfCorrectEffect).toContain('if (walletCreationStep !== "failed" && walletCreationStep !== "timeout") return')
     expect(selfCorrectEffect).toContain('setWalletCreationStep("profile_synced")')
     expect(selfCorrectEffect).toContain("setIdentityMismatchError(null)")

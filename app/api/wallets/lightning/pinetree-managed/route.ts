@@ -110,6 +110,7 @@ export async function POST(req: NextRequest) {
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
     console.info("[pinetree-managed-lightning] POST start", { merchant_id: merchantId })
+    const ensureStartedAt = Date.now()
 
     try {
       const result = await withOperationTimeout(
@@ -124,10 +125,20 @@ export async function POST(req: NextRequest) {
         status: result.status,
         connected_account_id_present: Boolean(result.speedConnectedAccountId),
       })
+      console.info("[pinetree-managed-lightning] ensure timing", {
+        merchant_id: merchantId,
+        step: "lightning_ensure_complete",
+        duration_ms: Date.now() - ensureStartedAt,
+      })
     } catch (error) {
       console.warn("[pinetree-managed-lightning] provisioning_deferred", {
         merchant_id: merchantId,
         error: error instanceof Error ? error.message : String(error),
+      })
+      console.info("[pinetree-managed-lightning] ensure timing", {
+        merchant_id: merchantId,
+        step: "lightning_ensure_deferred",
+        duration_ms: Date.now() - ensureStartedAt,
       })
       const profile = await getMerchantLightningProfile(merchantId).catch(() => null)
       return NextResponse.json({

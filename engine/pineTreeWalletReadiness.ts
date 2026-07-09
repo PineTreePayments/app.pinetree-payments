@@ -8,7 +8,7 @@
  */
 
 import { randomBytes } from "node:crypto"
-import { getMerchantById, getMerchantBusinessOwnerProfile } from "@/database/merchants"
+import { getMerchantById } from "@/database/merchants"
 import {
   getMerchantLightningProfile,
   upsertMerchantLightningProfile,
@@ -17,7 +17,12 @@ import {
 } from "@/database/merchantLightningProfiles"
 import { getPineTreeWalletProfile, upsertPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import { saveMerchantSpeedConnection } from "@/database/merchantProviders"
-import { createSpeedCustomConnectedAccountForMerchant } from "@/providers/lightning/speedConnectedAccounts"
+import {
+  createSpeedCustomConnectedAccountForMerchant,
+  getSpeedConnectedAccountSetupStatus
+} from "@/providers/lightning/speedConnectedAccounts"
+import { getMerchantBusinessProfile } from "@/engine/businessProfile"
+import { withOperationTimeout } from "@/engine/promiseTimeout"
 import {
   getPineTreeSpeedConfigStatus,
   isSpeedPlatformTreasurySweepEnabled,
@@ -26,6 +31,7 @@ import {
 
 export type EnsureManagedLightningAction =
   | "already_active"
+  | "existing_account_checked"
   | "provisioned"
   | "provisioning_incomplete"
   | "needs_business_profile"
@@ -49,6 +55,7 @@ const ACTIVE_SPEED_ACCOUNT_STATUSES = new Set([
   "connected",
   "verified",
 ])
+const SPEED_CUSTOM_CONNECT_TIMEOUT_MS = 10_000
 
 /** A profile counts as active only when it has a real account id AND an active-looking status. */
 function isActiveLightningProfile(profile: MerchantLightningProfile | null): boolean {
@@ -182,10 +189,42 @@ export async function ensureManagedLightningForMerchant(
     }
   }
 
-  const merchant = await getMerchantById(merchantId)
-  const businessOwnerProfile = getMerchantBusinessOwnerProfile(merchant)
+  const existingAccountId = String(existing?.speed_account_id || existing?.speed_connected_account_id || "").trim()
+  const existingRelationshipId = String(existing?.speed_connected_account_relationship_id || "").trim()
+  if (existingAccountId || existingRelationshipId) {
+    const checked = await getSpeedConnectedAccountSetupStatus({
+      connectedAccountId: existingRelationshipId || null,
+      accountId: existingAccountId || null,
+    })
+    const lightningProfile = await upsertMerchantLightningProfile({
+      merchantId,
+      status: checked.readiness,
+      speedConnectedAccountId: checked.speed_connected_account_id || existingAccountId || null,
+      speedConnectedAccountRelationshipId:
+        checked.speed_connected_account_relationship_id || existingRelationshipId || null,
+      speedAccountId: checked.speed_account_id || existing?.speed_account_id || null,
+      speedConnectedAccountStatus: checked.speed_connected_account_status,
+      speedConnectSetupUrl: checked.setup_url,
+      providerResponseSummary: checked.provider_response_summary,
+      providerErrorMessage: checked.error_message,
+    })
+    await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
+    return {
+      status: lightningProfile.status,
+      action: "existing_account_checked",
+      speedConnectedAccountId:
+        lightningProfile.speed_account_id || lightningProfile.speed_connected_account_id,
+      speedConnectedAccountRelationshipId: lightningProfile.speed_connected_account_relationship_id,
+      speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
+    }
+  }
 
-  if (!businessOwnerProfile) {
+  const [merchant, businessProfile] = await Promise.all([
+    getMerchantById(merchantId),
+    getMerchantBusinessProfile(merchantId),
+  ])
+
+  if (businessProfile.profile_status !== "complete") {
     const lightningProfile = await upsertMerchantLightningProfile({
       merchantId,
       status: "needs_attention",
@@ -202,14 +241,51 @@ export async function ensureManagedLightningForMerchant(
     }
   }
 
-  const speedSetup = await createSpeedCustomConnectedAccountForMerchant({
+  const speedStartedAt = Date.now()
+  console.info("[pinetree-managed-lightning] provisioning_step", {
     merchant_id: merchantId,
-    country: businessOwnerProfile.businessCountry,
-    first_name: businessOwnerProfile.ownerFirstName,
-    last_name: businessOwnerProfile.ownerLastName,
-    email: String(merchant?.email || "").trim(),
-    password: generateSpeedCustomConnectPassword(),
+    step: "speed_custom_connect_start",
   })
+  let speedSetup: Awaited<ReturnType<typeof createSpeedCustomConnectedAccountForMerchant>>
+  try {
+    speedSetup = await withOperationTimeout(
+      createSpeedCustomConnectedAccountForMerchant({
+        merchant_id: merchantId,
+        country: businessProfile.business_country!,
+        first_name: businessProfile.owner_first_name!,
+        last_name: businessProfile.owner_last_name!,
+        email: String(merchant?.email || "").trim(),
+        password: generateSpeedCustomConnectPassword(),
+      }),
+      SPEED_CUSTOM_CONNECT_TIMEOUT_MS,
+      "Speed Custom Connect"
+    )
+  } catch (error) {
+    console.warn("[pinetree-managed-lightning] speed_custom_connect_failed", {
+      merchant_id: merchantId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    const lightningProfile = await upsertMerchantLightningProfile({
+      merchantId,
+      status: "needs_attention",
+      speedConnectedAccountStatus: "speed_custom_connect_failed",
+      providerErrorMessage: "Lightning provisioning needs attention.",
+    })
+    await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
+    return {
+      status: lightningProfile.status,
+      action: "provisioning_incomplete",
+      speedConnectedAccountId: null,
+      speedConnectedAccountRelationshipId: null,
+      speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
+    }
+  } finally {
+    console.info("[pinetree-managed-lightning] provisioning_timing", {
+      merchant_id: merchantId,
+      step: "speed_custom_connect_complete",
+      duration_ms: Date.now() - speedStartedAt,
+    })
+  }
 
   const status: MerchantLightningProfileStatus =
     speedSetup.readiness === "ready"

@@ -167,4 +167,45 @@ describe("createOrLinkSpeedConnectedAccountForMerchant", () => {
       status: "Active",
     })
   })
+
+  it("reuses an existing custom connected account by email instead of creating a duplicate", async () => {
+    speedClientMocks.listSpeedConnectedAccounts.mockResolvedValue({
+      data: [{
+        id: "ca_existing",
+        account_id: "acct_existing",
+        owner_email: "merchant@example.test",
+        status: "active",
+      }],
+    })
+
+    const result = await createSpeedCustomConnectedAccountForMerchant({
+      merchant_id: "merchant_123",
+      country: "US",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      email: "merchant@example.test",
+      password: "temporary-secret",
+    })
+
+    expect(result.readiness).toBe("ready")
+    expect(result.speed_account_id).toBe("acct_existing")
+    expect(speedClientMocks.createSpeedCustomConnectedAccount).not.toHaveBeenCalled()
+  })
+
+  it("does not create a duplicate when existing-account lookup fails", async () => {
+    speedClientMocks.listSpeedConnectedAccounts.mockRejectedValue(new Error("lookup unavailable"))
+
+    const result = await createSpeedCustomConnectedAccountForMerchant({
+      merchant_id: "merchant_123",
+      country: "US",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      email: "merchant@example.test",
+      password: "temporary-secret",
+    })
+
+    expect(result.readiness).toBe("needs_attention")
+    expect(result.speed_connected_account_status).toBe("existing_account_lookup_failed")
+    expect(speedClientMocks.createSpeedCustomConnectedAccount).not.toHaveBeenCalled()
+  })
 })

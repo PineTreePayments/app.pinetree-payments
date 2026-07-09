@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   upsertPineTreeWalletProfile: vi.fn(),
   saveMerchantSpeedConnection: vi.fn(),
   createSpeedCustomConnectedAccountForMerchant: vi.fn(),
+  getSpeedConnectedAccountSetupStatus: vi.fn(),
+  getMerchantBusinessProfile: vi.fn(),
   getPineTreeSpeedConfigStatus: vi.fn(),
   isSpeedPlatformTreasurySweepEnabled: vi.fn(),
 }))
@@ -45,6 +47,11 @@ vi.mock("@/database/merchantProviders", () => ({
 
 vi.mock("@/providers/lightning/speedConnectedAccounts", () => ({
   createSpeedCustomConnectedAccountForMerchant: mocks.createSpeedCustomConnectedAccountForMerchant,
+  getSpeedConnectedAccountSetupStatus: mocks.getSpeedConnectedAccountSetupStatus,
+}))
+
+vi.mock("@/engine/businessProfile", () => ({
+  getMerchantBusinessProfile: mocks.getMerchantBusinessProfile,
 }))
 
 vi.mock("@/providers/lightning/speedClient", () => ({
@@ -85,6 +92,12 @@ describe("ensureManagedLightningForMerchant", () => {
     vi.spyOn(console, "info").mockImplementation(() => undefined)
     mocks.isSpeedPlatformTreasurySweepEnabled.mockReturnValue(false)
     mocks.getPineTreeWalletProfile.mockResolvedValue(null)
+    mocks.getMerchantBusinessProfile.mockResolvedValue({
+      profile_status: "complete",
+      business_country: "US",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+    })
     mocks.upsertMerchantLightningProfile.mockImplementation(async (input) =>
       lightningProfile({
         status: input.status,
@@ -119,6 +132,12 @@ describe("ensureManagedLightningForMerchant", () => {
       owner_first_name: null,
       owner_last_name: null,
       business_country: null,
+    })
+    mocks.getMerchantBusinessProfile.mockResolvedValue({
+      profile_status: "incomplete",
+      business_country: null,
+      owner_first_name: null,
+      owner_last_name: null,
     })
 
     const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
@@ -170,6 +189,7 @@ describe("ensureManagedLightningForMerchant", () => {
         email: "merchant@example.test",
       })
     )
+    expect(mocks.getMerchantBusinessProfile).toHaveBeenCalledWith(merchantId)
     // A password is required by Speed's API but is generated and never persisted/returned.
     const call = mocks.createSpeedCustomConnectedAccountForMerchant.mock.calls[0][0]
     expect(typeof call.password).toBe("string")
@@ -222,6 +242,60 @@ describe("ensureManagedLightningForMerchant", () => {
 
     expect(result.status).toBe("pending")
     expect(result.action).toBe("provisioning_incomplete")
+  })
+
+  it("checks an existing pending Speed account instead of creating a duplicate", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(
+      lightningProfile({
+        status: "pending",
+        accountId: "acct_existing",
+        relationshipId: "ca_existing",
+        accountStatus: "unknown",
+      })
+    )
+    mocks.getSpeedConnectedAccountSetupStatus.mockResolvedValue({
+      readiness: "pending",
+      speed_connected_account_id: "acct_existing",
+      speed_connected_account_relationship_id: "ca_existing",
+      speed_account_id: "acct_existing",
+      speed_connected_account_status: "pending_verification",
+      setup_url: null,
+      provider_response_summary: { source: "existing_connected_account" },
+      error_message: null,
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    const result = await ensureManagedLightningForMerchant(merchantId)
+
+    expect(result.action).toBe("existing_account_checked")
+    expect(result.status).toBe("pending")
+    expect(mocks.getSpeedConnectedAccountSetupStatus).toHaveBeenCalledWith({
+      connectedAccountId: "ca_existing",
+      accountId: "acct_existing",
+    })
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).not.toHaveBeenCalled()
+  })
+
+  it("stores needs_attention instead of throwing when Speed provisioning throws", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({ id: merchantId, email: "merchant@example.test" })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockRejectedValue(
+      new Error("raw provider failure")
+    )
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    const result = await ensureManagedLightningForMerchant(merchantId)
+
+    expect(result.status).toBe("needs_attention")
+    expect(result.action).toBe("provisioning_incomplete")
+    expect(mocks.upsertMerchantLightningProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        merchantId,
+        status: "needs_attention",
+        speedConnectedAccountStatus: "speed_custom_connect_failed",
+        providerErrorMessage: "Lightning provisioning needs attention.",
+      })
+    )
   })
 
   it("does not call Speed Custom Connect in treasury-sweep mode", async () => {

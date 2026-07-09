@@ -342,7 +342,8 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("const btcPayoutReady = railReadiness?.bitcoin_lightning.withdrawalReady")
     expect(page).toContain("const bitcoinReady = railReadiness?.bitcoin_lightning.walletProvisioned")
     expect(page).not.toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
-    expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
+    expect(page).toContain('const coreWalletProfileReady = profile?.status === "ready" && baseReady && solanaReady')
+    expect(page).toContain('const dynamicProfileReady = coreWalletProfileReady && baseSignerReady && solanaSignerReady')
     expect(page).toContain('if (dynamicProfileReady || hasReadyBaseAndSolanaProfile) return "ready"')
     expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
     expect(page).toContain('if (repairOrSetupIncomplete) return "reconnect_needed"')
@@ -358,9 +359,9 @@ describe("PineTree embedded wallet setup", () => {
     // POST to pinetree-profile route includes dynamic_user_id to lock the profile to this session
     expect(page).toContain("dynamic_user_id")
     expect(page).toContain("user.userId")
-    // Once Base/Solana sync succeeds after Create PineTree Wallet, Lightning setup starts automatically.
-    expect(page).toContain("autoEnableLightning")
-    expect(page).toContain("syncPineTreeManagedLightning")
+    // Core profile sync does not start a second client-side Lightning provisioning request.
+    expect(page).not.toContain("autoEnableLightning")
+    expect(page).not.toContain("syncPineTreeManagedLightning")
   })
 
   it("tracks wallet creation steps and times out instead of waiting forever", () => {
@@ -390,6 +391,21 @@ describe("PineTree embedded wallet setup", () => {
     expect(apiRoute).toContain("after(async () => {")
     expect(apiRoute).not.toContain("await ensureManagedLightningForMerchant(merchantId)")
     expect(apiRoute).toContain("BACKGROUND_PROVISIONING_TIMEOUT_MS = 12_000")
+    expect(apiRoute).toContain('step: "core_profile_saved"')
+    expect(apiRoute).toContain('step: "provider_sync_complete"')
+    expect(apiRoute).toContain('step: "lightning_ensure_complete"')
+  })
+
+  it("saves detected core wallet addresses without waiting for browser signers", () => {
+    const coreSaveEffect = page.slice(
+      page.indexOf("if (!pendingSync || !sdkHasLoaded || !user || pendingProfileSyncAttemptRef.current) return"),
+      page.indexOf("function inferWalletSetupFailureReason()")
+    )
+
+    expect(coreSaveEffect).toContain('reason: "waiting_for_dynamic_addresses"')
+    expect(coreSaveEffect).toContain("await syncProfileFromDynamic()")
+    expect(coreSaveEffect).not.toContain("waiting_for_dynamic_addresses_or_signers")
+    expect(page).toContain('const coreWalletProfileReady = profile?.status === "ready" && baseReady && solanaReady')
   })
 
   it("does not render a persistent synced banner after profile sync succeeds", () => {
@@ -535,7 +551,7 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("marks the merchant wallet Connected when the saved Base/Solana profile is ready", () => {
-    expect(page).toContain('const dynamicProfileReady = profile?.status === "ready" && baseReady && solanaReady && baseSignerReady && solanaSignerReady')
+    expect(page).toContain('const coreWalletProfileReady = profile?.status === "ready" && baseReady && solanaReady')
     expect(page).toContain('if (dynamicProfileReady || hasReadyBaseAndSolanaProfile) return "ready"')
     expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
     expect(page).toContain('walletSetupPrimaryState === "reconnect_needed" ? "Reconnect needed" :')
@@ -1058,7 +1074,7 @@ describe("PineTree embedded wallet setup", () => {
   it("syncs PineTree-managed Bitcoin automatically and does not render a merchant CTA", () => {
     expect(page).not.toContain("Enable Bitcoin Lightning")
     expect(page).not.toContain("handleEnableLightning")
-    expect(page).toContain("syncPineTreeManagedLightning")
+    expect(apiRoute).toContain("scheduleWalletReadiness(profile)")
     // Uses a POST fetch to the internal route — no redirect to Speed sign-up
     expect(page).toContain("/api/wallets/lightning/pinetree-managed")
     expect(page).not.toContain("speed.com")

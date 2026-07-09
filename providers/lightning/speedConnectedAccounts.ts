@@ -213,6 +213,53 @@ export async function createSpeedCustomConnectedAccountForMerchant(
     })
   }
 
+  const startedAt = Date.now()
+  console.info("[speed-custom-connect] provisioning_step", {
+    merchant_id: input.merchant_id,
+    step: "existing_account_lookup_start",
+  })
+  try {
+    const existing = await findExistingConnectedAccountByEmail(input.email)
+    if (existing) {
+      const summary = summarizeConnectedAccount(existing, "existing_connected_account")
+      const accountReference = summary.account_id || summary.connected_account_id
+      const readiness = normalizeSpeedConnectedAccountReadiness({
+        speedConnectedAccountId: accountReference,
+        rawProviderStatus: summary.status,
+      })
+      console.info("[speed-custom-connect] provisioning_timing", {
+        merchant_id: input.merchant_id,
+        step: "existing_account_reused",
+        duration_ms: Date.now() - startedAt,
+      })
+      return result({
+        status: readiness,
+        speedConnectedAccountId: accountReference,
+        speedConnectedAccountStatus: summary.status,
+        summary,
+        mode: config.mode,
+        usedLiveApi: true,
+      })
+    }
+  } catch (error) {
+    console.warn("[speed-custom-connect] existing_account_lookup_failed", {
+      merchant_id: input.merchant_id,
+      error: safeProviderErrorMessage(error, "Existing account lookup failed."),
+    })
+    return result({
+      status: "needs_attention",
+      speedConnectedAccountStatus: "existing_account_lookup_failed",
+      summary: emptySummary("error"),
+      errorMessage: "Existing Speed account lookup failed. Retry before creating another account.",
+      mode: config.mode,
+      usedLiveApi: true,
+    })
+  }
+
+  console.info("[speed-custom-connect] provisioning_step", {
+    merchant_id: input.merchant_id,
+    step: "custom_account_create_start",
+  })
   try {
     const account = await createSpeedCustomConnectedAccount({
       country: input.country,
@@ -228,7 +275,7 @@ export async function createSpeedCustomConnectedAccountForMerchant(
       rawProviderStatus: summary.status,
     })
 
-    return result({
+    const created = result({
       status: readiness,
       speedConnectedAccountId: accountReference,
       speedConnectedAccountStatus: summary.status || "unknown",
@@ -236,7 +283,18 @@ export async function createSpeedCustomConnectedAccountForMerchant(
       mode: config.mode,
       usedLiveApi: true,
     })
+    console.info("[speed-custom-connect] provisioning_timing", {
+      merchant_id: input.merchant_id,
+      step: "custom_account_create_complete",
+      duration_ms: Date.now() - startedAt,
+    })
+    return created
   } catch (error) {
+    console.info("[speed-custom-connect] provisioning_timing", {
+      merchant_id: input.merchant_id,
+      step: "custom_account_create_failed",
+      duration_ms: Date.now() - startedAt,
+    })
     return result({
       status: "needs_attention",
       speedConnectedAccountStatus: "speed_custom_connect_failed",
