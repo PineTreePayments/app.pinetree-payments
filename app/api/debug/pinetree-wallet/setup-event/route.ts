@@ -21,6 +21,10 @@ const WHITELISTED_EVENTS = new Set([
   "wallet_retry_clicked",
   "wallet_dynamic_sdk_loaded",
   "wallet_dynamic_jwt_requested",
+  "wallet_dynamic_jwt_response_received",
+  "wallet_dynamic_signin_started",
+  "wallet_dynamic_signin_returned",
+  "wallet_dynamic_signin_failed",
   "wallet_dynamic_jwt_authenticated",
   "wallet_dynamic_create_or_restore_started",
   "wallet_dynamic_create_or_restore_complete",
@@ -45,7 +49,10 @@ const MAX_DETAIL_KEYS = 12
 const MAX_STRING_LENGTH = 40
 const MAX_NUMBER = 1_000_000_000
 
-// Key names that are never allowed through, regardless of their value.
+// Key names that are rejected for *string* values only - a boolean or bounded number
+// can never leak a raw email/address/token no matter what its key is named (e.g.
+// tokenPresent: true is safe), so this pattern only needs to gate string values,
+// where the risk of a raw sensitive value actually lives.
 const UNSAFE_KEY_PATTERN = /email|address|jwt|token|secret|password|privatekey|private_key|payload|credential/i
 
 function looksUnsafeString(value: string) {
@@ -66,13 +73,12 @@ function sanitizeDetails(input: unknown): Record<string, boolean | number | stri
   const entries = Object.entries(input as Record<string, unknown>).slice(0, MAX_DETAIL_KEYS)
   for (const [key, value] of entries) {
     if (typeof key !== "string" || key.length === 0 || key.length > MAX_STRING_LENGTH) continue
-    if (UNSAFE_KEY_PATTERN.test(key)) continue
 
     if (typeof value === "boolean") {
       safe[key] = value
     } else if (typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= MAX_NUMBER) {
       safe[key] = value
-    } else if (typeof value === "string" && !looksUnsafeString(value)) {
+    } else if (typeof value === "string" && !UNSAFE_KEY_PATTERN.test(key) && !looksUnsafeString(value)) {
       safe[key] = value
     }
     // null, objects, arrays, and anything unsafe are dropped silently.

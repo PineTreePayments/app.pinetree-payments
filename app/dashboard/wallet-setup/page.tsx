@@ -3032,11 +3032,21 @@ function PineTreeWalletRuntime() {
         let endpointErrorCode: string | null = null
         let signInWithExternalJwtCalled = false
         let signInWithExternalJwtSucceeded = false
+        let signinFailureReason = "unknown_dynamic_auth_failure"
         try {
           console.info("[pinetree-wallets] wallet_dynamic_jwt_requested", {})
           emitWalletSetupDebugEvent("wallet_dynamic_jwt_requested", {})
           const payload = await requestPineTreeDynamicExternalJwtAuth(token, { walletDebug: walletSyncDebugQueryEnabled })
           endpointStatus = 200
+          emitWalletSetupDebugEvent("wallet_dynamic_jwt_response_received", {
+            ok: true,
+            tokenPresent: Boolean(payload.externalJwt),
+            expiresAtPresent: Boolean(payload.expiresAt),
+          })
+          if (!payload.externalJwt || !payload.externalUserId) {
+            signinFailureReason = "jwt_missing_token"
+            throw Object.assign(new Error("dynamic_external_jwt_failed"), { status: 502 })
+          }
           setProfileSyncDiagnostics((prev) => ({
             ...prev,
             externalJwtEnabled: true,
@@ -3055,11 +3065,43 @@ function PineTreeWalletRuntime() {
             dynamicExternalAuthSucceeded: false,
             updatedAt: new Date().toISOString(),
           }))
+          if (typeof signInWithExternalJwt !== "function") {
+            signinFailureReason = "dynamic_signin_function_missing"
+            throw Object.assign(new Error("dynamic_external_jwt_failed"), { status: 502 })
+          }
+
           signInWithExternalJwtCalled = true
-          const dynamicProfile = await signInWithExternalJwt({
-            externalJwt: payload.externalJwt,
-            externalUserId: payload.externalUserId,
+          emitWalletSetupDebugEvent("wallet_dynamic_signin_started", {})
+          let dynamicProfile: Awaited<ReturnType<typeof signInWithExternalJwt>>
+          try {
+            dynamicProfile = await signInWithExternalJwt({
+              externalJwt: payload.externalJwt,
+              externalUserId: payload.externalUserId,
+            })
+          } catch (signInError) {
+            const signInErrorMessage = signInError instanceof Error ? signInError.message.toLowerCase() : ""
+            signinFailureReason = /environment|audience|issuer/.test(signInErrorMessage)
+              ? "dynamic_environment_mismatch"
+              : "dynamic_signin_threw"
+            throw signInError
+          }
+          emitWalletSetupDebugEvent("wallet_dynamic_signin_returned", {
+            profilePresent: Boolean(dynamicProfile),
+            userPresent: Boolean(dynamicProfile),
           })
+
+          if (!dynamicProfile) {
+            // signInWithExternalJwt can resolve without an immediate profile while Dynamic
+            // finishes initializing the session server-side - poll refreshDynamicUser for a
+            // short bounded window instead of failing the whole flow immediately.
+            signinFailureReason = "dynamic_signin_returned_no_profile"
+            const pollStartedAt = Date.now()
+            const pollTimeoutMs = 4000
+            while (!dynamicProfile && Date.now() - pollStartedAt < pollTimeoutMs) {
+              await new Promise((resolve) => window.setTimeout(resolve, 250))
+              dynamicProfile = await refreshDynamicUser().catch(() => undefined)
+            }
+          }
           signInWithExternalJwtSucceeded = Boolean(dynamicProfile)
           if (signInWithExternalJwtSucceeded) {
             console.info("[pinetree-wallets] wallet_dynamic_jwt_authenticated", {})
@@ -3086,6 +3128,7 @@ function PineTreeWalletRuntime() {
             updatedAt: new Date().toISOString(),
           }))
           if (!dynamicProfile) {
+            signinFailureReason = "dynamic_user_not_available_after_signin"
             throw Object.assign(new Error("dynamic_external_auth_no_user"), { status: 502 })
           }
           setPendingSync(true)
@@ -3127,6 +3170,13 @@ function PineTreeWalletRuntime() {
               : status === 403
                 ? "merchant_resolution_failed"
                 : "dynamic_external_jwt_failed"
+          // The JWT fetch itself never resolved (network error, non-200) - none of the
+          // signinFailureReason branches above ran, so classify it here instead of
+          // leaving the default "unknown" reason.
+          if (signinFailureReason === "unknown_dynamic_auth_failure" && endpointStatus !== 200) {
+            signinFailureReason = "jwt_response_not_ok"
+          }
+          emitWalletSetupDebugEvent("wallet_dynamic_signin_failed", { reason: signinFailureReason })
           console.info("[pinetree-dynamic-auth] external_jwt_client", {
             authMode: dynamicAuthConfig.mode,
             emailFallbackEnabled: dynamicAuthConfig.emailFallbackEnabled,

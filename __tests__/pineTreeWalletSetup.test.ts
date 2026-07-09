@@ -294,6 +294,118 @@ describe("PineTree embedded wallet setup", () => {
     expect(openFallbackFn.indexOf("[pinetree-dynamic-auth] external_jwt_client")).toBeLessThan(openFallbackFn.indexOf("setShowAuthFlow(true)"))
   })
 
+  it("emits wallet_dynamic_jwt_response_received right after a successful JWT fetch", () => {
+    const openFallbackFn = page.slice(
+      page.indexOf("const openDynamicEmailFallbackAuth = useCallback"),
+      page.indexOf("const scheduleDynamicEmailFallbackAuth = useCallback")
+    )
+    const payloadIdx = openFallbackFn.indexOf("const payload = await requestPineTreeDynamicExternalJwtAuth(")
+    const responseReceivedIdx = openFallbackFn.indexOf('emitWalletSetupDebugEvent("wallet_dynamic_jwt_response_received"')
+    expect(payloadIdx).toBeGreaterThan(-1)
+    expect(responseReceivedIdx).toBeGreaterThan(payloadIdx)
+    const emitCall = openFallbackFn.slice(responseReceivedIdx, responseReceivedIdx + 260)
+    expect(emitCall).toContain("ok: true")
+    expect(emitCall).toContain("tokenPresent: Boolean(payload.externalJwt)")
+    expect(emitCall).toContain("expiresAtPresent: Boolean(payload.expiresAt)")
+  })
+
+  it("missing JWT/token in the response is classified as jwt_missing_token and never calls Dynamic sign-in", () => {
+    const openFallbackFn = page.slice(
+      page.indexOf("const openDynamicEmailFallbackAuth = useCallback"),
+      page.indexOf("const scheduleDynamicEmailFallbackAuth = useCallback")
+    )
+    const missingTokenIdx = openFallbackFn.indexOf('signinFailureReason = "jwt_missing_token"')
+    const signInCalledIdx = openFallbackFn.indexOf("signInWithExternalJwtCalled = true")
+    expect(missingTokenIdx).toBeGreaterThan(-1)
+    expect(signInCalledIdx).toBeGreaterThan(missingTokenIdx)
+    const guardBlock = openFallbackFn.slice(
+      openFallbackFn.indexOf("if (!payload.externalJwt || !payload.externalUserId) {"),
+      missingTokenIdx + 300
+    )
+    expect(guardBlock).toContain("throw Object.assign(new Error(\"dynamic_external_jwt_failed\"), { status: 502 })")
+  })
+
+  it("calls Dynamic signInWithExternalJwt with the SDK v4.90 argument shape ({ externalJwt, externalUserId })", () => {
+    const openFallbackFn = page.slice(
+      page.indexOf("const openDynamicEmailFallbackAuth = useCallback"),
+      page.indexOf("const scheduleDynamicEmailFallbackAuth = useCallback")
+    )
+    expect(openFallbackFn).toContain(
+      "dynamicProfile = await signInWithExternalJwt({\n              externalJwt: payload.externalJwt,\n              externalUserId: payload.externalUserId,\n            })"
+    )
+  })
+
+  it("does not immediately fail when signInWithExternalJwt resolves without a profile - it polls refreshDynamicUser for a bounded window first", () => {
+    const openFallbackFn = page.slice(
+      page.indexOf("const openDynamicEmailFallbackAuth = useCallback"),
+      page.indexOf("const scheduleDynamicEmailFallbackAuth = useCallback")
+    )
+    const returnedIdx = openFallbackFn.indexOf('emitWalletSetupDebugEvent("wallet_dynamic_signin_returned"')
+    const noProfileIdx = openFallbackFn.indexOf('if (!dynamicProfile) {', returnedIdx)
+    const pollBlock = openFallbackFn.slice(noProfileIdx, noProfileIdx + 800)
+    expect(pollBlock).toContain("const pollTimeoutMs = 4000")
+    expect(pollBlock).toContain("while (!dynamicProfile && Date.now() - pollStartedAt < pollTimeoutMs)")
+    expect(pollBlock).toContain("dynamicProfile = await refreshDynamicUser().catch(() => undefined)")
+    // The poll happens before the terminal failure check - it is not an immediate throw.
+    const terminalFailureIdx = openFallbackFn.indexOf('signinFailureReason = "dynamic_user_not_available_after_signin"')
+    expect(terminalFailureIdx).toBeGreaterThan(noProfileIdx + pollBlock.indexOf("pollTimeoutMs"))
+  })
+
+  it("signInWithExternalJwt throwing is caught, classified, and never left unhandled", () => {
+    const openFallbackFn = page.slice(
+      page.indexOf("const openDynamicEmailFallbackAuth = useCallback"),
+      page.indexOf("const scheduleDynamicEmailFallbackAuth = useCallback")
+    )
+    const signInTryIdx = openFallbackFn.indexOf("dynamicProfile = await signInWithExternalJwt({")
+    const catchIdx = openFallbackFn.indexOf("} catch (signInError) {", signInTryIdx)
+    expect(catchIdx).toBeGreaterThan(signInTryIdx)
+    const catchBlock = openFallbackFn.slice(catchIdx, catchIdx + 400)
+    expect(catchBlock).toContain('"dynamic_environment_mismatch"')
+    expect(catchBlock).toContain('"dynamic_signin_threw"')
+    expect(catchBlock).toContain("throw signInError")
+    // The final classification (and only emission point for wallet_dynamic_signin_failed)
+    // happens once in the outer catch, not duplicated at every throw site.
+    expect(openFallbackFn).toContain('emitWalletSetupDebugEvent("wallet_dynamic_signin_failed", { reason: signinFailureReason })')
+    expect((openFallbackFn.match(/wallet_dynamic_signin_failed/g) || []).length).toBe(1)
+  })
+
+  it("wallet_dynamic_jwt_authenticated fires before pendingSync flips true, so wallet create/restore only starts after auth succeeds", () => {
+    const openFallbackFn = page.slice(
+      page.indexOf("const openDynamicEmailFallbackAuth = useCallback"),
+      page.indexOf("const scheduleDynamicEmailFallbackAuth = useCallback")
+    )
+    const authenticatedIdx = openFallbackFn.indexOf('emitWalletSetupDebugEvent("wallet_dynamic_jwt_authenticated"')
+    const pendingSyncIdx = openFallbackFn.indexOf("setPendingSync(true)")
+    expect(authenticatedIdx).toBeGreaterThan(-1)
+    expect(pendingSyncIdx).toBeGreaterThan(authenticatedIdx)
+  })
+
+  it("never sends a JWT, token, email, or raw Dynamic error to the debug event route", () => {
+    const openFallbackFn = page.slice(
+      page.indexOf("const openDynamicEmailFallbackAuth = useCallback"),
+      page.indexOf("const scheduleDynamicEmailFallbackAuth = useCallback")
+    )
+    // Every emitWalletSetupDebugEvent(...) call site's immediate argument window - wide
+    // enough to cover the largest call here, narrow enough to not spill into unrelated code.
+    const emitStartIndexes: number[] = []
+    let searchFrom = 0
+    while (true) {
+      const idx = openFallbackFn.indexOf("emitWalletSetupDebugEvent(", searchFrom)
+      if (idx === -1) break
+      emitStartIndexes.push(idx)
+      searchFrom = idx + 1
+    }
+    expect(emitStartIndexes.length).toBeGreaterThan(0)
+    for (const idx of emitStartIndexes) {
+      const call = openFallbackFn.slice(idx, idx + 260)
+      expect(call).not.toContain("payload.externalJwt,")
+      expect(call).not.toContain("payload.externalUserId,")
+      expect(call).not.toContain("signInError.message")
+      expect(call).not.toContain("merchantEmail")
+      expect(call).not.toContain("dynamicUserEmail")
+    }
+  })
+
   it("external auth failure shows PineTree-controlled copy", () => {
     expect(dynamicAuthConfig).toContain("pineTreeDynamicConfigurationErrorMessage")
     expect(dynamicAuthConfig).toContain("PineTree Wallet verification is not configured correctly. Please contact support.")

@@ -95,6 +95,37 @@ describe("POST /api/debug/pinetree-wallet/setup-event", () => {
     })
   })
 
+  it("keeps boolean presence flags like tokenPresent even though the key contains 'token'", async () => {
+    // Regression: the key-based unsafe-pattern check must only gate string values -
+    // a boolean can never leak the token itself, so tokenPresent/expiresAtPresent
+    // must survive sanitization even though "token" matches the unsafe key pattern.
+    const { POST } = await import("@/app/api/debug/pinetree-wallet/setup-event/route")
+    const response = await POST(request({
+      event: "wallet_dynamic_jwt_response_received",
+      details: { ok: true, tokenPresent: true, expiresAtPresent: true },
+    }))
+
+    expect(response.status).toBe(200)
+    const loggedDetails = (console.info as ReturnType<typeof vi.fn>).mock.calls[0][1].details
+    expect(loggedDetails).toEqual({ ok: true, tokenPresent: true, expiresAtPresent: true })
+  })
+
+  it("accepts the Dynamic sign-in checkpoint events added for the external JWT fix", async () => {
+    const { POST } = await import("@/app/api/debug/pinetree-wallet/setup-event/route")
+    for (const event of [
+      "wallet_dynamic_jwt_response_received",
+      "wallet_dynamic_signin_started",
+      "wallet_dynamic_signin_returned",
+      "wallet_dynamic_signin_failed",
+    ]) {
+      vi.clearAllMocks()
+      mocks.requireMerchantAuthFromRequest.mockResolvedValue({ merchantId, email: null, source: "supabase" })
+      vi.spyOn(console, "info").mockImplementation(() => undefined)
+      const response = await POST(request({ event, details: { reason: "dynamic_signin_threw" } }))
+      expect(response.status).toBe(200)
+    }
+  })
+
   it("drops nested objects and arrays instead of logging them raw", async () => {
     const { POST } = await import("@/app/api/debug/pinetree-wallet/setup-event/route")
     await POST(request({
