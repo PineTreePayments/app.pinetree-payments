@@ -8,7 +8,6 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const envPath = path.join(repoRoot, ".env")
 const envLocalPath = path.join(repoRoot, ".env.local")
 const testSubject = "pinetree-dynamic-test-merchant"
-const testEmail = "dynamic-jwt-test@pinetree-payments.com"
 const ttlSeconds = 5 * 60
 const debugEnv = process.argv.includes("--debug-env")
 const originalProcessEnv = new Set(Object.keys(process.env))
@@ -211,12 +210,7 @@ async function main() {
   if (!publicJwk) throw new Error("dynamic_external_jwt_jwks_kid_mismatch")
   const verificationKey = await importJWK(publicJwk, "RS256")
 
-  let jwt = new SignJWT({
-    email: testEmail,
-    emailVerified: true,
-    email_verified: true,
-    merchant_id: testSubject,
-  })
+  let jwt = new SignJWT({})
     .setProtectedHeader({ alg: "RS256", kid })
     .setIssuer(issuer)
     .setSubject(testSubject)
@@ -244,9 +238,10 @@ async function main() {
   assertCheck(checks, "payload.sub is used consistently as externalUserId (route.ts returns externalUserId: auth.merchantId, same value as sub)", payload.sub === testSubject)
   assertCheck(checks, "payload.exp exists", typeof payload.exp === "number")
   assertCheck(checks, "payload.exp is short-lived", Number(payload.exp) - Number(payload.iat) <= ttlSeconds)
-  assertCheck(checks, "payload.email exists for test identity", payload.email === testEmail)
-  assertCheck(checks, "payload.emailVerified (camelCase, per Dynamic's documented BYOA claim name) is true", payload.emailVerified === true)
-  assertCheck(checks, "payload.email_verified (standard OIDC snake_case) is also true", payload.email_verified === true)
+  assertCheck(checks, "payload.email is omitted from external identity", !("email" in payload))
+  assertCheck(checks, "payload.emailVerified is omitted from external identity", !("emailVerified" in payload))
+  assertCheck(checks, "payload.email_verified is omitted from external identity", !("email_verified" in payload))
+  assertCheck(checks, "payload.merchant_id is omitted from external identity", !("merchant_id" in payload))
   assertCheck(checks, "JWT verifies against derived public JWKS", verified.payload.sub === testSubject)
   assertCheck(checks, "JWKS key is public signing material only", publicJwk.alg === "RS256" && publicJwk.use === "sig" && !("d" in publicJwk))
 

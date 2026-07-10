@@ -2,7 +2,6 @@ import { type NextRequest, NextResponse } from "next/server"
 import { requireAdminFromRequest, getRouteErrorStatus } from "@/lib/api/adminAuth"
 import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import { getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
-import { getMerchantById } from "@/database/merchants"
 import { getPineTreeDynamicAuthConfig } from "@/lib/pinetreeDynamicAuth"
 import {
   checkDynamicExternalJwks,
@@ -57,7 +56,7 @@ type DynamicCredentialLike = {
   address?: string
 }
 
-async function probeDynamicSignin(input: { merchantId: string; email: string }): Promise<DynamicSigninProbeResult> {
+async function probeDynamicSignin(input: { merchantId: string }): Promise<DynamicSigninProbeResult> {
   const environmentId = process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?.trim()
   const result: DynamicSigninProbeResult = {
     dynamicJwtAcceptedOk: false,
@@ -145,24 +144,19 @@ export async function GET(req: NextRequest) {
     const merchantId = merchantIdParam && merchantIdParam.trim() ? merchantIdParam.trim() : adminId
     const runSigninProbe = req.nextUrl.searchParams.get("probe") === "1"
 
-    const [profile, lightningProfile, merchant, jwks, environmentFacts] = await Promise.all([
+    const [profile, lightningProfile, jwks, environmentFacts] = await Promise.all([
       getPineTreeWalletProfile(merchantId),
       getMerchantLightningProfile(merchantId),
-      getMerchantById(merchantId),
       checkDynamicExternalJwks(),
       fetchDynamicEnvironmentFacts(),
     ])
     const authConfig = getPineTreeDynamicAuthConfig()
-    const merchantEmail = String(merchant?.email || "").trim().toLowerCase()
 
     let dynamicJwtGeneratedOk = false
     let claims: { issuerMatch: boolean; audienceMatch: boolean; subjectPresent: boolean; environmentIdPresent: boolean } | null = null
     let jwtGenerationError: string | null = null
     try {
-      const signed = await signDynamicExternalJwt({
-        merchantId,
-        email: merchantEmail || "smoke-check-no-email@invalid",
-      })
+      const signed = await signDynamicExternalJwt({ merchantId })
       dynamicJwtGeneratedOk = true
       claims = signed.claims
     } catch (error) {
@@ -170,9 +164,9 @@ export async function GET(req: NextRequest) {
     }
 
     let signinProbe: DynamicSigninProbeResult | null = null
-    if (runSigninProbe && dynamicJwtGeneratedOk && merchantEmail) {
+    if (runSigninProbe && dynamicJwtGeneratedOk) {
       try {
-        signinProbe = await probeDynamicSignin({ merchantId, email: merchantEmail })
+        signinProbe = await probeDynamicSignin({ merchantId })
       } catch (error) {
         signinProbe = {
           dynamicJwtAcceptedOk: false,

@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { SignJWT, exportJWK, exportPKCS8, generateKeyPair } from "jose"
+import { SignJWT, exportJWK, exportPKCS8, generateKeyPair, importJWK, jwtVerify } from "jose"
 import {
   dynamicSessionBoundToMerchant,
   getDynamicExternalUserId,
@@ -61,7 +61,7 @@ async function signTestJwt(options: {
   audience?: string
 }) {
   const keys = await generateKeyPair("RS256")
-  let jwt = new SignJWT({ email: "merchant@example.com" })
+  let jwt = new SignJWT({})
     .setProtectedHeader({ alg: "RS256", ...(options.kid ? { kid: options.kid } : {}) })
     .setSubject(merchantId)
     .setIssuedAt()
@@ -87,6 +87,7 @@ describe("analyzePineTreeDynamicExternalJwtContract (client-side JWT contract an
       audienceMatch: true,
       environmentIdPresent: true,
       subjectPresent: true,
+      emailClaimIncluded: false,
       externalUserIdPresent: false,
       externalUserIdMatchesSubject: false,
     })
@@ -133,6 +134,7 @@ describe("analyzePineTreeDynamicExternalJwtContract (client-side JWT contract an
       audienceMatch: false,
       environmentIdPresent: true,
       subjectPresent: false,
+      emailClaimIncluded: false,
       externalUserIdPresent: false,
       externalUserIdMatchesSubject: false,
     })
@@ -219,7 +221,7 @@ describe("runDynamicExternalJwtContractCheck (server key/JWKS parity)", () => {
 
   it("verifies a signed JWT against the exact JWKS key and subject binding", async () => {
     const { publicJwk } = await setupSigningEnv()
-    const signed = await signDynamicExternalJwt({ merchantId, email: "merchant@example.com" })
+    const signed = await signDynamicExternalJwt({ merchantId })
     const check = await verifySignedDynamicExternalJwtAgainstJwks({
       externalJwt: signed.externalJwt,
       externalUserId: signed.subject,
@@ -238,9 +240,26 @@ describe("runDynamicExternalJwtContractCheck (server key/JWKS parity)", () => {
     })
   })
 
+  it("external JWT identity excludes email claims while preserving subject binding", async () => {
+    const { publicJwk } = await setupSigningEnv()
+    const signed = await signDynamicExternalJwt({ merchantId })
+    const verificationKey = await importJWK({ ...publicJwk, kid: "pinetree-test-kid", alg: "RS256", use: "sig" }, "RS256")
+    const verified = await jwtVerify(signed.externalJwt, verificationKey, {
+      issuer: "https://app.pinetree-payments.com",
+      audience: "test-environment-id",
+      subject: merchantId,
+    })
+
+    expect(signed.subject).toBe(merchantId)
+    expect(verified.payload.sub).toBe(signed.subject)
+    expect(verified.payload).not.toHaveProperty("email")
+    expect(verified.payload).not.toHaveProperty("emailVerified")
+    expect(verified.payload).not.toHaveProperty("email_verified")
+  })
+
   it("detects changing private key material while reusing the same kid", async () => {
     await setupSigningEnv()
-    const signed = await signDynamicExternalJwt({ merchantId, email: "merchant@example.com" })
+    const signed = await signDynamicExternalJwt({ merchantId })
     const otherKeys = await generateKeyPair("RS256", { extractable: true })
     const otherJwk = await exportJWK(otherKeys.publicKey)
 
@@ -257,7 +276,7 @@ describe("runDynamicExternalJwtContractCheck (server key/JWKS parity)", () => {
 
   it("detects missing or mismatched externalUserId binding without leaking values", async () => {
     const { publicJwk } = await setupSigningEnv()
-    const signed = await signDynamicExternalJwt({ merchantId, email: "merchant@example.com" })
+    const signed = await signDynamicExternalJwt({ merchantId })
     const mismatched = await verifySignedDynamicExternalJwtAgainstJwks({
       externalJwt: signed.externalJwt,
       externalUserId: "different-external-user",
@@ -347,15 +366,20 @@ describe("Wallet setup page - external JWT contract wiring", () => {
     expect(page).toContain("if (!dynamicSessionExternallyBound && (!merchantEmail || !dynamicUserEmail))")
   })
 
-  it("treats Dynamic native email login as developer recovery only, never the production path", () => {
-    expect(page).toContain("const nativeFallbackRecoveryAllowed =")
-    expect(page).toContain('walletSyncDebugQueryEnabled || process.env.NODE_ENV !== "production"')
+  it("suppresses Dynamic native email login after external auth rejection", () => {
+    expect(page).not.toContain("const nativeFallbackRecoveryAllowed =")
+    expect(page).not.toContain('walletSyncDebugQueryEnabled || process.env.NODE_ENV !== "production"')
     const rejectedBlock = page.slice(
       page.indexOf('emitWalletSetupDebugEvent("wallet_dynamic_external_jwt_rejected", {})'),
       page.indexOf('logWalletCreationStep("failed", { reason: "dynamic_external_jwt_rejected" })')
     )
-    expect(rejectedBlock).toContain("if (nativeFallbackRecoveryAllowed) {")
     expect(rejectedBlock).toContain('emitWalletSetupDebugEvent("wallet_dynamic_native_fallback_suppressed"')
+    expect(rejectedBlock).toContain('emitWalletSetupDebugEvent("wallet_dynamic_external_identity_conflict_suspected"')
+    expect(rejectedBlock).toContain("jwtContractValid: true")
+    expect(rejectedBlock).toContain("emailClaimIncluded: false")
+    expect(rejectedBlock).toContain("externalUserBindingValid: true")
+    expect(rejectedBlock).toContain("dynamicRejected: true")
+    expect(rejectedBlock).not.toContain("setShowAuthFlow(true)")
     expect(rejectedBlock).toContain('recordWalletSetupFailure("dynamic_external_jwt_rejected", "failed"')
   })
 
@@ -385,6 +409,7 @@ describe("Wallet setup page - external JWT contract wiring", () => {
       "wallet_dynamic_jwt_auth_started",
       "wallet_dynamic_jwt_auth_success",
       "wallet_dynamic_jwt_auth_failed",
+      "wallet_dynamic_external_identity_conflict_suspected",
       "wallet_dynamic_native_fallback_suppressed",
     ]) {
       expect(eventRoute).toContain(`"${event}"`)

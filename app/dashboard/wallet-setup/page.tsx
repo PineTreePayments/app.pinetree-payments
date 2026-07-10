@@ -3226,6 +3226,9 @@ function PineTreeWalletRuntime() {
         let issuedClaims: PineTreeDynamicExternalJwtClaimsDiagnostics | null = null
         let jwtSelfVerificationPassed = false
         let jwtHeaderKidMatchesJwks = false
+        let signingPublicKeyMatchesJwks = false
+        let algorithmRs256 = false
+        let emailClaimIncluded = true
         let clientExternalUserIdMatchesSubject = false
         let clientUsedRouteExternalUserId = false
         try {
@@ -3245,6 +3248,9 @@ function PineTreeWalletRuntime() {
             }, payload.externalUserId)
             jwtSelfVerificationPassed = Boolean(payload.jwtVerification?.jwtSelfVerificationPassed)
             jwtHeaderKidMatchesJwks = Boolean(payload.jwtVerification?.jwtHeaderKidMatchesJwks)
+            signingPublicKeyMatchesJwks = Boolean(payload.jwtVerification?.signingPublicKeyMatchesJwks)
+            algorithmRs256 = Boolean(payload.jwtVerification?.algorithmRs256)
+            emailClaimIncluded = contractAnalysis.emailClaimIncluded
             clientExternalUserIdMatchesSubject = contractAnalysis.externalUserIdMatchesSubject
             clientUsedRouteExternalUserId = true
             const jwksKid = await fetch("/.well-known/dynamic-jwks.json", { cache: "no-store" })
@@ -3264,7 +3270,10 @@ function PineTreeWalletRuntime() {
               environmentIdMatch: contractAnalysis.environmentIdPresent && contractAnalysis.audienceMatch,
               environmentIdPresent: contractAnalysis.environmentIdPresent,
               subjectPresent: contractAnalysis.subjectPresent,
+              emailClaimIncluded,
               jwtSelfVerificationPassed,
+              signingPublicKeyMatchesJwks,
+              algorithmRs256,
               clientExternalUserIdPresent: contractAnalysis.externalUserIdPresent,
               clientUsedRouteExternalUserId,
               clientExternalUserIdMatchesSubject,
@@ -3286,6 +3295,7 @@ function PineTreeWalletRuntime() {
           const subjectAnalysis = analyzePineTreeDynamicExternalJwtContract(payload.externalJwt, {
             NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID: process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID,
           }, payload.externalUserId)
+          emailClaimIncluded = subjectAnalysis.emailClaimIncluded
           clientExternalUserIdMatchesSubject = subjectAnalysis.externalUserIdMatchesSubject
           clientUsedRouteExternalUserId = true
           if (!subjectAnalysis.externalUserIdPresent || !subjectAnalysis.externalUserIdMatchesSubject) {
@@ -3459,6 +3469,9 @@ function PineTreeWalletRuntime() {
             ...(signinSafeProviderMessage ? { safeProviderMessage: signinSafeProviderMessage } : {}),
             jwtSelfVerificationPassed,
             jwtHeaderKidMatchesJwks,
+            signingPublicKeyMatchesJwks,
+            algorithmRs256,
+            emailClaimIncluded,
             clientExternalUserIdMatchesSubject,
             ...(signinMessageHint ? { messageHint: signinMessageHint } : {}),
           })
@@ -3477,6 +3490,9 @@ function PineTreeWalletRuntime() {
             environmentIdPresent: issuedClaims?.environmentIdPresent ?? false,
             jwtSelfVerificationPassed,
             jwtHeaderKidMatchesJwks,
+            signingPublicKeyMatchesJwks,
+            algorithmRs256,
+            emailClaimIncluded,
             clientExternalUserIdMatchesSubject,
             ...(signinMessageHint ? { messageHint: signinMessageHint } : {}),
           })
@@ -3498,39 +3514,37 @@ function PineTreeWalletRuntime() {
             safeProviderMessage: signinSafeProviderMessage,
             jwtSelfVerificationPassed,
             jwtHeaderKidMatchesJwks,
+            signingPublicKeyMatchesJwks,
+            algorithmRs256,
+            emailClaimIncluded,
             clientExternalUserIdMatchesSubject,
           })
           if (signinMessageHint === "external_auth_rejected") {
-            // Dynamic's backend explicitly rejected the BYOA JWT. Verified contract
-            // (2026-07-10): this happens when the signed claims don't match the
-            // dashboard config - most commonly `aud` != Dynamic environment ID.
             emitWalletSetupDebugEvent("wallet_dynamic_external_jwt_rejected", {})
-            // Dynamic's native email login is a developer recovery path ONLY - it is
-            // never the product flow for merchant wallet creation. Production fails
-            // with a real diagnostic instead of asking merchants for a second login.
-            const nativeFallbackRecoveryAllowed =
-              walletSyncDebugQueryEnabled || process.env.NODE_ENV !== "production"
-            if (nativeFallbackRecoveryAllowed) {
-              emitWalletSetupDebugEvent("wallet_dynamic_native_fallback_started", {})
-              nativeFallbackPendingRef.current = true
-              setCoreSetupNeedsUserAuth(true)
-              setPendingSync(true)
-              markWalletSetupInProgress()
-              setWalletIdentityError("")
-              logWalletCreationStep("waiting_for_dynamic_auth", {
-                reason: "external_jwt_rejected_native_fallback",
+            const jwtContractValid = Boolean(
+              issuedClaims?.issuerMatch &&
+                issuedClaims?.audienceMatch &&
+                issuedClaims?.environmentIdPresent &&
+                jwtSelfVerificationPassed &&
+                jwtHeaderKidMatchesJwks &&
+                signingPublicKeyMatchesJwks &&
+                algorithmRs256 &&
+                !emailClaimIncluded
+            )
+            const externalUserBindingValid = Boolean(clientExternalUserIdMatchesSubject)
+            if (jwtContractValid && externalUserBindingValid) {
+              emitWalletSetupDebugEvent("wallet_dynamic_external_identity_conflict_suspected", {
+                jwtContractValid: true,
+                emailClaimIncluded: false,
+                externalUserBindingValid: true,
+                dynamicRejected: true,
               })
-              setProfileSyncDiagnostics((prev) => ({
-                ...prev,
-                lastWalletAuthAttemptState: "external_jwt_rejected_native_fallback_opened",
-                updatedAt: new Date().toISOString(),
-              }))
-              setShowDynamicUserProfile(false)
-              setShowAuthFlow(true)
-              return
             }
             emitWalletSetupDebugEvent("wallet_dynamic_native_fallback_suppressed", {
-              reason: "external_jwt_rejected_production",
+              reason: "external_jwt_rejected_external_identity_only",
+              jwtContractValid,
+              emailClaimIncluded,
+              externalUserBindingValid,
             })
             setWalletIdentityError(walletSetupFailureMessage("dynamic_external_jwt_rejected"))
             setPendingSync(false)

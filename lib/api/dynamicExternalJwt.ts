@@ -141,7 +141,6 @@ export type SignedDynamicExternalJwt = {
 
 export async function signDynamicExternalJwt(input: {
   merchantId: string
-  email: string
 }): Promise<SignedDynamicExternalJwt> {
   const issuer = getDynamicExternalJwtIssuer()
   const audience = resolveDynamicJwtAudience()
@@ -162,19 +161,10 @@ export async function signDynamicExternalJwt(input: {
     kidPresent: Boolean(keyId),
     algRs256: true,
     subjectPresent: Boolean(input.merchantId),
-    emailPresent: Boolean(input.email),
+    emailPresent: false,
   })
 
-  let jwt = new SignJWT({
-    email: input.email,
-    emailVerified: true,
-    // Dynamic's BYOA docs use camelCase emailVerified, but the standard OIDC claim
-    // name is snake_case - send both so a stricter validator on Dynamic's side that
-    // looks for the standard name still finds it, without removing the one Dynamic's
-    // own docs document.
-    email_verified: true,
-    merchant_id: input.merchantId,
-  })
+  let jwt = new SignJWT({})
     .setProtectedHeader({
       alg: "RS256",
       kid: keyId,

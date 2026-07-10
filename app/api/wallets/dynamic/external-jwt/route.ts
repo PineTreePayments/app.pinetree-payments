@@ -1,6 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { getMerchantById } from "@/database/merchants"
 import { requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
 import {
   getDynamicExternalJwtIssuer,
@@ -33,7 +32,6 @@ async function logExternalJwtContractDiagnostic() {
 type AuthenticatedMerchant = {
   merchantId: string
   userId: string
-  email: string
 }
 
 type ExternalJwtRouteStatus =
@@ -96,17 +94,9 @@ async function requireSupabaseMerchant(req: NextRequest): Promise<AuthenticatedM
     throw Object.assign(new Error("unauthorized"), { status: 401 })
   }
 
-  const merchantId = user.id
-  const merchant = await getMerchantById(merchantId)
-  const merchantEmail = String(merchant?.email || user.email || "").trim().toLowerCase()
-  if (!merchantEmail) {
-    throw Object.assign(new Error("merchant_email_missing"), { status: 409 })
-  }
-
   return {
-    merchantId,
+    merchantId: user.id,
     userId: user.id,
-    email: merchantEmail,
   }
 }
 
@@ -181,7 +171,7 @@ export async function POST(req: NextRequest) {
       environmentIdPresent: Boolean(process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?.trim()),
       subjectPresent: Boolean(auth.merchantId),
     })
-    const signed = await signDynamicExternalJwt({ merchantId: auth.merchantId, email: auth.email })
+    const signed = await signDynamicExternalJwt({ merchantId: auth.merchantId })
     const jwksKey = await deriveDynamicExternalJwtPublicJwk()
     const verification = await verifySignedDynamicExternalJwtAgainstJwks({
       externalJwt: signed.externalJwt,
@@ -210,7 +200,8 @@ export async function POST(req: NextRequest) {
     console.info("[pinetree-wallets] wallet_dynamic_jwt_auth_success", { ...signed.claims })
     await logExternalJwtContractDiagnostic()
     console.info("[pinetree-wallets] dynamic_external_jwt_issued", {
-      emailPresent: Boolean(auth.email),
+      emailPresent: false,
+      emailClaimIncluded: false,
       issuerMatch: signed.claims.issuerMatch,
       audienceMatch: signed.claims.audienceMatch,
       environmentIdMatch: signed.claims.environmentIdPresent && signed.claims.audienceMatch,

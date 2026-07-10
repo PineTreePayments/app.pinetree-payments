@@ -116,7 +116,7 @@ describe("Dynamic external JWT route", () => {
     expect(createClient).not.toHaveBeenCalled()
   })
 
-  it("uses PineTree merchant email, not client email, and emits a short-lived JWT payload", async () => {
+  it("uses PineTree merchant ID as the external identity and emits a short-lived JWT payload", async () => {
     const res = await POST(request({ email: "attacker@example.com", walletDebug: true }))
     expect(res.status).toBe(200)
     const json = (await res.json()) as {
@@ -160,10 +160,10 @@ describe("Dynamic external JWT route", () => {
       }
     )
 
-    expect(verified.payload.email).toBe("merchant@example.com")
-    expect(verified.payload.email).not.toBe("attacker@example.com")
-    expect(verified.payload.emailVerified).toBe(true)
-    expect(verified.payload.merchant_id).toBe("merchant-1")
+    expect(verified.payload).not.toHaveProperty("email")
+    expect(verified.payload).not.toHaveProperty("emailVerified")
+    expect(verified.payload).not.toHaveProperty("email_verified")
+    expect(verified.payload).not.toHaveProperty("merchant_id")
     expect(verified.payload.jti).toEqual(expect.any(String))
     expect(verified.protectedHeader.alg).toBe("RS256")
     expect(verified.protectedHeader.kid).toBe("pinetree-test-kid")
@@ -425,7 +425,7 @@ describe("Dynamic external JWT route", () => {
     expect(json.claims?.audienceMatch).toBe(true)
   })
 
-  it("includes both the documented emailVerified claim and the standard email_verified claim", async () => {
+  it("omits email identity claims from the external JWT", async () => {
     const res = await POST(request())
     expect(res.status).toBe(200)
     const json = (await res.json()) as { externalJwt: string }
@@ -435,8 +435,9 @@ describe("Dynamic external JWT route", () => {
       subject: "merchant-1",
     })
 
-    expect(verified.payload.emailVerified).toBe(true)
-    expect(verified.payload.email_verified).toBe(true)
+    expect(verified.payload).not.toHaveProperty("email")
+    expect(verified.payload).not.toHaveProperty("emailVerified")
+    expect(verified.payload).not.toHaveProperty("email_verified")
   })
 
   it("logs dynamic_jwt_claims_config_check with booleans only, never raw claim values", async () => {
@@ -454,7 +455,7 @@ describe("Dynamic external JWT route", () => {
       kidPresent: true,
       algRs256: true,
       subjectPresent: true,
-      emailPresent: true,
+      emailPresent: false,
     })
     const serialized = JSON.stringify(configCheckLog?.[1])
     expect(serialized).not.toContain("merchant-1")

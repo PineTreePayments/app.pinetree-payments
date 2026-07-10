@@ -185,14 +185,14 @@ describe("PineTree Wallet native auth resume - page wiring", () => {
     expect(page).toContain("autoOpenWalletAfterCreateRef.current = true")
   })
 
-  it("keeps the external-JWT-rejected fallback parking setup in needs_user_auth", () => {
+  it("does not park external-JWT-rejected setup in native auth", () => {
     const rejectedBlock = page.slice(
       page.indexOf('emitWalletSetupDebugEvent("wallet_dynamic_external_jwt_rejected", {})'),
       page.indexOf('setShowAuthFlow(true)')
     )
-    expect(rejectedBlock).toContain("nativeFallbackPendingRef.current = true")
-    expect(rejectedBlock).toContain("setCoreSetupNeedsUserAuth(true)")
-    expect(rejectedBlock).toContain("setPendingSync(true)")
+    expect(rejectedBlock).not.toContain("nativeFallbackPendingRef.current = true")
+    expect(rejectedBlock).not.toContain("setCoreSetupNeedsUserAuth(true)")
+    expect(rejectedBlock).not.toContain("setPendingSync(true)")
   })
 
   it("keeps an already-authenticated Dynamic user skipping external JWT during create", () => {

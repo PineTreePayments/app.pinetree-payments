@@ -259,7 +259,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(dynamicAuthConfig).toContain("/api/wallets/dynamic/external-jwt")
     expect(dynamicAuthConfig).toContain("PineTree Supabase user/session")
     expect(dynamicAuthConfig).toContain("PineTree backend issues/verifies JWT for Dynamic")
-    expect(dynamicAuthConfig).toContain("Dynamic session initializes for same PineTree user/email")
+    expect(dynamicAuthConfig).toContain("Dynamic session initializes for the same PineTree externalUser subject")
     expect(dynamicAuthConfig).toContain("embedded wallet signer restores without merchant typing a second email")
     const openFallbackFn = page.slice(
       page.indexOf("const openDynamicEmailFallbackAuth = useCallback"),
@@ -276,9 +276,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(openFallbackFn).toContain("setPendingSync(true)")
     expect(openFallbackFn).toContain('logWalletCreationStep("dynamic_authenticated"')
     expect(openFallbackFn).toContain("return false")
-    expect(openFallbackFn).toContain("setShowAuthFlow(true)")
     expect(openFallbackFn).toContain("assertCanOpenDynamicEmailFallbackAuth(dynamicAuthConfig)")
-    expect(openFallbackFn.indexOf("return false")).toBeLessThan(openFallbackFn.indexOf("setShowAuthFlow(true)"))
+    const externalJwtBlock = openFallbackFn.slice(
+      openFallbackFn.indexOf("if (pineTreeControlledDynamicAuthAvailable)"),
+      openFallbackFn.indexOf("if (!shouldOpenDynamicEmailFallbackAuth(dynamicAuthConfig))")
+    )
+    expect(externalJwtBlock).not.toContain("setShowAuthFlow(true)")
   })
 
   it("external_jwt mode logs external auth attempt before any Dynamic email auth path", () => {
@@ -291,7 +294,11 @@ describe("PineTree embedded wallet setup", () => {
     expect(openFallbackFn).toContain("externalJwtAttempted: true")
     expect(openFallbackFn).toContain("endpointStatus")
     expect(openFallbackFn).toContain("endpointErrorCode")
-    expect(openFallbackFn.indexOf("[pinetree-dynamic-auth] external_jwt_client")).toBeLessThan(openFallbackFn.indexOf("setShowAuthFlow(true)"))
+    const externalJwtBlock = openFallbackFn.slice(
+      openFallbackFn.indexOf("if (pineTreeControlledDynamicAuthAvailable)"),
+      openFallbackFn.indexOf("if (!shouldOpenDynamicEmailFallbackAuth(dynamicAuthConfig))")
+    )
+    expect(externalJwtBlock).not.toContain("setShowAuthFlow(true)")
   })
 
   it("emits wallet_dynamic_jwt_response_received right after a successful JWT fetch", () => {
@@ -518,7 +525,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(speedFn).not.toContain("throw")
   })
 
-  it("external_auth_rejected opens Dynamic native auth only as developer recovery, never in production", () => {
+  it("external_auth_rejected suspects stale external identity conflict and never opens Dynamic native auth", () => {
     const openFallbackFn = page.slice(
       page.indexOf("const openDynamicEmailFallbackAuth = useCallback"),
       page.indexOf("const scheduleDynamicEmailFallbackAuth = useCallback")
@@ -527,27 +534,16 @@ describe("PineTree embedded wallet setup", () => {
     expect(branchIdx).toBeGreaterThan(-1)
     const branch = openFallbackFn.slice(branchIdx, openFallbackFn.indexOf("setWalletIdentityError(\n", branchIdx))
     expect(branch).toContain('emitWalletSetupDebugEvent("wallet_dynamic_external_jwt_rejected", {})')
-    // Recovery gate: dev builds or ?walletDebug=1 only.
-    expect(branch).toContain("const nativeFallbackRecoveryAllowed =")
-    expect(branch).toContain('walletSyncDebugQueryEnabled || process.env.NODE_ENV !== "production"')
-    // Recovery path keeps the core task alive (pendingSync true) so setup resumes
-    // automatically once native auth completes.
-    const recoveryBranch = branch.slice(
-      branch.indexOf("if (nativeFallbackRecoveryAllowed) {"),
-      branch.indexOf('emitWalletSetupDebugEvent("wallet_dynamic_native_fallback_suppressed"')
-    )
-    expect(recoveryBranch).toContain('emitWalletSetupDebugEvent("wallet_dynamic_native_fallback_started", {})')
-    expect(recoveryBranch).toContain("setShowAuthFlow(true)")
-    expect(recoveryBranch).toContain("setPendingSync(true)")
-    expect(recoveryBranch).toContain("markWalletSetupInProgress()")
-    expect(recoveryBranch).not.toContain("recordWalletSetupFailure")
-    // Production path records the real diagnostic instead of asking merchants
-    // for a second (email) login.
-    const productionBranch = branch.slice(
-      branch.indexOf('emitWalletSetupDebugEvent("wallet_dynamic_native_fallback_suppressed"')
-    )
-    expect(productionBranch).toContain('recordWalletSetupFailure("dynamic_external_jwt_rejected", "failed"')
-    expect(productionBranch).not.toContain("setShowAuthFlow(true)")
+    expect(branch).toContain('emitWalletSetupDebugEvent("wallet_dynamic_external_identity_conflict_suspected"')
+    expect(branch).toContain("jwtContractValid: true")
+    expect(branch).toContain("emailClaimIncluded: false")
+    expect(branch).toContain("externalUserBindingValid: true")
+    expect(branch).toContain("dynamicRejected: true")
+    expect(branch).toContain('emitWalletSetupDebugEvent("wallet_dynamic_native_fallback_suppressed"')
+    expect(branch).toContain('recordWalletSetupFailure("dynamic_external_jwt_rejected", "failed"')
+    expect(branch).not.toContain("const nativeFallbackRecoveryAllowed =")
+    expect(branch).not.toContain('emitWalletSetupDebugEvent("wallet_dynamic_native_fallback_started", {})')
+    expect(branch).not.toContain("setShowAuthFlow(true)")
   })
 
   it("native fallback completion resumes core setup automatically and emits wallet_dynamic_native_user_detected", () => {
@@ -871,7 +867,7 @@ describe("PineTree embedded wallet setup", () => {
       "wallet_core_setup_started",
       "wallet_speed_setup_started",
       "wallet_dynamic_external_jwt_rejected",
-      "wallet_dynamic_native_fallback_started",
+      "wallet_dynamic_external_identity_conflict_suspected",
       "wallet_dynamic_native_user_detected",
       "wallet_core_profile_post_started",
       "wallet_core_profile_post_success",

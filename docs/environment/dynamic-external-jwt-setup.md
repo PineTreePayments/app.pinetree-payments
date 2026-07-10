@@ -134,10 +134,11 @@ Audience:
 
 JWT identity:
 sub is the PineTree merchant_id. The Dynamic SDK externalUserId will be the same
-value as sub.
+value as sub. PineTree does not bind Dynamic external authentication through
+email.
 
 Claims included:
-iss, sub, aud, exp, iat, jti, email, emailVerified, merchant_id.
+iss, sub, aud, exp, iat, jti.
 
 Please confirm:
 - BYOA / External JWT is enabled for sandbox and production projects.
@@ -160,6 +161,20 @@ Please confirm:
 8. Confirm debug fields show `dynamicExternalAuthAttempted=true` and
    `dynamicExternalAuthSucceeded=true`.
 9. Repeat for production with production keys and production Dynamic project.
+
+## Sandbox Cleanup After Email-Fallback Tests
+
+Prior Dynamic email-fallback testing may have created a separate Dynamic user
+for the same test email. If Dynamic rejects a fully verified external JWT with
+`invalid_external_auth`, clean up the sandbox test account manually:
+
+1. Open the Dynamic dashboard Users page.
+2. Find the test user created through email sign-in.
+3. Confirm it is the sandbox test account.
+4. Delete that stale Dynamic user before retrying PineTree external auth.
+
+Do not delete Dynamic users or wallets automatically from PineTree application
+code.
 
 ## Rollback To Email Fallback
 

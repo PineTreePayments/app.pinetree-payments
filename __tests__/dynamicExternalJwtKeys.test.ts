@@ -112,10 +112,11 @@ describe("Dynamic external JWT key material", () => {
       iss: "https://app.pinetree-payments.com",
       aud: "dynamic",
       sub: "pinetree-dynamic-test-merchant",
-      email: "dynamic-jwt-test@pinetree-payments.com",
-      emailVerified: true,
-      email_verified: true,
     })
+    expect(parsed.decodedPayload).not.toHaveProperty("email")
+    expect(parsed.decodedPayload).not.toHaveProperty("emailVerified")
+    expect(parsed.decodedPayload).not.toHaveProperty("email_verified")
+    expect(parsed.decodedPayload).not.toHaveProperty("merchant_id")
     expect(parsed.checks.every((check) => check.pass)).toBe(true)
     expect(output).not.toContain(signingKeyB64)
     expect(output).not.toContain("BEGIN PRIVATE KEY")

@@ -47,6 +47,7 @@ const WHITELISTED_EVENTS = new Set([
   "wallet_core_setup_started",
   "wallet_speed_setup_started",
   "wallet_dynamic_external_jwt_rejected",
+  "wallet_dynamic_external_identity_conflict_suspected",
   "wallet_dynamic_jwt_auth_started",
   "wallet_dynamic_jwt_auth_success",
   "wallet_dynamic_jwt_auth_failed",

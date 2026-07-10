@@ -122,6 +122,7 @@ export type PineTreeDynamicExternalJwtContractAnalysis = {
   audienceMatch: boolean
   environmentIdPresent: boolean
   subjectPresent: boolean
+  emailClaimIncluded: boolean
   externalUserIdPresent: boolean
   externalUserIdMatchesSubject: boolean
 }
@@ -177,6 +178,9 @@ export function analyzePineTreeDynamicExternalJwtContract(
     audienceMatch,
     environmentIdPresent: Boolean(environmentId),
     subjectPresent: typeof payload?.sub === "string" && payload.sub.length > 0,
+    emailClaimIncluded: Boolean(
+      payload && ("email" in payload || "emailVerified" in payload || "email_verified" in payload)
+    ),
     externalUserIdPresent: Boolean(routeExternalUserId),
     externalUserIdMatchesSubject: Boolean(routeExternalUserId && payload?.sub === routeExternalUserId),
   }
@@ -188,7 +192,7 @@ export async function requestPineTreeDynamicExternalJwtAuth(
 ): Promise<PineTreeDynamicExternalJwtPayload> {
   // PineTree Supabase user/session
   // -> PineTree backend issues/verifies JWT for Dynamic
-  // -> Dynamic session initializes for same PineTree user/email
+  // -> Dynamic session initializes for the same PineTree externalUser subject
   // -> embedded wallet signer restores without merchant typing a second email.
   const res = await fetch("/api/wallets/dynamic/external-jwt", {
     method: "POST",
