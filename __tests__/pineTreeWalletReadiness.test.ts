@@ -399,6 +399,119 @@ describe("ensureManagedLightningForMerchant", () => {
     expect(result.action).toBe("provisioning_incomplete")
     expect(mocks.saveMerchantSpeedConnection).not.toHaveBeenCalled()
   })
+
+  it("captures Speed's provider_code and sanitized field_errors from a rejected /connect/custom request", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({
+      id: merchantId,
+      business_name: "PineTree Test Merchant",
+      email: "merchant@example.test",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+      business_country: "US",
+    })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "needs_attention",
+      speed_connected_account_id: null,
+      speed_connected_account_relationship_id: null,
+      speed_account_id: null,
+      speed_connected_account_status: "speed_custom_connect_failed",
+      setup_url: null,
+      provider_response_summary: {},
+      error_message: "Speed custom connected account creation failed.",
+      mode: "test",
+      provider_code: "invalid_request",
+      field_errors: ["email: already registered"],
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    const result = await ensureManagedLightningForMerchant(merchantId)
+
+    expect(result.status).toBe("needs_attention")
+    expect(result.providerCode).toBe("invalid_request")
+    expect(result.fieldErrors).toEqual(["email: already registered"])
+    // Persisted alongside the existing provider response summary so the saved
+    // row is diagnosable, not just the request-time logs.
+    expect(mocks.upsertMerchantLightningProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        merchantId,
+        providerResponseSummary: expect.objectContaining({
+          provider_code: "invalid_request",
+          field_errors: ["email: already registered"],
+        }),
+      })
+    )
+  })
+
+  it("reports null providerCode and empty fieldErrors when Speed succeeds or an attempt hasn't run", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(
+      lightningProfile({ status: "ready", accountId: "acct_123", relationshipId: "ca_123", accountStatus: "active" })
+    )
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    const result = await ensureManagedLightningForMerchant(merchantId)
+
+    expect(result.action).toBe("already_active")
+    expect(result.providerCode).toBeNull()
+    expect(result.fieldErrors).toEqual([])
+  })
+
+  it("passes the merchant's business name and pre-validated email/password policy booleans to Speed", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({
+      id: merchantId,
+      business_name: "PineTree Test Merchant",
+      email: "merchant@example.test",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+      business_country: "US",
+    })
+    mocks.getMerchantBusinessProfile.mockResolvedValue({
+      profile_status: "complete",
+      business_country: "US",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+      legal_business_name: "PineTree Test Merchant LLC",
+    })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "ready",
+      speed_connected_account_id: "acct_biz",
+      speed_connected_account_relationship_id: "ca_biz",
+      speed_account_id: "acct_biz",
+      speed_connected_account_status: "active",
+      setup_url: null,
+      provider_response_summary: {},
+      error_message: null,
+      mode: "test",
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    await ensureManagedLightningForMerchant(merchantId)
+
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledWith(
+      expect.objectContaining({
+        business_name: "PineTree Test Merchant LLC",
+        email_valid: true,
+        password_policy_valid: true,
+      })
+    )
+  })
+
+  it("never includes wallet base/solana addresses or core status in the Lightning-only profile sync", () => {
+    // A Speed failure or success must never be able to touch the core
+    // base/solana readiness fields - those are set exclusively by the wallet
+    // profile POST route, never by Lightning provisioning.
+    const fs = require("node:fs")
+    const path = require("node:path")
+    const engine = fs.readFileSync(path.join(process.cwd(), "engine/pineTreeWalletReadiness.ts"), "utf8") as string
+    const syncFn = engine.slice(
+      engine.indexOf("async function syncLightningStatusIntoWalletProfile"),
+      engine.indexOf("/**\n * Ensures a merchant's Lightning rail")
+    )
+    expect(syncFn).not.toContain("baseAddress")
+    expect(syncFn).not.toContain("solanaAddress")
+    expect(syncFn).not.toContain("status:")
+  })
 })
 
 describe("no frontend surface calls Speed directly", () => {

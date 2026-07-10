@@ -123,8 +123,9 @@ export async function POST(req: NextRequest) {
     console.info("[pinetree-managed-lightning] POST start", { merchant_id: merchantId })
     const ensureStartedAt = Date.now()
 
+    let ensureResult: Awaited<ReturnType<typeof ensureManagedLightningForMerchant>> | null = null
     try {
-      const result = await withOperationTimeout(
+      ensureResult = await withOperationTimeout(
         ensureManagedLightningForMerchant(merchantId, { authEmail: auth.email }),
         LIGHTNING_PROVISIONING_TIMEOUT_MS,
         "managed lightning provisioning"
@@ -132,9 +133,9 @@ export async function POST(req: NextRequest) {
 
       console.info("[pinetree-managed-lightning] ensure result", {
         merchant_id: merchantId,
-        action: result.action,
-        status: result.status,
-        connected_account_id_present: Boolean(result.speedConnectedAccountId),
+        action: ensureResult.action,
+        status: ensureResult.status,
+        connected_account_id_present: Boolean(ensureResult.speedConnectedAccountId),
       })
       console.info("[pinetree-managed-lightning] ensure timing", {
         merchant_id: merchantId,
@@ -152,9 +153,13 @@ export async function POST(req: NextRequest) {
         duration_ms: Date.now() - ensureStartedAt,
       })
       const profile = await getMerchantLightningProfile(merchantId).catch(() => null)
+      const retryableStatus = profile?.status === "needs_attention" ? "needs_attention" : "retryable"
       return NextResponse.json({
         profile: safeLightningProfile(profile),
-        setup_status: profile?.status === "needs_attention" ? "needs_attention" : "retryable",
+        setup_status: retryableStatus,
+        status: retryableStatus,
+        providerCode: null,
+        fieldErrors: [],
         message: "Wallet setup is still processing. Please try again shortly.",
       })
     }
@@ -163,6 +168,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       profile: safeLightningProfile(profile),
       setup_status: profile?.status || "pending",
+      // Structured outcome for the calling client - status mirrors setup_status;
+      // providerCode/fieldErrors surface Speed's own /connect/custom validation
+      // failure (e.g. HTTP 400) instead of a generic "needs_attention".
+      status: profile?.status || "pending",
+      providerCode: ensureResult?.providerCode ?? null,
+      fieldErrors: ensureResult?.fieldErrors ?? [],
     })
   } catch (error) {
     return NextResponse.json(

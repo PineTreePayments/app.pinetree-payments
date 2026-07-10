@@ -44,6 +44,10 @@ export type EnsureManagedLightningResult = {
   speedConnectedAccountId: string | null
   speedConnectedAccountRelationshipId: string | null
   speedConnectedAccountStatus: string | null
+  // Speed's own error code and sanitized per-field validation messages from the
+  // most recent /connect/custom attempt, when one failed. Null/empty otherwise.
+  providerCode: string | null
+  fieldErrors: string[]
 }
 
 export type EnsureManagedLightningOptions = {
@@ -181,6 +185,8 @@ export async function ensureManagedLightningForMerchant(
         existing!.speed_account_id || existing!.speed_connected_account_id,
       speedConnectedAccountRelationshipId: existing!.speed_connected_account_relationship_id,
       speedConnectedAccountStatus: existing!.speed_connected_account_status,
+      providerCode: null,
+      fieldErrors: [],
     }
   }
 
@@ -249,6 +255,8 @@ export async function ensureManagedLightningForMerchant(
       speedConnectedAccountId: null,
       speedConnectedAccountRelationshipId: null,
       speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
+      providerCode: null,
+      fieldErrors: [],
     }
   }
 
@@ -279,6 +287,8 @@ export async function ensureManagedLightningForMerchant(
         lightningProfile.speed_account_id || lightningProfile.speed_connected_account_id,
       speedConnectedAccountRelationshipId: lightningProfile.speed_connected_account_relationship_id,
       speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
+      providerCode: null,
+      fieldErrors: [],
     }
   }
 
@@ -301,6 +311,8 @@ export async function ensureManagedLightningForMerchant(
       speedConnectedAccountId: null,
       speedConnectedAccountRelationshipId: null,
       speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
+      providerCode: null,
+      fieldErrors: [],
     }
   }
 
@@ -331,6 +343,8 @@ export async function ensureManagedLightningForMerchant(
       speedConnectedAccountId: null,
       speedConnectedAccountRelationshipId: null,
       speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
+      providerCode: null,
+      fieldErrors: [],
     }
   }
 
@@ -362,6 +376,8 @@ export async function ensureManagedLightningForMerchant(
       speedConnectedAccountId: null,
       speedConnectedAccountRelationshipId: null,
       speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
+      providerCode: null,
+      fieldErrors: [],
     }
   }
 
@@ -380,6 +396,9 @@ export async function ensureManagedLightningForMerchant(
         last_name: businessProfile.owner_last_name!,
         email: speedEmail,
         password: speedPassword,
+        business_name: businessProfile.legal_business_name,
+        email_valid: isValidSpeedCustomConnectEmail(speedEmail),
+        password_policy_valid: passwordPolicyPass,
       }),
       SPEED_CUSTOM_CONNECT_TIMEOUT_MS,
       "Speed Custom Connect"
@@ -402,6 +421,13 @@ export async function ensureManagedLightningForMerchant(
       speedConnectedAccountId: null,
       speedConnectedAccountRelationshipId: null,
       speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
+      // createSpeedCustomConnectedAccountForMerchant catches Speed API failures
+      // itself and resolves with provider_code/field_errors on speedSetup (see
+      // the success/incomplete return below) rather than rejecting - this catch
+      // only fires for a genuine timeout or another unexpected throw, neither of
+      // which carries a provider response to report.
+      providerCode: null,
+      fieldErrors: [],
     }
   } finally {
     console.info("[pinetree-managed-lightning] provisioning_timing", {
@@ -426,7 +452,14 @@ export async function ensureManagedLightningForMerchant(
     speedAccountId: speedSetup.speed_account_id,
     speedConnectedAccountStatus: speedSetup.speed_connected_account_status,
     speedConnectSetupUrl: speedSetup.setup_url,
-    providerResponseSummary: speedSetup.provider_response_summary,
+    // Persist Speed's own error code and sanitized field errors alongside the
+    // existing response summary so a rejected /connect/custom attempt is
+    // diagnosable from the saved row, not just the request-time logs.
+    providerResponseSummary: {
+      ...speedSetup.provider_response_summary,
+      ...(speedSetup.provider_code ? { provider_code: speedSetup.provider_code } : {}),
+      ...((speedSetup.field_errors || []).length > 0 ? { field_errors: speedSetup.field_errors } : {}),
+    },
     providerErrorMessage: speedSetup.error_message,
   })
 
@@ -452,5 +485,7 @@ export async function ensureManagedLightningForMerchant(
     speedConnectedAccountId: lightningProfile.speed_account_id || lightningProfile.speed_connected_account_id,
     speedConnectedAccountRelationshipId: lightningProfile.speed_connected_account_relationship_id,
     speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
+    providerCode: speedSetup.provider_code ?? null,
+    fieldErrors: speedSetup.field_errors || [],
   }
 }

@@ -1360,6 +1360,20 @@ function classifyDynamicSignInError(error: unknown): ClassifiedDynamicSignInErro
   }
 }
 
+// Lightweight classifier for an error that escapes refreshDynamicWalletRuntime
+// (e.g. the intermittent TypeError seen when two SDK hydration calls raced each
+// other). Only name/code - never the raw error, message, or wallet data - so
+// this is always safe to log server-side via emitWalletSetupDebugEvent.
+function classifyDynamicRefreshError(error: unknown): { errorName: string | null; errorCode: string | null } {
+  const chain = errorCauseChain(error)
+  const errorName = error instanceof Error ? error.name : readFirstString(chain, ["name"])
+  const errorCode = readFirstString(chain, ["code", "errorCode", "error_code"])
+  return {
+    errorName: errorName ? errorName.slice(0, 40) : null,
+    errorCode: errorCode ? errorCode.slice(0, 40) : null,
+  }
+}
+
 // A thrown signInWithExternalJwt is retried once for hints that plausibly describe
 // a transient condition (blocked storage/keychain access, SDK still initializing, a
 // dropped network request) rather than a hard configuration error that a retry
@@ -2594,6 +2608,16 @@ function PineTreeWalletRuntime() {
   const autoOpenWalletAfterCreateRef = useRef(false)
   const speedProvisionInFlightRef = useRef(false)
   const lastCombinedReadinessRef = useRef<string | null>(null)
+  // Single-flight guard for refreshDynamicWalletRuntime: only one Dynamic SDK
+  // hydration/refresh operation runs at a time. Concurrent callers (the polling
+  // interval, focus/visibility recheck, native-auth resume, final-refresh timer,
+  // etc.) all await this same in-flight promise instead of racing the SDK, which
+  // was the source of the intermittent TypeError during overlapping refreshes.
+  const walletRuntimeRefreshInFlightRef = useRef<Promise<boolean> | null>(null)
+  // Dedupes the background rail-sync call fired after a successful core profile
+  // save: only one rail-sync fetch per unique (dynamic_user_id, base, solana)
+  // address set, even if syncProfileFromDynamic resolves "ready" more than once.
+  const railSyncFiredForProfileRef = useRef<string | null>(null)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -3723,7 +3747,7 @@ function PineTreeWalletRuntime() {
     return dynamicProfileReadyRef.current
   }, [])
 
-  const refreshDynamicWalletRuntime = useCallback(async (reason: string, options?: { requireApprovalWallet?: boolean }) => {
+  const refreshDynamicWalletRuntimeImpl = useCallback(async (reason: string, options?: { requireApprovalWallet?: boolean }) => {
     if (!sdkHasLoaded || !user) return false
     console.info("[pinetree-wallets] wallet_dynamic_wallets_refresh_started", { reason })
     emitWalletSetupDebugEvent("wallet_dynamic_wallets_refresh_started", {
@@ -3907,6 +3931,7 @@ function PineTreeWalletRuntime() {
       }
       return hydrated
     } catch (error) {
+      const classified = classifyDynamicRefreshError(error)
       console.warn("[pinetree-wallets] dynamic_wallet_runtime_refresh_failed", {
         reason,
         dynamicUserId: user.userId ?? null,
@@ -3915,12 +3940,16 @@ function PineTreeWalletRuntime() {
       creatingEmbeddedWalletRef.current = false
       // Surface the throw server-side too - this is the "createWalletAccount /
       // createEmbeddedWallet threw but was swallowed client-side" case that's
-      // otherwise invisible in Vercel logs from a mobile browser.
+      // otherwise invisible in Vercel logs from a mobile browser. A transient
+      // refresh failure never resets pendingSync/walletCreationStep - the
+      // separate wallet-address-detection effect proceeds independently as soon
+      // as Base/Solana addresses are present, regardless of this return value.
       emitWalletSetupDebugEvent("wallet_dynamic_wallets_refresh_complete", {
         reason,
         hydrated: false,
         threw: true,
-        errorName: error instanceof Error ? error.name.slice(0, 40) : "unknown_error",
+        errorName: classified.errorName ?? "unknown_error",
+        ...(classified.errorCode ? { errorCode: classified.errorCode } : {}),
       })
       return false
     }
@@ -3945,6 +3974,80 @@ function PineTreeWalletRuntime() {
     waitForDynamicWalletRuntime,
     wallets,
   ])
+
+  // Single-flight wrapper: only one refreshDynamicWalletRuntimeImpl call runs at
+  // a time. A caller that arrives while one is already running awaits the same
+  // promise instead of starting a second concurrent SDK hydration - the race
+  // that produced the intermittent "hydrated: false, threw: true, errorName:
+  // TypeError" freeze in production.
+  const refreshDynamicWalletRuntime = useCallback((reason: string, options?: { requireApprovalWallet?: boolean }): Promise<boolean> => {
+    const runtimeWalletCountBefore = dynamicWalletRuntimeCountRef.current
+    const alreadyInFlight = walletRuntimeRefreshInFlightRef.current
+    if (alreadyInFlight) {
+      const diagnostic = {
+        refreshReason: reason,
+        inFlightReused: true,
+        sdkLoaded: sdkHasLoaded,
+        dynamicUserPresent: Boolean(user),
+        runtimeWalletCountBefore,
+        runtimeWalletCountAfter: runtimeWalletCountBefore,
+        errorName: null,
+        errorCode: null,
+      }
+      console.info("[pinetree-wallets] wallet_dynamic_wallets_refresh_diagnostic", diagnostic)
+      emitWalletSetupDebugEvent("wallet_dynamic_wallets_refresh_diagnostic", diagnostic)
+      return alreadyInFlight
+    }
+
+    const runPromise = (async () => {
+      let errorName: string | null = null
+      let errorCode: string | null = null
+      try {
+        return await refreshDynamicWalletRuntimeImpl(reason, options)
+      } catch (error) {
+        // Defensive net only - refreshDynamicWalletRuntimeImpl already catches
+        // its own errors and returns false. This guards against an error
+        // escaping before that try block (or a future change) ever reaching
+        // concurrent awaiters as an unhandled rejection.
+        const classified = classifyDynamicRefreshError(error)
+        errorName = classified.errorName
+        errorCode = classified.errorCode
+        console.warn("[pinetree-wallets] wallet_dynamic_wallets_refresh_unexpected_error", {
+          reason,
+          errorName,
+          errorCode,
+        })
+        return false
+      } finally {
+        const runtimeWalletCountAfter = dynamicWalletRuntimeCountRef.current
+        const diagnostic = {
+          refreshReason: reason,
+          inFlightReused: false,
+          sdkLoaded: sdkHasLoaded,
+          dynamicUserPresent: Boolean(user),
+          runtimeWalletCountBefore,
+          runtimeWalletCountAfter,
+          errorName,
+          errorCode,
+        }
+        console.info("[pinetree-wallets] wallet_dynamic_wallets_refresh_diagnostic", diagnostic)
+        emitWalletSetupDebugEvent("wallet_dynamic_wallets_refresh_diagnostic", {
+          refreshReason: diagnostic.refreshReason,
+          inFlightReused: diagnostic.inFlightReused,
+          sdkLoaded: diagnostic.sdkLoaded,
+          dynamicUserPresent: diagnostic.dynamicUserPresent,
+          runtimeWalletCountBefore: diagnostic.runtimeWalletCountBefore,
+          runtimeWalletCountAfter: diagnostic.runtimeWalletCountAfter,
+          ...(errorName ? { errorName } : {}),
+          ...(errorCode ? { errorCode } : {}),
+        })
+        walletRuntimeRefreshInFlightRef.current = null
+      }
+    })()
+
+    walletRuntimeRefreshInFlightRef.current = runPromise
+    return runPromise
+  }, [refreshDynamicWalletRuntimeImpl, sdkHasLoaded, user])
 
   useEffect(() => {
     if (!sdkHasLoaded || !user || profileState.kind !== "loaded") return
@@ -4385,11 +4488,18 @@ function PineTreeWalletRuntime() {
           }
         }
         // Fire rail sync in the background so merchant_wallets stays in sync with
-        // the PineTree Wallet profile without blocking the UI response.
-        void fetch("/api/wallets/pinetree-wallet/rail-sync", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }).then(() => fetchProviderRailState(token)).catch(() => undefined)
+        // the PineTree Wallet profile without blocking the UI response. Deduped
+        // per unique address set so overlapping successful profile saves (e.g. an
+        // initial attempt and a native-auth resume both landing "ready") never
+        // fire more than one rail-sync call for the same wallet.
+        const railSyncKey = `${json.profile.dynamic_user_id || ""}:${json.profile.base_address || ""}:${json.profile.solana_address || ""}`
+        if (railSyncFiredForProfileRef.current !== railSyncKey) {
+          railSyncFiredForProfileRef.current = railSyncKey
+          void fetch("/api/wallets/pinetree-wallet/rail-sync", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+          }).then(() => fetchProviderRailState(token)).catch(() => undefined)
+        }
         return json.profile
       }
       const mismatchResponse = getDynamicEmailMismatchResponse(responseBody)

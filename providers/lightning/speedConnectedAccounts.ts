@@ -12,6 +12,7 @@ import {
   getPineTreeSpeedConfigStatus,
   listSpeedConnectedAccounts,
   retrieveSpeedConnectedAccount,
+  SpeedApiError,
   type SpeedConnectedAccountObject,
   type SpeedMode,
 } from "./speedClient"
@@ -32,6 +33,11 @@ export type CreateSpeedCustomConnectedAccountForMerchantInput = {
   last_name: string
   email: string
   password: string
+  business_name?: string | null
+  // Pre-computed policy checks from the caller (single source of truth in
+  // pineTreeWalletReadiness.ts) - forwarded only for request diagnostics.
+  email_valid?: boolean
+  password_policy_valid?: boolean
 }
 
 export type SpeedConnectedAccountSummary = {
@@ -59,6 +65,11 @@ export type CreateOrLinkSpeedConnectedAccountResult = {
   readiness: SpeedConnectedAccountReadiness
   mode: SpeedMode
   used_live_api: boolean
+  // Speed's own error code and sanitized per-field validation messages from a
+  // rejected /connect/custom request (e.g. HTTP 400) - null/empty on success or
+  // when Speed's response body didn't include field-level detail.
+  provider_code: string | null
+  field_errors: string[]
 }
 
 const READY_SPEED_ACCOUNT_STATUSES = new Set([
@@ -157,6 +168,8 @@ function result(input: {
   errorMessage?: string | null
   mode: SpeedMode
   usedLiveApi: boolean
+  providerCode?: string | null
+  fieldErrors?: string[]
 }): CreateOrLinkSpeedConnectedAccountResult {
   const providerStatus = input.speedConnectedAccountStatus || input.summary.status || input.status
   return {
@@ -166,6 +179,8 @@ function result(input: {
     speed_account_id: input.summary.account_id || null,
     speed_connected_account_status: input.speedConnectedAccountStatus || null,
     setup_url: input.setupUrl || null,
+    provider_code: input.providerCode || null,
+    field_errors: input.fieldErrors || [],
     provider_response_summary: input.summary,
     error_message: input.errorMessage || null,
     raw_provider_status: providerStatus,
@@ -266,7 +281,10 @@ export async function createSpeedCustomConnectedAccountForMerchant(
       firstName: input.first_name,
       lastName: input.last_name,
       email: input.email,
-      password: input.password
+      password: input.password,
+      businessName: input.business_name,
+      emailValid: input.email_valid,
+      passwordPolicyValid: input.password_policy_valid,
     })
     const summary = summarizeConnectedAccount(account, "existing_connected_account")
     const accountReference = summary.account_id || summary.connected_account_id
@@ -295,6 +313,17 @@ export async function createSpeedCustomConnectedAccountForMerchant(
       step: "custom_account_create_failed",
       duration_ms: Date.now() - startedAt,
     })
+    // Capture Speed's own validation reason (e.g. a 400 field error) instead of
+    // collapsing every failure into the same generic "failed" bucket.
+    const isSpeedApiError = error instanceof SpeedApiError
+    if (isSpeedApiError) {
+      console.warn("[speed-custom-connect] custom_account_create_provider_rejected", {
+        merchant_id: input.merchant_id,
+        status: error.status,
+        providerCode: error.providerCode,
+        fieldErrorCount: error.fieldErrors.length,
+      })
+    }
     return result({
       status: "needs_attention",
       speedConnectedAccountStatus: "speed_custom_connect_failed",
@@ -302,6 +331,8 @@ export async function createSpeedCustomConnectedAccountForMerchant(
       errorMessage: safeProviderErrorMessage(error, "Speed custom connected account creation failed."),
       mode: config.mode,
       usedLiveApi: true,
+      providerCode: isSpeedApiError ? error.providerCode : null,
+      fieldErrors: isSpeedApiError ? error.fieldErrors : [],
     })
   }
 }

@@ -32,6 +32,7 @@ const WHITELISTED_EVENTS = new Set([
   "wallet_dynamic_create_embedded_wallet_complete",
   "wallet_dynamic_wallets_refresh_started",
   "wallet_dynamic_wallets_refresh_complete",
+  "wallet_dynamic_wallets_refresh_diagnostic",
   "wallet_dynamic_wallets_detected_count",
   "wallet_dynamic_base_address_detected",
   "wallet_dynamic_solana_address_detected",

@@ -131,6 +131,12 @@ export type CreateSpeedCustomConnectedAccountParams = {
   lastName: string
   email: string
   password: string
+  businessName?: string | null
+  // Pre-computed by the caller (pineTreeWalletReadiness.ts is the single source
+  // of truth for these policies) - carried through only so the request
+  // diagnostic can report real values without duplicating validation logic here.
+  emailValid?: boolean
+  passwordPolicyValid?: boolean
 }
 
 export type CreateSpeedConnectedWebhookParams = {
@@ -329,10 +335,91 @@ function safeSpeedErrorCode(status: number, body: string) {
   return "request_failed"
 }
 
-async function speedRequest<T>(
+/**
+ * Thrown for any non-2xx Speed API response. Carries the provider's own error
+ * code and sanitized per-field validation messages (when Speed's body includes
+ * them) so a 400 can be surfaced as the actual validation failure instead of
+ * collapsing into a generic "request_failed" bucket. Extends Error, so every
+ * existing `error instanceof Error` / `error.message` call site is unaffected.
+ */
+export class SpeedApiError extends Error {
+  status: number
+  providerCode: string | null
+  fieldErrors: string[]
+
+  constructor(message: string, status: number, providerCode: string | null, fieldErrors: string[]) {
+    super(message)
+    this.name = "SpeedApiError"
+    this.status = status
+    this.providerCode = providerCode
+    this.fieldErrors = fieldErrors
+  }
+}
+
+function sanitizeSpeedFieldErrorMessage(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  return trimmed
+    .replace(/sk_(test|live)_[A-Za-z0-9_-]+/g, "sk_$1_[redacted]")
+    .replace(/Basic\s+[A-Za-z0-9+/=]+/gi, "Basic [redacted]")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted-email]")
+    .slice(0, 200)
+}
+
+/**
+ * Extracts Speed's provider error code and per-field validation messages from a
+ * failed response body, tolerating whatever shape Speed actually returns
+ * (`errors: [...]` as strings or `{ field, message }` objects, or a single
+ * `error_message`/`message`). Never throws; unknown/unparseable bodies just
+ * produce an empty result. Every returned string is sanitized and length-capped.
+ */
+function parseSpeedErrorBody(body: string): { providerCode: string | null; fieldErrors: string[] } {
+  let parsed: unknown = null
+  try {
+    parsed = body ? JSON.parse(body) : null
+  } catch {
+    parsed = null
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { providerCode: null, fieldErrors: [] }
+  }
+
+  const row = parsed as Record<string, unknown>
+  const providerCodeRaw = row.error_code ?? row.code ?? row.type ?? null
+  const providerCode = typeof providerCodeRaw === "string" ? providerCodeRaw.slice(0, 60) : null
+
+  const fieldErrors: string[] = []
+  const errorsField = row.errors ?? row.error_details ?? row.list_errors
+  if (Array.isArray(errorsField)) {
+    for (const entry of errorsField) {
+      if (fieldErrors.length >= 10) break
+      if (typeof entry === "string") {
+        const safe = sanitizeSpeedFieldErrorMessage(entry)
+        if (safe) fieldErrors.push(safe)
+      } else if (entry && typeof entry === "object") {
+        const entryRow = entry as Record<string, unknown>
+        const field = typeof entryRow.field === "string"
+          ? entryRow.field
+          : typeof entryRow.param === "string" ? entryRow.param : null
+        const message = sanitizeSpeedFieldErrorMessage(
+          entryRow.message ?? entryRow.error_message ?? entryRow.description
+        )
+        if (message) fieldErrors.push(field ? `${field}: ${message}` : message)
+      }
+    }
+  } else {
+    const singleMessage = sanitizeSpeedFieldErrorMessage(row.error_message ?? row.message)
+    if (singleMessage) fieldErrors.push(singleMessage)
+  }
+
+  return { providerCode, fieldErrors }
+}
+
+async function speedRequestWithStatus<T>(
   path: string,
   init?: Omit<RequestInit, "headers"> & { headers?: Record<string, string> }
-): Promise<T> {
+): Promise<{ data: T; status: number }> {
   const config = getPineTreeSpeedConfigStatus()
   let response: Response
 
@@ -364,6 +451,7 @@ async function speedRequest<T>(
 
   if (!response.ok) {
     const body = await response.text().catch(() => "")
+    const { providerCode, fieldErrors } = parseSpeedErrorBody(body)
     console.error("[speed] API request failed", {
       path,
       status: response.status,
@@ -373,6 +461,8 @@ async function speedRequest<T>(
       console.warn("[speed] speed_connect_custom_request_failed", {
         status: response.status,
         safeCode: safeSpeedErrorCode(response.status, body),
+        providerCode,
+        providerFieldErrorCount: fieldErrors.length,
       })
     }
 
@@ -380,10 +470,23 @@ async function speedRequest<T>(
       throw new Error(SPEED_TRANSFER_SPLIT_ERROR)
     }
 
-    throw new Error(`Speed API returned ${response.status}${body ? `: ${body.slice(0, 300)}` : ""}`)
+    throw new SpeedApiError(
+      `Speed API returned ${response.status}${body ? `: ${body.slice(0, 300)}` : ""}`,
+      response.status,
+      providerCode,
+      fieldErrors
+    )
   }
 
-  return response.json() as Promise<T>
+  return { data: (await response.json()) as T, status: response.status }
+}
+
+async function speedRequest<T>(
+  path: string,
+  init?: Omit<RequestInit, "headers"> & { headers?: Record<string, string> }
+): Promise<T> {
+  const { data } = await speedRequestWithStatus<T>(path, init)
+  return data
 }
 
 /**
@@ -636,6 +739,23 @@ export async function createSpeedConnectAccountLink(params: {
   })
 }
 
+function speedConnectCustomDiagnostic(input: {
+  requestStarted: boolean
+  emailPresent: boolean
+  emailValid: boolean
+  passwordPresent: boolean
+  passwordPolicyValid: boolean
+  firstNamePresent: boolean
+  lastNamePresent: boolean
+  businessNamePresent: boolean
+  countryPresent: boolean
+  providerStatus: number | null
+  providerCode: string | null
+  providerFieldErrors: string[]
+}) {
+  return { endpoint: "/connect/custom", ...input }
+}
+
 export async function createSpeedCustomConnectedAccount(
   params: CreateSpeedCustomConnectedAccountParams
 ): Promise<SpeedConnectedAccountObject> {
@@ -644,6 +764,7 @@ export async function createSpeedCustomConnectedAccount(
   const lastName = String(params.lastName || "").trim()
   const email = String(params.email || "").trim().toLowerCase()
   const password = String(params.password || "").trim()
+  const businessName = String(params.businessName || "").trim()
 
   if (!country) throw new Error("Speed custom connected account country is required.")
   if (!firstName) throw new Error("Speed custom connected account first name is required.")
@@ -651,22 +772,68 @@ export async function createSpeedCustomConnectedAccount(
   if (!email) throw new Error("Speed custom connected account email is required.")
   if (!password) throw new Error("Speed custom connected account password is required.")
 
-  console.info("[speed] speed_connect_custom_request_started", {
+  const presenceFields = {
     emailPresent: Boolean(email),
+    emailValid: params.emailValid ?? Boolean(email),
     passwordPresent: Boolean(password),
-  })
+    passwordPolicyValid: params.passwordPolicyValid ?? Boolean(password),
+    firstNamePresent: Boolean(firstName),
+    lastNamePresent: Boolean(lastName),
+    businessNamePresent: Boolean(businessName),
+    countryPresent: Boolean(country),
+  }
 
-  return speedRequest<SpeedConnectedAccountObject>("/connect/custom", {
-    method: "POST",
-    body: JSON.stringify({
-      country,
-      account_type: "merchant",
-      first_name: firstName,
-      last_name: lastName,
-      email,
-      password
+  // Diagnostics only - never the password or email value itself, only presence
+  // and policy-pass booleans computed by the caller.
+  console.info(
+    "[speed] speed_connect_custom_request_diagnostic",
+    speedConnectCustomDiagnostic({
+      requestStarted: true,
+      ...presenceFields,
+      providerStatus: null,
+      providerCode: null,
+      providerFieldErrors: [],
     })
-  })
+  )
+
+  try {
+    const { data, status } = await speedRequestWithStatus<SpeedConnectedAccountObject>("/connect/custom", {
+      method: "POST",
+      body: JSON.stringify({
+        country,
+        account_type: "merchant",
+        first_name: firstName,
+        last_name: lastName,
+        email,
+        password,
+        ...(businessName ? { account_name: businessName } : {}),
+      })
+    })
+    console.info(
+      "[speed] speed_connect_custom_request_diagnostic",
+      speedConnectCustomDiagnostic({
+        requestStarted: true,
+        ...presenceFields,
+        providerStatus: status,
+        providerCode: null,
+        providerFieldErrors: [],
+      })
+    )
+    return data
+  } catch (error) {
+    const isSpeedApiError = error instanceof SpeedApiError
+    console.info(
+      "[speed] speed_connect_custom_request_diagnostic",
+      speedConnectCustomDiagnostic({
+        requestStarted: true,
+        ...presenceFields,
+        providerStatus: isSpeedApiError ? error.status : null,
+        providerCode: isSpeedApiError ? error.providerCode : null,
+        providerFieldErrors: isSpeedApiError ? error.fieldErrors : [],
+      })
+    )
+    throw error
+  }
 }
 
 export async function createSpeedConnectedAccountWebhook(

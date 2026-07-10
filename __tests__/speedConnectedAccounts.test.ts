@@ -8,18 +8,25 @@ const speedClientMocks = vi.hoisted(() => ({
   retrieveSpeedConnectedAccount: vi.fn(),
 }))
 
-vi.mock("@/providers/lightning/speedClient", () => ({
-  createSpeedCustomConnectedAccount: speedClientMocks.createSpeedCustomConnectedAccount,
-  createSpeedConnectAccountLink: speedClientMocks.createSpeedConnectAccountLink,
-  getPineTreeSpeedConfigStatus: speedClientMocks.getPineTreeSpeedConfigStatus,
-  listSpeedConnectedAccounts: speedClientMocks.listSpeedConnectedAccounts,
-  retrieveSpeedConnectedAccount: speedClientMocks.retrieveSpeedConnectedAccount,
-}))
+vi.mock("@/providers/lightning/speedClient", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/providers/lightning/speedClient")>()
+  return {
+    createSpeedCustomConnectedAccount: speedClientMocks.createSpeedCustomConnectedAccount,
+    createSpeedConnectAccountLink: speedClientMocks.createSpeedConnectAccountLink,
+    getPineTreeSpeedConfigStatus: speedClientMocks.getPineTreeSpeedConfigStatus,
+    listSpeedConnectedAccounts: speedClientMocks.listSpeedConnectedAccounts,
+    retrieveSpeedConnectedAccount: speedClientMocks.retrieveSpeedConnectedAccount,
+    // Real class, not a mock - speedConnectedAccounts.ts does `instanceof
+    // SpeedApiError` to extract providerCode/fieldErrors from a rejection.
+    SpeedApiError: actual.SpeedApiError,
+  }
+})
 
 import {
   createOrLinkSpeedConnectedAccountForMerchant,
   createSpeedCustomConnectedAccountForMerchant
 } from "@/providers/lightning/speedConnectedAccounts"
+import { SpeedApiError } from "@/providers/lightning/speedClient"
 
 const originalEnv = process.env
 
@@ -166,6 +173,73 @@ describe("createOrLinkSpeedConnectedAccountForMerchant", () => {
       account_id: "acct_custom_123",
       status: "Active",
     })
+  })
+
+  it("forwards businessName and pre-computed policy booleans to the Speed client call", async () => {
+    speedClientMocks.createSpeedCustomConnectedAccount.mockResolvedValue({
+      id: "ca_custom_biz",
+      account_id: "acct_custom_biz",
+      status: "Active",
+    })
+
+    await createSpeedCustomConnectedAccountForMerchant({
+      merchant_id: "merchant_123",
+      country: "US",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      email: "merchant@example.test",
+      password: "temporary-secret",
+      business_name: "PineTree Test Merchant LLC",
+      email_valid: true,
+      password_policy_valid: true,
+    })
+
+    expect(speedClientMocks.createSpeedCustomConnectedAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessName: "PineTree Test Merchant LLC",
+        emailValid: true,
+        passwordPolicyValid: true,
+      })
+    )
+  })
+
+  it("captures Speed's provider code and sanitized field errors from a rejected /connect/custom request instead of collapsing to a generic failure", async () => {
+    speedClientMocks.createSpeedCustomConnectedAccount.mockRejectedValue(
+      new SpeedApiError("Speed API returned 400: validation failed", 400, "invalid_request", [
+        "email: already registered",
+        "password: too weak",
+      ])
+    )
+
+    const result = await createSpeedCustomConnectedAccountForMerchant({
+      merchant_id: "merchant_123",
+      country: "US",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      email: "merchant@example.test",
+      password: "temporary-secret",
+    })
+
+    expect(result.readiness).toBe("needs_attention")
+    expect(result.provider_code).toBe("invalid_request")
+    expect(result.field_errors).toEqual(["email: already registered", "password: too weak"])
+  })
+
+  it("reports a null provider code and empty field errors for a non-provider (network/unknown) failure", async () => {
+    speedClientMocks.createSpeedCustomConnectedAccount.mockRejectedValue(new Error("network unreachable"))
+
+    const result = await createSpeedCustomConnectedAccountForMerchant({
+      merchant_id: "merchant_123",
+      country: "US",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      email: "merchant@example.test",
+      password: "temporary-secret",
+    })
+
+    expect(result.readiness).toBe("needs_attention")
+    expect(result.provider_code).toBeNull()
+    expect(result.field_errors).toEqual([])
   })
 
   it("reuses an existing custom connected account by email instead of creating a duplicate", async () => {

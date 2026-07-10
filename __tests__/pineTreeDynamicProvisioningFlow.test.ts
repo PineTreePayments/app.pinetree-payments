@@ -208,7 +208,7 @@ describe("PineTree Dynamic provisioning flow", () => {
     // ever called createWalletAccount when that array was non-empty, so nothing ever created a
     // wallet and the app silently polled forever without ever reaching profile POST.
     const refreshFn = page.slice(
-      page.indexOf("const refreshDynamicWalletRuntime = useCallback"),
+      page.indexOf("const refreshDynamicWalletRuntimeImpl = useCallback"),
       page.indexOf("}, [\n    createEmbeddedWallet,")
     )
     expect(page).toContain("const REQUIRED_WAAS_WALLET_CHAINS = [{ chain: \"EVM\" }, { chain: \"SOL\" }]")
@@ -220,7 +220,7 @@ describe("PineTree Dynamic provisioning flow", () => {
 
   it("existing WaaS credentials without runtime wallets force a restore instead of a duplicate create", () => {
     const refreshFn = page.slice(
-      page.indexOf("const refreshDynamicWalletRuntime = useCallback"),
+      page.indexOf("const refreshDynamicWalletRuntimeImpl = useCallback"),
       page.indexOf("}, [\n    createEmbeddedWallet,")
     )
     expect(refreshFn).toContain("if (runtimeWallets.length === 0 && runtimeCredentials.length > 0 && !shouldInitializeWaas)")
@@ -230,12 +230,89 @@ describe("PineTree Dynamic provisioning flow", () => {
   it("wallet creation calls are guarded against concurrent duplicate attempts", () => {
     expect(page).toContain("const creatingEmbeddedWalletRef = useRef(false)")
     const refreshFn = page.slice(
-      page.indexOf("const refreshDynamicWalletRuntime = useCallback"),
+      page.indexOf("const refreshDynamicWalletRuntimeImpl = useCallback"),
       page.indexOf("}, [\n    createEmbeddedWallet,")
     )
     expect(refreshFn).toContain("requiredChains.length > 0 && !creatingEmbeddedWalletRef.current")
     expect(refreshFn).toContain("creatingEmbeddedWalletRef.current = true")
     expect(refreshFn).toContain("creatingEmbeddedWalletRef.current = false")
+  })
+
+  it("refreshDynamicWalletRuntime is a single-flight wrapper - concurrent callers share the same in-flight promise", () => {
+    // Root cause of the overlapping-refresh freeze/TypeError: nothing dedup'd
+    // concurrent calls into refreshDynamicWalletRuntimeImpl, so two SDK
+    // hydration cycles (e.g. the polling interval and a focus recheck) could
+    // race each other's createWalletAccount/initializeWaas calls.
+    const wrapperFn = page.slice(
+      page.indexOf("const refreshDynamicWalletRuntime = useCallback((reason: string"),
+      page.indexOf("}, [refreshDynamicWalletRuntimeImpl, sdkHasLoaded, user])")
+    )
+    expect(wrapperFn).toBeTruthy()
+    expect(wrapperFn).toContain("const alreadyInFlight = walletRuntimeRefreshInFlightRef.current")
+    expect(wrapperFn).toContain("if (alreadyInFlight) {")
+    expect(wrapperFn).toContain("return alreadyInFlight")
+    expect(wrapperFn).toContain("walletRuntimeRefreshInFlightRef.current = runPromise")
+    expect(wrapperFn).toContain("walletRuntimeRefreshInFlightRef.current = null")
+  })
+
+  it("declares the single-flight ref once, ahead of the wrapper", () => {
+    expect(page).toContain("const walletRuntimeRefreshInFlightRef = useRef<Promise<boolean> | null>(null)")
+  })
+
+  it("single-flight diagnostic logs refreshReason/inFlightReused/runtimeWalletCount before and after, and errorName/errorCode safely", () => {
+    const wrapperFn = page.slice(
+      page.indexOf("const refreshDynamicWalletRuntime = useCallback((reason: string"),
+      page.indexOf("}, [refreshDynamicWalletRuntimeImpl, sdkHasLoaded, user])")
+    )
+    expect(wrapperFn).toContain("wallet_dynamic_wallets_refresh_diagnostic")
+    expect(wrapperFn).toContain("refreshReason: reason")
+    expect(wrapperFn).toContain("inFlightReused: true")
+    expect(wrapperFn).toContain("inFlightReused: false")
+    expect(wrapperFn).toContain("runtimeWalletCountBefore")
+    expect(wrapperFn).toContain("runtimeWalletCountAfter")
+    expect(wrapperFn).toContain("classifyDynamicRefreshError(error)")
+    // Never the raw error object, wallet address, email, or JWT - only
+    // name/code strings capped to 40 chars.
+    expect(wrapperFn).not.toContain("error.stack")
+    expect(wrapperFn).not.toContain("error.message")
+  })
+
+  it("wallet_dynamic_wallets_refresh_diagnostic is whitelisted for the server-visible beacon", () => {
+    const eventRoute = read("app/api/debug/pinetree-wallet/setup-event/route.ts")
+    expect(eventRoute).toContain('"wallet_dynamic_wallets_refresh_diagnostic"')
+  })
+
+  it("a transient refresh failure never resets pendingSync or walletCreationStep - the impl only returns false", () => {
+    const implFn = page.slice(
+      page.indexOf("const refreshDynamicWalletRuntimeImpl = useCallback"),
+      page.indexOf("}, [\n    createEmbeddedWallet,")
+    )
+    const catchBlock = implFn.slice(implFn.indexOf("} catch (error) {"))
+    expect(catchBlock).not.toContain("setPendingSync(false)")
+    expect(catchBlock).not.toContain('setWalletCreationStep("failed")')
+    expect(catchBlock).not.toContain('setWalletCreationStep("timeout")')
+    expect(catchBlock).toContain("return false")
+  })
+
+  it("wallet address detection (and the resulting profile save) is a separate effect, decoupled from refresh's return value", () => {
+    // Confirms Base/Solana detection proceeds independently of whether the most
+    // recent refreshDynamicWalletRuntime call itself succeeded or failed -
+    // this effect watches dynamicNetworkAddresses directly, not a refresh result.
+    const detectEffectStart = page.indexOf('if (!pendingSync || !sdkHasLoaded || !user || pendingProfileSyncAttemptRef.current) return')
+    expect(detectEffectStart).toBeGreaterThan(-1)
+    const detectEffect = page.slice(detectEffectStart, page.indexOf("function inferWalletSetupFailureReason"))
+    expect(detectEffect).toContain("dynamicNetworkAddresses.base[0]?.address")
+    expect(detectEffect).toContain("syncProfileFromDynamic()")
+  })
+
+  it("dedupes the background rail-sync call fired after a successful profile save", () => {
+    const readyBlock = page.slice(
+      page.indexOf('const railSyncKey = `${json.profile.dynamic_user_id'),
+      page.indexOf('const railSyncKey = `${json.profile.dynamic_user_id') + 500
+    )
+    expect(readyBlock).toContain("railSyncFiredForProfileRef.current !== railSyncKey")
+    expect(readyBlock).toContain("railSyncFiredForProfileRef.current = railSyncKey")
+    expect(page).toContain("const railSyncFiredForProfileRef = useRef<string | null>(null)")
   })
 
   it("delayed Base/Solana hydration retries before saving the profile and then clears Preparing/Saving", () => {
