@@ -6501,14 +6501,7 @@ function PineTreeWalletRuntime() {
   return (
     <>
       <article className="max-w-2xl rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-5 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:p-6">
-        <div className="flex items-start justify-between gap-4">
-          <h2 className="min-w-0 text-base font-semibold text-gray-950">PineTree Wallet</h2>
-          <WalletStatusPill
-            label={walletStatus}
-            tone="blue"
-            className="shrink-0"
-          />
-        </div>
+        <h2 className="min-w-0 text-base font-semibold text-gray-950">PineTree Wallet</h2>
         {!walletProvisioningInProgress ? (
           <div className="mt-3 max-w-xl">
             <p className="text-sm leading-6 text-gray-600">

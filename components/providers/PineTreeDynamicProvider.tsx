@@ -31,6 +31,42 @@ const embeddedMerchantWalletConnectorTokens = [
   "magicsocial",
 ]
 
+const pineTreeDynamicLogoUrl = "/favicon.ico"
+
+const pineTreeDynamicCssOverrides = `
+  .layout-header__typography {
+    display: flex;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .layout-header__typography img,
+  .layout-header__typography svg {
+    display: block;
+    width: 48px;
+    height: 48px;
+    max-width: 48px;
+    max-height: 48px;
+    margin: 0 auto;
+    border: 1px solid rgba(229, 231, 235, 0.9);
+    border-radius: 16px;
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+    object-fit: contain;
+  }
+
+  @media (max-width: 480px) {
+    .layout-header__typography img,
+    .layout-header__typography svg {
+      width: 44px;
+      height: 44px;
+      max-width: 44px;
+      max-height: 44px;
+      border-radius: 14px;
+    }
+  }
+`
+
 function normalizeWalletToken(value: unknown) {
   return String(value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "")
 }
@@ -178,6 +214,8 @@ export default function PineTreeDynamicProvider({ children }: { children: ReactN
         settings={{
           environmentId,
           appName: "PineTree Wallet",
+          appLogoUrl: pineTreeDynamicLogoUrl,
+          cssOverrides: pineTreeDynamicCssOverrides,
           walletConnectors: [
             EthereumWalletConnectors,
             SolanaWalletConnectors,

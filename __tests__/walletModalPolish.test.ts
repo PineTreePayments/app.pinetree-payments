@@ -8,6 +8,7 @@ function read(file: string) {
 
 const walletPage = read("app/dashboard/wallet-setup/page.tsx")
 const providersPage = read("app/dashboard/providers/page.tsx")
+const dynamicProvider = read("components/providers/PineTreeDynamicProvider.tsx")
 
 function walletOverviewSrc() {
   return walletPage.slice(
@@ -344,26 +345,31 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(src).toContain("max-w-xl")
   })
 
-  it("main Connected pill renders in the wallet setup card header area", () => {
+  it("main Connected pill is removed from the wallet setup card header area", () => {
     const src = runtimeSrc()
-    expect(src).toContain("flex items-start justify-between gap-4")
     expect(src).toContain("<h2 className=\"min-w-0 text-base font-semibold text-gray-950\">PineTree Wallet</h2>")
-    expect(src).toContain("label={walletStatus}")
-    expect(src).toContain("className=\"shrink-0\"")
+    const setupCardHeader = src.slice(
+      src.indexOf("<article className=\"max-w-2xl"),
+      src.indexOf("{!walletProvisioningInProgress ? (")
+    )
+    expect(setupCardHeader).not.toContain("WalletStatusPill")
+    expect(setupCardHeader).not.toContain("label={walletStatus}")
+    expect(setupCardHeader).not.toContain("className=\"shrink-0\"")
   })
 
-  it("wallet setup card badge displays Connected instead of Ready when the wallet is set up", () => {
+  it("wallet setup state still derives Connected internally when the wallet is set up", () => {
     expect(walletPage).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
     expect(walletPage).not.toContain('walletSetupPrimaryState === "ready" ? "Ready"')
-    const runtime = runtimeSrc()
-    expect(runtime).toContain("label={walletStatus}")
   })
 
   it("wallet modal header badge also displays Connected instead of Ready", () => {
-    // Both the setup-card badge and the modal header badge share the same
-    // walletStatus value, so renaming the underlying label fixes both at once.
     const labelUsages = [...walletPage.matchAll(/label=\{walletStatus\}/g)]
-    expect(labelUsages.length).toBeGreaterThanOrEqual(2)
+    expect(labelUsages.length).toBeGreaterThanOrEqual(1)
+    const modalHeader = walletPage.slice(
+      walletPage.indexOf('aria-labelledby="pinetree-wallet-modal-title"'),
+      walletPage.indexOf('aria-label="Close PineTree Wallet"')
+    )
+    expect(modalHeader).toContain("label={walletStatus}")
   })
 
   it("Open/Create PineTree Wallet button remains in the content flow", () => {
@@ -393,6 +399,17 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(chipsSrc).toContain("{rail.label}")
     expect(chipsSrc).not.toContain("ProviderStatusPill")
     expect(chipsSrc).not.toContain("walletStatus")
+  })
+})
+
+describe("Dynamic email fallback modal branding", () => {
+  it("uses the shared PineTree header logo asset for Dynamic auth branding", () => {
+    expect(dynamicProvider).toContain('const pineTreeDynamicLogoUrl = "/favicon.ico"')
+    expect(dynamicProvider).toContain("appLogoUrl: pineTreeDynamicLogoUrl")
+    expect(dynamicProvider).toContain("cssOverrides: pineTreeDynamicCssOverrides")
+    expect(dynamicProvider).toContain(".layout-header__typography img")
+    expect(dynamicProvider).toContain("object-fit: contain")
+    expect(dynamicProvider).not.toContain("blue circle checkmark")
   })
 })
 
