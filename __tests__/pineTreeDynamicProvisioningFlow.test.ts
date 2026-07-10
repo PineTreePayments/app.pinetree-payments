@@ -547,9 +547,9 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain("Open PineTree Wallet")
   })
 
-  it("existing ready profile plus wrong Dynamic session shows Wrong sign-in", () => {
-    expect(page).toContain('walletSetupPrimaryState === "email_mismatch" ? "Wrong sign-in" :')
-    expect(page).toContain("We could not verify wallet access. Please try again.")
+  it("existing ready profile plus wrong Dynamic session shows older setup guidance", () => {
+    expect(page).toContain('walletSetupPrimaryState === "email_mismatch" ? "Older setup found" :')
+    expect(page).toContain("PineTree found an older wallet setup for this account. Please retry after the previous test wallet is cleared.")
     const ctaBlock = page.slice(
       page.indexOf('<div className="mt-6 flex justify-start">'),
       page.indexOf(') : walletSetupPrimaryState === "reconnect_needed" ? (')
@@ -741,10 +741,10 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(ctaChain).toContain("Open PineTree Wallet")
   })
 
-  it("badge distinguishes Reconnect needed, Wrong sign-in, Save needed, and Rail sync needed", () => {
+  it("badge distinguishes Reconnect needed, Older setup found, Save needed, and Rail sync needed", () => {
     expect(page).toContain('walletSetupPrimaryState === "reconnect_needed" ? "Reconnect needed" :')
-    expect(page).toContain('walletSetupPrimaryState === "email_mismatch" ? "Wrong sign-in" :')
-    expect(page).toContain('walletSetupPrimaryState === "email_unverified" ? "Wrong sign-in" :')
+    expect(page).toContain('walletSetupPrimaryState === "email_mismatch" ? "Older setup found" :')
+    expect(page).toContain('walletSetupPrimaryState === "email_unverified" ? "Older setup found" :')
     expect(page).toContain('walletSetupPrimaryState === "save_needed" ? "Save needed" :')
     expect(page).toContain('walletSetupPrimaryState === "rail_sync_needed" ? "Rail sync needed" :')
     expect(page).not.toContain('walletSetupPrimaryState === "repair_needed" ? "Setup incomplete" :')
@@ -978,6 +978,8 @@ describe("PineTree Dynamic provisioning flow", () => {
 
   it("does not silently overwrite a saved ready profile with a different Dynamic address", () => {
     expect(profileRoute).toContain("const existingReadyProfile = profileHasReadyCoreIdentity(existingProfile)")
+    expect(profileRoute).toContain("const existingProfileProtected = await pineTreeWalletProfileHasProtectedHistory(existingProfile?.id)")
+    expect(profileRoute).not.toContain("existingReadyProfile || await pineTreeWalletProfileHasProtectedHistory")
     expect(profileRoute).toContain('error: "wallet_identity_conflict"')
     expect(profileRoute).toContain('conflictType')
     expect(profileRoute).toContain('"base_owned_by_other_merchant"')
@@ -987,6 +989,39 @@ describe("PineTree Dynamic provisioning flow", () => {
     // Idempotent resync (same addresses) must not be treated as a conflict.
     expect(profileRoute).toContain("incomingBaseAddress !== existingProfile.base_address")
     expect(profileRoute).toContain("incomingSolanaAddress !== existingProfile.solana_address")
+  })
+
+  it("protects stale profile replacement using financial history, not ready status alone", () => {
+    const walletProfileDb = read("database/pineTreeWalletProfiles.ts")
+    expect(walletProfileDb).toContain('"wallet_operations"')
+    expect(walletProfileDb).toContain('"wallet_operation_events"')
+    expect(walletProfileDb).toContain('"wallet_withdrawal_requests"')
+    expect(walletProfileDb).toContain('"ledger_entries"')
+    expect(walletProfileDb).toContain('"payments"')
+    expect(walletProfileDb).toContain('.in(column, addresses)')
+  })
+
+  it("ships a safe one-off deleted Dynamic wallet profile repair script", () => {
+    const repairScript = read("scripts/repair-deleted-dynamic-wallet-profile.mjs")
+    for (const field of [
+      "profileExists",
+      "profileStatus",
+      "hasDynamicUserId",
+      "hasBaseAddress",
+      "hasSolanaAddress",
+      "hasWalletOperations",
+      "hasWithdrawals",
+      "hasLedgerHistory",
+      "hasPaymentHistory",
+      "safeToReset",
+    ]) {
+      expect(repairScript).toContain(field)
+    }
+    expect(repairScript).toContain("dynamic_user_id: null")
+    expect(repairScript).toContain("base_address: null")
+    expect(repairScript).toContain("solana_address: null")
+    expect(repairScript).not.toContain("console.log(serviceKey")
+    expect(repairScript).not.toContain("console.log(supabaseUrl")
   })
 
   it("logs wallet profile identity conflicts with safe ownership booleans only", () => {

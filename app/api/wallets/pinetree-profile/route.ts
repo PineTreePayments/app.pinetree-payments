@@ -244,7 +244,7 @@ export async function POST(req: NextRequest) {
           body.dynamic_user_id &&
           existingProfile.dynamic_user_id === body.dynamic_user_id
       )
-      const existingProfileProtected = existingReadyProfile || await pineTreeWalletProfileHasProtectedHistory(existingProfile?.id)
+      const existingProfileProtected = await pineTreeWalletProfileHasProtectedHistory(existingProfile?.id)
       const existingProfileRepairable = Boolean(existingProfile && !existingProfileProtected)
       const ownershipDiagnostics = {
         existingProfileForMerchant: Boolean(existingProfile),

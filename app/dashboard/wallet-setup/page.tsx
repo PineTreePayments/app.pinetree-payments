@@ -1170,6 +1170,9 @@ function isWalletAddressConflictResponse(value: unknown) {
   return error === "wallet_address_conflict" || error === "wallet_identity_conflict"
 }
 
+const stalePineTreeWalletSetupMessage =
+  "PineTree found an older wallet setup for this account. Please retry after the previous test wallet is cleared."
+
 function getProviderSyncStatus(value: unknown) {
   const providerSync = toRecord(value).providerSync
   if (!Array.isArray(providerSync)) return providerSync ? "returned" : null
@@ -4408,9 +4411,7 @@ function PineTreeWalletRuntime() {
       if (isWalletAddressConflictResponse(responseBody)) {
         setIdentityMismatchError(null)
         setIdentityUnverified(false)
-        setWalletIdentityError(
-          "This PineTree Wallet doesn't match the one already saved for your account. Contact support to continue."
-        )
+        setWalletIdentityError(stalePineTreeWalletSetupMessage)
         clearWalletSetupInProgress()
         recordWalletSetupFailure("wallet_address_conflict", "failed", {
           profileEndpointStatus: res.status,
@@ -5247,7 +5248,7 @@ function PineTreeWalletRuntime() {
   // dynamicSessionExternallyBound short-circuits both: an externalUser credential
   // signed by PineTree (JWT sub = merchant_id) is stronger proof of ownership than
   // any email Dynamic happens to surface, so email presentation can never flip a
-  // bound session into "Wrong sign-in".
+  // bound session into stale older-setup state.
   const liveEmailMismatch =
     !dynamicSessionExternallyBound &&
     Boolean(user) && Boolean(merchantEmail) && Boolean(dynamicUserEmail) && dynamicUserEmail !== merchantEmail
@@ -5355,8 +5356,8 @@ function PineTreeWalletRuntime() {
     walletSetupPrimaryState === "create_wallet" ? "Create wallet" :
     walletSetupPrimaryState === "provisioning" ? "Provisioning" :
     walletSetupPrimaryState === "reconnect_needed" ? "Reconnect needed" :
-    walletSetupPrimaryState === "email_mismatch" ? "Wrong sign-in" :
-    walletSetupPrimaryState === "email_unverified" ? "Wrong sign-in" :
+    walletSetupPrimaryState === "email_mismatch" ? "Older setup found" :
+    walletSetupPrimaryState === "email_unverified" ? "Older setup found" :
     walletSetupPrimaryState === "save_needed" ? "Save needed" :
     walletSetupPrimaryState === "rail_sync_needed" ? "Rail sync needed" :
     walletSetupPrimaryState === "failed" ? "Failed" :

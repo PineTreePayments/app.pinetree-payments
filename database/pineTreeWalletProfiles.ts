@@ -160,17 +160,54 @@ export async function pineTreeWalletProfileHasProtectedHistory(profileId?: strin
   const id = String(profileId || "").trim()
   if (!id) return false
 
-  const { count, error } = await supabase
-    .from("wallet_withdrawal_requests")
-    .select("id", { count: "exact", head: true })
-    .eq("wallet_profile_id", id)
+  const { data: profile } = await supabase
+    .from(PROFILES_TABLE)
+    .select("merchant_id,base_address,solana_address")
+    .eq("id", id)
+    .maybeSingle()
 
-  if (error) {
-    // Fail closed: if the financial-history check cannot be evaluated, do not
-    // allow address replacement that might detach real withdrawal history.
-    return true
+  const merchantId = String((profile as { merchant_id?: unknown } | null)?.merchant_id || "").trim()
+  const addresses = [
+    String((profile as { base_address?: unknown } | null)?.base_address || "").trim(),
+    String((profile as { solana_address?: unknown } | null)?.solana_address || "").trim(),
+  ].filter(Boolean)
+
+  const countRows = async (table: string, column: string, value: string) => {
+    const { count, error } = await supabase
+      .from(table)
+      .select("id", { count: "exact", head: true })
+      .eq(column, value)
+    if (error) return true
+    return Number(count || 0) > 0
   }
-  return Number(count || 0) > 0
+
+  const countAddressRows = async (table: string, column: string) => {
+    if (!merchantId || addresses.length === 0) return false
+    const { count, error } = await supabase
+      .from(table)
+      .select("id", { count: "exact", head: true })
+      .eq("merchant_id", merchantId)
+      .in(column, addresses)
+    if (error) return true
+    return Number(count || 0) > 0
+  }
+
+  const [
+    withdrawalsForProfile,
+    walletOperations,
+    walletOperationEvents,
+    ledgerForAddresses,
+    paymentsForAddresses,
+  ] = await Promise.all([
+    countRows("wallet_withdrawal_requests", "wallet_profile_id", id),
+    merchantId ? countRows("wallet_operations", "merchant_id", merchantId) : false,
+    merchantId ? countRows("wallet_operation_events", "merchant_id", merchantId) : false,
+    countAddressRows("ledger_entries", "wallet_address"),
+    countAddressRows("payments", "payment_url"),
+  ])
+
+  // Fail closed when any count helper reports an error (true).
+  return Boolean(withdrawalsForProfile || walletOperations || walletOperationEvents || ledgerForAddresses || paymentsForAddresses)
 }
 
 /**

@@ -824,7 +824,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("function isWalletAddressConflictResponse(value: unknown)")
     expect(page).toContain("isWalletAddressConflictResponse(responseBody)")
     expect(page).toContain(
-      "This PineTree Wallet doesn't match the one already saved for your account. Contact support to continue."
+      "PineTree found an older wallet setup for this account. Please retry after the previous test wallet is cleared."
     )
   })
 
