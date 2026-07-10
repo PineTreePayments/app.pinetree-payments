@@ -438,6 +438,115 @@ describe("PineTree embedded wallet setup", () => {
     expect(retryableSetSrc).not.toContain("external_auth_rejected")
   })
 
+  it("Create Wallet and Try Again share one orchestrator that starts core Dynamic and Speed tasks concurrently", () => {
+    const createFn = page.slice(
+      page.indexOf("function handleCreateWallet()"),
+      page.indexOf("async function createPineTreeWalletSetup(")
+    )
+    expect(createFn).toContain("void createPineTreeWalletSetup({ retry: false })")
+    const retryFn = page.slice(
+      page.indexOf("function handleRetryWalletSetup()"),
+      page.indexOf("async function handleResetPineTreeWalletSetup()")
+    )
+    expect(retryFn).toContain("void createPineTreeWalletSetup({ retry: true })")
+    // Neither task waits for the other: both start inside one Promise.allSettled,
+    // so the Speed route is called immediately on Create Wallet, and a Speed
+    // rejection can never short-circuit core Dynamic wallet creation.
+    const orchestratorFn = page.slice(
+      page.indexOf("async function createPineTreeWalletSetup("),
+      page.indexOf("async function startCoreDynamicWallet(")
+    )
+    expect(orchestratorFn).toContain("await Promise.allSettled([")
+    expect(orchestratorFn).toContain("startCoreDynamicWallet(options),")
+    expect(orchestratorFn).toContain("provisionSpeedLightning(),")
+    expect(orchestratorFn).toContain('emitWalletSetupDebugEvent("wallet_setup_orchestrator_started"')
+    expect(orchestratorFn).toContain('emitWalletSetupDebugEvent("wallet_setup_orchestrator_settled"')
+  })
+
+  it("Speed provisioning never throws into or fails core wallet setup", () => {
+    const speedFn = page.slice(
+      page.indexOf("async function provisionSpeedLightning("),
+      page.indexOf("function handleUsePineTreeAccountEmail()")
+    )
+    expect(speedFn).toContain('fetch("/api/wallets/lightning/pinetree-managed"')
+    expect(speedFn).toContain('emitWalletSetupDebugEvent("wallet_speed_setup_started", {})')
+    expect(speedFn).toContain('emitWalletSetupDebugEvent("wallet_speed_setup_success", {})')
+    expect(speedFn).toContain('emitWalletSetupDebugEvent("wallet_speed_setup_pending", {})')
+    expect(speedFn).toContain('emitWalletSetupDebugEvent("wallet_speed_setup_failed"')
+    expect(speedFn).toContain('return "failed"')
+    // Its failure paths only return a status - they never record a core setup
+    // failure, flip the core creation step, or clear pendingSync.
+    expect(speedFn).not.toContain("recordWalletSetupFailure")
+    expect(speedFn).not.toContain('setWalletCreationStep("failed")')
+    expect(speedFn).not.toContain("setPendingSync")
+    expect(speedFn).not.toContain("throw")
+  })
+
+  it("external_auth_rejected falls back to Dynamic native auth instead of permanently failing wallet setup", () => {
+    const openFallbackFn = page.slice(
+      page.indexOf("const openDynamicEmailFallbackAuth = useCallback"),
+      page.indexOf("const scheduleDynamicEmailFallbackAuth = useCallback")
+    )
+    const branchIdx = openFallbackFn.indexOf('if (signinMessageHint === "external_auth_rejected") {')
+    expect(branchIdx).toBeGreaterThan(-1)
+    const branch = openFallbackFn.slice(branchIdx, openFallbackFn.indexOf("setWalletIdentityError(\n", branchIdx))
+    expect(branch).toContain('emitWalletSetupDebugEvent("wallet_dynamic_external_jwt_rejected", {})')
+    expect(branch).toContain('emitWalletSetupDebugEvent("wallet_dynamic_native_fallback_started", {})')
+    expect(branch).toContain("setShowAuthFlow(true)")
+    // The core task stays alive (pendingSync remains true) so setup resumes
+    // automatically once native auth completes; it is not recorded as failed.
+    expect(branch).toContain("setPendingSync(true)")
+    expect(branch).toContain("markWalletSetupInProgress()")
+    expect(branch).not.toContain("recordWalletSetupFailure")
+    expect(branch).toContain("return")
+  })
+
+  it("native fallback completion resumes core setup automatically and emits wallet_dynamic_native_user_detected", () => {
+    expect(page).toContain("if (!user || !nativeFallbackPendingRef.current) return")
+    expect(page).toContain('emitWalletSetupDebugEvent("wallet_dynamic_native_user_detected", {})')
+    expect(page).toContain("setCoreSetupNeedsUserAuth(false)")
+  })
+
+  it("an existing Dynamic user skips external JWT and goes straight to embedded wallet provisioning", () => {
+    const coreFn = page.slice(
+      page.indexOf("async function startCoreDynamicWallet("),
+      page.indexOf("async function provisionSpeedLightning(")
+    )
+    const userBranchIdx = coreFn.indexOf("if (sdkHasLoaded && user) {", coreFn.indexOf("if (hasStaleDynamicSession && user) {"))
+    const externalJwtIdx = coreFn.indexOf('openDynamicEmailFallbackAuth("create_pinetree_wallet")')
+    expect(userBranchIdx).toBeGreaterThan(-1)
+    expect(externalJwtIdx).toBeGreaterThan(userBranchIdx)
+  })
+
+  it("combined readiness maps core and lightning outcomes without lightning demoting a ready core wallet", () => {
+    const readinessEffect = page.slice(
+      page.indexOf("// syncWalletReadiness: combine the core wallet and Speed/Lightning task outcomes"),
+      page.indexOf("const walletRailRows = useMemo")
+    )
+    expect(readinessEffect).toContain("if (!coreWalletProfileReady) return")
+    expect(readinessEffect).toContain('? "wallet_setup_ready"')
+    expect(readinessEffect).toContain('? "wallet_setup_lightning_needs_attention"')
+    expect(readinessEffect).toContain(': "wallet_setup_pending_lightning"')
+    // Core failure has its own event, emitted from the failed-state effect, so a
+    // succeeded Speed task never hides a core failure.
+    expect(page).toContain('emitWalletSetupDebugEvent("wallet_setup_failed_core"')
+  })
+
+  it("native fallback keeps normal merchant UI simple with a Continue setup action", () => {
+    expect(page).toContain('coreSetupNeedsUserAuth ? "Continue setup" : walletSetupFailureRecoveryLabel(walletSetupFailureReason)')
+    expect(page).toContain('return "Creating PineTree Wallet..."')
+    // Merchant-facing copy helpers never mention JWT/BYOA/Speed internals.
+    const noticeCopyFn = page.slice(
+      page.indexOf("function walletSetupNoticeCopy("),
+      page.indexOf("function walletSetupPrimaryNoticeTone(") > -1
+        ? page.indexOf("function walletSetupPrimaryNoticeTone(")
+        : page.indexOf("function walletSetupNoticeCopy(") + 800
+    )
+    expect(noticeCopyFn).not.toContain("BYOA")
+    expect(noticeCopyFn).not.toContain("JWT")
+    expect(noticeCopyFn).not.toContain("Speed")
+  })
+
   it("wallet_dynamic_jwt_authenticated fires before pendingSync flips true, so wallet create/restore only starts after auth succeeds", () => {
     const openFallbackFn = page.slice(
       page.indexOf("const openDynamicEmailFallbackAuth = useCallback"),
@@ -702,6 +811,22 @@ describe("PineTree embedded wallet setup", () => {
       "wallet_profile_sync_eligible",
       "wallet_profile_sync_skipped_reason",
       "wallet_profile_post_attempting",
+      "wallet_setup_orchestrator_started",
+      "wallet_core_setup_started",
+      "wallet_speed_setup_started",
+      "wallet_dynamic_external_jwt_rejected",
+      "wallet_dynamic_native_fallback_started",
+      "wallet_dynamic_native_user_detected",
+      "wallet_core_profile_post_started",
+      "wallet_core_profile_post_success",
+      "wallet_speed_setup_success",
+      "wallet_speed_setup_pending",
+      "wallet_speed_setup_failed",
+      "wallet_setup_orchestrator_settled",
+      "wallet_setup_ready",
+      "wallet_setup_pending_lightning",
+      "wallet_setup_failed_core",
+      "wallet_setup_lightning_needs_attention",
     ]
     const combined = `${page}\n${apiRoute}`
     for (const event of expectedEvents) {
@@ -829,13 +954,20 @@ describe("PineTree embedded wallet setup", () => {
   it("retry clears local setup state and restarts embedded wallet polling without deleting rows", () => {
     const retryFn = page.slice(
       page.indexOf("function handleRetryWalletSetup()"),
-      page.indexOf("function handleWithdrawalAssetSelect")
+      page.indexOf("async function handleResetPineTreeWalletSetup()")
     )
     expect(retryFn).toContain("setPendingSync(false)")
     expect(retryFn).toContain("setLogoutPending(false)")
     expect(retryFn).toContain("setShowAuthFlow(false)")
-    expect(retryFn).toContain('refreshDynamicWalletRuntime("retry_embedded_wallet_setup"')
-    expect(retryFn).toContain("} else {\n        openDynamicEmailFallbackAuth(\"retry_embedded_wallet_setup_missing_dynamic_user\")")
+    // Retry routes through the shared orchestrator, whose retry branch restarts
+    // embedded wallet polling (or reopens PineTree-controlled auth when no user).
+    expect(retryFn).toContain("void createPineTreeWalletSetup({ retry: true })")
+    const coreFn = page.slice(
+      page.indexOf("async function startCoreDynamicWallet("),
+      page.indexOf("async function provisionSpeedLightning(")
+    )
+    expect(coreFn).toContain('refreshDynamicWalletRuntime("retry_embedded_wallet_setup"')
+    expect(coreFn).toContain('openDynamicEmailFallbackAuth("retry_embedded_wallet_setup_missing_dynamic_user")')
     expect(page).not.toContain("delete Dynamic")
   })
 

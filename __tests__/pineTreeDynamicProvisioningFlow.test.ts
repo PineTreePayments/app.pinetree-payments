@@ -293,13 +293,20 @@ describe("PineTree Dynamic provisioning flow", () => {
   })
 
   it("Try again during first-time provisioning restarts PineTree polling instead of link-new-wallet auth", () => {
+    // Retry now routes through the shared orchestrator; the retry branch of
+    // startCoreDynamicWallet carries the same restart-polling behavior.
     const retryFn = page.slice(
       page.indexOf("function handleRetryWalletSetup()"),
-      page.indexOf("function handleWithdrawalAssetSelect")
+      page.indexOf("async function handleResetPineTreeWalletSetup()")
     )
-    expect(retryFn).toContain('"restart_embedded_wallet_runtime_polling"')
-    expect(retryFn).toContain('refreshDynamicWalletRuntime("retry_embedded_wallet_setup"')
-    expect(retryFn).toContain("} else {\n        openDynamicEmailFallbackAuth(\"retry_embedded_wallet_setup_missing_dynamic_user\")")
+    expect(retryFn).toContain("void createPineTreeWalletSetup({ retry: true })")
+    const coreFn = page.slice(
+      page.indexOf("async function startCoreDynamicWallet("),
+      page.indexOf("async function provisionSpeedLightning(")
+    )
+    expect(coreFn).toContain('"restart_embedded_wallet_runtime_polling"')
+    expect(coreFn).toContain('refreshDynamicWalletRuntime("retry_embedded_wallet_setup"')
+    expect(coreFn).toContain('openDynamicEmailFallbackAuth("retry_embedded_wallet_setup_missing_dynamic_user")')
   })
 
   it("no timeout message appears before a final runtime refresh attempt", () => {
@@ -476,12 +483,13 @@ describe("PineTree Dynamic provisioning flow", () => {
   it("Try Again recovery action is selected by failure reason", () => {
     const retryFn = page.slice(
       page.indexOf("function handleRetryWalletSetup()"),
-      page.indexOf("function handleWithdrawalAssetSelect")
+      page.indexOf("async function handleResetPineTreeWalletSetup()")
     )
     expect(retryFn).toContain('retryFailureReason === "dynamic_auth_missing"')
     expect(retryFn).toContain('retryFailureReason === "profile_sync_failed"')
     expect(retryFn).toContain('retryFailureReason === "provider_sync_failed"')
-    expect(retryFn).toContain('refreshDynamicWalletRuntime("retry_embedded_wallet_setup"')
+    expect(retryFn).toContain("void createPineTreeWalletSetup({ retry: true })")
+    expect(page).toContain('refreshDynamicWalletRuntime("retry_embedded_wallet_setup"')
     expect(page).toContain("walletSetupFailureRecoveryLabel(walletSetupFailureReason)")
   })
 
@@ -878,11 +886,16 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(dynamicProvider).toContain("detectNewWalletsForLinking: false")
     expect(page).not.toContain("connectWallet(")
     expect(page).not.toContain("linkWallet(")
+    const coreFn = page.slice(
+      page.indexOf("async function startCoreDynamicWallet("),
+      page.indexOf("async function provisionSpeedLightning(")
+    )
+    expect(coreFn).toContain('refreshDynamicWalletRuntime("retry_embedded_wallet_setup"')
+    expect(coreFn).not.toContain("setShowDynamicUserProfile(true)")
     const retryFn = page.slice(
       page.indexOf("function handleRetryWalletSetup()"),
-      page.indexOf("function handleWithdrawalAssetSelect")
+      page.indexOf("async function handleResetPineTreeWalletSetup()")
     )
-    expect(retryFn).toContain('refreshDynamicWalletRuntime("retry_embedded_wallet_setup"')
     expect(retryFn).not.toContain("setShowDynamicUserProfile(true)")
   })
 

@@ -2478,6 +2478,9 @@ function PineTreeWalletRuntime() {
   })
   const [walletSyncDebugQueryEnabled, setWalletSyncDebugQueryEnabled] = useState(false)
   const [lastDebugEvents, setLastDebugEvents] = useState<WalletSetupDebugEventLogEntry[]>([])
+  // True while core wallet setup is parked waiting on the merchant to complete the
+  // Dynamic native auth fallback (external JWT was rejected by Dynamic's backend).
+  const [coreSetupNeedsUserAuth, setCoreSetupNeedsUserAuth] = useState(false)
   const [withdrawalRail, setWithdrawalRail] = useState<WithdrawalRail>("base")
   const [withdrawalAsset, setWithdrawalAsset] = useState<WithdrawalAsset>("ETH")
   const [withdrawalDestination, setWithdrawalDestination] = useState("")
@@ -2503,6 +2506,9 @@ function PineTreeWalletRuntime() {
   const walletSetupStartInFlightRef = useRef<string | null>(null)
   const staleProfileAutoRepairAttemptRef = useRef<string | null>(null)
   const creatingEmbeddedWalletRef = useRef(false)
+  const nativeFallbackPendingRef = useRef(false)
+  const speedProvisionInFlightRef = useRef(false)
+  const lastCombinedReadinessRef = useRef<string | null>(null)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -3308,6 +3314,32 @@ function PineTreeWalletRuntime() {
             status,
             code,
           })
+          if (signinMessageHint === "external_auth_rejected") {
+            // Dynamic's backend explicitly rejected the BYOA JWT (a dashboard-side
+            // configuration/approval issue PineTree can't fix client-side). Instead of
+            // hard-failing wallet creation, fall back to Dynamic's native auth flow so
+            // the merchant can still finish setup while BYOA approval is pending. The
+            // existing identity gate still rejects a mismatched Dynamic email, and any
+            // already-started Speed provisioning keeps running in the background.
+            emitWalletSetupDebugEvent("wallet_dynamic_external_jwt_rejected", {})
+            emitWalletSetupDebugEvent("wallet_dynamic_native_fallback_started", {})
+            nativeFallbackPendingRef.current = true
+            setCoreSetupNeedsUserAuth(true)
+            setPendingSync(true)
+            markWalletSetupInProgress()
+            setWalletIdentityError("")
+            logWalletCreationStep("waiting_for_dynamic_auth", {
+              reason: "external_jwt_rejected_native_fallback",
+            })
+            setProfileSyncDiagnostics((prev) => ({
+              ...prev,
+              lastWalletAuthAttemptState: "external_jwt_rejected_native_fallback_opened",
+              updatedAt: new Date().toISOString(),
+            }))
+            setShowDynamicUserProfile(false)
+            setShowAuthFlow(true)
+            return
+          }
           setWalletIdentityError(
             status === 401
               ? "PineTree sign-in is required before creating a PineTree Wallet."
@@ -3974,6 +4006,7 @@ function PineTreeWalletRuntime() {
       })
       console.info("[pinetree-wallets] wallet_profile_post_attempting", {})
       emitWalletSetupDebugEvent("wallet_profile_post_attempting", {})
+      emitWalletSetupDebugEvent("wallet_core_profile_post_started", {})
       const profileSaveStartedAt = Date.now()
       const res = await fetch("/api/wallets/pinetree-profile", {
         method: "POST",
@@ -4034,6 +4067,7 @@ function PineTreeWalletRuntime() {
           solanaAddressPersisted: Boolean(json.profile.solana_address),
           status: json.profile.status,
         })
+        emitWalletSetupDebugEvent("wallet_core_profile_post_success", { status: json.profile.status })
         setWalletIdentityError("")
         setIdentityMismatchError(null)
         setIdentityUnverified(false)
@@ -4634,6 +4668,36 @@ function PineTreeWalletRuntime() {
     }
   }, [coreWalletProfileReady, dynamicEmbeddedSignersReady])
 
+  // Resume core wallet setup automatically once the Dynamic native auth fallback
+  // completes: the pendingSync-driven effects pick up from here (identity gate,
+  // embedded wallet provisioning, profile POST) without another click.
+  useEffect(() => {
+    if (!user || !nativeFallbackPendingRef.current) return
+    nativeFallbackPendingRef.current = false
+    setCoreSetupNeedsUserAuth(false)
+    console.info("[pinetree-wallets] wallet_dynamic_native_user_detected", {})
+    emitWalletSetupDebugEvent("wallet_dynamic_native_user_detected", {})
+  }, [user])
+
+  // syncWalletReadiness: combine the core wallet and Speed/Lightning task outcomes
+  // once core setup is ready. Lightning is additive - a pending or failed Lightning
+  // rail never demotes a ready core wallet back to failed.
+  useEffect(() => {
+    if (!coreWalletProfileReady) return
+    const lightningStatus = lightningProfileState.kind === "loaded"
+      ? lightningProfileState.profile.status
+      : null
+    const combined = lightningStatus === "ready"
+      ? "wallet_setup_ready"
+      : lightningStatus === "needs_attention"
+        ? "wallet_setup_lightning_needs_attention"
+        : "wallet_setup_pending_lightning"
+    if (lastCombinedReadinessRef.current === combined) return
+    lastCombinedReadinessRef.current = combined
+    console.info(`[pinetree-wallets] ${combined}`, {})
+    emitWalletSetupDebugEvent(combined, {})
+  }, [coreWalletProfileReady, lightningProfileState])
+
   const walletRailRows = useMemo<WalletRailRow[]>(() => [
     { rail: "base", label: "Base" as const, configured: baseReady, enabled: enabledRails.base },
     { rail: "solana", label: "Solana" as const, configured: solanaReady, enabled: enabledRails.solana },
@@ -4884,6 +4948,10 @@ function PineTreeWalletRuntime() {
   useEffect(() => {
     if (walletSetupPrimaryState === "failed") {
       emitWalletSetupDebugEvent("wallet_setup_retry_shown", {
+        reason: walletSetupFailureReason || "none",
+      })
+      // Core failure is authoritative - a succeeded/pending Speed task can never mask it.
+      emitWalletSetupDebugEvent("wallet_setup_failed_core", {
         reason: walletSetupFailureReason || "none",
       })
     }
@@ -5308,27 +5376,110 @@ function PineTreeWalletRuntime() {
       userPresent: Boolean(user),
     })
     if (walletSetupStartInFlightRef.current || (pendingSync && !provisioningRetryExhausted)) return
+    void createPineTreeWalletSetup({ retry: false })
+  }
+
+  // Single orchestrator for Create PineTree Wallet and Try Again. Starts the core
+  // Dynamic wallet task and Speed/Lightning provisioning at the same time - neither
+  // waits for the other, and Promise.allSettled plus non-throwing tasks guarantee a
+  // Speed rejection can never short-circuit or fail core wallet creation.
+  async function createPineTreeWalletSetup(options: { retry: boolean }) {
+    emitWalletSetupDebugEvent("wallet_setup_orchestrator_started", { retry: options.retry })
+    const [coreResult, lightningResult] = await Promise.allSettled([
+      startCoreDynamicWallet(options),
+      provisionSpeedLightning(),
+    ])
+    const core = coreResult.status === "fulfilled" ? coreResult.value : "failed"
+    const lightning = lightningResult.status === "fulfilled" ? lightningResult.value : "failed"
+    emitWalletSetupDebugEvent("wallet_setup_orchestrator_settled", { core, lightning })
+  }
+
+  // Kicks off core Dynamic wallet setup: reuse an existing Dynamic user when present,
+  // otherwise attempt external JWT sign-in (with its own native-auth fallback when
+  // Dynamic rejects BYOA). Address detection and the profile POST continue through the
+  // pendingSync-driven effects; "started" means the core pipeline is now running.
+  async function startCoreDynamicWallet(options: { retry: boolean }): Promise<"started" | "needs_user_auth" | "failed"> {
+    emitWalletSetupDebugEvent("wallet_core_setup_started", { retry: options.retry })
+    if (options.retry) {
+      if (!beginWalletProvisioningAttempt("provisioning_wallet", "restart_embedded_wallet_runtime_polling", { retry: true })) return "started"
+      if (sdkHasLoaded && user) {
+        void refreshDynamicWalletRuntime("retry_embedded_wallet_setup", { requireApprovalWallet: false })
+      } else {
+        openDynamicEmailFallbackAuth("retry_embedded_wallet_setup_missing_dynamic_user")
+      }
+      return "started"
+    }
     if (hasStaleDynamicSession && user) {
       logWalletCreationStep("opening_dynamic", { reason: "stale_dynamic_session_logout" })
       setLogoutPending(true)
       void handleLogOut?.()
-      return
+      return "needs_user_auth"
     }
     if (sdkHasLoaded && user) {
-      if (!beginWalletProvisioningAttempt("opening_dynamic", "create_authenticated_dynamic_user")) return
+      // An existing Dynamic user skips external JWT entirely and goes straight to
+      // embedded wallet provisioning + profile save.
+      if (!beginWalletProvisioningAttempt("opening_dynamic", "create_authenticated_dynamic_user")) return "started"
       void refreshDynamicWalletRuntime("create_embedded_wallet_setup", { requireApprovalWallet: false })
-      return
+      return "started"
     }
     if (!dynamicAuthConfig.configValid) {
       blockDynamicEmailFallbackAuth("create_pinetree_wallet")
-      return
+      return "failed"
     }
     if (pineTreeControlledDynamicAuthAvailable) {
-      if (!beginWalletProvisioningAttempt("opening_dynamic", "create_pinetree_wallet")) return
+      if (!beginWalletProvisioningAttempt("opening_dynamic", "create_pinetree_wallet")) return "started"
       openDynamicEmailFallbackAuth("create_pinetree_wallet")
-      return
+      return "started"
     }
     requestDynamicVerificationPrompt("create_pinetree_wallet")
+    return "needs_user_auth"
+  }
+
+  // Speed/Lightning provisioning runs concurrently with core Dynamic wallet setup.
+  // It never throws into the orchestrator, never touches core failure state, and its
+  // outcome only feeds the combined readiness (syncWalletReadiness) effect via
+  // lightningProfileState.
+  async function provisionSpeedLightning(): Promise<"ready" | "pending" | "needs_attention" | "failed"> {
+    emitWalletSetupDebugEvent("wallet_speed_setup_started", {})
+    if (speedProvisionInFlightRef.current) return "pending"
+    speedProvisionInFlightRef.current = true
+    try {
+      const token = accessTokenRef.current
+      if (!token) {
+        emitWalletSetupDebugEvent("wallet_speed_setup_failed", { reason: "missing_auth_token" })
+        return "failed"
+      }
+      const res = await fetch("/api/wallets/lightning/pinetree-managed", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+        cache: "no-store",
+      })
+      if (!res.ok) {
+        emitWalletSetupDebugEvent("wallet_speed_setup_failed", { status: res.status })
+        return "failed"
+      }
+      const json = (await res.json()) as { profile: MerchantLightningProfile | null }
+      if (json.profile) {
+        setLightningProfileState({ kind: "loaded", profile: json.profile })
+      }
+      const status = json.profile?.status
+      if (status === "ready") {
+        emitWalletSetupDebugEvent("wallet_speed_setup_success", {})
+        return "ready"
+      }
+      if (status === "needs_attention") {
+        emitWalletSetupDebugEvent("wallet_speed_setup_failed", { reason: "needs_attention" })
+        return "needs_attention"
+      }
+      emitWalletSetupDebugEvent("wallet_speed_setup_pending", {})
+      return "pending"
+    } catch {
+      emitWalletSetupDebugEvent("wallet_speed_setup_failed", { reason: "request_threw" })
+      return "failed"
+    } finally {
+      speedProvisionInFlightRef.current = false
+    }
   }
 
   function handleUsePineTreeAccountEmail() {
@@ -5411,12 +5562,7 @@ function PineTreeWalletRuntime() {
     walletSetupStartInFlightRef.current = null
     setShowAuthFlow(false)
     window.setTimeout(() => {
-      if (!beginWalletProvisioningAttempt("provisioning_wallet", "restart_embedded_wallet_runtime_polling", { retry: true })) return
-      if (sdkHasLoaded && user) {
-        void refreshDynamicWalletRuntime("retry_embedded_wallet_setup", { requireApprovalWallet: false })
-      } else {
-        openDynamicEmailFallbackAuth("retry_embedded_wallet_setup_missing_dynamic_user")
-      }
+      void createPineTreeWalletSetup({ retry: true })
     }, 0)
   }
 
@@ -6066,7 +6212,7 @@ function PineTreeWalletRuntime() {
               disabled={syncing || walletCreationInProgress}
               className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
             >
-              {walletSetupFailureRecoveryLabel(walletSetupFailureReason)}
+              {coreSetupNeedsUserAuth ? "Continue setup" : walletSetupFailureRecoveryLabel(walletSetupFailureReason)}
             </button>
           ) : hasWallet ? (
             <div className="flex flex-wrap gap-2">

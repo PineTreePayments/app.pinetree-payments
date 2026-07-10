@@ -43,6 +43,22 @@ const WHITELISTED_EVENTS = new Set([
   "wallet_core_ready",
   "wallet_setup_timeout",
   "wallet_setup_retry_shown",
+  "wallet_setup_orchestrator_started",
+  "wallet_core_setup_started",
+  "wallet_speed_setup_started",
+  "wallet_dynamic_external_jwt_rejected",
+  "wallet_dynamic_native_fallback_started",
+  "wallet_dynamic_native_user_detected",
+  "wallet_core_profile_post_started",
+  "wallet_core_profile_post_success",
+  "wallet_speed_setup_success",
+  "wallet_speed_setup_pending",
+  "wallet_speed_setup_failed",
+  "wallet_setup_orchestrator_settled",
+  "wallet_setup_ready",
+  "wallet_setup_pending_lightning",
+  "wallet_setup_failed_core",
+  "wallet_setup_lightning_needs_attention",
 ])
 
 const MAX_DETAIL_KEYS = 12
