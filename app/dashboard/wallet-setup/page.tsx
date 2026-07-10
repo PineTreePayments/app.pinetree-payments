@@ -2503,6 +2503,7 @@ function PineTreeWalletRuntime() {
   const pendingWalletProvisionAttemptRef = useRef<string | null>(null)
   const pendingWalletProvisionStartedAtRef = useRef<number | null>(null)
   const pendingProfileSyncAttemptRef = useRef(false)
+  const profilePostInFlightKeyRef = useRef<string | null>(null)
   const walletSetupStartInFlightRef = useRef<string | null>(null)
   const staleProfileAutoRepairAttemptRef = useRef<string | null>(null)
   const creatingEmbeddedWalletRef = useRef(false)
@@ -3988,6 +3989,25 @@ function PineTreeWalletRuntime() {
         base_address: baseAddress,
         solana_address: solanaAddress,
       }
+      const profilePostKey = [
+        user.userId || "",
+        dynamicUserEmail || "",
+        merchantEmail || "",
+        baseAddress || "",
+        solanaAddress || "",
+      ].join("|")
+      if (profilePostInFlightKeyRef.current === profilePostKey) {
+        console.info("[pinetree-wallets] wallet_profile_post_deduped_in_flight", {
+          dynamicUserIdPresent: Boolean(user.userId),
+          dynamicEmailPresent: Boolean(dynamicUserEmail),
+          merchantEmailPresent: Boolean(merchantEmail),
+          baseAddressPresent: Boolean(baseAddress),
+          solanaAddressPresent: Boolean(solanaAddress),
+        })
+        emitWalletSetupDebugEvent("wallet_profile_sync_skipped_reason", { reason: "profile_post_in_flight" })
+        keepPendingSync = true
+        return null
+      }
       console.info("[pinetree-wallets] profile_sync_request", {
         endpoint: "/api/wallets/pinetree-profile",
         dynamicUserIdPresent: Boolean(user.userId),
@@ -4007,6 +4027,7 @@ function PineTreeWalletRuntime() {
       console.info("[pinetree-wallets] wallet_profile_post_attempting", {})
       emitWalletSetupDebugEvent("wallet_profile_post_attempting", {})
       emitWalletSetupDebugEvent("wallet_core_profile_post_started", {})
+      profilePostInFlightKeyRef.current = profilePostKey
       const profileSaveStartedAt = Date.now()
       const res = await fetch("/api/wallets/pinetree-profile", {
         method: "POST",
@@ -4185,6 +4206,7 @@ function PineTreeWalletRuntime() {
       logWalletCreationStep("failed", { profile_sync_response_status: res.status })
       return null
     } finally {
+      profilePostInFlightKeyRef.current = null
       setSyncing(false)
       if (!keepPendingSync) setPendingSync(false)
     }

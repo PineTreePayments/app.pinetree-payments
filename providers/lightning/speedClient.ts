@@ -319,6 +319,16 @@ function getSpeedAuthHeaders(): Record<string, string> {
   }
 }
 
+function safeSpeedErrorCode(status: number, body: string) {
+  const normalized = String(body || "").toLowerCase()
+  if (normalized.includes("email")) return "validation_email"
+  if (normalized.includes("password")) return "validation_password"
+  if (status === 401) return "unauthorized"
+  if (status === 403) return "forbidden"
+  if (status >= 500) return "provider_error"
+  return "request_failed"
+}
+
 async function speedRequest<T>(
   path: string,
   init?: Omit<RequestInit, "headers"> & { headers?: Record<string, string> }
@@ -357,8 +367,14 @@ async function speedRequest<T>(
     console.error("[speed] API request failed", {
       path,
       status: response.status,
-      body: body.slice(0, 1000)
+      safeCode: safeSpeedErrorCode(response.status, body)
     })
+    if (path === "/connect/custom") {
+      console.warn("[speed] speed_connect_custom_request_failed", {
+        status: response.status,
+        safeCode: safeSpeedErrorCode(response.status, body),
+      })
+    }
 
     if (isSpeedTransferPercentageValidationMessage(body)) {
       throw new Error(SPEED_TRANSFER_SPLIT_ERROR)
@@ -634,6 +650,11 @@ export async function createSpeedCustomConnectedAccount(
   if (!lastName) throw new Error("Speed custom connected account last name is required.")
   if (!email) throw new Error("Speed custom connected account email is required.")
   if (!password) throw new Error("Speed custom connected account password is required.")
+
+  console.info("[speed] speed_connect_custom_request_started", {
+    emailPresent: Boolean(email),
+    passwordPresent: Boolean(password),
+  })
 
   return speedRequest<SpeedConnectedAccountObject>("/connect/custom", {
     method: "POST",

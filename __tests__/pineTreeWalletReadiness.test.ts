@@ -90,6 +90,7 @@ describe("ensureManagedLightningForMerchant", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.spyOn(console, "info").mockImplementation(() => undefined)
+    vi.spyOn(console, "warn").mockImplementation(() => undefined)
     mocks.isSpeedPlatformTreasurySweepEnabled.mockReturnValue(false)
     mocks.getPineTreeWalletProfile.mockResolvedValue(null)
     mocks.getMerchantBusinessProfile.mockResolvedValue({
@@ -194,6 +195,8 @@ describe("ensureManagedLightningForMerchant", () => {
     const call = mocks.createSpeedCustomConnectedAccountForMerchant.mock.calls[0][0]
     expect(typeof call.password).toBe("string")
     expect(call.password.length).toBeGreaterThan(10)
+    const { speedCustomConnectPasswordPolicyPass } = await import("@/engine/pineTreeWalletReadiness")
+    expect(speedCustomConnectPasswordPolicyPass(call.password)).toBe(true)
 
     expect(result.action).toBe("provisioned")
     expect(result.status).toBe("ready")
@@ -213,6 +216,57 @@ describe("ensureManagedLightningForMerchant", () => {
     expect(mocks.saveMerchantSpeedConnection).toHaveBeenCalledWith(
       merchantId,
       expect.objectContaining({ accountId: "acct_456", enabled: true })
+    )
+  })
+
+  it("falls back to the authenticated user email when the merchant email is missing", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({
+      id: merchantId,
+      business_name: "PineTree Test Merchant",
+      email: null,
+    })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "pending",
+      speed_connected_account_id: "acct_auth",
+      speed_connected_account_relationship_id: "ca_auth",
+      speed_account_id: "acct_auth",
+      speed_connected_account_status: "pending_verification",
+      setup_url: null,
+      provider_response_summary: {},
+      error_message: null,
+      mode: "test",
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    const result = await ensureManagedLightningForMerchant(merchantId, { authEmail: "AuthUser@Example.Test" })
+
+    expect(result.action).toBe("provisioning_incomplete")
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "authuser@example.test" })
+    )
+  })
+
+  it("does not call Speed when both merchant and auth emails are missing or invalid", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({
+      id: merchantId,
+      business_name: "PineTree Test Merchant",
+      email: "not-an-email",
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    const result = await ensureManagedLightningForMerchant(merchantId, { authEmail: "" })
+
+    expect(result.status).toBe("needs_attention")
+    expect(result.action).toBe("provisioning_incomplete")
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).not.toHaveBeenCalled()
+    expect(mocks.upsertMerchantLightningProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        merchantId,
+        status: "needs_attention",
+        speedConnectedAccountStatus: "speed_connect_missing_email",
+      })
     )
   })
 
@@ -366,5 +420,21 @@ describe("no frontend surface calls Speed directly", () => {
     // own route, which internally delegates to ensureManagedLightningForMerchant.
     expect(walletPage).toContain('"/api/wallets/lightning/pinetree-managed"')
     expect(walletPage).toContain('"/api/merchant/business-owner-profile"')
+  })
+})
+
+describe("Speed Custom Connect generated credentials", () => {
+  it("generates passwords that always pass the Speed policy helper", async () => {
+    const {
+      generateSpeedCustomConnectPassword,
+      speedCustomConnectPasswordPolicyPass,
+    } = await import("@/engine/pineTreeWalletReadiness")
+
+    for (let index = 0; index < 50; index += 1) {
+      expect(speedCustomConnectPasswordPolicyPass(generateSpeedCustomConnectPassword())).toBe(true)
+    }
+    expect(speedCustomConnectPasswordPolicyPass("abcABC123!!!")).toBe(false)
+    expect(speedCustomConnectPasswordPolicyPass("NoSpecial12345")).toBe(false)
+    expect(speedCustomConnectPasswordPolicyPass("NoNumber!!!!!")).toBe(false)
   })
 })

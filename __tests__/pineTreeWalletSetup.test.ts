@@ -764,11 +764,15 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("rejects a conflicting wallet address instead of silently overwriting a saved profile", () => {
-    expect(apiRoute).toContain("const existingIsComplete = Boolean(existingProfile?.base_address && existingProfile?.solana_address)")
+    expect(apiRoute).toContain("function profileHasReadyCoreIdentity")
+    expect(apiRoute).toContain("const existingReadyProfile = profileHasReadyCoreIdentity(existingProfile)")
     expect(apiRoute).toContain("if (baseConflict || solanaConflict)")
     expect(apiRoute).toContain('error: "wallet_address_conflict"')
     expect(apiRoute).toContain('status: "needs_review"')
     expect(apiRoute).toContain("retryable: false")
+    expect(apiRoute).toContain("wallet_profile_post_conflict_ready_profile_only")
+    expect(apiRoute).toContain("wallet_profile_post_existing_incomplete_repaired")
+    expect(apiRoute).toContain("wallet_profile_post_idempotent_success")
     expect(page).toContain("function isWalletAddressConflictResponse(value: unknown)")
     expect(page).toContain("isWalletAddressConflictResponse(responseBody)")
     expect(page).toContain(
@@ -787,6 +791,9 @@ describe("PineTree embedded wallet setup", () => {
       "wallet_profile_post_start",
       "wallet_profile_post_success",
       "wallet_profile_post_conflict",
+      "wallet_profile_post_existing_incomplete_repaired",
+      "wallet_profile_post_idempotent_success",
+      "wallet_profile_post_conflict_ready_profile_only",
       "wallet_profile_post_error",
       "wallet_core_ready",
       "wallet_signers_missing_non_blocking",
@@ -915,6 +922,19 @@ describe("PineTree embedded wallet setup", () => {
     expect(emitIdx).toBeGreaterThan(-1)
     expect(fetchIdx).toBeGreaterThan(emitIdx)
     expect(syncFn).toContain('emitWalletSetupDebugEvent("wallet_profile_post_response"')
+  })
+
+  it("dedupes an identical in-flight profile POST from repeated Dynamic hydration effects", () => {
+    const syncFn = page.slice(
+      page.indexOf("const syncProfileFromDynamic = useCallback"),
+      page.indexOf("// --- Post-reconnect wallet match check ---")
+    )
+    expect(page).toContain("const profilePostInFlightKeyRef = useRef<string | null>(null)")
+    expect(syncFn).toContain("const profilePostKey = [")
+    expect(syncFn).toContain("if (profilePostInFlightKeyRef.current === profilePostKey)")
+    expect(syncFn).toContain("wallet_profile_post_deduped_in_flight")
+    expect(syncFn).toContain("profilePostInFlightKeyRef.current = profilePostKey")
+    expect(syncFn).toContain("profilePostInFlightKeyRef.current = null")
   })
 
   it("gates the wallet setup event log panel behind walletDebug=1 and shows only safe values", () => {

@@ -16,6 +16,15 @@ import { resolveWalletIdentity } from "@/lib/walletIdentity"
 
 const BACKGROUND_PROVISIONING_TIMEOUT_MS = 12_000
 
+function profileHasReadyCoreIdentity(profile: Awaited<ReturnType<typeof getPineTreeWalletProfile>>) {
+  return Boolean(
+    profile &&
+    profile.status === "ready" &&
+    profile.base_address &&
+    profile.solana_address
+  )
+}
+
 function scheduleWalletReadiness(profile: Awaited<ReturnType<typeof upsertPineTreeWalletProfile>>) {
   after(async () => {
     const providerSyncStartedAt = Date.now()
@@ -147,7 +156,7 @@ export async function POST(req: NextRequest) {
           authEmailPresent: Boolean(auth.email),
           reason: identity.code,
         })
-        console.warn("[pinetree-wallets] wallet_profile_post_conflict", {
+        console.warn("[pinetree-wallets] wallet_profile_identity_check_failed", {
           merchantId,
           reason: identity.code,
         })
@@ -201,15 +210,16 @@ export async function POST(req: NextRequest) {
     if (syncsDynamicProfile) {
       const incomingBaseAddress = "base_address" in body ? (body.base_address as string | null) : undefined
       const incomingSolanaAddress = "solana_address" in body ? (body.solana_address as string | null) : undefined
-      const existingIsComplete = Boolean(existingProfile?.base_address && existingProfile?.solana_address)
+      const existingReadyProfile = profileHasReadyCoreIdentity(existingProfile)
       const baseConflict = Boolean(
-        existingIsComplete &&
+        existingReadyProfile &&
+        existingProfile &&
         incomingBaseAddress &&
         existingProfile?.base_address &&
         incomingBaseAddress !== existingProfile.base_address
       )
       const solanaConflict = Boolean(
-        existingIsComplete &&
+        existingReadyProfile &&
         incomingSolanaAddress &&
         existingProfile?.solana_address &&
         incomingSolanaAddress !== existingProfile.solana_address
@@ -218,6 +228,11 @@ export async function POST(req: NextRequest) {
         console.warn("[pinetree-wallets] wallet_profile_post_conflict", {
           merchantId,
           reason: "address_conflict",
+          baseConflict,
+          solanaConflict,
+        })
+        console.warn("[pinetree-wallets] wallet_profile_post_conflict_ready_profile_only", {
+          merchantId,
           baseConflict,
           solanaConflict,
         })
@@ -231,7 +246,33 @@ export async function POST(req: NextRequest) {
           { status: 409 }
         )
       }
+      if (
+        existingReadyProfile &&
+        incomingBaseAddress === existingProfile?.base_address &&
+        incomingSolanaAddress === existingProfile?.solana_address
+      ) {
+        const readyProfile = existingProfile!
+        console.info("[pinetree-wallets] wallet_profile_post_idempotent_success", {
+          merchantId,
+          profileId: readyProfile.id,
+          status: readyProfile.status,
+        })
+        return NextResponse.json({
+          profile: readyProfile,
+          merchantId,
+          providerSync: { status: "pending" as const },
+          setupStatus: "ready" as const,
+        })
+      }
     }
+
+    const shouldLogIncompleteRepair = Boolean(
+      syncsDynamicProfile &&
+      existingProfile &&
+      !profileHasReadyCoreIdentity(existingProfile) &&
+      body.base_address &&
+      body.solana_address
+    )
 
     const bitcoinProvisioning = hasBtcAddressInput && normalizedBtcAddress
       ? await provisionMerchantBitcoinAddress({
@@ -281,6 +322,13 @@ export async function POST(req: NextRequest) {
       step: "core_profile_saved",
       duration_ms: Date.now() - profileSaveStartedAt,
     })
+    if (shouldLogIncompleteRepair) {
+      console.info("[pinetree-wallets] wallet_profile_post_existing_incomplete_repaired", {
+        merchantId,
+        profileId: profile.id,
+        status: profile.status,
+      })
+    }
 
     scheduleWalletReadiness(profile)
     const providerSync = { status: "pending" as const }

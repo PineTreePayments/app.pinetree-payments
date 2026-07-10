@@ -5,6 +5,7 @@ const merchantId = "71478b11-ed12-4dbf-8466-52807995bac0"
 
 const mocks = vi.hoisted(() => ({
   requireMerchantIdFromRequest: vi.fn(),
+  requireMerchantAuthFromRequest: vi.fn(),
   getRouteErrorStatus: vi.fn(),
   getMerchantLightningProfile: vi.fn(),
   getPineTreeWalletProfile: vi.fn(),
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/api/merchantAuth", () => ({
   requireMerchantIdFromRequest: mocks.requireMerchantIdFromRequest,
+  requireMerchantAuthFromRequest: mocks.requireMerchantAuthFromRequest,
   getRouteErrorStatus: mocks.getRouteErrorStatus,
 }))
 
@@ -71,6 +73,7 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.requireMerchantIdFromRequest.mockResolvedValue(merchantId)
+    mocks.requireMerchantAuthFromRequest.mockResolvedValue({ merchantId, email: "auth@example.test", source: "supabase" })
     mocks.getRouteErrorStatus.mockReturnValue(500)
     vi.spyOn(console, "info").mockImplementation(() => undefined)
   })
@@ -92,7 +95,7 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
     const body = await response.json()
 
     expect(response.status).toBe(200)
-    expect(mocks.ensureManagedLightningForMerchant).toHaveBeenCalledWith(merchantId)
+    expect(mocks.ensureManagedLightningForMerchant).toHaveBeenCalledWith(merchantId, { authEmail: "auth@example.test" })
     expect(body.profile.status).toBe("ready")
     expect(body.profile.speed_connected_account_id).toBe("acct_123")
     expect(body.profile.speed_connected_account_relationship_id).toBe("ca_123")
@@ -158,7 +161,7 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
   })
 
   it("returns 500 when the merchant JWT/session cannot be resolved", async () => {
-    mocks.requireMerchantIdFromRequest.mockRejectedValue(new Error("no session"))
+    mocks.requireMerchantAuthFromRequest.mockRejectedValue(new Error("no session"))
     mocks.getRouteErrorStatus.mockReturnValue(401)
 
     const { POST } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
@@ -173,6 +176,7 @@ describe("GET /api/wallets/lightning/pinetree-managed", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.requireMerchantIdFromRequest.mockResolvedValue(merchantId)
+    mocks.requireMerchantAuthFromRequest.mockResolvedValue({ merchantId, email: "auth@example.test", source: "supabase" })
     mocks.getRouteErrorStatus.mockReturnValue(500)
     vi.spyOn(console, "info").mockImplementation(() => undefined)
   })

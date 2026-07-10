@@ -10,7 +10,7 @@
  */
 
 import { type NextRequest, NextResponse } from "next/server"
-import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
+import { requireMerchantAuthFromRequest, requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
 import {
   getMerchantLightningProfile,
   type MerchantLightningProfile,
@@ -26,6 +26,16 @@ import {
 } from "@/providers/lightning/speedClient"
 
 const LIGHTNING_PROVISIONING_TIMEOUT_MS = 12_000
+
+function safeProvisioningLogMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "")
+  if (!message) return "unknown"
+  return message
+    .replace(/sk_(test|live)_[A-Za-z0-9_-]+/g, "sk_$1_[redacted]")
+    .replace(/Basic\s+[A-Za-z0-9+/=]+/gi, "Basic [redacted]")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted-email]")
+    .slice(0, 240)
+}
 
 function safeLightningProfile(profile: MerchantLightningProfile | null) {
   if (!profile) return null
@@ -108,13 +118,14 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(req)
+    const auth = await requireMerchantAuthFromRequest(req)
+    const merchantId = auth.merchantId
     console.info("[pinetree-managed-lightning] POST start", { merchant_id: merchantId })
     const ensureStartedAt = Date.now()
 
     try {
       const result = await withOperationTimeout(
-        ensureManagedLightningForMerchant(merchantId),
+        ensureManagedLightningForMerchant(merchantId, { authEmail: auth.email }),
         LIGHTNING_PROVISIONING_TIMEOUT_MS,
         "managed lightning provisioning"
       )
@@ -133,7 +144,7 @@ export async function POST(req: NextRequest) {
     } catch (error) {
       console.warn("[pinetree-managed-lightning] provisioning_deferred", {
         merchant_id: merchantId,
-        error: error instanceof Error ? error.message : String(error),
+        error: safeProvisioningLogMessage(error),
       })
       console.info("[pinetree-managed-lightning] ensure timing", {
         merchant_id: merchantId,

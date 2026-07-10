@@ -977,7 +977,7 @@ describe("PineTree Dynamic provisioning flow", () => {
   })
 
   it("does not silently overwrite a saved ready profile with a different Dynamic address", () => {
-    expect(profileRoute).toContain("const existingIsComplete = Boolean(existingProfile?.base_address && existingProfile?.solana_address)")
+    expect(profileRoute).toContain("const existingReadyProfile = profileHasReadyCoreIdentity(existingProfile)")
     expect(profileRoute).toContain('error: "wallet_address_conflict"')
     expect(profileRoute).toContain('status: "needs_review"')
     // Idempotent resync (same addresses) must not be treated as a conflict.

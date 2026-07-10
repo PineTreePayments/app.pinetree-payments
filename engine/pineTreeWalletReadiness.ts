@@ -7,7 +7,7 @@
  * merchants never see a Speed signup/OAuth flow.
  */
 
-import { randomBytes } from "node:crypto"
+import { randomBytes, randomInt } from "node:crypto"
 import { getMerchantById } from "@/database/merchants"
 import {
   getMerchantLightningProfile,
@@ -46,6 +46,10 @@ export type EnsureManagedLightningResult = {
   speedConnectedAccountStatus: string | null
 }
 
+export type EnsureManagedLightningOptions = {
+  authEmail?: string | null
+}
+
 const ACTIVE_SPEED_ACCOUNT_STATUSES = new Set([
   "active",
   "ready",
@@ -70,8 +74,66 @@ function isActiveLightningProfile(profile: MerchantLightningProfile | null): boo
  * PineTree Wallet merchants never log into Speed directly — generate one,
  * hand it to Speed, and discard it immediately.
  */
-function generateSpeedCustomConnectPassword(): string {
-  return randomBytes(24).toString("base64url")
+const SPEED_PASSWORD_LOWER = "abcdefghjkmnpqrstuvwxyz"
+const SPEED_PASSWORD_UPPER = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+const SPEED_PASSWORD_NUMBER = "23456789"
+const SPEED_PASSWORD_SPECIAL = "!#$%&()*+-.:;=?@[]^_{}~"
+const SPEED_PASSWORD_ALL = `${SPEED_PASSWORD_LOWER}${SPEED_PASSWORD_UPPER}${SPEED_PASSWORD_NUMBER}${SPEED_PASSWORD_SPECIAL}`
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function pick(chars: string) {
+  return chars[randomInt(0, chars.length)]
+}
+
+function shuffle(chars: string[]) {
+  for (let index = chars.length - 1; index > 0; index -= 1) {
+    const swapIndex = randomInt(0, index + 1)
+    const current = chars[index]
+    chars[index] = chars[swapIndex]
+    chars[swapIndex] = current
+  }
+  return chars
+}
+
+export function isValidSpeedCustomConnectEmail(value?: string | null): boolean {
+  const email = String(value || "").trim().toLowerCase()
+  return email.length <= 320 && EMAIL_RE.test(email)
+}
+
+export function speedCustomConnectPasswordPolicyPass(value?: string | null): boolean {
+  const password = String(value || "")
+  if (password.length < 12 || password.length > 128) return false
+  if (/\s/.test(password)) return false
+  if (!/[a-z]/.test(password)) return false
+  if (!/[A-Z]/.test(password)) return false
+  if (!/[0-9]/.test(password)) return false
+  if (!/[!#$%&()*+\-.:;=?@[\]^_{}~]/.test(password)) return false
+  if (/(.)\1\1/.test(password)) return false
+  if (/abc|bcd|cde|def|efg|fgh|ghi|hij|ijk|jkl|klm|lmn|mno|nop|opq|pqr|qrs|rst|stu|tuv|uvw|vwx|wxy|xyz|123|234|345|456|567|678|789/i.test(password)) {
+    return false
+  }
+  return true
+}
+
+export function generateSpeedCustomConnectPassword(): string {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const chars = [
+      pick(SPEED_PASSWORD_LOWER),
+      pick(SPEED_PASSWORD_UPPER),
+      pick(SPEED_PASSWORD_NUMBER),
+      pick(SPEED_PASSWORD_SPECIAL),
+    ]
+    while (chars.length < 20) {
+      const next = pick(SPEED_PASSWORD_ALL)
+      const lastTwo = chars.slice(-2)
+      if (lastTwo.length === 2 && lastTwo[0] === next && lastTwo[1] === next) continue
+      chars.push(next)
+    }
+    const password = shuffle(chars).join("")
+    if (speedCustomConnectPasswordPolicyPass(password)) return password
+  }
+
+  return `Pt9!${randomBytes(16).toString("hex").replace(/abc|123/gi, "x9")}`
 }
 
 async function syncLightningStatusIntoWalletProfile(
@@ -106,7 +168,8 @@ async function syncLightningStatusIntoWalletProfile(
  * active) short-circuits on a single DB read before any Speed API call.
  */
 export async function ensureManagedLightningForMerchant(
-  merchantId: string
+  merchantId: string,
+  options: EnsureManagedLightningOptions = {}
 ): Promise<EnsureManagedLightningResult> {
   const existing = await getMerchantLightningProfile(merchantId)
 
@@ -241,6 +304,67 @@ export async function ensureManagedLightningForMerchant(
     }
   }
 
+  const merchantEmail = String(merchant?.email || "").trim().toLowerCase()
+  const authEmail = String(options.authEmail || "").trim().toLowerCase()
+  const speedEmail = isValidSpeedCustomConnectEmail(merchantEmail)
+    ? merchantEmail
+    : isValidSpeedCustomConnectEmail(authEmail)
+      ? authEmail
+      : null
+
+  if (!speedEmail) {
+    console.warn("[pinetree-managed-lightning] speed_connect_missing_email", {
+      merchant_id: merchantId,
+      merchantEmailPresent: Boolean(merchantEmail),
+      authEmailPresent: Boolean(authEmail),
+    })
+    const lightningProfile = await upsertMerchantLightningProfile({
+      merchantId,
+      status: "needs_attention",
+      speedConnectedAccountStatus: "speed_connect_missing_email",
+      providerErrorMessage: "Lightning provisioning needs a valid merchant email.",
+    })
+    await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
+    return {
+      status: lightningProfile.status,
+      action: "provisioning_incomplete",
+      speedConnectedAccountId: null,
+      speedConnectedAccountRelationshipId: null,
+      speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
+    }
+  }
+
+  const speedPassword = generateSpeedCustomConnectPassword()
+  const passwordPolicyPass = speedCustomConnectPasswordPolicyPass(speedPassword)
+  console.info("[pinetree-managed-lightning] speed_connect_password_generated", {
+    merchant_id: merchantId,
+    passwordPolicyPass,
+  })
+  console.info("[pinetree-managed-lightning] speed_connect_payload_validated", {
+    merchant_id: merchantId,
+    emailPresent: Boolean(speedEmail),
+    emailValid: isValidSpeedCustomConnectEmail(speedEmail),
+    passwordPresent: Boolean(speedPassword),
+    passwordPolicyPass,
+  })
+
+  if (!passwordPolicyPass) {
+    const lightningProfile = await upsertMerchantLightningProfile({
+      merchantId,
+      status: "needs_attention",
+      speedConnectedAccountStatus: "speed_connect_password_policy_failed",
+      providerErrorMessage: "Lightning provisioning needs attention.",
+    })
+    await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
+    return {
+      status: lightningProfile.status,
+      action: "provisioning_incomplete",
+      speedConnectedAccountId: null,
+      speedConnectedAccountRelationshipId: null,
+      speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
+    }
+  }
+
   const speedStartedAt = Date.now()
   console.info("[pinetree-managed-lightning] provisioning_step", {
     merchant_id: merchantId,
@@ -254,8 +378,8 @@ export async function ensureManagedLightningForMerchant(
         country: businessProfile.business_country!,
         first_name: businessProfile.owner_first_name!,
         last_name: businessProfile.owner_last_name!,
-        email: String(merchant?.email || "").trim(),
-        password: generateSpeedCustomConnectPassword(),
+        email: speedEmail,
+        password: speedPassword,
       }),
       SPEED_CUSTOM_CONNECT_TIMEOUT_MS,
       "Speed Custom Connect"
