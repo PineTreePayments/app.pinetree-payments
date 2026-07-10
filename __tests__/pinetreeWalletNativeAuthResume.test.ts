@@ -97,7 +97,7 @@ describe("PineTree Wallet native auth resume - page wiring", () => {
     const occurrences = page.split("walletProvisioningTimeoutSuppressionReason(").length - 1
     // Scheduling guard in each of the two timer effects plus the fire-time re-check.
     expect(occurrences).toBeGreaterThanOrEqual(3)
-    expect(page).toContain("wallet_setup_timeout_suppressed_waiting_for_native_auth")
+    expect(page).toContain("wallet_setup_timeout_suppressed")
     expect(page).toContain("needsUserAuth: coreSetupNeedsUserAuth")
     expect(page).toContain("dynamicAuthSheetOpen: Boolean(showAuthFlow)")
     expect(page).toContain("profilePostInFlight: Boolean(profilePostInFlightKeyRef.current)")
@@ -210,7 +210,7 @@ describe("PineTree Wallet native auth resume - page wiring", () => {
       "wallet_native_auth_resume_core_started",
       "wallet_core_create_success",
       "wallet_wallet_page_opened_after_create",
-      "wallet_setup_timeout_suppressed_waiting_for_native_auth",
+      "wallet_setup_timeout_suppressed",
     ]) {
       expect(eventRoute).toContain(`"${event}"`)
     }

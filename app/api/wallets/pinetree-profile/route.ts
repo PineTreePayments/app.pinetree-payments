@@ -1,9 +1,11 @@
 import { after, type NextRequest, NextResponse } from "next/server"
 import { requireMerchantAuthFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
 import {
+  findPineTreeWalletProfileByAddress,
   getPineTreeWalletProfile,
   inferBtcAddressType,
   normalizeBtcAddressType,
+  pineTreeWalletProfileHasProtectedHistory,
   upsertPineTreeWalletProfile
 } from "@/database/pineTreeWalletProfiles"
 import { backfillMerchantEmailIfMissing, getMerchantById } from "@/database/merchants"
@@ -23,6 +25,15 @@ function profileHasReadyCoreIdentity(profile: Awaited<ReturnType<typeof getPineT
     profile.base_address &&
     profile.solana_address
   )
+}
+
+type WalletIdentityConflictType =
+  | "base_owned_by_other_merchant"
+  | "solana_owned_by_other_merchant"
+  | "protected_existing_profile"
+
+function normalizedString(value: unknown) {
+  return String(value || "").trim() || null
 }
 
 function scheduleWalletReadiness(profile: Awaited<ReturnType<typeof upsertPineTreeWalletProfile>>) {
@@ -141,13 +152,18 @@ export async function POST(req: NextRequest) {
       "dynamic_email" in body ||
       "base_address" in body ||
       "solana_address" in body
+    const incomingBaseAddress = "base_address" in body ? normalizedString(body.base_address) : undefined
+    const incomingSolanaAddress = "solana_address" in body ? normalizedString(body.solana_address) : undefined
+    const existingProfile = await getPineTreeWalletProfile(merchantId)
     if (syncsDynamicProfile) {
       const merchant = await getMerchantById(merchantId)
       const identity = resolveWalletIdentity({
         merchantEmail: merchant?.email,
         authEmail: auth.email,
         bodyMerchantEmail: body.merchant_email,
-        dynamicEmail: body.dynamic_email,
+        // Dynamic externalUser auth is authoritative for wallet creation. A
+        // stale Dynamic email credential from old fallback tests must not block
+        // profile repair once the wallet addresses belong to this merchant.
       })
       if (!identity.ok) {
         console.warn("[pinetree-wallets] profile_route_identity_mismatch", {
@@ -157,8 +173,15 @@ export async function POST(req: NextRequest) {
           reason: identity.code,
         })
         console.warn("[pinetree-wallets] wallet_profile_identity_check_failed", {
-          merchantId,
           reason: identity.code,
+          existingProfileForMerchant: Boolean(existingProfile),
+          existingProfileStatus: existingProfile?.status ?? null,
+          baseAddressOwnedBySameMerchant: false,
+          solanaAddressOwnedBySameMerchant: false,
+          baseAddressOwnedByAnotherMerchant: false,
+          solanaAddressOwnedByAnotherMerchant: false,
+          dynamicUserMatchesExistingProfile: false,
+          existingProfileRepairable: Boolean(existingProfile && !profileHasReadyCoreIdentity(existingProfile)),
         })
         return NextResponse.json(
           {
@@ -205,40 +228,62 @@ export async function POST(req: NextRequest) {
       : normalizedBtcAddress
         ? inferBtcAddressType(normalizedBtcAddress)
         : undefined
-    const existingProfile = await getPineTreeWalletProfile(merchantId)
 
     if (syncsDynamicProfile) {
-      const incomingBaseAddress = "base_address" in body ? (body.base_address as string | null) : undefined
-      const incomingSolanaAddress = "solana_address" in body ? (body.solana_address as string | null) : undefined
+      const { baseProfile, solanaProfile } = await findPineTreeWalletProfileByAddress({
+        baseAddress: incomingBaseAddress,
+        solanaAddress: incomingSolanaAddress,
+      })
       const existingReadyProfile = profileHasReadyCoreIdentity(existingProfile)
-      const baseConflict = Boolean(
-        existingReadyProfile &&
-        existingProfile &&
-        incomingBaseAddress &&
-        existingProfile?.base_address &&
-        incomingBaseAddress !== existingProfile.base_address
+      const baseAddressOwnedBySameMerchant = Boolean(baseProfile?.merchant_id === merchantId)
+      const solanaAddressOwnedBySameMerchant = Boolean(solanaProfile?.merchant_id === merchantId)
+      const baseAddressOwnedByAnotherMerchant = Boolean(baseProfile && baseProfile.merchant_id !== merchantId)
+      const solanaAddressOwnedByAnotherMerchant = Boolean(solanaProfile && solanaProfile.merchant_id !== merchantId)
+      const dynamicUserMatchesExistingProfile = Boolean(
+        existingProfile?.dynamic_user_id &&
+          body.dynamic_user_id &&
+          existingProfile.dynamic_user_id === body.dynamic_user_id
       )
-      const solanaConflict = Boolean(
-        existingReadyProfile &&
-        incomingSolanaAddress &&
-        existingProfile?.solana_address &&
-        incomingSolanaAddress !== existingProfile.solana_address
-      )
-      if (baseConflict || solanaConflict) {
+      const existingProfileProtected = existingReadyProfile || await pineTreeWalletProfileHasProtectedHistory(existingProfile?.id)
+      const existingProfileRepairable = Boolean(existingProfile && !existingProfileProtected)
+      const ownershipDiagnostics = {
+        existingProfileForMerchant: Boolean(existingProfile),
+        existingProfileStatus: existingProfile?.status ?? null,
+        baseAddressOwnedBySameMerchant,
+        solanaAddressOwnedBySameMerchant,
+        baseAddressOwnedByAnotherMerchant,
+        solanaAddressOwnedByAnotherMerchant,
+        dynamicUserMatchesExistingProfile,
+        existingProfileRepairable,
+      }
+      const conflictType: WalletIdentityConflictType | null = baseAddressOwnedByAnotherMerchant
+        ? "base_owned_by_other_merchant"
+        : solanaAddressOwnedByAnotherMerchant
+          ? "solana_owned_by_other_merchant"
+          : existingProfileProtected &&
+              existingProfile &&
+              Boolean(
+                (incomingBaseAddress && existingProfile.base_address && incomingBaseAddress !== existingProfile.base_address) ||
+                (incomingSolanaAddress && existingProfile.solana_address && incomingSolanaAddress !== existingProfile.solana_address)
+              )
+            ? "protected_existing_profile"
+            : null
+
+      if (conflictType) {
         console.warn("[pinetree-wallets] wallet_profile_post_conflict", {
-          merchantId,
-          reason: "address_conflict",
-          baseConflict,
-          solanaConflict,
+          reason: "wallet_identity_conflict",
+          conflictType,
+          ...ownershipDiagnostics,
         })
-        console.warn("[pinetree-wallets] wallet_profile_post_conflict_ready_profile_only", {
-          merchantId,
-          baseConflict,
-          solanaConflict,
+        console.warn("[pinetree-wallets] wallet_profile_identity_check_failed", {
+          reason: "wallet_identity_conflict",
+          conflictType,
+          ...ownershipDiagnostics,
         })
         return NextResponse.json(
           {
-            error: "wallet_address_conflict",
+            error: "wallet_identity_conflict",
+            conflictType,
             status: "needs_review",
             message: "This wallet does not match the one already saved for your account. Please contact support before continuing.",
             retryable: false,
@@ -246,11 +291,8 @@ export async function POST(req: NextRequest) {
           { status: 409 }
         )
       }
-      if (
-        existingReadyProfile &&
-        incomingBaseAddress === existingProfile?.base_address &&
-        incomingSolanaAddress === existingProfile?.solana_address
-      ) {
+
+      if (existingReadyProfile && baseAddressOwnedBySameMerchant && solanaAddressOwnedBySameMerchant) {
         const readyProfile = existingProfile!
         console.info("[pinetree-wallets] wallet_profile_post_idempotent_success", {
           merchantId,

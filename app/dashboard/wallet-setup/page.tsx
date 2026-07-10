@@ -1166,7 +1166,8 @@ function isWalletIdentityUnavailableResponse(value: unknown) {
 }
 
 function isWalletAddressConflictResponse(value: unknown) {
-  return toRecord(value).error === "wallet_address_conflict"
+  const error = toRecord(value).error
+  return error === "wallet_address_conflict" || error === "wallet_identity_conflict"
 }
 
 function getProviderSyncStatus(value: unknown) {
@@ -4725,7 +4726,7 @@ function PineTreeWalletRuntime() {
       profilePostInFlight: Boolean(profilePostInFlightKeyRef.current),
     })
     if (suppressionReason) {
-      emitWalletSetupDebugEvent("wallet_setup_timeout_suppressed_waiting_for_native_auth", {
+      emitWalletSetupDebugEvent("wallet_setup_timeout_suppressed", {
         reason: suppressionReason,
         phase: "final_refresh_timer",
       })
@@ -4768,7 +4769,7 @@ function PineTreeWalletRuntime() {
       profilePostInFlight: Boolean(profilePostInFlightKeyRef.current),
     })
     if (suppressionReason) {
-      emitWalletSetupDebugEvent("wallet_setup_timeout_suppressed_waiting_for_native_auth", {
+      emitWalletSetupDebugEvent("wallet_setup_timeout_suppressed", {
         reason: suppressionReason,
         phase: "failure_timer",
       })
@@ -4788,7 +4789,7 @@ function PineTreeWalletRuntime() {
         profilePostInFlight: Boolean(profilePostInFlightKeyRef.current),
       })
       if (fireTimeSuppression) {
-        emitWalletSetupDebugEvent("wallet_setup_timeout_suppressed_waiting_for_native_auth", {
+        emitWalletSetupDebugEvent("wallet_setup_timeout_suppressed", {
           reason: fireTimeSuppression,
           phase: "failure_timer_fire",
         })

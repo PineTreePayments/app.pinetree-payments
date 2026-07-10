@@ -125,24 +125,24 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("Sign up with Dynamic")
   })
 
-  it("binds PineTree Wallet creation to the merchant account email", () => {
+  it("keeps merchant email checks out of externally authenticated profile ownership", () => {
     expect(page).toContain("setMerchantEmail(canonicalMerchantEmail)")
     expect(page).toContain("extractDynamicUserEmail(user)")
     expect(page).not.toContain("Using your PineTree account email: {merchantEmail}")
     expect(page).not.toContain("PineTree account email: {identityMismatchError?.merchantEmail ?? merchantEmail}")
     expect(apiRoute).toContain("getMerchantById(merchantId)")
     expect(apiRoute).toContain("resolveWalletIdentity")
+    expect(apiRoute).toContain("Dynamic externalUser auth is authoritative for wallet creation")
     expect(dbHelper).toContain("dynamic_email: string | null")
     expect(dynamicEmailMigration).toContain("ADD COLUMN IF NOT EXISTS dynamic_email TEXT")
   })
 
-  it("no flow allows a different Dynamic email to bind to the PineTree merchant profile", () => {
+  it("non-external Dynamic sessions still block a different Dynamic email before profile POST", () => {
     expect(page).toContain("if (!dynamicSessionExternallyBound && merchantEmail && dynamicUserEmail && dynamicUserEmail !== merchantEmail)")
     expect(page).toContain("return null")
     expect(apiRoute).toContain("bodyMerchantEmail: body.merchant_email")
-    expect(apiRoute).toContain("dynamicEmail: body.dynamic_email")
-    expect(apiRoute).toContain(': "dynamic_email_mismatch"')
     expect(apiRoute).toContain("{ status: 409 }")
+    expect(apiRoute).not.toContain("dynamicEmail: body.dynamic_email")
   })
 
   it("loads the merchant wallet profile from the DB before deciding Create vs Open", () => {
@@ -811,11 +811,14 @@ describe("PineTree embedded wallet setup", () => {
   it("rejects a conflicting wallet address instead of silently overwriting a saved profile", () => {
     expect(apiRoute).toContain("function profileHasReadyCoreIdentity")
     expect(apiRoute).toContain("const existingReadyProfile = profileHasReadyCoreIdentity(existingProfile)")
-    expect(apiRoute).toContain("if (baseConflict || solanaConflict)")
-    expect(apiRoute).toContain('error: "wallet_address_conflict"')
+    expect(apiRoute).toContain("baseAddressOwnedByAnotherMerchant")
+    expect(apiRoute).toContain("solanaAddressOwnedByAnotherMerchant")
+    expect(apiRoute).toContain("protected_existing_profile")
+    expect(apiRoute).toContain('error: "wallet_identity_conflict"')
+    expect(apiRoute).toContain("conflictType")
     expect(apiRoute).toContain('status: "needs_review"')
     expect(apiRoute).toContain("retryable: false")
-    expect(apiRoute).toContain("wallet_profile_post_conflict_ready_profile_only")
+    expect(apiRoute).toContain("wallet_profile_identity_check_failed")
     expect(apiRoute).toContain("wallet_profile_post_existing_incomplete_repaired")
     expect(apiRoute).toContain("wallet_profile_post_idempotent_success")
     expect(page).toContain("function isWalletAddressConflictResponse(value: unknown)")
@@ -838,7 +841,7 @@ describe("PineTree embedded wallet setup", () => {
       "wallet_profile_post_conflict",
       "wallet_profile_post_existing_incomplete_repaired",
       "wallet_profile_post_idempotent_success",
-      "wallet_profile_post_conflict_ready_profile_only",
+      "wallet_profile_identity_check_failed",
       "wallet_profile_post_error",
       "wallet_core_ready",
       "wallet_signers_missing_non_blocking",

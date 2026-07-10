@@ -118,6 +118,61 @@ export async function getPineTreeWalletProfile(
   return data as PineTreeWalletProfile
 }
 
+export async function findPineTreeWalletProfileByAddress(input: {
+  baseAddress?: string | null
+  solanaAddress?: string | null
+}): Promise<{
+  baseProfile: PineTreeWalletProfile | null
+  solanaProfile: PineTreeWalletProfile | null
+}> {
+  const baseAddress = String(input.baseAddress || "").trim()
+  const solanaAddress = String(input.solanaAddress || "").trim()
+  const [baseResult, solanaResult] = await Promise.all([
+    baseAddress
+      ? supabase
+          .from(PROFILES_TABLE)
+          .select("*")
+          .eq("base_address", baseAddress)
+          .limit(1)
+      : Promise.resolve({ data: null, error: null }),
+    solanaAddress
+      ? supabase
+          .from(PROFILES_TABLE)
+          .select("*")
+          .eq("solana_address", solanaAddress)
+          .limit(1)
+      : Promise.resolve({ data: null, error: null }),
+  ])
+  const baseProfile = Array.isArray(baseResult.data)
+    ? (baseResult.data[0] as PineTreeWalletProfile | undefined) ?? null
+    : null
+  const solanaProfile = Array.isArray(solanaResult.data)
+    ? (solanaResult.data[0] as PineTreeWalletProfile | undefined) ?? null
+    : null
+
+  return {
+    baseProfile: baseResult.error ? null : baseProfile,
+    solanaProfile: solanaResult.error ? null : solanaProfile,
+  }
+}
+
+export async function pineTreeWalletProfileHasProtectedHistory(profileId?: string | null): Promise<boolean> {
+  const id = String(profileId || "").trim()
+  if (!id) return false
+
+  const { count, error } = await supabase
+    .from("wallet_withdrawal_requests")
+    .select("id", { count: "exact", head: true })
+    .eq("wallet_profile_id", id)
+
+  if (error) {
+    // Fail closed: if the financial-history check cannot be evaluated, do not
+    // allow address replacement that might detach real withdrawal history.
+    return true
+  }
+  return Number(count || 0) > 0
+}
+
 /**
  * Create or update the PineTree Wallet profile for a merchant.
  * Only the fields provided in the input are updated; omitted fields keep their current value.

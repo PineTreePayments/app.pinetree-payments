@@ -978,11 +978,39 @@ describe("PineTree Dynamic provisioning flow", () => {
 
   it("does not silently overwrite a saved ready profile with a different Dynamic address", () => {
     expect(profileRoute).toContain("const existingReadyProfile = profileHasReadyCoreIdentity(existingProfile)")
-    expect(profileRoute).toContain('error: "wallet_address_conflict"')
+    expect(profileRoute).toContain('error: "wallet_identity_conflict"')
+    expect(profileRoute).toContain('conflictType')
+    expect(profileRoute).toContain('"base_owned_by_other_merchant"')
+    expect(profileRoute).toContain('"solana_owned_by_other_merchant"')
+    expect(profileRoute).toContain('"protected_existing_profile"')
     expect(profileRoute).toContain('status: "needs_review"')
     // Idempotent resync (same addresses) must not be treated as a conflict.
     expect(profileRoute).toContain("incomingBaseAddress !== existingProfile.base_address")
     expect(profileRoute).toContain("incomingSolanaAddress !== existingProfile.solana_address")
+  })
+
+  it("logs wallet profile identity conflicts with safe ownership booleans only", () => {
+    expect(profileRoute).toContain("const ownershipDiagnostics = {")
+    for (const field of [
+      "existingProfileForMerchant",
+      "existingProfileStatus",
+      "baseAddressOwnedBySameMerchant",
+      "solanaAddressOwnedBySameMerchant",
+      "baseAddressOwnedByAnotherMerchant",
+      "solanaAddressOwnedByAnotherMerchant",
+      "dynamicUserMatchesExistingProfile",
+      "existingProfileRepairable",
+    ]) {
+      expect(profileRoute).toContain(field)
+    }
+    const conflictLog = profileRoute.slice(
+      profileRoute.indexOf('console.warn("[pinetree-wallets] wallet_profile_identity_check_failed"'),
+      profileRoute.indexOf("return NextResponse.json", profileRoute.indexOf('console.warn("[pinetree-wallets] wallet_profile_identity_check_failed"'))
+    )
+    expect(conflictLog).not.toContain("incomingBaseAddress")
+    expect(conflictLog).not.toContain("incomingSolanaAddress")
+    expect(conflictLog).not.toContain("dynamic_email")
+    expect(conflictLog).not.toContain("merchantEmail")
   })
 
   it("wallet balances do not make a rail ready by themselves", () => {

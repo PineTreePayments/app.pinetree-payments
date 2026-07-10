@@ -62,7 +62,7 @@ const WHITELISTED_EVENTS = new Set([
   "wallet_native_auth_resume_core_started",
   "wallet_core_create_success",
   "wallet_wallet_page_opened_after_create",
-  "wallet_setup_timeout_suppressed_waiting_for_native_auth",
+  "wallet_setup_timeout_suppressed",
   "wallet_core_profile_post_started",
   "wallet_core_profile_post_success",
   "wallet_speed_setup_success",
