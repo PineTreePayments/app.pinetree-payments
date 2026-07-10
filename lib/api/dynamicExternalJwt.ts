@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto"
-import { SignJWT, importPKCS8 } from "jose"
+import { createPrivateKey, createPublicKey, randomUUID } from "node:crypto"
+import { SignJWT, exportJWK, importPKCS8 } from "jose"
 
 /**
  * Server-side PineTree -> Dynamic external JWT signing.
@@ -29,6 +29,8 @@ export type DynamicJwtClaimsDiagnostics = {
   environmentIdPresent: boolean
 }
 
+export const pineTreeDynamicCanonicalIssuer = "https://app.pinetree-payments.com"
+
 export function getDynamicExternalJwtIssuer() {
   return process.env.DYNAMIC_EXTERNAL_JWT_ISSUER || "https://app.pinetree-payments.com"
 }
@@ -49,8 +51,8 @@ function normalizeOrigin(value: string | undefined) {
 
 /**
  * Boolean-only claim diagnostics, safe to log and to return to the client.
- * - issuerMatch: the signed issuer is the same origin the public JWKS is served
- *   under (NEXT_PUBLIC_APP_URL) - the value the Dynamic dashboard must have.
+ * - issuerMatch: the signed issuer exactly equals the value configured in the
+ *   Dynamic dashboard: https://app.pinetree-payments.com.
  * - audienceMatch: the signed audience equals the Dynamic environment ID (the
  *   dashboard-configured audience, per the verified contract above).
  */
@@ -60,9 +62,8 @@ export function getDynamicJwtClaimsDiagnostics(input: {
   subject: string | null | undefined
 }): DynamicJwtClaimsDiagnostics {
   const environmentId = process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?.trim()
-  const appUrl = normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL)
   return {
-    issuerMatch: Boolean(input.issuer && appUrl && normalizeOrigin(input.issuer) === appUrl),
+    issuerMatch: input.issuer === pineTreeDynamicCanonicalIssuer,
     audienceMatch: Boolean(input.audience && environmentId && input.audience === environmentId),
     subjectPresent: Boolean(input.subject),
     environmentIdPresent: Boolean(environmentId),
@@ -166,6 +167,81 @@ export async function signDynamicExternalJwt(input: {
     keyId,
     claims: getDynamicJwtClaimsDiagnostics({ issuer, audience, subject: input.merchantId }),
   }
+}
+
+/**
+ * TEMPORARY external-JWT contract diagnostic (safe fields only). Compares what
+ * this deployment SIGNS against what the canonical JWKS URL (the one configured
+ * in Dynamic's dashboard) actually SERVES:
+ * - headerKid: the kid this deployment puts in the JWT header.
+ * - jwksKid: the kid served by the issuer-origin JWKS.
+ * - kidMatch: exact equality of the two.
+ * - signingKeyMatchesJwks: the public key derived from this deployment's
+ *   signing key has the same RSA modulus/exponent as the JWKS entry - i.e. the
+ *   JWT signature will verify against the key Dynamic fetches.
+ * - issuerMatch: signed issuer === https://app.pinetree-payments.com (the
+ *   dashboard-configured value).
+ * - audienceMatch: signed audience === NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID.
+ *
+ * kids are public JWKS values; nothing here includes the JWT, private key
+ * material, or emails.
+ */
+export type DynamicExternalJwtContractCheck = {
+  headerKid: string | null
+  jwksKid: string | null
+  kidMatch: boolean
+  signingKeyMatchesJwks: boolean
+  issuerMatch: boolean
+  audienceMatch: boolean
+  environmentIdPresent: boolean
+  algorithm: "RS256"
+  jwksLoaded: boolean
+}
+
+export async function runDynamicExternalJwtContractCheck(): Promise<DynamicExternalJwtContractCheck> {
+  const issuer = getDynamicExternalJwtIssuer()
+  const audience = resolveDynamicJwtAudience()
+  const environmentId = process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?.trim()
+  const headerKid = getDynamicExternalJwtKid() ?? null
+
+  const check: DynamicExternalJwtContractCheck = {
+    headerKid,
+    jwksKid: null,
+    kidMatch: false,
+    signingKeyMatchesJwks: false,
+    issuerMatch: issuer === pineTreeDynamicCanonicalIssuer,
+    audienceMatch: Boolean(audience && environmentId && audience === environmentId),
+    environmentIdPresent: Boolean(environmentId),
+    algorithm: "RS256",
+    jwksLoaded: false,
+  }
+
+  let localPublicJwk: { n?: string; e?: string } | null = null
+  try {
+    const signingKeyPem = getDynamicExternalJwtSigningKeyPem()
+    localPublicJwk = await exportJWK(createPublicKey(createPrivateKey(signingKeyPem)))
+  } catch {
+    localPublicJwk = null
+  }
+
+  try {
+    const res = await fetch(`${normalizeOrigin(issuer)}/.well-known/dynamic-jwks.json`, { cache: "no-store" })
+    if (res.ok) {
+      const json = (await res.json()) as { keys?: Array<{ kid?: string; n?: string; e?: string }> }
+      const keys = Array.isArray(json?.keys) ? json.keys : []
+      check.jwksLoaded = keys.length > 0
+      const matching = keys.find((key) => key?.kid === headerKid) ?? keys[0] ?? null
+      check.jwksKid = matching?.kid ?? null
+      check.kidMatch = Boolean(headerKid && matching?.kid === headerKid)
+      check.signingKeyMatchesJwks = Boolean(
+        localPublicJwk?.n && matching?.n === localPublicJwk.n && matching?.e === localPublicJwk.e
+      )
+    }
+  } catch {
+    // Unreachable JWKS is itself the diagnostic result - report booleans as-is.
+  }
+
+  return check
 }
 
 /**

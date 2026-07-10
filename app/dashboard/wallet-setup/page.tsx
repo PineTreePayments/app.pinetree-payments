@@ -42,6 +42,7 @@ import {
   assertCanOpenDynamicEmailFallbackAuth,
   pineTreeDynamicConfigurationErrorMessage,
   pineTreeDynamicEmailFallbackMisconfiguredWarning,
+  analyzePineTreeDynamicExternalJwtContract,
   requestPineTreeDynamicExternalJwtAuth,
   shouldOpenDynamicEmailFallbackAuth,
   type PineTreeDynamicExternalJwtClaimsDiagnostics,
@@ -3168,6 +3169,37 @@ function PineTreeWalletRuntime() {
           const payload = await requestPineTreeDynamicExternalJwtAuth(token, { walletDebug: walletSyncDebugQueryEnabled })
           issuedClaims = payload.claims ?? null
           endpointStatus = 200
+          // TEMPORARY external-JWT contract diagnostic: decode the token locally
+          // and compare kid/alg/iss/aud against the values Dynamic validates
+          // (canonical issuer, client-bundle environment ID, same-origin JWKS
+          // kid). Safe fields only - never the JWT, key material, or emails.
+          try {
+            const contractAnalysis = analyzePineTreeDynamicExternalJwtContract(payload.externalJwt, {
+              NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID: process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID,
+            })
+            const jwksKid = await fetch("/.well-known/dynamic-jwks.json", { cache: "no-store" })
+              .then(async (jwksRes) => {
+                if (!jwksRes.ok) return null
+                const jwks = (await jwksRes.json()) as { keys?: Array<{ kid?: string }> }
+                return jwks.keys?.[0]?.kid ?? null
+              })
+              .catch(() => null)
+            const contractDiagnostic = {
+              headerKid: contractAnalysis.headerKid ?? "missing",
+              jwksKid: jwksKid ?? "missing",
+              kidMatch: Boolean(contractAnalysis.headerKid && jwksKid && contractAnalysis.headerKid === jwksKid),
+              algorithm: contractAnalysis.algorithm ?? "missing",
+              issuerMatch: contractAnalysis.issuerMatch,
+              audienceMatch: contractAnalysis.audienceMatch,
+              environmentIdMatch: contractAnalysis.environmentIdPresent && contractAnalysis.audienceMatch,
+              environmentIdPresent: contractAnalysis.environmentIdPresent,
+              subjectPresent: contractAnalysis.subjectPresent,
+            }
+            console.info("[pinetree-wallets] wallet_dynamic_jwt_contract_diagnostic", contractDiagnostic)
+            emitWalletSetupDebugEvent("wallet_dynamic_jwt_contract_diagnostic", contractDiagnostic)
+          } catch {
+            // Diagnostics never block sign-in.
+          }
           emitWalletSetupDebugEvent("wallet_dynamic_jwt_response_received", {
             ok: true,
             tokenPresent: Boolean(payload.externalJwt),

@@ -6,8 +6,27 @@ import {
   getDynamicExternalJwtIssuer,
   getDynamicJwtClaimsDiagnostics,
   resolveDynamicJwtAudience,
+  runDynamicExternalJwtContractCheck,
   signDynamicExternalJwt,
+  type DynamicExternalJwtContractCheck,
 } from "@/lib/api/dynamicExternalJwt"
+
+// TEMPORARY diagnostic cache: the contract check fetches this deployment's own
+// public JWKS to prove key/kid parity with what Dynamic verifies against - one
+// fetch per 5 minutes, never per request, and never blocking token issuance.
+let contractCheckCache: { at: number; value: DynamicExternalJwtContractCheck } | null = null
+const contractCheckTtlMs = 5 * 60 * 1000
+
+async function logExternalJwtContractDiagnostic() {
+  try {
+    if (!contractCheckCache || Date.now() - contractCheckCache.at > contractCheckTtlMs) {
+      contractCheckCache = { at: Date.now(), value: await runDynamicExternalJwtContractCheck() }
+    }
+    console.info("[pinetree-wallets] wallet_dynamic_jwt_contract_diagnostic", contractCheckCache.value)
+  } catch {
+    // Diagnostics must never break token issuance.
+  }
+}
 
 type AuthenticatedMerchant = {
   merchantId: string
@@ -165,11 +184,15 @@ export async function POST(req: NextRequest) {
     logExternalJwtRoute({ ...diagnostics, userPresent, merchantResolved, status: routeStatus })
 
     console.info("[pinetree-wallets] wallet_dynamic_jwt_auth_success", { ...signed.claims })
+    await logExternalJwtContractDiagnostic()
     console.info("[pinetree-wallets] dynamic_external_jwt_issued", {
       emailPresent: Boolean(auth.email),
-      issuer: signed.issuer,
+      issuerMatch: signed.claims.issuerMatch,
+      audienceMatch: signed.claims.audienceMatch,
+      environmentIdMatch: signed.claims.environmentIdPresent && signed.claims.audienceMatch,
       audienceConfigured: Boolean(signed.audience),
       kidConfigured: Boolean(signed.keyId),
+      algorithm: "RS256",
       signingKeyConfigured: diagnostics.signingKeyConfigured,
       expiresAt: signed.expiresAt.toISOString(),
     })

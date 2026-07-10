@@ -103,6 +103,69 @@ export function assertCanOpenDynamicEmailFallbackAuth(config: PineTreeDynamicAut
   }
 }
 
+export const pineTreeDynamicCanonicalIssuer = "https://app.pinetree-payments.com"
+
+export type PineTreeDynamicExternalJwtContractAnalysis = {
+  headerKid: string | null
+  algorithm: string | null
+  issuerMatch: boolean
+  audienceMatch: boolean
+  environmentIdPresent: boolean
+  subjectPresent: boolean
+}
+
+function decodeJwtSegment(segment: string): Record<string, unknown> | null {
+  try {
+    const normalized = segment.replace(/-/g, "+").replace(/_/g, "/")
+    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4)
+    const binary = atob(padded)
+    const json = decodeURIComponent(
+      Array.from(binary, (char) => "%" + char.charCodeAt(0).toString(16).padStart(2, "0")).join("")
+    )
+    const parsed = JSON.parse(json) as unknown
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * TEMPORARY contract diagnostic for a PineTree-issued external JWT. Decodes the
+ * token locally (client-side) and reduces it to safe comparison booleans plus
+ * the public header kid/alg - never the token itself, claim values, or emails.
+ *
+ * - issuerMatch: iss === https://app.pinetree-payments.com (the value
+ *   configured in Dynamic's dashboard).
+ * - audienceMatch: aud === the Dynamic environment ID this client bundle was
+ *   built with - the exact claim Dynamic rejects with "Audience (aud) does not
+ *   match" when wrong. Comparing against the CLIENT-inlined environment ID also
+ *   catches a server/client env split, which a server-only check cannot see.
+ */
+export function analyzePineTreeDynamicExternalJwtContract(
+  externalJwt: string,
+  env: { NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?: string }
+): PineTreeDynamicExternalJwtContractAnalysis {
+  const environmentId = (env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID || "").trim()
+  const segments = String(externalJwt || "").split(".")
+  const header = segments.length === 3 ? decodeJwtSegment(segments[0]) : null
+  const payload = segments.length === 3 ? decodeJwtSegment(segments[1]) : null
+
+  const aud = payload?.aud
+  const audienceMatch = Boolean(
+    environmentId &&
+      (aud === environmentId || (Array.isArray(aud) && aud.includes(environmentId)))
+  )
+
+  return {
+    headerKid: typeof header?.kid === "string" ? header.kid : null,
+    algorithm: typeof header?.alg === "string" ? header.alg : null,
+    issuerMatch: payload?.iss === pineTreeDynamicCanonicalIssuer,
+    audienceMatch,
+    environmentIdPresent: Boolean(environmentId),
+    subjectPresent: typeof payload?.sub === "string" && payload.sub.length > 0,
+  }
+}
+
 export async function requestPineTreeDynamicExternalJwtAuth(
   accessToken: string,
   options?: { walletDebug?: boolean }

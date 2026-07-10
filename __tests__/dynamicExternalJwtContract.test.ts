@@ -1,10 +1,13 @@
 import fs from "node:fs"
 import path from "node:path"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { SignJWT, exportJWK, exportPKCS8, generateKeyPair } from "jose"
 import {
   dynamicSessionBoundToMerchant,
   getDynamicExternalUserId,
 } from "@/lib/wallets/dynamicExternalIdentity"
+import { analyzePineTreeDynamicExternalJwtContract } from "@/lib/pinetreeDynamicAuth"
+import { runDynamicExternalJwtContractCheck } from "@/lib/api/dynamicExternalJwt"
 
 function read(file: string) {
   return fs.readFileSync(path.join(process.cwd(), file), "utf8")
@@ -45,6 +48,196 @@ describe("Dynamic external identity mapping", () => {
       verifiedCredentials: [{ format: "email", publicIdentifier: merchantId }],
     })).toBeNull()
     expect(dynamicSessionBoundToMerchant({ verifiedCredentials: [] }, merchantId)).toBe(false)
+  })
+})
+
+async function signTestJwt(options: {
+  kid?: string
+  issuer?: string
+  audience?: string
+}) {
+  const keys = await generateKeyPair("RS256")
+  let jwt = new SignJWT({ email: "merchant@example.com" })
+    .setProtectedHeader({ alg: "RS256", ...(options.kid ? { kid: options.kid } : {}) })
+    .setSubject(merchantId)
+    .setIssuedAt()
+    .setExpirationTime("5m")
+  if (options.issuer) jwt = jwt.setIssuer(options.issuer)
+  if (options.audience) jwt = jwt.setAudience(options.audience)
+  return jwt.sign(keys.privateKey)
+}
+
+describe("analyzePineTreeDynamicExternalJwtContract (client-side JWT contract analysis)", () => {
+  const env = { NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID: "test-environment-id" }
+
+  it("reports full contract match for a correctly signed token", async () => {
+    const jwt = await signTestJwt({
+      kid: "pinetree-test-kid",
+      issuer: "https://app.pinetree-payments.com",
+      audience: "test-environment-id",
+    })
+    expect(analyzePineTreeDynamicExternalJwtContract(jwt, env)).toEqual({
+      headerKid: "pinetree-test-kid",
+      algorithm: "RS256",
+      issuerMatch: true,
+      audienceMatch: true,
+      environmentIdPresent: true,
+      subjectPresent: true,
+    })
+  })
+
+  it("flags an audience that does not equal the environment ID - the exact production rejection", async () => {
+    const jwt = await signTestJwt({
+      kid: "pinetree-test-kid",
+      issuer: "https://app.pinetree-payments.com",
+      audience: "dynamic",
+    })
+    const analysis = analyzePineTreeDynamicExternalJwtContract(jwt, env)
+    expect(analysis.audienceMatch).toBe(false)
+    expect(analysis.issuerMatch).toBe(true)
+  })
+
+  it("flags an issuer that diverges from the canonical dashboard value", async () => {
+    const jwt = await signTestJwt({
+      kid: "pinetree-test-kid",
+      issuer: "https://app.pinetree-payments.com/", // trailing slash = mismatch
+      audience: "test-environment-id",
+    })
+    expect(analyzePineTreeDynamicExternalJwtContract(jwt, env).issuerMatch).toBe(false)
+  })
+
+  it("accepts an audience array containing the environment ID", async () => {
+    const keys = await generateKeyPair("RS256")
+    const jwt = await new SignJWT({})
+      .setProtectedHeader({ alg: "RS256", kid: "k" })
+      .setIssuer("https://app.pinetree-payments.com")
+      .setSubject(merchantId)
+      .setAudience(["other", "test-environment-id"])
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(keys.privateKey)
+    expect(analyzePineTreeDynamicExternalJwtContract(jwt, env).audienceMatch).toBe(true)
+  })
+
+  it("handles malformed tokens and a missing environment ID without throwing", () => {
+    expect(analyzePineTreeDynamicExternalJwtContract("not-a-jwt", env)).toEqual({
+      headerKid: null,
+      algorithm: null,
+      issuerMatch: false,
+      audienceMatch: false,
+      environmentIdPresent: true,
+      subjectPresent: false,
+    })
+    expect(analyzePineTreeDynamicExternalJwtContract("a.b.c", {}).environmentIdPresent).toBe(false)
+  })
+
+  it("returns comparison booleans plus public header fields only - never claim values", async () => {
+    const jwt = await signTestJwt({
+      kid: "pinetree-test-kid",
+      issuer: "https://app.pinetree-payments.com",
+      audience: "test-environment-id",
+    })
+    const serialized = JSON.stringify(analyzePineTreeDynamicExternalJwtContract(jwt, env))
+    expect(serialized).not.toContain("merchant@example.com")
+    expect(serialized).not.toContain(merchantId)
+    expect(serialized).not.toContain("https://app.pinetree-payments.com")
+  })
+})
+
+describe("runDynamicExternalJwtContractCheck (server key/JWKS parity)", () => {
+  const envKeys = [
+    "DYNAMIC_EXTERNAL_JWT_ISSUER",
+    "DYNAMIC_EXTERNAL_JWT_AUDIENCE",
+    "DYNAMIC_EXTERNAL_JWT_AUDIENCE_OVERRIDE",
+    "DYNAMIC_EXTERNAL_JWT_KID",
+    "DYNAMIC_EXTERNAL_JWT_KEY_ID",
+    "DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64",
+    "DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY",
+    "NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID",
+  ] as const
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]))
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    for (const key of envKeys) {
+      const original = originalEnv[key]
+      if (original === undefined) {
+        delete process.env[key]
+      } else {
+        process.env[key] = original
+      }
+    }
+  })
+
+  async function setupSigningEnv() {
+    const keys = await generateKeyPair("RS256", { extractable: true })
+    const privateKeyPem = await exportPKCS8(keys.privateKey)
+    const publicJwk = await exportJWK(keys.publicKey)
+    process.env.DYNAMIC_EXTERNAL_JWT_ISSUER = "https://app.pinetree-payments.com"
+    process.env.DYNAMIC_EXTERNAL_JWT_KID = "pinetree-test-kid"
+    process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64 = Buffer.from(privateKeyPem, "utf8").toString("base64")
+    process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID = "test-environment-id"
+    delete process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE
+    delete process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE_OVERRIDE
+    delete process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY
+    delete process.env.DYNAMIC_EXTERNAL_JWT_KEY_ID
+    return { publicJwk }
+  }
+
+  it("proves signing key and kid parity against the JWKS Dynamic fetches", async () => {
+    const { publicJwk } = await setupSigningEnv()
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ keys: [{ ...publicJwk, kid: "pinetree-test-kid", alg: "RS256", use: "sig" }] }), { status: 200 })
+    ))
+
+    expect(await runDynamicExternalJwtContractCheck()).toEqual({
+      headerKid: "pinetree-test-kid",
+      jwksKid: "pinetree-test-kid",
+      kidMatch: true,
+      signingKeyMatchesJwks: true,
+      issuerMatch: true,
+      audienceMatch: true,
+      environmentIdPresent: true,
+      algorithm: "RS256",
+      jwksLoaded: true,
+    })
+  })
+
+  it("detects a JWKS serving a DIFFERENT key than the one signing tokens", async () => {
+    await setupSigningEnv()
+    const otherKeys = await generateKeyPair("RS256", { extractable: true })
+    const otherJwk = await exportJWK(otherKeys.publicKey)
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ keys: [{ ...otherJwk, kid: "pinetree-test-kid", alg: "RS256", use: "sig" }] }), { status: 200 })
+    ))
+
+    const check = await runDynamicExternalJwtContractCheck()
+    expect(check.kidMatch).toBe(true)
+    expect(check.signingKeyMatchesJwks).toBe(false)
+  })
+
+  it("detects a kid mismatch between the JWT header and the served JWKS", async () => {
+    const { publicJwk } = await setupSigningEnv()
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ keys: [{ ...publicJwk, kid: "some-other-kid", alg: "RS256", use: "sig" }] }), { status: 200 })
+    ))
+
+    const check = await runDynamicExternalJwtContractCheck()
+    expect(check.headerKid).toBe("pinetree-test-kid")
+    expect(check.jwksKid).toBe("some-other-kid")
+    expect(check.kidMatch).toBe(false)
+  })
+
+  it("reports an unreachable JWKS without throwing and never leaks key material", async () => {
+    await setupSigningEnv()
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("network down") }))
+
+    const check = await runDynamicExternalJwtContractCheck()
+    expect(check.jwksLoaded).toBe(false)
+    expect(check.kidMatch).toBe(false)
+    const serialized = JSON.stringify(check)
+    expect(serialized).not.toContain("BEGIN PRIVATE KEY")
+    expect(serialized).not.toContain(process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64)
   })
 })
 

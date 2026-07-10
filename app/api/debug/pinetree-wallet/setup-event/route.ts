@@ -50,6 +50,7 @@ const WHITELISTED_EVENTS = new Set([
   "wallet_dynamic_jwt_auth_started",
   "wallet_dynamic_jwt_auth_success",
   "wallet_dynamic_jwt_auth_failed",
+  "wallet_dynamic_jwt_contract_diagnostic",
   "wallet_dynamic_native_fallback_started",
   "wallet_dynamic_native_fallback_suppressed",
   "wallet_dynamic_native_user_detected",
