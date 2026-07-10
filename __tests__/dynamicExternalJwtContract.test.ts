@@ -7,7 +7,11 @@ import {
   getDynamicExternalUserId,
 } from "@/lib/wallets/dynamicExternalIdentity"
 import { analyzePineTreeDynamicExternalJwtContract } from "@/lib/pinetreeDynamicAuth"
-import { runDynamicExternalJwtContractCheck } from "@/lib/api/dynamicExternalJwt"
+import {
+  runDynamicExternalJwtContractCheck,
+  signDynamicExternalJwt,
+  verifySignedDynamicExternalJwtAgainstJwks,
+} from "@/lib/api/dynamicExternalJwt"
 
 function read(file: string) {
   return fs.readFileSync(path.join(process.cwd(), file), "utf8")
@@ -83,6 +87,8 @@ describe("analyzePineTreeDynamicExternalJwtContract (client-side JWT contract an
       audienceMatch: true,
       environmentIdPresent: true,
       subjectPresent: true,
+      externalUserIdPresent: false,
+      externalUserIdMatchesSubject: false,
     })
   })
 
@@ -127,8 +133,35 @@ describe("analyzePineTreeDynamicExternalJwtContract (client-side JWT contract an
       audienceMatch: false,
       environmentIdPresent: true,
       subjectPresent: false,
+      externalUserIdPresent: false,
+      externalUserIdMatchesSubject: false,
     })
     expect(analyzePineTreeDynamicExternalJwtContract("a.b.c", {}).environmentIdPresent).toBe(false)
+  })
+
+  it("proves the route externalUserId exactly matches the JWT subject without returning either value", async () => {
+    const jwt = await signTestJwt({
+      kid: "pinetree-test-kid",
+      issuer: "https://app.pinetree-payments.com",
+      audience: "test-environment-id",
+    })
+    const analysis = analyzePineTreeDynamicExternalJwtContract(jwt, env, merchantId)
+    expect(analysis.externalUserIdPresent).toBe(true)
+    expect(analysis.externalUserIdMatchesSubject).toBe(true)
+    const serialized = JSON.stringify(analysis)
+    expect(serialized).not.toContain(merchantId)
+    expect(serialized).not.toContain("merchant@example.com")
+  })
+
+  it("flags a route externalUserId that does not match JWT sub before Dynamic is called", async () => {
+    const jwt = await signTestJwt({
+      kid: "pinetree-test-kid",
+      issuer: "https://app.pinetree-payments.com",
+      audience: "test-environment-id",
+    })
+    const analysis = analyzePineTreeDynamicExternalJwtContract(jwt, env, "different-external-user")
+    expect(analysis.externalUserIdPresent).toBe(true)
+    expect(analysis.externalUserIdMatchesSubject).toBe(false)
   })
 
   it("returns comparison booleans plus public header fields only - never claim values", async () => {
@@ -183,6 +216,62 @@ describe("runDynamicExternalJwtContractCheck (server key/JWKS parity)", () => {
     delete process.env.DYNAMIC_EXTERNAL_JWT_KEY_ID
     return { publicJwk }
   }
+
+  it("verifies a signed JWT against the exact JWKS key and subject binding", async () => {
+    const { publicJwk } = await setupSigningEnv()
+    const signed = await signDynamicExternalJwt({ merchantId, email: "merchant@example.com" })
+    const check = await verifySignedDynamicExternalJwtAgainstJwks({
+      externalJwt: signed.externalJwt,
+      externalUserId: signed.subject,
+      jwksKey: { ...publicJwk, kid: "pinetree-test-kid", alg: "RS256", use: "sig" },
+    })
+
+    expect(check).toEqual({
+      jwtSelfVerificationPassed: true,
+      jwtHeaderKidPresent: true,
+      jwtHeaderKidMatchesJwks: true,
+      signingPublicKeyMatchesJwks: true,
+      jwksKidPresent: true,
+      algorithmRs256: true,
+      routeExternalUserIdPresent: true,
+      routeExternalUserIdMatchesSubject: true,
+    })
+  })
+
+  it("detects changing private key material while reusing the same kid", async () => {
+    await setupSigningEnv()
+    const signed = await signDynamicExternalJwt({ merchantId, email: "merchant@example.com" })
+    const otherKeys = await generateKeyPair("RS256", { extractable: true })
+    const otherJwk = await exportJWK(otherKeys.publicKey)
+
+    const check = await verifySignedDynamicExternalJwtAgainstJwks({
+      externalJwt: signed.externalJwt,
+      externalUserId: signed.subject,
+      jwksKey: { ...otherJwk, kid: "pinetree-test-kid", alg: "RS256", use: "sig" },
+    })
+
+    expect(check.jwtHeaderKidMatchesJwks).toBe(true)
+    expect(check.signingPublicKeyMatchesJwks).toBe(false)
+    expect(check.jwtSelfVerificationPassed).toBe(false)
+  })
+
+  it("detects missing or mismatched externalUserId binding without leaking values", async () => {
+    const { publicJwk } = await setupSigningEnv()
+    const signed = await signDynamicExternalJwt({ merchantId, email: "merchant@example.com" })
+    const mismatched = await verifySignedDynamicExternalJwtAgainstJwks({
+      externalJwt: signed.externalJwt,
+      externalUserId: "different-external-user",
+      jwksKey: { ...publicJwk, kid: "pinetree-test-kid", alg: "RS256", use: "sig" },
+    })
+
+    expect(mismatched.routeExternalUserIdPresent).toBe(true)
+    expect(mismatched.routeExternalUserIdMatchesSubject).toBe(false)
+    expect(mismatched.jwtSelfVerificationPassed).toBe(false)
+    const serialized = JSON.stringify(mismatched)
+    expect(serialized).not.toContain(merchantId)
+    expect(serialized).not.toContain("different-external-user")
+    expect(serialized).not.toContain("merchant@example.com")
+  })
 
   it("proves signing key and kid parity against the JWKS Dynamic fetches", async () => {
     const { publicJwk } = await setupSigningEnv()

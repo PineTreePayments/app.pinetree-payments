@@ -1,5 +1,5 @@
 import { createPrivateKey, createPublicKey, randomUUID } from "node:crypto"
-import { SignJWT, exportJWK, importPKCS8 } from "jose"
+import { SignJWT, decodeJwt, decodeProtectedHeader, exportJWK, importJWK, importPKCS8, jwtVerify } from "jose"
 
 /**
  * Server-side PineTree -> Dynamic external JWT signing.
@@ -27,6 +27,16 @@ export type DynamicJwtClaimsDiagnostics = {
   audienceMatch: boolean
   subjectPresent: boolean
   environmentIdPresent: boolean
+}
+
+export type DynamicExternalJwtPublicJwk = {
+  kid: string
+  alg: "RS256"
+  use: "sig"
+  kty?: string
+  n?: string
+  e?: string
+  [key: string]: unknown
 }
 
 export const pineTreeDynamicCanonicalIssuer = "https://app.pinetree-payments.com"
@@ -96,12 +106,36 @@ export function getDynamicExternalJwtKid() {
   return process.env.DYNAMIC_EXTERNAL_JWT_KID || process.env.DYNAMIC_EXTERNAL_JWT_KEY_ID || undefined
 }
 
+export async function deriveDynamicExternalJwtPublicJwk(): Promise<DynamicExternalJwtPublicJwk> {
+  const kid = getDynamicExternalJwtKid()
+  if (!kid) {
+    throw Object.assign(new Error("dynamic_external_jwt_kid_missing"), { status: 503 })
+  }
+
+  const signingKeyPem = getDynamicExternalJwtSigningKeyPem()
+  try {
+    await importPKCS8(signingKeyPem, "RS256")
+    const privateKey = createPrivateKey(signingKeyPem)
+    const publicKey = createPublicKey(privateKey)
+    const publicJwk = await exportJWK(publicKey)
+    return {
+      ...publicJwk,
+      kid,
+      alg: "RS256",
+      use: "sig",
+    }
+  } catch {
+    throw Object.assign(new Error("dynamic_external_jwt_signing_key_invalid"), { status: 503 })
+  }
+}
+
 export type SignedDynamicExternalJwt = {
   externalJwt: string
   expiresAt: Date
   issuer: string
   audience: string | undefined
   keyId: string
+  subject: string
   claims: DynamicJwtClaimsDiagnostics
 }
 
@@ -165,8 +199,56 @@ export async function signDynamicExternalJwt(input: {
     issuer,
     audience,
     keyId,
+    subject: input.merchantId,
     claims: getDynamicJwtClaimsDiagnostics({ issuer, audience, subject: input.merchantId }),
   }
+}
+
+export type DynamicExternalJwtSelfVerification = {
+  jwtSelfVerificationPassed: boolean
+  jwtHeaderKidPresent: boolean
+  jwtHeaderKidMatchesJwks: boolean
+  signingPublicKeyMatchesJwks: boolean
+  jwksKidPresent: boolean
+  algorithmRs256: boolean
+  routeExternalUserIdPresent: boolean
+  routeExternalUserIdMatchesSubject: boolean
+}
+
+export async function verifySignedDynamicExternalJwtAgainstJwks(input: {
+  externalJwt: string
+  externalUserId: string | null | undefined
+  jwksKey?: DynamicExternalJwtPublicJwk
+}): Promise<DynamicExternalJwtSelfVerification> {
+  const jwksKey = input.jwksKey ?? await deriveDynamicExternalJwtPublicJwk()
+  const header = decodeProtectedHeader(input.externalJwt)
+  const payload = decodeJwt(input.externalJwt)
+  const signingJwk = await deriveDynamicExternalJwtPublicJwk()
+  const routeExternalUserId = String(input.externalUserId || "")
+  const result: DynamicExternalJwtSelfVerification = {
+    jwtSelfVerificationPassed: false,
+    jwtHeaderKidPresent: typeof header.kid === "string" && header.kid.length > 0,
+    jwtHeaderKidMatchesJwks: Boolean(header.kid && jwksKey.kid && header.kid === jwksKey.kid),
+    signingPublicKeyMatchesJwks: Boolean(signingJwk.n && jwksKey.n === signingJwk.n && signingJwk.e && jwksKey.e === signingJwk.e),
+    jwksKidPresent: Boolean(jwksKey.kid),
+    algorithmRs256: header.alg === "RS256" && jwksKey.alg === "RS256",
+    routeExternalUserIdPresent: Boolean(routeExternalUserId),
+    routeExternalUserIdMatchesSubject: Boolean(routeExternalUserId && payload.sub === routeExternalUserId),
+  }
+
+  try {
+    const verificationKey = await importJWK(jwksKey, "RS256")
+    await jwtVerify(input.externalJwt, verificationKey, {
+      issuer: getDynamicExternalJwtIssuer(),
+      audience: resolveDynamicJwtAudience(),
+      subject: routeExternalUserId || undefined,
+    })
+    result.jwtSelfVerificationPassed = true
+  } catch {
+    result.jwtSelfVerificationPassed = false
+  }
+
+  return result
 }
 
 /**
@@ -218,8 +300,7 @@ export async function runDynamicExternalJwtContractCheck(): Promise<DynamicExter
 
   let localPublicJwk: { n?: string; e?: string } | null = null
   try {
-    const signingKeyPem = getDynamicExternalJwtSigningKeyPem()
-    localPublicJwk = await exportJWK(createPublicKey(createPrivateKey(signingKeyPem)))
+    localPublicJwk = await deriveDynamicExternalJwtPublicJwk()
   } catch {
     localPublicJwk = null
   }

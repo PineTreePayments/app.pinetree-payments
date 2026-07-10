@@ -27,6 +27,16 @@ export type PineTreeDynamicExternalJwtPayload = {
   // whether the signed issuer matches the app origin the JWKS is served under,
   // and whether the signed audience matches the Dynamic environment ID.
   claims?: PineTreeDynamicExternalJwtClaimsDiagnostics
+  jwtVerification?: {
+    jwtSelfVerificationPassed: boolean
+    jwtHeaderKidPresent: boolean
+    jwtHeaderKidMatchesJwks: boolean
+    signingPublicKeyMatchesJwks: boolean
+    jwksKidPresent: boolean
+    algorithmRs256: boolean
+    routeExternalUserIdPresent: boolean
+    routeExternalUserIdMatchesSubject: boolean
+  }
   diagnostics?: {
     enabled: boolean
     issuerConfigured: boolean
@@ -112,6 +122,8 @@ export type PineTreeDynamicExternalJwtContractAnalysis = {
   audienceMatch: boolean
   environmentIdPresent: boolean
   subjectPresent: boolean
+  externalUserIdPresent: boolean
+  externalUserIdMatchesSubject: boolean
 }
 
 function decodeJwtSegment(segment: string): Record<string, unknown> | null {
@@ -143,9 +155,11 @@ function decodeJwtSegment(segment: string): Record<string, unknown> | null {
  */
 export function analyzePineTreeDynamicExternalJwtContract(
   externalJwt: string,
-  env: { NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?: string }
+  env: { NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?: string },
+  externalUserId?: string | null
 ): PineTreeDynamicExternalJwtContractAnalysis {
   const environmentId = (env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID || "").trim()
+  const routeExternalUserId = String(externalUserId || "")
   const segments = String(externalJwt || "").split(".")
   const header = segments.length === 3 ? decodeJwtSegment(segments[0]) : null
   const payload = segments.length === 3 ? decodeJwtSegment(segments[1]) : null
@@ -163,6 +177,8 @@ export function analyzePineTreeDynamicExternalJwtContract(
     audienceMatch,
     environmentIdPresent: Boolean(environmentId),
     subjectPresent: typeof payload?.sub === "string" && payload.sub.length > 0,
+    externalUserIdPresent: Boolean(routeExternalUserId),
+    externalUserIdMatchesSubject: Boolean(routeExternalUserId && payload?.sub === routeExternalUserId),
   }
 }
 
@@ -201,6 +217,7 @@ export async function requestPineTreeDynamicExternalJwtAuth(
     externalUserId: json.externalUserId,
     expiresAt: json.expiresAt,
     claims: json.claims,
+    jwtVerification: json.jwtVerification,
     diagnostics: json.diagnostics,
   }
 }

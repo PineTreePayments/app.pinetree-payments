@@ -1239,7 +1239,59 @@ type ClassifiedDynamicSignInError = {
   errorName?: string
   errorCode?: string
   status?: number
+  httpStatus?: number
+  providerCode?: string
+  safeProviderMessage?: string
   messageHint: string
+}
+
+const SAFE_DYNAMIC_PROVIDER_MESSAGES = [
+  "Audience (aud) does not match",
+  "Issuer (iss) does not match",
+  "Signature verification failed",
+  "Subject does not match external user ID",
+  "Invalid external authentication",
+] as const
+
+function errorCauseChain(error: unknown) {
+  const chain: Array<Record<string, unknown>> = []
+  let cursor = error
+  for (let depth = 0; depth < 5; depth += 1) {
+    if (!cursor || typeof cursor !== "object") break
+    const row = cursor as Record<string, unknown>
+    chain.push(row)
+    cursor = row.cause
+  }
+  return chain
+}
+
+function readFirstString(rows: Array<Record<string, unknown>>, keys: string[]) {
+  for (const row of rows) {
+    for (const key of keys) {
+      const value = row[key]
+      if (typeof value === "string" && value.trim()) return value.trim()
+    }
+  }
+  return undefined
+}
+
+function readFirstNumber(rows: Array<Record<string, unknown>>, keys: string[]) {
+  for (const row of rows) {
+    for (const key of keys) {
+      const value = row[key]
+      if (typeof value === "number" && Number.isFinite(value)) return value
+    }
+  }
+  return undefined
+}
+
+function safeDynamicProviderMessage(rows: Array<Record<string, unknown>>) {
+  const combined = rows
+    .map((row) => [row.message, row.error, row.error_description, row.description].filter((value): value is string => typeof value === "string").join(" "))
+    .join(" ")
+    .toLowerCase()
+  const match = SAFE_DYNAMIC_PROVIDER_MESSAGES.find((message) => combined.includes(message.toLowerCase()))
+  return match ?? undefined
 }
 
 /**
@@ -1249,16 +1301,20 @@ type ClassifiedDynamicSignInError = {
  * matched hint enum.
  */
 function classifyDynamicSignInError(error: unknown): ClassifiedDynamicSignInError {
+  const chain = errorCauseChain(error)
   const row = typeof error === "object" && error !== null ? (error as Record<string, unknown>) : {}
   const errorName = error instanceof Error
     ? error.name
-    : typeof row.name === "string" ? row.name : undefined
+    : readFirstString(chain, ["name"])
   const rawMessage = error instanceof Error
     ? error.message
-    : typeof row.message === "string" ? row.message : ""
-  const message = rawMessage.toLowerCase()
-  const status = typeof row.status === "number" ? row.status : undefined
-  const errorCode = typeof row.code === "string" ? row.code : undefined
+    : readFirstString(chain, ["message"]) ?? ""
+  const message = `${rawMessage} ${chain.map((entry) => typeof entry.message === "string" ? entry.message : "").join(" ")}`.toLowerCase()
+  const status = readFirstNumber(chain, ["status", "statusCode", "httpStatus"])
+  const httpStatus = readFirstNumber(chain, ["httpStatus", "status", "statusCode"])
+  const errorCode = readFirstString(chain, ["code", "errorCode"])
+  const providerCode = readFirstString(chain, ["providerCode", "code", "error", "error_code"])
+  const safeProviderMessage = safeDynamicProviderMessage(chain)
 
   let messageHint = "unknown_dynamic_signin_throw"
   if (errorName === "QuotaExceededError" || errorName === "SecurityError") {
@@ -1288,6 +1344,9 @@ function classifyDynamicSignInError(error: unknown): ClassifiedDynamicSignInErro
     errorName: errorName ? errorName.slice(0, 40) : undefined,
     errorCode: errorCode ? errorCode.slice(0, 40) : undefined,
     status,
+    httpStatus,
+    providerCode: providerCode ? providerCode.slice(0, 40) : undefined,
+    safeProviderMessage,
     messageHint,
   }
 }
@@ -3160,8 +3219,15 @@ function PineTreeWalletRuntime() {
         let signinErrorName: string | undefined
         let signinErrorCode: string | undefined
         let signinErrorStatus: number | undefined
+        let signinHttpStatus: number | undefined
+        let signinProviderCode: string | undefined
+        let signinSafeProviderMessage: string | undefined
         let signinMessageHint: string | undefined
         let issuedClaims: PineTreeDynamicExternalJwtClaimsDiagnostics | null = null
+        let jwtSelfVerificationPassed = false
+        let jwtHeaderKidMatchesJwks = false
+        let clientExternalUserIdMatchesSubject = false
+        let clientUsedRouteExternalUserId = false
         try {
           console.info("[pinetree-wallets] wallet_dynamic_jwt_requested", {})
           emitWalletSetupDebugEvent("wallet_dynamic_jwt_requested", {})
@@ -3176,7 +3242,11 @@ function PineTreeWalletRuntime() {
           try {
             const contractAnalysis = analyzePineTreeDynamicExternalJwtContract(payload.externalJwt, {
               NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID: process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID,
-            })
+            }, payload.externalUserId)
+            jwtSelfVerificationPassed = Boolean(payload.jwtVerification?.jwtSelfVerificationPassed)
+            jwtHeaderKidMatchesJwks = Boolean(payload.jwtVerification?.jwtHeaderKidMatchesJwks)
+            clientExternalUserIdMatchesSubject = contractAnalysis.externalUserIdMatchesSubject
+            clientUsedRouteExternalUserId = true
             const jwksKid = await fetch("/.well-known/dynamic-jwks.json", { cache: "no-store" })
               .then(async (jwksRes) => {
                 if (!jwksRes.ok) return null
@@ -3194,6 +3264,10 @@ function PineTreeWalletRuntime() {
               environmentIdMatch: contractAnalysis.environmentIdPresent && contractAnalysis.audienceMatch,
               environmentIdPresent: contractAnalysis.environmentIdPresent,
               subjectPresent: contractAnalysis.subjectPresent,
+              jwtSelfVerificationPassed,
+              clientExternalUserIdPresent: contractAnalysis.externalUserIdPresent,
+              clientUsedRouteExternalUserId,
+              clientExternalUserIdMatchesSubject,
             }
             console.info("[pinetree-wallets] wallet_dynamic_jwt_contract_diagnostic", contractDiagnostic)
             emitWalletSetupDebugEvent("wallet_dynamic_jwt_contract_diagnostic", contractDiagnostic)
@@ -3208,6 +3282,18 @@ function PineTreeWalletRuntime() {
           if (!payload.externalJwt || !payload.externalUserId) {
             signinFailureReason = "jwt_missing_token"
             throw Object.assign(new Error("dynamic_external_jwt_failed"), { status: 502 })
+          }
+          const subjectAnalysis = analyzePineTreeDynamicExternalJwtContract(payload.externalJwt, {
+            NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID: process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID,
+          }, payload.externalUserId)
+          clientExternalUserIdMatchesSubject = subjectAnalysis.externalUserIdMatchesSubject
+          clientUsedRouteExternalUserId = true
+          if (!subjectAnalysis.externalUserIdPresent || !subjectAnalysis.externalUserIdMatchesSubject) {
+            signinFailureReason = "external_user_id_subject_mismatch"
+            throw Object.assign(new Error("dynamic_external_user_id_mismatch"), {
+              status: 502,
+              code: "dynamic_external_user_id_mismatch",
+            })
           }
           setProfileSyncDiagnostics((prev) => ({
             ...prev,
@@ -3251,6 +3337,9 @@ function PineTreeWalletRuntime() {
               signinErrorName = classified.errorName
               signinErrorCode = classified.errorCode
               signinErrorStatus = classified.status
+              signinHttpStatus = classified.httpStatus
+              signinProviderCode = classified.providerCode
+              signinSafeProviderMessage = classified.safeProviderMessage
               signinMessageHint = classified.messageHint
               const canRetry = signInAttempt < maxSignInAttempts && DYNAMIC_SIGNIN_RETRYABLE_HINTS.has(classified.messageHint)
               if (!canRetry) {
@@ -3365,6 +3454,12 @@ function PineTreeWalletRuntime() {
             ...(signinErrorName ? { errorName: signinErrorName } : {}),
             ...(signinErrorCode ? { errorCode: signinErrorCode } : {}),
             ...(signinErrorStatus !== undefined ? { status: signinErrorStatus } : {}),
+            ...(signinHttpStatus !== undefined ? { httpStatus: signinHttpStatus } : {}),
+            ...(signinProviderCode ? { providerCode: signinProviderCode } : {}),
+            ...(signinSafeProviderMessage ? { safeProviderMessage: signinSafeProviderMessage } : {}),
+            jwtSelfVerificationPassed,
+            jwtHeaderKidMatchesJwks,
+            clientExternalUserIdMatchesSubject,
             ...(signinMessageHint ? { messageHint: signinMessageHint } : {}),
           })
           // Contract diagnostics for the failed attempt: whether the token we
@@ -3380,6 +3475,9 @@ function PineTreeWalletRuntime() {
             jwksLoaded,
             subjectPresent: issuedClaims?.subjectPresent ?? false,
             environmentIdPresent: issuedClaims?.environmentIdPresent ?? false,
+            jwtSelfVerificationPassed,
+            jwtHeaderKidMatchesJwks,
+            clientExternalUserIdMatchesSubject,
             ...(signinMessageHint ? { messageHint: signinMessageHint } : {}),
           })
           console.info("[pinetree-dynamic-auth] external_jwt_client", {
@@ -3393,8 +3491,14 @@ function PineTreeWalletRuntime() {
           })
           console.warn("[pinetree-wallets] dynamic_external_jwt_auth_failed", {
             reason,
-            status,
-            code,
+            errorName: signinErrorName,
+            errorCode: signinErrorCode || code,
+            httpStatus: signinHttpStatus ?? status,
+            providerCode: signinProviderCode,
+            safeProviderMessage: signinSafeProviderMessage,
+            jwtSelfVerificationPassed,
+            jwtHeaderKidMatchesJwks,
+            clientExternalUserIdMatchesSubject,
           })
           if (signinMessageHint === "external_auth_rejected") {
             // Dynamic's backend explicitly rejected the BYOA JWT. Verified contract

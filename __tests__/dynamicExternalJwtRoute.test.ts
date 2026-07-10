@@ -124,6 +124,7 @@ describe("Dynamic external JWT route", () => {
       externalUserId: string
       expiresAt: string
       email?: string
+      jwtVerification?: Record<string, boolean>
       diagnostics?: {
         enabled: boolean
         issuerConfigured: boolean
@@ -138,6 +139,16 @@ describe("Dynamic external JWT route", () => {
     expect(json.externalJwt).toBeTruthy()
     expect(json.externalUserId).toBe("merchant-1")
     expect(json.email).toBeUndefined()
+    expect(json.jwtVerification).toMatchObject({
+      jwtSelfVerificationPassed: true,
+      jwtHeaderKidPresent: true,
+      jwtHeaderKidMatchesJwks: true,
+      signingPublicKeyMatchesJwks: true,
+      jwksKidPresent: true,
+      algorithmRs256: true,
+      routeExternalUserIdPresent: true,
+      routeExternalUserIdMatchesSubject: true,
+    })
 
     const verified = await jwtVerify(
       json.externalJwt,
@@ -181,6 +192,8 @@ describe("Dynamic external JWT route", () => {
     const jwks = await jwksRes.json() as { keys: Array<Record<string, unknown>> }
     const jwk = jwks.keys.find((key) => key.kid === "pinetree-test-kid")
     expect(jwk).toBeTruthy()
+    expect(jwk?.kid).toBe("pinetree-test-kid")
+    expect(jwk?.alg).toBe("RS256")
     const verificationKey = await importJWK(jwk!, "RS256")
 
     const verified = await jwtVerify(json.externalJwt, verificationKey, {
@@ -190,6 +203,31 @@ describe("Dynamic external JWT route", () => {
     })
 
     expect(json.externalUserId).toBe(verified.payload.sub)
+  })
+
+  it("logs jwt_contract_verified with safe booleans only", async () => {
+    process.env.DYNAMIC_EXTERNAL_JWT_ISSUER = "https://app.pinetree-payments.com"
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined)
+
+    const res = await POST(request({ walletDebug: true }))
+    expect(res.status).toBe(200)
+
+    const contractLog = info.mock.calls.findLast((call) => call[0] === "[pinetree-dynamic-auth] jwt_contract_verified")
+    expect(contractLog?.[1]).toEqual({
+      jwtSelfVerificationPassed: true,
+      jwtHeaderKidMatchesJwks: true,
+      signingPublicKeyMatchesJwks: true,
+      routeExternalUserIdMatchesSubject: true,
+      algorithmRs256: true,
+    })
+    const serialized = JSON.stringify(contractLog?.[1])
+    expect(serialized).not.toContain("merchant-1")
+    expect(serialized).not.toContain("merchant@example.com")
+    expect(serialized).not.toContain("BEGIN PRIVATE KEY")
+    expect(serialized).not.toContain(process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64)
+    expect(serialized).not.toContain("eyJ")
+
+    info.mockRestore()
   })
 
   it("logs safe route diagnostics only", async () => {

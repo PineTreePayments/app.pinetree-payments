@@ -335,6 +335,36 @@ describe("PineTree embedded wallet setup", () => {
     )
   })
 
+  it("proves response.externalUserId matches JWT sub before calling Dynamic", () => {
+    const openFallbackFn = page.slice(
+      page.indexOf("const openDynamicEmailFallbackAuth = useCallback"),
+      page.indexOf("const scheduleDynamicEmailFallbackAuth = useCallback")
+    )
+    const guardIdx = openFallbackFn.indexOf("if (!subjectAnalysis.externalUserIdPresent || !subjectAnalysis.externalUserIdMatchesSubject)")
+    const callIdx = openFallbackFn.indexOf("dynamicProfile = await signInWithExternalJwt({")
+    expect(guardIdx).toBeGreaterThan(-1)
+    expect(callIdx).toBeGreaterThan(guardIdx)
+    expect(openFallbackFn).toContain("clientExternalUserIdMatchesSubject = subjectAnalysis.externalUserIdMatchesSubject")
+    expect(openFallbackFn).toContain('new Error("dynamic_external_user_id_mismatch")')
+    expect(openFallbackFn).toContain("clientUsedRouteExternalUserId = true")
+  })
+
+  it("uses response.externalUserId directly and does not reconstruct it from email, merchant, or user state", () => {
+    const openFallbackFn = page.slice(
+      page.indexOf("const openDynamicEmailFallbackAuth = useCallback"),
+      page.indexOf("const scheduleDynamicEmailFallbackAuth = useCallback")
+    )
+    const signInCall = openFallbackFn.slice(
+      openFallbackFn.indexOf("dynamicProfile = await signInWithExternalJwt({"),
+      openFallbackFn.indexOf("})", openFallbackFn.indexOf("dynamicProfile = await signInWithExternalJwt({")) + 2
+    )
+    expect(signInCall).toContain("externalUserId: payload.externalUserId")
+    expect(signInCall).not.toContain("merchantEmail")
+    expect(signInCall).not.toContain("dynamicUserEmail")
+    expect(signInCall).not.toContain("merchantId")
+    expect(signInCall).not.toContain("user.")
+  })
+
   it("does not immediately fail when signInWithExternalJwt resolves without a profile - it polls refreshDynamicUser for a bounded window first", () => {
     const openFallbackFn = page.slice(
       page.indexOf("const openDynamicEmailFallbackAuth = useCallback"),
@@ -359,10 +389,12 @@ describe("PineTree embedded wallet setup", () => {
     const signInTryIdx = openFallbackFn.indexOf("dynamicProfile = await signInWithExternalJwt({")
     const catchIdx = openFallbackFn.indexOf("} catch (signInError) {", signInTryIdx)
     expect(catchIdx).toBeGreaterThan(signInTryIdx)
-    const catchBlock = openFallbackFn.slice(catchIdx, catchIdx + 1000)
+    const catchBlock = openFallbackFn.slice(catchIdx, catchIdx + 1600)
     expect(catchBlock).toContain("const classified = classifyDynamicSignInError(signInError)")
     expect(catchBlock).toContain("signinFailureReason = classified.reason")
     expect(catchBlock).toContain("signinMessageHint = classified.messageHint")
+    expect(catchBlock).toContain("signinProviderCode = classified.providerCode")
+    expect(catchBlock).toContain("signinSafeProviderMessage = classified.safeProviderMessage")
     expect(catchBlock).toContain("throw signInError")
     // A retryable classification (blocked storage/keychain, SDK not ready, network
     // blip) gets one bounded retry with a state refresh first, not an immediate throw.
@@ -383,7 +415,11 @@ describe("PineTree embedded wallet setup", () => {
     expect(classifierFn).not.toContain("stack")
     expect(classifierFn).toContain("errorName: errorName ? errorName.slice(0, 40) : undefined")
     expect(classifierFn).toContain("errorCode: errorCode ? errorCode.slice(0, 40) : undefined")
+    expect(classifierFn).toContain("providerCode: providerCode ? providerCode.slice(0, 40) : undefined")
+    expect(classifierFn).toContain("safeProviderMessage,")
     expect(classifierFn).toContain("messageHint,")
+    expect(page).toContain("SAFE_DYNAMIC_PROVIDER_MESSAGES")
+    expect(classifierFn).toContain("safeDynamicProviderMessage")
     // messageHint is the safe classification derived from the message, not the message itself.
     expect(classifierFn).not.toContain("messageHint: rawMessage")
     expect(classifierFn).not.toContain("messageHint: message")

@@ -219,7 +219,7 @@ describe("Dynamic external JWT key material", () => {
 
     const res = await GET()
     expect(res.status).toBe(200)
-    expect(res.headers.get("cache-control")).toContain("public")
+    expect(res.headers.get("cache-control")).toBe("public, max-age=300, must-revalidate")
     const json = await res.json()
     const serialized = JSON.stringify(json)
 

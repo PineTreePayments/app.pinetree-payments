@@ -5,10 +5,12 @@ import { requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
 import {
   getDynamicExternalJwtIssuer,
   getDynamicJwtClaimsDiagnostics,
+  deriveDynamicExternalJwtPublicJwk,
   resolveDynamicJwtAudience,
   runDynamicExternalJwtContractCheck,
   signDynamicExternalJwt,
   type DynamicExternalJwtContractCheck,
+  verifySignedDynamicExternalJwtAgainstJwks,
 } from "@/lib/api/dynamicExternalJwt"
 
 // TEMPORARY diagnostic cache: the contract check fetches this deployment's own
@@ -180,6 +182,28 @@ export async function POST(req: NextRequest) {
       subjectPresent: Boolean(auth.merchantId),
     })
     const signed = await signDynamicExternalJwt({ merchantId: auth.merchantId, email: auth.email })
+    const jwksKey = await deriveDynamicExternalJwtPublicJwk()
+    const verification = await verifySignedDynamicExternalJwtAgainstJwks({
+      externalJwt: signed.externalJwt,
+      externalUserId: signed.subject,
+      jwksKey,
+    })
+    console.info("[pinetree-dynamic-auth] jwt_contract_verified", {
+      jwtSelfVerificationPassed: verification.jwtSelfVerificationPassed,
+      jwtHeaderKidMatchesJwks: verification.jwtHeaderKidMatchesJwks,
+      signingPublicKeyMatchesJwks: verification.signingPublicKeyMatchesJwks,
+      routeExternalUserIdMatchesSubject: verification.routeExternalUserIdMatchesSubject,
+      algorithmRs256: verification.algorithmRs256,
+    })
+    if (
+      !verification.jwtSelfVerificationPassed ||
+      !verification.jwtHeaderKidMatchesJwks ||
+      !verification.signingPublicKeyMatchesJwks ||
+      !verification.routeExternalUserIdMatchesSubject ||
+      !verification.algorithmRs256
+    ) {
+      throw Object.assign(new Error("dynamic_jwt_self_verification_failed"), { status: 503 })
+    }
     routeStatus = "issued"
     logExternalJwtRoute({ ...diagnostics, userPresent, merchantResolved, status: routeStatus })
 
@@ -194,17 +218,26 @@ export async function POST(req: NextRequest) {
       kidConfigured: Boolean(signed.keyId),
       algorithm: "RS256",
       signingKeyConfigured: diagnostics.signingKeyConfigured,
+      jwtSelfVerificationPassed: verification.jwtSelfVerificationPassed,
+      jwtHeaderKidPresent: verification.jwtHeaderKidPresent,
+      jwtHeaderKidMatchesJwks: verification.jwtHeaderKidMatchesJwks,
+      signingPublicKeyMatchesJwks: verification.signingPublicKeyMatchesJwks,
+      jwksKidPresent: verification.jwksKidPresent,
+      algorithmRs256: verification.algorithmRs256,
+      routeExternalUserIdPresent: verification.routeExternalUserIdPresent,
+      routeExternalUserIdMatchesSubject: verification.routeExternalUserIdMatchesSubject,
       expiresAt: signed.expiresAt.toISOString(),
     })
 
     return NextResponse.json({
       externalJwt: signed.externalJwt,
-      externalUserId: auth.merchantId,
+      externalUserId: signed.subject,
       expiresAt: signed.expiresAt.toISOString(),
       // Boolean-only claim diagnostics, always returned so the client can emit
       // wallet_dynamic_jwt_auth_failed with real issuer/audience facts when
       // Dynamic rejects the token later in the flow. Never contains claim values.
       claims: signed.claims,
+      jwtVerification: verification,
       ...(includeDebugResponse ? { diagnostics: { ...diagnostics, merchantResolved } } : {}),
     })
   } catch (error) {
