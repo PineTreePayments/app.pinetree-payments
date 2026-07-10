@@ -378,6 +378,7 @@ describe("PineTree Dynamic provisioning flow", () => {
   })
 
   it("externalUser merchant binding can save profile while email is stored only for audit/debugging", () => {
+    expect(profileRoute).toContain("getMerchantById(auth.merchantId)")
     expect(profileRoute).toContain("getMerchantByAuthUserId(authUserId)")
     expect(profileRoute).toContain("dynamicExternalUserId !== merchantId")
     expect(profileRoute).not.toContain("resolveWalletIdentity")

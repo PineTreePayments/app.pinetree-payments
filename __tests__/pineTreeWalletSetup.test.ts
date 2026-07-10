@@ -129,7 +129,8 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("extractDynamicUserEmail(user)")
     expect(page).not.toContain("Using your PineTree account email: {merchantEmail}")
     expect(page).not.toContain("PineTree account email: {identityMismatchError?.merchantEmail ?? merchantEmail}")
-    expect(apiRoute).toContain("getMerchantByAuthUserId(authUserId)")
+    expect(apiRoute).toContain("const canonicalMerchant = await getMerchantById(auth.merchantId)")
+    expect(apiRoute).toContain("const fallbackMerchant = await getMerchantByAuthUserId(authUserId)")
     expect(apiRoute).toContain("dynamicExternalUserId !== merchantId")
     expect(apiRoute).not.toContain("resolveWalletIdentity")
     expect(apiRoute).not.toContain("bodyMerchantEmail")
@@ -143,10 +144,44 @@ describe("PineTree embedded wallet setup", () => {
     expect(merchantsDb).toContain("owner_user_id")
     expect(merchantsDb).toContain("getMerchantByAuthUserId")
     expect(apiRoute).toContain("resolveProfileMerchant(auth)")
+    expect(apiRoute).toContain("getMerchantById(auth.merchantId)")
     expect(apiRoute).toContain("getMerchantByAuthUserId(authUserId)")
     expect(apiRoute).toContain("requestMerchantId = normalizedString(body.merchant_id)")
     expect(apiRoute).not.toContain("merchantId = requestMerchantId")
     expect(apiRoute).not.toContain("merchantId === authUserId")
+  })
+
+  it("fresh canonical merchant can load a missing PineTree wallet profile as not_created", () => {
+    expect(apiRoute).toContain("const canonicalMerchant = await getMerchantById(auth.merchantId)")
+    expect(apiRoute).toContain("canonicalMerchantResolved: true")
+    expect(apiRoute).toContain('status: profile ? profile.status : "not_created"')
+    expect(apiRoute).toContain("profile,")
+    expect(apiRoute).toContain("wallet_profile_get_missing")
+  })
+
+  it("GET and POST share the same profile merchant resolver and do not require user_id when canonical resolution works", () => {
+    const postRoute = apiRoute.slice(apiRoute.indexOf("export async function POST"), apiRoute.indexOf("/**\n * GET"))
+    const getRoute = apiRoute.slice(apiRoute.indexOf("export async function GET"))
+    expect(postRoute).toContain("resolveProfileMerchant(auth)")
+    expect(getRoute).toContain("resolveProfileMerchant(auth)")
+    expect(apiRoute).toContain("const canonicalMerchant = await getMerchantById(auth.merchantId)")
+    expect(apiRoute).toContain("if (canonicalMerchant) {")
+    const canonicalBlock = apiRoute.slice(
+      apiRoute.indexOf("if (canonicalMerchant) {"),
+      apiRoute.indexOf("const fallbackMerchant = await getMerchantByAuthUserId(authUserId)")
+    )
+    expect(canonicalBlock).not.toContain("user_id")
+    expect(canonicalBlock).not.toContain("owner_user_id")
+  })
+
+  it("logs safe boolean diagnostics for profile auth failures", () => {
+    expect(apiRoute).toContain('wallet_profile_get_auth_failed')
+    expect(apiRoute).toContain("function walletProfileAuthDiagnostics")
+    expect(apiRoute).toContain("authUserPresent: boolean")
+    expect(apiRoute).toContain("canonicalMerchantResolved: boolean")
+    expect(apiRoute).toContain("fallbackMerchantResolved: boolean")
+    expect(apiRoute).toContain("merchantOwnershipConfirmed: boolean")
+    expect(apiRoute).toContain("status: number")
   })
 
   it("compares Dynamic externalUserId to merchant id and keeps identity errors distinct from address conflicts", () => {

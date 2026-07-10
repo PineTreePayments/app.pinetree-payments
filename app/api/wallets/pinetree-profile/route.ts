@@ -48,6 +48,16 @@ function profileIdentityDiagnostics(input: {
   return input
 }
 
+function walletProfileAuthDiagnostics(input: {
+  authUserPresent: boolean
+  canonicalMerchantResolved: boolean
+  fallbackMerchantResolved: boolean
+  merchantOwnershipConfirmed: boolean
+  status: number
+}) {
+  return input
+}
+
 async function resolveProfileMerchant(auth: Awaited<ReturnType<typeof requireMerchantAuthFromRequest>>) {
   const authUserId = auth.authUserId || auth.merchantId
   if (auth.source === "api_key") {
@@ -56,16 +66,32 @@ async function resolveProfileMerchant(auth: Awaited<ReturnType<typeof requireMer
       merchant: { id: auth.merchantId, user_id: authUserId },
       merchantId: auth.merchantId,
       merchantBelongsToAuthUser: Boolean(auth.merchantId),
+      canonicalMerchantResolved: Boolean(auth.merchantId),
+      fallbackMerchantResolved: false,
     }
   }
 
-  const merchant = await getMerchantByAuthUserId(authUserId)
-  const merchantId = String(merchant?.id || "").trim()
+  const canonicalMerchant = await getMerchantById(auth.merchantId)
+  if (canonicalMerchant) {
+    return {
+      authUserId,
+      merchant: canonicalMerchant,
+      merchantId: canonicalMerchant.id,
+      merchantBelongsToAuthUser: true,
+      canonicalMerchantResolved: true,
+      fallbackMerchantResolved: false,
+    }
+  }
+
+  const fallbackMerchant = await getMerchantByAuthUserId(authUserId)
+  const merchantId = String(fallbackMerchant?.id || "").trim()
   return {
     authUserId,
-    merchant,
+    merchant: fallbackMerchant,
     merchantId,
     merchantBelongsToAuthUser: Boolean(merchantId),
+    canonicalMerchantResolved: false,
+    fallbackMerchantResolved: Boolean(merchantId),
   }
 }
 
@@ -454,8 +480,18 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   try {
     const auth = await requireMerchantAuthFromRequest(req)
-    const { merchantId } = await resolveProfileMerchant(auth)
+    const resolved = await resolveProfileMerchant(auth)
+    const { merchantId } = resolved
     if (!merchantId) {
+      console.warn("[pinetree-wallets] wallet_profile_get_auth_failed", {
+        ...walletProfileAuthDiagnostics({
+          authUserPresent: Boolean(resolved.authUserId),
+          canonicalMerchantResolved: resolved.canonicalMerchantResolved,
+          fallbackMerchantResolved: resolved.fallbackMerchantResolved,
+          merchantOwnershipConfirmed: false,
+          status: 403,
+        }),
+      })
       return NextResponse.json({ error: "merchant_not_resolved" }, { status: 403 })
     }
     console.info("[pinetree-wallets] wallet_profile_get_start", { merchantId })
@@ -464,14 +500,27 @@ export async function GET(req: NextRequest) {
       profile ? "[pinetree-wallets] wallet_profile_get_success" : "[pinetree-wallets] wallet_profile_get_missing",
       { merchantId, status: profile?.status ?? null }
     )
-    return NextResponse.json({ profile })
+    return NextResponse.json({
+      profile,
+      status: profile ? profile.status : "not_created",
+    })
   } catch (error) {
+    const status = getRouteErrorStatus(error)
+    console.warn("[pinetree-wallets] wallet_profile_get_auth_failed", {
+      ...walletProfileAuthDiagnostics({
+        authUserPresent: false,
+        canonicalMerchantResolved: false,
+        fallbackMerchantResolved: false,
+        merchantOwnershipConfirmed: false,
+        status,
+      }),
+    })
     console.warn("[pinetree-wallets] wallet_profile_get_error", {
       error: error instanceof Error ? error.message : String(error),
     })
     return NextResponse.json(
       { error: "Failed to load wallet profile" },
-      { status: getRouteErrorStatus(error) }
+      { status }
     )
   }
 }
