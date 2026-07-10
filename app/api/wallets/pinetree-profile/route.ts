@@ -8,13 +8,12 @@ import {
   pineTreeWalletProfileHasProtectedHistory,
   upsertPineTreeWalletProfile
 } from "@/database/pineTreeWalletProfiles"
-import { backfillMerchantEmailIfMissing, getMerchantById } from "@/database/merchants"
+import { getMerchantByAuthUserId, getMerchantById } from "@/database/merchants"
 import { syncPineTreeWalletProfileProviders } from "@/database/pineTreeWalletProfileProviderSync"
 import { provisionMerchantBitcoinAddress } from "@/engine/pineTreeBitcoinAddressProvisioning"
 import { ensureManagedLightningForMerchant } from "@/engine/pineTreeWalletReadiness"
 import { assertMerchantBusinessProfileComplete } from "@/engine/businessProfile"
 import { withOperationTimeout } from "@/engine/promiseTimeout"
-import { resolveWalletIdentity } from "@/lib/walletIdentity"
 
 const BACKGROUND_PROVISIONING_TIMEOUT_MS = 12_000
 
@@ -34,6 +33,40 @@ type WalletIdentityConflictType =
 
 function normalizedString(value: unknown) {
   return String(value || "").trim() || null
+}
+
+function profileIdentityDiagnostics(input: {
+  authUserPresent: boolean
+  merchantResolved: boolean
+  merchantBelongsToAuthUser: boolean
+  requestMerchantIdPresent: boolean
+  requestMerchantMatchesResolvedMerchant: boolean
+  dynamicExternalUserIdPresent: boolean
+  dynamicExternalUserMatchesResolvedMerchant: boolean
+  profileOwnershipChecksReached: boolean
+}) {
+  return input
+}
+
+async function resolveProfileMerchant(auth: Awaited<ReturnType<typeof requireMerchantAuthFromRequest>>) {
+  const authUserId = auth.authUserId || auth.merchantId
+  if (auth.source === "api_key") {
+    return {
+      authUserId,
+      merchant: { id: auth.merchantId, user_id: authUserId },
+      merchantId: auth.merchantId,
+      merchantBelongsToAuthUser: Boolean(auth.merchantId),
+    }
+  }
+
+  const merchant = await getMerchantByAuthUserId(authUserId)
+  const merchantId = String(merchant?.id || "").trim()
+  return {
+    authUserId,
+    merchant,
+    merchantId,
+    merchantBelongsToAuthUser: Boolean(merchantId),
+  }
 }
 
 function scheduleWalletReadiness(profile: Awaited<ReturnType<typeof upsertPineTreeWalletProfile>>) {
@@ -117,8 +150,39 @@ function scheduleWalletReadiness(profile: Awaited<ReturnType<typeof upsertPineTr
 export async function POST(req: NextRequest) {
   try {
     const auth = await requireMerchantAuthFromRequest(req)
-    const merchantId = auth.merchantId
     const body = (await req.json()) as Record<string, unknown>
+    const resolved = await resolveProfileMerchant(auth)
+    const authUserId = resolved.authUserId
+    const requestMerchantId = normalizedString(body.merchant_id)
+    const merchantId = resolved.merchantId
+    const syncsDynamicProfile =
+      "dynamic_user_id" in body ||
+      "dynamic_email" in body ||
+      "base_address" in body ||
+      "solana_address" in body
+    const dynamicExternalUserId = syncsDynamicProfile ? normalizedString(body.dynamic_user_id) : null
+    const baseIdentityDiagnostics = {
+      authUserPresent: Boolean(authUserId),
+      merchantResolved: Boolean(merchantId),
+      merchantBelongsToAuthUser: resolved.merchantBelongsToAuthUser,
+      requestMerchantIdPresent: Boolean(requestMerchantId),
+      requestMerchantMatchesResolvedMerchant: Boolean(requestMerchantId && merchantId && requestMerchantId === merchantId),
+      dynamicExternalUserIdPresent: Boolean(dynamicExternalUserId),
+      dynamicExternalUserMatchesResolvedMerchant: Boolean(dynamicExternalUserId && merchantId && dynamicExternalUserId === merchantId),
+      profileOwnershipChecksReached: false,
+    }
+    if (!merchantId) {
+      const requestedMerchantExists = requestMerchantId
+        ? Boolean(await getMerchantById(requestMerchantId))
+        : false
+      const reason = requestedMerchantExists ? "merchant_not_owned_by_auth_user" : "merchant_not_resolved"
+      console.warn("[pinetree-wallets] wallet_profile_identity_check_failed", {
+        reason,
+        ...profileIdentityDiagnostics(baseIdentityDiagnostics),
+      })
+      return NextResponse.json({ error: reason, retryable: true }, { status: 403 })
+    }
+
     console.info("[pinetree-wallets] wallet_profile_post_start", { merchantId })
     console.info("[pinetree-wallets] profile_route_post_received", {
       merchantId,
@@ -147,72 +211,40 @@ export async function POST(req: NextRequest) {
 
     await assertMerchantBusinessProfileComplete(merchantId)
 
-    const syncsDynamicProfile =
-      "dynamic_user_id" in body ||
-      "dynamic_email" in body ||
-      "base_address" in body ||
-      "solana_address" in body
     const incomingBaseAddress = "base_address" in body ? normalizedString(body.base_address) : undefined
     const incomingSolanaAddress = "solana_address" in body ? normalizedString(body.solana_address) : undefined
     const existingProfile = await getPineTreeWalletProfile(merchantId)
     if (syncsDynamicProfile) {
-      const merchant = await getMerchantById(merchantId)
-      const identity = resolveWalletIdentity({
-        merchantEmail: merchant?.email,
-        authEmail: auth.email,
-        bodyMerchantEmail: body.merchant_email,
-        // Dynamic externalUser auth is authoritative for wallet creation. A
-        // stale Dynamic email credential from old fallback tests must not block
-        // profile repair once the wallet addresses belong to this merchant.
-      })
-      if (!identity.ok) {
-        console.warn("[pinetree-wallets] profile_route_identity_mismatch", {
-          merchantId,
-          merchantEmailPresent: Boolean(merchant?.email),
-          authEmailPresent: Boolean(auth.email),
-          reason: identity.code,
-        })
+      if (!dynamicExternalUserId) {
         console.warn("[pinetree-wallets] wallet_profile_identity_check_failed", {
-          reason: identity.code,
-          existingProfileForMerchant: Boolean(existingProfile),
-          existingProfileStatus: existingProfile?.status ?? null,
-          baseAddressOwnedBySameMerchant: false,
-          solanaAddressOwnedBySameMerchant: false,
-          baseAddressOwnedByAnotherMerchant: false,
-          solanaAddressOwnedByAnotherMerchant: false,
-          dynamicUserMatchesExistingProfile: false,
-          existingProfileRepairable: Boolean(existingProfile && !profileHasReadyCoreIdentity(existingProfile)),
+          reason: "dynamic_external_user_missing",
+          ...profileIdentityDiagnostics(baseIdentityDiagnostics),
         })
         return NextResponse.json(
           {
-            error: identity.code === "wallet_identity_unavailable"
-              ? "wallet_identity_unavailable"
-              : "dynamic_email_mismatch",
-            message: identity.code === "wallet_identity_unavailable"
-              ? "We could not verify your PineTree account identity. Please refresh and try again."
-              : "We could not verify wallet access. Please try again.",
+            error: "dynamic_external_user_missing",
             retryable: true,
           },
-          { status: 409 }
+          { status: 400 }
         )
       }
-      if (identity.shouldBackfillMerchantEmail) {
-        try {
-          const backfilled = await backfillMerchantEmailIfMissing(
-            merchantId,
-            identity.canonicalEmail,
-            merchant?.email
-          )
-          console.info("[pinetree-wallets] merchant_email_backfilled", {
-            merchant_id: merchantId,
-            step: backfilled ? "merchant_email_backfilled" : "merchant_email_already_present",
-          })
-        } catch {
-          console.warn("[pinetree-wallets] merchant_email_backfill_deferred", {
-            merchant_id: merchantId,
-            step: "merchant_email_backfill_deferred",
-          })
+      if (dynamicExternalUserId !== merchantId) {
+        const diagnostics = {
+          ...baseIdentityDiagnostics,
+          dynamicExternalUserIdPresent: true,
+          dynamicExternalUserMatchesResolvedMerchant: false,
         }
+        console.warn("[pinetree-wallets] wallet_profile_identity_check_failed", {
+          reason: "dynamic_external_user_merchant_mismatch",
+          ...profileIdentityDiagnostics(diagnostics),
+        })
+        return NextResponse.json(
+          {
+            error: "dynamic_external_user_merchant_mismatch",
+            retryable: true,
+          },
+          { status: 400 }
+        )
       }
     }
 
@@ -247,6 +279,10 @@ export async function POST(req: NextRequest) {
       const existingProfileProtected = await pineTreeWalletProfileHasProtectedHistory(existingProfile?.id)
       const existingProfileRepairable = Boolean(existingProfile && !existingProfileProtected)
       const ownershipDiagnostics = {
+        ...profileIdentityDiagnostics({
+          ...baseIdentityDiagnostics,
+          profileOwnershipChecksReached: true,
+        }),
         existingProfileForMerchant: Boolean(existingProfile),
         existingProfileStatus: existingProfile?.status ?? null,
         baseAddressOwnedBySameMerchant,
@@ -271,18 +307,18 @@ export async function POST(req: NextRequest) {
 
       if (conflictType) {
         console.warn("[pinetree-wallets] wallet_profile_post_conflict", {
-          reason: "wallet_identity_conflict",
+          reason: conflictType,
           conflictType,
           ...ownershipDiagnostics,
         })
         console.warn("[pinetree-wallets] wallet_profile_identity_check_failed", {
-          reason: "wallet_identity_conflict",
+          reason: conflictType,
           conflictType,
           ...ownershipDiagnostics,
         })
         return NextResponse.json(
           {
-            error: "wallet_identity_conflict",
+            error: conflictType,
             conflictType,
             status: "needs_review",
             message: "This wallet does not match the one already saved for your account. Please contact support before continuing.",
@@ -334,7 +370,7 @@ export async function POST(req: NextRequest) {
     const profileSaveStartedAt = Date.now()
     const profile = await upsertPineTreeWalletProfile({
       merchantId,
-      dynamicUserId: "dynamic_user_id" in body ? (body.dynamic_user_id as string | null) : undefined,
+      dynamicUserId: "dynamic_user_id" in body ? dynamicExternalUserId : undefined,
       dynamicEmail: "dynamic_email" in body ? (body.dynamic_email as string | null) : undefined,
       baseAddress: "base_address" in body ? (body.base_address as string | null) : undefined,
       solanaAddress: "solana_address" in body ? (body.solana_address as string | null) : undefined,
@@ -417,7 +453,11 @@ export async function POST(req: NextRequest) {
  */
 export async function GET(req: NextRequest) {
   try {
-    const merchantId = (await requireMerchantAuthFromRequest(req)).merchantId
+    const auth = await requireMerchantAuthFromRequest(req)
+    const { merchantId } = await resolveProfileMerchant(auth)
+    if (!merchantId) {
+      return NextResponse.json({ error: "merchant_not_resolved" }, { status: 403 })
+    }
     console.info("[pinetree-wallets] wallet_profile_get_start", { merchantId })
     const profile = await getPineTreeWalletProfile(merchantId)
     console.info(

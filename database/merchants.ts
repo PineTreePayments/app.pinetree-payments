@@ -4,6 +4,8 @@ const db = supabaseAdmin || supabase
 
 export type Merchant = {
   id: string
+  user_id?: string | null
+  owner_user_id?: string | null
   business_name: string
   email: string | null
   created_at: string
@@ -56,6 +58,33 @@ export async function getMerchantById(merchantId: string) {
   }
 
   return data as Merchant | null
+}
+
+export async function getMerchantByAuthUserId(authUserId: string) {
+  const normalized = String(authUserId || "").trim()
+  if (!normalized) return null
+
+  const byUserId = await db
+    .from("merchants")
+    .select("*")
+    .eq("user_id", normalized)
+    .limit(1)
+
+  if (!byUserId.error && Array.isArray(byUserId.data) && byUserId.data[0]) {
+    return byUserId.data[0] as Merchant
+  }
+
+  const byOwnerUserId = await db
+    .from("merchants")
+    .select("*")
+    .eq("owner_user_id", normalized)
+    .limit(1)
+
+  if (!byOwnerUserId.error && Array.isArray(byOwnerUserId.data) && byOwnerUserId.data[0]) {
+    return byOwnerUserId.data[0] as Merchant
+  }
+
+  return null
 }
 
 export async function backfillMerchantEmailIfMissing(

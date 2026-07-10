@@ -33,8 +33,8 @@ describe("PineTree Dynamic provisioning flow", () => {
     })).toBe("not_created")
   })
 
-  it("Dynamic provisioning saves Dynamic user id plus Base and Solana addresses", () => {
-    expect(page).toContain("dynamic_user_id: user.userId")
+  it("Dynamic provisioning saves externalUser merchant binding plus Base and Solana addresses", () => {
+    expect(page).toContain("dynamic_user_id: dynamicExternalUserId")
     expect(page).toContain("dynamic_email: dynamicUserEmail")
     expect(page).toContain("merchant_email: merchantEmail")
     expect(page).toContain("base_address: baseAddress")
@@ -372,15 +372,17 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(identityGuard).toContain("setIdentityMismatchError({ merchantEmail, dynamicEmail: dynamicUserEmail })")
     expect(identityGuard).toContain("clearWalletSetupInProgress()")
     expect(identityGuard).toContain("return null")
-    expect(profileRoute).toContain("profile_route_identity_mismatch")
-    expect(profileRoute).toContain(': "dynamic_email_mismatch"')
-    expect(profileRoute).toContain("{ status: 409 }")
+    expect(profileRoute).not.toContain("profile_route_identity_mismatch")
+    expect(profileRoute).not.toContain(': "dynamic_email_mismatch"')
+    expect(profileRoute).toContain('error: "dynamic_external_user_merchant_mismatch"')
   })
 
-  it("matching Dynamic email can save profile and is stored for audit/debugging", () => {
-    expect(profileRoute).toContain("resolveWalletIdentity")
-    expect(profileRoute).toContain("merchantEmail: merchant?.email")
-    expect(profileRoute).toContain("authEmail: auth.email")
+  it("externalUser merchant binding can save profile while email is stored only for audit/debugging", () => {
+    expect(profileRoute).toContain("getMerchantByAuthUserId(authUserId)")
+    expect(profileRoute).toContain("dynamicExternalUserId !== merchantId")
+    expect(profileRoute).not.toContain("resolveWalletIdentity")
+    expect(profileRoute).not.toContain("merchantEmail: merchant?.email")
+    expect(profileRoute).not.toContain("authEmail: auth.email")
     expect(profileRoute).toContain('dynamicEmail: "dynamic_email" in body')
     expect(walletProfileDb).toContain("dynamic_email: string | null")
     expect(walletProfileDb).toContain("dynamic_email: input.dynamicEmail !== undefined")
@@ -980,7 +982,7 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(profileRoute).toContain("const existingReadyProfile = profileHasReadyCoreIdentity(existingProfile)")
     expect(profileRoute).toContain("const existingProfileProtected = await pineTreeWalletProfileHasProtectedHistory(existingProfile?.id)")
     expect(profileRoute).not.toContain("existingReadyProfile || await pineTreeWalletProfileHasProtectedHistory")
-    expect(profileRoute).toContain('error: "wallet_identity_conflict"')
+    expect(profileRoute).toContain("error: conflictType")
     expect(profileRoute).toContain('conflictType')
     expect(profileRoute).toContain('"base_owned_by_other_merchant"')
     expect(profileRoute).toContain('"solana_owned_by_other_merchant"')

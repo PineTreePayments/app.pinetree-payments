@@ -52,7 +52,7 @@ import {
   shouldRerunSpeedOnNativeAuthResume,
   walletProvisioningTimeoutSuppressionReason,
 } from "@/lib/pinetreeWalletSetupResume"
-import { dynamicSessionBoundToMerchant } from "@/lib/wallets/dynamicExternalIdentity"
+import { dynamicSessionBoundToMerchant, getDynamicExternalUserId } from "@/lib/wallets/dynamicExternalIdentity"
 
 // Legacy compatibility route exists server-side but is not called by PineTree Wallet:
 // "/api/merchant/business-owner-profile"
@@ -1167,7 +1167,12 @@ function isWalletIdentityUnavailableResponse(value: unknown) {
 
 function isWalletAddressConflictResponse(value: unknown) {
   const error = toRecord(value).error
-  return error === "wallet_address_conflict" || error === "wallet_identity_conflict"
+  return (
+    error === "wallet_address_conflict" ||
+    error === "base_owned_by_other_merchant" ||
+    error === "solana_owned_by_other_merchant" ||
+    error === "protected_existing_profile"
+  )
 }
 
 const stalePineTreeWalletSetupMessage =
@@ -2883,6 +2888,7 @@ function PineTreeWalletRuntime() {
     () => dynamicSessionBoundToMerchant(user, merchantId),
     [user, merchantId]
   )
+  const dynamicExternalUserId = useMemo(() => getDynamicExternalUserId(user), [user])
 
   useEffect(() => {
     dynamicWalletRuntimeCountRef.current = dynamicWalletRuntimeCount
@@ -4214,14 +4220,14 @@ function PineTreeWalletRuntime() {
         return null
       }
       const body: Record<string, unknown> = {
-        dynamic_user_id: user.userId,
+        dynamic_user_id: dynamicExternalUserId,
         dynamic_email: dynamicUserEmail,
         merchant_email: merchantEmail,
         base_address: baseAddress,
         solana_address: solanaAddress,
       }
       const profilePostKey = [
-        user.userId || "",
+        dynamicExternalUserId || "",
         dynamicUserEmail || "",
         merchantEmail || "",
         baseAddress || "",
@@ -4450,7 +4456,7 @@ function PineTreeWalletRuntime() {
       setSyncing(false)
       if (!keepPendingSync) setPendingSync(false)
     }
-  }, [user, wallets, primaryWallet, dynamicWalletSearchList, dynamicNetworkAddresses, dynamicWalletRuntimeCount, waasRuntimeWallets.length, waasCredentialWalletSources.length, waasCredentialSignerWallets.length, repairInProgress, logWalletCreationStep, fetchProviderRailState, merchantEmail, dynamicUserEmail, dynamicEmailSource, dynamicSessionExternallyBound, recordWalletSetupFailure])
+  }, [user, wallets, primaryWallet, dynamicWalletSearchList, dynamicNetworkAddresses, dynamicWalletRuntimeCount, waasRuntimeWallets.length, waasCredentialWalletSources.length, waasCredentialSignerWallets.length, repairInProgress, logWalletCreationStep, fetchProviderRailState, merchantEmail, dynamicUserEmail, dynamicEmailSource, dynamicSessionExternallyBound, dynamicExternalUserId, recordWalletSetupFailure])
 
   // --- Post-reconnect wallet match check ---
   // Fires when Dynamic loads wallets after setShowAuthFlow(true). Clears the reconnect
@@ -5226,7 +5232,8 @@ function PineTreeWalletRuntime() {
   const dynamicSessionMatchesProfile =
     !profile?.dynamic_user_id ||
     !user ||
-    profile.dynamic_user_id === user.userId
+    profile.dynamic_user_id === user.userId ||
+    profile.dynamic_user_id === dynamicExternalUserId
 
   const hasStaleDynamicSession =
     user !== null &&

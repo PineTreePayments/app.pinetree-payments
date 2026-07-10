@@ -5,6 +5,7 @@ import { verifyMerchantApiKey, type ApiKeyPermission } from "@/engine/merchantAp
 type ErrorWithStatus = Error & { status?: number }
 type MerchantRequestAuth = {
   merchantId: string
+  authUserId: string
   email: string | null
   source: "api_key" | "supabase"
 }
@@ -57,7 +58,7 @@ export async function requireMerchantAuthFromRequest(
     if (!verified) {
       throw createStatusError("Invalid or revoked API key", 401)
     }
-    return { merchantId: verified.merchantId, email: null, source: "api_key" }
+    return { merchantId: verified.merchantId, authUserId: verified.merchantId, email: null, source: "api_key" }
   }
 
   // ── Supabase session path ─────────────────────────────────────────────────
@@ -85,6 +86,7 @@ export async function requireMerchantAuthFromRequest(
 
   return {
     merchantId: authData.user.id,
+    authUserId: authData.user.id,
     email,
     source: "supabase",
   }

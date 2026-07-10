@@ -20,6 +20,8 @@ describe("PineTree embedded wallet setup", () => {
   const withdrawalSigner = read("providers/wallets/withdrawalSigner.ts")
   const dynamicSignerLookup = read("lib/wallets/dynamicSignerLookup.ts")
   const dynamicAuthConfig = read("lib/pinetreeDynamicAuth.ts")
+  const merchantAuth = read("lib/api/merchantAuth.ts")
+  const merchantsDb = read("database/merchants.ts")
   const dbHelper = read("database/pineTreeWalletProfiles.ts")
   const migration = read("database/migrations/20260622_create_pinetree_wallet_profile.sql")
   const dynamicEmailMigration = read("database/migrations/20260705_add_dynamic_email_to_pinetree_wallet_profiles.sql")
@@ -30,7 +32,7 @@ describe("PineTree embedded wallet setup", () => {
   const lightningDbHelper = read("database/merchantLightningProfiles.ts")
   const lightningApiRoute = read("app/api/wallets/lightning/pinetree-managed/route.ts")
 
-  it("falls back to authenticated email and requests a safe merchant backfill", () => {
+  it("keeps legacy email resolution out of the PineTree profile route", () => {
     expect(resolveWalletIdentity({
       merchantEmail: null,
       authEmail: "Owner@Example.com",
@@ -41,13 +43,9 @@ describe("PineTree embedded wallet setup", () => {
       canonicalEmail: "owner@example.com",
       shouldBackfillMerchantEmail: true,
     })
-    expect(apiRoute).toContain("backfillMerchantEmailIfMissing")
-    expect(apiRoute).toContain('"[pinetree-wallets] merchant_email_backfilled"')
-    const backfillLog = apiRoute.slice(
-      apiRoute.indexOf('"[pinetree-wallets] merchant_email_backfilled"'),
-      apiRoute.indexOf('"[pinetree-wallets] merchant_email_backfill_deferred"')
-    )
-    expect(backfillLog).not.toContain("canonicalEmail")
+    expect(apiRoute).not.toContain("backfillMerchantEmailIfMissing")
+    expect(apiRoute).not.toContain('"[pinetree-wallets] merchant_email_backfilled"')
+    expect(apiRoute).toContain("dynamicExternalUserId !== merchantId")
   })
 
   it("rejects conflicting merchant, auth, body, and wallet identity emails", () => {
@@ -73,7 +71,8 @@ describe("PineTree embedded wallet setup", () => {
       bodyMerchantEmail: "untrusted@example.com",
       dynamicEmail: "untrusted@example.com",
     })).toEqual({ ok: false, code: "wallet_identity_unavailable" })
-    expect(apiRoute).toContain('"wallet_identity_unavailable"')
+    expect(apiRoute).not.toContain('"wallet_identity_unavailable"')
+    expect(apiRoute).toContain('"dynamic_external_user_missing"')
     expect(apiRoute).toContain("retryable: true")
   })
   const lightningReadinessEngine = read("engine/pineTreeWalletReadiness.ts")
@@ -130,18 +129,69 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("extractDynamicUserEmail(user)")
     expect(page).not.toContain("Using your PineTree account email: {merchantEmail}")
     expect(page).not.toContain("PineTree account email: {identityMismatchError?.merchantEmail ?? merchantEmail}")
-    expect(apiRoute).toContain("getMerchantById(merchantId)")
-    expect(apiRoute).toContain("resolveWalletIdentity")
-    expect(apiRoute).toContain("Dynamic externalUser auth is authoritative for wallet creation")
+    expect(apiRoute).toContain("getMerchantByAuthUserId(authUserId)")
+    expect(apiRoute).toContain("dynamicExternalUserId !== merchantId")
+    expect(apiRoute).not.toContain("resolveWalletIdentity")
+    expect(apiRoute).not.toContain("bodyMerchantEmail")
     expect(dbHelper).toContain("dynamic_email: string | null")
     expect(dynamicEmailMigration).toContain("ADD COLUMN IF NOT EXISTS dynamic_email TEXT")
+  })
+
+  it("resolves wallet profile merchant identity from auth-owned merchant, not client or email identity", () => {
+    expect(merchantAuth).toContain("authUserId: authData.user.id")
+    expect(merchantsDb).toContain("user_id")
+    expect(merchantsDb).toContain("owner_user_id")
+    expect(merchantsDb).toContain("getMerchantByAuthUserId")
+    expect(apiRoute).toContain("resolveProfileMerchant(auth)")
+    expect(apiRoute).toContain("getMerchantByAuthUserId(authUserId)")
+    expect(apiRoute).toContain("requestMerchantId = normalizedString(body.merchant_id)")
+    expect(apiRoute).not.toContain("merchantId = requestMerchantId")
+    expect(apiRoute).not.toContain("merchantId === authUserId")
+  })
+
+  it("compares Dynamic externalUserId to merchant id and keeps identity errors distinct from address conflicts", () => {
+    expect(page).toContain("getDynamicExternalUserId(user)")
+    expect(page).toContain("dynamic_user_id: dynamicExternalUserId")
+    expect(apiRoute).toContain("dynamicExternalUserId !== merchantId")
+    expect(apiRoute).toContain('error: "merchant_not_resolved"')
+    expect(apiRoute).toContain('error: reason')
+    expect(apiRoute).toContain('reason = requestedMerchantExists ? "merchant_not_owned_by_auth_user" : "merchant_not_resolved"')
+    expect(apiRoute).toContain('error: "dynamic_external_user_missing"')
+    expect(apiRoute).toContain('error: "dynamic_external_user_merchant_mismatch"')
+    expect(apiRoute).toContain('"base_owned_by_other_merchant"')
+    expect(apiRoute).toContain('"solana_owned_by_other_merchant"')
+    expect(apiRoute).not.toContain('error: "wallet_identity_conflict"')
+  })
+
+  it("logs merchant identity diagnostics as safe booleans only", () => {
+    const diagnosticsFn = apiRoute.slice(
+      apiRoute.indexOf("function profileIdentityDiagnostics"),
+      apiRoute.indexOf("async function resolveProfileMerchant")
+    )
+    const diagnosticsBuild = apiRoute.slice(
+      apiRoute.indexOf("const baseIdentityDiagnostics ="),
+      apiRoute.indexOf("if (!merchantId)")
+    )
+    expect(diagnosticsFn).toContain("authUserPresent: boolean")
+    expect(diagnosticsFn).toContain("merchantResolved: boolean")
+    expect(diagnosticsFn).toContain("merchantBelongsToAuthUser: boolean")
+    expect(diagnosticsFn).toContain("requestMerchantIdPresent: boolean")
+    expect(diagnosticsFn).toContain("requestMerchantMatchesResolvedMerchant: boolean")
+    expect(diagnosticsFn).toContain("dynamicExternalUserIdPresent: boolean")
+    expect(diagnosticsFn).toContain("dynamicExternalUserMatchesResolvedMerchant: boolean")
+    expect(diagnosticsFn).toContain("profileOwnershipChecksReached: boolean")
+    expect(diagnosticsBuild).toContain("Boolean(authUserId)")
+    expect(diagnosticsBuild).toContain("Boolean(merchantId)")
+    expect(diagnosticsBuild).not.toContain("email")
+    expect(diagnosticsBuild).not.toContain("address")
+    expect(diagnosticsBuild).not.toContain("token")
   })
 
   it("non-external Dynamic sessions still block a different Dynamic email before profile POST", () => {
     expect(page).toContain("if (!dynamicSessionExternallyBound && merchantEmail && dynamicUserEmail && dynamicUserEmail !== merchantEmail)")
     expect(page).toContain("return null")
-    expect(apiRoute).toContain("bodyMerchantEmail: body.merchant_email")
-    expect(apiRoute).toContain("{ status: 409 }")
+    expect(apiRoute).not.toContain("bodyMerchantEmail")
+    expect(apiRoute).toContain('error: "dynamic_external_user_merchant_mismatch"')
     expect(apiRoute).not.toContain("dynamicEmail: body.dynamic_email")
   })
 
@@ -166,7 +216,7 @@ describe("PineTree embedded wallet setup", () => {
 
   it("loads merchant profile by PineTree merchant auth without requiring Dynamic auth", () => {
     expect(apiRoute).toContain("const auth = await requireMerchantAuthFromRequest(req)")
-    expect(apiRoute).toContain("const merchantId = auth.merchantId")
+    expect(apiRoute).toContain("resolveProfileMerchant(auth)")
     expect(apiRoute).toContain("const profile = await getPineTreeWalletProfile(merchantId)")
     expect(page).toContain('fetch("/api/wallets/pinetree-profile"')
     expect(page).toContain("headers: { Authorization: `Bearer ${token}` }")
@@ -207,7 +257,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("[pinetree-wallets] dynamic_auth_config_invalid")
     expect(dynamicAuthConfig).toContain("PineTree Wallet verification is not configured correctly. Please contact support.")
     expect(page).toContain("dynamicUserEmail !== merchantEmail")
-    expect(apiRoute).toContain("resolveWalletIdentity")
+    expect(apiRoute).not.toContain("resolveWalletIdentity")
   })
 
   it("email fallback disabled without external_jwt shows only a wallet debug warning", () => {
@@ -697,10 +747,11 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("detects and blocks a stale Dynamic session from a different PineTree account", () => {
-    // dynamicSessionMatchesProfile checks profile.dynamic_user_id against user.userId
+    // dynamicSessionMatchesProfile accepts the externalUser merchant binding stored on the profile.
     expect(page).toContain("dynamicSessionMatchesProfile")
     expect(page).toContain("profile.dynamic_user_id")
     expect(page).toContain("user.userId")
+    expect(page).toContain("profile.dynamic_user_id === dynamicExternalUserId")
     // hasStaleDynamicSession guards Create so it doesn't silently reuse the old session
     expect(page).toContain("hasStaleDynamicSession")
     // Reconnect copy is shown to the merchant instead of the old setup-incomplete warning.
@@ -743,7 +794,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("getDynamicWalletSearchList(wallets as unknown[], primaryWallet)")
     // POST to pinetree-profile route includes dynamic_user_id to lock the profile to this session
     expect(page).toContain("dynamic_user_id")
-    expect(page).toContain("user.userId")
+    expect(page).toContain("dynamic_user_id: dynamicExternalUserId")
     // Core profile sync does not start a second client-side Lightning provisioning request.
     expect(page).not.toContain("autoEnableLightning")
     expect(page).not.toContain("syncPineTreeManagedLightning")
@@ -814,7 +865,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(apiRoute).toContain("baseAddressOwnedByAnotherMerchant")
     expect(apiRoute).toContain("solanaAddressOwnedByAnotherMerchant")
     expect(apiRoute).toContain("protected_existing_profile")
-    expect(apiRoute).toContain('error: "wallet_identity_conflict"')
+    expect(apiRoute).toContain("error: conflictType")
     expect(apiRoute).toContain("conflictType")
     expect(apiRoute).toContain('status: "needs_review"')
     expect(apiRoute).toContain("retryable: false")
@@ -1084,7 +1135,7 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("Dynamic profile sync sends only Dynamic user, Base, and Solana addresses", () => {
-    expect(page).toContain("dynamic_user_id: user.userId")
+    expect(page).toContain("dynamic_user_id: dynamicExternalUserId")
     expect(page).toContain("base_address: baseAddress")
     expect(page).toContain("solana_address: solanaAddress")
     expect(page).not.toContain("btc_address: bitcoinAddress")
