@@ -356,6 +356,12 @@ export class SpeedApiError extends Error {
   }
 }
 
+export type NormalizedSpeedProviderError = {
+  providerStatus: number | null
+  providerCode: string | null
+  fieldErrors: string[]
+}
+
 function sanitizeSpeedFieldErrorMessage(value: unknown): string | null {
   if (typeof value !== "string") return null
   const trimmed = value.trim()
@@ -363,6 +369,8 @@ function sanitizeSpeedFieldErrorMessage(value: unknown): string | null {
   return trimmed
     .replace(/sk_(test|live)_[A-Za-z0-9_-]+/g, "sk_$1_[redacted]")
     .replace(/Basic\s+[A-Za-z0-9+/=]+/gi, "Basic [redacted]")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/password\s*[:=]\s*[^,\s}]+/gi, "password=[redacted]")
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted-email]")
     .slice(0, 200)
 }
@@ -374,45 +382,75 @@ function sanitizeSpeedFieldErrorMessage(value: unknown): string | null {
  * `error_message`/`message`). Never throws; unknown/unparseable bodies just
  * produce an empty result. Every returned string is sanitized and length-capped.
  */
-function parseSpeedErrorBody(body: string): { providerCode: string | null; fieldErrors: string[] } {
+export function parseSpeedErrorBody(body: string): { providerCode: string | null; fieldErrors: string[] } {
   let parsed: unknown = null
   try {
     parsed = body ? JSON.parse(body) : null
   } catch {
     parsed = null
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (!parsed || typeof parsed !== "object") {
     return { providerCode: null, fieldErrors: [] }
   }
 
-  const row = parsed as Record<string, unknown>
-  const providerCodeRaw = row.error_code ?? row.code ?? row.type ?? null
-  const providerCode = typeof providerCodeRaw === "string" ? providerCodeRaw.slice(0, 60) : null
-
   const fieldErrors: string[] = []
-  const errorsField = row.errors ?? row.error_details ?? row.list_errors
-  if (Array.isArray(errorsField)) {
-    for (const entry of errorsField) {
-      if (fieldErrors.length >= 10) break
-      if (typeof entry === "string") {
-        const safe = sanitizeSpeedFieldErrorMessage(entry)
-        if (safe) fieldErrors.push(safe)
-      } else if (entry && typeof entry === "object") {
-        const entryRow = entry as Record<string, unknown>
-        const field = typeof entryRow.field === "string"
-          ? entryRow.field
-          : typeof entryRow.param === "string" ? entryRow.param : null
-        const message = sanitizeSpeedFieldErrorMessage(
-          entryRow.message ?? entryRow.error_message ?? entryRow.description
-        )
-        if (message) fieldErrors.push(field ? `${field}: ${message}` : message)
-      }
-    }
-  } else {
-    const singleMessage = sanitizeSpeedFieldErrorMessage(row.error_message ?? row.message)
-    if (singleMessage) fieldErrors.push(singleMessage)
+  let providerCode: string | null = null
+  const seen = new Set<string>()
+
+  function addError(value: unknown, field?: string | null) {
+    if (fieldErrors.length >= 10) return
+    const safe = sanitizeSpeedFieldErrorMessage(value)
+    if (!safe) return
+    const fieldName = sanitizeSpeedFieldErrorMessage(field || "")
+    const line = fieldName ? `${fieldName}: ${safe}` : safe
+    if (seen.has(line)) return
+    seen.add(line)
+    fieldErrors.push(line)
   }
 
+  function visit(value: unknown, depth = 0) {
+    if (depth > 5 || fieldErrors.length >= 10 || value == null) return
+    if (typeof value === "string") {
+      addError(value)
+      return
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, depth + 1)
+      return
+    }
+    if (typeof value !== "object") return
+
+    const row = value as Record<string, unknown>
+    if (!providerCode) {
+      const providerCodeRaw = row.error_code ?? row.code ?? row.errorCode ?? row.type ?? null
+      if (typeof providerCodeRaw === "string") {
+        providerCode = sanitizeSpeedFieldErrorMessage(providerCodeRaw)?.slice(0, 60) || null
+      }
+    }
+
+    const field = typeof row.field === "string"
+      ? row.field
+      : typeof row.param === "string"
+        ? row.param
+        : typeof row.name === "string"
+          ? row.name
+          : null
+    addError(row.error_message ?? row.message ?? row.description ?? row.error, field)
+
+    for (const key of [
+      "errors",
+      "field_errors",
+      "validation_errors",
+      "error_details",
+      "list_errors",
+      "data",
+      "error",
+    ]) {
+      if (Object.prototype.hasOwnProperty.call(row, key)) visit(row[key], depth + 1)
+    }
+  }
+
+  visit(parsed)
   return { providerCode, fieldErrors }
 }
 
@@ -470,12 +508,7 @@ async function speedRequestWithStatus<T>(
       throw new Error(SPEED_TRANSFER_SPLIT_ERROR)
     }
 
-    throw new SpeedApiError(
-      `Speed API returned ${response.status}${body ? `: ${body.slice(0, 300)}` : ""}`,
-      response.status,
-      providerCode,
-      fieldErrors
-    )
+    throw new SpeedApiError(`Speed API returned ${response.status}`, response.status, providerCode, fieldErrors)
   }
 
   return { data: (await response.json()) as T, status: response.status }
@@ -771,6 +804,10 @@ export async function createSpeedCustomConnectedAccount(
   if (!lastName) throw new Error("Speed custom connected account last name is required.")
   if (!email) throw new Error("Speed custom connected account email is required.")
   if (!password) throw new Error("Speed custom connected account password is required.")
+  if (params.emailValid === false) throw new Error("Speed custom connected account email is invalid.")
+  if (params.passwordPolicyValid === false) {
+    throw new Error("Speed custom connected account password policy failed.")
+  }
 
   const presenceFields = {
     emailPresent: Boolean(email),

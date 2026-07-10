@@ -248,15 +248,17 @@ describe("PineTree Dynamic provisioning flow", () => {
       page.indexOf("}, [refreshDynamicWalletRuntimeImpl, sdkHasLoaded, user])")
     )
     expect(wrapperFn).toBeTruthy()
-    expect(wrapperFn).toContain("const alreadyInFlight = walletRuntimeRefreshInFlightRef.current")
+    expect(wrapperFn).toContain("const refreshMode = options?.requireApprovalWallet ? \"approval_wallet_hydration\" : \"normal_hydration\"")
+    expect(wrapperFn).toContain("const alreadyInFlight = walletRuntimeRefreshInFlightRef.current[refreshMode]")
     expect(wrapperFn).toContain("if (alreadyInFlight) {")
     expect(wrapperFn).toContain("return alreadyInFlight")
-    expect(wrapperFn).toContain("walletRuntimeRefreshInFlightRef.current = runPromise")
-    expect(wrapperFn).toContain("walletRuntimeRefreshInFlightRef.current = null")
+    expect(wrapperFn).toContain("walletRuntimeRefreshInFlightRef.current[refreshMode] = runPromise")
+    expect(wrapperFn).toContain("walletRuntimeRefreshInFlightRef.current[refreshMode] = null")
   })
 
   it("declares the single-flight ref once, ahead of the wrapper", () => {
-    expect(page).toContain("const walletRuntimeRefreshInFlightRef = useRef<Promise<boolean> | null>(null)")
+    expect(page).toContain("normal_hydration: null")
+    expect(page).toContain("approval_wallet_hydration: null")
   })
 
   it("single-flight diagnostic logs refreshReason/inFlightReused/runtimeWalletCount before and after, and errorName/errorCode safely", () => {
@@ -266,6 +268,8 @@ describe("PineTree Dynamic provisioning flow", () => {
     )
     expect(wrapperFn).toContain("wallet_dynamic_wallets_refresh_diagnostic")
     expect(wrapperFn).toContain("refreshReason: reason")
+    expect(wrapperFn).toContain("refreshMode")
+    expect(wrapperFn).toContain("stage")
     expect(wrapperFn).toContain("inFlightReused: true")
     expect(wrapperFn).toContain("inFlightReused: false")
     expect(wrapperFn).toContain("runtimeWalletCountBefore")

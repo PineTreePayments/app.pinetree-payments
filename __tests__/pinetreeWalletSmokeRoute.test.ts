@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   getPineTreeWalletProfile: vi.fn(),
   getMerchantLightningProfile: vi.fn(),
   getMerchantById: vi.fn(),
+  verifyPineTreeWalletSetupState: vi.fn(),
 }))
 
 vi.mock("@/lib/api/adminAuth", () => ({
@@ -27,6 +28,10 @@ vi.mock("@/database/merchantLightningProfiles", () => ({
 
 vi.mock("@/database/merchants", () => ({
   getMerchantById: mocks.getMerchantById,
+}))
+
+vi.mock("@/database/pineTreeWalletSetupVerification", () => ({
+  verifyPineTreeWalletSetupState: mocks.verifyPineTreeWalletSetupState,
 }))
 
 function request(query = "") {
@@ -92,6 +97,23 @@ describe("GET /api/debug/pinetree-wallet/smoke", () => {
     mocks.getPineTreeWalletProfile.mockResolvedValue(readyProfile)
     mocks.getMerchantLightningProfile.mockResolvedValue(lightningProfile)
     mocks.getMerchantById.mockResolvedValue({ id: adminId, email: "merchant@example.com" })
+    mocks.verifyPineTreeWalletSetupState.mockResolvedValue({
+      merchantResolved: true,
+      profileExists: true,
+      profileStatus: "ready",
+      hasBaseAddress: true,
+      hasSolanaAddress: true,
+      lightningProfileExists: true,
+      lightningStatus: "pending",
+      baseProviderRowExists: true,
+      solanaProviderRowExists: true,
+      baseRailSyncExists: true,
+      solanaRailSyncExists: true,
+      duplicateWalletProfiles: false,
+      duplicateBaseProviderRows: false,
+      duplicateSolanaProviderRows: false,
+      setupConsistent: true,
+    })
 
     // No real network in tests: JWKS check and Dynamic settings/signin probes
     // are answered by this stub.
@@ -178,6 +200,11 @@ describe("GET /api/debug/pinetree-wallet/smoke", () => {
       profileHasBaseAddress: true,
       profileHasSolanaAddress: true,
       lightningStatus: "pending",
+      setupVerification: {
+        setupConsistent: true,
+        hasBaseAddress: true,
+        hasSolanaAddress: true,
+      },
     })
     // Signin probe is opt-in; no Dynamic user should be touched by default.
     expect(body).not.toHaveProperty("dynamicJwtAcceptedOk")
@@ -268,7 +295,7 @@ describe("GET /api/debug/pinetree-wallet/smoke", () => {
   it("is disabled in production unless explicitly enabled", async () => {
     vi.stubEnv("NODE_ENV", "production")
     vi.stubEnv("PINETREE_WALLET_DEBUG_SMOKE_ENABLED", "false")
-    vi.stubEnv("NEXT_PUBLIC_WALLET_DEBUG_EVENTS", "false")
+    vi.stubEnv("NEXT_PUBLIC_WALLET_DEBUG_EVENTS", "true")
 
     const { GET } = await import("@/app/api/debug/pinetree-wallet/smoke/route")
     const response = await GET(request())

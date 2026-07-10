@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { requireAdminFromRequest, getRouteErrorStatus } from "@/lib/api/adminAuth"
 import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import { getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
+import { verifyPineTreeWalletSetupState } from "@/database/pineTreeWalletSetupVerification"
 import { getPineTreeDynamicAuthConfig } from "@/lib/pinetreeDynamicAuth"
 import {
   checkDynamicExternalJwks,
@@ -36,8 +37,7 @@ import {
 function smokeEnabled() {
   return (
     process.env.NODE_ENV !== "production" ||
-    process.env.PINETREE_WALLET_DEBUG_SMOKE_ENABLED === "true" ||
-    process.env.NEXT_PUBLIC_WALLET_DEBUG_EVENTS === "true"
+    process.env.PINETREE_WALLET_DEBUG_SMOKE_ENABLED === "true"
   )
 }
 
@@ -144,9 +144,10 @@ export async function GET(req: NextRequest) {
     const merchantId = merchantIdParam && merchantIdParam.trim() ? merchantIdParam.trim() : adminId
     const runSigninProbe = req.nextUrl.searchParams.get("probe") === "1"
 
-    const [profile, lightningProfile, jwks, environmentFacts] = await Promise.all([
+    const [profile, lightningProfile, setupVerification, jwks, environmentFacts] = await Promise.all([
       getPineTreeWalletProfile(merchantId),
       getMerchantLightningProfile(merchantId),
+      verifyPineTreeWalletSetupState(merchantId),
       checkDynamicExternalJwks(),
       fetchDynamicEnvironmentFacts(),
     ])
@@ -207,6 +208,7 @@ export async function GET(req: NextRequest) {
       profileHasBaseAddress: Boolean(profile?.base_address),
       profileHasSolanaAddress: Boolean(profile?.solana_address),
       lightningStatus: lightningProfile?.status ?? null,
+      setupVerification,
     })
   } catch (error) {
     return NextResponse.json(

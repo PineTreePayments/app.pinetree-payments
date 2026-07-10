@@ -2609,11 +2609,14 @@ function PineTreeWalletRuntime() {
   const speedProvisionInFlightRef = useRef(false)
   const lastCombinedReadinessRef = useRef<string | null>(null)
   // Single-flight guard for refreshDynamicWalletRuntime: only one Dynamic SDK
-  // hydration/refresh operation runs at a time. Concurrent callers (the polling
+  // hydration/refresh operation runs at a time per compatible mode. Concurrent callers (the polling
   // interval, focus/visibility recheck, native-auth resume, final-refresh timer,
-  // etc.) all await this same in-flight promise instead of racing the SDK, which
-  // was the source of the intermittent TypeError during overlapping refreshes.
-  const walletRuntimeRefreshInFlightRef = useRef<Promise<boolean> | null>(null)
+  // etc.) await the same in-flight promise for normal hydration, while approval
+  // flows get their own stronger hydration promise instead of reusing a weaker one.
+  const walletRuntimeRefreshInFlightRef = useRef<Record<"normal_hydration" | "approval_wallet_hydration", Promise<boolean> | null>>({
+    normal_hydration: null,
+    approval_wallet_hydration: null,
+  })
   // Dedupes the background rail-sync call fired after a successful core profile
   // save: only one rail-sync fetch per unique (dynamic_user_id, base, solana)
   // address set, even if syncProfileFromDynamic resolves "ready" more than once.
@@ -3749,9 +3752,19 @@ function PineTreeWalletRuntime() {
 
   const refreshDynamicWalletRuntimeImpl = useCallback(async (reason: string, options?: { requireApprovalWallet?: boolean }) => {
     if (!sdkHasLoaded || !user) return false
-    console.info("[pinetree-wallets] wallet_dynamic_wallets_refresh_started", { reason })
+    const refreshMode = options?.requireApprovalWallet ? "approval_wallet_hydration" : "normal_hydration"
+    let refreshStage:
+      | "read_runtime_wallets"
+      | "read_waas_credentials"
+      | "initialize_waas"
+      | "create_wallet_account"
+      | "create_embedded_wallet"
+      | "hydrate_runtime"
+      | "detect_addresses" = "read_runtime_wallets"
+    console.info("[pinetree-wallets] wallet_dynamic_wallets_refresh_started", { reason, refreshMode })
     emitWalletSetupDebugEvent("wallet_dynamic_wallets_refresh_started", {
       reason,
+      refreshMode,
       dynamicWaasIsEnabled,
       runtimeWalletCount: dynamicWalletRuntimeCountRef.current,
     })
@@ -3759,12 +3772,15 @@ function PineTreeWalletRuntime() {
       await refreshDynamicUser()
       if (dynamicWaasIsEnabled) {
         if (shouldInitializeWaas) {
+          refreshStage = "initialize_waas"
           await initializeWaas({ forceClientRebuild: true })
         }
         // When WaaS wallets are absent after initialization, provision them.
         // createWalletAccount uses needsAutoCreateWalletChains â€” the SDK-populated list of chains
         // that require wallet creation for this user.
+        refreshStage = "read_runtime_wallets"
         let runtimeWallets = getWaasWallets()
+        refreshStage = "read_waas_credentials"
         const runtimeCredentials = getWaasWalletsByCredentials()
 
         // Credentials already exist server-side (a wallet was provisioned in an earlier
@@ -3773,7 +3789,9 @@ function PineTreeWalletRuntime() {
         if (runtimeWallets.length === 0 && runtimeCredentials.length > 0 && !shouldInitializeWaas) {
           console.info("[pinetree-wallets] wallet_dynamic_create_or_restore_started", { reason, path: "restore_existing" })
           emitWalletSetupDebugEvent("wallet_dynamic_create_or_restore_started", { reason, path: "restore_existing" })
+          refreshStage = "initialize_waas"
           await initializeWaas({ forceClientRebuild: true })
+          refreshStage = "read_runtime_wallets"
           runtimeWallets = getWaasWallets()
           console.info("[pinetree-wallets] wallet_dynamic_create_or_restore_complete", {
             reason,
@@ -3820,6 +3838,7 @@ function PineTreeWalletRuntime() {
                 path: "waas_create",
                 usedExplicitFallbackChains: needsAutoCreateWalletChains.length === 0,
               })
+              refreshStage = "create_wallet_account"
               await createWalletAccount(requiredChains)
               console.info("[pinetree-wallets] wallet_dynamic_create_embedded_wallet_complete", { reason })
               emitWalletSetupDebugEvent("wallet_dynamic_create_embedded_wallet_complete", { reason, path: "waas_create" })
@@ -3862,6 +3881,7 @@ function PineTreeWalletRuntime() {
             }
             console.info("[pinetree-wallets] wallet_dynamic_create_embedded_wallet_started", { reason, path: "legacy_create" })
             emitWalletSetupDebugEvent("wallet_dynamic_create_embedded_wallet_started", { reason, path: "legacy_create" })
+            refreshStage = "create_embedded_wallet"
             await createEmbeddedWallet()
             console.info("[pinetree-wallets] wallet_dynamic_create_embedded_wallet_complete", { reason, path: "legacy_create" })
             emitWalletSetupDebugEvent("wallet_dynamic_create_embedded_wallet_complete", { reason, path: "legacy_create" })
@@ -3873,10 +3893,13 @@ function PineTreeWalletRuntime() {
       }
       await refreshDynamicUser()
       setDynamicWalletRuntimeRefreshNonce((value) => value + 1)
+      refreshStage = "hydrate_runtime"
       const hydrated = await waitForDynamicWalletRuntime(options)
-      console.info("[pinetree-wallets] wallet_dynamic_wallets_refresh_complete", { reason, hydrated })
+      refreshStage = "detect_addresses"
+      console.info("[pinetree-wallets] wallet_dynamic_wallets_refresh_complete", { reason, refreshMode, hydrated })
       emitWalletSetupDebugEvent("wallet_dynamic_wallets_refresh_complete", {
         reason,
+        refreshMode,
         hydrated,
         runtimeWalletCount: dynamicWalletRuntimeCountRef.current,
       })
@@ -3934,8 +3957,10 @@ function PineTreeWalletRuntime() {
       const classified = classifyDynamicRefreshError(error)
       console.warn("[pinetree-wallets] dynamic_wallet_runtime_refresh_failed", {
         reason,
-        dynamicUserId: user.userId ?? null,
-        error: error instanceof Error ? error.message : String(error),
+        refreshMode,
+        stage: refreshStage,
+        errorName: classified.errorName ?? "unknown_error",
+        ...(classified.errorCode ? { errorCode: classified.errorCode } : {}),
       })
       creatingEmbeddedWalletRef.current = false
       // Surface the throw server-side too - this is the "createWalletAccount /
@@ -3946,8 +3971,14 @@ function PineTreeWalletRuntime() {
       // as Base/Solana addresses are present, regardless of this return value.
       emitWalletSetupDebugEvent("wallet_dynamic_wallets_refresh_complete", {
         reason,
+        refreshMode,
         hydrated: false,
         threw: true,
+        stage: refreshStage,
+        sdkLoaded: sdkHasLoaded,
+        dynamicUserPresent: Boolean(user),
+        runtimeWalletCountBefore: dynamicWalletRuntimeCountRef.current,
+        runtimeWalletCountAfter: dynamicWalletRuntimeCountRef.current,
         errorName: classified.errorName ?? "unknown_error",
         ...(classified.errorCode ? { errorCode: classified.errorCode } : {}),
       })
@@ -3981,12 +4012,15 @@ function PineTreeWalletRuntime() {
   // that produced the intermittent "hydrated: false, threw: true, errorName:
   // TypeError" freeze in production.
   const refreshDynamicWalletRuntime = useCallback((reason: string, options?: { requireApprovalWallet?: boolean }): Promise<boolean> => {
+    const refreshMode = options?.requireApprovalWallet ? "approval_wallet_hydration" : "normal_hydration"
     const runtimeWalletCountBefore = dynamicWalletRuntimeCountRef.current
-    const alreadyInFlight = walletRuntimeRefreshInFlightRef.current
+    const alreadyInFlight = walletRuntimeRefreshInFlightRef.current[refreshMode]
     if (alreadyInFlight) {
       const diagnostic = {
         refreshReason: reason,
+        refreshMode,
         inFlightReused: true,
+        stage: "hydrate_runtime",
         sdkLoaded: sdkHasLoaded,
         dynamicUserPresent: Boolean(user),
         runtimeWalletCountBefore,
@@ -4022,7 +4056,9 @@ function PineTreeWalletRuntime() {
         const runtimeWalletCountAfter = dynamicWalletRuntimeCountRef.current
         const diagnostic = {
           refreshReason: reason,
+          refreshMode,
           inFlightReused: false,
+          stage: "hydrate_runtime",
           sdkLoaded: sdkHasLoaded,
           dynamicUserPresent: Boolean(user),
           runtimeWalletCountBefore,
@@ -4033,7 +4069,9 @@ function PineTreeWalletRuntime() {
         console.info("[pinetree-wallets] wallet_dynamic_wallets_refresh_diagnostic", diagnostic)
         emitWalletSetupDebugEvent("wallet_dynamic_wallets_refresh_diagnostic", {
           refreshReason: diagnostic.refreshReason,
+          refreshMode: diagnostic.refreshMode,
           inFlightReused: diagnostic.inFlightReused,
+          stage: diagnostic.stage,
           sdkLoaded: diagnostic.sdkLoaded,
           dynamicUserPresent: diagnostic.dynamicUserPresent,
           runtimeWalletCountBefore: diagnostic.runtimeWalletCountBefore,
@@ -4041,11 +4079,11 @@ function PineTreeWalletRuntime() {
           ...(errorName ? { errorName } : {}),
           ...(errorCode ? { errorCode } : {}),
         })
-        walletRuntimeRefreshInFlightRef.current = null
+        walletRuntimeRefreshInFlightRef.current[refreshMode] = null
       }
     })()
 
-    walletRuntimeRefreshInFlightRef.current = runPromise
+    walletRuntimeRefreshInFlightRef.current[refreshMode] = runPromise
     return runPromise
   }, [refreshDynamicWalletRuntimeImpl, sdkHasLoaded, user])
 

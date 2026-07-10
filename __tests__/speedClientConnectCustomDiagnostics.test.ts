@@ -124,6 +124,58 @@ describe("speedClient /connect/custom", () => {
     })
   })
 
+  it("captures nested provider error shapes safely", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "validation_failed",
+            data: {
+              field_errors: [
+                { field: "account_name", error_message: "Business name is required" },
+              ],
+            },
+          },
+        }),
+        { status: 400 }
+      )
+    )
+
+    const { createSpeedCustomConnectedAccount, SpeedApiError } = await import("@/providers/lightning/speedClient")
+    await expect(
+      createSpeedCustomConnectedAccount({
+        country: "US",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        email: "merchant@example.test",
+        password: "temporary-secret",
+      })
+    ).rejects.toSatisfy((error: unknown) => {
+      const speedError = error as InstanceType<typeof SpeedApiError>
+      expect(speedError.providerCode).toBe("validation_failed")
+      expect(speedError.fieldErrors).toEqual(["account_name: Business name is required"])
+      expect(speedError.message).toBe("Speed API returned 400")
+      return true
+    })
+  })
+
+  it("blocks an explicitly invalid email before calling Speed", async () => {
+    const { createSpeedCustomConnectedAccount } = await import("@/providers/lightning/speedClient")
+
+    await expect(
+      createSpeedCustomConnectedAccount({
+        country: "US",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        email: "not-an-email",
+        password: "temporary-secret",
+        emailValid: false,
+      })
+    ).rejects.toThrow("email is invalid")
+
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it("never leaks the account password, and redacts an echoed API key, from a rejected response body", async () => {
     fetchMock.mockResolvedValue(
       new Response(

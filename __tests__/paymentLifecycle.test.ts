@@ -14,6 +14,10 @@ vi.mock("@/database/transactions", () => ({
   updateTransactionStatus: vi.fn()
 }))
 
+vi.mock("@/database/paymentEvents", () => ({
+  getPaymentEventByProviderEvent: vi.fn()
+}))
+
 vi.mock("@/engine/updatePaymentStatus", () => ({
   updatePaymentStatus: vi.fn()
 }))
@@ -24,6 +28,10 @@ vi.mock("@/engine/providerRegistry", () => ({
 
 vi.mock("@/engine/reconcileTransaction", () => ({
   reconcileTransactionForPayment: vi.fn()
+}))
+
+vi.mock("@/engine/transactionProgress", () => ({
+  syncTransactionProgressForPayment: vi.fn()
 }))
 
 import { advancePaymentToTargetStatus } from "@/engine/eventProcessor"

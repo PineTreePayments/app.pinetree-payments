@@ -1,6 +1,12 @@
 import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
-import { getWalletRailSyncs, upsertWalletRailSync, type WalletRailSyncRecord } from "@/database/pineTreeWalletRailSyncs"
-import { getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
+import {
+  checkWalletRailSyncSchemaContract,
+  getWalletRailSyncs,
+  isWalletRailSyncSchemaError,
+  upsertWalletRailSync,
+  type WalletRailSyncRecord,
+} from "@/database/pineTreeWalletRailSyncs"
+import { deriveLightningReadiness, getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
 import { saveProviderEngine } from "./providersDashboard"
 
 export type RailSyncResult = {
@@ -14,10 +20,14 @@ export type PineTreeWalletRailSyncResult = {
   merchantId: string
   rails: RailSyncResult[]
   syncedAt: string
+  coreStatus: "ready" | "needs_attention" | "not_created"
+  lightningStatus: "ready" | "pending" | "needs_attention" | "not_configured"
+  warnings: string[]
 }
 
 export type RailSyncFailureCode =
   | "profile_missing"
+  | "database_schema_missing"
   | "database_error"
   | "invalid_profile_state"
   | "lightning_sync_failed"
@@ -41,12 +51,21 @@ export type RailSyncStage =
 export class RailSyncEngineError extends Error {
   stage: RailSyncStage
   code: RailSyncFailureCode
+  migration?: string
+  missing?: string[]
 
-  constructor(stage: RailSyncStage, code: RailSyncFailureCode, message: string) {
+  constructor(
+    stage: RailSyncStage,
+    code: RailSyncFailureCode,
+    message: string,
+    details?: { migration?: string; missing?: string[] }
+  ) {
     super(message)
     this.name = "RailSyncEngineError"
     this.stage = stage
     this.code = code
+    this.migration = details?.migration
+    this.missing = details?.missing
   }
 }
 
@@ -73,6 +92,26 @@ export async function syncPineTreeWalletRailsEngine(
   logRailSyncStage("rail_sync_started", merchantId)
 
   try {
+    try {
+      await checkWalletRailSyncSchemaContract()
+    } catch (error) {
+      if (isWalletRailSyncSchemaError(error)) {
+        console.warn("[pinetree-wallets] rail_sync_schema_contract_missing", {
+          merchantId,
+          code: error.code,
+          missing: error.missing,
+          migration: error.migration,
+        })
+        throw new RailSyncEngineError(
+          "rail_sync_started",
+          "database_schema_missing",
+          "PineTree Wallet rail-sync schema is missing.",
+          { migration: error.migration, missing: error.missing }
+        )
+      }
+      throw error
+    }
+
     const profile = await getPineTreeWalletProfile(merchantId)
     logRailSyncStage("rail_sync_profile_loaded", merchantId, { profileExists: Boolean(profile) })
 
@@ -86,6 +125,9 @@ export async function syncPineTreeWalletRailsEngine(
           { rail: "bitcoin_lightning", status: "skipped", address: null, reason: "No PineTree Wallet profile" },
         ],
         syncedAt: new Date().toISOString(),
+        coreStatus: "not_created",
+        lightningStatus: "not_configured",
+        warnings: ["profile_missing"],
       }
     }
 
@@ -99,6 +141,20 @@ export async function syncPineTreeWalletRailsEngine(
       const existingSyncs = await getWalletRailSyncs(merchantId)
       syncByRail = new Map(existingSyncs.map((s) => [s.rail, s]))
     } catch (error) {
+      if (isWalletRailSyncSchemaError(error)) {
+        console.warn("[pinetree-wallets] rail_sync_schema_contract_missing", {
+          merchantId,
+          code: error.code,
+          missing: error.missing,
+          migration: error.migration,
+        })
+        throw new RailSyncEngineError(
+          "rail_sync_profile_loaded",
+          "database_schema_missing",
+          "PineTree Wallet rail-sync schema is missing.",
+          { migration: error.migration, missing: error.missing }
+        )
+      }
       console.warn("[pinetree-wallets] rail_sync_existing_syncs_lookup_failed", {
         merchantId,
         error: error instanceof Error ? error.message : "unknown_error",
@@ -151,12 +207,31 @@ export async function syncPineTreeWalletRailsEngine(
 
         results.push({ rail, status: "synced", address })
       } catch (error) {
-        results.push({
+        if (isWalletRailSyncSchemaError(error)) {
+          console.warn("[pinetree-wallets] rail_sync_schema_contract_missing", {
+            merchantId,
+            rail,
+            code: error.code,
+            missing: error.missing,
+            migration: error.migration,
+          })
+          throw new RailSyncEngineError(
+            "rail_sync_persist_started",
+            "database_schema_missing",
+            "PineTree Wallet rail-sync schema is missing.",
+            { migration: error.migration, missing: error.missing }
+          )
+        }
+        console.warn("[pinetree-wallets] rail_sync_persist_failed", {
+          merchantId,
           rail,
-          status: "failed",
-          address,
-          reason: error instanceof Error ? error.message : "Unknown error",
+          code: "database_error",
         })
+        throw new RailSyncEngineError(
+          "rail_sync_persist_started",
+          "database_error",
+          `Failed to sync ${rail} rail`
+        )
       }
     }
 
@@ -164,11 +239,11 @@ export async function syncPineTreeWalletRailsEngine(
     // its own status via ensureManagedLightningForMerchant, and a failure or
     // missing profile must never fail rail sync or change its HTTP outcome.
     let lightningConfigured = false
-    let lightningStatus: string | null = null
+    let lightningStatus: PineTreeWalletRailSyncResult["lightningStatus"] = "not_configured"
     try {
       const lightningProfile = await getMerchantLightningProfile(merchantId)
       lightningConfigured = Boolean(lightningProfile)
-      lightningStatus = lightningProfile?.status ?? null
+      lightningStatus = deriveLightningReadiness(lightningProfile).status
     } catch (error) {
       console.warn("[pinetree-wallets] rail_sync_lightning_lookup_failed", {
         merchantId,
@@ -185,7 +260,14 @@ export async function syncPineTreeWalletRailsEngine(
     })
 
     logRailSyncStage("rail_sync_complete", merchantId, { profileExists: true })
-    return { merchantId, rails: results, syncedAt: new Date().toISOString() }
+    return {
+      merchantId,
+      rails: results,
+      syncedAt: new Date().toISOString(),
+      coreStatus: profile.status === "ready" ? "ready" : profile.status === "needs_attention" ? "needs_attention" : "not_created",
+      lightningStatus,
+      warnings: lightningConfigured ? [] : [],
+    }
   } catch (error) {
     if (error instanceof RailSyncEngineError) throw error
     console.warn("[pinetree-wallets] rail_sync_failed", {

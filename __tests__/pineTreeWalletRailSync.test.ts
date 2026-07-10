@@ -11,6 +11,7 @@ vi.mock("@/database/supabase", () => ({ supabase: {}, supabaseAdmin: null }))
 const mockGetProfile = vi.fn()
 const mockGetSyncs = vi.fn()
 const mockUpsertSync = vi.fn()
+const mockCheckSchema = vi.fn()
 const mockSaveProvider = vi.fn()
 const mockGetLightningProfile = vi.fn()
 
@@ -19,11 +20,20 @@ vi.mock("@/database/pineTreeWalletProfiles", () => ({
 }))
 
 vi.mock("@/database/pineTreeWalletRailSyncs", () => ({
+  checkWalletRailSyncSchemaContract: (...args: unknown[]) => mockCheckSchema(...args),
   getWalletRailSyncs: (...args: unknown[]) => mockGetSyncs(...args),
+  isWalletRailSyncSchemaError: (error: unknown) => Boolean(error && typeof error === "object" && (error as { code?: string }).code === "database_schema_missing"),
   upsertWalletRailSync: (...args: unknown[]) => mockUpsertSync(...args),
 }))
 
 vi.mock("@/database/merchantLightningProfiles", () => ({
+  deriveLightningReadiness: (profile: { status?: "ready" | "pending" | "needs_attention" } | null) => ({
+    ready: profile?.status === "ready",
+    pending: profile?.status === "pending",
+    configured: Boolean(profile),
+    needsAttention: profile?.status === "needs_attention",
+    status: profile?.status ?? "not_configured",
+  }),
   getMerchantLightningProfile: (...args: unknown[]) => mockGetLightningProfile(...args),
 }))
 
@@ -47,6 +57,7 @@ describe("syncPineTreeWalletRailsEngine", () => {
     vi.spyOn(console, "info").mockImplementation(() => undefined)
     vi.spyOn(console, "warn").mockImplementation(() => undefined)
     mockUpsertSync.mockResolvedValue({})
+    mockCheckSchema.mockResolvedValue({ ok: true, code: "ok", missing: [], migration: null })
     mockSaveProvider.mockResolvedValue(undefined)
     mockGetLightningProfile.mockResolvedValue(null)
   })
@@ -145,7 +156,7 @@ describe("syncPineTreeWalletRailsEngine", () => {
     expect(solanaRail?.address).toBe("solana-addr-NEW")
   })
 
-  it("records failed status when saveProviderEngine throws", async () => {
+  it("throws a structured database_error when saveProviderEngine throws", async () => {
     mockGetProfile.mockResolvedValue({
       solana_address: "solana-addr-abc",
       base_address: null,
@@ -154,11 +165,13 @@ describe("syncPineTreeWalletRailsEngine", () => {
     mockGetSyncs.mockResolvedValue([])
     mockSaveProvider.mockRejectedValue(new Error("DB write failed"))
 
-    const result = await syncPineTreeWalletRailsEngine("merchant-1")
-
-    const solanaRail = result.rails.find((r) => r.rail === "solana")
-    expect(solanaRail?.status).toBe("failed")
-    expect(solanaRail?.reason).toBe("DB write failed")
+    await expect(syncPineTreeWalletRailsEngine("merchant-1")).rejects.toSatisfy((error: unknown) => {
+      expect(error).toBeInstanceOf(RailSyncEngineError)
+      const railSyncError = error as RailSyncEngineError
+      expect(railSyncError.stage).toBe("rail_sync_persist_started")
+      expect(railSyncError.code).toBe("database_error")
+      return true
+    })
     expect(mockUpsertSync).not.toHaveBeenCalled()
   })
 
@@ -167,6 +180,7 @@ describe("syncPineTreeWalletRailsEngine", () => {
       solana_address: "solana-addr-abc",
       base_address: "0xbaseaddr",
       btc_address: null,
+      status: "ready",
     })
     mockGetSyncs.mockResolvedValue([])
     mockGetLightningProfile.mockResolvedValue(null)
@@ -182,6 +196,7 @@ describe("syncPineTreeWalletRailsEngine", () => {
       solana_address: "solana-addr-abc",
       base_address: "0xbaseaddr",
       btc_address: null,
+      status: "ready",
     })
     mockGetSyncs.mockResolvedValue([])
     mockGetLightningProfile.mockResolvedValue({ status: "needs_attention" })
@@ -207,19 +222,26 @@ describe("syncPineTreeWalletRailsEngine", () => {
     expect(result.rails.find((r) => r.rail === "base")?.status).toBe("synced")
   })
 
-  it("recovers when the rail-sync dedup table read fails, resyncing addresses instead of raising a 500", async () => {
+  it("returns database_schema_missing when the rail-sync schema contract is missing", async () => {
     mockGetProfile.mockResolvedValue({
       solana_address: "solana-addr-abc",
       base_address: "0xbaseaddr",
       btc_address: null,
     })
-    mockGetSyncs.mockRejectedValue(new Error("relation pinetree_wallet_rail_syncs read failed"))
+    mockCheckSchema.mockRejectedValue({
+      code: "database_schema_missing",
+      missing: ["table:pinetree_wallet_rail_syncs"],
+      migration: "database/migrations/20260623_create_pinetree_wallet_rail_syncs.sql",
+    })
 
-    const result = await syncPineTreeWalletRailsEngine("merchant-1")
-
-    expect(result.rails.find((r) => r.rail === "solana")?.status).toBe("synced")
-    expect(result.rails.find((r) => r.rail === "base")?.status).toBe("synced")
-    expect(mockSaveProvider).toHaveBeenCalledTimes(2)
+    await expect(syncPineTreeWalletRailsEngine("merchant-1")).rejects.toSatisfy((error: unknown) => {
+      expect(error).toBeInstanceOf(RailSyncEngineError)
+      const railSyncError = error as RailSyncEngineError
+      expect(railSyncError.code).toBe("database_schema_missing")
+      expect(railSyncError.missing).toEqual(["table:pinetree_wallet_rail_syncs"])
+      return true
+    })
+    expect(mockSaveProvider).not.toHaveBeenCalled()
   })
 
   it("wraps a genuinely unexpected failure in RailSyncEngineError with a stage and code instead of a bare Error", async () => {
@@ -354,6 +376,7 @@ describe("POST /api/wallets/pinetree-wallet/rail-sync", () => {
     vi.spyOn(console, "info").mockImplementation(() => undefined)
     vi.spyOn(console, "warn").mockImplementation(() => undefined)
     mockUpsertSync.mockResolvedValue({})
+    mockCheckSchema.mockResolvedValue({ ok: true, code: "ok", missing: [], migration: null })
     mockSaveProvider.mockResolvedValue(undefined)
     mockGetLightningProfile.mockResolvedValue(null)
   })
@@ -363,6 +386,7 @@ describe("POST /api/wallets/pinetree-wallet/rail-sync", () => {
       solana_address: "solana-addr-abc",
       base_address: "0xbaseaddr",
       btc_address: null,
+      status: "ready",
     })
     mockGetSyncs.mockResolvedValue([])
 
@@ -373,7 +397,15 @@ describe("POST /api/wallets/pinetree-wallet/rail-sync", () => {
 
     expect(response.status).toBe(200)
     expect(body.ok).toBe(true)
-    expect(body.result.rails.find((r: { rail: string }) => r.rail === "base").status).toBe("synced")
+    expect(body).toMatchObject({
+      coreStatus: "ready",
+      lightningStatus: "not_configured",
+      syncedRails: ["solana", "base"],
+      skippedRails: ["bitcoin_lightning"],
+      warnings: [],
+    })
+    expect(JSON.stringify(body)).not.toContain("0xbaseaddr")
+    expect(JSON.stringify(body)).not.toContain("solana-addr-abc")
   })
 
   it("returns 200 ok:true even when Lightning is needs_attention - never a 500 just because Lightning is unavailable", async () => {
