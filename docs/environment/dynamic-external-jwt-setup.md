@@ -34,7 +34,9 @@ Server-only:
 ```bash
 DYNAMIC_EXTERNAL_JWT_ENABLED=true
 DYNAMIC_EXTERNAL_JWT_ISSUER=https://app.pinetree-payments.com
-DYNAMIC_EXTERNAL_JWT_AUDIENCE=dynamic
+# Audience is derived from NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID (verified Dynamic
+# contract). Do NOT set DYNAMIC_EXTERNAL_JWT_AUDIENCE - it is legacy and ignored
+# whenever an environment ID is configured.
 DYNAMIC_EXTERNAL_JWT_KID=<generated kid>
 DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64=<generated base64 signing key>
 ```
@@ -54,38 +56,53 @@ PineTree can provide these:
 ```text
 Issuer: https://app.pinetree-payments.com
 JWKS URL: https://app.pinetree-payments.com/.well-known/dynamic-jwks.json
-Audience: dynamic
+Audience: <the Dynamic environment ID> (verified 2026-07-10)
 Algorithm: RS256
 User identity: JWT sub / externalUserId = PineTree merchant_id
 Email claim: PineTree merchant email
 ```
 
-If Dynamic says audience is not required, set `DYNAMIC_EXTERNAL_JWT_AUDIENCE`
-to an empty value and configure no audience restriction in Dynamic.
+**2026-07-10 VERIFIED CONTRACT** (probed directly against Dynamic's live
+`POST /api/v0/sdk/{environmentId}/externalAuth/signin` with PineTree-signed
+JWTs):
 
-**2026-07-09 finding:** per Dynamic's own BYOA docs, `aud` is an optional,
-dashboard-configurable claim with no fixed convention - Dynamic only requires
-`iss`, `sub`, and `exp`, and validates `iss` against the dashboard-configured
-value. `DYNAMIC_EXTERNAL_JWT_AUDIENCE=dynamic` was a placeholder entered before
-this was confirmed with Dynamic support and was never verified against what (if
-anything) Dynamic's dashboard actually expects. The route now falls back to
-signing `aud` as `NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID` whenever
-`DYNAMIC_EXTERNAL_JWT_AUDIENCE` is unset or still literally `dynamic`, since
-environment-ID-as-audience is the most common per-project binding for this kind
-of integration. If Dynamic support confirms a different required value, set
-`DYNAMIC_EXTERNAL_JWT_AUDIENCE` explicitly to override this fallback.
+- `aud` **is required** and must equal the **Dynamic environment ID**
+  (`NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID`). A JWT without that audience is
+  rejected `422 invalid_external_auth` with `"Audience (aud) does not match"` -
+  surfaced by the SDK as `InvalidExternalAuthError`. This was the production
+  failure: any deploy signing the old `dynamic` placeholder (or any other
+  stale audience value) fails exactly this way and used to fall back to the
+  email login sheet.
+- With `aud` = environment ID and the existing issuer/JWKS/kid, sign-in
+  succeeds and returns a Dynamic user carrying an `externalUser` verified
+  credential whose public identifier equals the JWT `sub` (the PineTree
+  merchant_id). That credential - not any email - is the canonical identity
+  binding for the session (see `lib/wallets/dynamicExternalIdentity.ts`).
+- `security.externalAuth.enabled` was confirmed `true` for the sandbox
+  environment via Dynamic's public SDK settings endpoint.
+- Note: the sandbox environment has `automaticEmbeddedWalletCreationForExternal:
+  false`, so externally-authenticated users do NOT get embedded wallets
+  auto-created by Dynamic - PineTree's client-side explicit
+  `createWalletAccount` call covers this.
 
-If sign-in fails with `wallet_dynamic_signin_failed { errorName:
-"InvalidExternalAuthError", errorCode: "invalid_external_auth_error" }`, this
-means Dynamic's backend received and rejected the JWT (JWKS fetch succeeded,
-the SDK reached the network call) but does not expose which validation step
-failed. Given `aud` is optional, the more likely causes are: the `iss` claim
-not exactly matching what's configured in Dynamic's dashboard for this
-environment (check for a trailing slash, `www.`, `http://` vs `https://`, or a
-preview-deployment URL), or BYOA/External JWT not actually being enabled yet
-for the specific Dynamic environment `NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID`
-points at. Confirm both directly with Dynamic support - this cannot be fully
-diagnosed from application code or logs alone.
+The route therefore signs `aud` as the environment ID whenever one is
+configured; the legacy `DYNAMIC_EXTERNAL_JWT_AUDIENCE` var is consulted only
+when no environment ID exists (and its `dynamic` placeholder is never signed).
+If Dynamic support ever mandates a different value, set
+`DYNAMIC_EXTERNAL_JWT_AUDIENCE_OVERRIDE` - it wins over everything.
+
+**Email fallback is a developer recovery path only.** In production builds the
+client no longer opens Dynamic's email login when the external JWT is rejected;
+it fails with `dynamic_external_jwt_rejected` and boolean contract diagnostics
+(`wallet_dynamic_jwt_auth_failed { issuerMatch, audienceMatch, jwksLoaded,
+subjectPresent, environmentIdPresent }`). The fallback still opens in dev
+builds or with `?walletDebug=1`.
+
+**Smoke check:** `GET /api/debug/pinetree-wallet/smoke` (admin) reports JWT
+generation + claim matches + JWKS reachability + Dynamic external-auth
+enablement; add `&probe=1` to submit a real signed JWT for the merchant to
+Dynamic and report acceptance, Dynamic-user existence, and Base/Solana
+embedded-wallet existence (booleans only).
 
 If the Dynamic auth sheet shows `Sandbox`, `NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID`
 is pointing at a Dynamic sandbox environment. That is fine for staging only when
@@ -113,7 +130,7 @@ JWKS URL:
 https://app.pinetree-payments.com/.well-known/dynamic-jwks.json
 
 Audience:
-dynamic
+<the Dynamic environment ID>
 
 JWT identity:
 sub is the PineTree merchant_id. The Dynamic SDK externalUserId will be the same

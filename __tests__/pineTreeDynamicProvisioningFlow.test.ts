@@ -364,7 +364,7 @@ describe("PineTree Dynamic provisioning flow", () => {
 
   it("mismatched Dynamic email is rejected before saving a PineTree Wallet profile", () => {
     const identityGuard = page.slice(
-      page.indexOf("if (merchantEmail && dynamicUserEmail && dynamicUserEmail !== merchantEmail)"),
+      page.indexOf("if (!dynamicSessionExternallyBound && merchantEmail && dynamicUserEmail && dynamicUserEmail !== merchantEmail)"),
       page.indexOf("const body: Record<string, unknown>")
     )
     expect(identityGuard).toContain("dynamic_email_mismatch")
@@ -774,10 +774,10 @@ describe("PineTree Dynamic provisioning flow", () => {
   it("identity check runs before wallet address extraction, signer lookup, and the provisioning timeout", () => {
     const fnStart = page.indexOf("const syncProfileFromDynamic = useCallback(")
     const identityMismatchIndex = page.indexOf(
-      "if (merchantEmail && dynamicUserEmail && dynamicUserEmail !== merchantEmail)",
+      "if (!dynamicSessionExternallyBound && merchantEmail && dynamicUserEmail && dynamicUserEmail !== merchantEmail)",
       fnStart
     )
-    const identityUnverifiedIndex = page.indexOf("if (!merchantEmail || !dynamicUserEmail) {", fnStart)
+    const identityUnverifiedIndex = page.indexOf("if (!dynamicSessionExternallyBound && (!merchantEmail || !dynamicUserEmail)) {", fnStart)
     const addressGuardIndex = page.indexOf("dynamicNetworkAddresses.base.length === 0 &&", fnStart)
     const signerLookupIndex = page.indexOf(
       'findDynamicApprovalWalletForSourceAsync(dynamicWalletSearchList as unknown[], primaryWallet, "base", baseAddress)',
@@ -797,7 +797,7 @@ describe("PineTree Dynamic provisioning flow", () => {
       page.indexOf("const syncProfileFromDynamic = useCallback("),
       page.indexOf("const body: Record<string, unknown>")
     )
-    expect(fnBody).toContain("if (!merchantEmail || !dynamicUserEmail) {")
+    expect(fnBody).toContain("if (!dynamicSessionExternallyBound && (!merchantEmail || !dynamicUserEmail)) {")
     expect(fnBody).toContain(
       '"We could not verify that this wallet session matches your PineTree account email."'
     )

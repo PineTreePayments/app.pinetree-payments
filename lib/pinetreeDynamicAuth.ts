@@ -12,10 +12,21 @@ export type PineTreeDynamicAuthConfig = {
   invalidReason: string | null
 }
 
+export type PineTreeDynamicExternalJwtClaimsDiagnostics = {
+  issuerMatch: boolean
+  audienceMatch: boolean
+  subjectPresent: boolean
+  environmentIdPresent: boolean
+}
+
 export type PineTreeDynamicExternalJwtPayload = {
   externalJwt: string
   externalUserId: string
   expiresAt: string
+  // Boolean-only claim diagnostics from the issuing route (never claim values):
+  // whether the signed issuer matches the app origin the JWKS is served under,
+  // and whether the signed audience matches the Dynamic environment ID.
+  claims?: PineTreeDynamicExternalJwtClaimsDiagnostics
   diagnostics?: {
     enabled: boolean
     issuerConfigured: boolean
@@ -126,6 +137,7 @@ export async function requestPineTreeDynamicExternalJwtAuth(
     externalJwt: json.externalJwt,
     externalUserId: json.externalUserId,
     expiresAt: json.expiresAt,
+    claims: json.claims,
     diagnostics: json.diagnostics,
   }
 }

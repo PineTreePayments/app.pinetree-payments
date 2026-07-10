@@ -44,12 +44,14 @@ import {
   pineTreeDynamicEmailFallbackMisconfiguredWarning,
   requestPineTreeDynamicExternalJwtAuth,
   shouldOpenDynamicEmailFallbackAuth,
+  type PineTreeDynamicExternalJwtClaimsDiagnostics,
 } from "@/lib/pinetreeDynamicAuth"
 import {
   resolveNativeAuthResumeAction,
   shouldRerunSpeedOnNativeAuthResume,
   walletProvisioningTimeoutSuppressionReason,
 } from "@/lib/pinetreeWalletSetupResume"
+import { dynamicSessionBoundToMerchant } from "@/lib/wallets/dynamicExternalIdentity"
 
 // Legacy compatibility route exists server-side but is not called by PineTree Wallet:
 // "/api/merchant/business-owner-profile"
@@ -321,6 +323,7 @@ type WalletSetupFailureReason =
   | "dynamic_email_mismatch"
   | "dynamic_email_unverified"
   | "dynamic_external_jwt_failed"
+  | "dynamic_external_jwt_rejected"
   | "dynamic_email_fallback_blocked"
   | "no_dynamic_wallets"
   | "base_address_missing"
@@ -1033,6 +1036,9 @@ function walletSetupFailureMessage(reason: WalletSetupFailureReason | null) {
     reason === "dynamic_email_missing" ||
     reason === "dynamic_email_unverified"
   ) return "We could not verify wallet access. Please try again."
+  if (reason === "dynamic_external_jwt_rejected") {
+    return "PineTree could not verify wallet access with our wallet provider. Your account is fine - this is a configuration issue on our side. Please try again shortly or contact support (code: external_jwt_rejected)."
+  }
   return "Wallet setup is taking longer than expected. Please try again."
 }
 
@@ -2804,6 +2810,15 @@ function PineTreeWalletRuntime() {
   const dynamicEmailExtraction = useMemo(() => extractDynamicUserEmail(user), [user])
   const dynamicUserEmail = dynamicEmailExtraction.email
   const dynamicEmailSource = dynamicEmailExtraction.source
+  // Canonical identity binding for external-JWT sessions: Dynamic attaches an
+  // "externalUser" verified credential whose public identifier is the PineTree
+  // merchant_id (the JWT sub). A session bound this way is proven to belong to
+  // this merchant regardless of what email Dynamic managed to surface - the
+  // email-comparison gates below must never fail it.
+  const dynamicSessionExternallyBound = useMemo(
+    () => dynamicSessionBoundToMerchant(user, merchantId),
+    [user, merchantId]
+  )
 
   useEffect(() => {
     dynamicWalletRuntimeCountRef.current = dynamicWalletRuntimeCount
@@ -3145,10 +3160,13 @@ function PineTreeWalletRuntime() {
         let signinErrorCode: string | undefined
         let signinErrorStatus: number | undefined
         let signinMessageHint: string | undefined
+        let issuedClaims: PineTreeDynamicExternalJwtClaimsDiagnostics | null = null
         try {
           console.info("[pinetree-wallets] wallet_dynamic_jwt_requested", {})
           emitWalletSetupDebugEvent("wallet_dynamic_jwt_requested", {})
+          emitWalletSetupDebugEvent("wallet_dynamic_jwt_auth_started", {})
           const payload = await requestPineTreeDynamicExternalJwtAuth(token, { walletDebug: walletSyncDebugQueryEnabled })
+          issuedClaims = payload.claims ?? null
           endpointStatus = 200
           emitWalletSetupDebugEvent("wallet_dynamic_jwt_response_received", {
             ok: true,
@@ -3234,6 +3252,12 @@ function PineTreeWalletRuntime() {
           if (signInWithExternalJwtSucceeded) {
             console.info("[pinetree-wallets] wallet_dynamic_jwt_authenticated", {})
             emitWalletSetupDebugEvent("wallet_dynamic_jwt_authenticated", {})
+            emitWalletSetupDebugEvent("wallet_dynamic_jwt_auth_success", {
+              issuerMatch: issuedClaims?.issuerMatch ?? false,
+              audienceMatch: issuedClaims?.audienceMatch ?? false,
+              subjectPresent: issuedClaims?.subjectPresent ?? false,
+              environmentIdPresent: issuedClaims?.environmentIdPresent ?? false,
+            })
           }
           setProfileSyncDiagnostics((prev) => ({
             ...prev,
@@ -3311,6 +3335,21 @@ function PineTreeWalletRuntime() {
             ...(signinErrorStatus !== undefined ? { status: signinErrorStatus } : {}),
             ...(signinMessageHint ? { messageHint: signinMessageHint } : {}),
           })
+          // Contract diagnostics for the failed attempt: whether the token we
+          // signed matched the verified Dynamic requirements (issuer = app origin,
+          // audience = environment ID) and whether our JWKS is actually reachable
+          // at the URL Dynamic's dashboard points at. Booleans only.
+          const jwksLoaded = await fetch("/.well-known/dynamic-jwks.json", { cache: "no-store" })
+            .then((jwksRes) => jwksRes.ok)
+            .catch(() => false)
+          emitWalletSetupDebugEvent("wallet_dynamic_jwt_auth_failed", {
+            issuerMatch: issuedClaims?.issuerMatch ?? false,
+            audienceMatch: issuedClaims?.audienceMatch ?? false,
+            jwksLoaded,
+            subjectPresent: issuedClaims?.subjectPresent ?? false,
+            environmentIdPresent: issuedClaims?.environmentIdPresent ?? false,
+            ...(signinMessageHint ? { messageHint: signinMessageHint } : {}),
+          })
           console.info("[pinetree-dynamic-auth] external_jwt_client", {
             authMode: dynamicAuthConfig.mode,
             emailFallbackEnabled: dynamicAuthConfig.emailFallbackEnabled,
@@ -3326,29 +3365,55 @@ function PineTreeWalletRuntime() {
             code,
           })
           if (signinMessageHint === "external_auth_rejected") {
-            // Dynamic's backend explicitly rejected the BYOA JWT (a dashboard-side
-            // configuration/approval issue PineTree can't fix client-side). Instead of
-            // hard-failing wallet creation, fall back to Dynamic's native auth flow so
-            // the merchant can still finish setup while BYOA approval is pending. The
-            // existing identity gate still rejects a mismatched Dynamic email, and any
-            // already-started Speed provisioning keeps running in the background.
+            // Dynamic's backend explicitly rejected the BYOA JWT. Verified contract
+            // (2026-07-10): this happens when the signed claims don't match the
+            // dashboard config - most commonly `aud` != Dynamic environment ID.
             emitWalletSetupDebugEvent("wallet_dynamic_external_jwt_rejected", {})
-            emitWalletSetupDebugEvent("wallet_dynamic_native_fallback_started", {})
-            nativeFallbackPendingRef.current = true
-            setCoreSetupNeedsUserAuth(true)
-            setPendingSync(true)
-            markWalletSetupInProgress()
-            setWalletIdentityError("")
-            logWalletCreationStep("waiting_for_dynamic_auth", {
-              reason: "external_jwt_rejected_native_fallback",
+            // Dynamic's native email login is a developer recovery path ONLY - it is
+            // never the product flow for merchant wallet creation. Production fails
+            // with a real diagnostic instead of asking merchants for a second login.
+            const nativeFallbackRecoveryAllowed =
+              walletSyncDebugQueryEnabled || process.env.NODE_ENV !== "production"
+            if (nativeFallbackRecoveryAllowed) {
+              emitWalletSetupDebugEvent("wallet_dynamic_native_fallback_started", {})
+              nativeFallbackPendingRef.current = true
+              setCoreSetupNeedsUserAuth(true)
+              setPendingSync(true)
+              markWalletSetupInProgress()
+              setWalletIdentityError("")
+              logWalletCreationStep("waiting_for_dynamic_auth", {
+                reason: "external_jwt_rejected_native_fallback",
+              })
+              setProfileSyncDiagnostics((prev) => ({
+                ...prev,
+                lastWalletAuthAttemptState: "external_jwt_rejected_native_fallback_opened",
+                updatedAt: new Date().toISOString(),
+              }))
+              setShowDynamicUserProfile(false)
+              setShowAuthFlow(true)
+              return
+            }
+            emitWalletSetupDebugEvent("wallet_dynamic_native_fallback_suppressed", {
+              reason: "external_jwt_rejected_production",
+            })
+            setWalletIdentityError(walletSetupFailureMessage("dynamic_external_jwt_rejected"))
+            setPendingSync(false)
+            clearWalletSetupInProgress()
+            recordWalletSetupFailure("dynamic_external_jwt_rejected", "failed", {
+              reason,
+              externalJwtEnabled: true,
+              lastWalletAuthAttemptState: "external_jwt_rejected_no_fallback",
+              signInWithExternalJwtCalled,
+              signInWithExternalJwtSucceeded,
+              dynamicExternalAuthAttempted: true,
+              dynamicExternalAuthSucceeded: false,
             })
             setProfileSyncDiagnostics((prev) => ({
               ...prev,
-              lastWalletAuthAttemptState: "external_jwt_rejected_native_fallback_opened",
+              lastWalletAuthAttemptState: "external_jwt_rejected_no_fallback",
               updatedAt: new Date().toISOString(),
             }))
-            setShowDynamicUserProfile(false)
-            setShowAuthFlow(true)
+            logWalletCreationStep("failed", { reason: "dynamic_external_jwt_rejected" })
             return
           }
           setWalletIdentityError(
@@ -3770,7 +3835,9 @@ function PineTreeWalletRuntime() {
     // Identity check runs first - before address extraction, signer lookup, profile
     // sync, or the provisioning timeout - so a wrong/unverifiable Dynamic email never
     // has a chance to fall through to the generic "could not finish" / timeout copy.
-    if (merchantEmail && dynamicUserEmail && dynamicUserEmail !== merchantEmail) {
+    // External-JWT sessions are exempt: the externalUser credential (JWT sub =
+    // merchant_id) proves ownership; Dynamic email presentation is not authoritative.
+    if (!dynamicSessionExternallyBound && merchantEmail && dynamicUserEmail && dynamicUserEmail !== merchantEmail) {
       const message = "Use your PineTree account email to verify wallet access."
       setIdentityMismatchError({ merchantEmail, dynamicEmail: dynamicUserEmail })
       setIdentityUnverified(false)
@@ -3817,7 +3884,7 @@ function PineTreeWalletRuntime() {
       emitWalletSetupDebugEvent("wallet_profile_sync_skipped_reason", { reason: "dynamic_email_mismatch" })
       return null
     }
-    if (!merchantEmail || !dynamicUserEmail) {
+    if (!dynamicSessionExternallyBound && (!merchantEmail || !dynamicUserEmail)) {
       const skippedReason = !merchantEmail ? "missing_pinetree_merchant_email" : "missing_dynamic_user_email"
       setIdentityMismatchError(null)
       setIdentityUnverified(true)
@@ -4231,7 +4298,7 @@ function PineTreeWalletRuntime() {
       setSyncing(false)
       if (!keepPendingSync) setPendingSync(false)
     }
-  }, [user, wallets, primaryWallet, dynamicWalletSearchList, dynamicNetworkAddresses, dynamicWalletRuntimeCount, waasRuntimeWallets.length, waasCredentialWalletSources.length, waasCredentialSignerWallets.length, repairInProgress, logWalletCreationStep, fetchProviderRailState, merchantEmail, dynamicUserEmail, dynamicEmailSource, recordWalletSetupFailure])
+  }, [user, wallets, primaryWallet, dynamicWalletSearchList, dynamicNetworkAddresses, dynamicWalletRuntimeCount, waasRuntimeWallets.length, waasCredentialWalletSources.length, waasCredentialSignerWallets.length, repairInProgress, logWalletCreationStep, fetchProviderRailState, merchantEmail, dynamicUserEmail, dynamicEmailSource, dynamicSessionExternallyBound, recordWalletSetupFailure])
 
   // --- Post-reconnect wallet match check ---
   // Fires when Dynamic loads wallets after setShowAuthFlow(true). Clears the reconnect
@@ -4281,6 +4348,10 @@ function PineTreeWalletRuntime() {
   useEffect(() => {
     if (!pendingSync || !sdkHasLoaded || !user || !merchantEmail) return
     if (dynamicUserEmail && dynamicUserEmail === merchantEmail) return
+    // External-JWT sessions are bound to the merchant by the externalUser
+    // credential (JWT sub = merchant_id) - a missing/differently-surfaced Dynamic
+    // email must not fail a session PineTree itself signed in.
+    if (dynamicSessionExternallyBound) return
 
     pendingWalletProvisionStartedAtRef.current = null
     pendingWalletProvisionAttemptRef.current = null
@@ -4322,7 +4393,7 @@ function PineTreeWalletRuntime() {
       dynamic_email_source: dynamicEmailSource,
       checked_before_address_extraction: true,
     })
-  }, [pendingSync, sdkHasLoaded, user, merchantEmail, dynamicUserEmail, dynamicEmailSource, logWalletCreationStep, recordWalletSetupFailure])
+  }, [pendingSync, sdkHasLoaded, user, merchantEmail, dynamicUserEmail, dynamicEmailSource, dynamicSessionExternallyBound, logWalletCreationStep, recordWalletSetupFailure])
 
   // --- After wallet creation: retry Dynamic hydration before syncing addresses to DB ---
   useEffect(() => {
@@ -4469,9 +4540,11 @@ function PineTreeWalletRuntime() {
     if (!accessTokenRef.current) return "pine_tree_auth_missing"
     if (!user) return "dynamic_auth_missing"
     if (!user.userId) return "dynamic_user_missing"
-    if (!merchantEmail) return "merchant_email_missing"
-    if (!dynamicUserEmail) return "dynamic_email_missing"
-    if (dynamicUserEmail !== merchantEmail) return "dynamic_email_mismatch"
+    if (!dynamicSessionExternallyBound) {
+      if (!merchantEmail) return "merchant_email_missing"
+      if (!dynamicUserEmail) return "dynamic_email_missing"
+      if (dynamicUserEmail !== merchantEmail) return "dynamic_email_mismatch"
+    }
     if (dynamicWalletRuntimeCount === 0) return "no_dynamic_wallets"
 
     const baseAddress = dynamicNetworkAddresses.base[0]?.address ?? null
@@ -5020,9 +5093,15 @@ function PineTreeWalletRuntime() {
   // directly, so the same comparison governs the UI whether or not a profile already
   // exists, and never depends on a stateful flag that might be stale (e.g. left over
   // from a previous PineTree account in the same browser).
+  // dynamicSessionExternallyBound short-circuits both: an externalUser credential
+  // signed by PineTree (JWT sub = merchant_id) is stronger proof of ownership than
+  // any email Dynamic happens to surface, so email presentation can never flip a
+  // bound session into "Wrong sign-in".
   const liveEmailMismatch =
+    !dynamicSessionExternallyBound &&
     Boolean(user) && Boolean(merchantEmail) && Boolean(dynamicUserEmail) && dynamicUserEmail !== merchantEmail
   const liveEmailUnverified =
+    !dynamicSessionExternallyBound &&
     Boolean(user) && Boolean(merchantEmail) && !dynamicUserEmail
   const emailMismatchActive = Boolean(identityMismatchError) || liveEmailMismatch
   const emailUnverifiedActive = !emailMismatchActive && (identityUnverified || liveEmailUnverified)

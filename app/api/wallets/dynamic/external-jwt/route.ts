@@ -1,9 +1,13 @@
-import { randomUUID } from "node:crypto"
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { SignJWT, importPKCS8 } from "jose"
 import { getMerchantById } from "@/database/merchants"
 import { requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
+import {
+  getDynamicExternalJwtIssuer,
+  getDynamicJwtClaimsDiagnostics,
+  resolveDynamicJwtAudience,
+  signDynamicExternalJwt,
+} from "@/lib/api/dynamicExternalJwt"
 
 type AuthenticatedMerchant = {
   merchantId: string
@@ -33,7 +37,7 @@ function getExternalJwtConfigDiagnostics() {
   return {
     enabled: isEnabled(process.env.DYNAMIC_EXTERNAL_JWT_ENABLED),
     issuerConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_ISSUER?.trim()),
-    audienceConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE?.trim()),
+    audienceConfigured: Boolean(resolveDynamicJwtAudience()),
     kidConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_KID || process.env.DYNAMIC_EXTERNAL_JWT_KEY_ID),
     signingKeyConfigured: Boolean(process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64 || process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY),
     jwksDerivedFromSigningKey: Boolean(
@@ -49,28 +53,6 @@ function logExternalJwtRoute(input: ReturnType<typeof getExternalJwtConfigDiagno
   status: ExternalJwtRouteStatus
 }) {
   console.info("[pinetree-dynamic-auth] external_jwt_route", input)
-}
-
-function getSigningKeyPem() {
-  const encodedSigningKey = process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64?.trim()
-  if (encodedSigningKey) {
-    try {
-      const decoded = Buffer.from(encodedSigningKey, "base64").toString("utf8")
-      if (!decoded.includes("-----BEGIN PRIVATE KEY-----") || !decoded.includes("-----END PRIVATE KEY-----")) {
-        throw new Error("invalid_pem")
-      }
-      return decoded
-    } catch {
-      throw Object.assign(new Error("dynamic_external_jwt_signing_key_invalid"), { status: 503 })
-    }
-  }
-
-  // TODO: Remove this raw PEM fallback after all environments use
-  // DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64.
-  const legacyPrivateKey = process.env.DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY?.replace(/\\n/g, "\n")
-  if (legacyPrivateKey) return legacyPrivateKey
-
-  throw Object.assign(new Error("dynamic_external_jwt_signing_key_missing"), { status: 503 })
 }
 
 async function requireSupabaseMerchant(req: NextRequest): Promise<AuthenticatedMerchant> {
@@ -115,92 +97,6 @@ async function shouldIncludeDebugResponse(req: NextRequest) {
   return body?.walletDebug === true || body?.walletDebug === "1"
 }
 
-// DYNAMIC_EXTERNAL_JWT_AUDIENCE was originally seeded with this literal placeholder
-// while BYOA audience expectations were still being confirmed with Dynamic support
-// (see docs/environment/dynamic-external-jwt-setup.md). Dynamic's own BYOA docs mark
-// `aud` as an optional, dashboard-configurable claim with no fixed convention - the
-// most common binding for a per-project value is the Dynamic environment ID, so
-// fall back to that instead of sending a placeholder string that was never actually
-// confirmed against Dynamic's dashboard configuration.
-function resolveDynamicJwtAudience() {
-  const configured = process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE?.trim()
-  const environmentId = process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?.trim()
-  if (!configured || configured === "dynamic") {
-    return environmentId || configured || undefined
-  }
-  return configured
-}
-
-function signPineTreeDynamicJwtClaimsConfigCheck(input: {
-  issuer: string
-  audience: string | undefined
-  keyId: string | undefined
-  subject: string
-  emailPresent: boolean
-}) {
-  const environmentId = process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?.trim()
-  console.info("[pinetree-wallets] dynamic_jwt_claims_config_check", {
-    issuerPresent: Boolean(input.issuer),
-    audiencePresent: Boolean(input.audience),
-    audienceMatchesDynamicEnv: Boolean(input.audience && environmentId && input.audience === environmentId),
-    kidPresent: Boolean(input.keyId),
-    algRs256: true,
-    subjectPresent: Boolean(input.subject),
-    emailPresent: input.emailPresent,
-  })
-}
-
-async function signPineTreeDynamicJwt(input: AuthenticatedMerchant) {
-  const issuer = process.env.DYNAMIC_EXTERNAL_JWT_ISSUER || "https://app.pinetree-payments.com"
-  const audience = resolveDynamicJwtAudience()
-  const keyId = process.env.DYNAMIC_EXTERNAL_JWT_KID || process.env.DYNAMIC_EXTERNAL_JWT_KEY_ID || undefined
-  const ttlSeconds = 5 * 60
-  const expiresAt = new Date(Date.now() + ttlSeconds * 1000)
-
-  if (!keyId) {
-    throw Object.assign(new Error("dynamic_external_jwt_kid_missing"), { status: 503 })
-  }
-  const privateKey = getSigningKeyPem()
-
-  signPineTreeDynamicJwtClaimsConfigCheck({
-    issuer,
-    audience,
-    keyId,
-    subject: input.merchantId,
-    emailPresent: Boolean(input.email),
-  })
-
-  let jwt = new SignJWT({
-    email: input.email,
-    emailVerified: true,
-    // Dynamic's BYOA docs use camelCase emailVerified, but the standard OIDC claim
-    // name is snake_case - send both so a stricter validator on Dynamic's side that
-    // looks for the standard name still finds it, without removing the one Dynamic's
-    // own docs document.
-    email_verified: true,
-    merchant_id: input.merchantId,
-  })
-    .setProtectedHeader({
-      alg: "RS256",
-      kid: keyId,
-    })
-    .setIssuer(issuer)
-    .setSubject(input.merchantId)
-    .setJti(randomUUID())
-    .setIssuedAt()
-    .setExpirationTime(expiresAt)
-
-  if (audience) jwt = jwt.setAudience(audience)
-
-  let signingKey: Awaited<ReturnType<typeof importPKCS8>>
-  try {
-    signingKey = await importPKCS8(privateKey, "RS256")
-  } catch {
-    throw Object.assign(new Error("dynamic_external_jwt_signing_key_invalid"), { status: 503 })
-  }
-  return { externalJwt: await jwt.sign(signingKey), expiresAt, issuer, audience, keyId }
-}
-
 export async function GET(req: NextRequest) {
   let merchantResolved = false
   const diagnostics = getExternalJwtConfigDiagnostics()
@@ -211,6 +107,11 @@ export async function GET(req: NextRequest) {
       diagnostics: {
         ...diagnostics,
         merchantResolved,
+        claims: getDynamicJwtClaimsDiagnostics({
+          issuer: getDynamicExternalJwtIssuer(),
+          audience: resolveDynamicJwtAudience(),
+          subject: "diagnostic",
+        }),
       },
     })
   } catch (error) {
@@ -232,6 +133,7 @@ export async function POST(req: NextRequest) {
   let userPresent = false
   let merchantResolved = false
   let routeStatus: ExternalJwtRouteStatus = "starting"
+  let subject: string | null = null
   const includeDebugResponse = await shouldIncludeDebugResponse(req)
   try {
     const diagnostics = getExternalJwtConfigDiagnostics()
@@ -252,11 +154,17 @@ export async function POST(req: NextRequest) {
     const auth = await requireSupabaseMerchant(req)
     userPresent = true
     merchantResolved = true
+    subject = auth.merchantId
     routeStatus = "signing"
-    const signed = await signPineTreeDynamicJwt(auth)
+    console.info("[pinetree-wallets] wallet_dynamic_jwt_auth_started", {
+      environmentIdPresent: Boolean(process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?.trim()),
+      subjectPresent: Boolean(auth.merchantId),
+    })
+    const signed = await signDynamicExternalJwt({ merchantId: auth.merchantId, email: auth.email })
     routeStatus = "issued"
     logExternalJwtRoute({ ...diagnostics, userPresent, merchantResolved, status: routeStatus })
 
+    console.info("[pinetree-wallets] wallet_dynamic_jwt_auth_success", { ...signed.claims })
     console.info("[pinetree-wallets] dynamic_external_jwt_issued", {
       emailPresent: Boolean(auth.email),
       issuer: signed.issuer,
@@ -270,6 +178,10 @@ export async function POST(req: NextRequest) {
       externalJwt: signed.externalJwt,
       externalUserId: auth.merchantId,
       expiresAt: signed.expiresAt.toISOString(),
+      // Boolean-only claim diagnostics, always returned so the client can emit
+      // wallet_dynamic_jwt_auth_failed with real issuer/audience facts when
+      // Dynamic rejects the token later in the flow. Never contains claim values.
+      claims: signed.claims,
       ...(includeDebugResponse ? { diagnostics: { ...diagnostics, merchantResolved } } : {}),
     })
   } catch (error) {
@@ -281,6 +193,15 @@ export async function POST(req: NextRequest) {
         ? (error as { status: number }).status
         : 500
     const code = error instanceof Error ? error.message : "dynamic_external_jwt_failed"
+    console.warn("[pinetree-wallets] wallet_dynamic_jwt_auth_failed", {
+      ...getDynamicJwtClaimsDiagnostics({
+        issuer: getDynamicExternalJwtIssuer(),
+        audience: resolveDynamicJwtAudience(),
+        subject,
+      }),
+      status,
+      code,
+    })
     console.warn("[pinetree-wallets] dynamic_external_jwt_failed", {
       status,
       code,

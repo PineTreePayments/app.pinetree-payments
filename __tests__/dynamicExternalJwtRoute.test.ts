@@ -31,6 +31,7 @@ const envKeys = [
   "DYNAMIC_EXTERNAL_JWT_ENABLED",
   "DYNAMIC_EXTERNAL_JWT_ISSUER",
   "DYNAMIC_EXTERNAL_JWT_AUDIENCE",
+  "DYNAMIC_EXTERNAL_JWT_AUDIENCE_OVERRIDE",
   "DYNAMIC_EXTERNAL_JWT_SECRET",
   "DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64",
   "DYNAMIC_EXTERNAL_JWT_PRIVATE_KEY",
@@ -39,6 +40,7 @@ const envKeys = [
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
   "NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID",
+  "NEXT_PUBLIC_APP_URL",
 ] as const
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]])) as Record<(typeof envKeys)[number], string | undefined>
 
@@ -68,6 +70,8 @@ describe("Dynamic external JWT route", () => {
     process.env.NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE = "external_jwt"
     process.env.DYNAMIC_EXTERNAL_JWT_ENABLED = "true"
     process.env.DYNAMIC_EXTERNAL_JWT_ISSUER = "pinetree"
+    // Legacy audience var: with the verified environment-ID contract it must be
+    // ignored whenever an environment ID is configured.
     process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE = "dynamic"
     process.env.DYNAMIC_EXTERNAL_JWT_KID = "pinetree-test-kid"
     process.env.DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64 = Buffer.from(privateKeyPem, "utf8").toString("base64")
@@ -75,7 +79,8 @@ describe("Dynamic external JWT route", () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.test"
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key"
     delete process.env.DYNAMIC_EXTERNAL_JWT_KEY_ID
-    delete process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID
+    delete process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE_OVERRIDE
+    process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID = "test-environment-id"
     getUser.mockResolvedValue({
       data: { user: { id: "merchant-1", email: "session@example.com" } },
       error: null,
@@ -139,7 +144,7 @@ describe("Dynamic external JWT route", () => {
       publicKey,
       {
         issuer: "pinetree",
-        audience: "dynamic",
+        audience: "test-environment-id",
         subject: "merchant-1",
       }
     )
@@ -180,7 +185,7 @@ describe("Dynamic external JWT route", () => {
 
     const verified = await jwtVerify(json.externalJwt, verificationKey, {
       issuer: "pinetree",
-      audience: "dynamic",
+      audience: "test-environment-id",
       subject: "merchant-1",
     })
 
@@ -223,7 +228,7 @@ describe("Dynamic external JWT route", () => {
     await expect(
       jwtVerify(json.externalJwt, publicKey, {
         issuer: "pinetree",
-        audience: "dynamic",
+        audience: "test-environment-id",
         subject: "merchant-1",
       })
     ).resolves.toBeTruthy()
@@ -246,7 +251,7 @@ describe("Dynamic external JWT route", () => {
     await expect(
       jwtVerify(json.externalJwt, publicKey, {
         issuer: "pinetree",
-        audience: "dynamic",
+        audience: "test-environment-id",
         subject: "merchant-1",
       })
     ).resolves.toBeTruthy()
@@ -254,6 +259,7 @@ describe("Dynamic external JWT route", () => {
 
   it("omits audience when no audience is configured", async () => {
     process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE = ""
+    delete process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID
 
     const res = await POST(request())
     expect(res.status).toBe(200)
@@ -299,9 +305,29 @@ describe("Dynamic external JWT route", () => {
     expect(verified.payload.aud).toBe("ea6b03bc-04c8-43b0-9b21-98248857d020")
   })
 
-  it("keeps an explicitly configured non-placeholder audience unchanged even when NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID is set", async () => {
-    process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE = "custom-confirmed-audience"
+  it("signs the environment ID as audience even when a legacy custom DYNAMIC_EXTERNAL_JWT_AUDIENCE is set", async () => {
+    // Verified contract (2026-07-10): Dynamic's dashboard-configured audience is
+    // the environment ID; a stale legacy audience env var caused production's
+    // 422 invalid_external_auth "Audience (aud) does not match". The environment
+    // ID must win over any legacy audience value.
+    process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE = "custom-stale-audience"
     process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID = "ea6b03bc-04c8-43b0-9b21-98248857d020"
+
+    const res = await POST(request())
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as { externalJwt: string }
+    const verified = await jwtVerify(json.externalJwt, publicKey, {
+      issuer: "pinetree",
+      audience: "ea6b03bc-04c8-43b0-9b21-98248857d020",
+      subject: "merchant-1",
+    })
+
+    expect(verified.payload.aud).toBe("ea6b03bc-04c8-43b0-9b21-98248857d020")
+  })
+
+  it("uses a legacy custom audience only when no environment ID is configured", async () => {
+    process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE = "custom-confirmed-audience"
+    delete process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID
 
     const res = await POST(request())
     expect(res.status).toBe(200)
@@ -315,13 +341,59 @@ describe("Dynamic external JWT route", () => {
     expect(verified.payload.aud).toBe("custom-confirmed-audience")
   })
 
+  it("honors DYNAMIC_EXTERNAL_JWT_AUDIENCE_OVERRIDE above everything for a support-mandated value", async () => {
+    process.env.DYNAMIC_EXTERNAL_JWT_AUDIENCE_OVERRIDE = "support-mandated-audience"
+    process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID = "ea6b03bc-04c8-43b0-9b21-98248857d020"
+
+    const res = await POST(request())
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as { externalJwt: string }
+    const verified = await jwtVerify(json.externalJwt, publicKey, {
+      issuer: "pinetree",
+      audience: "support-mandated-audience",
+      subject: "merchant-1",
+    })
+
+    expect(verified.payload.aud).toBe("support-mandated-audience")
+  })
+
+  it("returns boolean claim diagnostics (issuerMatch/audienceMatch) with the issued token", async () => {
+    process.env.DYNAMIC_EXTERNAL_JWT_ISSUER = "https://app.pinetree-payments.com"
+    process.env.NEXT_PUBLIC_APP_URL = "https://app.pinetree-payments.com"
+
+    const res = await POST(request())
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as { claims?: Record<string, unknown> }
+    expect(json.claims).toEqual({
+      issuerMatch: true,
+      audienceMatch: true,
+      subjectPresent: true,
+      environmentIdPresent: true,
+    })
+    // Booleans only - never the issuer/audience/subject values themselves.
+    expect(JSON.stringify(json.claims)).not.toContain("app.pinetree-payments.com")
+    expect(JSON.stringify(json.claims)).not.toContain("test-environment-id")
+    expect(JSON.stringify(json.claims)).not.toContain("merchant-1")
+  })
+
+  it("reports issuerMatch false when the issuer diverges from the app origin serving the JWKS", async () => {
+    process.env.DYNAMIC_EXTERNAL_JWT_ISSUER = "https://staging.pinetree-payments.com"
+    process.env.NEXT_PUBLIC_APP_URL = "https://app.pinetree-payments.com"
+
+    const res = await POST(request())
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as { claims?: { issuerMatch: boolean; audienceMatch: boolean } }
+    expect(json.claims?.issuerMatch).toBe(false)
+    expect(json.claims?.audienceMatch).toBe(true)
+  })
+
   it("includes both the documented emailVerified claim and the standard email_verified claim", async () => {
     const res = await POST(request())
     expect(res.status).toBe(200)
     const json = (await res.json()) as { externalJwt: string }
     const verified = await jwtVerify(json.externalJwt, publicKey, {
       issuer: "pinetree",
-      audience: "dynamic",
+      audience: "test-environment-id",
       subject: "merchant-1",
     })
 
