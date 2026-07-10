@@ -45,6 +45,11 @@ import {
   requestPineTreeDynamicExternalJwtAuth,
   shouldOpenDynamicEmailFallbackAuth,
 } from "@/lib/pinetreeDynamicAuth"
+import {
+  resolveNativeAuthResumeAction,
+  shouldRerunSpeedOnNativeAuthResume,
+  walletProvisioningTimeoutSuppressionReason,
+} from "@/lib/pinetreeWalletSetupResume"
 
 // Legacy compatibility route exists server-side but is not called by PineTree Wallet:
 // "/api/merchant/business-owner-profile"
@@ -2376,7 +2381,7 @@ function PineTreeWalletRuntime() {
   const accessTokenRef = useRef<string | null>(null)
 
   // --- Dynamic SDK ---
-  const { user, sdkHasLoaded, setShowAuthFlow, setShowDynamicUserProfile, handleLogOut, primaryWallet } = useDynamicContext()
+  const { user, sdkHasLoaded, showAuthFlow, setShowAuthFlow, setShowDynamicUserProfile, handleLogOut, primaryWallet } = useDynamicContext()
   const { signInWithExternalJwt } = useExternalAuth()
   const refreshDynamicUser = useRefreshUser()
   const switchDynamicWallet = useSwitchWallet()
@@ -2508,6 +2513,10 @@ function PineTreeWalletRuntime() {
   const staleProfileAutoRepairAttemptRef = useRef<string | null>(null)
   const creatingEmbeddedWalletRef = useRef(false)
   const nativeFallbackPendingRef = useRef(false)
+  // True while an explicit create/retry/native-auth-resume attempt is running, so a
+  // successful core profile save opens the wallet instead of leaving the merchant on
+  // the setup card. Never set by page-load auto-repair, which must not pop the modal.
+  const autoOpenWalletAfterCreateRef = useRef(false)
   const speedProvisionInFlightRef = useRef(false)
   const lastCombinedReadinessRef = useRef<string | null>(null)
 
@@ -2993,6 +3002,7 @@ function PineTreeWalletRuntime() {
     setDynamicVerificationPromptReason(null)
     setPendingSync(false)
     setSyncing(false)
+    autoOpenWalletAfterCreateRef.current = false
     clearWalletSetupInProgress()
     recordWalletSetupFailure("dynamic_auth_cancelled", "failed", {
       reason: dynamicVerificationPromptReason || "dynamic_auth_cancelled",
@@ -4135,6 +4145,17 @@ function PineTreeWalletRuntime() {
           setWalletSetupFailureReason(null)
           setSyncing(false)
           setPendingSync(false)
+          emitWalletSetupDebugEvent("wallet_core_create_success", { status: json.profile.status })
+          // A merchant-initiated create/retry/native-auth-resume attempt just
+          // finished - open the wallet rather than leaving the setup card (and a
+          // possibly stale "Try Again") on screen. Page-load auto-repair never
+          // sets the flag, so background saves don't pop the modal.
+          if (autoOpenWalletAfterCreateRef.current) {
+            autoOpenWalletAfterCreateRef.current = false
+            setActiveTab("overview")
+            setWalletOpen(true)
+            emitWalletSetupDebugEvent("wallet_wallet_page_opened_after_create", {})
+          }
         }
         // Fire rail sync in the background so merchant_wallets stays in sync with
         // the PineTree Wallet profile without blocking the UI response.
@@ -4468,6 +4489,25 @@ function PineTreeWalletRuntime() {
 
   useEffect(() => {
     if (!pendingSync || finalProvisioningRefreshAttempted) return
+    // While setup is parked on the Dynamic native auth fallback (external JWT
+    // rejected) or the auth sheet is open, the provisioning clock must not run:
+    // email OTP sign-in routinely takes longer than the timeout, and timing out
+    // mid-auth is what left merchants stranded on "Try Again". The suppression
+    // deps below restart the timers from zero once auth completes.
+    const suppressionReason = walletProvisioningTimeoutSuppressionReason({
+      pendingSync,
+      needsUserAuth: coreSetupNeedsUserAuth,
+      dynamicAuthSheetOpen: Boolean(showAuthFlow),
+      nativeFallbackPending: nativeFallbackPendingRef.current,
+      profilePostInFlight: Boolean(profilePostInFlightKeyRef.current),
+    })
+    if (suppressionReason) {
+      emitWalletSetupDebugEvent("wallet_setup_timeout_suppressed_waiting_for_native_auth", {
+        reason: suppressionReason,
+        phase: "final_refresh_timer",
+      })
+      return
+    }
     const savedDynamicProfileBeforeProvisioning =
       profileState.kind === "loaded" &&
       Boolean(profileState.profile.dynamic_user_id && profileState.profile.base_address && profileState.profile.solana_address)
@@ -4490,14 +4530,47 @@ function PineTreeWalletRuntime() {
       }
     }, walletCreationTimeoutMs)
     return () => window.clearTimeout(timer)
-  }, [pendingSync, finalProvisioningRefreshAttempted, profileState, repairInProgress, refreshDynamicWalletRuntime, logWalletCreationStep])
+  }, [pendingSync, finalProvisioningRefreshAttempted, coreSetupNeedsUserAuth, showAuthFlow, profileState, repairInProgress, refreshDynamicWalletRuntime, logWalletCreationStep])
 
   useEffect(() => {
     if (!pendingSync || !finalProvisioningRefreshAttempted) return
+    // Same suppression as the first-stage timer: never declare a timeout while
+    // waiting on the merchant to finish Dynamic native auth or while a profile
+    // POST that could still succeed is in flight.
+    const suppressionReason = walletProvisioningTimeoutSuppressionReason({
+      pendingSync,
+      needsUserAuth: coreSetupNeedsUserAuth,
+      dynamicAuthSheetOpen: Boolean(showAuthFlow),
+      nativeFallbackPending: nativeFallbackPendingRef.current,
+      profilePostInFlight: Boolean(profilePostInFlightKeyRef.current),
+    })
+    if (suppressionReason) {
+      emitWalletSetupDebugEvent("wallet_setup_timeout_suppressed_waiting_for_native_auth", {
+        reason: suppressionReason,
+        phase: "failure_timer",
+      })
+      return
+    }
     const savedDynamicProfileBeforeProvisioning =
       profileState.kind === "loaded" &&
       Boolean(profileState.profile.dynamic_user_id && profileState.profile.base_address && profileState.profile.solana_address)
     const timer = window.setTimeout(() => {
+      // Re-check at fire time: a native-auth fallback or profile POST may have
+      // started after this timer was scheduled (refs don't re-run the effect).
+      const fireTimeSuppression = walletProvisioningTimeoutSuppressionReason({
+        pendingSync: true,
+        needsUserAuth: coreSetupNeedsUserAuth,
+        dynamicAuthSheetOpen: Boolean(showAuthFlow),
+        nativeFallbackPending: nativeFallbackPendingRef.current,
+        profilePostInFlight: Boolean(profilePostInFlightKeyRef.current),
+      })
+      if (fireTimeSuppression) {
+        emitWalletSetupDebugEvent("wallet_setup_timeout_suppressed_waiting_for_native_auth", {
+          reason: fireTimeSuppression,
+          phase: "failure_timer_fire",
+        })
+        return
+      }
       pendingWalletProvisionStartedAtRef.current = null
       pendingWalletProvisionAttemptRef.current = null
       pendingProfileSyncAttemptRef.current = false
@@ -4523,7 +4596,7 @@ function PineTreeWalletRuntime() {
       })
     }, walletProvisioningFinalRefreshGraceMs)
     return () => window.clearTimeout(timer)
-  }, [pendingSync, finalProvisioningRefreshAttempted, profileState, repairInProgress, recordWalletSetupFailure])
+  }, [pendingSync, finalProvisioningRefreshAttempted, coreSetupNeedsUserAuth, showAuthFlow, profileState, repairInProgress, recordWalletSetupFailure])
 
   useEffect(() => {
     if (!sdkHasLoaded || !user) return
@@ -4691,15 +4764,81 @@ function PineTreeWalletRuntime() {
   }, [coreWalletProfileReady, dynamicEmbeddedSignersReady])
 
   // Resume core wallet setup automatically once the Dynamic native auth fallback
-  // completes: the pendingSync-driven effects pick up from here (identity gate,
-  // embedded wallet provisioning, profile POST) without another click.
+  // completes. The provisioning timeout was suppressed while waiting on the merchant;
+  // this clears the parked needs-user-auth/failure state, resets the timeout window,
+  // and re-enters the pendingSync-driven pipeline (identity gate, embedded wallet
+  // provisioning, profile POST) without another "Try Again" click. If a ready profile
+  // already exists for this Dynamic user, it opens the wallet instead of recreating.
   useEffect(() => {
     if (!user || !nativeFallbackPendingRef.current) return
     nativeFallbackPendingRef.current = false
     setCoreSetupNeedsUserAuth(false)
     console.info("[pinetree-wallets] wallet_dynamic_native_user_detected", {})
     emitWalletSetupDebugEvent("wallet_dynamic_native_user_detected", {})
-  }, [user])
+    emitWalletSetupDebugEvent("wallet_native_auth_resume_started", {})
+
+    // Fresh timeout window: the time the merchant spent inside the email sign-in
+    // sheet must not count against the resumed provisioning attempt.
+    pendingWalletProvisionStartedAtRef.current = null
+    pendingWalletProvisionAttemptRef.current = null
+    pendingProfileSyncAttemptRef.current = false
+    walletSetupStartInFlightRef.current = null
+    setWalletSetupFailureReason(null)
+    setWalletIdentityError("")
+    setProvisioningRetryExhausted(false)
+    setFinalProvisioningRefreshAttempted(false)
+    setWalletCreationStep("provisioning_wallet")
+    setPendingSync(true)
+    markWalletSetupInProgress()
+    autoOpenWalletAfterCreateRef.current = true
+    emitWalletSetupDebugEvent("wallet_native_auth_resume_timeout_reset", {})
+
+    // Speed already ran when the orchestrator started - only re-run it when no
+    // Lightning profile or in-flight attempt exists at all.
+    if (shouldRerunSpeedOnNativeAuthResume({
+      speedProvisionInFlight: speedProvisionInFlightRef.current,
+      lightningProfileKind: lightningProfileState.kind,
+    })) {
+      void provisionSpeedLightning()
+    }
+
+    void (async () => {
+      // A profile may already exist (an earlier attempt saved it, or this Dynamic
+      // user was provisioned before) - open it rather than re-provisioning forever.
+      emitWalletSetupDebugEvent("wallet_native_auth_resume_profile_get_started", {})
+      const token = accessTokenRef.current
+      let existingProfile: PineTreeWalletProfile | null = null
+      if (token) {
+        try {
+          const res = await fetch("/api/wallets/pinetree-profile", {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          if (res.ok) {
+            const json = (await res.json()) as { profile: PineTreeWalletProfile | null }
+            existingProfile = json.profile
+            if (json.profile) setProfileState({ kind: "loaded", profile: json.profile })
+          }
+        } catch {
+          // Network hiccup - fall through to normal provisioning below.
+        }
+      }
+      if (resolveNativeAuthResumeAction(existingProfile) === "open_existing_ready_wallet") {
+        emitWalletSetupDebugEvent("wallet_native_auth_resume_profile_existing_ready", {})
+        pendingProfileSyncAttemptRef.current = true
+        setPendingSync(false)
+        setWalletCreationStep("profile_synced")
+        setWalletSetupStage("ready")
+        clearWalletSetupInProgress()
+        autoOpenWalletAfterCreateRef.current = false
+        setActiveTab("overview")
+        setWalletOpen(true)
+        emitWalletSetupDebugEvent("wallet_wallet_page_opened_after_create", { existingProfile: true })
+        return
+      }
+      emitWalletSetupDebugEvent("wallet_native_auth_resume_core_started", {})
+      void refreshDynamicWalletRuntime("native_auth_resume_embedded_wallet_provisioning", { requireApprovalWallet: false })
+    })()
+  }, [user, lightningProfileState.kind, refreshDynamicWalletRuntime])
 
   // syncWalletReadiness: combine the core wallet and Speed/Lightning task outcomes
   // once core setup is ready. Lightning is additive - a pending or failed Lightning
@@ -5135,6 +5274,9 @@ function PineTreeWalletRuntime() {
     setFinalProvisioningRefreshAttempted(false)
     setPendingSync(true)
     markWalletSetupInProgress()
+    // Explicit create/retry attempt: open the wallet as soon as the core profile
+    // saves instead of leaving the merchant on the setup card.
+    autoOpenWalletAfterCreateRef.current = true
     return true
   }
 

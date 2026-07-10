@@ -154,6 +154,26 @@ describe("POST /api/debug/pinetree-wallet/setup-event", () => {
     }
   })
 
+  it("accepts the native-auth resume events added for the resume-after-email-signin fix", async () => {
+    const { POST } = await import("@/app/api/debug/pinetree-wallet/setup-event/route")
+    for (const event of [
+      "wallet_native_auth_resume_started",
+      "wallet_native_auth_resume_timeout_reset",
+      "wallet_native_auth_resume_profile_get_started",
+      "wallet_native_auth_resume_profile_existing_ready",
+      "wallet_native_auth_resume_core_started",
+      "wallet_core_create_success",
+      "wallet_wallet_page_opened_after_create",
+      "wallet_setup_timeout_suppressed_waiting_for_native_auth",
+    ]) {
+      vi.clearAllMocks()
+      mocks.requireMerchantAuthFromRequest.mockResolvedValue({ merchantId, email: null, source: "supabase" })
+      vi.spyOn(console, "info").mockImplementation(() => undefined)
+      const response = await POST(request({ event, details: { reason: "needs_user_auth", phase: "failure_timer" } }))
+      expect(response.status).toBe(200)
+    }
+  })
+
   it("logs the full classified wallet_dynamic_signin_failed payload (reason/errorName/errorCode/status/messageHint) safely", async () => {
     const { POST } = await import("@/app/api/debug/pinetree-wallet/setup-event/route")
     const response = await POST(request({
