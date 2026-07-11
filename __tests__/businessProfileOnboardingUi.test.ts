@@ -13,7 +13,7 @@ describe("Business Profile onboarding UI", () => {
     const sharedBanner = read("components/dashboard/BusinessProfileRequirementBanner.tsx")
 
     for (const source of [dashboard, providers]) {
-      expect(source).toContain("Complete your Business Profile before continuing.")
+      expect(source).toContain("Complete Business Profile before continuing")
       expect(source).toContain("BusinessProfileRequirementBanner")
       expect(source).not.toContain("Business Profile Required")
       expect(source).not.toContain("Complete your Business Profile to activate wallets, providers, and live payments.")
@@ -22,8 +22,10 @@ describe("Business Profile onboarding UI", () => {
 
     expect(sharedBanner).toContain("bg-red-50/70")
     expect(sharedBanner).toContain("border-red-200")
-    expect(sharedBanner).toContain("Complete Business Profile")
+    expect(sharedBanner).toContain('const linkedWord = "continuing"')
     expect(sharedBanner).toContain("/dashboard/settings?section=business-profile&return=${returnDestination}")
+    expect(sharedBanner).not.toContain("bg-red-600")
+    expect(sharedBanner).not.toContain("Complete Business Profile</Link>")
     expect(dashboard).toContain('returnDestination="overview"')
     expect(providers).toContain('returnDestination="providers"')
 
@@ -126,13 +128,24 @@ describe("Business Profile onboarding UI", () => {
     expect(settings).not.toContain("Dynamic email")
   })
 
-  it("wallet warning links directly to the Business Profile modal route", () => {
+  it("wallet warning is a single compact inline link and wallet card/action stay visually unchanged", () => {
     const wallet = read("app/dashboard/wallet-setup/page.tsx")
+    const sharedBanner = read("components/dashboard/BusinessProfileRequirementBanner.tsx")
     const settings = read("app/dashboard/settings/page.tsx")
 
-    expect(wallet).toContain("Complete your Business Profile before creating your PineTree Wallet.")
-    expect(wallet).toContain('/dashboard/settings?section=business-profile&return=wallet')
-    expect(wallet).toContain("Complete Business Profile")
+    expect(wallet).toContain("Complete Business Profile before continuing")
+    expect(sharedBanner).toContain("/dashboard/settings?section=business-profile&return=${returnDestination}")
+    expect(wallet).toContain('returnDestination="wallet"')
+    expect(wallet).toContain(">PineTree Wallet</h2>")
+    expect(wallet).toContain("One merchant wallet for receiving funds and managing payments.")
+    expect(wallet).toContain("<EnabledRailChips rows={walletRailRows} />")
+    expect(wallet).toContain("Create PineTree Wallet")
+    expect(wallet).toContain("businessProfileGateBlocking ? \"Create PineTree Wallet\"")
+    expect(wallet).toContain("disabled={businessProfileGateBlocking || syncing || logoutPending || walletCreationInProgress}")
+    expect(wallet).not.toContain("Complete your Business Profile before creating your PineTree Wallet.")
+    expect(wallet).not.toContain("bg-red-600")
+    expect(sharedBanner).toContain('const linkedWord = "continuing"')
+    expect(sharedBanner).not.toContain("Complete Business Profile</Link>")
     expect(wallet).toContain("businessProfileGateReady")
     expect(wallet).toContain("blockWalletSetupForBusinessProfile")
     expect(wallet).toContain('wallet_create_blocked_business_profile_required')

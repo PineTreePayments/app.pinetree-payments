@@ -15,17 +15,25 @@ export default function BusinessProfileRequirementBanner({
   returnDestination: BusinessProfileReturnDestination
   compact?: boolean
 }) {
+  const linkedWord = "continuing"
+  const linkIndex = message.indexOf(linkedWord)
+  const beforeLink = linkIndex >= 0 ? message.slice(0, linkIndex) : `${message} `
+  const afterLink = linkIndex >= 0 ? message.slice(linkIndex + linkedWord.length) : ""
+
   return (
     <div className={`rounded-lg border border-red-200 bg-red-50/70 text-sm shadow-none ${compact ? "px-3 py-2" : "px-3 py-2.5"}`}>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="flex items-center gap-2">
         <span className="h-4 w-1 shrink-0 rounded-full bg-red-500" />
-        <p className="min-w-0 flex-1 font-semibold leading-5 text-red-950">{message}</p>
-        <Link
-          href={businessProfileDeepLink(returnDestination)}
-          className="inline-flex min-h-8 shrink-0 items-center justify-center rounded-lg bg-red-600 px-3 text-xs font-semibold text-white transition hover:bg-red-700"
-        >
-          Complete Business Profile
-        </Link>
+        <p className="min-w-0 flex-1 font-semibold leading-5 text-red-950">
+          {beforeLink}
+          <Link
+            href={businessProfileDeepLink(returnDestination)}
+            className="font-semibold text-red-700 underline decoration-red-300 underline-offset-2 hover:text-red-800 hover:decoration-red-500"
+          >
+            {linkIndex >= 0 ? linkedWord : "continuing"}
+          </Link>
+          {afterLink}
+        </p>
       </div>
     </div>
   )

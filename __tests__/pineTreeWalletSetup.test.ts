@@ -613,6 +613,11 @@ describe("PineTree embedded wallet setup", () => {
       page.indexOf("function blockWalletSetupForBusinessProfile("),
       page.indexOf("function beginWalletProvisioningAttempt(")
     )
+    const createButtonDisabledIndex = page.indexOf("disabled={businessProfileGateBlocking || syncing || logoutPending || walletCreationInProgress}")
+    const createButtonBranch = page.slice(
+      page.lastIndexOf("<button", createButtonDisabledIndex),
+      page.indexOf("</button>", createButtonDisabledIndex)
+    )
 
     expect(page).toContain('fetch("/api/settings"')
     expect(page).toContain("businessProfileGateReady")
@@ -629,6 +634,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(blockerFn).toContain("setPendingSync(false)")
     expect(blockerFn).toContain("clearWalletSetupInProgress()")
     expect(blockerFn).toContain("walletSetupStartInFlightRef.current = null")
+    expect(createButtonBranch).toContain("Create PineTree Wallet")
+    expect(createButtonBranch).toContain("disabled={businessProfileGateBlocking || syncing || logoutPending || walletCreationInProgress}")
+    expect(createButtonBranch).toContain("businessProfileGateBlocking ? \"Create PineTree Wallet\"")
+    expect(createButtonBranch).toContain("bg-[#0052FF]")
+    expect(createButtonBranch).not.toContain("Complete Business Profile")
+    expect(createButtonBranch.indexOf("businessProfileGateBlocking ? \"Create PineTree Wallet\"")).toBeLessThan(createButtonBranch.indexOf("logoutPending || walletCreationInProgress ? \"Creating PineTree Wallet...\""))
   })
 
   it("Speed provisioning never throws into or fails core wallet setup", () => {

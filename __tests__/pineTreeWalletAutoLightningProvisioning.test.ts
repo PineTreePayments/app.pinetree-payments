@@ -82,15 +82,13 @@ describe("No manual 'Set up Bitcoin' CTA competes with automatic provisioning", 
     expect(page).not.toContain("Enable Lightning")
   })
 
-  it("the Business Profile banner only shows for a real needs_attention configuration reason, never for pending", () => {
-    const conditionStart = page.indexOf('lightningProfileState.kind === "loaded" &&\n                  lightningProfileState.profile.status === "needs_attention"')
-    const componentEnd = page.indexOf("<BusinessProfileRequirementBanner", conditionStart) + "<BusinessProfileRequirementBanner".length
-    const bannerCondition = page.slice(
-      conditionStart,
-      componentEnd
+  it("does not render a second Business Profile banner inside the wallet modal", () => {
+    const modalOverview = page.slice(
+      page.indexOf('{activeTab === "overview" ? ('),
+      page.indexOf("{activeTab === \"balances\" ? (")
     )
-    expect(bannerCondition).toContain('status === "needs_attention"')
-    expect(bannerCondition).toContain('["business_profile_required", "business_owner_profile_required"].includes')
+    expect(page).toContain("BusinessProfileRequirementBanner")
+    expect(modalOverview).not.toContain("BusinessProfileRequirementBanner")
   })
 })
 

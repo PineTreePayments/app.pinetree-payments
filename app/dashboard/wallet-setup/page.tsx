@@ -7399,7 +7399,7 @@ function PineTreeWalletRuntime() {
       {businessProfileGateBlocking ? (
         <div className="mb-3 max-w-2xl">
           <BusinessProfileRequirementBanner
-            message="Complete your Business Profile before creating your PineTree Wallet."
+            message="Complete Business Profile before continuing"
             returnDestination="wallet"
             compact
           />
@@ -7673,21 +7673,14 @@ function PineTreeWalletRuntime() {
                 {walletOpening ? "Opening PineTree Wallet..." : "Open PineTree Wallet"}
               </button>
             </div>
-          ) : businessProfileGateBlocking ? (
-            <Link
-              href="/dashboard/settings?section=business-profile&return=wallet"
-              className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-red-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 sm:w-auto"
-            >
-              Complete Business Profile
-            </Link>
           ) : showProvisioningRetryOnly ? null : (
             <button
               type="button"
               onClick={handleCreateWallet}
-              disabled={syncing || logoutPending || walletCreationInProgress}
+              disabled={businessProfileGateBlocking || syncing || logoutPending || walletCreationInProgress}
               className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
             >
-              {logoutPending || walletCreationInProgress ? "Creating PineTree Wallet..." : "Create PineTree Wallet"}
+              {businessProfileGateBlocking ? "Create PineTree Wallet" : logoutPending || walletCreationInProgress ? "Creating PineTree Wallet..." : "Create PineTree Wallet"}
             </button>
           )}
         </div>
@@ -7757,17 +7750,6 @@ function PineTreeWalletRuntime() {
 
               {activeTab === "overview" ? (
                 <>
-                  {lightningProfileState.kind === "loaded" &&
-                  lightningProfileState.profile.status === "needs_attention" &&
-                  ["business_profile_required", "business_owner_profile_required"].includes(String(lightningProfileState.profile.speed_connected_account_status || "")) ? (
-                    <div className="mb-3">
-                      <BusinessProfileRequirementBanner
-                        message="Complete your Business Profile before creating your PineTree Wallet."
-                        returnDestination="wallet"
-                        compact
-                      />
-                    </div>
-                  ) : null}
                   <WalletOverviewSummary
                     rows={walletRailRows}
                     sync={walletSync}
