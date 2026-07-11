@@ -170,8 +170,9 @@ describe("PineTree Wallet native auth resume - page wiring", () => {
     )
     expect(readySaveBlock).toContain('emitWalletSetupDebugEvent("wallet_core_create_success"')
     expect(readySaveBlock).toContain("autoOpenWalletAfterCreateRef.current")
-    expect(readySaveBlock).toContain("setWalletOpen(true)")
-    expect(readySaveBlock).toContain('emitWalletSetupDebugEvent("wallet_wallet_page_opened_after_create", {})')
+    expect(readySaveBlock).toContain('openPineTreeWalletModalOnce("profile_ready_after_create")')
+    expect(page).toContain("setWalletOpen(true)")
+    expect(page).toContain('emitWalletSetupDebugEvent("wallet_wallet_page_opened_after_create", {})')
   })
 
   it("only auto-opens the wallet for merchant-initiated attempts, never page-load auto-repair", () => {

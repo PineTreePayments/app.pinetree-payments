@@ -30,7 +30,7 @@ function withdrawalWalletRowsSrc() {
 function withdrawableAssetOptionsSrc() {
   return walletPage.slice(
     walletPage.indexOf("const withdrawableAssetOptions = useMemo"),
-    walletPage.indexOf("useEffect(() => {\n    if (withdrawableAssetOptions")
+    walletPage.indexOf("const selectedWithdrawalBalance = useMemo")
   )
 }
 

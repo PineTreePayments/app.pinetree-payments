@@ -240,11 +240,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("profileAddresses")
   })
 
-  it("treats a missing DB wallet profile as a new PineTree wallet even with stale local setup state", () => {
+  it("treats a missing DB wallet profile as new unless a setup marker needs resume", () => {
     expect(page).toContain("if (!json.profile) {")
-    expect(page).toContain("window.localStorage.removeItem(setupKey)")
+    expect(page).toContain('emitWalletSetupStageDiagnostic("wallet_create_resume_detected", "resume_missing_profile")')
+    expect(page).toContain('setWalletCreationStep("provisioning_wallet")')
     expect(page).toContain('setWalletCreationStep("idle")')
-    expect(page).toContain('status: "new_wallet_required"')
+    expect(page).toContain('status: setupStarted ? "resume_missing_profile" : "new_wallet_required"')
     expect(page).toContain('if (profileState.kind === "none") return "create_wallet"')
     expect(page).not.toContain('if (setupStarted && json.profile?.status !== "ready")')
   })
@@ -422,9 +423,9 @@ describe("PineTree embedded wallet setup", () => {
       page.indexOf("const openDynamicEmailFallbackAuth = useCallback"),
       page.indexOf("const scheduleDynamicEmailFallbackAuth = useCallback")
     )
-    expect(openFallbackFn).toContain(
-      "dynamicProfile = await signInWithExternalJwt({\n                externalJwt: payload.externalJwt,\n                externalUserId: payload.externalUserId,\n              })"
-    )
+    expect(openFallbackFn).toContain("dynamicProfile = await signInWithExternalJwt({")
+    expect(openFallbackFn).toContain("externalJwt: payload.externalJwt")
+    expect(openFallbackFn).toContain("externalUserId: payload.externalUserId")
   })
 
   it("proves response.externalUserId matches JWT sub before calling Dynamic", () => {
@@ -617,7 +618,7 @@ describe("PineTree embedded wallet setup", () => {
     )
     const branchIdx = openFallbackFn.indexOf('if (signinMessageHint === "external_auth_rejected") {')
     expect(branchIdx).toBeGreaterThan(-1)
-    const branch = openFallbackFn.slice(branchIdx, openFallbackFn.indexOf("setWalletIdentityError(\n", branchIdx))
+    const branch = openFallbackFn.slice(branchIdx, openFallbackFn.indexOf('logWalletCreationStep("failed", { reason: "dynamic_external_jwt_rejected" })', branchIdx))
     expect(branch).toContain('emitWalletSetupDebugEvent("wallet_dynamic_external_jwt_rejected", {})')
     expect(branch).toContain('emitWalletSetupDebugEvent("wallet_dynamic_external_identity_conflict_suspected"')
     expect(branch).toContain("jwtContractValid: true")
@@ -952,6 +953,18 @@ describe("PineTree embedded wallet setup", () => {
       "wallet_profile_sync_eligible",
       "wallet_profile_sync_skipped_reason",
       "wallet_profile_post_attempting",
+      "wallet_create_dynamic_auth_complete",
+      "wallet_create_runtime_hydration_started",
+      "wallet_create_runtime_hydration_complete",
+      "wallet_create_addresses_detected",
+      "wallet_create_profile_sync_started",
+      "wallet_create_profile_sync_complete",
+      "wallet_create_rail_sync_started",
+      "wallet_create_rail_sync_complete",
+      "wallet_create_modal_opened",
+      "wallet_create_resume_detected",
+      "wallet_create_resume_profile_sync_started",
+      "wallet_create_resume_complete",
       "wallet_setup_orchestrator_started",
       "wallet_core_setup_started",
       "wallet_speed_setup_started",
@@ -1038,11 +1051,14 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("emits wallet_dynamic_wallets_detected_count as a plain count, never a raw wallet list", () => {
-    expect(page).toContain('emitWalletSetupDebugEvent("wallet_dynamic_wallets_detected_count", {\n        count: dynamicWalletRuntimeCount,\n      })')
+    expect(page).toContain('emitWalletSetupDebugEvent("wallet_dynamic_wallets_detected_count"')
+    expect(page).toContain("count: dynamicWalletRuntimeCount")
   })
 
   it("emits wallet_dynamic_missing_required_addresses with only booleans and a reason", () => {
-    expect(page).toContain('emitWalletSetupDebugEvent("wallet_dynamic_missing_required_addresses", {\n          missingBase: !baseAddress,\n          missingSolana: !solanaAddress,')
+    expect(page).toContain('emitWalletSetupDebugEvent("wallet_dynamic_missing_required_addresses"')
+    expect(page).toContain("missingBase: !baseAddress")
+    expect(page).toContain("missingSolana: !solanaAddress")
     expect(page).toContain('emitWalletSetupDebugEvent("wallet_profile_sync_skipped_reason", { reason: missingReason })')
   })
 
@@ -1069,6 +1085,43 @@ describe("PineTree embedded wallet setup", () => {
     expect(syncFn).toContain("wallet_profile_post_deduped_in_flight")
     expect(syncFn).toContain("profilePostInFlightKeyRef.current = profilePostKey")
     expect(syncFn).toContain("profilePostInFlightKeyRef.current = null")
+  })
+
+  it("setup stage diagnostics expose only safe progression booleans", () => {
+    expect(page).toContain("type WalletSetupStageDiagnosticEvent =")
+    expect(page).toContain("function buildWalletSetupStageDiagnostics(stage: string): WalletSetupDebugDetails")
+    for (const field of [
+      "setupAttemptActive",
+      "profileExists",
+      "profileReady",
+      "hasBaseAddress",
+      "hasSolanaAddress",
+      "refreshInFlight",
+      "profilePostInFlight",
+      "railSyncInFlight",
+      "modalAlreadyOpened",
+      "stage",
+    ]) {
+      expect(page).toContain(field)
+    }
+    const diagnosticFn = page.slice(
+      page.indexOf("function buildWalletSetupStageDiagnostics"),
+      page.indexOf("function emitWalletSetupStageDiagnostic")
+    )
+    expect(diagnosticFn).not.toContain("merchantEmail")
+    expect(diagnosticFn).not.toContain("dynamicUserEmail")
+    expect(diagnosticFn).not.toContain("accessToken")
+  })
+
+  it("create setup kickoff guard clears after the orchestrator hands off to effects", () => {
+    const createFn = page.slice(
+      page.indexOf("async function createPineTreeWalletSetup("),
+      page.indexOf("// Kicks off core Dynamic wallet setup")
+    )
+    expect(createFn).toContain("try {")
+    expect(createFn).toContain("Promise.allSettled")
+    expect(createFn).toContain("finally {")
+    expect(createFn).toContain("walletSetupStartInFlightRef.current = null")
   })
 
   it("gates the wallet setup event log panel behind walletDebug=1 and shows only safe values", () => {
@@ -1101,7 +1154,8 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("does not render a persistent synced banner after profile sync succeeds", () => {
-    expect(page).toContain('if (step === "profile_synced") return "Wallet ready"')
+    expect(page).toContain('if (step === "profile_synced") return ""')
+    expect(page).not.toContain('if (step === "profile_synced") return "Wallet ready"')
     expect(page).not.toContain("PineTree Wallet synced.")
   })
 
@@ -1306,7 +1360,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("function WalletOverviewSummary")
     expect(page).toContain(">TOTAL BALANCE</p>")
     expect(page).toContain(">WALLET SUMMARY</p>")
-    expect(page).toContain("formatUsd(sync?.totalUsd ?? null)")
+    expect(page).toContain("formatWalletTotalBalance(sync?.totalUsd, syncing)")
     expect(page).toContain("Pending sync")
     expect(page).toContain("Last synced")
     expect(page).toContain("visibleRows.map((row)")

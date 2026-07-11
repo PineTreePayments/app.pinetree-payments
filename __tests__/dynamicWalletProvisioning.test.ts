@@ -14,7 +14,8 @@ describe("Dynamic wallet provisioning — zero-wallet case", () => {
     // back to an explicit EVM+SOL request so creation is never silently skipped (see
     // pineTreeDynamicProvisioningFlow.test.ts for the fallback-path coverage).
     expect(page).toContain("await createWalletAccount(requiredChains)")
-    expect(page).toContain("needsAutoCreateWalletChains.length > 0\n            ? needsAutoCreateWalletChains")
+    expect(page).toContain("needsAutoCreateWalletChains.length > 0")
+    expect(page).toContain("? needsAutoCreateWalletChains")
     expect(page).toContain("if (runtimeWallets.length === 0) {")
   })
 

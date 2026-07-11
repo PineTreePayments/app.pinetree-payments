@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { readFileSync } from "fs"
 import path from "path"
+import { formatWalletTotalBalance } from "@/lib/pinetreeWalletDisplay"
 
 function read(file: string) {
   return readFileSync(path.join(process.cwd(), file), "utf8")
@@ -42,9 +43,21 @@ describe("Overview tab - polished PineTree summary", () => {
   it("renders total balance hero card with blue glow treatment", () => {
     const src = walletOverviewSrc()
     expect(src).toContain("TOTAL BALANCE")
+    expect(src).toContain("formatWalletTotalBalance(sync?.totalUsd, syncing)")
     expect(src).toContain("radial-gradient")
     expect(src).toContain("border-blue-")
     expect(src).toContain("shadow-[0_22px_50px")
+  })
+
+  it("formats Total Balance safely while loading or empty", () => {
+    expect(formatWalletTotalBalance(null, true)).toBe("Syncing...")
+    expect(formatWalletTotalBalance(null, false)).toBe("\u2014")
+    expect(formatWalletTotalBalance(undefined, false)).toBe("\u2014")
+    expect(formatWalletTotalBalance(0, false)).toBe("$0.00")
+  })
+
+  it("wallet setup source contains no malformed encoded balance literals", () => {
+    expect(walletPage).not.toMatch(/Ã¢|aeâ|â€”|â€¦|â‰ˆ|Â/)
   })
 
   it("renders Wallet Summary with blue-tinted border and divider", () => {
@@ -242,7 +255,7 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
   })
 
   it("Withdraw tab has no intro Send card above the asset selector", () => {
-    const src = withdrawalFormSrc()
+    const src = withdrawalFormSrc().replace(/\r\n/g, "\n")
     expect(src).not.toContain(">Send<")
     expect(src).not.toContain("Choose a PineTree Wallet asset, then review before approval.")
     // The default (non-review) screen opens straight into the asset selector.
@@ -308,7 +321,7 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
   })
 
   it("review screen has Approve withdrawal and a Back secondary action, not a generic browser-confirm layout", () => {
-    const src = withdrawalFormSrc()
+    const src = withdrawalFormSrc().replace(/\r\n/g, "\n")
     const reviewScreen = src.slice(
       src.indexOf('if (screen === "review" && review)'),
       src.indexOf('if (screen === "approving")')
@@ -360,6 +373,8 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
   it("wallet setup state still derives Connected internally when the wallet is set up", () => {
     expect(walletPage).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
     expect(walletPage).not.toContain('walletSetupPrimaryState === "ready" ? "Ready"')
+    expect(walletPage).toContain('if (step === "profile_synced") return ""')
+    expect(walletPage).not.toContain('if (step === "profile_synced") return "Wallet ready"')
   })
 
   it("wallet modal header badge also displays Connected instead of Ready", () => {

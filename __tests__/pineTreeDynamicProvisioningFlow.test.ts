@@ -187,7 +187,8 @@ describe("PineTree Dynamic provisioning flow", () => {
   it("first-time Dynamic auth with delayed wallet addresses stays in provisioning, not setup incomplete", () => {
     expect(page).toContain('| "provisioning_wallet"')
     expect(page).toContain(') return "Creating PineTree Wallet..."')
-    expect(page).toContain('if (step === "profile_synced") return "Wallet ready"')
+    expect(page).toContain('if (step === "profile_synced") return ""')
+    expect(page).not.toContain('if (step === "profile_synced") return "Wallet ready"')
     expect(page).not.toContain("Securing Base and Solana wallet addresses... This usually takes a few seconds.")
     expect(page).toContain("const walletProvisioningInProgress =")
     expect(page).toContain("const walletSetupIncomplete = hasWallet && dbOnlyWalletProfile && !walletProvisioningInProgress")
@@ -289,9 +290,9 @@ describe("PineTree Dynamic provisioning flow", () => {
   it("a transient refresh failure never resets pendingSync or walletCreationStep - the impl only returns false", () => {
     const implFn = page.slice(
       page.indexOf("const refreshDynamicWalletRuntimeImpl = useCallback"),
-      page.indexOf("}, [\n    createEmbeddedWallet,")
+      page.indexOf("// Single-flight wrapper")
     )
-    const catchBlock = implFn.slice(implFn.indexOf("} catch (error) {"))
+    const catchBlock = implFn.slice(implFn.lastIndexOf("} catch (error) {"))
     expect(catchBlock).not.toContain("setPendingSync(false)")
     expect(catchBlock).not.toContain('setWalletCreationStep("failed")')
     expect(catchBlock).not.toContain('setWalletCreationStep("timeout")')
@@ -310,12 +311,14 @@ describe("PineTree Dynamic provisioning flow", () => {
   })
 
   it("dedupes the background rail-sync call fired after a successful profile save", () => {
-    const readyBlock = page.slice(
-      page.indexOf('const railSyncKey = `${json.profile.dynamic_user_id'),
-      page.indexOf('const railSyncKey = `${json.profile.dynamic_user_id') + 500
+    const railSyncFn = page.slice(
+      page.indexOf("function runRailSyncOnceForProfile"),
+      page.indexOf("function beginWalletProvisioningAttempt")
     )
-    expect(readyBlock).toContain("railSyncFiredForProfileRef.current !== railSyncKey")
-    expect(readyBlock).toContain("railSyncFiredForProfileRef.current = railSyncKey")
+    expect(railSyncFn).toContain("railSyncFiredForProfileRef.current === railSyncKey")
+    expect(railSyncFn).toContain("railSyncFiredForProfileRef.current = railSyncKey")
+    expect(railSyncFn).toContain("railSyncInFlightKeyRef.current = railSyncKey")
+    expect(railSyncFn).toContain("railSyncInFlightKeyRef.current = null")
     expect(page).toContain("const railSyncFiredForProfileRef = useRef<string | null>(null)")
   })
 
@@ -394,9 +397,11 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain("walletProvisioningFinalRefreshGraceMs = 5_000")
     expect(page).toContain("setFinalProvisioningRefreshAttempted(true)")
     expect(page).toContain('refreshDynamicWalletRuntime("final_embedded_wallet_runtime_refresh_before_timeout"')
+    const firstStart = page.indexOf("if (!pendingSync || finalProvisioningRefreshAttempted) return")
+    const secondStart = page.indexOf("if (!pendingSync || !finalProvisioningRefreshAttempted) return")
     const firstTimeoutEffect = page.slice(
-      page.indexOf("if (!pendingSync || finalProvisioningRefreshAttempted) return"),
-      page.indexOf("useEffect(() => {\n    if (!pendingSync || !finalProvisioningRefreshAttempted) return")
+      firstStart,
+      secondStart
     )
     expect(firstTimeoutEffect).not.toContain('setWalletCreationStep("timeout")')
     const graceTimeoutEffect = page.slice(
@@ -961,6 +966,7 @@ describe("PineTree Dynamic provisioning flow", () => {
   it("reload during setup resumes provisioning instead of resetting to Create PineTree Wallet", () => {
     expect(page).toContain('walletSetupStoragePrefix = "pinetree_wallet_setup_in_progress:"')
     expect(page).toContain("window.localStorage.getItem(setupKey) === \"true\"")
+    expect(page).toContain('emitWalletSetupStageDiagnostic("wallet_create_resume_detected", "resume_missing_profile")')
     expect(page).toContain("setWalletCreationStep(\"provisioning_wallet\")")
     expect(page).toContain("markWalletSetupInProgress()")
     expect(page).toContain("clearWalletSetupInProgress()")

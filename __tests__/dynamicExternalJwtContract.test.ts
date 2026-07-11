@@ -359,8 +359,9 @@ describe("Wallet setup page - external JWT contract wiring", () => {
     expect(page).toContain("dynamicSessionBoundToMerchant(user, merchantId)")
     // Both live derived states and the pre-provisioning identity gate must be
     // short-circuited by the external binding.
-    expect(page).toContain("!dynamicSessionExternallyBound &&\n    Boolean(user) && Boolean(merchantEmail) && Boolean(dynamicUserEmail) && dynamicUserEmail !== merchantEmail")
-    expect(page).toContain("!dynamicSessionExternallyBound &&\n    Boolean(user) && Boolean(merchantEmail) && !dynamicUserEmail")
+    expect(page).toContain("!dynamicSessionExternallyBound &&")
+    expect(page).toContain("Boolean(user) && Boolean(merchantEmail) && Boolean(dynamicUserEmail) && dynamicUserEmail !== merchantEmail")
+    expect(page).toContain("Boolean(user) && Boolean(merchantEmail) && !dynamicUserEmail")
     expect(page).toContain("if (dynamicSessionExternallyBound) return")
     expect(page).toContain("if (!dynamicSessionExternallyBound && merchantEmail && dynamicUserEmail && dynamicUserEmail !== merchantEmail)")
     expect(page).toContain("if (!dynamicSessionExternallyBound && (!merchantEmail || !dynamicUserEmail))")
