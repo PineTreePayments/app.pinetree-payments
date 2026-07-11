@@ -9,6 +9,7 @@ import {
   normalizeBusinessCountry,
   normalizeBusinessState
 } from "@/engine/businessProfileLocation"
+import { BUSINESS_PROFILE_REQUIRED_FIELDS } from "@/engine/businessProfileFields"
 
 const db = supabaseAdmin || supabase
 
@@ -188,6 +189,14 @@ function text(value: unknown, maxLength: number, fieldName: string) {
   return normalized
 }
 
+function email(value: unknown, fieldName: string) {
+  const normalized = text(value, 254, fieldName)
+  if (normalized && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(normalized)) {
+    throw new Error(`${fieldName} must be a valid email address`)
+  }
+  return normalized
+}
+
 function bool(value: unknown) {
   return value === true
 }
@@ -207,32 +216,35 @@ export function normalizeSettings(input: Partial<MerchantSettingsPayload>): Merc
   const businessPostalCode = text(input.business_postal_code ?? input.zip, 32, "Business postal code")
   const businessPhone = text(input.business_phone ?? input.phone, 50, "Business phone")
   const businessWebsite = text(input.business_website ?? input.website, 500, "Business website")
-  const ownerEmail = text(input.owner_email, 254, "Owner email")
-  if (ownerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(ownerEmail)) {
-    throw new Error("Owner email must be a valid email address")
-  }
-  const requiredProfileFields = [
-    legalBusinessName,
-    input.business_type,
-    businessCountry,
-    businessState,
-    businessCity,
-    businessAddressLine1,
-    businessPostalCode,
-    businessPhone,
-    input.owner_first_name,
-    input.owner_last_name,
-    ownerEmail,
-  ]
-  const profileStatus = requiredProfileFields.every((value) => String(value || "").trim())
-    ? "complete"
-    : "incomplete"
-
-  return {
-    business_name: legalBusinessName,
+  const contactEmail = email(input.contact_email, "Business email")
+  const ownerEmail = email(input.owner_email, "Owner email")
+  const normalizedProfile = {
     legal_business_name: legalBusinessName,
     business_dba: text(input.business_dba, 160, "Business DBA"),
-    contact_email: text(input.contact_email, 254, "Contact email"),
+    contact_email: contactEmail,
+    business_type: text(input.business_type, 80, "Business type"),
+    business_country: businessCountry,
+    business_state: businessState,
+    business_city: businessCity,
+    business_address_line1: businessAddressLine1,
+    business_address_line2: businessAddressLine2,
+    business_postal_code: businessPostalCode,
+    business_phone: businessPhone,
+    business_website: businessWebsite,
+    owner_first_name: text(input.owner_first_name, 120, "Owner first name"),
+    owner_last_name: text(input.owner_last_name, 120, "Owner last name"),
+    owner_email: ownerEmail,
+    owner_phone: text(input.owner_phone, 50, "Owner phone"),
+  }
+  const profileStatus = BUSINESS_PROFILE_REQUIRED_FIELDS.every((field) =>
+    String(normalizedProfile[field] || "").trim()
+  ) ? "complete" : "incomplete"
+
+  return {
+    business_name: normalizedProfile.legal_business_name,
+    legal_business_name: normalizedProfile.legal_business_name,
+    business_dba: normalizedProfile.business_dba,
+    contact_email: normalizedProfile.contact_email,
     address: businessAddressLine1,
     address_line_2: businessAddressLine2,
     city: businessCity,
@@ -249,11 +261,11 @@ export function normalizeSettings(input: Partial<MerchantSettingsPayload>): Merc
     business_website: businessWebsite,
     phone: businessPhone,
     website: businessWebsite,
-    business_type: text(input.business_type, 80, "Business type"),
-    owner_first_name: text(input.owner_first_name, 120, "Owner first name"),
-    owner_last_name: text(input.owner_last_name, 120, "Owner last name"),
-    owner_email: ownerEmail,
-    owner_phone: text(input.owner_phone, 50, "Owner phone"),
+    business_type: normalizedProfile.business_type,
+    owner_first_name: normalizedProfile.owner_first_name,
+    owner_last_name: normalizedProfile.owner_last_name,
+    owner_email: normalizedProfile.owner_email,
+    owner_phone: normalizedProfile.owner_phone,
     profile_status: profileStatus,
     completed_at: profileStatus === "complete" ? text(input.completed_at, 80, "Business Profile completion date") || new Date().toISOString() : null,
     closeout_time: closeoutTime,

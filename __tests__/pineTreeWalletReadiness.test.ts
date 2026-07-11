@@ -456,7 +456,7 @@ describe("ensureManagedLightningForMerchant", () => {
     expect(result.fieldErrors).toEqual([])
   })
 
-  it("passes the merchant's business name and pre-validated email/password policy booleans to Speed", async () => {
+  it("passes DBA when present and pre-validated email/password policy booleans to Speed", async () => {
     mocks.getMerchantLightningProfile.mockResolvedValue(null)
     mocks.getMerchantById.mockResolvedValue({
       id: merchantId,
@@ -472,6 +472,49 @@ describe("ensureManagedLightningForMerchant", () => {
       owner_first_name: "Ada",
       owner_last_name: "Lovelace",
       legal_business_name: "PineTree Test Merchant LLC",
+      business_dba: "PineTree Test Merchant",
+    })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "ready",
+      speed_connected_account_id: "acct_biz",
+      speed_connected_account_relationship_id: "ca_biz",
+      speed_account_id: "acct_biz",
+      speed_connected_account_status: "active",
+      setup_url: null,
+      provider_response_summary: {},
+      error_message: null,
+      mode: "test",
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    await ensureManagedLightningForMerchant(merchantId)
+
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledWith(
+      expect.objectContaining({
+        business_name: "PineTree Test Merchant",
+        email_valid: true,
+        password_policy_valid: true,
+      })
+    )
+  })
+
+  it("uses legal business name as the Speed display fallback when DBA is absent", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({
+      id: merchantId,
+      business_name: "PineTree Test Merchant",
+      email: "merchant@example.test",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+      business_country: "US",
+    })
+    mocks.getMerchantBusinessProfile.mockResolvedValue({
+      profile_status: "complete",
+      business_country: "US",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+      legal_business_name: "PineTree Test Merchant LLC",
+      business_dba: null,
     })
     mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
       readiness: "ready",
@@ -491,8 +534,6 @@ describe("ensureManagedLightningForMerchant", () => {
     expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledWith(
       expect.objectContaining({
         business_name: "PineTree Test Merchant LLC",
-        email_valid: true,
-        password_policy_valid: true,
       })
     )
   })

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import {
@@ -13,6 +13,12 @@ import {
   BUSINESS_PROFILE_COUNTRIES,
   US_STATES
 } from "@/engine/businessProfileLocation"
+import {
+  BUSINESS_PROFILE_FIELD_LABELS,
+  BUSINESS_PROFILE_REQUIRED_FIELDS,
+  isBusinessProfileFieldRequired,
+  type BusinessProfileField
+} from "@/engine/businessProfileFields"
 
 type MerchantSettingsPayload = {
   business_name: string | null
@@ -37,6 +43,9 @@ type MerchantSettingsPayload = {
   closeout_time: string
   report_toast: boolean
 }
+
+type BusinessProfileValues = Record<BusinessProfileField, string>
+type BusinessProfileErrors = Partial<Record<BusinessProfileField, string>>
 
 type MerchantTaxSettingsPayload = {
   tax_enabled: boolean
@@ -125,6 +134,42 @@ function parseCloseoutTime(value: string) {
   }
 }
 
+function profileStatusLabel(status: "incomplete" | "complete" | "needs_attention") {
+  if (status === "complete") return "Complete"
+  if (status === "needs_attention") return "Needs attention"
+  return "Incomplete"
+}
+
+function profileActionLabel(status: "incomplete" | "complete" | "needs_attention") {
+  if (status === "complete") return "Edit Profile"
+  if (status === "needs_attention") return "Review Profile"
+  return "Complete Profile"
+}
+
+function profileStatusTone(status: "incomplete" | "complete" | "needs_attention") {
+  if (status === "complete") return "border-emerald-200 bg-emerald-50 text-emerald-700"
+  if (status === "needs_attention") return "border-red-200 bg-red-50 text-red-700"
+  return "border-amber-200 bg-amber-50 text-amber-700"
+}
+
+function requiredLabel(field: BusinessProfileField) {
+  return BUSINESS_PROFILE_FIELD_LABELS[field]
+}
+
+function validateBusinessProfile(values: BusinessProfileValues) {
+  const errors: BusinessProfileErrors = {}
+  for (const field of BUSINESS_PROFILE_REQUIRED_FIELDS) {
+    if (!values[field].trim()) errors[field] = `${requiredLabel(field)} is required.`
+  }
+  if (values.contact_email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(values.contact_email.trim())) {
+    errors.contact_email = "Business Email must be a valid email address."
+  }
+  if (values.owner_email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(values.owner_email.trim())) {
+    errors.owner_email = "Owner Email must be a valid email address."
+  }
+  return errors
+}
+
 export default function SettingsPage() {
   const [businessName, setBusinessName] = useState("")
   const [businessDba, setBusinessDba] = useState("")
@@ -145,6 +190,12 @@ export default function SettingsPage() {
   const [ownerEmail, setOwnerEmail] = useState("")
   const [ownerPhone, setOwnerPhone] = useState("")
   const [profileStatus, setProfileStatus] = useState<"incomplete" | "complete" | "needs_attention">("incomplete")
+  const [businessProfileOpen, setBusinessProfileOpen] = useState(false)
+  const [businessProfileErrors, setBusinessProfileErrors] = useState<BusinessProfileErrors>({})
+  const [businessProfileReturnFromWallet, setBusinessProfileReturnFromWallet] = useState(false)
+  const [businessProfileSavedFromWallet, setBusinessProfileSavedFromWallet] = useState(false)
+  const firstBusinessProfileFieldRef = useRef<HTMLInputElement | HTMLSelectElement | null>(null)
+  const businessProfileFieldRefs = useRef<Partial<Record<BusinessProfileField, HTMLInputElement | HTMLSelectElement | null>>>({})
 
   const [closeHour, setCloseHour] = useState("12")
   const [closeMinute, setCloseMinute] = useState("00")
@@ -199,9 +250,9 @@ export default function SettingsPage() {
     }
 
     return payload || {}
-  }, [])
+  }, [accountEmail])
 
-  const applyPayload = useCallback((payload: SettingsApiResponse) => {
+  const applyPayload = useCallback((payload: SettingsApiResponse, authenticatedEmail = accountEmail) => {
     const settings = payload.settings
     const tax = payload.tax
     setSchemaReady(payload.schemaReady !== false)
@@ -210,9 +261,11 @@ export default function SettingsPage() {
       : null)
 
     if (settings) {
+      // Prefill from the authenticated PineTree signup email, but do not silently save it.
+      const signupEmail = authenticatedEmail || ""
       setBusinessName(settings.legal_business_name || settings.business_name || "")
       setBusinessDba(settings.business_dba || "")
-      setContactEmail(settings.contact_email || "")
+      setContactEmail(settings.contact_email || signupEmail)
       setAddress(settings.address || "")
       setAddressLine2(settings.address_line_2 || "")
       setCity(settings.city || "")
@@ -224,7 +277,7 @@ export default function SettingsPage() {
       setBusinessType(settings.business_type || "")
       setOwnerFirstName(settings.owner_first_name || "")
       setOwnerLastName(settings.owner_last_name || "")
-      setOwnerEmail(settings.owner_email || "")
+      setOwnerEmail(settings.owner_email || signupEmail)
       setOwnerPhone(settings.owner_phone || "")
       setProfileStatus(settings.profile_status || "incomplete")
       setReportToast(settings.report_toast ?? true)
@@ -254,10 +307,11 @@ export default function SettingsPage() {
         return
       }
 
-      setAccountEmail(user.email ?? "")
+      const authenticatedEmail = user.email ?? ""
+      setAccountEmail(authenticatedEmail)
 
       const payload = await callSettingsApi("GET")
-      applyPayload(payload)
+      applyPayload(payload, authenticatedEmail)
 
       const { data: { session } } = await supabase.auth.getSession()
       if (session?.access_token) {
@@ -309,6 +363,24 @@ export default function SettingsPage() {
   useEffect(() => {
     loadSettings()
   }, [loadSettings])
+
+  useEffect(() => {
+    if (loading || typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get("section") === "business-profile") {
+      setBusinessProfileOpen(true)
+      setBusinessProfileReturnFromWallet(params.get("return") === "wallet")
+    }
+  }, [loading])
+
+  useEffect(() => {
+    if (!businessProfileOpen || typeof document === "undefined") return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
+  }, [businessProfileOpen])
 
   async function saveSettings() {
     const parsedTaxRate = parseTaxRate(taxRate)
@@ -368,6 +440,79 @@ export default function SettingsPage() {
     }
   }
 
+  const businessProfileValues: BusinessProfileValues = {
+    legal_business_name: businessName,
+    business_dba: businessDba,
+    contact_email: contactEmail,
+    business_type: businessType,
+    business_country: country,
+    business_state: state,
+    business_city: city,
+    business_address_line1: address,
+    business_address_line2: addressLine2,
+    business_postal_code: zip,
+    business_phone: phone,
+    business_website: website,
+    owner_first_name: ownerFirstName,
+    owner_last_name: ownerLastName,
+    owner_email: ownerEmail,
+    owner_phone: ownerPhone,
+  }
+
+  function focusFirstBusinessProfileError(errors: BusinessProfileErrors) {
+    const firstField = BUSINESS_PROFILE_REQUIRED_FIELDS.find((field) => errors[field])
+    if (!firstField) return
+    window.setTimeout(() => {
+      const input = businessProfileFieldRefs.current[firstField]
+      input?.scrollIntoView({ block: "center", behavior: "smooth" })
+      input?.focus()
+    }, 0)
+  }
+
+  async function saveBusinessProfile() {
+    const errors = validateBusinessProfile(businessProfileValues)
+    setBusinessProfileErrors(errors)
+    if (Object.keys(errors).length > 0) {
+      focusFirstBusinessProfileError(errors)
+      return
+    }
+
+    setSaving(true)
+    try {
+      const {
+        data: { session }
+      } = await supabase.auth.getSession()
+      const token = session?.access_token
+      if (!token) throw new Error("User not authenticated")
+
+      const res = await fetch("/api/merchant/business-profile", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(businessProfileValues),
+        credentials: "include",
+        cache: "no-store"
+      })
+      const payload = await res.json().catch(() => null) as { profile?: { profile_status?: "incomplete" | "complete" | "needs_attention" }, error?: string } | null
+      if (!res.ok) throw new Error(payload?.error || "Failed to save Business Profile")
+
+      const refreshed = await callSettingsApi("GET")
+      applyPayload(refreshed, accountEmail)
+      setProfileStatus(payload?.profile?.profile_status || "complete")
+      setBusinessProfileErrors({})
+      setBusinessProfileOpen(false)
+      if (businessProfileReturnFromWallet) setBusinessProfileSavedFromWallet(true)
+      toast.success("Business Profile saved")
+    } catch (error) {
+      console.error(error)
+      toast.error(error instanceof Error ? error.message : "Failed to save Business Profile")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   function parseTaxRate(raw: string): number | null {
     if (raw.trim() === "") return null
     const parsed = Number(raw)
@@ -421,6 +566,100 @@ export default function SettingsPage() {
     value: MerchantOperationsSettingsPayload[K]
   ) => setOperations((current) => ({ ...current, [key]: value }))
 
+  const setBusinessProfileField = (field: BusinessProfileField, value: string) => {
+    setBusinessProfileErrors((current) => ({ ...current, [field]: undefined }))
+    if (field === "legal_business_name") setBusinessName(value)
+    else if (field === "business_dba") setBusinessDba(value)
+    else if (field === "contact_email") setContactEmail(value)
+    else if (field === "business_type") setBusinessType(value)
+    else if (field === "business_country") {
+      setCountry(value)
+      if (value === "US" || country === "US") setState("")
+    }
+    else if (field === "business_state") setState(value)
+    else if (field === "business_city") setCity(value)
+    else if (field === "business_address_line1") setAddress(value)
+    else if (field === "business_address_line2") setAddressLine2(value)
+    else if (field === "business_postal_code") setZip(value)
+    else if (field === "business_phone") setPhone(value)
+    else if (field === "business_website") setWebsite(value)
+    else if (field === "owner_first_name") setOwnerFirstName(value)
+    else if (field === "owner_last_name") setOwnerLastName(value)
+    else if (field === "owner_email") setOwnerEmail(value)
+    else if (field === "owner_phone") setOwnerPhone(value)
+  }
+
+  const renderBusinessProfileField = (
+    field: BusinessProfileField,
+    options?: { type?: string; placeholder?: string; span?: "full" }
+  ) => {
+    const required = isBusinessProfileFieldRequired(field)
+    const error = businessProfileErrors[field]
+    const id = `business-profile-${field}`
+    const label = BUSINESS_PROFILE_FIELD_LABELS[field]
+    const value = businessProfileValues[field]
+    const commonProps = {
+      id,
+      value,
+      "aria-invalid": Boolean(error),
+      "aria-describedby": error ? `${id}-error` : undefined,
+      className: `${fieldClass} ${error ? "border-red-300 focus:border-red-500 focus:ring-red-500/20" : ""}`,
+      ref: (node: HTMLInputElement | HTMLSelectElement | null) => {
+        businessProfileFieldRefs.current[field] = node
+        if (field === "legal_business_name") firstBusinessProfileFieldRef.current = node
+      },
+    }
+
+    return (
+      <div className={options?.span === "full" ? "md:col-span-2" : ""}>
+        <label htmlFor={id} className={labelClass}>
+          {label}
+          {required ? <span className="text-red-600"> *</span> : null}
+        </label>
+        {field === "business_country" ? (
+          <select
+            {...commonProps}
+            onChange={(e) => setBusinessProfileField(field, e.target.value)}
+          >
+            <option value="">Select a country</option>
+            {BUSINESS_PROFILE_COUNTRIES.map(({ code, name }) => (
+              <option key={code} value={code}>{name}</option>
+            ))}
+          </select>
+        ) : field === "business_state" && country === "US" ? (
+          <select
+            {...commonProps}
+            onChange={(e) => setBusinessProfileField(field, e.target.value)}
+          >
+            <option value="">Select a state</option>
+            {US_STATES.map(({ code, name }) => (
+              <option key={code} value={code}>{name}</option>
+            ))}
+          </select>
+        ) : field === "business_type" ? (
+          <select
+            {...commonProps}
+            onChange={(e) => setBusinessProfileField(field, e.target.value)}
+          >
+            <option value="">Select</option>
+            <option value="retail">Retail</option>
+            <option value="restaurant">Restaurant</option>
+            <option value="services">Services</option>
+            <option value="online">Online</option>
+          </select>
+        ) : (
+          <input
+            {...commonProps}
+            type={options?.type || "text"}
+            placeholder={options?.placeholder}
+            onChange={(e) => setBusinessProfileField(field, e.target.value)}
+          />
+        )}
+        {error ? <p id={`${id}-error`} className="mt-1 text-xs font-medium text-red-600">{error}</p> : null}
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-5">
       <div>
@@ -434,190 +673,135 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <DashboardSection title="Business Profile" titleTone="blue">
-      <div id="business-profile" />
-      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-        {profileStatus !== "complete" ? (
-          <div className="mb-3 rounded-lg border border-red-200 bg-red-50/70 px-3 py-2 text-sm">
-            <div className="flex items-center gap-2">
-              <span className="h-4 w-1 shrink-0 rounded-full bg-red-500" />
-              <p className="min-w-0 flex-1 font-semibold leading-5 text-red-950">Complete Business Profile before continuing</p>
-              <span className="hidden shrink-0 font-semibold text-red-700 sm:inline">Complete</span>
-            </div>
-          </div>
-        ) : null}
-
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <div>
-            <label className={labelClass}>Legal Business Name</label>
-            <input
-              value={businessName}
-              onChange={(e) => setBusinessName(e.target.value)}
-              className={fieldClass}
-            />
-          </div>
-
-          <div>
-            <label className={labelClass}>Business DBA</label>
-            <input
-              value={businessDba}
-              onChange={(e) => setBusinessDba(e.target.value)}
-              className={fieldClass}
-            />
-          </div>
-
-          <div>
-            <label className={labelClass}>Contact Email</label>
-            <input
-              value={contactEmail}
-              onChange={(e) => setContactEmail(e.target.value)}
-              className={fieldClass}
-              placeholder={accountEmail || "receipts@example.com"}
-            />
-          </div>
-
-          <div>
-            <label className={labelClass}>Business Address Line 1</label>
-            <input
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              className={fieldClass}
-            />
-          </div>
-
-          <div>
-            <label className={labelClass}>Address Line 2</label>
-            <input
-              value={addressLine2}
-              onChange={(e) => setAddressLine2(e.target.value)}
-              className={fieldClass}
-            />
-          </div>
-
-          <div>
-            <label className={labelClass}>City</label>
-            <input
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
-              className={fieldClass}
-            />
-          </div>
-
-          <div>
-            <label className={labelClass}>State</label>
-            {country === "US" ? (
-              <select
-                value={state}
-                onChange={(e) => setState(e.target.value)}
-                className={fieldClass}
+      {businessProfileOpen ? (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) setBusinessProfileOpen(false)
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="business-profile-modal-title"
+            className="flex max-h-[92dvh] w-full max-w-4xl flex-col overflow-hidden rounded-[1.5rem] border border-white/70 bg-white shadow-[0_32px_100px_rgba(15,23,42,0.30)]"
+          >
+            <header className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-5 sm:px-7">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 id="business-profile-modal-title" className="text-lg font-semibold text-gray-950">Business Profile</h2>
+                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${profileStatusTone(profileStatus)}`}>
+                    {profileStatusLabel(profileStatus)}
+                  </span>
+                </div>
+                <p className="mt-1 text-sm leading-5 text-gray-600">Fields marked with <span className="text-red-600">*</span> are required.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBusinessProfileOpen(false)}
+                className="inline-flex h-9 min-w-9 items-center justify-center rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-600 shadow-sm transition hover:text-gray-950"
               >
-                <option value="">Select a state</option>
-                {US_STATES.map(({ code, name }) => (
-                  <option key={code} value={code}>{name}</option>
-                ))}
-              </select>
-            ) : (
-              <input
-                value={state}
-                onChange={(e) => setState(e.target.value)}
-                className={fieldClass}
-                placeholder="State / province / region"
-              />
-            )}
-          </div>
+                Close
+              </button>
+            </header>
 
-          <div>
-            <label className={labelClass}>ZIP / Postal Code</label>
-            <input
-              value={zip}
-              onChange={(e) => setZip(e.target.value)}
-              className={fieldClass}
-            />
-          </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-7">
+              <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-3 text-sm text-blue-900">
+                <p className="font-semibold">Payment activation requirement</p>
+                <p className="mt-1 leading-5">Complete these business and owner details to activate payments and retry PineTree Wallet Lightning setup.</p>
+              </div>
 
-          <div>
-            <label className={labelClass}>Country</label>
-            <select
-              value={country}
-              onChange={(e) => {
-                const nextCountry = e.target.value
-                setCountry(nextCountry)
-                if (nextCountry === "US" || country === "US") setState("")
-              }}
-              className={fieldClass}
-            >
-              <option value="">Select a country</option>
-              {BUSINESS_PROFILE_COUNTRIES.map(({ code, name }) => (
-                <option key={code} value={code}>{name}</option>
-              ))}
-            </select>
-          </div>
+              <div className="mt-5 space-y-6">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Business Information</p>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    {renderBusinessProfileField("legal_business_name")}
+                    {renderBusinessProfileField("business_dba")}
+                    {renderBusinessProfileField("contact_email", { type: "email", placeholder: accountEmail || "business@example.com" })}
+                    {renderBusinessProfileField("business_type")}
+                    {renderBusinessProfileField("business_country")}
+                    {renderBusinessProfileField("business_state", { placeholder: "State / province / region" })}
+                    {renderBusinessProfileField("business_city")}
+                    {renderBusinessProfileField("business_address_line1")}
+                    {renderBusinessProfileField("business_address_line2")}
+                    {renderBusinessProfileField("business_postal_code")}
+                    {renderBusinessProfileField("business_phone", { type: "tel" })}
+                    {renderBusinessProfileField("business_website", { placeholder: "https://example.com" })}
+                  </div>
+                </div>
 
-          <div>
-            <label className={labelClass}>Business Phone</label>
-            <input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              className={fieldClass}
-            />
-          </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Owner Information</p>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    {renderBusinessProfileField("owner_first_name")}
+                    {renderBusinessProfileField("owner_last_name")}
+                    {renderBusinessProfileField("owner_email", { type: "email", placeholder: accountEmail || "owner@example.com" })}
+                    {renderBusinessProfileField("owner_phone", { type: "tel" })}
+                  </div>
+                </div>
+              </div>
+            </div>
 
-          <div>
-            <label className={labelClass}>Business Type</label>
-            <select
-              value={businessType}
-              onChange={(e) => setBusinessType(e.target.value)}
-              className={fieldClass}
-            >
-              <option value="">Select</option>
-              <option value="retail">Retail</option>
-              <option value="restaurant">Restaurant</option>
-              <option value="services">Services</option>
-              <option value="online">Online</option>
-            </select>
-          </div>
-
-          <div>
-            <label className={labelClass}>Owner First Name</label>
-            <input
-              value={ownerFirstName}
-              onChange={(e) => setOwnerFirstName(e.target.value)}
-              className={fieldClass}
-            />
-          </div>
-
-          <div>
-            <label className={labelClass}>Owner Last Name</label>
-            <input
-              value={ownerLastName}
-              onChange={(e) => setOwnerLastName(e.target.value)}
-              className={fieldClass}
-            />
-          </div>
-
-          <div>
-            <label className={labelClass}>Owner Email</label>
-            <input
-              value={ownerEmail}
-              onChange={(e) => setOwnerEmail(e.target.value)}
-              className={fieldClass}
-              placeholder={accountEmail || "owner@example.com"}
-            />
-          </div>
-
-          <div>
-            <label className={labelClass}>Owner Phone</label>
-            <input
-              value={ownerPhone}
-              onChange={(e) => setOwnerPhone(e.target.value)}
-              className={fieldClass}
-            />
-          </div>
+            <footer className="flex flex-col-reverse gap-2 border-t border-gray-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-7">
+              <button
+                type="button"
+                onClick={() => setBusinessProfileOpen(false)}
+                disabled={saving}
+                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveBusinessProfile()}
+                disabled={saving || !schemaReady}
+                className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+              >
+                {saving ? "Saving..." : "Save Business Profile"}
+              </button>
+            </footer>
+          </section>
         </div>
-      </div>
+      ) : null}
+
+      <DashboardSection title="Business Profile" titleTone="blue">
+        <div id="business-profile" className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-semibold text-gray-950">Business Profile</p>
+                <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${profileStatusTone(profileStatus)}`}>
+                  {profileStatusLabel(profileStatus)}
+                </span>
+              </div>
+              <p className="mt-1 text-sm leading-5 text-gray-600">
+                Required business and owner information for payment activation and PineTree Wallet Lightning setup.
+              </p>
+              {profileStatus !== "complete" ? (
+                <p className="mt-2 text-xs font-medium text-red-700">Complete this profile before activating payments.</p>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={() => setBusinessProfileOpen(true)}
+              className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+            >
+              {profileActionLabel(profileStatus)}
+            </button>
+          </div>
+          {businessProfileSavedFromWallet ? (
+            <div className="mt-3 flex flex-col gap-2 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-3 text-sm text-blue-900 sm:flex-row sm:items-center sm:justify-between">
+              <p className="font-medium">Business Profile saved. PineTree Wallet can retry Lightning setup now.</p>
+              <Link href="/dashboard/wallet-setup" className="font-semibold text-blue-700 hover:text-blue-800">
+                Return to PineTree Wallet
+              </Link>
+            </div>
+          ) : null}
+        </div>
       </DashboardSection>
 
-      <DashboardSection title="Receipts" titleTone="blue">
+      <DashboardSection title="Receipt Preferences" titleTone="blue">
         <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-3.5">
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.65fr)]">
             <div>
@@ -644,7 +828,7 @@ export default function SettingsPage() {
         </div>
       </DashboardSection>
 
-      <DashboardSection title="Tax" titleTone="blue">
+      <DashboardSection title="Tax Configuration" titleTone="blue">
         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
           <div className="grid gap-3 md:grid-cols-[minmax(180px,0.75fr)_minmax(0,1fr)_minmax(0,1fr)] md:items-end">
             <div className="flex min-h-10 items-center justify-between rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2">
@@ -676,7 +860,7 @@ export default function SettingsPage() {
         </div>
       </DashboardSection>
 
-      <DashboardSection title="Reporting & Reminders" titleTone="blue">
+      <DashboardSection title="POS / Operations Preferences" titleTone="blue">
         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
           <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)] md:items-end">
           <div>

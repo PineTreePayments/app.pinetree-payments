@@ -17,6 +17,12 @@ import {
   normalizeBusinessCountry,
   normalizeBusinessState
 } from "@/engine/businessProfileLocation"
+import {
+  BUSINESS_PROFILE_REQUIRED_FIELDS,
+  BUSINESS_PROFILE_OPTIONAL_FIELDS,
+  BUSINESS_PROFILE_FIELD_LABELS
+} from "@/engine/businessProfileFields"
+import { normalizeBusinessProfile } from "@/engine/businessProfile"
 
 describe("merchant settings readiness", () => {
   it("blocks terminal readiness when required settings are missing", () => {
@@ -121,6 +127,69 @@ describe("Business Profile settings normalization", () => {
   it("normalizes supported country and US state codes", () => {
     expect(normalizeBusinessCountry("us")).toBe("US")
     expect(normalizeBusinessState("ky", "US")).toBe("KY")
+  })
+
+  it("uses the shared Business Profile required field definition", () => {
+    expect(BUSINESS_PROFILE_REQUIRED_FIELDS).toEqual([
+      "legal_business_name",
+      "contact_email",
+      "business_type",
+      "business_country",
+      "business_state",
+      "business_city",
+      "business_address_line1",
+      "business_postal_code",
+      "business_phone",
+      "owner_first_name",
+      "owner_last_name",
+      "owner_email",
+      "owner_phone",
+    ])
+    expect(BUSINESS_PROFILE_OPTIONAL_FIELDS).toContain("business_dba")
+    expect(BUSINESS_PROFILE_FIELD_LABELS.contact_email).toBe("Business Email")
+  })
+
+  it("treats DBA as optional in backend Business Profile readiness", () => {
+    const profile = normalizeBusinessProfile({
+      legal_business_name: "PineTree Shop LLC",
+      business_dba: "",
+      contact_email: "shop@example.com",
+      business_type: "retail",
+      business_country: "US",
+      business_state: "KY",
+      business_city: "Louisville",
+      business_address_line1: "123 Market St",
+      business_postal_code: "40202",
+      business_phone: "555-0100",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+      owner_email: "ada@example.com",
+      owner_phone: "555-0101",
+    })
+
+    expect(profile.business_dba).toBeNull()
+    expect(profile.profile_status).toBe("complete")
+    expect(profile.missing_fields).not.toContain("business_dba")
+  })
+
+  it("keeps profile incomplete when Business Email or Owner Phone is missing", () => {
+    const profile = normalizeBusinessProfile({
+      legal_business_name: "PineTree Shop LLC",
+      business_type: "retail",
+      business_country: "US",
+      business_state: "KY",
+      business_city: "Louisville",
+      business_address_line1: "123 Market St",
+      business_postal_code: "40202",
+      business_phone: "555-0100",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+      owner_email: "ada@example.com",
+    })
+
+    expect(profile.profile_status).toBe("incomplete")
+    expect(profile.missing_fields).toContain("contact_email")
+    expect(profile.missing_fields).toContain("owner_phone")
   })
 
   it("rejects unsupported countries and invalid US states with field-specific errors", () => {

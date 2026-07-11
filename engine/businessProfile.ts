@@ -3,6 +3,11 @@ import {
   normalizeBusinessCountry,
   normalizeBusinessState
 } from "@/engine/businessProfileLocation"
+import {
+  BUSINESS_PROFILE_FIELD_LABELS,
+  BUSINESS_PROFILE_REQUIRED_FIELDS,
+  isBusinessProfileFieldRequired
+} from "@/engine/businessProfileFields"
 
 const db = supabaseAdmin || supabase
 
@@ -11,6 +16,7 @@ export type BusinessProfileStatus = "incomplete" | "complete" | "needs_attention
 export type MerchantBusinessProfile = {
   legal_business_name: string | null
   business_dba: string | null
+  contact_email: string | null
   business_type: string | null
   business_country: string | null
   business_state: string | null
@@ -34,19 +40,7 @@ export type MerchantBusinessProfileInput = Partial<Omit<
   "profile_status" | "completed_at" | "missing_fields"
 >>
 
-const REQUIRED_FIELDS: Array<keyof Omit<MerchantBusinessProfile, "profile_status" | "completed_at" | "missing_fields">> = [
-  "legal_business_name",
-  "business_type",
-  "business_country",
-  "business_state",
-  "business_city",
-  "business_address_line1",
-  "business_postal_code",
-  "business_phone",
-  "owner_first_name",
-  "owner_last_name",
-  "owner_email",
-]
+export { BUSINESS_PROFILE_FIELD_LABELS, BUSINESS_PROFILE_REQUIRED_FIELDS, isBusinessProfileFieldRequired }
 
 function text(value: unknown, maxLength = 320, fieldName = "Business Profile field") {
   const normalized = String(value || "").trim()
@@ -55,10 +49,10 @@ function text(value: unknown, maxLength = 320, fieldName = "Business Profile fie
   return normalized
 }
 
-function email(value: unknown) {
-  const normalized = text(value, 254, "Owner email")
+function email(value: unknown, fieldName = "Owner email") {
+  const normalized = text(value, 254, fieldName)
   if (normalized && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(normalized)) {
-    throw new Error("Owner email must be a valid email address")
+    throw new Error(`${fieldName} must be a valid email address`)
   }
   return normalized
 }
@@ -72,6 +66,7 @@ export function normalizeBusinessProfile(input: MerchantBusinessProfileInput): M
   const profile: MerchantBusinessProfile = {
     legal_business_name: text(input.legal_business_name, 160, "Legal business name"),
     business_dba: text(input.business_dba, 160, "Business DBA"),
+    contact_email: email(input.contact_email, "Business email"),
     business_type: text(input.business_type, 80, "Business type"),
     business_country: businessCountry,
     business_state: normalizeBusinessState(input.business_state, businessCountry),
@@ -90,7 +85,7 @@ export function normalizeBusinessProfile(input: MerchantBusinessProfileInput): M
     missing_fields: [],
   }
 
-  profile.missing_fields = REQUIRED_FIELDS.filter((field) => !profile[field])
+  profile.missing_fields = BUSINESS_PROFILE_REQUIRED_FIELDS.filter((field) => !profile[field])
   profile.profile_status = profile.missing_fields.length === 0 ? "complete" : "incomplete"
   return profile
 }
@@ -99,6 +94,7 @@ function profileFromRows(settings: Record<string, unknown> | null, merchant: Rec
   const profile = normalizeBusinessProfile({
     legal_business_name: read(settings, "legal_business_name", "business_name") || text(merchant?.business_name, 160),
     business_dba: read(settings, "business_dba"),
+    contact_email: read(settings, "contact_email") || text(merchant?.email, 254),
     business_type: read(settings, "business_type"),
     business_country: read(settings, "business_country", "country") || text(merchant?.business_country, 2),
     business_state: read(settings, "business_state", "state"),
@@ -166,6 +162,7 @@ export async function saveMerchantBusinessProfile(
     merchant_id: merchantId,
     legal_business_name: next.legal_business_name,
     business_dba: next.business_dba,
+    contact_email: next.contact_email,
     business_type: next.business_type,
     business_country: next.business_country,
     business_state: next.business_state,

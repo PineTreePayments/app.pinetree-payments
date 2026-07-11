@@ -7,23 +7,20 @@ function read(relativePath: string) {
 }
 
 describe("Business Profile onboarding UI", () => {
-  it("uses compact red onboarding copy and styling across dashboard surfaces", () => {
+  it("keeps compact red onboarding copy where the gate blocks payments", () => {
     const dashboard = read("app/dashboard/page.tsx")
-    const settings = read("app/dashboard/settings/page.tsx")
     const providers = read("app/dashboard/providers/page.tsx")
-    const wallet = read("app/dashboard/wallet-setup/page.tsx")
 
-    for (const source of [dashboard, settings, providers, wallet]) {
+    for (const source of [dashboard, providers]) {
       expect(source).toContain("Complete Business Profile before continuing")
       expect(source).toContain("bg-red-50/70")
       expect(source).toContain("border-red-200")
-      expect(source).toContain("flex items-center gap-2")
       expect(source).not.toContain("Business Profile Required")
       expect(source).not.toContain("Complete your Business Profile to activate wallets, providers, and live payments.")
       expect(source).not.toContain("Complete your Business Profile to activate payments.")
     }
 
-    const businessProfileSections = [dashboard, settings, providers, wallet]
+    const businessProfileSections = [dashboard, providers]
       .map((source) => source.slice(source.indexOf("Complete Business Profile before continuing") - 600, source.indexOf("Complete Business Profile before continuing") + 1200))
 
     for (const section of businessProfileSections) {
@@ -31,6 +28,73 @@ describe("Business Profile onboarding UI", () => {
       expect(section).not.toContain("text-amber")
       expect(section).not.toContain("border-amber")
     }
+  })
+
+  it("settings page uses a Business Profile entry card and modal, not an inline full form", () => {
+    const settings = read("app/dashboard/settings/page.tsx")
+    const businessSection = settings.slice(
+      settings.indexOf('<DashboardSection title="Business Profile"'),
+      settings.indexOf('<DashboardSection title="Receipt Preferences"')
+    )
+
+    expect(businessSection).toContain("Business Profile")
+    expect(businessSection).toContain("profileActionLabel(profileStatus)")
+    expect(businessSection).toContain("setBusinessProfileOpen(true)")
+    expect(businessSection).not.toContain("<input")
+    expect(businessSection).not.toContain("BUSINESS_PROFILE_COUNTRIES.map")
+    expect(settings).toContain('role="dialog"')
+    expect(settings).toContain('aria-labelledby="business-profile-modal-title"')
+    expect(settings).toContain("Fields marked with")
+    expect(settings).toContain("Save Business Profile")
+  })
+
+  it("Business Profile modal marks only shared required fields with red asterisks", () => {
+    const settings = read("app/dashboard/settings/page.tsx")
+    const fields = read("engine/businessProfileFields.ts")
+
+    expect(settings).toContain("isBusinessProfileFieldRequired(field)")
+    expect(settings).toContain('className="text-red-600"> *</span>')
+    expect(fields).toContain('"contact_email"')
+    expect(fields).toContain('"owner_phone"')
+    const requiredBlock = fields.slice(
+      fields.indexOf("export const BUSINESS_PROFILE_REQUIRED_FIELDS"),
+      fields.indexOf("export const BUSINESS_PROFILE_OPTIONAL_FIELDS")
+    )
+    expect(requiredBlock).not.toContain('"business_dba"')
+    expect(fields).toContain('"business_dba"')
+    expect(fields).toContain("BUSINESS_PROFILE_OPTIONAL_FIELDS")
+  })
+
+  it("Business Email and Owner Email prefill from Supabase signup email without overwriting saved values", () => {
+    const settings = read("app/dashboard/settings/page.tsx")
+
+    expect(settings).toContain("const authenticatedEmail = user.email ?? \"\"")
+    expect(settings).toContain("setContactEmail(settings.contact_email || signupEmail)")
+    expect(settings).toContain("setOwnerEmail(settings.owner_email || signupEmail)")
+    expect(settings).toContain("do not silently save")
+    expect(settings).not.toContain("Dynamic email")
+  })
+
+  it("wallet warning links directly to the Business Profile modal route", () => {
+    const wallet = read("app/dashboard/wallet-setup/page.tsx")
+    const settings = read("app/dashboard/settings/page.tsx")
+
+    expect(wallet).toContain("Complete your Business Profile before activating Bitcoin Lightning and accepting payments.")
+    expect(wallet).toContain('/dashboard/settings?section=business-profile&return=wallet')
+    expect(wallet).toContain("Complete Business Profile")
+    expect(settings).toContain('params.get("section") === "business-profile"')
+    expect(settings).toContain('params.get("return") === "wallet"')
+    expect(settings).toContain("Return to PineTree Wallet")
+  })
+
+  it("settings page keeps Business Profile, tax, POS, receipt, and security surfaces separate", () => {
+    const settings = read("app/dashboard/settings/page.tsx")
+
+    expect(settings).toContain('<DashboardSection title="Business Profile"')
+    expect(settings).toContain('<DashboardSection title="Tax Configuration"')
+    expect(settings).toContain('<DashboardSection title="POS / Operations Preferences"')
+    expect(settings).toContain('<DashboardSection title="Receipt Preferences"')
+    expect(settings).toContain('<DashboardSection title="Security & Integrations"')
   })
 
   it("does not show the stale June 7 settings migration warning by default", () => {
@@ -65,9 +129,9 @@ describe("Business Profile onboarding UI", () => {
 
     expect(settings).toContain("BUSINESS_PROFILE_COUNTRIES.map")
     expect(settings).toContain("US_STATES.map")
-    expect(settings).toContain("<label className={labelClass}>Country</label>")
-    expect(settings).toContain("<label className={labelClass}>State</label>")
-    expect(settings).toContain("<label className={labelClass}>ZIP / Postal Code</label>")
+    expect(settings).toContain('renderBusinessProfileField("business_country")')
+    expect(settings).toContain('renderBusinessProfileField("business_state"')
+    expect(settings).toContain('renderBusinessProfileField("business_postal_code")')
     expect(locations).toContain('{ code: "US", name: "United States" }')
     expect(locations).toContain('{ code: "DC", name: "District of Columbia" }')
   })

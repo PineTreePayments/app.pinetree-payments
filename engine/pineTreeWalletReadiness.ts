@@ -439,7 +439,7 @@ async function ensureManagedLightningForMerchantImpl(
         last_name: businessProfile.owner_last_name!,
         email: speedEmail,
         password: speedPassword,
-        business_name: businessProfile.legal_business_name,
+        business_name: businessProfile.business_dba || businessProfile.legal_business_name,
         email_valid: isValidSpeedCustomConnectEmail(speedEmail),
         password_policy_valid: passwordPolicyPass,
       }),
