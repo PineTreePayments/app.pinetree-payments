@@ -16,6 +16,7 @@ import { assertMerchantBusinessProfileComplete } from "@/engine/businessProfile"
 import { withOperationTimeout } from "@/engine/promiseTimeout"
 
 const BACKGROUND_PROVISIONING_TIMEOUT_MS = 12_000
+const BUSINESS_PROFILE_REQUIRED_MESSAGE = "Complete your Business Profile before creating your PineTree Wallet."
 
 function profileHasReadyCoreIdentity(profile: Awaited<ReturnType<typeof getPineTreeWalletProfile>>) {
   return Boolean(
@@ -235,7 +236,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ profile, merchantId })
     }
 
-    await assertMerchantBusinessProfileComplete(merchantId)
+    try {
+      await assertMerchantBusinessProfileComplete(merchantId)
+    } catch (error) {
+      if (getRouteErrorStatus(error) === 409) {
+        console.warn("[pinetree-wallets] wallet_profile_business_profile_required", { merchantId })
+        return NextResponse.json(
+          {
+            error: "business_profile_required",
+            code: "business_profile_required",
+            message: BUSINESS_PROFILE_REQUIRED_MESSAGE,
+            retryable: false,
+          },
+          { status: 409 }
+        )
+      }
+      throw error
+    }
 
     const incomingBaseAddress = "base_address" in body ? normalizedString(body.base_address) : undefined
     const incomingSolanaAddress = "solana_address" in body ? normalizedString(body.solana_address) : undefined

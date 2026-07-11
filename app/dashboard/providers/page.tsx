@@ -13,6 +13,7 @@ import {
   dashboardPageTitleClass,
   dashboardSectionLabelClass
 } from "@/components/dashboard/DashboardPrimitives"
+import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
 import {
   getShift4DisplayStatus,
   type Shift4DisplayStatus
@@ -1227,15 +1228,11 @@ function EngineSettingStatus({
 
       <div className="space-y-2">
         {businessProfileStatus && businessProfileStatus.profile_status !== "complete" ? (
-          <div className="rounded-lg border border-red-200 bg-red-50/70 px-3 py-2 text-sm shadow-none">
-            <div className="flex items-center gap-2">
-              <span className="h-4 w-1 shrink-0 rounded-full bg-red-500" />
-              <p className="min-w-0 flex-1 font-semibold leading-5 text-red-950">Complete Business Profile before continuing</p>
-              <a href="/dashboard/settings#business-profile" className="hidden shrink-0 font-semibold text-red-700 hover:text-red-800 sm:inline">
-                Complete
-              </a>
-            </div>
-          </div>
+          <BusinessProfileRequirementBanner
+            message="Complete your Business Profile before continuing."
+            returnDestination="providers"
+            compact
+          />
         ) : null}
         <p className={dashboardSectionLabelClass}>Payment Providers</p>
         <div className="flex flex-wrap gap-1.5">

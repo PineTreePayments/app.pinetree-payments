@@ -10,18 +10,25 @@ describe("Business Profile onboarding UI", () => {
   it("keeps compact red onboarding copy where the gate blocks payments", () => {
     const dashboard = read("app/dashboard/page.tsx")
     const providers = read("app/dashboard/providers/page.tsx")
+    const sharedBanner = read("components/dashboard/BusinessProfileRequirementBanner.tsx")
 
     for (const source of [dashboard, providers]) {
-      expect(source).toContain("Complete Business Profile before continuing")
-      expect(source).toContain("bg-red-50/70")
-      expect(source).toContain("border-red-200")
+      expect(source).toContain("Complete your Business Profile before continuing.")
+      expect(source).toContain("BusinessProfileRequirementBanner")
       expect(source).not.toContain("Business Profile Required")
       expect(source).not.toContain("Complete your Business Profile to activate wallets, providers, and live payments.")
       expect(source).not.toContain("Complete your Business Profile to activate payments.")
     }
 
+    expect(sharedBanner).toContain("bg-red-50/70")
+    expect(sharedBanner).toContain("border-red-200")
+    expect(sharedBanner).toContain("Complete Business Profile")
+    expect(sharedBanner).toContain("/dashboard/settings?section=business-profile&return=${returnDestination}")
+    expect(dashboard).toContain('returnDestination="overview"')
+    expect(providers).toContain('returnDestination="providers"')
+
     const businessProfileSections = [dashboard, providers]
-      .map((source) => source.slice(source.indexOf("Complete Business Profile before continuing") - 600, source.indexOf("Complete Business Profile before continuing") + 1200))
+      .map((source) => source.slice(source.indexOf("BusinessProfileRequirementBanner") - 600, source.indexOf("BusinessProfileRequirementBanner") + 1200))
 
     for (const section of businessProfileSections) {
       expect(section).not.toContain("bg-amber-50")
@@ -123,12 +130,17 @@ describe("Business Profile onboarding UI", () => {
     const wallet = read("app/dashboard/wallet-setup/page.tsx")
     const settings = read("app/dashboard/settings/page.tsx")
 
-    expect(wallet).toContain("Complete your Business Profile before activating Bitcoin Lightning and accepting payments.")
+    expect(wallet).toContain("Complete your Business Profile before creating your PineTree Wallet.")
     expect(wallet).toContain('/dashboard/settings?section=business-profile&return=wallet')
     expect(wallet).toContain("Complete Business Profile")
+    expect(wallet).toContain("businessProfileGateReady")
+    expect(wallet).toContain("blockWalletSetupForBusinessProfile")
+    expect(wallet).toContain('wallet_create_blocked_business_profile_required')
+    expect(wallet).toContain('wallet_speed_setup_skipped_business_profile_required')
     expect(settings).toContain('params.get("section") === "business-profile"')
-    expect(settings).toContain('params.get("return") === "wallet"')
+    expect(settings).toContain('returnDestination === "wallet" || returnDestination === "overview" || returnDestination === "providers"')
     expect(settings).toContain("Return to PineTree Wallet")
+    expect(settings).toContain("Return to Overview")
   })
 
   it("settings page keeps Business Profile, tax, POS, receipt, and security surfaces separate", () => {

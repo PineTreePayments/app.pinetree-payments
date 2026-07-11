@@ -592,6 +592,45 @@ describe("PineTree embedded wallet setup", () => {
     expect(orchestratorFn).toContain('emitWalletSetupDebugEvent("wallet_setup_orchestrator_settled"')
   })
 
+  it("blocks PineTree Wallet creation before Dynamic, profile POST, timers, or Speed when Business Profile is incomplete", () => {
+    const createFn = page.slice(
+      page.indexOf("function handleCreateWallet()"),
+      page.indexOf("// Single orchestrator for Create PineTree Wallet and Try Again.")
+    )
+    const orchestratorFn = page.slice(
+      page.indexOf("async function createPineTreeWalletSetup("),
+      page.indexOf("// Kicks off core Dynamic wallet setup")
+    )
+    const coreFn = page.slice(
+      page.indexOf("async function startCoreDynamicWallet("),
+      page.indexOf("// Automatic Speed/Lightning provisioning")
+    )
+    const speedFn = page.slice(
+      page.indexOf("async function provisionSpeedLightning("),
+      page.indexOf("function handleUsePineTreeAccountEmail()")
+    )
+    const blockerFn = page.slice(
+      page.indexOf("function blockWalletSetupForBusinessProfile("),
+      page.indexOf("function beginWalletProvisioningAttempt(")
+    )
+
+    expect(page).toContain('fetch("/api/settings"')
+    expect(page).toContain("businessProfileGateReady")
+    expect(page).toContain("businessProfileGateBlocking")
+    expect(page).toContain("businessProfileCompleteForResume")
+    expect(page).toContain("wallet_create_resume_blocked_business_profile_required")
+    expect(createFn.indexOf("blockWalletSetupForBusinessProfile")).toBeGreaterThan(-1)
+    expect(createFn.indexOf("blockWalletSetupForBusinessProfile")).toBeLessThan(createFn.indexOf("void createPineTreeWalletSetup"))
+    expect(orchestratorFn).toContain('blockWalletSetupForBusinessProfile(options.retry ? "retry_pinetree_wallet" : "create_pinetree_wallet")')
+    expect(orchestratorFn.indexOf("blockWalletSetupForBusinessProfile")).toBeLessThan(orchestratorFn.indexOf("wallet_setup_orchestrator_started"))
+    expect(coreFn).toContain("if (!beginWalletProvisioningAttempt")
+    expect(speedFn).toContain('wallet_speed_setup_skipped_business_profile_required')
+    expect(blockerFn).toContain('setWalletCreationStep("idle")')
+    expect(blockerFn).toContain("setPendingSync(false)")
+    expect(blockerFn).toContain("clearWalletSetupInProgress()")
+    expect(blockerFn).toContain("walletSetupStartInFlightRef.current = null")
+  })
+
   it("Speed provisioning never throws into or fails core wallet setup", () => {
     const speedFn = page.slice(
       page.indexOf("async function provisionSpeedLightning("),
@@ -599,6 +638,7 @@ describe("PineTree embedded wallet setup", () => {
     )
     expect(speedFn).toContain('fetch("/api/wallets/lightning/pinetree-managed"')
     expect(speedFn).toContain('emitWalletSetupDebugEvent("wallet_speed_setup_started", {})')
+    expect(speedFn).toContain('emitWalletSetupDebugEvent("wallet_speed_setup_skipped_business_profile_required", {})')
     expect(speedFn).toContain('emitWalletSetupDebugEvent("wallet_speed_setup_success", {})')
     expect(speedFn).toContain('emitWalletSetupDebugEvent("wallet_speed_setup_pending", {})')
     expect(speedFn).toContain('emitWalletSetupDebugEvent("wallet_speed_setup_failed"')
@@ -1713,6 +1753,23 @@ describe("PineTree embedded wallet setup", () => {
     expect(apiRoute).toContain("merchantId")
     expect(apiRoute).toContain("getPineTreeWalletProfile")
     expect(apiRoute).toContain("upsertPineTreeWalletProfile")
+  })
+
+  it("pinetree-profile API returns actionable 409 before wallet profile creation when Business Profile is incomplete", () => {
+    const postRoute = apiRoute.slice(
+      apiRoute.indexOf("export async function POST"),
+      apiRoute.indexOf("/**\n * GET")
+    )
+    expect(postRoute).toContain("await assertMerchantBusinessProfileComplete(merchantId)")
+    expect(postRoute).toContain('code: "business_profile_required"')
+    expect(postRoute).toContain('message: BUSINESS_PROFILE_REQUIRED_MESSAGE')
+    expect(postRoute).toContain("retryable: false")
+    expect(postRoute).toContain("{ status: 409 }")
+    const gateIndex = postRoute.indexOf("await assertMerchantBusinessProfileComplete(merchantId)")
+    const profileCreationUpsertIndex = postRoute.indexOf("const profile = await upsertPineTreeWalletProfile({", gateIndex)
+    expect(gateIndex).toBeLessThan(postRoute.indexOf("findPineTreeWalletProfileByAddress"))
+    expect(gateIndex).toBeLessThan(profileCreationUpsertIndex)
+    expect(gateIndex).toBeLessThan(postRoute.indexOf("scheduleWalletReadiness(profile)"))
   })
 
   it("pinetree-profile API does not run BTC provisioning during Base/Solana profile sync", () => {

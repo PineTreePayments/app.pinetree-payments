@@ -192,8 +192,8 @@ export default function SettingsPage() {
   const [profileStatus, setProfileStatus] = useState<"incomplete" | "complete" | "needs_attention">("incomplete")
   const [businessProfileOpen, setBusinessProfileOpen] = useState(false)
   const [businessProfileErrors, setBusinessProfileErrors] = useState<BusinessProfileErrors>({})
-  const [businessProfileReturnFromWallet, setBusinessProfileReturnFromWallet] = useState(false)
-  const [businessProfileSavedFromWallet, setBusinessProfileSavedFromWallet] = useState(false)
+  const [businessProfileReturnDestination, setBusinessProfileReturnDestination] = useState<"overview" | "wallet" | "providers" | null>(null)
+  const [businessProfileSavedForReturn, setBusinessProfileSavedForReturn] = useState(false)
   const firstBusinessProfileFieldRef = useRef<HTMLInputElement | HTMLSelectElement | null>(null)
   const businessProfileFieldRefs = useRef<Partial<Record<BusinessProfileField, HTMLInputElement | HTMLSelectElement | null>>>({})
 
@@ -369,7 +369,12 @@ export default function SettingsPage() {
     const params = new URLSearchParams(window.location.search)
     if (params.get("section") === "business-profile") {
       setBusinessProfileOpen(true)
-      setBusinessProfileReturnFromWallet(params.get("return") === "wallet")
+      const returnDestination = params.get("return")
+      setBusinessProfileReturnDestination(
+        returnDestination === "wallet" || returnDestination === "overview" || returnDestination === "providers"
+          ? returnDestination
+          : null
+      )
     }
   }, [loading])
 
@@ -503,7 +508,7 @@ export default function SettingsPage() {
       setProfileStatus(payload?.profile?.profile_status || "complete")
       setBusinessProfileErrors({})
       setBusinessProfileOpen(false)
-      if (businessProfileReturnFromWallet) setBusinessProfileSavedFromWallet(true)
+      if (businessProfileReturnDestination) setBusinessProfileSavedForReturn(true)
       toast.success("Business Profile saved")
     } catch (error) {
       console.error(error)
@@ -785,11 +790,14 @@ export default function SettingsPage() {
               {profileActionLabel(profileStatus)}
             </button>
           </div>
-          {businessProfileSavedFromWallet ? (
+          {businessProfileSavedForReturn && businessProfileReturnDestination ? (
             <div className="mt-3 flex flex-col gap-2 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-3 text-sm text-blue-900 sm:flex-row sm:items-center sm:justify-between">
-              <p className="font-medium">Business Profile saved. PineTree Wallet can retry Lightning setup now.</p>
-              <Link href="/dashboard/wallet-setup" className="font-semibold text-blue-700 hover:text-blue-800">
-                Return to PineTree Wallet
+              <p className="font-medium">Business Profile saved.</p>
+              <Link
+                href={businessProfileReturnDestination === "wallet" ? "/dashboard/wallet-setup" : businessProfileReturnDestination === "providers" ? "/dashboard/providers" : "/dashboard"}
+                className="font-semibold text-blue-700 hover:text-blue-800"
+              >
+                {businessProfileReturnDestination === "wallet" ? "Return to PineTree Wallet" : businessProfileReturnDestination === "providers" ? "Return to Providers" : "Return to Overview"}
               </Link>
             </div>
           ) : null}

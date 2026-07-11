@@ -36,6 +36,7 @@ import {
   ProviderStatusPill,
   dashboardPageTitleClass,
 } from "@/components/dashboard/DashboardPrimitives"
+import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
 import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/PineTreeDynamicProvider"
 import type { PineTreeRailReadinessMap } from "@/lib/pinetreeRailReadiness"
 import {
@@ -203,6 +204,11 @@ type ProfileState =
   | { kind: "loaded"; profile: PineTreeWalletProfile }
   | { kind: "error" }
 
+type BusinessProfileReadinessState =
+  | { kind: "loading" }
+  | { kind: "loaded"; complete: boolean; status: "incomplete" | "complete" | "needs_attention" }
+  | { kind: "error" }
+
 type LightningProfileState =
   | { kind: "loading" }
   | { kind: "none" }
@@ -344,6 +350,7 @@ type WalletSetupFailureReason =
   | "profile_sync_failed"
   | "provider_sync_failed"
   | "wallet_address_conflict"
+  | "business_profile_required"
   | "provisioning_timeout_unknown"
   | "dynamic_required_chains_incomplete"
   | "dynamic_hydration_timeout"
@@ -2119,25 +2126,6 @@ function formatActivityTimestamp(value: string | null) {
   return `${datePart} at ${timePart}`
 }
 
-function BusinessProfileRequiredBanner() {
-  return (
-    <div className="mb-3 rounded-lg border border-red-200 bg-red-50/70 px-3 py-2 text-sm shadow-none">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <span className="h-4 w-1 shrink-0 rounded-full bg-red-500" />
-        <p className="min-w-0 flex-1 font-semibold leading-5 text-red-950">
-          Complete your Business Profile before activating Bitcoin Lightning and accepting payments.
-        </p>
-        <Link
-          href="/dashboard/settings?section=business-profile&return=wallet"
-          className="inline-flex min-h-8 shrink-0 items-center justify-center rounded-lg bg-red-600 px-3 text-xs font-semibold text-white transition hover:bg-red-700"
-        >
-          Complete Business Profile
-        </Link>
-      </div>
-    </div>
-  )
-}
-
 function WalletOverviewSummary({
   rows,
   sync,
@@ -2543,6 +2531,7 @@ function ActivityTab({
 function PineTreeWalletRuntime() {
   // --- Supabase session & DB profiles ---
   const [profileState, setProfileState] = useState<ProfileState>({ kind: "loading" })
+  const [businessProfileReadiness, setBusinessProfileReadiness] = useState<BusinessProfileReadinessState>({ kind: "loading" })
   const [lightningProfileState, setLightningProfileState] = useState<LightningProfileState>({ kind: "loading" })
   const accessTokenRef = useRef<string | null>(null)
 
@@ -3011,6 +3000,7 @@ function PineTreeWalletRuntime() {
       const token = session?.access_token
       if (!session || !token) {
         setProfileState({ kind: "none" })
+        setBusinessProfileReadiness({ kind: "error" })
         setLightningProfileState({ kind: "none" })
         setMerchantId(null)
         setMerchantEmail(null)
@@ -3022,15 +3012,30 @@ function PineTreeWalletRuntime() {
       const canonicalMerchantEmail = normalizeIdentityEmail(sessionUser.email)
       setMerchantEmail(canonicalMerchantEmail)
 
-      const [walletRes, lightningRes] = await Promise.all([
+      const [walletRes, settingsRes, lightningRes] = await Promise.all([
         fetch("/api/wallets/pinetree-profile", {
           headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch("/api/settings", {
+          headers: { Authorization: `Bearer ${token}` },
+          credentials: "include",
+          cache: "no-store",
         }),
         fetch("/api/wallets/lightning/pinetree-managed", {
           headers: { Authorization: `Bearer ${token}` },
         }),
       ])
       void fetchProviderRailState(token)
+
+      let businessProfileCompleteForResume = false
+      if (settingsRes.ok) {
+        const json = (await settingsRes.json()) as { settings?: { profile_status?: "incomplete" | "complete" | "needs_attention" } }
+        const status = json.settings?.profile_status || "incomplete"
+        businessProfileCompleteForResume = status === "complete"
+        setBusinessProfileReadiness({ kind: "loaded", status, complete: businessProfileCompleteForResume })
+      } else {
+        setBusinessProfileReadiness({ kind: "error" })
+      }
 
       if (!walletRes.ok) {
         setProfileState({ kind: "error" })
@@ -3045,7 +3050,12 @@ function PineTreeWalletRuntime() {
             // after the merchant explicitly cancelled/logged out of the Dynamic sheet
             // must not, until they click Create again (Part G).
             const explicitlyCancelled = Boolean(cancelledKey && window.localStorage.getItem(cancelledKey) === "true")
-            const setupStarted = window.localStorage.getItem(setupKey) === "true" && !explicitlyCancelled
+            const storedSetupStarted = window.localStorage.getItem(setupKey) === "true" && !explicitlyCancelled
+            const setupStarted = storedSetupStarted && businessProfileCompleteForResume
+            if (storedSetupStarted && !businessProfileCompleteForResume) {
+              window.localStorage.removeItem(setupKey)
+              emitWalletSetupDebugEvent("wallet_create_resume_blocked_business_profile_required", {})
+            }
             if (!json.profile) {
               if (setupStarted) {
                 emitWalletSetupStageDiagnostic("wallet_create_resume_detected", "resume_missing_profile")
@@ -3112,12 +3122,27 @@ function PineTreeWalletRuntime() {
       }
     } catch {
       setProfileState({ kind: "error" })
+      setBusinessProfileReadiness({ kind: "error" })
       setLightningProfileState({ kind: "none" })
     }
   }, [fetchProviderRailState])
 
   useEffect(() => {
     void fetchAllProfiles()
+  }, [fetchAllProfiles])
+
+  useEffect(() => {
+    function refreshWalletReadinessOnReturn() {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return
+      void fetchAllProfiles()
+    }
+
+    window.addEventListener("focus", refreshWalletReadinessOnReturn)
+    document.addEventListener("visibilitychange", refreshWalletReadinessOnReturn)
+    return () => {
+      window.removeEventListener("focus", refreshWalletReadinessOnReturn)
+      document.removeEventListener("visibilitychange", refreshWalletReadinessOnReturn)
+    }
   }, [fetchAllProfiles])
 
   // --- Live Dynamic wallet addresses - used only for sync, never for display ---
@@ -5236,6 +5261,15 @@ function PineTreeWalletRuntime() {
         })
         return null
       }
+      if (res.status === 409 && String((responseBody as { code?: unknown } | null)?.code || "") === "business_profile_required") {
+        setIdentityMismatchError(null)
+        setIdentityUnverified(false)
+        setWalletIdentityError("")
+        setBusinessProfileReadiness({ kind: "loaded", complete: false, status: "incomplete" })
+        blockWalletSetupForBusinessProfile("profile_post_business_profile_required")
+        emitWalletSetupDebugEvent("wallet_profile_post_blocked_business_profile_required", { status: res.status })
+        return null
+      }
       console.warn("[pinetree-wallets] profile_sync_failed", {
         endpoint: "/api/wallets/pinetree-profile",
         status: res.status,
@@ -5756,6 +5790,8 @@ function PineTreeWalletRuntime() {
   const dynamicProfileReady = coreWalletProfileReady && baseSignerReady && solanaSignerReady
   const dynamicEmbeddedSignersReady = baseSignerReady && solanaSignerReady
   const profileHasDynamicAddresses = baseReady || solanaReady
+  const businessProfileGateReady = businessProfileReadiness.kind === "loaded" && businessProfileReadiness.complete
+  const businessProfileGateBlocking = !businessProfileGateReady
   // Wallet exists once a PineTree embedded wallet address is available.
   const hasWallet = profileState.kind === "loaded" && (baseReady || solanaReady || btcPayoutReady || bitcoinReady)
   const walletProvisioningInProgress =
@@ -6422,7 +6458,27 @@ function PineTreeWalletRuntime() {
       })
   }
 
+  function blockWalletSetupForBusinessProfile(reason: string) {
+    setWalletSetupFailureReason("business_profile_required")
+    setWalletSetupStage("idle")
+    setWalletCreationStep("idle")
+    setSyncing(false)
+    setPendingSync(false)
+    overallSetupActiveRef.current = false
+    walletSetupStartInFlightRef.current = null
+    pendingWalletProvisionAttemptRef.current = null
+    pendingWalletProvisionStartedAtRef.current = null
+    pendingProfileSyncAttemptRef.current = false
+    autoOpenWalletAfterCreateRef.current = false
+    clearWalletSetupInProgress()
+    emitWalletSetupDebugEvent("wallet_create_blocked_business_profile_required", { reason })
+  }
+
   function beginWalletProvisioningAttempt(step: WalletCreationStep, reason: string, options?: { retry?: boolean }) {
+    if (!businessProfileGateReady) {
+      blockWalletSetupForBusinessProfile(reason)
+      return false
+    }
     if (walletSetupStartInFlightRef.current || (pendingSync && !provisioningRetryExhausted)) return false
     const attemptId = createWalletSetupAttemptId()
     walletSetupStartInFlightRef.current = attemptId
@@ -6712,7 +6768,12 @@ function PineTreeWalletRuntime() {
     emitWalletSetupDebugEvent("wallet_create_clicked", {
       sdkLoaded: sdkHasLoaded,
       userPresent: Boolean(user),
+      businessProfileComplete: businessProfileGateReady,
     })
+    if (!businessProfileGateReady) {
+      blockWalletSetupForBusinessProfile("create_pinetree_wallet")
+      return
+    }
     if (walletSetupStartInFlightRef.current || (pendingSync && !provisioningRetryExhausted)) return
     void createPineTreeWalletSetup({ retry: false })
   }
@@ -6722,6 +6783,10 @@ function PineTreeWalletRuntime() {
   // waits for the other, and Promise.allSettled plus non-throwing tasks guarantee a
   // Speed rejection can never short-circuit or fail core wallet creation.
   async function createPineTreeWalletSetup(options: { retry: boolean }) {
+    if (!businessProfileGateReady) {
+      blockWalletSetupForBusinessProfile(options.retry ? "retry_pinetree_wallet" : "create_pinetree_wallet")
+      return
+    }
     emitWalletSetupDebugEvent("wallet_setup_orchestrator_started", { retry: options.retry })
     try {
       const [coreResult, lightningResult] = await Promise.allSettled([
@@ -6818,6 +6883,10 @@ function PineTreeWalletRuntime() {
   // lightningProfileState.
   async function provisionSpeedLightning(): Promise<"ready" | "pending" | "needs_attention" | "failed"> {
     emitWalletSetupDebugEvent("wallet_speed_setup_started", {})
+    if (!businessProfileGateReady) {
+      emitWalletSetupDebugEvent("wallet_speed_setup_skipped_business_profile_required", {})
+      return "failed"
+    }
     if (speedProvisionInFlightRef.current) return "pending"
     speedProvisionInFlightRef.current = true
     try {
@@ -7301,7 +7370,7 @@ function PineTreeWalletRuntime() {
 
   if (sdkTimedOut && !sdkHasLoaded) return <WalletSetupUnavailable kind="sdk" />
 
-  if (profileState.kind === "loading" || lightningProfileState.kind === "loading" || (!sdkHasLoaded && profileState.kind !== "error")) {
+  if (profileState.kind === "loading" || businessProfileReadiness.kind === "loading" || lightningProfileState.kind === "loading" || (!sdkHasLoaded && profileState.kind !== "error")) {
     return (
       <WalletProfileShell
         status="Loading"
@@ -7327,6 +7396,15 @@ function PineTreeWalletRuntime() {
 
   return (
     <>
+      {businessProfileGateBlocking ? (
+        <div className="mb-3 max-w-2xl">
+          <BusinessProfileRequirementBanner
+            message="Complete your Business Profile before creating your PineTree Wallet."
+            returnDestination="wallet"
+            compact
+          />
+        </div>
+      ) : null}
       <article className="max-w-2xl rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-5 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:p-6">
         <h2 className="min-w-0 text-base font-semibold text-gray-950">PineTree Wallet</h2>
         {!walletProvisioningInProgress ? (
@@ -7595,6 +7673,13 @@ function PineTreeWalletRuntime() {
                 {walletOpening ? "Opening PineTree Wallet..." : "Open PineTree Wallet"}
               </button>
             </div>
+          ) : businessProfileGateBlocking ? (
+            <Link
+              href="/dashboard/settings?section=business-profile&return=wallet"
+              className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-red-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 sm:w-auto"
+            >
+              Complete Business Profile
+            </Link>
           ) : showProvisioningRetryOnly ? null : (
             <button
               type="button"
@@ -7675,7 +7760,13 @@ function PineTreeWalletRuntime() {
                   {lightningProfileState.kind === "loaded" &&
                   lightningProfileState.profile.status === "needs_attention" &&
                   ["business_profile_required", "business_owner_profile_required"].includes(String(lightningProfileState.profile.speed_connected_account_status || "")) ? (
-                    <BusinessProfileRequiredBanner />
+                    <div className="mb-3">
+                      <BusinessProfileRequirementBanner
+                        message="Complete your Business Profile before creating your PineTree Wallet."
+                        returnDestination="wallet"
+                        compact
+                      />
+                    </div>
                   ) : null}
                   <WalletOverviewSummary
                     rows={walletRailRows}

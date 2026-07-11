@@ -204,7 +204,9 @@ describe("Explicit cancellation prevents automatic resume after reload (Part G)"
       page.indexOf("if (json.profile?.status === \"ready\")")
     )
     expect(mountEffect).toContain("const explicitlyCancelled = Boolean(cancelledKey && window.localStorage.getItem(cancelledKey) === \"true\")")
-    expect(mountEffect).toContain('const setupStarted = window.localStorage.getItem(setupKey) === "true" && !explicitlyCancelled')
+    expect(mountEffect).toContain('const storedSetupStarted = window.localStorage.getItem(setupKey) === "true" && !explicitlyCancelled')
+    expect(mountEffect).toContain("const setupStarted = storedSetupStarted && businessProfileCompleteForResume")
+    expect(mountEffect).toContain("wallet_create_resume_blocked_business_profile_required")
   })
 
   it("a new explicit Create/Retry click clears the cancellation marker so the merchant can always retry", () => {
