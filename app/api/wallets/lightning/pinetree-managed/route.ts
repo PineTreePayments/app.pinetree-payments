@@ -18,7 +18,7 @@ import {
 } from "@/database/merchantLightningProfiles"
 import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import { ensureManagedLightningForMerchant } from "@/engine/pineTreeWalletReadiness"
-import { withOperationTimeout } from "@/engine/promiseTimeout"
+import { withOperationTimeout, OperationTimeoutError } from "@/engine/promiseTimeout"
 import {
   getPineTreeSpeedConfigStatus,
   isSpeedPlatformTreasurySweepEnabled,
@@ -152,6 +152,17 @@ export async function POST(req: NextRequest) {
         step: "lightning_ensure_deferred",
         duration_ms: Date.now() - ensureStartedAt,
       })
+      if (error instanceof OperationTimeoutError) {
+        console.warn("[pinetree-managed-lightning] wallet_lightning_auto_provision_timeout", {
+          merchant_id: merchantId,
+          elapsed_ms: Date.now() - ensureStartedAt,
+        })
+      } else {
+        console.warn("[pinetree-managed-lightning] wallet_lightning_auto_provision_failed", {
+          merchant_id: merchantId,
+          elapsed_ms: Date.now() - ensureStartedAt,
+        })
+      }
       const profile = await getMerchantLightningProfile(merchantId).catch(() => null)
       const retryableStatus = profile?.status === "needs_attention" ? "needs_attention" : "retryable"
       return NextResponse.json({

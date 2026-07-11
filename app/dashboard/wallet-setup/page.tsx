@@ -971,6 +971,12 @@ const walletCreationTimeoutMs =
   walletCoreSetupPostCreateHydrationMs // 12 + 25 + 25 + 12 = 74_000
 const walletProvisioningRetryIntervalMs = 1_800
 const walletProvisioningFinalRefreshGraceMs = 15_000 // total cap: 74_000 + 15_000 = 89_000
+// Bounded client-side wait for the automatic post-profile-sync Lightning/Speed
+// provisioning call - slightly longer than the server's own internal
+// LIGHTNING_PROVISIONING_TIMEOUT_MS (12s) so a normal request has room to finish, but
+// still bounded so a hung network connection can never block core wallet setup, which
+// must already be showing "Ready" by the time this fires.
+const lightningAutoProvisionClientTimeoutMs = 15_000
 const walletSetupStoragePrefix = "pinetree_wallet_setup_in_progress:"
 // Set when the merchant explicitly cancels/logs out of the Dynamic wallet-setup sheet
 // mid-attempt. Distinct from walletSetupStoragePrefix: that marker means "resume this
@@ -2683,6 +2689,13 @@ function PineTreeWalletRuntime() {
   // the setup card. Never set by page-load auto-repair, which must not pop the modal.
   const autoOpenWalletAfterCreateRef = useRef(false)
   const speedProvisionInFlightRef = useRef(false)
+  // Idempotency key for the automatic post-profile-sync Lightning trigger: identifies
+  // the exact core profile (merchant + Base + Solana addresses) an attempt was already
+  // made for, so React Strict Mode's double effect-fire, a profile refetch, or a
+  // duplicate profile-sync-complete callback never fires a second automatic attempt
+  // for the same already-attempted profile. A profile save with different addresses
+  // (e.g. a genuinely new wallet) still gets its own attempt.
+  const lightningAutoProvisionAttemptedForProfileRef = useRef<string | null>(null)
   const lastCombinedReadinessRef = useRef<string | null>(null)
   // Single-flight guard for refreshDynamicWalletRuntime: only one Dynamic SDK
   // hydration/refresh operation runs at a time per compatible mode. Concurrent callers (the polling
@@ -5165,6 +5178,10 @@ function PineTreeWalletRuntime() {
         // initial attempt and a native-auth resume both landing "ready") never
         // fire more than one rail-sync call for the same wallet.
         runRailSyncOnceForProfile(json.profile, token)
+        // Automatic Lightning/Speed provisioning: fires once per newly-saved core
+        // profile, non-blocking, right after the profile that actually has Base and
+        // Solana addresses is confirmed saved - never at Create-click time.
+        triggerAutomaticLightningProvisioningOnce(json.profile)
         return json.profile
       }
       const mismatchResponse = getDynamicEmailMismatchResponse(responseBody)
@@ -6757,6 +6774,40 @@ function PineTreeWalletRuntime() {
     }
     requestDynamicVerificationPrompt("create_pinetree_wallet")
     return "needs_user_auth"
+  }
+
+  // Automatic Speed/Lightning provisioning, triggered once per newly-saved core
+  // profile right after wallet_create_profile_sync_complete (not at Create-click
+  // time, which fires in parallel with Dynamic wallet creation and can be many
+  // seconds before Base/Solana addresses actually exist). Bounded so a slow Speed
+  // request can never hold up core wallet setup, which is already "Ready" by the time
+  // this runs; the underlying request still completes in the background and updates
+  // lightningProfileState whenever it eventually settles, even after this function
+  // itself stops waiting on it.
+  function triggerAutomaticLightningProvisioningOnce(profileForAttempt: PineTreeWalletProfile) {
+    if (!profileForAttempt.base_address || !profileForAttempt.solana_address) return
+    const attemptKey = `${merchantId || ""}:${profileForAttempt.base_address}:${profileForAttempt.solana_address}`
+    if (lightningAutoProvisionAttemptedForProfileRef.current === attemptKey) return
+    lightningAutoProvisionAttemptedForProfileRef.current = attemptKey
+
+    const startedAt = Date.now()
+    console.info("[pinetree-wallets] wallet_lightning_auto_provision_client_started", {})
+    emitWalletSetupDebugEvent("wallet_lightning_auto_provision_client_started", {})
+    const bounded = runWithBoundedTimeout(() => provisionSpeedLightning(), lightningAutoProvisionClientTimeoutMs)
+    void bounded.result.then((outcome) => {
+      if (outcome.status === "timeout") {
+        console.warn("[pinetree-wallets] wallet_lightning_auto_provision_client_timeout", {
+          elapsedMs: Date.now() - startedAt,
+        })
+        emitWalletSetupDebugEvent("wallet_lightning_auto_provision_client_timeout", {
+          elapsedMs: Date.now() - startedAt,
+        })
+        // The request keeps running in the background - let it update
+        // lightningProfileState on its own whenever it eventually settles instead of
+        // waiting on it here.
+        void bounded.settlement.catch(() => undefined)
+      }
+    })
   }
 
   // Speed/Lightning provisioning runs concurrently with core Dynamic wallet setup.

@@ -110,6 +110,8 @@ const WHITELISTED_EVENTS = new Set([
   "wallet_dynamic_logout_complete",
   "wallet_dynamic_logout_failed",
   "wallet_setup_cancelled_from_dynamic",
+  "wallet_lightning_auto_provision_client_started",
+  "wallet_lightning_auto_provision_client_timeout",
 ])
 
 const MAX_DETAIL_KEYS = 12

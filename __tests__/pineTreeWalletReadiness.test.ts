@@ -512,6 +512,76 @@ describe("ensureManagedLightningForMerchant", () => {
     expect(syncFn).not.toContain("solanaAddress")
     expect(syncFn).not.toContain("status:")
   })
+
+  it("two concurrent calls for the same merchant create only one Speed connected account", async () => {
+    const concurrentMerchantId = "concurrent-merchant-1"
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({
+      id: concurrentMerchantId,
+      email: "merchant@example.test",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+      business_country: "US",
+    })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "ready",
+      speed_connected_account_id: "acct_concurrent",
+      speed_connected_account_relationship_id: "ca_concurrent",
+      speed_account_id: "acct_concurrent",
+      speed_connected_account_status: "active",
+      setup_url: null,
+      provider_response_summary: {},
+      error_message: null,
+      mode: "test",
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    // No awaits between these two calls - both start before either settles, exercising
+    // the exact React Strict Mode / duplicate-effect-fire race this guards against.
+    const first = ensureManagedLightningForMerchant(concurrentMerchantId)
+    const second = ensureManagedLightningForMerchant(concurrentMerchantId)
+
+    const [firstResult, secondResult] = await Promise.all([first, second])
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledTimes(1)
+    expect(firstResult).toBe(secondResult)
+    expect(firstResult.speedConnectedAccountId).toBe("acct_concurrent")
+  })
+
+  it("a later call after the first settles starts a fresh attempt instead of being permanently deduped", async () => {
+    const sequentialMerchantId = "sequential-merchant-1"
+    mocks.getMerchantLightningProfile.mockResolvedValueOnce(null)
+    mocks.getMerchantById.mockResolvedValue({
+      id: sequentialMerchantId,
+      email: "merchant@example.test",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+      business_country: "US",
+    })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "ready",
+      speed_connected_account_id: "acct_seq",
+      speed_connected_account_relationship_id: "ca_seq",
+      speed_account_id: "acct_seq",
+      speed_connected_account_status: "active",
+      setup_url: null,
+      provider_response_summary: {},
+      error_message: null,
+      mode: "test",
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    const firstResult = await ensureManagedLightningForMerchant(sequentialMerchantId)
+    expect(firstResult.action).toBe("provisioned")
+
+    // Second call: the profile is now active, so it should short-circuit without
+    // calling Speed again - proving the in-flight map was cleared, not left stuck.
+    mocks.getMerchantLightningProfile.mockResolvedValue(
+      lightningProfile({ status: "ready", accountId: "acct_seq", relationshipId: "ca_seq", accountStatus: "active" })
+    )
+    const second = await ensureManagedLightningForMerchant(sequentialMerchantId)
+    expect(second.action).toBe("already_active")
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("no frontend surface calls Speed directly", () => {

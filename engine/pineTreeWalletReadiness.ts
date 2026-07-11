@@ -22,7 +22,7 @@ import {
   getSpeedConnectedAccountSetupStatus
 } from "@/providers/lightning/speedConnectedAccounts"
 import { getMerchantBusinessProfile } from "@/engine/businessProfile"
-import { withOperationTimeout } from "@/engine/promiseTimeout"
+import { withOperationTimeout, OperationTimeoutError } from "@/engine/promiseTimeout"
 import {
   getPineTreeSpeedConfigStatus,
   isSpeedPlatformTreasurySweepEnabled,
@@ -171,13 +171,23 @@ async function syncLightningStatusIntoWalletProfile(
  * Cheap to call on every PineTree Wallet open: the common case (already
  * active) short-circuits on a single DB read before any Speed API call.
  */
-export async function ensureManagedLightningForMerchant(
+async function ensureManagedLightningForMerchantImpl(
   merchantId: string,
   options: EnsureManagedLightningOptions = {}
 ): Promise<EnsureManagedLightningResult> {
   const existing = await getMerchantLightningProfile(merchantId)
 
   if (isActiveLightningProfile(existing)) {
+    console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_existing", {
+      merchant_id: merchantId,
+      status: "ready",
+      existingProfileFound: true,
+      setupUrlPresent: false,
+    })
+    console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_complete", {
+      merchant_id: merchantId,
+      status: "ready",
+    })
     return {
       status: "ready",
       action: "already_active",
@@ -280,6 +290,24 @@ export async function ensureManagedLightningForMerchant(
       providerErrorMessage: checked.error_message,
     })
     await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
+    console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_existing", {
+      merchant_id: merchantId,
+      status: lightningProfile.status,
+      existingProfileFound: true,
+      setupUrlPresent: Boolean(lightningProfile.speed_connect_setup_url),
+    })
+    if (lightningProfile.status === "ready") {
+      console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_complete", {
+        merchant_id: merchantId,
+        status: lightningProfile.status,
+      })
+    } else if (lightningProfile.status === "pending") {
+      console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_pending", {
+        merchant_id: merchantId,
+        status: lightningProfile.status,
+        setupUrlPresent: Boolean(lightningProfile.speed_connect_setup_url),
+      })
+    }
     return {
       status: lightningProfile.status,
       action: "existing_account_checked",
@@ -304,6 +332,11 @@ export async function ensureManagedLightningForMerchant(
       speedConnectedAccountStatus: "business_owner_profile_required",
       providerErrorMessage:
         "Complete your Business Profile to activate payments.",
+    })
+    console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_skipped", {
+      merchant_id: merchantId,
+      status: lightningProfile.status,
+      safeReason: "business_owner_profile_required",
     })
     return {
       status: lightningProfile.status,
@@ -337,6 +370,11 @@ export async function ensureManagedLightningForMerchant(
       providerErrorMessage: "Lightning provisioning needs a valid merchant email.",
     })
     await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
+    console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_skipped", {
+      merchant_id: merchantId,
+      status: lightningProfile.status,
+      safeReason: "missing_valid_email",
+    })
     return {
       status: lightningProfile.status,
       action: "provisioning_incomplete",
@@ -370,6 +408,11 @@ export async function ensureManagedLightningForMerchant(
       providerErrorMessage: "Lightning provisioning needs attention.",
     })
     await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
+    console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_skipped", {
+      merchant_id: merchantId,
+      status: lightningProfile.status,
+      safeReason: "password_policy_failed",
+    })
     return {
       status: lightningProfile.status,
       action: "provisioning_incomplete",
@@ -415,6 +458,17 @@ export async function ensureManagedLightningForMerchant(
       providerErrorMessage: "Lightning provisioning needs attention.",
     })
     await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
+    if (error instanceof OperationTimeoutError) {
+      console.warn("[pinetree-managed-lightning] wallet_lightning_auto_provision_timeout", {
+        merchant_id: merchantId,
+        elapsed_ms: Date.now() - speedStartedAt,
+      })
+    } else {
+      console.warn("[pinetree-managed-lightning] wallet_lightning_auto_provision_failed", {
+        merchant_id: merchantId,
+        elapsed_ms: Date.now() - speedStartedAt,
+      })
+    }
     return {
       status: lightningProfile.status,
       action: "provisioning_incomplete",
@@ -479,6 +533,24 @@ export async function ensureManagedLightningForMerchant(
 
   await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
 
+  console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_created", {
+    merchant_id: merchantId,
+    status: lightningProfile.status,
+    setupUrlPresent: Boolean(lightningProfile.speed_connect_setup_url),
+  })
+  if (lightningProfile.status === "ready") {
+    console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_complete", {
+      merchant_id: merchantId,
+      status: lightningProfile.status,
+    })
+  } else if (lightningProfile.status === "pending") {
+    console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_pending", {
+      merchant_id: merchantId,
+      status: lightningProfile.status,
+      setupUrlPresent: Boolean(lightningProfile.speed_connect_setup_url),
+    })
+  }
+
   return {
     status: lightningProfile.status,
     action: status === "ready" ? "provisioned" : "provisioning_incomplete",
@@ -487,5 +559,51 @@ export async function ensureManagedLightningForMerchant(
     speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
     providerCode: speedSetup.provider_code ?? null,
     fieldErrors: speedSetup.field_errors || [],
+  }
+}
+
+// Single-flight guard, keyed by merchant id: concurrent calls for the same merchant
+// (React Strict Mode double-invoking an effect, a profile refetch, a retry click, or a
+// delayed network retry all landing on the same warm serverless instance) await the
+// same in-flight attempt instead of racing two independent reads of
+// merchant_lightning_profiles and potentially both reaching the Speed Custom Connect
+// create step before either write lands. The durable idempotency record is still the
+// database row itself (checked at the top of the impl above and upserted with
+// onConflict: "merchant_id"); this only closes the same-process TOCTOU window.
+const lightningAutoProvisionInFlight = new Map<string, Promise<EnsureManagedLightningResult>>()
+
+export async function ensureManagedLightningForMerchant(
+  merchantId: string,
+  options: EnsureManagedLightningOptions = {}
+): Promise<EnsureManagedLightningResult> {
+  const alreadyInFlight = lightningAutoProvisionInFlight.get(merchantId)
+  if (alreadyInFlight) {
+    console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_skipped", {
+      merchant_id: merchantId,
+      safeReason: "concurrent_request_in_flight",
+    })
+    return alreadyInFlight
+  }
+
+  const startedAt = Date.now()
+  console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_started", {
+    merchant_id: merchantId,
+  })
+
+  const run = ensureManagedLightningForMerchantImpl(merchantId, options).finally(() => {
+    if (lightningAutoProvisionInFlight.get(merchantId) === run) {
+      lightningAutoProvisionInFlight.delete(merchantId)
+    }
+  })
+  lightningAutoProvisionInFlight.set(merchantId, run)
+
+  try {
+    return await run
+  } catch (error) {
+    console.warn("[pinetree-managed-lightning] wallet_lightning_auto_provision_failed", {
+      merchant_id: merchantId,
+      elapsed_ms: Date.now() - startedAt,
+    })
+    throw error
   }
 }
