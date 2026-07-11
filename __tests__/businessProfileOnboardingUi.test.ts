@@ -48,6 +48,50 @@ describe("Business Profile onboarding UI", () => {
     expect(settings).toContain("Save Business Profile")
   })
 
+  it("settings Business Profile card is compact with concise copy and a right-aligned status pill", () => {
+    const settings = read("app/dashboard/settings/page.tsx")
+    const businessSection = settings.slice(
+      settings.indexOf('<DashboardSection title="Business Profile"'),
+      settings.indexOf('<DashboardSection title="Receipt Preferences"')
+    )
+
+    expect(businessSection).toContain("Business and owner details required for payment activation.")
+    expect(businessSection).toContain("flex items-center justify-between gap-3")
+    expect(businessSection).toContain("shrink-0 rounded-full border px-1.5 py-px text-[10px]")
+    expect(businessSection).toContain("w-full")
+    expect(businessSection).not.toContain("Required business and owner information for payment activation and PineTree Wallet Lightning setup.")
+    expect(businessSection).not.toContain("Complete this profile before activating payments.")
+  })
+
+  it("Business Profile status pills use gray for incomplete, blue for complete, and no green complete styling", () => {
+    const settings = read("app/dashboard/settings/page.tsx")
+    const toneFn = settings.slice(
+      settings.indexOf("function profileStatusTone"),
+      settings.indexOf("function requiredLabel")
+    )
+
+    expect(toneFn).toContain('if (status === "complete") return "border-blue-200 bg-blue-50 text-blue-700"')
+    expect(toneFn).toContain('return "border-gray-200 bg-gray-50 text-gray-700"')
+    expect(toneFn).toContain('if (status === "needs_attention") return "border-red-200 bg-red-50 text-red-700"')
+    expect(toneFn).not.toContain("emerald")
+    expect(toneFn).not.toContain("bg-amber")
+  })
+
+  it("Business Profile modal banner uses shorter payment activation copy without Lightning retry text", () => {
+    const settings = read("app/dashboard/settings/page.tsx")
+    const modalBlock = settings.slice(
+      settings.indexOf('aria-labelledby="business-profile-modal-title"'),
+      settings.indexOf('<DashboardSection title="Business Profile"')
+    )
+
+    expect(modalBlock).toContain("Payment activation")
+    expect(modalBlock).toContain("Complete the required details below to activate payments.")
+    expect(modalBlock).toContain("px-3 py-2")
+    expect(modalBlock).toContain("text-xs font-semibold")
+    expect(modalBlock).not.toContain("Payment activation requirement")
+    expect(modalBlock).not.toContain("retry PineTree Wallet Lightning setup")
+  })
+
   it("Business Profile modal marks only shared required fields with red asterisks", () => {
     const settings = read("app/dashboard/settings/page.tsx")
     const fields = read("engine/businessProfileFields.ts")

@@ -147,9 +147,9 @@ function profileActionLabel(status: "incomplete" | "complete" | "needs_attention
 }
 
 function profileStatusTone(status: "incomplete" | "complete" | "needs_attention") {
-  if (status === "complete") return "border-emerald-200 bg-emerald-50 text-emerald-700"
+  if (status === "complete") return "border-blue-200 bg-blue-50 text-blue-700"
   if (status === "needs_attention") return "border-red-200 bg-red-50 text-red-700"
-  return "border-amber-200 bg-amber-50 text-amber-700"
+  return "border-gray-200 bg-gray-50 text-gray-700"
 }
 
 function requiredLabel(field: BusinessProfileField) {
@@ -691,7 +691,7 @@ export default function SettingsPage() {
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 id="business-profile-modal-title" className="text-lg font-semibold text-gray-950">Business Profile</h2>
-                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${profileStatusTone(profileStatus)}`}>
+                  <span className={`rounded-full border px-1.5 py-px text-[10px] font-semibold ${profileStatusTone(profileStatus)}`}>
                     {profileStatusLabel(profileStatus)}
                   </span>
                 </div>
@@ -706,13 +706,13 @@ export default function SettingsPage() {
               </button>
             </header>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-7">
-              <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-3 text-sm text-blue-900">
-                <p className="font-semibold">Payment activation requirement</p>
-                <p className="mt-1 leading-5">Complete these business and owner details to activate payments and retry PineTree Wallet Lightning setup.</p>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-7">
+              <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-blue-900">
+                <p className="text-xs font-semibold">Payment activation</p>
+                <p className="mt-0.5 text-xs leading-5">Complete the required details below to activate payments.</p>
               </div>
 
-              <div className="mt-5 space-y-6">
+              <div className="mt-4 space-y-5">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Business Information</p>
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -766,26 +766,21 @@ export default function SettingsPage() {
       ) : null}
 
       <DashboardSection title="Business Profile" titleTone="blue">
-        <div id="business-profile" className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-sm font-semibold text-gray-950">Business Profile</p>
-                <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${profileStatusTone(profileStatus)}`}>
-                  {profileStatusLabel(profileStatus)}
-                </span>
-              </div>
-              <p className="mt-1 text-sm leading-5 text-gray-600">
-                Required business and owner information for payment activation and PineTree Wallet Lightning setup.
-              </p>
-              {profileStatus !== "complete" ? (
-                <p className="mt-2 text-xs font-medium text-red-700">Complete this profile before activating payments.</p>
-              ) : null}
+        <div id="business-profile" className="rounded-2xl border border-gray-200 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-3.5">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold text-gray-950">Business Profile</p>
+              <span className={`shrink-0 rounded-full border px-1.5 py-px text-[10px] font-semibold ${profileStatusTone(profileStatus)}`}>
+                {profileStatusLabel(profileStatus)}
+              </span>
             </div>
+            <p className="text-sm leading-5 text-gray-600">
+              Business and owner details required for payment activation.
+            </p>
             <button
               type="button"
               onClick={() => setBusinessProfileOpen(true)}
-              className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+              className="inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
             >
               {profileActionLabel(profileStatus)}
             </button>
