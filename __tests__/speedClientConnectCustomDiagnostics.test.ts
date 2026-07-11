@@ -11,6 +11,33 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const originalEnv = process.env
 
+describe("normalizeSpeedCountry", () => {
+  it("maps known US spellings to US", async () => {
+    const { normalizeSpeedCountry } = await import("@/providers/lightning/speedClient")
+    expect(normalizeSpeedCountry("US")).toBe("US")
+    expect(normalizeSpeedCountry("USA")).toBe("US")
+    expect(normalizeSpeedCountry("United States")).toBe("US")
+    expect(normalizeSpeedCountry("United States of America")).toBe("US")
+    expect(normalizeSpeedCountry("united states")).toBe("US")
+  })
+
+  it("trims whitespace and collapses internal spacing before matching", async () => {
+    const { normalizeSpeedCountry } = await import("@/providers/lightning/speedClient")
+    expect(normalizeSpeedCountry("  US  ")).toBe("US")
+    expect(normalizeSpeedCountry(" United   States ")).toBe("US")
+  })
+
+  it("rejects unsupported or ambiguous values instead of defaulting to US", async () => {
+    const { normalizeSpeedCountry } = await import("@/providers/lightning/speedClient")
+    expect(normalizeSpeedCountry("CA")).toBeNull()
+    expect(normalizeSpeedCountry("Canada")).toBeNull()
+    expect(normalizeSpeedCountry("Mexico")).toBeNull()
+    expect(normalizeSpeedCountry("")).toBeNull()
+    expect(normalizeSpeedCountry(null)).toBeNull()
+    expect(normalizeSpeedCountry(undefined)).toBeNull()
+  })
+})
+
 describe("speedClient /connect/custom", () => {
   let fetchMock: ReturnType<typeof vi.fn>
 
@@ -49,6 +76,43 @@ describe("speedClient /connect/custom", () => {
     const body = JSON.parse(String(init.body))
     expect(body.account_name).toBe("PineTree Test Merchant LLC")
     expect(body.email).toBe("merchant@example.test")
+  })
+
+  it("normalizes a recognized US country spelling to 'US' in the final request body", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ id: "ca_country", account_id: "acct_country", status: "Active" }), {
+        status: 200,
+      })
+    )
+
+    const { createSpeedCustomConnectedAccount } = await import("@/providers/lightning/speedClient")
+    await createSpeedCustomConnectedAccount({
+      country: "United States",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      email: "merchant@example.test",
+      password: "temporary-secret",
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String(init.body))
+    expect(body.country).toBe("US")
+  })
+
+  it("rejects an unsupported country locally without ever calling Speed", async () => {
+    const { createSpeedCustomConnectedAccount } = await import("@/providers/lightning/speedClient")
+
+    await expect(
+      createSpeedCustomConnectedAccount({
+        country: "Canada",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        email: "merchant@example.test",
+        password: "temporary-secret",
+      })
+    ).rejects.toThrow("country is not supported")
+
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it("omits account_name when no business name is available", async () => {

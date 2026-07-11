@@ -53,6 +53,12 @@ export type SpeedConnectedAccountSummary = {
   platform_account_id?: string | null
   account_id: string | null
   account_name: string | null
+  // Reflects Speed's RESPONSE account object, not PineTree's outgoing request -
+  // always false on any error/not_configured summary (there is no response
+  // account to read from) regardless of whether an email was actually sent.
+  // The engine layer validates the email is present and well-formed before
+  // ever calling Speed (see the speedEmail guard in pineTreeWalletReadiness.ts)
+  // - do not read this field as "was email included in the request".
   owner_email_present: boolean
   status: string | null
   type: string | null

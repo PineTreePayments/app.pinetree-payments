@@ -278,6 +278,53 @@ describe("createOrLinkSpeedConnectedAccountForMerchant", () => {
     warnSpy.mockRestore()
   })
 
+  it("owner_email_present in provider_response_summary reflects Speed's response, not the outgoing request - false on an error response even when email was sent", async () => {
+    // Reproduces the exact saved provider_response_summary from a production
+    // country rejection: owner_email_present: false alongside a real
+    // field_errors entry. This is expected - the error path always summarizes
+    // a null account object (there is no response account to read an email
+    // off of), regardless of whether the request itself included an email.
+    speedClientMocks.createSpeedCustomConnectedAccount.mockRejectedValue(
+      new SpeedApiError("Speed API returned 400", 400, "invalid_request_error", [
+        { field: "country", message: "Invalid Country. Your request can't be completed" },
+      ])
+    )
+
+    const result = await createSpeedCustomConnectedAccountForMerchant({
+      merchant_id: "merchant_123",
+      country: "US",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      email: "merchant@example.test",
+      password: "temporary-secret",
+    })
+
+    expect(speedClientMocks.createSpeedCustomConnectedAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "merchant@example.test" })
+    )
+    expect(result.provider_response_summary.owner_email_present).toBe(false)
+  })
+
+  it("owner_email_present reflects Speed's returned account object on success", async () => {
+    speedClientMocks.createSpeedCustomConnectedAccount.mockResolvedValue({
+      id: "ca_email",
+      account_id: "acct_email",
+      status: "Active",
+      owner_email: "merchant@example.test",
+    })
+
+    const result = await createSpeedCustomConnectedAccountForMerchant({
+      merchant_id: "merchant_123",
+      country: "US",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      email: "merchant@example.test",
+      password: "temporary-secret",
+    })
+
+    expect(result.provider_response_summary.owner_email_present).toBe(true)
+  })
+
   it("reports a null provider code and empty field errors for a non-provider (network/unknown) failure", async () => {
     speedClientMocks.createSpeedCustomConnectedAccount.mockRejectedValue(new Error("network unreachable"))
 

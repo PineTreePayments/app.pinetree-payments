@@ -26,6 +26,7 @@ import { withOperationTimeout, OperationTimeoutError } from "@/engine/promiseTim
 import {
   getPineTreeSpeedConfigStatus,
   isSpeedPlatformTreasurySweepEnabled,
+  normalizeSpeedCountry,
   SPEED_PLATFORM_TREASURY_SWEEP_MODE,
   type SpeedFieldError,
 } from "@/providers/lightning/speedClient"
@@ -39,6 +40,7 @@ export type EnsureManagedLightningAction =
   | "needs_business_owner_profile"
   | "needs_valid_phone"
   | "needs_supported_business_type"
+  | "needs_valid_country"
   | "rejection_unchanged"
   | "treasury_sweep_mode"
 
@@ -525,6 +527,36 @@ async function ensureManagedLightningForMerchantImpl(
     }
   }
 
+  const speedCountry = normalizeSpeedCountry(businessProfile.business_country)
+  if (!speedCountry) {
+    console.warn("[pinetree-managed-lightning] speed_country_unsupported", {
+      merchant_id: merchantId,
+      businessCountryPresent: Boolean(businessProfile.business_country),
+    })
+    const lightningProfile = await upsertMerchantLightningProfile({
+      merchantId,
+      status: "needs_attention",
+      speedConnectedAccountStatus: "needs_valid_country",
+      providerErrorMessage: "Review your Business Profile country to finish Bitcoin setup.",
+    })
+    await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
+    console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_skipped", {
+      merchant_id: merchantId,
+      status: lightningProfile.status,
+      safeReason: "country_unsupported",
+    })
+    return {
+      status: lightningProfile.status,
+      action: "needs_valid_country",
+      speedConnectedAccountId: null,
+      speedConnectedAccountRelationshipId: null,
+      speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
+      providerCode: null,
+      fieldErrors: [],
+      merchantMessage: "Review your Business Profile country to finish Bitcoin setup.",
+    }
+  }
+
   const speedAccountType = mapBusinessTypeToSpeedAccountType(businessProfile.business_type)
   if (!speedAccountType) {
     console.warn("[pinetree-managed-lightning] speed_business_type_unsupported", {
@@ -587,7 +619,7 @@ async function ensureManagedLightningForMerchantImpl(
 
   const speedBusinessName = businessProfile.business_dba || businessProfile.legal_business_name || ""
   const requestFingerprint = computeSpeedCustomConnectFingerprint({
-    country: businessProfile.business_country!,
+    country: speedCountry,
     firstName: businessProfile.owner_first_name!,
     lastName: businessProfile.owner_last_name!,
     businessName: speedBusinessName,
@@ -634,7 +666,7 @@ async function ensureManagedLightningForMerchantImpl(
     speedSetup = await withOperationTimeout(
       createSpeedCustomConnectedAccountForMerchant({
         merchant_id: merchantId,
-        country: businessProfile.business_country!,
+        country: speedCountry,
         first_name: businessProfile.owner_first_name!,
         last_name: businessProfile.owner_last_name!,
         email: speedEmail,

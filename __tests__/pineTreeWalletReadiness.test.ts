@@ -54,11 +54,16 @@ vi.mock("@/engine/businessProfile", () => ({
   getMerchantBusinessProfile: mocks.getMerchantBusinessProfile,
 }))
 
-vi.mock("@/providers/lightning/speedClient", () => ({
-  getPineTreeSpeedConfigStatus: mocks.getPineTreeSpeedConfigStatus,
-  isSpeedPlatformTreasurySweepEnabled: mocks.isSpeedPlatformTreasurySweepEnabled,
-  SPEED_PLATFORM_TREASURY_SWEEP_MODE: "speed_platform_treasury_sweep",
-}))
+vi.mock("@/providers/lightning/speedClient", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/providers/lightning/speedClient")>()
+  return {
+    getPineTreeSpeedConfigStatus: mocks.getPineTreeSpeedConfigStatus,
+    isSpeedPlatformTreasurySweepEnabled: mocks.isSpeedPlatformTreasurySweepEnabled,
+    SPEED_PLATFORM_TREASURY_SWEEP_MODE: "speed_platform_treasury_sweep",
+    // Real function, not a mock - exercises the actual country allowlist.
+    normalizeSpeedCountry: actual.normalizeSpeedCountry,
+  }
+})
 
 function lightningProfile(input: {
   status: "not_configured" | "pending" | "ready" | "needs_attention"
@@ -554,6 +559,120 @@ describe("ensureManagedLightningForMerchant", () => {
 
     expect(result.action).toBe("provisioned")
     expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledTimes(1)
+  })
+
+  it("retries the exact country-rejection merchant via forceRetry, reuses the existing account by email, and never touches Base/Solana", async () => {
+    const { computeSpeedCustomConnectFingerprint, ensureManagedLightningForMerchant } = await import(
+      "@/engine/pineTreeWalletReadiness"
+    )
+    // Reproduces the saved provider_response_summary from the production
+    // rejection: a Speed-side country validation failure, fingerprinted
+    // against the (now-fixed) normalized country value.
+    mocks.getMerchantLightningProfile.mockResolvedValue({
+      ...lightningProfile({ status: "needs_attention", accountStatus: "speed_custom_connect_rejected" }),
+      provider_response_summary: {
+        provider_code: "invalid_request_error",
+        field_errors: [{ field: "country", message: "Invalid Country. Your request can't be completed" }],
+        owner_email_present: false,
+        speed_request_fingerprint: computeSpeedCustomConnectFingerprint({
+          country: "US",
+          firstName: "Ada",
+          lastName: "Lovelace",
+          businessName: "",
+          email: "merchant@example.test",
+          accountType: "merchant",
+          phone: "+14155551234",
+        }),
+      },
+    })
+    mocks.getMerchantById.mockResolvedValue({ id: merchantId, email: "merchant@example.test" })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "ready",
+      speed_connected_account_id: "acct_reused",
+      speed_connected_account_relationship_id: "ca_reused",
+      speed_account_id: "acct_reused",
+      speed_connected_account_status: "active",
+      setup_url: null,
+      provider_response_summary: { source: "existing_connected_account" },
+      error_message: null,
+      mode: "test",
+    })
+
+    const result = await ensureManagedLightningForMerchant(merchantId, { forceRetry: true })
+
+    expect(result.action).toBe("provisioned")
+    expect(result.status).toBe("ready")
+    // Exactly one Speed call - createSpeedCustomConnectedAccountForMerchant
+    // itself is responsible for the existing-account-by-email reuse check
+    // that prevents a duplicate Speed account (covered in speedConnectedAccounts.test.ts).
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledTimes(1)
+    // Never recreates the PineTree wallet or Base/Solana - the only wallet
+    // profile write this engine ever issues is the Lightning-status sync.
+    expect(mocks.upsertPineTreeWalletProfile).not.toHaveBeenCalled()
+  })
+
+  it("normalizes a 'United States' Business Profile country value to 'US' before calling Speed", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({ id: merchantId, email: "merchant@example.test" })
+    mocks.getMerchantBusinessProfile.mockResolvedValue({
+      profile_status: "complete",
+      business_country: "United States",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+      business_type: "retail",
+      owner_phone: "+14155551234",
+    })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "ready",
+      speed_connected_account_id: "acct_country_fix",
+      speed_connected_account_relationship_id: "ca_country_fix",
+      speed_account_id: "acct_country_fix",
+      speed_connected_account_status: "active",
+      setup_url: null,
+      provider_response_summary: {},
+      error_message: null,
+      mode: "test",
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    const result = await ensureManagedLightningForMerchant(merchantId)
+
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledWith(
+      expect.objectContaining({ country: "US" })
+    )
+    expect(result.action).toBe("provisioned")
+  })
+
+  it("stops before calling Speed when the Business Profile country cannot be normalized for Speed (e.g. Canada)", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({ id: merchantId, email: "merchant@example.test" })
+    mocks.getMerchantBusinessProfile.mockResolvedValue({
+      profile_status: "complete",
+      business_country: "CA",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+      business_type: "retail",
+      owner_phone: "+14155551234",
+    })
+    const warnSpy = vi.spyOn(console, "warn")
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    const result = await ensureManagedLightningForMerchant(merchantId)
+
+    expect(result.action).toBe("needs_valid_country")
+    expect(result.status).toBe("needs_attention")
+    expect(result.merchantMessage).toBe("Review your Business Profile country to finish Bitcoin setup.")
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).not.toHaveBeenCalled()
+    expect(mocks.upsertMerchantLightningProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        merchantId,
+        status: "needs_attention",
+        speedConnectedAccountStatus: "needs_valid_country",
+      })
+    )
+    // Never logs the raw country value, only a presence boolean.
+    const countryCall = warnSpy.mock.calls.find((call) => call[0] === "[pinetree-managed-lightning] speed_country_unsupported")
+    expect(countryCall?.[1]).toEqual({ merchant_id: merchantId, businessCountryPresent: true })
   })
 
   it("stops before calling Speed when the Business Profile's business_type has no mapped Speed account_type", async () => {

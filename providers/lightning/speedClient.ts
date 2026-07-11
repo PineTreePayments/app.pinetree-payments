@@ -487,6 +487,36 @@ export function getSpeedApiHost(): string {
   }
 }
 
+/**
+ * Explicit allowlist of country spellings Speed's /connect/custom endpoint is
+ * known to accept, mapped to the ISO-style two-letter code Speed expects.
+ * Deliberately narrow: PineTree's general Business Profile country list
+ * (US/CA/MX/GB/AU, see engine/businessProfileLocation.ts) is broader than what
+ * Speed Custom Connect actually supports today - a merchant with a
+ * PineTree-valid, non-US business_country produced Speed's own
+ * "Invalid Country. Your request can't be completed" rejection. Only add an
+ * entry here once it's confirmed to work against Speed's real API.
+ */
+const SPEED_COUNTRY_SYNONYMS: Record<string, string> = {
+  US: "US",
+  USA: "US",
+  "UNITED STATES": "US",
+  "UNITED STATES OF AMERICA": "US",
+}
+
+/**
+ * Normalizes a PineTree country value to the exact code Speed's /connect/custom
+ * expects. Returns null - never a guess, never a silent US default - for
+ * anything not on the explicit allowlist above, so the caller can stop before
+ * issuing a request Speed is guaranteed to reject.
+ */
+export function normalizeSpeedCountry(value?: string | null): string | null {
+  const trimmed = String(value || "").trim()
+  if (!trimmed) return null
+  const normalized = trimmed.toUpperCase().replace(/\s+/g, " ")
+  return SPEED_COUNTRY_SYNONYMS[normalized] ?? null
+}
+
 async function speedRequestWithStatus<T>(
   path: string,
   init?: Omit<RequestInit, "headers"> & { headers?: Record<string, string> }
@@ -824,7 +854,12 @@ function speedConnectCustomDiagnostic(input: {
 export async function createSpeedCustomConnectedAccount(
   params: CreateSpeedCustomConnectedAccountParams
 ): Promise<SpeedConnectedAccountObject> {
-  const country = String(params.country || "").trim().toUpperCase()
+  // Defense in depth: the engine layer (pineTreeWalletReadiness.ts) is expected
+  // to normalize and reject an unsupported country before ever calling this
+  // function, but this client never trusts a caller's country string as-is -
+  // it re-normalizes here too, so a bad value can never reach Speed regardless
+  // of which caller invokes this.
+  const country = normalizeSpeedCountry(params.country)
   const firstName = String(params.firstName || "").trim()
   const lastName = String(params.lastName || "").trim()
   const email = String(params.email || "").trim().toLowerCase()
@@ -833,7 +868,7 @@ export async function createSpeedCustomConnectedAccount(
   const phone = String(params.phone || "").trim()
   const accountType = String(params.accountType || "").trim()
 
-  if (!country) throw new Error("Speed custom connected account country is required.")
+  if (!country) throw new Error("Speed custom connected account country is not supported.")
   if (!firstName) throw new Error("Speed custom connected account first name is required.")
   if (!lastName) throw new Error("Speed custom connected account last name is required.")
   if (!email) throw new Error("Speed custom connected account email is required.")
