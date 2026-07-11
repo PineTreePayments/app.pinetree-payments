@@ -1359,7 +1359,8 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("Manage rails in Providers")
     expect(page).toContain("configured: baseReady, enabled: enabledRails.base")
     expect(page).toContain("configured: solanaReady, enabled: enabledRails.solana")
-    expect(page).toContain("configured: bitcoinReady, enabled: enabledRails.bitcoin")
+    expect(page).toContain("configured: bitcoinReady,")
+    expect(page).toContain("enabled: enabledRails.bitcoin,")
   })
 
   it("marks the merchant wallet Connected when the saved Base/Solana profile is ready", () => {

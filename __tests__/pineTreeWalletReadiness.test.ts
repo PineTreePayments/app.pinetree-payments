@@ -98,6 +98,8 @@ describe("ensureManagedLightningForMerchant", () => {
       business_country: "US",
       owner_first_name: "Ada",
       owner_last_name: "Lovelace",
+      business_type: "retail",
+      owner_phone: "+14155551234",
     })
     mocks.upsertMerchantLightningProfile.mockImplementation(async (input) =>
       lightningProfile({
@@ -188,6 +190,8 @@ describe("ensureManagedLightningForMerchant", () => {
         first_name: "Ada",
         last_name: "Lovelace",
         email: "merchant@example.test",
+        phone: "+14155551234",
+        account_type: "merchant",
       })
     )
     expect(mocks.getMerchantBusinessProfile).toHaveBeenCalledWith(merchantId)
@@ -421,7 +425,9 @@ describe("ensureManagedLightningForMerchant", () => {
       error_message: "Speed custom connected account creation failed.",
       mode: "test",
       provider_code: "invalid_request",
-      field_errors: ["email: already registered"],
+      provider_message: "email already registered",
+      field_errors: [{ field: "email", message: "already registered" }],
+      provider_http_status: 400,
     })
 
     const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
@@ -429,18 +435,165 @@ describe("ensureManagedLightningForMerchant", () => {
 
     expect(result.status).toBe("needs_attention")
     expect(result.providerCode).toBe("invalid_request")
-    expect(result.fieldErrors).toEqual(["email: already registered"])
-    // Persisted alongside the existing provider response summary so the saved
-    // row is diagnosable, not just the request-time logs.
+    expect(result.fieldErrors).toEqual([{ field: "email", message: "already registered" }])
+    // A deterministic 4xx is persisted distinctly so the retry-suppression gate
+    // can recognize it on the next call.
     expect(mocks.upsertMerchantLightningProfile).toHaveBeenCalledWith(
       expect.objectContaining({
         merchantId,
+        speedConnectedAccountStatus: "speed_custom_connect_rejected",
+        // Merchant-safe canned copy only - never Speed's raw provider_message.
+        providerErrorMessage: "Review your Business Profile information to finish Bitcoin setup.",
         providerResponseSummary: expect.objectContaining({
           provider_code: "invalid_request",
-          field_errors: ["email: already registered"],
+          field_errors: [{ field: "email", message: "already registered" }],
+          speed_request_fingerprint: expect.any(String),
         }),
       })
     )
+  })
+
+  it("does not retry Speed automatically when a deterministic rejection is unchanged", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue({
+      ...lightningProfile({ status: "needs_attention", accountStatus: "speed_custom_connect_rejected" }),
+      provider_response_summary: {
+        provider_code: "invalid_request",
+        field_errors: [{ field: "email", message: "already registered" }],
+        // Matches the fingerprint the engine would compute for the unchanged
+        // beforeEach business profile (US / Ada / Lovelace / retail / phone).
+        speed_request_fingerprint: (
+          await import("@/engine/pineTreeWalletReadiness")
+        ).computeSpeedCustomConnectFingerprint({
+          country: "US",
+          firstName: "Ada",
+          lastName: "Lovelace",
+          businessName: "",
+          email: "merchant@example.test",
+          accountType: "merchant",
+          phone: "+14155551234",
+        }),
+      },
+    })
+    mocks.getMerchantById.mockResolvedValue({
+      id: merchantId,
+      email: "merchant@example.test",
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    const result = await ensureManagedLightningForMerchant(merchantId)
+
+    expect(result.action).toBe("rejection_unchanged")
+    expect(result.status).toBe("needs_attention")
+    expect(result.providerCode).toBe("invalid_request")
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).not.toHaveBeenCalled()
+  })
+
+  it("allows a fresh Speed attempt once the fingerprinted Business Profile fields change", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue({
+      ...lightningProfile({ status: "needs_attention", accountStatus: "speed_custom_connect_rejected" }),
+      provider_response_summary: {
+        provider_code: "invalid_request",
+        field_errors: [{ field: "email", message: "already registered" }],
+        speed_request_fingerprint: "stale-fingerprint-from-before-the-edit",
+      },
+    })
+    mocks.getMerchantById.mockResolvedValue({ id: merchantId, email: "merchant@example.test" })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "ready",
+      speed_connected_account_id: "acct_retry",
+      speed_connected_account_relationship_id: "ca_retry",
+      speed_account_id: "acct_retry",
+      speed_connected_account_status: "active",
+      setup_url: null,
+      provider_response_summary: {},
+      error_message: null,
+      mode: "test",
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    const result = await ensureManagedLightningForMerchant(merchantId)
+
+    expect(result.action).toBe("provisioned")
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledTimes(1)
+  })
+
+  it("permits an explicit forceRetry even when the fingerprinted profile is unchanged", async () => {
+    const { computeSpeedCustomConnectFingerprint, ensureManagedLightningForMerchant } = await import(
+      "@/engine/pineTreeWalletReadiness"
+    )
+    mocks.getMerchantLightningProfile.mockResolvedValue({
+      ...lightningProfile({ status: "needs_attention", accountStatus: "speed_custom_connect_rejected" }),
+      provider_response_summary: {
+        provider_code: "invalid_request",
+        field_errors: [],
+        speed_request_fingerprint: computeSpeedCustomConnectFingerprint({
+          country: "US",
+          firstName: "Ada",
+          lastName: "Lovelace",
+          businessName: "",
+          email: "merchant@example.test",
+          accountType: "merchant",
+          phone: "+14155551234",
+        }),
+      },
+    })
+    mocks.getMerchantById.mockResolvedValue({ id: merchantId, email: "merchant@example.test" })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "ready",
+      speed_connected_account_id: "acct_forced",
+      speed_connected_account_relationship_id: "ca_forced",
+      speed_account_id: "acct_forced",
+      speed_connected_account_status: "active",
+      setup_url: null,
+      provider_response_summary: {},
+      error_message: null,
+      mode: "test",
+    })
+
+    const result = await ensureManagedLightningForMerchant(merchantId, { forceRetry: true })
+
+    expect(result.action).toBe("provisioned")
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledTimes(1)
+  })
+
+  it("stops before calling Speed when the Business Profile's business_type has no mapped Speed account_type", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({ id: merchantId, email: "merchant@example.test" })
+    mocks.getMerchantBusinessProfile.mockResolvedValue({
+      profile_status: "complete",
+      business_country: "US",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+      business_type: "some_unmapped_future_type",
+      owner_phone: "+14155551234",
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    const result = await ensureManagedLightningForMerchant(merchantId)
+
+    expect(result.action).toBe("needs_supported_business_type")
+    expect(result.status).toBe("needs_attention")
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).not.toHaveBeenCalled()
+  })
+
+  it("stops before calling Speed when the owner/business phone cannot be normalized to E.164", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({ id: merchantId, email: "merchant@example.test" })
+    mocks.getMerchantBusinessProfile.mockResolvedValue({
+      profile_status: "complete",
+      business_country: "US",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+      business_type: "retail",
+      owner_phone: "123",
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    const result = await ensureManagedLightningForMerchant(merchantId)
+
+    expect(result.action).toBe("needs_valid_phone")
+    expect(result.status).toBe("needs_attention")
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).not.toHaveBeenCalled()
   })
 
   it("reports null providerCode and empty fieldErrors when Speed succeeds or an attempt hasn't run", async () => {
@@ -473,6 +626,8 @@ describe("ensureManagedLightningForMerchant", () => {
       owner_last_name: "Lovelace",
       legal_business_name: "PineTree Test Merchant LLC",
       business_dba: "PineTree Test Merchant",
+      business_type: "retail",
+      owner_phone: "+14155551234",
     })
     mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
       readiness: "ready",
@@ -515,6 +670,8 @@ describe("ensureManagedLightningForMerchant", () => {
       owner_last_name: "Lovelace",
       legal_business_name: "PineTree Test Merchant LLC",
       business_dba: null,
+      business_type: "retail",
+      owner_phone: "+14155551234",
     })
     mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
       readiness: "ready",
@@ -644,6 +801,87 @@ describe("no frontend surface calls Speed directly", () => {
     // own route, which internally delegates to ensureManagedLightningForMerchant.
     expect(walletPage).toContain('"/api/wallets/lightning/pinetree-managed"')
     expect(walletPage).toContain('"/api/merchant/business-owner-profile"')
+  })
+})
+
+describe("normalizeUsPhoneToE164", () => {
+  it("normalizes a 10-digit US number", async () => {
+    const { normalizeUsPhoneToE164 } = await import("@/engine/pineTreeWalletReadiness")
+    expect(normalizeUsPhoneToE164("(415) 555-1234")).toBe("+14155551234")
+    expect(normalizeUsPhoneToE164("415-555-1234")).toBe("+14155551234")
+  })
+
+  it("normalizes an 11-digit number with a leading country code", async () => {
+    const { normalizeUsPhoneToE164 } = await import("@/engine/pineTreeWalletReadiness")
+    expect(normalizeUsPhoneToE164("14155551234")).toBe("+14155551234")
+  })
+
+  it("passes through an already-E.164 number unchanged", async () => {
+    const { normalizeUsPhoneToE164 } = await import("@/engine/pineTreeWalletReadiness")
+    expect(normalizeUsPhoneToE164("+14155551234")).toBe("+14155551234")
+  })
+
+  it("returns null instead of manufacturing a number for invalid input", async () => {
+    const { normalizeUsPhoneToE164 } = await import("@/engine/pineTreeWalletReadiness")
+    expect(normalizeUsPhoneToE164("123")).toBeNull()
+    expect(normalizeUsPhoneToE164("")).toBeNull()
+    expect(normalizeUsPhoneToE164(null)).toBeNull()
+    expect(normalizeUsPhoneToE164("+44 20 7946 0958")).toBeNull()
+  })
+})
+
+describe("mapBusinessTypeToSpeedAccountType", () => {
+  it("maps every known PineTree business_type UI value to a Speed account_type", async () => {
+    const { mapBusinessTypeToSpeedAccountType } = await import("@/engine/pineTreeWalletReadiness")
+    for (const type of ["retail", "restaurant", "services", "online"]) {
+      expect(mapBusinessTypeToSpeedAccountType(type)).toBe("merchant")
+    }
+  })
+
+  it("returns null for a missing or unrecognized business_type instead of guessing", async () => {
+    const { mapBusinessTypeToSpeedAccountType } = await import("@/engine/pineTreeWalletReadiness")
+    expect(mapBusinessTypeToSpeedAccountType(null)).toBeNull()
+    expect(mapBusinessTypeToSpeedAccountType("")).toBeNull()
+    expect(mapBusinessTypeToSpeedAccountType("some_future_type")).toBeNull()
+  })
+})
+
+describe("getLightningNeedsAttentionMerchantMessage", () => {
+  it("returns the Business Profile message for a 4xx with field errors", async () => {
+    const { getLightningNeedsAttentionMerchantMessage } = await import("@/engine/pineTreeWalletReadiness")
+    expect(
+      getLightningNeedsAttentionMerchantMessage({ providerHttpStatus: 400, fieldErrorCount: 1 })
+    ).toBe("Review your Business Profile information to finish Bitcoin setup.")
+  })
+
+  it("returns the temporary-unavailable message for a 5xx or missing status (timeout/network)", async () => {
+    const { getLightningNeedsAttentionMerchantMessage } = await import("@/engine/pineTreeWalletReadiness")
+    expect(
+      getLightningNeedsAttentionMerchantMessage({ providerHttpStatus: 500, fieldErrorCount: 0 })
+    ).toBe("Bitcoin setup is temporarily unavailable. Try again.")
+    expect(
+      getLightningNeedsAttentionMerchantMessage({ providerHttpStatus: null, fieldErrorCount: 0 })
+    ).toBe("Bitcoin setup is temporarily unavailable. Try again.")
+  })
+
+  it("falls back to the generic needs-attention message for an unclassified rejection", async () => {
+    const { getLightningNeedsAttentionMerchantMessage } = await import("@/engine/pineTreeWalletReadiness")
+    expect(
+      getLightningNeedsAttentionMerchantMessage({ providerHttpStatus: 400, fieldErrorCount: 0 })
+    ).toBe("Bitcoin setup needs attention.")
+  })
+
+  it("never returns Speed's raw provider message", async () => {
+    const { getLightningNeedsAttentionMerchantMessage } = await import("@/engine/pineTreeWalletReadiness")
+    const messages = [
+      getLightningNeedsAttentionMerchantMessage({ providerHttpStatus: 400, fieldErrorCount: 1 }),
+      getLightningNeedsAttentionMerchantMessage({ providerHttpStatus: 500, fieldErrorCount: 0 }),
+      getLightningNeedsAttentionMerchantMessage({ providerHttpStatus: 400, fieldErrorCount: 0 }),
+    ]
+    for (const message of messages) {
+      expect(message).not.toContain("Speed")
+      expect(message).not.toContain("email")
+    }
   })
 })
 

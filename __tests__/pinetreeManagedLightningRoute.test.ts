@@ -38,8 +38,10 @@ vi.mock("@/engine/pineTreeWalletReadiness", () => ({
   ensureManagedLightningForMerchant: mocks.ensureManagedLightningForMerchant,
 }))
 
-function request() {
-  return new NextRequest("https://app.test/api/wallets/lightning/pinetree-managed", {
+function request(searchParams?: Record<string, string>) {
+  const url = new URL("https://app.test/api/wallets/lightning/pinetree-managed")
+  for (const [key, value] of Object.entries(searchParams || {})) url.searchParams.set(key, value)
+  return new NextRequest(url, {
     method: "POST",
   })
 }
@@ -95,7 +97,10 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
     const body = await response.json()
 
     expect(response.status).toBe(200)
-    expect(mocks.ensureManagedLightningForMerchant).toHaveBeenCalledWith(merchantId, { authEmail: "auth@example.test" })
+    expect(mocks.ensureManagedLightningForMerchant).toHaveBeenCalledWith(
+      merchantId,
+      { authEmail: "auth@example.test", forceRetry: false }
+    )
     expect(body.profile.status).toBe("ready")
     expect(body.profile.speed_connected_account_id).toBe("acct_123")
     expect(body.profile.speed_connected_account_relationship_id).toBe("ca_123")
@@ -103,18 +108,19 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
     expect(JSON.stringify(body)).not.toContain("sk_live")
   })
 
-  it("returns a structured status/providerCode/fieldErrors alongside the existing profile/setup_status fields", async () => {
+  it("returns a structured status/providerCode/fieldErrors/merchantMessage alongside the existing profile/setup_status fields", async () => {
     mocks.ensureManagedLightningForMerchant.mockResolvedValue({
       status: "needs_attention",
       action: "provisioning_incomplete",
       speedConnectedAccountId: null,
       speedConnectedAccountRelationshipId: null,
-      speedConnectedAccountStatus: "speed_custom_connect_failed",
+      speedConnectedAccountStatus: "speed_custom_connect_rejected",
       providerCode: "invalid_request",
-      fieldErrors: ["email: already registered"],
+      fieldErrors: [{ field: "email", message: "already registered" }],
+      merchantMessage: "Review your Business Profile information to finish Bitcoin setup.",
     })
     mocks.getMerchantLightningProfile.mockResolvedValue(
-      savedProfile({ status: "needs_attention", accountStatus: "speed_custom_connect_failed" })
+      savedProfile({ status: "needs_attention", accountStatus: "speed_custom_connect_rejected" })
     )
 
     const { POST } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
@@ -124,10 +130,49 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
     expect(response.status).toBe(200)
     expect(body.status).toBe("needs_attention")
     expect(body.providerCode).toBe("invalid_request")
-    expect(body.fieldErrors).toEqual(["email: already registered"])
+    expect(body.fieldErrors).toEqual([{ field: "email", message: "already registered" }])
+    expect(body.merchantMessage).toBe("Review your Business Profile information to finish Bitcoin setup.")
     // Existing fields are preserved for backward compatibility.
     expect(body.setup_status).toBe("needs_attention")
     expect(body.profile.status).toBe("needs_attention")
+  })
+
+  it("passes forceRetry through to ensureManagedLightningForMerchant only when ?retry=true is present", async () => {
+    mocks.ensureManagedLightningForMerchant.mockResolvedValue({
+      status: "ready",
+      action: "provisioned",
+      speedConnectedAccountId: "acct_123",
+      speedConnectedAccountRelationshipId: "ca_123",
+      speedConnectedAccountStatus: "active",
+    })
+    mocks.getMerchantLightningProfile.mockResolvedValue(savedProfile({ status: "ready", accountId: "acct_123" }))
+
+    const { POST } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
+    await POST(request({ retry: "true" }))
+
+    expect(mocks.ensureManagedLightningForMerchant).toHaveBeenCalledWith(
+      merchantId,
+      { authEmail: "auth@example.test", forceRetry: true }
+    )
+  })
+
+  it("does not force a retry on the normal automatic call (no query param)", async () => {
+    mocks.ensureManagedLightningForMerchant.mockResolvedValue({
+      status: "ready",
+      action: "already_active",
+      speedConnectedAccountId: "acct_123",
+      speedConnectedAccountRelationshipId: "ca_123",
+      speedConnectedAccountStatus: "active",
+    })
+    mocks.getMerchantLightningProfile.mockResolvedValue(savedProfile({ status: "ready", accountId: "acct_123" }))
+
+    const { POST } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
+    await POST(request())
+
+    expect(mocks.ensureManagedLightningForMerchant).toHaveBeenCalledWith(
+      merchantId,
+      { authEmail: "auth@example.test", forceRetry: false }
+    )
   })
 
   it("Speed failure (needs_attention/retryable) never turns into a non-200 response - the wallet page never sees a hard failure from Lightning alone", async () => {
@@ -138,7 +183,7 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
       speedConnectedAccountRelationshipId: null,
       speedConnectedAccountStatus: "speed_custom_connect_failed",
       providerCode: "invalid_request",
-      fieldErrors: ["password: too weak"],
+      fieldErrors: [{ field: "password", message: "too weak" }],
     })
     mocks.getMerchantLightningProfile.mockResolvedValue(
       savedProfile({ status: "needs_attention", accountStatus: "speed_custom_connect_failed" })

@@ -7,7 +7,7 @@
  * merchants never see a Speed signup/OAuth flow.
  */
 
-import { randomBytes, randomInt } from "node:crypto"
+import { createHash, randomBytes, randomInt } from "node:crypto"
 import { getMerchantById } from "@/database/merchants"
 import {
   getMerchantLightningProfile,
@@ -27,6 +27,7 @@ import {
   getPineTreeSpeedConfigStatus,
   isSpeedPlatformTreasurySweepEnabled,
   SPEED_PLATFORM_TREASURY_SWEEP_MODE,
+  type SpeedFieldError,
 } from "@/providers/lightning/speedClient"
 
 export type EnsureManagedLightningAction =
@@ -36,6 +37,9 @@ export type EnsureManagedLightningAction =
   | "provisioning_incomplete"
   | "needs_business_profile"
   | "needs_business_owner_profile"
+  | "needs_valid_phone"
+  | "needs_supported_business_type"
+  | "rejection_unchanged"
   | "treasury_sweep_mode"
 
 export type EnsureManagedLightningResult = {
@@ -47,11 +51,102 @@ export type EnsureManagedLightningResult = {
   // Speed's own error code and sanitized per-field validation messages from the
   // most recent /connect/custom attempt, when one failed. Null/empty otherwise.
   providerCode: string | null
-  fieldErrors: string[]
+  fieldErrors: SpeedFieldError[]
+  // Canned, merchant-safe copy (never Speed's raw message) - null when ready/pending.
+  merchantMessage: string | null
 }
 
 export type EnsureManagedLightningOptions = {
   authEmail?: string | null
+  // Bypasses the "unchanged profile after a deterministic rejection" retry
+  // gate for exactly one attempt. Set from an explicit merchant-initiated
+  // retry action, never from the automatic on-open provisioning call.
+  forceRetry?: boolean
+}
+
+const SPEED_BUSINESS_TYPE_TO_ACCOUNT_TYPE: Record<string, string> = {
+  retail: "merchant",
+  restaurant: "merchant",
+  services: "merchant",
+  online: "merchant",
+}
+
+/**
+ * Maps PineTree's Business Profile `business_type` UI label to the enum value
+ * Speed's /connect/custom `account_type` field expects. Returns null for a
+ * missing/unrecognized value so the caller can stop before issuing a request
+ * Speed is guaranteed to reject, rather than forwarding PineTree's raw label.
+ */
+export function mapBusinessTypeToSpeedAccountType(businessType?: string | null): string | null {
+  const key = String(businessType || "").trim().toLowerCase()
+  if (!key) return null
+  return SPEED_BUSINESS_TYPE_TO_ACCOUNT_TYPE[key] ?? null
+}
+
+const US_PHONE_10_DIGIT_RE = /^\d{10}$/
+
+/**
+ * Normalizes a US phone number to E.164 (+1XXXXXXXXXX). Accepts 10-digit
+ * national numbers, 11-digit numbers with a leading country-code 1, or an
+ * already-E.164 +1 number. Returns null for anything else instead of
+ * manufacturing a number - the caller must treat null as "reject locally".
+ */
+export function normalizeUsPhoneToE164(value?: string | null): string | null {
+  const raw = String(value || "").trim()
+  if (!raw) return null
+  if (/^\+1\d{10}$/.test(raw)) return raw
+  const digits = raw.replace(/\D/g, "")
+  if (US_PHONE_10_DIGIT_RE.test(digits)) return `+1${digits}`
+  if (digits.length === 11 && digits.startsWith("1") && US_PHONE_10_DIGIT_RE.test(digits.slice(1))) {
+    return `+1${digits.slice(1)}`
+  }
+  return null
+}
+
+/**
+ * Stable fingerprint of the Business Profile fields that feed the Speed
+ * /connect/custom request. Used to decide whether a previously-rejected
+ * profile has actually changed before allowing another automatic attempt.
+ */
+export function computeSpeedCustomConnectFingerprint(input: {
+  country: string
+  firstName: string
+  lastName: string
+  businessName: string
+  email: string
+  accountType: string
+  phone: string
+}): string {
+  return createHash("sha256")
+    .update(JSON.stringify([
+      input.country,
+      input.firstName,
+      input.lastName,
+      input.businessName,
+      input.email,
+      input.accountType,
+      input.phone,
+    ]))
+    .digest("hex")
+    .slice(0, 32)
+}
+
+/**
+ * Canned, merchant-safe copy for a Lightning profile in needs_attention.
+ * Never surfaces Speed's raw provider message - only a category-level string.
+ */
+export function getLightningNeedsAttentionMerchantMessage(input: {
+  providerHttpStatus?: number | null
+  fieldErrorCount?: number
+}): string {
+  const status = input.providerHttpStatus ?? null
+  if (status != null && status >= 400 && status < 500 && (input.fieldErrorCount ?? 0) > 0) {
+    return "Review your Business Profile information to finish Bitcoin setup."
+  }
+  if (status == null || status >= 500) {
+    return "Bitcoin setup is temporarily unavailable. Try again."
+  }
+  return "Bitcoin setup needs attention."
 }
 
 const ACTIVE_SPEED_ACCOUNT_STATUSES = new Set([
@@ -197,6 +292,7 @@ async function ensureManagedLightningForMerchantImpl(
       speedConnectedAccountStatus: existing!.speed_connected_account_status,
       providerCode: null,
       fieldErrors: [],
+      merchantMessage: null,
     }
   }
 
@@ -267,6 +363,7 @@ async function ensureManagedLightningForMerchantImpl(
       speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
       providerCode: null,
       fieldErrors: [],
+      merchantMessage: null,
     }
   }
 
@@ -317,6 +414,7 @@ async function ensureManagedLightningForMerchantImpl(
       speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
       providerCode: null,
       fieldErrors: [],
+      merchantMessage: null,
     }
   }
 
@@ -346,6 +444,7 @@ async function ensureManagedLightningForMerchantImpl(
       speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
       providerCode: null,
       fieldErrors: [],
+      merchantMessage: null,
     }
   }
 
@@ -383,6 +482,7 @@ async function ensureManagedLightningForMerchantImpl(
       speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
       providerCode: null,
       fieldErrors: [],
+      merchantMessage: null,
     }
   }
 
@@ -421,6 +521,106 @@ async function ensureManagedLightningForMerchantImpl(
       speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
       providerCode: null,
       fieldErrors: [],
+      merchantMessage: null,
+    }
+  }
+
+  const speedAccountType = mapBusinessTypeToSpeedAccountType(businessProfile.business_type)
+  if (!speedAccountType) {
+    console.warn("[pinetree-managed-lightning] speed_business_type_unsupported", {
+      merchant_id: merchantId,
+      businessTypePresent: Boolean(businessProfile.business_type),
+    })
+    const lightningProfile = await upsertMerchantLightningProfile({
+      merchantId,
+      status: "needs_attention",
+      speedConnectedAccountStatus: "speed_business_type_unsupported",
+      providerErrorMessage: "Review your Business Profile information to finish Bitcoin setup.",
+    })
+    await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
+    console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_skipped", {
+      merchant_id: merchantId,
+      status: lightningProfile.status,
+      safeReason: "business_type_unsupported",
+    })
+    return {
+      status: lightningProfile.status,
+      action: "needs_supported_business_type",
+      speedConnectedAccountId: null,
+      speedConnectedAccountRelationshipId: null,
+      speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
+      providerCode: null,
+      fieldErrors: [],
+      merchantMessage: "Review your Business Profile information to finish Bitcoin setup.",
+    }
+  }
+
+  const speedPhone = normalizeUsPhoneToE164(businessProfile.owner_phone || businessProfile.business_phone)
+  if (!speedPhone) {
+    console.warn("[pinetree-managed-lightning] speed_phone_invalid", {
+      merchant_id: merchantId,
+      phonePresent: Boolean(businessProfile.owner_phone || businessProfile.business_phone),
+    })
+    const lightningProfile = await upsertMerchantLightningProfile({
+      merchantId,
+      status: "needs_attention",
+      speedConnectedAccountStatus: "speed_phone_invalid",
+      providerErrorMessage: "Review your Business Profile information to finish Bitcoin setup.",
+    })
+    await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
+    console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_skipped", {
+      merchant_id: merchantId,
+      status: lightningProfile.status,
+      safeReason: "phone_invalid",
+    })
+    return {
+      status: lightningProfile.status,
+      action: "needs_valid_phone",
+      speedConnectedAccountId: null,
+      speedConnectedAccountRelationshipId: null,
+      speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
+      providerCode: null,
+      fieldErrors: [],
+      merchantMessage: "Review your Business Profile information to finish Bitcoin setup.",
+    }
+  }
+
+  const speedBusinessName = businessProfile.business_dba || businessProfile.legal_business_name || ""
+  const requestFingerprint = computeSpeedCustomConnectFingerprint({
+    country: businessProfile.business_country!,
+    firstName: businessProfile.owner_first_name!,
+    lastName: businessProfile.owner_last_name!,
+    businessName: speedBusinessName,
+    email: speedEmail,
+    accountType: speedAccountType,
+    phone: speedPhone,
+  })
+
+  // A deterministic Speed validation rejection (4xx) must not be retried
+  // automatically on every wallet open - only when the fingerprinted profile
+  // fields have actually changed, or the caller asked for an explicit retry.
+  const existingSummary = existing?.provider_response_summary ?? null
+  const priorFingerprint = String(existingSummary?.speed_request_fingerprint || "")
+  const priorWasDeterministicRejection = existing?.speed_connected_account_status === "speed_custom_connect_rejected"
+  if (priorWasDeterministicRejection && priorFingerprint === requestFingerprint && !options.forceRetry) {
+    const priorFieldErrors = (existingSummary?.field_errors as SpeedFieldError[] | undefined) ?? []
+    console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_skipped", {
+      merchant_id: merchantId,
+      status: "needs_attention",
+      safeReason: "deterministic_rejection_unchanged",
+    })
+    return {
+      status: "needs_attention",
+      action: "rejection_unchanged",
+      speedConnectedAccountId: null,
+      speedConnectedAccountRelationshipId: null,
+      speedConnectedAccountStatus: existing?.speed_connected_account_status ?? null,
+      providerCode: (existingSummary?.provider_code as string | undefined) ?? null,
+      fieldErrors: priorFieldErrors,
+      merchantMessage: getLightningNeedsAttentionMerchantMessage({
+        providerHttpStatus: 400,
+        fieldErrorCount: priorFieldErrors.length,
+      }),
     }
   }
 
@@ -439,7 +639,9 @@ async function ensureManagedLightningForMerchantImpl(
         last_name: businessProfile.owner_last_name!,
         email: speedEmail,
         password: speedPassword,
-        business_name: businessProfile.business_dba || businessProfile.legal_business_name,
+        business_name: speedBusinessName,
+        phone: speedPhone,
+        account_type: speedAccountType,
         email_valid: isValidSpeedCustomConnectEmail(speedEmail),
         password_policy_valid: passwordPolicyPass,
       }),
@@ -482,6 +684,7 @@ async function ensureManagedLightningForMerchantImpl(
       // which carries a provider response to report.
       providerCode: null,
       fieldErrors: [],
+      merchantMessage: null,
     }
   } finally {
     console.info("[pinetree-managed-lightning] provisioning_timing", {
@@ -498,23 +701,45 @@ async function ensureManagedLightningForMerchantImpl(
         ? "needs_attention"
         : "pending"
 
+  // A 4xx from Speed is a deterministic validation rejection - distinguish it
+  // from a generic/transient failure so the fingerprint-unchanged retry gate
+  // (above) only ever suppresses retries for the case it's meant for.
+  const isDeterministicRejection = Boolean(
+    speedSetup.provider_http_status && speedSetup.provider_http_status >= 400 && speedSetup.provider_http_status < 500
+  )
+  const speedConnectedAccountStatus = status === "needs_attention" && isDeterministicRejection
+    ? "speed_custom_connect_rejected"
+    : speedSetup.speed_connected_account_status
+  const speedFieldErrors = speedSetup.field_errors || []
+  const merchantMessage = status === "needs_attention"
+    ? getLightningNeedsAttentionMerchantMessage({
+        providerHttpStatus: speedSetup.provider_http_status,
+        fieldErrorCount: speedFieldErrors.length,
+      })
+    : null
+
   const lightningProfile = await upsertMerchantLightningProfile({
     merchantId,
     status,
     speedConnectedAccountId: speedSetup.speed_account_id || speedSetup.speed_connected_account_id,
     speedConnectedAccountRelationshipId: speedSetup.speed_connected_account_relationship_id,
     speedAccountId: speedSetup.speed_account_id,
-    speedConnectedAccountStatus: speedSetup.speed_connected_account_status,
+    speedConnectedAccountStatus,
     speedConnectSetupUrl: speedSetup.setup_url,
-    // Persist Speed's own error code and sanitized field errors alongside the
-    // existing response summary so a rejected /connect/custom attempt is
-    // diagnosable from the saved row, not just the request-time logs.
+    // Persist Speed's own error code, sanitized field errors, and the request
+    // fingerprint alongside the existing response summary so a rejected
+    // /connect/custom attempt is diagnosable from the saved row (not just the
+    // request-time logs) and so the next call can tell whether the Business
+    // Profile actually changed before allowing another automatic attempt.
     providerResponseSummary: {
       ...speedSetup.provider_response_summary,
       ...(speedSetup.provider_code ? { provider_code: speedSetup.provider_code } : {}),
-      ...((speedSetup.field_errors || []).length > 0 ? { field_errors: speedSetup.field_errors } : {}),
+      ...(speedFieldErrors.length > 0 ? { field_errors: speedFieldErrors } : {}),
+      speed_request_fingerprint: requestFingerprint,
     },
-    providerErrorMessage: speedSetup.error_message,
+    // Merchant-safe canned copy only - Speed's raw provider_message never
+    // leaves the structured log/diagnostic event.
+    providerErrorMessage: merchantMessage,
   })
 
   if (lightningProfile.speed_account_id) {
@@ -559,6 +784,7 @@ async function ensureManagedLightningForMerchantImpl(
     speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
     providerCode: speedSetup.provider_code ?? null,
     fieldErrors: speedSetup.field_errors || [],
+    merchantMessage,
   }
 }
 

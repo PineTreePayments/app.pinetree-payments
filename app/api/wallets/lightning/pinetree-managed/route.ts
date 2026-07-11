@@ -120,13 +120,17 @@ export async function POST(req: NextRequest) {
   try {
     const auth = await requireMerchantAuthFromRequest(req)
     const merchantId = auth.merchantId
-    console.info("[pinetree-managed-lightning] POST start", { merchant_id: merchantId })
+    // Explicit, merchant-initiated retry only - never set by the automatic
+    // on-open provisioning call. Bypasses the deterministic-rejection /
+    // unchanged-profile retry gate for exactly this one attempt.
+    const forceRetry = req.nextUrl.searchParams.get("retry") === "true"
+    console.info("[pinetree-managed-lightning] POST start", { merchant_id: merchantId, forceRetry })
     const ensureStartedAt = Date.now()
 
     let ensureResult: Awaited<ReturnType<typeof ensureManagedLightningForMerchant>> | null = null
     try {
       ensureResult = await withOperationTimeout(
-        ensureManagedLightningForMerchant(merchantId, { authEmail: auth.email }),
+        ensureManagedLightningForMerchant(merchantId, { authEmail: auth.email, forceRetry }),
         LIGHTNING_PROVISIONING_TIMEOUT_MS,
         "managed lightning provisioning"
       )
@@ -171,6 +175,7 @@ export async function POST(req: NextRequest) {
         status: retryableStatus,
         providerCode: null,
         fieldErrors: [],
+        merchantMessage: null,
         message: "Wallet setup is still processing. Please try again shortly.",
       })
     }
@@ -185,6 +190,8 @@ export async function POST(req: NextRequest) {
       status: profile?.status || "pending",
       providerCode: ensureResult?.providerCode ?? null,
       fieldErrors: ensureResult?.fieldErrors ?? [],
+      // Canned, merchant-safe copy only - never Speed's raw provider message.
+      merchantMessage: ensureResult?.merchantMessage ?? null,
     })
   } catch (error) {
     return NextResponse.json(

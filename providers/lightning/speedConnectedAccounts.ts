@@ -10,10 +10,12 @@ import {
   createSpeedConnectAccountLink,
   createSpeedCustomConnectedAccount,
   getPineTreeSpeedConfigStatus,
+  getSpeedApiHost,
   listSpeedConnectedAccounts,
   retrieveSpeedConnectedAccount,
   SpeedApiError,
   type SpeedConnectedAccountObject,
+  type SpeedFieldError,
   type SpeedMode,
 } from "./speedClient"
 
@@ -34,6 +36,12 @@ export type CreateSpeedCustomConnectedAccountForMerchantInput = {
   email: string
   password: string
   business_name?: string | null
+  // E.164-normalized phone, pre-validated by the caller. Never manufactured
+  // here - omitted from the Speed request entirely when not provided.
+  phone?: string | null
+  // Speed's account_type enum value, pre-mapped by the caller from PineTree's
+  // business_type UI label via an explicit mapping table.
+  account_type?: string | null
   // Pre-computed policy checks from the caller (single source of truth in
   // pineTreeWalletReadiness.ts) - forwarded only for request diagnostics.
   email_valid?: boolean
@@ -69,7 +77,13 @@ export type CreateOrLinkSpeedConnectedAccountResult = {
   // rejected /connect/custom request (e.g. HTTP 400) - null/empty on success or
   // when Speed's response body didn't include field-level detail.
   provider_code: string | null
-  field_errors: string[]
+  provider_message: string | null
+  field_errors: SpeedFieldError[]
+  // HTTP status of the rejected Speed response, when one exists. Used by the
+  // caller to distinguish a deterministic validation rejection (4xx - must not
+  // be retried with an unchanged profile) from a transient/provider failure
+  // (5xx, timeout, network) - both otherwise collapse into "needs_attention".
+  provider_http_status: number | null
 }
 
 const READY_SPEED_ACCOUNT_STATUSES = new Set([
@@ -169,7 +183,9 @@ function result(input: {
   mode: SpeedMode
   usedLiveApi: boolean
   providerCode?: string | null
-  fieldErrors?: string[]
+  providerMessage?: string | null
+  fieldErrors?: SpeedFieldError[]
+  providerHttpStatus?: number | null
 }): CreateOrLinkSpeedConnectedAccountResult {
   const providerStatus = input.speedConnectedAccountStatus || input.summary.status || input.status
   return {
@@ -180,7 +196,9 @@ function result(input: {
     speed_connected_account_status: input.speedConnectedAccountStatus || null,
     setup_url: input.setupUrl || null,
     provider_code: input.providerCode || null,
+    provider_message: input.providerMessage || null,
     field_errors: input.fieldErrors || [],
+    provider_http_status: input.providerHttpStatus ?? null,
     provider_response_summary: input.summary,
     error_message: input.errorMessage || null,
     raw_provider_status: providerStatus,
@@ -283,6 +301,8 @@ export async function createSpeedCustomConnectedAccountForMerchant(
       email: input.email,
       password: input.password,
       businessName: input.business_name,
+      phone: input.phone,
+      accountType: input.account_type,
       emailValid: input.email_valid,
       passwordPolicyValid: input.password_policy_valid,
     })
@@ -317,11 +337,25 @@ export async function createSpeedCustomConnectedAccountForMerchant(
     // collapsing every failure into the same generic "failed" bucket.
     const isSpeedApiError = error instanceof SpeedApiError
     if (isSpeedApiError) {
-      console.warn("[speed-custom-connect] custom_account_create_provider_rejected", {
+      // Structured event: everything an operator needs to diagnose a rejected
+      // /connect/custom request without ever seeing a secret, password, email,
+      // phone, name, or address value - see the safe-field allowlist below.
+      console.warn("[speed-custom-connect] speed_custom_connect_rejected", {
         merchant_id: input.merchant_id,
         status: error.status,
-        providerCode: error.providerCode,
-        fieldErrorCount: error.fieldErrors.length,
+        provider_code: error.providerCode,
+        provider_message: error.providerMessage,
+        field_errors: error.fieldErrors,
+        request_presence: {
+          email: Boolean(input.email),
+          password: Boolean(input.password),
+          business_name: Boolean(input.business_name),
+          first_name: Boolean(input.first_name),
+          last_name: Boolean(input.last_name),
+          phone: Boolean(input.phone),
+        },
+        api_host: getSpeedApiHost(),
+        elapsed_ms: Date.now() - startedAt,
       })
     }
     return result({
@@ -332,7 +366,9 @@ export async function createSpeedCustomConnectedAccountForMerchant(
       mode: config.mode,
       usedLiveApi: true,
       providerCode: isSpeedApiError ? error.providerCode : null,
+      providerMessage: isSpeedApiError ? error.providerMessage : null,
       fieldErrors: isSpeedApiError ? error.fieldErrors : [],
+      providerHttpStatus: isSpeedApiError ? error.status : null,
     })
   }
 }

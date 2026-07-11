@@ -4,6 +4,7 @@ const speedClientMocks = vi.hoisted(() => ({
   createSpeedCustomConnectedAccount: vi.fn(),
   createSpeedConnectAccountLink: vi.fn(),
   getPineTreeSpeedConfigStatus: vi.fn(),
+  getSpeedApiHost: vi.fn(() => "api.tryspeed.test"),
   listSpeedConnectedAccounts: vi.fn(),
   retrieveSpeedConnectedAccount: vi.fn(),
 }))
@@ -14,6 +15,7 @@ vi.mock("@/providers/lightning/speedClient", async (importOriginal) => {
     createSpeedCustomConnectedAccount: speedClientMocks.createSpeedCustomConnectedAccount,
     createSpeedConnectAccountLink: speedClientMocks.createSpeedConnectAccountLink,
     getPineTreeSpeedConfigStatus: speedClientMocks.getPineTreeSpeedConfigStatus,
+    getSpeedApiHost: speedClientMocks.getSpeedApiHost,
     listSpeedConnectedAccounts: speedClientMocks.listSpeedConnectedAccounts,
     retrieveSpeedConnectedAccount: speedClientMocks.retrieveSpeedConnectedAccount,
     // Real class, not a mock - speedConnectedAccounts.ts does `instanceof
@@ -175,7 +177,7 @@ describe("createOrLinkSpeedConnectedAccountForMerchant", () => {
     })
   })
 
-  it("forwards businessName and pre-computed policy booleans to the Speed client call", async () => {
+  it("forwards businessName, phone, accountType, and pre-computed policy booleans to the Speed client call", async () => {
     speedClientMocks.createSpeedCustomConnectedAccount.mockResolvedValue({
       id: "ca_custom_biz",
       account_id: "acct_custom_biz",
@@ -190,6 +192,8 @@ describe("createOrLinkSpeedConnectedAccountForMerchant", () => {
       email: "merchant@example.test",
       password: "temporary-secret",
       business_name: "PineTree Test Merchant LLC",
+      phone: "+14155551234",
+      account_type: "merchant",
       email_valid: true,
       password_policy_valid: true,
     })
@@ -197,6 +201,8 @@ describe("createOrLinkSpeedConnectedAccountForMerchant", () => {
     expect(speedClientMocks.createSpeedCustomConnectedAccount).toHaveBeenCalledWith(
       expect.objectContaining({
         businessName: "PineTree Test Merchant LLC",
+        phone: "+14155551234",
+        accountType: "merchant",
         emailValid: true,
         passwordPolicyValid: true,
       })
@@ -206,8 +212,8 @@ describe("createOrLinkSpeedConnectedAccountForMerchant", () => {
   it("captures Speed's provider code and sanitized field errors from a rejected /connect/custom request instead of collapsing to a generic failure", async () => {
     speedClientMocks.createSpeedCustomConnectedAccount.mockRejectedValue(
       new SpeedApiError("Speed API returned 400: validation failed", 400, "invalid_request", [
-        "email: already registered",
-        "password: too weak",
+        { field: "email", message: "already registered" },
+        { field: "password", message: "too weak" },
       ])
     )
 
@@ -222,7 +228,54 @@ describe("createOrLinkSpeedConnectedAccountForMerchant", () => {
 
     expect(result.readiness).toBe("needs_attention")
     expect(result.provider_code).toBe("invalid_request")
-    expect(result.field_errors).toEqual(["email: already registered", "password: too weak"])
+    expect(result.field_errors).toEqual([
+      { field: "email", message: "already registered" },
+      { field: "password", message: "too weak" },
+    ])
+    expect(result.provider_http_status).toBe(400)
+  })
+
+  it("emits a speed_custom_connect_rejected diagnostic with sanitized presence booleans and never a raw secret", async () => {
+    speedClientMocks.createSpeedCustomConnectedAccount.mockRejectedValue(
+      new SpeedApiError("Speed API returned 400", 400, "invalid_request", [
+        { field: "phone", message: "invalid format" },
+      ])
+    )
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+
+    await createSpeedCustomConnectedAccountForMerchant({
+      merchant_id: "merchant_123",
+      country: "US",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      email: "merchant@example.test",
+      password: "super-secret-password",
+      phone: "+1415000bad",
+    })
+
+    const rejectedCall = warnSpy.mock.calls.find((call) => call[0] === "[speed-custom-connect] speed_custom_connect_rejected")
+    expect(rejectedCall?.[1]).toMatchObject({
+      merchant_id: "merchant_123",
+      status: 400,
+      provider_code: "invalid_request",
+      field_errors: [{ field: "phone", message: "invalid format" }],
+      request_presence: {
+        email: true,
+        password: true,
+        business_name: false,
+        first_name: true,
+        last_name: true,
+        phone: true,
+      },
+    })
+    expect(typeof rejectedCall?.[1].elapsed_ms).toBe("number")
+    expect(typeof rejectedCall?.[1].api_host).toBe("string")
+    const serialized = JSON.stringify(warnSpy.mock.calls)
+    expect(serialized).not.toContain("super-secret-password")
+    expect(serialized).not.toContain("+1415000bad")
+    expect(serialized).not.toContain("merchant@example.test")
+
+    warnSpy.mockRestore()
   })
 
   it("reports a null provider code and empty field errors for a non-provider (network/unknown) failure", async () => {

@@ -132,6 +132,13 @@ export type CreateSpeedCustomConnectedAccountParams = {
   email: string
   password: string
   businessName?: string | null
+  // E.164 phone (e.g. +14155551234). Normalization/validation happens in the
+  // caller (pineTreeWalletReadiness.ts) - this client never manufactures or
+  // reformats a phone number, only sends it through or omits it.
+  phone?: string | null
+  // Speed's account_type enum value, pre-mapped by the caller from PineTree's
+  // business_type UI label - this client never sends PineTree's raw label.
+  accountType?: string | null
   // Pre-computed by the caller (pineTreeWalletReadiness.ts is the single source
   // of truth for these policies) - carried through only so the request
   // diagnostic can report real values without duplicating validation logic here.
@@ -335,6 +342,12 @@ function safeSpeedErrorCode(status: number, body: string) {
   return "request_failed"
 }
 
+/** A single Speed validation issue. `field` is null when Speed's body didn't name one. */
+export type SpeedFieldError = {
+  field: string | null
+  message: string
+}
+
 /**
  * Thrown for any non-2xx Speed API response. Carries the provider's own error
  * code and sanitized per-field validation messages (when Speed's body includes
@@ -345,21 +358,29 @@ function safeSpeedErrorCode(status: number, body: string) {
 export class SpeedApiError extends Error {
   status: number
   providerCode: string | null
-  fieldErrors: string[]
+  providerMessage: string | null
+  fieldErrors: SpeedFieldError[]
 
-  constructor(message: string, status: number, providerCode: string | null, fieldErrors: string[]) {
+  constructor(
+    message: string,
+    status: number,
+    providerCode: string | null,
+    fieldErrors: SpeedFieldError[],
+    providerMessage: string | null = null
+  ) {
     super(message)
     this.name = "SpeedApiError"
     this.status = status
     this.providerCode = providerCode
     this.fieldErrors = fieldErrors
+    this.providerMessage = providerMessage ?? fieldErrors[0]?.message ?? null
   }
 }
 
 export type NormalizedSpeedProviderError = {
   providerStatus: number | null
   providerCode: string | null
-  fieldErrors: string[]
+  fieldErrors: SpeedFieldError[]
 }
 
 function sanitizeSpeedFieldErrorMessage(value: unknown): string | null {
@@ -382,7 +403,10 @@ function sanitizeSpeedFieldErrorMessage(value: unknown): string | null {
  * `error_message`/`message`). Never throws; unknown/unparseable bodies just
  * produce an empty result. Every returned string is sanitized and length-capped.
  */
-export function parseSpeedErrorBody(body: string): { providerCode: string | null; fieldErrors: string[] } {
+export function parseSpeedErrorBody(body: string): {
+  providerCode: string | null
+  fieldErrors: SpeedFieldError[]
+} {
   let parsed: unknown = null
   try {
     parsed = body ? JSON.parse(body) : null
@@ -393,7 +417,7 @@ export function parseSpeedErrorBody(body: string): { providerCode: string | null
     return { providerCode: null, fieldErrors: [] }
   }
 
-  const fieldErrors: string[] = []
+  const fieldErrors: SpeedFieldError[] = []
   let providerCode: string | null = null
   const seen = new Set<string>()
 
@@ -402,10 +426,10 @@ export function parseSpeedErrorBody(body: string): { providerCode: string | null
     const safe = sanitizeSpeedFieldErrorMessage(value)
     if (!safe) return
     const fieldName = sanitizeSpeedFieldErrorMessage(field || "")
-    const line = fieldName ? `${fieldName}: ${safe}` : safe
-    if (seen.has(line)) return
-    seen.add(line)
-    fieldErrors.push(line)
+    const key = `${fieldName || ""}|${safe}`
+    if (seen.has(key)) return
+    seen.add(key)
+    fieldErrors.push({ field: fieldName || null, message: safe })
   }
 
   function visit(value: unknown, depth = 0) {
@@ -454,11 +478,21 @@ export function parseSpeedErrorBody(body: string): { providerCode: string | null
   return { providerCode, fieldErrors }
 }
 
+/** Hostname only (never the full URL/path) - safe to include in logs. */
+export function getSpeedApiHost(): string {
+  try {
+    return new URL(getSpeedApiBaseUrl()).hostname
+  } catch {
+    return "unknown"
+  }
+}
+
 async function speedRequestWithStatus<T>(
   path: string,
   init?: Omit<RequestInit, "headers"> & { headers?: Record<string, string> }
 ): Promise<{ data: T; status: number }> {
   const config = getPineTreeSpeedConfigStatus()
+  const startedAt = Date.now()
   let response: Response
 
   try {
@@ -493,16 +527,12 @@ async function speedRequestWithStatus<T>(
     console.error("[speed] API request failed", {
       path,
       status: response.status,
-      safeCode: safeSpeedErrorCode(response.status, body)
+      safeCode: safeSpeedErrorCode(response.status, body),
+      providerCode,
+      fieldErrorCount: fieldErrors.length,
+      apiHost: getSpeedApiHost(),
+      elapsedMs: Date.now() - startedAt,
     })
-    if (path === "/connect/custom") {
-      console.warn("[speed] speed_connect_custom_request_failed", {
-        status: response.status,
-        safeCode: safeSpeedErrorCode(response.status, body),
-        providerCode,
-        providerFieldErrorCount: fieldErrors.length,
-      })
-    }
 
     if (isSpeedTransferPercentageValidationMessage(body)) {
       throw new Error(SPEED_TRANSFER_SPLIT_ERROR)
@@ -782,9 +812,11 @@ function speedConnectCustomDiagnostic(input: {
   lastNamePresent: boolean
   businessNamePresent: boolean
   countryPresent: boolean
+  phonePresent: boolean
+  accountTypePresent: boolean
   providerStatus: number | null
   providerCode: string | null
-  providerFieldErrors: string[]
+  providerFieldErrorCount: number
 }) {
   return { endpoint: "/connect/custom", ...input }
 }
@@ -798,6 +830,8 @@ export async function createSpeedCustomConnectedAccount(
   const email = String(params.email || "").trim().toLowerCase()
   const password = String(params.password || "").trim()
   const businessName = String(params.businessName || "").trim()
+  const phone = String(params.phone || "").trim()
+  const accountType = String(params.accountType || "").trim()
 
   if (!country) throw new Error("Speed custom connected account country is required.")
   if (!firstName) throw new Error("Speed custom connected account first name is required.")
@@ -818,10 +852,12 @@ export async function createSpeedCustomConnectedAccount(
     lastNamePresent: Boolean(lastName),
     businessNamePresent: Boolean(businessName),
     countryPresent: Boolean(country),
+    phonePresent: Boolean(phone),
+    accountTypePresent: Boolean(accountType),
   }
 
-  // Diagnostics only - never the password or email value itself, only presence
-  // and policy-pass booleans computed by the caller.
+  // Diagnostics only - never the password, email, or phone value itself, only
+  // presence and policy-pass booleans computed by the caller.
   console.info(
     "[speed] speed_connect_custom_request_diagnostic",
     speedConnectCustomDiagnostic({
@@ -829,7 +865,7 @@ export async function createSpeedCustomConnectedAccount(
       ...presenceFields,
       providerStatus: null,
       providerCode: null,
-      providerFieldErrors: [],
+      providerFieldErrorCount: 0,
     })
   )
 
@@ -838,12 +874,13 @@ export async function createSpeedCustomConnectedAccount(
       method: "POST",
       body: JSON.stringify({
         country,
-        account_type: "merchant",
+        account_type: accountType || "merchant",
         first_name: firstName,
         last_name: lastName,
         email,
         password,
         ...(businessName ? { account_name: businessName } : {}),
+        ...(phone ? { phone } : {}),
       })
     })
     console.info(
@@ -853,7 +890,7 @@ export async function createSpeedCustomConnectedAccount(
         ...presenceFields,
         providerStatus: status,
         providerCode: null,
-        providerFieldErrors: [],
+        providerFieldErrorCount: 0,
       })
     )
     return data
@@ -866,7 +903,7 @@ export async function createSpeedCustomConnectedAccount(
         ...presenceFields,
         providerStatus: isSpeedApiError ? error.status : null,
         providerCode: isSpeedApiError ? error.providerCode : null,
-        providerFieldErrors: isSpeedApiError ? error.fieldErrors : [],
+        providerFieldErrorCount: isSpeedApiError ? error.fieldErrors.length : 0,
       })
     )
     throw error

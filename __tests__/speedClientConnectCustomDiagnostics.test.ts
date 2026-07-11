@@ -95,7 +95,10 @@ describe("speedClient /connect/custom", () => {
       const speedError = error as InstanceType<typeof SpeedApiError>
       expect(speedError.status).toBe(400)
       expect(speedError.providerCode).toBe("invalid_request")
-      expect(speedError.fieldErrors).toEqual(["email: email already registered", "password too weak"])
+      expect(speedError.fieldErrors).toEqual([
+        { field: "email", message: "email already registered" },
+        { field: null, message: "password too weak" },
+      ])
       return true
     })
   })
@@ -119,7 +122,8 @@ describe("speedClient /connect/custom", () => {
     ).rejects.toSatisfy((error: unknown) => {
       const speedError = error as InstanceType<typeof SpeedApiError>
       expect(speedError.providerCode).toBe("validation_error")
-      expect(speedError.fieldErrors).toEqual(["Country is required"])
+      expect(speedError.fieldErrors).toEqual([{ field: null, message: "Country is required" }])
+      expect(speedError.providerMessage).toBe("Country is required")
       return true
     })
   })
@@ -153,7 +157,9 @@ describe("speedClient /connect/custom", () => {
     ).rejects.toSatisfy((error: unknown) => {
       const speedError = error as InstanceType<typeof SpeedApiError>
       expect(speedError.providerCode).toBe("validation_failed")
-      expect(speedError.fieldErrors).toEqual(["account_name: Business name is required"])
+      expect(speedError.fieldErrors).toEqual([
+        { field: "account_name", message: "Business name is required" },
+      ])
       expect(speedError.message).toBe("Speed API returned 400")
       return true
     })
@@ -206,6 +212,47 @@ describe("speedClient /connect/custom", () => {
     })
   })
 
+  it("sends phone and account_type when provided, and omits phone when absent", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ id: "ca_phone", account_id: "acct_phone", status: "Active" }), { status: 200 })
+    )
+
+    const { createSpeedCustomConnectedAccount } = await import("@/providers/lightning/speedClient")
+    await createSpeedCustomConnectedAccount({
+      country: "US",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      email: "merchant@example.test",
+      password: "temporary-secret",
+      phone: "+14155551234",
+      accountType: "merchant",
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String(init.body))
+    expect(body.phone).toBe("+14155551234")
+    expect(body.account_type).toBe("merchant")
+
+    fetchMock.mockClear()
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ id: "ca_no_phone", account_id: "acct_no_phone", status: "Active" }), {
+        status: 200,
+      })
+    )
+    await createSpeedCustomConnectedAccount({
+      country: "US",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      email: "merchant@example.test",
+      password: "temporary-secret",
+    })
+    const [, secondInit] = fetchMock.mock.calls[0]
+    const secondBody = JSON.parse(String(secondInit.body))
+    expect(secondBody).not.toHaveProperty("phone")
+    // Falls back to the legacy default when no mapped account_type is passed.
+    expect(secondBody.account_type).toBe("merchant")
+  })
+
   it("logs the request diagnostic with presence/policy booleans and never the raw password or email", async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ id: "ca_3", account_id: "acct_3", status: "Active" }), { status: 200 })
@@ -245,6 +292,51 @@ describe("speedClient /connect/custom", () => {
     info.mockRestore()
   })
 
+  it("never logs the phone value in the request diagnostic, only its presence", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ id: "ca_4", account_id: "acct_4", status: "Active" }), { status: 200 })
+    )
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined)
+
+    const { createSpeedCustomConnectedAccount } = await import("@/providers/lightning/speedClient")
+    await createSpeedCustomConnectedAccount({
+      country: "US",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      email: "merchant@example.test",
+      password: "temporary-secret",
+      phone: "+14155551234",
+    })
+
+    const diagnosticCalls = info.mock.calls.filter((call) => call[0] === "[speed] speed_connect_custom_request_diagnostic")
+    expect(diagnosticCalls[0][1]).toMatchObject({ phonePresent: true })
+    expect(JSON.stringify(diagnosticCalls)).not.toContain("+14155551234")
+
+    info.mockRestore()
+  })
+
+  it("includes the API hostname and elapsed time (never the full URL) in the generic failure log", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ error_code: "invalid_request", error_message: "bad request" }), { status: 400 })
+    )
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    const { createSpeedCustomConnectedAccount } = await import("@/providers/lightning/speedClient")
+    await createSpeedCustomConnectedAccount({
+      country: "US",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      email: "merchant@example.test",
+      password: "temporary-secret",
+    }).catch(() => undefined)
+
+    const failedCall = errorSpy.mock.calls.find((call) => call[0] === "[speed] API request failed")
+    expect(failedCall?.[1]).toMatchObject({ apiHost: "api.speed.test" })
+    expect(typeof failedCall?.[1].elapsedMs).toBe("number")
+
+    errorSpy.mockRestore()
+  })
+
   it("reports the failed providerStatus/providerCode in the post-request diagnostic", async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ error_code: "invalid_request", error_message: "bad request" }), { status: 400 })
@@ -265,8 +357,8 @@ describe("speedClient /connect/custom", () => {
     expect(finalDiagnostic).toMatchObject({
       providerStatus: 400,
       providerCode: "invalid_request",
+      providerFieldErrorCount: 1,
     })
-    expect(finalDiagnostic.providerFieldErrors).toEqual(["bad request"])
 
     info.mockRestore()
   })

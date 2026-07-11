@@ -196,6 +196,9 @@ type MerchantLightningProfile = {
   speed_connected_account_id: string | null
   speed_connected_account_status: string | null
   setup_source: "pinetree_managed"
+  // Canned, merchant-safe copy for a needs_attention profile - never Speed's
+  // raw provider message.
+  provider_error_message?: string | null
 }
 
 type ProfileState =
@@ -226,6 +229,9 @@ type WalletRailRow = {
   label: "Base" | "Solana" | "Bitcoin"
   enabled: boolean
   configured: boolean
+  // Set only for Bitcoin when the Lightning/Speed profile is needs_attention -
+  // canned, merchant-safe copy, never Speed's raw provider message.
+  needsAttentionMessage?: string | null
 }
 
 type WithdrawalDiagnostics = {
@@ -1012,7 +1018,7 @@ function WalletStatusPill({
   className = "",
 }: {
   label: string
-  tone: "blue" | "default"
+  tone: "blue" | "default" | "amber"
   className?: string
 }) {
   return (
@@ -2162,16 +2168,22 @@ function WalletOverviewSummary({
                   ? sync?.balances.solana.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) ?? null
                   : sync?.balances.bitcoin.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) ?? null
               const connected = row.configured && row.enabled
+              const needsAttention = Boolean(row.needsAttentionMessage)
               return (
-                <div key={row.label} className="grid grid-cols-[minmax(0,1fr)_7.25rem_minmax(4.5rem,auto)] items-center gap-3 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_7.75rem_minmax(5.75rem,auto)] sm:px-5">
-                  <p className="min-w-0 text-sm font-semibold text-gray-900">{row.label}</p>
-                  <span className="flex justify-center">
-                    <WalletStatusPill
-                      label={connected ? "Connected" : "Not connected"}
-                      tone={connected ? "blue" : "default"}
-                    />
-                  </span>
-                  <span className="min-w-[72px] text-right text-sm font-semibold tabular-nums text-gray-950 sm:min-w-[92px]">{formatUsd(railUsd)}</span>
+                <div key={row.label} className="px-4 py-3.5 sm:px-5">
+                  <div className="grid grid-cols-[minmax(0,1fr)_7.25rem_minmax(4.5rem,auto)] items-center gap-3 sm:grid-cols-[minmax(0,1fr)_7.75rem_minmax(5.75rem,auto)]">
+                    <p className="min-w-0 text-sm font-semibold text-gray-900">{row.label}</p>
+                    <span className="flex justify-center">
+                      <WalletStatusPill
+                        label={needsAttention ? "Needs attention" : connected ? "Connected" : "Not connected"}
+                        tone={needsAttention ? "amber" : connected ? "blue" : "default"}
+                      />
+                    </span>
+                    <span className="min-w-[72px] text-right text-sm font-semibold tabular-nums text-gray-950 sm:min-w-[92px]">{formatUsd(railUsd)}</span>
+                  </div>
+                  {needsAttention ? (
+                    <p className="mt-1.5 text-xs leading-4 text-amber-700">{row.needsAttentionMessage}</p>
+                  ) : null}
                 </div>
               )
             })}
@@ -5941,11 +5953,22 @@ function PineTreeWalletRuntime() {
     emitWalletSetupDebugEvent(combined, {})
   }, [coreWalletProfileReady, lightningProfileState])
 
+  const bitcoinNeedsAttentionMessage = lightningProfileState.kind === "loaded"
+    && lightningProfileState.profile.status === "needs_attention"
+    ? lightningProfileState.profile.provider_error_message || "Bitcoin setup needs attention."
+    : null
+
   const walletRailRows = useMemo<WalletRailRow[]>(() => [
     { rail: "base", label: "Base" as const, configured: baseReady, enabled: enabledRails.base },
     { rail: "solana", label: "Solana" as const, configured: solanaReady, enabled: enabledRails.solana },
-    { rail: "bitcoin", label: "Bitcoin" as const, configured: bitcoinReady, enabled: enabledRails.bitcoin },
-  ], [baseReady, bitcoinReady, enabledRails.base, enabledRails.bitcoin, enabledRails.solana, solanaReady])
+    {
+      rail: "bitcoin",
+      label: "Bitcoin" as const,
+      configured: bitcoinReady,
+      enabled: enabledRails.bitcoin,
+      needsAttentionMessage: bitcoinNeedsAttentionMessage,
+    },
+  ], [baseReady, bitcoinNeedsAttentionMessage, bitcoinReady, enabledRails.base, enabledRails.bitcoin, enabledRails.solana, solanaReady])
 
   const withdrawalWalletRows = useMemo(() => [
     { rail: "base" as const, configured: baseReady && enabledRails.base },

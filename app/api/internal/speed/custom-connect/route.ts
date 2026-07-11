@@ -27,10 +27,11 @@ export async function POST(req: NextRequest) {
   try {
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
     const merchantId = readString(body, "merchant_id")
+    const forceRetry = body.retry === true
 
     if (!merchantId) return NextResponse.json({ error: "merchant_id is required" }, { status: 400 })
 
-    const result = await ensureManagedLightningForMerchant(merchantId)
+    const result = await ensureManagedLightningForMerchant(merchantId, { forceRetry })
     const profile = await getMerchantLightningProfile(merchantId)
 
     if (result.action === "needs_business_profile") {

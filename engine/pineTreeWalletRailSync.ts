@@ -101,6 +101,8 @@ export async function syncPineTreeWalletRailsEngine(
           code: error.code,
           missing: error.missing,
           migration: error.migration,
+          underlyingCode: error.underlyingCode,
+          underlyingMessage: error.underlyingMessage,
         })
         throw new RailSyncEngineError(
           "rail_sync_started",
@@ -147,6 +149,8 @@ export async function syncPineTreeWalletRailsEngine(
           code: error.code,
           missing: error.missing,
           migration: error.migration,
+          underlyingCode: error.underlyingCode,
+          underlyingMessage: error.underlyingMessage,
         })
         throw new RailSyncEngineError(
           "rail_sync_profile_loaded",
@@ -214,6 +218,8 @@ export async function syncPineTreeWalletRailsEngine(
             code: error.code,
             missing: error.missing,
             migration: error.migration,
+            underlyingCode: error.underlyingCode,
+            underlyingMessage: error.underlyingMessage,
           })
           throw new RailSyncEngineError(
             "rail_sync_persist_started",
