@@ -838,8 +838,12 @@ describe("PineTree embedded wallet setup", () => {
 
   it("tracks wallet creation steps and times out instead of waiting forever", () => {
     expect(page).toContain("type WalletCreationStep")
-    expect(page).toContain("walletCreationTimeoutMs = 20_000")
-    expect(page).toContain("walletProvisioningFinalRefreshGraceMs = 5_000")
+    // Stage-aware overall deadline: sized to the sum of one hydration attempt, up to
+    // two sequential chain creates, and one post-create hydration re-check (74s), plus
+    // a grace period, landing within the 75-90s total core-setup budget.
+    expect(page).toContain("const walletCreationTimeoutMs =")
+    expect(page).toContain("dynamicChainCreateTimeoutMs * 2 +")
+    expect(page).toContain("const walletProvisioningFinalRefreshGraceMs = 15_000")
     expect(page).toContain("walletProvisioningRetryIntervalMs = 1_800")
     expect(page).toContain('logWalletCreationStep("waiting_for_dynamic_auth")')
     expect(page).toContain('logWalletCreationStep("provisioning_wallet"')

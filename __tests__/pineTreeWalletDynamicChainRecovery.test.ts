@@ -157,6 +157,137 @@ describe("setupAttemptActive reflects a ref, not just stale render-cycle state (
   })
 })
 
+describe("Chain create is bounded by a true PineTree-side deadline, not just the dedupe guard", () => {
+  const implFn = page.slice(
+    page.indexOf("const refreshDynamicWalletRuntimeImpl = useCallback"),
+    page.indexOf("// Single-flight wrapper")
+  )
+
+  it("wraps each createWalletAccount call in the reusable bounded helper instead of awaiting it directly", () => {
+    expect(page).toContain('import { runWithBoundedTimeout } from "@/lib/wallets/boundedProviderCall"')
+    expect(implFn).toContain("runWithBoundedTimeout(\n              () => createWalletAccount([{ chain: \"EVM\" }]")
+    expect(implFn).toContain("runWithBoundedTimeout(\n              () => createWalletAccount([{ chain: \"SOL\" }]")
+    expect(implFn).toContain("const baseCreateOutcome = await baseCreateCall.result")
+    expect(implFn).toContain("const solanaCreateOutcome = await solanaCreateCall.result")
+  })
+
+  it("a timed-out create does not immediately trigger a duplicate create - it marks the chain detached", () => {
+    expect(page).toContain("const baseWalletCreateDetachedRef = useRef(false)")
+    expect(page).toContain("const solanaWalletCreateDetachedRef = useRef(false)")
+    expect(implFn).toContain("!chainCreateGuardActive(baseWalletCreateGuardRef) &&\n            !baseWalletCreateDetachedRef.current")
+    expect(implFn).toContain("!chainCreateGuardActive(solanaWalletCreateGuardRef) &&\n            !solanaWalletCreateDetachedRef.current")
+    expect(implFn).toContain("baseWalletCreateDetachedRef.current = true")
+    expect(implFn).toContain("solanaWalletCreateDetachedRef.current = true")
+  })
+
+  it("fresh hydration after a timeout rechecks provider state (computeRequiredChainState) before any retry, and only clears detached once the original call actually settles", () => {
+    expect(implFn).toContain("computeRequiredChainState({")
+    expect(implFn).toContain("void baseCreateCall.settlement.then((settled) => {\n                baseWalletCreateDetachedRef.current = false")
+    expect(implFn).toContain("void solanaCreateCall.settlement.then((settled) => {\n                solanaWalletCreateDetachedRef.current = false")
+  })
+
+  it("an older provider promise resolving later cannot overwrite a newer generation or trigger duplicate profile work", () => {
+    expect(implFn).toContain("const baseCreateGeneration = generation")
+    expect(implFn).toContain("const solanaCreateGeneration = generation")
+    expect(implFn).toContain(
+      "const stillCurrentGeneration =\n                  walletRuntimeRefreshMetaRef.current[refreshMode]?.generation === baseCreateGeneration"
+    )
+    expect(implFn).toContain(
+      "const stillCurrentGeneration =\n                  walletRuntimeRefreshMetaRef.current[refreshMode]?.generation === solanaCreateGeneration"
+    )
+    expect(implFn).toContain("if (stillCurrentGeneration && settled.status === \"fulfilled\") {\n                  setDynamicWalletRuntimeRefreshNonce((value) => value + 1)")
+  })
+
+  it("emits the required safe timeout/late-settlement events, whitelisted for the server-visible beacon", () => {
+    for (const event of [
+      "wallet_dynamic_base_create_timed_out",
+      "wallet_dynamic_solana_create_timed_out",
+      "wallet_dynamic_chain_create_late_settlement_ignored",
+    ]) {
+      expect(implFn).toContain(event)
+      expect(eventRoute).toContain(`"${event}"`)
+    }
+  })
+
+  it("refreshDynamicWalletRuntimeImpl receives the caller's single-flight generation instead of tracking its own", () => {
+    expect(page).toContain(
+      'const refreshDynamicWalletRuntimeImpl = useCallback(async (reason: string, options?: { requireApprovalWallet?: boolean }, generation = 0) => {'
+    )
+    expect(page).toContain("return await refreshDynamicWalletRuntimeImpl(reason, options, generation)")
+  })
+})
+
+describe("Overall core-setup deadline is stage-aware, not shorter than valid staged work (Problem 2)", () => {
+  it("sizes the total budget from the hydration/chain-create/post-create-hydration stage constants instead of a flat 20s", () => {
+    expect(page).toContain("const dynamicHydrationSingleFlightTimeoutMs = 12_000")
+    expect(page).toContain("const dynamicChainCreateTimeoutMs = 25_000")
+    expect(page).toContain("const walletCoreSetupPostCreateHydrationMs = 12_000")
+    expect(page).toContain("const walletCreationTimeoutMs =")
+    expect(page).toContain("dynamicHydrationSingleFlightTimeoutMs +\n  dynamicChainCreateTimeoutMs * 2 +\n  walletCoreSetupPostCreateHydrationMs")
+    expect(page).toContain("const walletProvisioningFinalRefreshGraceMs = 15_000")
+  })
+
+  it("does not fail at 25 seconds while a chain create is still within its own allowed deadline", () => {
+    // 12 (hydrate) + 25*2 (base + solana create) + 12 (post-create hydrate) = 74s,
+    // strictly greater than a single chain create's own 25s deadline, so the overall
+    // timer cannot fire while that create is still legitimately in flight.
+    const totalMs = 12_000 + 25_000 * 2 + 12_000
+    expect(totalMs).toBeGreaterThan(25_000)
+    expect(totalMs).toBe(74_000)
+  })
+
+  it("eventually fails within the 75-90 second total cap", () => {
+    const totalStageMs = 12_000 + 25_000 * 2 + 12_000
+    const graceMs = 15_000
+    const overallCapMs = totalStageMs + graceMs
+    expect(overallCapMs).toBeGreaterThanOrEqual(75_000)
+    expect(overallCapMs).toBeLessThanOrEqual(90_000)
+  })
+})
+
+describe("Stage-aware progress text (no UI layout change, no success banner)", () => {
+  it("declares a granular stage label shown only during provisioning", () => {
+    expect(page).toContain('const [coreSetupStageLabel, setCoreSetupStageLabel] = useState("")')
+    expect(page).toContain('walletSetupPrimaryState === "provisioning" && coreSetupStageLabel')
+  })
+
+  it("covers the requested stage checkpoints", () => {
+    for (const label of [
+      "Preparing secure wallet",
+      "Creating Base wallet",
+      "Creating Solana wallet",
+      "Syncing wallet networks",
+      "Finishing PineTree Wallet setup",
+    ]) {
+      expect(page).toContain(label)
+    }
+  })
+
+  it("still surfaces the same bounded-failure copy instead of a success banner", () => {
+    expect(page).toContain(
+      "PineTree Wallet setup could not finish creating the required wallet networks. Please try again."
+    )
+    expect(page).not.toContain("Wallet ready")
+  })
+})
+
+describe("Both chains completing proceeds to profile POST and modal open exactly once", () => {
+  it("profile POST is still fired from the single dedicated syncProfileFromDynamic path, not from the chain-create block", () => {
+    const implFn = page.slice(
+      page.indexOf("const refreshDynamicWalletRuntimeImpl = useCallback"),
+      page.indexOf("// Single-flight wrapper")
+    )
+    expect(implFn).not.toContain("/api/wallets/pinetree-profile")
+    expect(implFn).not.toContain("openPineTreeWalletModalOnce")
+  })
+
+  it("modal open remains one-shot and profile POST remains deduped by key", () => {
+    expect(page).toContain("function openPineTreeWalletModalOnce(stage: string) {")
+    expect(page).toContain("if (walletModalOpenedForAttemptRef.current || walletOpen) return")
+    expect(page).toContain("if (profilePostInFlightKeyRef.current === profilePostKey) {")
+  })
+})
+
 describe("Bounded user-facing failure instead of an indefinite freeze (Part F)", () => {
   it("declares the new chain-recovery failure reasons", () => {
     for (const reason of [

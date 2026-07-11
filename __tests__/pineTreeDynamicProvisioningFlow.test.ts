@@ -394,7 +394,7 @@ describe("PineTree Dynamic provisioning flow", () => {
   })
 
   it("no timeout message appears before a final runtime refresh attempt", () => {
-    expect(page).toContain("walletProvisioningFinalRefreshGraceMs = 5_000")
+    expect(page).toContain("const walletProvisioningFinalRefreshGraceMs = 15_000")
     expect(page).toContain("setFinalProvisioningRefreshAttempted(true)")
     expect(page).toContain('refreshDynamicWalletRuntime("final_embedded_wallet_runtime_refresh_before_timeout"')
     const firstStart = page.indexOf("if (!pendingSync || finalProvisioningRefreshAttempted) return")

@@ -99,6 +99,9 @@ const WHITELISTED_EVENTS = new Set([
   "wallet_dynamic_solana_create_complete",
   "wallet_dynamic_solana_create_failed",
   "wallet_dynamic_required_chains_complete",
+  "wallet_dynamic_base_create_timed_out",
+  "wallet_dynamic_solana_create_timed_out",
+  "wallet_dynamic_chain_create_late_settlement_ignored",
 ])
 
 const MAX_DETAIL_KEYS = 12
