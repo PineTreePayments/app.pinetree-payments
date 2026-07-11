@@ -54,6 +54,7 @@ import {
 } from "@/lib/pinetreeWalletSetupResume"
 import { dynamicSessionBoundToMerchant, getDynamicExternalUserId } from "@/lib/wallets/dynamicExternalIdentity"
 import { formatWalletTotalBalance } from "@/lib/pinetreeWalletDisplay"
+import { computeRequiredChainState } from "@/lib/wallets/dynamicChainClassification"
 
 // Legacy compatibility route exists server-side but is not called by PineTree Wallet:
 // "/api/merchant/business-owner-profile"
@@ -336,6 +337,10 @@ type WalletSetupFailureReason =
   | "provider_sync_failed"
   | "wallet_address_conflict"
   | "provisioning_timeout_unknown"
+  | "dynamic_required_chains_incomplete"
+  | "dynamic_hydration_timeout"
+  | "dynamic_base_creation_failed"
+  | "dynamic_solana_creation_failed"
 
 type ProfileSyncDiagnosticsState = {
   externalJwtEnabled?: boolean
@@ -937,6 +942,15 @@ const walletProvisioningFinalRefreshGraceMs = 5_000
 // comes back empty for a brand new user (SDK hasn't caught up yet) but no wallet or
 // WaaS credential exists either - PineTree Wallet always needs both of these chains.
 const REQUIRED_WAAS_WALLET_CHAINS = [{ chain: "EVM" }, { chain: "SOL" }]
+// Bounded timeout for a single Dynamic hydration/refresh attempt. Production logs showed
+// the same normal_hydration promise being reused (inFlightReused: true) for nearly a
+// minute because nothing ever gave up on it - once an attempt is older than this, the
+// next caller evicts it and starts a fresh one instead of awaiting it forever.
+const dynamicHydrationSingleFlightTimeoutMs = 12_000
+// Bounded timeout for an explicit single-chain create (createWalletAccount([{chain}])).
+// Guards the per-chain dedupe refs below so a hung Base or Solana creation call can't
+// permanently block that chain from ever being retried.
+const dynamicChainCreateTimeoutMs = 25_000
 const walletSetupStoragePrefix = "pinetree_wallet_setup_in_progress:"
 const walletCreationDebugEnabled =
   process.env.NODE_ENV !== "production" ||
@@ -1040,6 +1054,14 @@ function walletSetupFailureMessage(reason: WalletSetupFailureReason | null) {
   ) return "We could not verify wallet access. Please try again."
   if (reason === "dynamic_external_jwt_rejected") {
     return "PineTree could not verify wallet access with our wallet provider. Your account is fine - this is a configuration issue on our side. Please try again shortly or contact support (code: external_jwt_rejected)."
+  }
+  if (
+    reason === "dynamic_required_chains_incomplete" ||
+    reason === "dynamic_hydration_timeout" ||
+    reason === "dynamic_base_creation_failed" ||
+    reason === "dynamic_solana_creation_failed"
+  ) {
+    return "PineTree Wallet setup could not finish creating the required wallet networks. Please try again."
   }
   return "Wallet setup is taking longer than expected. Please try again."
 }
@@ -2633,6 +2655,39 @@ function PineTreeWalletRuntime() {
     normal_hydration: null,
     approval_wallet_hydration: null,
   })
+  // Parallel metadata for the single-flight ref above: generation/attempt id + start
+  // time per mode, so a caller can tell an actually-active in-flight promise apart
+  // from a stale one that has outlived dynamicHydrationSingleFlightTimeoutMs, and so a
+  // stale promise's own `finally` can detect it has been superseded and skip clearing
+  // the newer attempt's record.
+  const walletRuntimeRefreshMetaRef = useRef<Record<"normal_hydration" | "approval_wallet_hydration", { generation: number; startedAt: number; stage: string } | null>>({
+    normal_hydration: null,
+    approval_wallet_hydration: null,
+  })
+  const walletRuntimeRefreshGenerationRef = useRef(0)
+  // Per-chain dedupe guards for explicit single-chain creation (Part B). Track startedAt
+  // rather than a plain boolean so a hung createWalletAccount([{chain}]) call can't
+  // permanently block that one chain from ever being retried.
+  const baseWalletCreateGuardRef = useRef<number | null>(null)
+  const solanaWalletCreateGuardRef = useRef<number | null>(null)
+  // Mirrors pendingSync but updated synchronously (refs, not state) so diagnostics
+  // emitted in the same tick as a setPendingSync(true) call never read a stale
+  // pre-render value. Fixes the "setupAttemptActive: false" reported immediately
+  // after wallet_create_dynamic_auth_complete/native auth resume in production.
+  const overallSetupActiveRef = useRef(false)
+  const baseWalletCreateFailedRef = useRef(false)
+  const solanaWalletCreateFailedRef = useRef(false)
+
+  function chainCreateGuardActive(guardRef: { current: number | null }) {
+    const startedAt = guardRef.current
+    if (startedAt === null) return false
+    if (Date.now() - startedAt > dynamicChainCreateTimeoutMs) {
+      guardRef.current = null
+      return false
+    }
+    return true
+  }
+
   // Dedupes the background rail-sync call fired after a successful core profile
   // save: only one rail-sync fetch per unique (dynamic_user_id, base, solana)
   // address set, even if syncProfileFromDynamic resolves "ready" more than once.
@@ -3484,6 +3539,7 @@ function PineTreeWalletRuntime() {
             signinFailureReason = "dynamic_user_not_available_after_signin"
             throw Object.assign(new Error("dynamic_external_auth_no_user"), { status: 502 })
           }
+          overallSetupActiveRef.current = true
           setPendingSync(true)
           markWalletSetupInProgress()
           setProvisioningRetryExhausted(false)
@@ -3888,6 +3944,114 @@ function PineTreeWalletRuntime() {
               reason: "waas_credential_exists_but_restore_failed",
             })
           }
+        } else {
+          // At least one WaaS runtime wallet exists, but that never guaranteed both
+          // required chains (Base + Solana) are present - Dynamic can return exactly
+          // one wallet for one chain while the other was never created. The block
+          // above only ever runs when the count is exactly zero, so a lone Base or
+          // Solana wallet used to permanently block the missing chain from ever being
+          // explicitly requested again - the production freeze this fixes.
+          refreshStage = "read_waas_credentials"
+          const requiredChainState = computeRequiredChainState({
+            runtimeWallets,
+            runtimeCredentials,
+            hasBaseAddress: dynamicNetworkAddresses.base.length > 0,
+            hasSolanaAddress: dynamicNetworkAddresses.solana.length > 0,
+          })
+          const {
+            hasBaseCredential,
+            hasSolanaCredential,
+            hasBaseRuntimeWallet,
+            hasSolanaRuntimeWallet,
+          } = requiredChainState
+          console.info("[pinetree-wallets] wallet_dynamic_required_chain_state", { reason, ...requiredChainState })
+          emitWalletSetupDebugEvent("wallet_dynamic_required_chain_state", { reason, ...requiredChainState })
+
+          const missingBaseChain = !hasBaseCredential && !hasBaseRuntimeWallet
+          const missingSolanaChain = !hasSolanaCredential && !hasSolanaRuntimeWallet
+          let attemptedBaseCreate = false
+          let attemptedSolanaCreate = false
+
+          if (missingBaseChain && !chainCreateGuardActive(baseWalletCreateGuardRef)) {
+            attemptedBaseCreate = true
+            baseWalletCreateGuardRef.current = Date.now()
+            try {
+              console.info("[pinetree-wallets] wallet_dynamic_base_create_started", { reason })
+              emitWalletSetupDebugEvent("wallet_dynamic_base_create_started", { reason })
+              refreshStage = "create_wallet_account"
+              await createWalletAccount([{ chain: "EVM" }] as unknown as typeof needsAutoCreateWalletChains)
+              baseWalletCreateFailedRef.current = false
+              console.info("[pinetree-wallets] wallet_dynamic_base_create_complete", { reason })
+              emitWalletSetupDebugEvent("wallet_dynamic_base_create_complete", { reason })
+              setDynamicWalletRuntimeRefreshNonce((value) => value + 1)
+            } catch (error) {
+              baseWalletCreateFailedRef.current = true
+              const classified = classifyDynamicRefreshError(error)
+              console.warn("[pinetree-wallets] wallet_dynamic_base_create_failed", {
+                reason,
+                errorName: classified.errorName ?? "unknown_error",
+              })
+              emitWalletSetupDebugEvent("wallet_dynamic_base_create_failed", {
+                reason,
+                errorName: classified.errorName ?? "unknown_error",
+              })
+            } finally {
+              baseWalletCreateGuardRef.current = null
+            }
+          }
+
+          if (missingSolanaChain && !chainCreateGuardActive(solanaWalletCreateGuardRef)) {
+            attemptedSolanaCreate = true
+            solanaWalletCreateGuardRef.current = Date.now()
+            try {
+              console.info("[pinetree-wallets] wallet_dynamic_solana_create_started", { reason })
+              emitWalletSetupDebugEvent("wallet_dynamic_solana_create_started", { reason })
+              refreshStage = "create_wallet_account"
+              await createWalletAccount([{ chain: "SOL" }] as unknown as typeof needsAutoCreateWalletChains)
+              solanaWalletCreateFailedRef.current = false
+              console.info("[pinetree-wallets] wallet_dynamic_solana_create_complete", { reason })
+              emitWalletSetupDebugEvent("wallet_dynamic_solana_create_complete", { reason })
+              setDynamicWalletRuntimeRefreshNonce((value) => value + 1)
+            } catch (error) {
+              solanaWalletCreateFailedRef.current = true
+              const classified = classifyDynamicRefreshError(error)
+              console.warn("[pinetree-wallets] wallet_dynamic_solana_create_failed", {
+                reason,
+                errorName: classified.errorName ?? "unknown_error",
+              })
+              emitWalletSetupDebugEvent("wallet_dynamic_solana_create_failed", {
+                reason,
+                errorName: classified.errorName ?? "unknown_error",
+              })
+            } finally {
+              solanaWalletCreateGuardRef.current = null
+            }
+          }
+
+          // A chain with an existing credential but no runtime wallet needs a restore,
+          // never a duplicate create - the same forceClientRebuild path used above when
+          // the runtime wallet count was zero.
+          if (
+            (hasBaseCredential && !hasBaseRuntimeWallet) ||
+            (hasSolanaCredential && !hasSolanaRuntimeWallet)
+          ) {
+            refreshStage = "initialize_waas"
+            await initializeWaas({ forceClientRebuild: true })
+            setDynamicWalletRuntimeRefreshNonce((value) => value + 1)
+          }
+
+          console.info("[pinetree-wallets] wallet_dynamic_required_chains_complete", {
+            reason,
+            ...requiredChainState,
+            attemptedBaseCreate,
+            attemptedSolanaCreate,
+          })
+          emitWalletSetupDebugEvent("wallet_dynamic_required_chains_complete", {
+            reason,
+            ...requiredChainState,
+            attemptedBaseCreate,
+            attemptedSolanaCreate,
+          })
         }
       } else {
         // shouldAutoCreateEmbeddedWallet is the SDK's own signal for this decision - trust
@@ -4022,6 +4186,7 @@ function PineTreeWalletRuntime() {
     createEmbeddedWallet,
     createOrRestoreSession,
     createWalletAccount,
+    dynamicNetworkAddresses,
     dynamicWaasIsEnabled,
     embeddedWalletSessionActive,
     getWaasWalletConnector,
@@ -4050,22 +4215,76 @@ function PineTreeWalletRuntime() {
     const runtimeWalletCountBefore = dynamicWalletRuntimeCountRef.current
     const alreadyInFlight = walletRuntimeRefreshInFlightRef.current[refreshMode]
     if (alreadyInFlight) {
-      const diagnostic = {
+      const meta = walletRuntimeRefreshMetaRef.current[refreshMode]
+      const ageMs = meta ? Date.now() - meta.startedAt : 0
+      const stale = ageMs >= dynamicHydrationSingleFlightTimeoutMs
+      if (!stale) {
+        const diagnostic = {
+          refreshReason: reason,
+          refreshMode,
+          inFlightReused: true,
+          stage: meta?.stage ?? "hydrate_runtime",
+          generation: meta?.generation ?? null,
+          ageMs,
+          stale: false,
+          sdkLoaded: sdkHasLoaded,
+          dynamicUserPresent: Boolean(user),
+          runtimeWalletCountBefore,
+          runtimeWalletCountAfter: runtimeWalletCountBefore,
+          errorName: null,
+          errorCode: null,
+        }
+        console.info("[pinetree-wallets] wallet_dynamic_wallets_refresh_diagnostic", diagnostic)
+        emitWalletSetupDebugEvent("wallet_dynamic_wallets_refresh_diagnostic", diagnostic)
+        console.info("[pinetree-wallets] wallet_dynamic_refresh_singleflight_reused", diagnostic)
+        emitWalletSetupDebugEvent("wallet_dynamic_refresh_singleflight_reused", diagnostic)
+        return alreadyInFlight
+      }
+      // Stale: this promise has been running longer than
+      // dynamicHydrationSingleFlightTimeoutMs. Evict it so this caller starts a fresh
+      // attempt instead of awaiting a hung Dynamic SDK call forever - production logs
+      // showed the same normal_hydration promise reused (inFlightReused: true) for
+      // nearly a minute. The stale promise keeps running in the background; its own
+      // `finally` below checks the generation and no-ops once superseded (requirement 4).
+      const timedOutDiagnostic = {
         refreshReason: reason,
         refreshMode,
-        inFlightReused: true,
-        stage: "hydrate_runtime",
-        sdkLoaded: sdkHasLoaded,
-        dynamicUserPresent: Boolean(user),
+        stage: meta?.stage ?? "hydrate_runtime",
+        generation: meta?.generation ?? null,
+        ageMs,
+        stale: true,
         runtimeWalletCountBefore,
         runtimeWalletCountAfter: runtimeWalletCountBefore,
-        errorName: null,
-        errorCode: null,
       }
-      console.info("[pinetree-wallets] wallet_dynamic_wallets_refresh_diagnostic", diagnostic)
-      emitWalletSetupDebugEvent("wallet_dynamic_wallets_refresh_diagnostic", diagnostic)
-      return alreadyInFlight
+      console.warn("[pinetree-wallets] wallet_dynamic_refresh_singleflight_timed_out", timedOutDiagnostic)
+      emitWalletSetupDebugEvent("wallet_dynamic_refresh_singleflight_timed_out", timedOutDiagnostic)
+      walletRuntimeRefreshInFlightRef.current[refreshMode] = null
+      walletRuntimeRefreshMetaRef.current[refreshMode] = null
+      console.info("[pinetree-wallets] wallet_dynamic_refresh_singleflight_replaced", timedOutDiagnostic)
+      emitWalletSetupDebugEvent("wallet_dynamic_refresh_singleflight_replaced", timedOutDiagnostic)
     }
+
+    const generation = ++walletRuntimeRefreshGenerationRef.current
+    const startedAt = Date.now()
+    walletRuntimeRefreshMetaRef.current[refreshMode] = { generation, startedAt, stage: "hydrate_runtime" }
+    console.info("[pinetree-wallets] wallet_dynamic_refresh_singleflight_started", {
+      refreshReason: reason,
+      refreshMode,
+      generation,
+      ageMs: 0,
+      stale: false,
+      runtimeWalletCountBefore,
+      runtimeWalletCountAfter: runtimeWalletCountBefore,
+    })
+    emitWalletSetupDebugEvent("wallet_dynamic_refresh_singleflight_started", {
+      refreshReason: reason,
+      refreshMode,
+      generation,
+      ageMs: 0,
+      stale: false,
+      runtimeWalletCountBefore,
+      runtimeWalletCountAfter: runtimeWalletCountBefore,
+    })
 
     const runPromise = (async () => {
       let errorName: string | null = null
@@ -4115,7 +4334,25 @@ function PineTreeWalletRuntime() {
           ...(errorName ? { errorName } : {}),
           ...(errorCode ? { errorCode } : {}),
         })
-        walletRuntimeRefreshInFlightRef.current[refreshMode] = null
+        // Guard against a stale/superseded promise's completion clearing a newer
+        // in-flight record (requirement 4): only clear if this run's generation is
+        // still the one currently tracked as active.
+        const currentMeta = walletRuntimeRefreshMetaRef.current[refreshMode]
+        if (currentMeta && currentMeta.generation === generation) {
+          walletRuntimeRefreshInFlightRef.current[refreshMode] = null
+          walletRuntimeRefreshMetaRef.current[refreshMode] = null
+          const clearedDiagnostic = {
+            refreshReason: reason,
+            refreshMode,
+            generation,
+            ageMs: Date.now() - startedAt,
+            stale: false,
+            runtimeWalletCountBefore,
+            runtimeWalletCountAfter,
+          }
+          console.info("[pinetree-wallets] wallet_dynamic_refresh_singleflight_cleared", clearedDiagnostic)
+          emitWalletSetupDebugEvent("wallet_dynamic_refresh_singleflight_cleared", clearedDiagnostic)
+        }
       }
     })()
 
@@ -4892,8 +5129,20 @@ function PineTreeWalletRuntime() {
 
     const baseAddress = dynamicNetworkAddresses.base[0]?.address ?? null
     const solanaAddress = dynamicNetworkAddresses.solana[0]?.address ?? null
-    if (!baseAddress) return "base_address_missing"
-    if (!solanaAddress) return "solana_address_missing"
+    // A runtime wallet exists (dynamicWalletRuntimeCount > 0, checked above) but one or
+    // both required chain addresses are still missing - the exact production symptom
+    // (runtimeWalletCount: 1, missingBase/missingSolana: true). Prefer the specific
+    // per-chain explicit-create failure reason when one was actually attempted and
+    // failed, over the generic address-missing reasons below.
+    if (!baseAddress && !solanaAddress) return "dynamic_required_chains_incomplete"
+    if (!baseAddress) {
+      if (baseWalletCreateFailedRef.current) return "dynamic_base_creation_failed"
+      return "base_address_missing"
+    }
+    if (!solanaAddress) {
+      if (solanaWalletCreateFailedRef.current) return "dynamic_solana_creation_failed"
+      return "solana_address_missing"
+    }
 
     const baseSigner = findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, "base", baseAddress)
     if (!baseSigner) return "base_signer_missing"
@@ -4992,6 +5241,7 @@ function PineTreeWalletRuntime() {
       pendingProfileSyncAttemptRef.current = false
       walletSetupStartInFlightRef.current = null
       setProvisioningRetryExhausted(true)
+      overallSetupActiveRef.current = false
       setPendingSync(false)
       setSyncing(false)
       setRepairInProgress(false)
@@ -5188,6 +5438,7 @@ function PineTreeWalletRuntime() {
   useEffect(() => {
     if (!user || !nativeFallbackPendingRef.current) return
     nativeFallbackPendingRef.current = false
+    overallSetupActiveRef.current = true
     setCoreSetupNeedsUserAuth(false)
     console.info("[pinetree-wallets] wallet_dynamic_native_user_detected", {})
     emitWalletSetupDebugEvent("wallet_dynamic_native_user_detected", {})
@@ -5610,6 +5861,7 @@ function PineTreeWalletRuntime() {
     pendingWalletProvisionAttemptRef.current = null
     pendingProfileSyncAttemptRef.current = false
     walletSetupStartInFlightRef.current = null
+    overallSetupActiveRef.current = false
     setPendingSync(false)
     setSyncing(false)
     setRepairInProgress(false)
@@ -5697,7 +5949,12 @@ function PineTreeWalletRuntime() {
     const dynamicSolanaAddress = dynamicNetworkAddresses.solana[0]?.address ?? null
 
     return {
-      setupAttemptActive: Boolean(pendingSync || walletSetupStartInFlightRef.current),
+      // overallSetupActiveRef is a ref (synchronous), unlike pendingSync (React state,
+      // which can still read its stale pre-update value in the same tick a
+      // setPendingSync(true) call was made) - ORing it in fixes the "setupAttemptActive:
+      // false" reported immediately after wallet_create_dynamic_auth_complete and during
+      // native auth resume, without changing pendingSync's own semantics anywhere else.
+      setupAttemptActive: Boolean(overallSetupActiveRef.current || pendingSync || walletSetupStartInFlightRef.current),
       profileExists: Boolean(loadedProfile),
       profileReady: Boolean(
         (loadedProfile?.status === "ready" && loadedProfile.base_address && loadedProfile.solana_address) ||
@@ -5767,6 +6024,7 @@ function PineTreeWalletRuntime() {
     setRepairFailedIncomplete(false)
     setProvisioningRetryExhausted(false)
     setFinalProvisioningRefreshAttempted(false)
+    overallSetupActiveRef.current = true
     setPendingSync(true)
     markWalletSetupInProgress()
     // Explicit create/retry attempt: open the wallet as soon as the core profile
@@ -5802,12 +6060,14 @@ function PineTreeWalletRuntime() {
       waasCredentialWalletSourceCount: waasCredentialWalletSources.length,
       waasCredentialSignerWalletCount: waasCredentialSignerWallets.length,
     })
+    overallSetupActiveRef.current = true
     setPendingSync(true)
     markWalletSetupInProgress()
     setProvisioningRetryExhausted(false)
     setFinalProvisioningRefreshAttempted(false)
     pendingProfileSyncAttemptRef.current = false
     if (hasReadyBaseAndSolanaProfile) {
+      overallSetupActiveRef.current = false
       setPendingSync(false)
       clearWalletSetupInProgress()
       setWalletOpening(false)

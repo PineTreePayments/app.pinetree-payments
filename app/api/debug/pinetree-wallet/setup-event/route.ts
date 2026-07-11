@@ -86,6 +86,19 @@ const WHITELISTED_EVENTS = new Set([
   "wallet_setup_pending_lightning",
   "wallet_setup_failed_core",
   "wallet_setup_lightning_needs_attention",
+  "wallet_dynamic_refresh_singleflight_started",
+  "wallet_dynamic_refresh_singleflight_reused",
+  "wallet_dynamic_refresh_singleflight_timed_out",
+  "wallet_dynamic_refresh_singleflight_replaced",
+  "wallet_dynamic_refresh_singleflight_cleared",
+  "wallet_dynamic_required_chain_state",
+  "wallet_dynamic_base_create_started",
+  "wallet_dynamic_base_create_complete",
+  "wallet_dynamic_base_create_failed",
+  "wallet_dynamic_solana_create_started",
+  "wallet_dynamic_solana_create_complete",
+  "wallet_dynamic_solana_create_failed",
+  "wallet_dynamic_required_chains_complete",
 ])
 
 const MAX_DETAIL_KEYS = 12
