@@ -67,8 +67,8 @@ describe("Explicit missing-chain provisioning (Part B)", () => {
     // (runtimeWalletCount: 1 but both addresses still missing) was that nothing ever
     // ran once the count left zero.
     expect(implFn).toContain("computeRequiredChainState({")
-    expect(implFn).toContain("const missingBaseChain = !hasBaseCredential && !hasBaseRuntimeWallet")
-    expect(implFn).toContain("const missingSolanaChain = !hasSolanaCredential && !hasSolanaRuntimeWallet")
+    expect(implFn).toContain("const missingBaseChain = needsExplicitBaseCreate(requiredChainState)")
+    expect(implFn).toContain("const missingSolanaChain = needsExplicitSolanaCreate(requiredChainState)")
   })
 
   it("Base and Solana creation are tracked and guarded independently", () => {
@@ -76,8 +76,8 @@ describe("Explicit missing-chain provisioning (Part B)", () => {
       page.indexOf("const refreshDynamicWalletRuntimeImpl = useCallback"),
       page.indexOf("// Single-flight wrapper")
     )
-    expect(implFn).toContain("createWalletAccount([{ chain: \"EVM\" }]")
-    expect(implFn).toContain("createWalletAccount([{ chain: \"SOL\" }]")
+    expect(implFn).toContain("createWalletAccount([{ chain: ChainEnum.Evm }])")
+    expect(implFn).toContain("createWalletAccount([{ chain: ChainEnum.Sol }])")
     expect(implFn).toContain("baseWalletCreateGuardRef.current = Date.now()")
     expect(implFn).toContain("solanaWalletCreateGuardRef.current = Date.now()")
     expect(implFn).toContain("wallet_dynamic_base_create_started")
@@ -165,10 +165,18 @@ describe("Chain create is bounded by a true PineTree-side deadline, not just the
 
   it("wraps each createWalletAccount call in the reusable bounded helper instead of awaiting it directly", () => {
     expect(page).toContain('import { runWithBoundedTimeout } from "@/lib/wallets/boundedProviderCall"')
-    expect(implFn).toContain("runWithBoundedTimeout(\n              () => createWalletAccount([{ chain: \"EVM\" }]")
-    expect(implFn).toContain("runWithBoundedTimeout(\n              () => createWalletAccount([{ chain: \"SOL\" }]")
+    expect(implFn).toContain("createWalletAccount([{ chain: ChainEnum.Evm }])")
+    expect(implFn).toContain("createWalletAccount([{ chain: ChainEnum.Sol }])")
     expect(implFn).toContain("const baseCreateOutcome = await baseCreateCall.result")
     expect(implFn).toContain("const solanaCreateOutcome = await solanaCreateCall.result")
+  })
+
+  it("uses the installed SDK's real ChainEnum instead of an unchecked string cast for the per-chain create requests", () => {
+    expect(page).toContain(
+      'import { ChainEnum, useDynamicContext, useDynamicEvents, useDynamicWaas'
+    )
+    expect(page).not.toContain('createWalletAccount([{ chain: "EVM" }] as unknown as typeof needsAutoCreateWalletChains)')
+    expect(page).not.toContain('createWalletAccount([{ chain: "SOL" }] as unknown as typeof needsAutoCreateWalletChains)')
   })
 
   it("a timed-out create does not immediately trigger a duplicate create - it marks the chain detached", () => {

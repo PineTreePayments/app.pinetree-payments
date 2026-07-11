@@ -93,3 +93,76 @@ describe("computeRequiredChainState + per-chain decisions", () => {
     expect(needsSolanaRestore(state)).toBe(false)
   })
 })
+
+describe("Base wallet classification does not require a connector literally named Base (Part D)", () => {
+  it("accepts a generic EVM smart-wallet signer (e.g. ZeroDev-keyed) as the Base wallet, not just a connector named 'dynamicwaas'", () => {
+    const zerodevSignerWallet = {
+      connector: { key: "zerodev", name: "ZeroDev Smart Wallet" },
+      address: "0x3333333333333333333333333333333333333333",
+    }
+    expect(classifyWaasWalletChain(zerodevSignerWallet)).toBe("EVM")
+  })
+
+  it("accepts Base chain ID 8453 network context without requiring the network slug to equal 'base'", () => {
+    const baseNetworkWallet = {
+      chain: "EVM",
+      network: "eip155:8453",
+      address: "0x4444444444444444444444444444444444444444",
+    }
+    expect(classifyWaasWalletChain(baseNetworkWallet)).toBe("EVM")
+  })
+
+  it("accepts an Ethereum-labelled EVM wallet (connector name 'Ethereum') as usable for Base", () => {
+    const ethereumLabelledWallet = {
+      connector: { key: "turnkeyhd", name: "Ethereum" },
+      address: "0x5555555555555555555555555555555555555555",
+    }
+    expect(classifyWaasWalletChain(ethereumLabelledWallet)).toBe("EVM")
+  })
+
+  it("never mistakes a Solana wallet for Base", () => {
+    const solanaSmartWallet = {
+      connector: { key: "dynamicwaas", name: "Solana Wallet", connectedChain: "SOL" },
+      address: "6pM6WgH6mYs2f6nQvC1zK8b6D3nZq1u9m8h4b3v2w1x",
+    }
+    expect(classifyWaasWalletChain(solanaSmartWallet)).toBe("SOL")
+    expect(classifyWaasWalletChain(solanaSmartWallet)).not.toBe("EVM")
+  })
+
+  it("does not accept an unrelated external wallet with no EVM/Solana hint at all", () => {
+    const unrelatedWallet = {
+      connector: { key: "walletconnect", name: "Generic External Wallet" },
+      address: "not-a-recognizable-address",
+    }
+    expect(classifyWaasWalletChain(unrelatedWallet)).toBe("unknown")
+  })
+
+  it("rejects an invalid/malformed EVM address instead of accepting it by shape alone", () => {
+    const invalidAddressWallet = { address: "0xnotarealaddress" }
+    expect(classifyWaasWalletChain(invalidAddressWallet)).toBe("unknown")
+    const tooShort = { address: "0x1234" }
+    expect(classifyWaasWalletChain(tooShort)).toBe("unknown")
+  })
+})
+
+describe("needsExplicit*Create respects a broadly-detected address, not just the narrow runtime-wallet list (Part C/D)", () => {
+  it("does not request another Base create when a Base address was already detected via a broader wallet search, even if the narrow runtime-wallet check missed it", () => {
+    const state = computeRequiredChainState({
+      runtimeWallets: [], // narrow list missed the zerodev-keyed EVM signer
+      runtimeCredentials: [],
+      hasBaseAddress: true, // broader dynamicNetworkAddresses search found it
+      hasSolanaAddress: false,
+    })
+    expect(needsExplicitBaseCreate(state)).toBe(false)
+  })
+
+  it("still requests a Base create when neither credential, runtime wallet, nor address exist", () => {
+    const state = computeRequiredChainState({
+      runtimeWallets: [],
+      runtimeCredentials: [],
+      hasBaseAddress: false,
+      hasSolanaAddress: false,
+    })
+    expect(needsExplicitBaseCreate(state)).toBe(true)
+  })
+})

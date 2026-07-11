@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useDynamicContext, useDynamicEvents, useDynamicWaas, useEmbeddedWallet, useExternalAuth, useRefreshUser, useSwitchWallet, useUserWallets } from "@dynamic-labs/sdk-react-core"
+import { ChainEnum, useDynamicContext, useDynamicEvents, useDynamicWaas, useEmbeddedWallet, useExternalAuth, useRefreshUser, useSwitchWallet, useUserWallets } from "@dynamic-labs/sdk-react-core"
 import { Transaction } from "@solana/web3.js"
 import { AlertTriangle, CheckCircle2, ChevronDown, Copy, X } from "lucide-react"
 import Link from "next/link"
@@ -24,6 +24,7 @@ import {
   findDynamicWalletForSource,
   getDynamicWalletAddressesAsync,
   getDynamicWalletAddresses,
+  getDynamicWalletConnectorInfo,
   getDynamicWalletSearchList,
   inferredSignerRailForWallet,
   signDynamicSolanaTransactionWithActiveAccount,
@@ -54,7 +55,13 @@ import {
 } from "@/lib/pinetreeWalletSetupResume"
 import { dynamicSessionBoundToMerchant, getDynamicExternalUserId } from "@/lib/wallets/dynamicExternalIdentity"
 import { formatWalletTotalBalance } from "@/lib/pinetreeWalletDisplay"
-import { computeRequiredChainState } from "@/lib/wallets/dynamicChainClassification"
+import {
+  classifyWaasWalletChain,
+  computeRequiredChainState,
+  needsExplicitBaseCreate,
+  needsExplicitSolanaCreate,
+} from "@/lib/wallets/dynamicChainClassification"
+import { classifyDynamicWalletCreationError } from "@/lib/wallets/dynamicWalletCreationError"
 import { runWithBoundedTimeout } from "@/lib/wallets/boundedProviderCall"
 
 // Legacy compatibility route exists server-side but is not called by PineTree Wallet:
@@ -965,6 +972,15 @@ const walletCreationTimeoutMs =
 const walletProvisioningRetryIntervalMs = 1_800
 const walletProvisioningFinalRefreshGraceMs = 15_000 // total cap: 74_000 + 15_000 = 89_000
 const walletSetupStoragePrefix = "pinetree_wallet_setup_in_progress:"
+// Set when the merchant explicitly cancels/logs out of the Dynamic wallet-setup sheet
+// mid-attempt. Distinct from walletSetupStoragePrefix: that marker means "resume this
+// on reload" and stays even through an interrupted setup; this one means "the merchant
+// walked away on purpose - do not auto-resume until they click Create again."
+const walletSetupCancelledStoragePrefix = "pinetree_wallet_setup_cancelled:"
+// How long Dynamic's own auth sheet may report itself open before PineTree treats that
+// state as stale for timeout-suppression purposes only (Dynamic's UI itself is never
+// force-closed by this - only our own bounded setup deadline stops waiting on it).
+const dynamicAuthSheetStaleMs = 90_000
 const walletCreationDebugEnabled =
   process.env.NODE_ENV !== "production" ||
   process.env.NEXT_PUBLIC_PINE_TREE_WALLET_DEBUG === "true" ||
@@ -1186,6 +1202,10 @@ function extractDynamicUserEmail(dynamicUser: unknown): DynamicEmailExtraction {
 
 function walletSetupStorageKeyForMerchant(merchantId: string | null | undefined) {
   return merchantId ? `${walletSetupStoragePrefix}${merchantId}` : null
+}
+
+function walletSetupCancelledStorageKeyForMerchant(merchantId: string | null | undefined) {
+  return merchantId ? `${walletSetupCancelledStoragePrefix}${merchantId}` : null
 }
 
 function getDynamicEmailMismatchResponse(value: unknown): IdentityMismatchError | null {
@@ -2701,6 +2721,31 @@ function PineTreeWalletRuntime() {
   const overallSetupActiveRef = useRef(false)
   const baseWalletCreateFailedRef = useRef(false)
   const solanaWalletCreateFailedRef = useRef(false)
+  // Tracks Dynamic's own auth-sheet lifecycle via the SDK's authFlowOpen/authFlowClose
+  // events (not just the showAuthFlow boolean, which production showed can remain true
+  // indefinitely once Dynamic's own UI enters an internal error state like "Try again
+  // or log out"). null means "not currently open" or "unknown."
+  const dynamicAuthSheetOpenedAtRef = useRef<number | null>(null)
+  const dynamicAuthSheetStaleClearedRef = useRef(false)
+
+  // Whether Dynamic's auth sheet should still be treated as open for the purposes of
+  // suppressing PineTree's own bounded provisioning timeout. Falls back to the raw
+  // showAuthFlow boolean when we have no open-time signal yet (e.g. very first render
+  // before any authFlowOpen event has fired), but once a sheet has been open longer
+  // than dynamicAuthSheetStaleMs, it can no longer suppress the timeout - Dynamic's own
+  // UI is left alone (never force-closed by this check alone).
+  function isDynamicAuthSheetConsideredOpen(): boolean {
+    if (!showAuthFlow) return false
+    const openedAt = dynamicAuthSheetOpenedAtRef.current
+    if (openedAt === null) return true
+    const stale = Date.now() - openedAt > dynamicAuthSheetStaleMs
+    if (stale && !dynamicAuthSheetStaleClearedRef.current) {
+      dynamicAuthSheetStaleClearedRef.current = true
+      console.info("[pinetree-wallets] wallet_dynamic_sheet_stale_state_cleared", { ageMs: Date.now() - openedAt })
+      emitWalletSetupDebugEvent("wallet_dynamic_sheet_stale_state_cleared", { ageMs: Date.now() - openedAt })
+    }
+    return !stale
+  }
 
   function chainCreateGuardActive(guardRef: { current: number | null }) {
     const startedAt = guardRef.current
@@ -2710,6 +2755,84 @@ function PineTreeWalletRuntime() {
       return false
     }
     return true
+  }
+
+  // Builds the safe wallet_dynamic_base_create_failed diagnostic: only sanitized
+  // enum-like strings/bounded numbers, from classifyDynamicWalletCreationError plus
+  // booleans already computed elsewhere in this render - never a raw error, message,
+  // stack, address, email, JWT, or user/merchant id.
+  function buildDynamicChainCreateFailureDiagnostic(params: {
+    reason: string
+    chain: "EVM" | "SOL"
+    error: unknown
+    runtimeWalletCount: number
+    hasBaseCredential: boolean
+    hasBaseRuntimeWallet: boolean
+    hasSolanaCredential: boolean
+    hasSolanaRuntimeWallet: boolean
+  }) {
+    const classified = classifyDynamicWalletCreationError(params.error)
+    return {
+      reason: params.reason,
+      operation: "create_wallet_account",
+      sdkMethod: "createWalletAccount",
+      requestedChain: params.chain,
+      requestedChainId: params.chain === "EVM" ? 8453 : null,
+      errorName: classified.errorName,
+      errorCode: classified.errorCode,
+      errorType: classified.errorType,
+      providerStatus: classified.providerStatus,
+      safeReason: classified.safeReason,
+      authSheetOpen: Boolean(showAuthFlow),
+      dynamicUserPresent: Boolean(user),
+      waasEnabled: dynamicWaasIsEnabled,
+      // A dashboard/config-shaped rejection (chain not enabled at all) means Base was
+      // never actually usable - anything else means the network is configured and this
+      // failure is a transient/provider-side issue instead.
+      baseNetworkEnabled: classified.safeReason !== "no_enabled_chains" && classified.safeReason !== "invalid_chains",
+      runtimeWalletCount: params.runtimeWalletCount,
+      hasBaseCredential: params.hasBaseCredential,
+      hasBaseRuntimeWallet: params.hasBaseRuntimeWallet,
+      hasSolanaCredential: params.hasSolanaCredential,
+      hasSolanaRuntimeWallet: params.hasSolanaRuntimeWallet,
+    }
+  }
+
+  // Debug-only (never runs in production unless walletCreationDebugEnabled): summarizes
+  // how every runtime wallet in the broad search list classifies, without ever logging
+  // an address or wallet id, so a "Base remains undetected" report can show whether an
+  // EVM-compatible wallet already existed but was rejected by an overly narrow rule.
+  function logDynamicWalletClassificationSummary(reason: string, candidateWallets: unknown[]) {
+    const summary = candidateWallets.map((candidate) => {
+      const wallet = candidate as DynamicWalletLike
+      const { connectorKey } = getDynamicWalletConnectorInfo(wallet)
+      const chainFamily = classifyDynamicWalletChain(wallet)
+      const accepted = classifyWaasWalletChain(wallet)
+      const acceptedAsBase = accepted === "EVM"
+      const acceptedAsSolana = accepted === "SOL"
+      const networkCount =
+        (Array.isArray(wallet.accounts) ? wallet.accounts.length : 0) ||
+        (Array.isArray(wallet.additionalAddresses) ? wallet.additionalAddresses.length : 0) + 1
+      return {
+        connectorKey,
+        chainFamily,
+        networkCount,
+        supportsEvm: chainFamily === "evm",
+        supportsBase: dynamicWalletSupportsRail(wallet, "base"),
+        supportsSolana: dynamicWalletSupportsRail(wallet, "solana"),
+        embedded: Boolean(
+          connectorKey && ["dynamicwaas", "turnkey", "zerodev", "magiclink"].some((token) => String(connectorKey).toLowerCase().includes(token))
+        ),
+        acceptedAsBase,
+        acceptedAsSolana,
+        rejectionReason: acceptedAsBase || acceptedAsSolana
+          ? null
+          : chainFamily === "unknown"
+            ? "no_recognized_chain_hint"
+            : "chain_family_not_required",
+      }
+    })
+    console.debug("[pinetree-wallets] wallet_dynamic_classification_summary", { reason, wallets: summary })
   }
 
   // Dedupes the background rail-sync call fired after a successful core profile
@@ -2746,6 +2869,36 @@ function PineTreeWalletRuntime() {
       merchantEmailPresent: Boolean(merchantEmail),
     })
   }, [dynamicAuthConfig.mode, dynamicAuthConfig.emailFallbackEnabled, dynamicAuthConfig.externalJwtConfigured, merchantEmail])
+
+  // Dev-only: safe capability/config snapshot for diagnosing "wrong SDK API invoked"
+  // reports - booleans only, never wallet/user identity.
+  useEffect(() => {
+    if (!walletCreationDebugEnabled || !sdkHasLoaded) return
+    let configuredEvmNetworkPresent = false
+    let configuredSolanaNetworkPresent = false
+    try {
+      configuredEvmNetworkPresent = Boolean(getWaasWalletConnector("EVM"))
+    } catch {
+      configuredEvmNetworkPresent = false
+    }
+    try {
+      configuredSolanaNetworkPresent = Boolean(getWaasWalletConnector("SOL"))
+    } catch {
+      configuredSolanaNetworkPresent = false
+    }
+    console.debug("[pinetree-wallets] wallet_dynamic_wallet_creation_capabilities", {
+      createWalletAccountAvailable: typeof createWalletAccount === "function",
+      createEmbeddedWalletAvailable: typeof createEmbeddedWallet === "function",
+      initializeWaasAvailable: typeof initializeWaas === "function",
+      configuredEvmNetworkPresent,
+      // Base has no distinct Dynamic ChainEnum value - it is served by the same
+      // generic EVM embedded wallet/connector, so its configured-network signal is
+      // the same as the generic EVM connector's presence.
+      configuredBaseNetworkPresent: configuredEvmNetworkPresent,
+      configuredSolanaNetworkPresent,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sdkHasLoaded, dynamicWaasIsEnabled])
 
   // --- SDK load timeout ---
   useEffect(() => {
@@ -2872,7 +3025,12 @@ function PineTreeWalletRuntime() {
         if (typeof window !== "undefined") {
           const setupKey = walletSetupStorageKeyForMerchant(sessionUser.id)
           if (setupKey) {
-            const setupStarted = window.localStorage.getItem(setupKey) === "true"
+            const cancelledKey = walletSetupCancelledStorageKeyForMerchant(sessionUser.id)
+            // A page reload after a merely-interrupted setup may resume; a page reload
+            // after the merchant explicitly cancelled/logged out of the Dynamic sheet
+            // must not, until they click Create again (Part G).
+            const explicitlyCancelled = Boolean(cancelledKey && window.localStorage.getItem(cancelledKey) === "true")
+            const setupStarted = window.localStorage.getItem(setupKey) === "true" && !explicitlyCancelled
             if (!json.profile) {
               if (setupStarted) {
                 emitWalletSetupStageDiagnostic("wallet_create_resume_detected", "resume_missing_profile")
@@ -3232,6 +3390,72 @@ function PineTreeWalletRuntime() {
       reason: dynamicVerificationPromptReason || "dynamic_auth_cancelled",
     })
     logWalletCreationStep("failed", { reason: "dynamic_auth_cancelled" })
+  })
+
+  // Dynamic's own auth-sheet lifecycle (Part E). showAuthFlow alone was seen stuck true
+  // in production because Dynamic's UI can enter an internal error state ("Try again or
+  // log out") without ever firing authFlowClose - these events give a real open-time
+  // signal for the staleness check above, independent of that boolean.
+  useDynamicEvents("authFlowOpen", () => {
+    dynamicAuthSheetOpenedAtRef.current = Date.now()
+    dynamicAuthSheetStaleClearedRef.current = false
+    console.info("[pinetree-wallets] wallet_dynamic_sheet_opened", {})
+    emitWalletSetupDebugEvent("wallet_dynamic_sheet_opened", {})
+  })
+
+  useDynamicEvents("authFlowClose", () => {
+    dynamicAuthSheetOpenedAtRef.current = null
+    console.info("[pinetree-wallets] wallet_dynamic_sheet_closed", {})
+    emitWalletSetupDebugEvent("wallet_dynamic_sheet_closed", {})
+    // A Dynamic user session present at close time means the required information
+    // capture actually completed (success), rather than the merchant dismissing an
+    // incomplete/error sheet state.
+    if (user) {
+      console.info("[pinetree-wallets] wallet_dynamic_sheet_completed", {})
+      emitWalletSetupDebugEvent("wallet_dynamic_sheet_completed", {})
+    }
+  })
+
+  // Fires for both a PineTree-initiated handleLogOut() call and Dynamic's own internal
+  // "Log out" control inside its auth sheet (e.g. after the "Try again or log out"
+  // error state) - either way this is the Dynamic wallet-provider session ending, never
+  // the separate PineTree/Supabase application session (Part F, Option A: cancel wallet
+  // setup, keep the merchant signed into PineTree - never call the Supabase sign-out
+  // function from here).
+  useDynamicEvents("logout", () => {
+    const setupWasActive = Boolean(pendingSync || overallSetupActiveRef.current || walletSetupStartInFlightRef.current)
+    console.info("[pinetree-wallets] wallet_dynamic_logout_started", { setupWasActive })
+    emitWalletSetupDebugEvent("wallet_dynamic_logout_started", { setupWasActive })
+    try {
+      dynamicAuthSheetOpenedAtRef.current = null
+      setShowAuthFlow(false)
+      setShowDynamicUserProfile(false)
+      if (setupWasActive) {
+        overallSetupActiveRef.current = false
+        setCoreSetupStageLabel("")
+        setPendingSync(false)
+        setSyncing(false)
+        setWalletCreationStep("idle")
+        setCoreSetupNeedsUserAuth(false)
+        walletSetupStartInFlightRef.current = null
+        pendingWalletProvisionAttemptRef.current = null
+        pendingWalletProvisionStartedAtRef.current = null
+        pendingProfileSyncAttemptRef.current = false
+        nativeFallbackPendingRef.current = false
+        autoOpenWalletAfterCreateRef.current = false
+        // Clearing the in-progress marker alone is not enough (Part G): the merchant
+        // walked away on purpose, so mark it cancelled too, distinctly from an
+        // interrupted-but-still-wanted setup that a plain reload should still resume.
+        clearWalletSetupInProgress()
+        markWalletSetupCancelled()
+        emitWalletSetupDebugEvent("wallet_setup_cancelled_from_dynamic", {})
+      }
+      console.info("[pinetree-wallets] wallet_dynamic_logout_complete", { setupWasActive })
+      emitWalletSetupDebugEvent("wallet_dynamic_logout_complete", { setupWasActive })
+    } catch {
+      console.warn("[pinetree-wallets] wallet_dynamic_logout_failed", {})
+      emitWalletSetupDebugEvent("wallet_dynamic_logout_failed", {})
+    }
   })
 
   const blockDynamicEmailFallbackAuth = useCallback((reason: string) => {
@@ -3977,12 +4201,21 @@ function PineTreeWalletRuntime() {
           // Solana wallet used to permanently block the missing chain from ever being
           // explicitly requested again - the production freeze this fixes.
           refreshStage = "read_waas_credentials"
+          // Classify against the broader dynamicWalletSearchList, not just the narrow
+          // getWaasWallets() result: an EVM signer wallet created as part of a smart
+          // wallet (e.g. ZeroDev) can appear in userWallets keyed 'zerodev' rather than
+          // 'dynamicwaas', so getWaasWallets() alone can under-count it and cause a
+          // Base wallet that already exists to look "missing" forever.
+          const broadRuntimeWallets = [...runtimeWallets, ...dynamicWalletSearchList]
           const requiredChainState = computeRequiredChainState({
-            runtimeWallets,
+            runtimeWallets: broadRuntimeWallets,
             runtimeCredentials,
             hasBaseAddress: dynamicNetworkAddresses.base.length > 0,
             hasSolanaAddress: dynamicNetworkAddresses.solana.length > 0,
           })
+          if (walletCreationDebugEnabled) {
+            logDynamicWalletClassificationSummary(reason, broadRuntimeWallets)
+          }
           const {
             hasBaseCredential,
             hasSolanaCredential,
@@ -3992,8 +4225,12 @@ function PineTreeWalletRuntime() {
           console.info("[pinetree-wallets] wallet_dynamic_required_chain_state", { reason, ...requiredChainState })
           emitWalletSetupDebugEvent("wallet_dynamic_required_chain_state", { reason, ...requiredChainState })
 
-          const missingBaseChain = !hasBaseCredential && !hasBaseRuntimeWallet
-          const missingSolanaChain = !hasSolanaCredential && !hasSolanaRuntimeWallet
+          // Also requires no already-detected address (broader search than
+          // hasBaseRuntimeWallet/hasSolanaRuntimeWallet alone) - an EVM signer wallet
+          // that already produced a valid Base address must never be recreated merely
+          // because the narrower runtime-wallet check missed it.
+          const missingBaseChain = needsExplicitBaseCreate(requiredChainState)
+          const missingSolanaChain = needsExplicitSolanaCreate(requiredChainState)
           let attemptedBaseCreate = false
           let attemptedSolanaCreate = false
 
@@ -4014,7 +4251,10 @@ function PineTreeWalletRuntime() {
             // AbortSignal support, so a timeout here means the underlying provider call
             // is now detached (kept running in the background, uncancelled).
             const baseCreateCall = runWithBoundedTimeout(
-              () => createWalletAccount([{ chain: "EVM" }] as unknown as typeof needsAutoCreateWalletChains),
+              // ChainEnum.Evm ("EVM") is the exact value the installed
+              // @dynamic-labs/sdk-react-core WalletCreationRequirement type expects -
+              // verified against its .d.ts, no unchecked cast needed.
+              () => createWalletAccount([{ chain: ChainEnum.Evm }]),
               dynamicChainCreateTimeoutMs
             )
             const baseCreateOutcome = await baseCreateCall.result
@@ -4026,15 +4266,18 @@ function PineTreeWalletRuntime() {
               setDynamicWalletRuntimeRefreshNonce((value) => value + 1)
             } else if (baseCreateOutcome.status === "rejected") {
               baseWalletCreateFailedRef.current = true
-              const classified = classifyDynamicRefreshError(baseCreateOutcome.reason)
-              console.warn("[pinetree-wallets] wallet_dynamic_base_create_failed", {
+              const diagnostic = buildDynamicChainCreateFailureDiagnostic({
                 reason,
-                errorName: classified.errorName ?? "unknown_error",
+                chain: "EVM",
+                error: baseCreateOutcome.reason,
+                runtimeWalletCount: broadRuntimeWallets.length,
+                hasBaseCredential,
+                hasBaseRuntimeWallet,
+                hasSolanaCredential,
+                hasSolanaRuntimeWallet,
               })
-              emitWalletSetupDebugEvent("wallet_dynamic_base_create_failed", {
-                reason,
-                errorName: classified.errorName ?? "unknown_error",
-              })
+              console.warn("[pinetree-wallets] wallet_dynamic_base_create_failed", diagnostic)
+              emitWalletSetupDebugEvent("wallet_dynamic_base_create_failed", diagnostic)
             } else {
               // Timed out locally. Do not start a duplicate create merely because this
               // local deadline expired - mark the chain detached so the next hydration
@@ -4086,7 +4329,7 @@ function PineTreeWalletRuntime() {
             setCoreSetupStageLabel("Creating Solana wallet")
             refreshStage = "create_wallet_account"
             const solanaCreateCall = runWithBoundedTimeout(
-              () => createWalletAccount([{ chain: "SOL" }] as unknown as typeof needsAutoCreateWalletChains),
+              () => createWalletAccount([{ chain: ChainEnum.Sol }]),
               dynamicChainCreateTimeoutMs
             )
             const solanaCreateOutcome = await solanaCreateCall.result
@@ -4300,6 +4543,7 @@ function PineTreeWalletRuntime() {
     createWalletAccount,
     dynamicNetworkAddresses,
     dynamicWaasIsEnabled,
+    dynamicWalletSearchList,
     embeddedWalletSessionActive,
     getWaasWalletConnector,
     getWaasWallets,
@@ -5275,7 +5519,7 @@ function PineTreeWalletRuntime() {
     const suppressionReason = walletProvisioningTimeoutSuppressionReason({
       pendingSync,
       needsUserAuth: coreSetupNeedsUserAuth,
-      dynamicAuthSheetOpen: Boolean(showAuthFlow),
+      dynamicAuthSheetOpen: isDynamicAuthSheetConsideredOpen(),
       nativeFallbackPending: nativeFallbackPendingRef.current,
       profilePostInFlight: Boolean(profilePostInFlightKeyRef.current),
     })
@@ -5318,7 +5562,7 @@ function PineTreeWalletRuntime() {
     const suppressionReason = walletProvisioningTimeoutSuppressionReason({
       pendingSync,
       needsUserAuth: coreSetupNeedsUserAuth,
-      dynamicAuthSheetOpen: Boolean(showAuthFlow),
+      dynamicAuthSheetOpen: isDynamicAuthSheetConsideredOpen(),
       nativeFallbackPending: nativeFallbackPendingRef.current,
       profilePostInFlight: Boolean(profilePostInFlightKeyRef.current),
     })
@@ -5338,7 +5582,7 @@ function PineTreeWalletRuntime() {
       const fireTimeSuppression = walletProvisioningTimeoutSuppressionReason({
         pendingSync: true,
         needsUserAuth: coreSetupNeedsUserAuth,
-        dynamicAuthSheetOpen: Boolean(showAuthFlow),
+        dynamicAuthSheetOpen: isDynamicAuthSheetConsideredOpen(),
         nativeFallbackPending: nativeFallbackPendingRef.current,
         profilePostInFlight: Boolean(profilePostInFlightKeyRef.current),
       })
@@ -6035,6 +6279,40 @@ function PineTreeWalletRuntime() {
     }
   }
 
+  // Explicit cancellation marker (Part G): distinct from walletSetupStoragePrefix.
+  // A page reload after a merely-interrupted setup (browser closed, network drop)
+  // should still resume - a page reload after the merchant explicitly logged out or
+  // cancelled from the Dynamic sheet must not.
+  function markWalletSetupCancelled() {
+    const cancelledKey = walletSetupCancelledStorageKeyForMerchant(merchantId)
+    if (!cancelledKey) return
+    try {
+      window.localStorage.setItem(cancelledKey, "true")
+    } catch {
+      // Storage unavailable - resume gating below simply falls back to "not cancelled".
+    }
+  }
+
+  function clearWalletSetupCancelled() {
+    const cancelledKey = walletSetupCancelledStorageKeyForMerchant(merchantId)
+    if (!cancelledKey) return
+    try {
+      window.localStorage.removeItem(cancelledKey)
+    } catch {
+      // Nothing to clean up if storage is unavailable.
+    }
+  }
+
+  function setupCancelledInThisBrowser() {
+    const cancelledKey = walletSetupCancelledStorageKeyForMerchant(merchantId)
+    if (!cancelledKey) return false
+    try {
+      return window.localStorage.getItem(cancelledKey) === "true"
+    } catch {
+      return false
+    }
+  }
+
   // Server-visible mirror of the wallet_dynamic_* console diagnostics below - frontend
   // console.info never reaches Vercel logs from a mobile browser, so this fires a small
   // sanitized beacon at the same checkpoints. Fire-and-forget: never awaited, never
@@ -6146,6 +6424,9 @@ function PineTreeWalletRuntime() {
     setCoreSetupStageLabel("Preparing secure wallet")
     setPendingSync(true)
     markWalletSetupInProgress()
+    // A new explicit click always supersedes a prior cancellation (Part G) - only
+    // background/automatic resume is blocked by it, never a merchant-initiated retry.
+    clearWalletSetupCancelled()
     // Explicit create/retry attempt: open the wallet as soon as the core profile
     // saves instead of leaving the merchant on the setup card.
     autoOpenWalletAfterCreateRef.current = true

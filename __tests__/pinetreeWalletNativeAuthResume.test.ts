@@ -99,7 +99,10 @@ describe("PineTree Wallet native auth resume - page wiring", () => {
     expect(occurrences).toBeGreaterThanOrEqual(3)
     expect(page).toContain("wallet_setup_timeout_suppressed")
     expect(page).toContain("needsUserAuth: coreSetupNeedsUserAuth")
-    expect(page).toContain("dynamicAuthSheetOpen: Boolean(showAuthFlow)")
+    // Sheet-open state now goes through a staleness-aware helper instead of the raw
+    // showAuthFlow boolean directly (production showed showAuthFlow can remain true
+    // indefinitely once Dynamic's own UI enters an internal error state).
+    expect(page).toContain("dynamicAuthSheetOpen: isDynamicAuthSheetConsideredOpen()")
     expect(page).toContain("profilePostInFlight: Boolean(profilePostInFlightKeyRef.current)")
   })
 
