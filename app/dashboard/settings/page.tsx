@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import {
   DashboardSection,
+  ProviderStatusPill,
   dashboardPageTitleClass
 } from "@/components/dashboard/DashboardPrimitives"
 import Link from "next/link"
@@ -146,10 +147,10 @@ function profileActionLabel(status: "incomplete" | "complete" | "needs_attention
   return "Complete Profile"
 }
 
-function profileStatusTone(status: "incomplete" | "complete" | "needs_attention") {
-  if (status === "complete") return "border-blue-200 bg-blue-50 text-blue-700"
-  if (status === "needs_attention") return "border-red-200 bg-red-50 text-red-700"
-  return "border-gray-200 bg-gray-50 text-gray-700"
+function profileStatusTone(status: "incomplete" | "complete" | "needs_attention"): "default" | "blue" | "red" {
+  if (status === "complete") return "blue"
+  if (status === "needs_attention") return "red"
+  return "default"
 }
 
 function requiredLabel(field: BusinessProfileField) {
@@ -670,7 +671,7 @@ export default function SettingsPage() {
       {businessProfileOpen ? (
         <div
           data-pinetree-overlay="true"
-          className="pinetree-modal-backdrop fixed inset-0 z-[80] flex items-end justify-center overflow-hidden p-0 sm:items-center sm:p-5"
+          className="pinetree-modal-backdrop fixed inset-0 z-[80] flex min-h-[100dvh] items-end justify-center overflow-hidden bg-slate-950/25 p-0 backdrop-blur-md sm:items-center sm:p-5"
           role="presentation"
           onMouseDown={(event) => {
             if (event.currentTarget === event.target) setBusinessProfileOpen(false)
@@ -686,9 +687,7 @@ export default function SettingsPage() {
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 id="business-profile-modal-title" className="text-lg font-semibold text-gray-950">Business Profile</h2>
-                  <span className={`rounded-full border px-1.5 py-px text-[10px] font-semibold ${profileStatusTone(profileStatus)}`}>
-                    {profileStatusLabel(profileStatus)}
-                  </span>
+                  <ProviderStatusPill label={profileStatusLabel(profileStatus)} tone={profileStatusTone(profileStatus)} />
                 </div>
                 <p className="mt-1 text-sm leading-5 text-gray-600">Fields marked with <span className="text-red-600">*</span> are required.</p>
               </div>
@@ -760,9 +759,7 @@ export default function SettingsPage() {
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm font-semibold text-gray-950">Business Profile</p>
-              <span className={`shrink-0 rounded-full border px-1.5 py-px text-[10px] font-semibold ${profileStatusTone(profileStatus)}`}>
-                {profileStatusLabel(profileStatus)}
-              </span>
+              <ProviderStatusPill label={profileStatusLabel(profileStatus)} tone={profileStatusTone(profileStatus)} className="shrink-0" />
             </div>
             <p className="text-sm leading-5 text-gray-600">
               Business and owner details required for payment activation.

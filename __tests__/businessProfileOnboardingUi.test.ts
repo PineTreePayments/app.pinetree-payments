@@ -13,7 +13,8 @@ describe("Business Profile onboarding UI", () => {
     const sharedBanner = read("components/dashboard/BusinessProfileRequirementBanner.tsx")
 
     for (const source of [dashboard, providers]) {
-      expect(source).toContain("Complete Business Profile before continuing")
+      expect(source).toContain("Complete Business Profile Before Continuing")
+      expect(source).not.toContain("Complete Business Profile before continuing")
       expect(source).toContain("BusinessProfileRequirementBanner")
       expect(source).not.toContain("Business Profile Required")
       expect(source).not.toContain("Complete your Business Profile to activate wallets, providers, and live payments.")
@@ -22,7 +23,7 @@ describe("Business Profile onboarding UI", () => {
 
     expect(sharedBanner).toContain("bg-red-50/70")
     expect(sharedBanner).toContain("border-red-200")
-    expect(sharedBanner).toContain('const linkedWord = "continuing"')
+    expect(sharedBanner).toContain('const linkedWord = "Continuing"')
     expect(sharedBanner).toContain("/dashboard/settings?section=business-profile&return=${returnDestination}")
     expect(sharedBanner).not.toContain("bg-red-600")
     expect(sharedBanner).not.toContain("Complete Business Profile</Link>")
@@ -70,7 +71,8 @@ describe("Business Profile onboarding UI", () => {
 
     expect(businessSection).toContain("Business and owner details required for payment activation.")
     expect(businessSection).toContain("flex items-center justify-between gap-3")
-    expect(businessSection).toContain("shrink-0 rounded-full border px-1.5 py-px text-[10px]")
+    expect(businessSection).toContain('ProviderStatusPill label={profileStatusLabel(profileStatus)} tone={profileStatusTone(profileStatus)} className="shrink-0"')
+    expect(businessSection).not.toContain("shrink-0 rounded-full border px-1.5 py-px text-[10px]")
     expect(editProfileButton).toContain("inline-flex h-10 w-auto min-w-[9.5rem] items-center justify-center rounded-lg bg-blue-600 px-5 text-sm")
     expect(editProfileButton).not.toContain("w-full")
     expect(editProfileButton).not.toContain("rounded-full")
@@ -107,7 +109,7 @@ describe("Business Profile onboarding UI", () => {
     )
 
     expect(modalBlock).toContain('data-pinetree-overlay="true"')
-    expect(modalBlock).toContain("pinetree-modal-backdrop fixed inset-0 z-[80] flex items-end justify-center overflow-hidden")
+    expect(modalBlock).toContain("pinetree-modal-backdrop fixed inset-0 z-[80] flex min-h-[100dvh] items-end justify-center overflow-hidden bg-slate-950/25 p-0 backdrop-blur-md")
     expect(modalBlock).toContain("flex h-[100dvh] max-h-[100dvh] w-full max-w-4xl flex-col overflow-hidden")
     expect(modalBlock).toContain("sm:h-auto sm:max-h-[92dvh]")
     expect(modalBlock).toContain("shrink-0 flex items-start justify-between")
@@ -118,6 +120,7 @@ describe("Business Profile onboarding UI", () => {
     )
     expect(headerBlock).toContain('id="business-profile-modal-title"')
     expect(headerBlock).toContain("Business Profile")
+    expect(headerBlock).toContain("ProviderStatusPill")
     expect(headerBlock).toContain("profileStatusLabel(profileStatus)")
     expect(headerBlock).toContain("Fields marked with")
     expect(headerBlock).toContain("Close")
@@ -141,9 +144,10 @@ describe("Business Profile onboarding UI", () => {
       settings.indexOf("function requiredLabel")
     )
 
-    expect(toneFn).toContain('if (status === "complete") return "border-blue-200 bg-blue-50 text-blue-700"')
-    expect(toneFn).toContain('return "border-gray-200 bg-gray-50 text-gray-700"')
-    expect(toneFn).toContain('if (status === "needs_attention") return "border-red-200 bg-red-50 text-red-700"')
+    expect(settings).toContain("ProviderStatusPill")
+    expect(toneFn).toContain('if (status === "complete") return "blue"')
+    expect(toneFn).toContain('return "default"')
+    expect(toneFn).toContain('if (status === "needs_attention") return "red"')
     expect(toneFn).not.toContain("emerald")
     expect(toneFn).not.toContain("bg-amber")
   })
@@ -219,7 +223,8 @@ describe("Business Profile onboarding UI", () => {
     const sharedBanner = read("components/dashboard/BusinessProfileRequirementBanner.tsx")
     const settings = read("app/dashboard/settings/page.tsx")
 
-    expect(wallet).toContain("Complete Business Profile before continuing")
+    expect(wallet).toContain("Complete Business Profile Before Continuing")
+    expect(wallet).not.toContain("Complete Business Profile before continuing")
     expect(sharedBanner).toContain("/dashboard/settings?section=business-profile&return=${returnDestination}")
     expect(wallet).toContain('returnDestination="wallet"')
     expect(wallet).toContain(">PineTree Wallet</h2>")
@@ -232,7 +237,7 @@ describe("Business Profile onboarding UI", () => {
     expect(wallet).toContain("disabled={businessProfileGateBlocking || syncing || logoutPending || walletCreationInProgress}")
     expect(wallet).not.toContain("Complete your Business Profile before creating your PineTree Wallet.")
     expect(wallet).not.toContain("bg-red-600")
-    expect(sharedBanner).toContain('const linkedWord = "continuing"')
+    expect(sharedBanner).toContain('const linkedWord = "Continuing"')
     expect(sharedBanner).not.toContain("Complete Business Profile</Link>")
     expect(wallet).toContain("businessProfileGateReady")
     expect(wallet).toContain("blockWalletSetupForBusinessProfile")

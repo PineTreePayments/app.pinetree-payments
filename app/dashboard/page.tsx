@@ -254,7 +254,7 @@ export default function DashboardPage() {
 
       {businessProfileStatus && businessProfileStatus.profile_status !== "complete" ? (
         <BusinessProfileRequirementBanner
-          message="Complete Business Profile before continuing"
+          message="Complete Business Profile Before Continuing"
           returnDestination="overview"
           compact
         />

@@ -7822,16 +7822,16 @@ function PineTreeWalletRuntime() {
       {businessProfileGateBlocking ? (
         <div className="mb-3 max-w-2xl">
           <BusinessProfileRequirementBanner
-            message="Complete Business Profile before continuing"
+            message="Complete Business Profile Before Continuing"
             returnDestination="wallet"
             compact
           />
         </div>
       ) : null}
-      <article className="max-w-2xl min-h-[15rem] rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-6 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:min-h-[16rem] sm:p-7">
+      <article className="max-w-2xl min-h-[15rem] flex flex-col rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-6 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:min-h-[16rem] sm:p-7">
         <h2 className="min-w-0 text-base font-semibold text-gray-950">PineTree Wallet</h2>
         {!walletProvisioningInProgress ? (
-          <div className="mt-4 max-w-xl">
+          <div className="mt-6 max-w-xl">
             <div>
               <EnabledRailChips rows={walletRailRows} />
             </div>
@@ -8042,7 +8042,7 @@ function PineTreeWalletRuntime() {
           </div>
         ) : null}
 
-        <div className="mt-8 flex justify-start">
+        <div className="mt-auto flex justify-start pt-7">
           {dynamicVerificationPromptReason ? (
             <button
               type="button"

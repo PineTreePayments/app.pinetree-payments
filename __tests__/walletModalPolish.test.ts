@@ -367,12 +367,13 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(src).not.toContain("sm:flex-row sm:items-start sm:justify-between")
     expect(src).toContain("min-h-[15rem]")
     expect(src).toContain("sm:min-h-[16rem]")
+    expect(src).toContain("flex flex-col")
     expect(src).toContain("p-6")
     expect(src).toContain("sm:p-7")
     expect(src).toContain("max-w-2xl")
     expect(src).toContain("max-w-xl")
-    expect(src).toContain("mt-4 max-w-xl")
-    expect(src).toContain("mt-8 flex justify-start")
+    expect(src).toContain("mt-6 max-w-xl")
+    expect(src).toContain("mt-auto flex justify-start pt-7")
   })
 
   it("main Connected pill is removed from the wallet setup card header area", () => {
@@ -411,7 +412,7 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     const src = runtimeSrc()
     expect(src).toContain("Open PineTree Wallet")
     expect(src).toContain("Create PineTree Wallet")
-    expect(src).toContain("mt-8 flex justify-start")
+    expect(src).toContain("mt-auto flex justify-start pt-7")
     expect(src).toContain("h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60")
   })
 

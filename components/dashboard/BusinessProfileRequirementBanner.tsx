@@ -15,7 +15,7 @@ export default function BusinessProfileRequirementBanner({
   returnDestination: BusinessProfileReturnDestination
   compact?: boolean
 }) {
-  const linkedWord = "continuing"
+  const linkedWord = "Continuing"
   const linkIndex = message.indexOf(linkedWord)
   const beforeLink = linkIndex >= 0 ? message.slice(0, linkIndex) : `${message} `
   const afterLink = linkIndex >= 0 ? message.slice(linkIndex + linkedWord.length) : ""
@@ -30,7 +30,7 @@ export default function BusinessProfileRequirementBanner({
             href={businessProfileDeepLink(returnDestination)}
             className="font-semibold text-red-700 underline decoration-red-300 underline-offset-2 hover:text-red-800 hover:decoration-red-500"
           >
-            {linkIndex >= 0 ? linkedWord : "continuing"}
+            {linkIndex >= 0 ? linkedWord : "Continuing"}
           </Link>
           {afterLink}
         </p>
