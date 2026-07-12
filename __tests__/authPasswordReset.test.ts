@@ -46,6 +46,18 @@ describe("auth password reset flow", () => {
     expect(resetPassword).toContain("PASSWORD_RECOVERY")
   })
 
+  it("shows concise signup password requirements without changing auth validation", () => {
+    const signup = read("app/signup/page.tsx")
+
+    expect(signup).toContain("Password must:")
+    expect(signup).toContain("• Be at least 11 characters")
+    expect(signup).toContain("• Include one uppercase letter")
+    expect(signup).toContain("• Include one lowercase letter")
+    expect(signup).toContain("• Include one number")
+    expect(signup).toContain("supabase.auth.signUp")
+    expect(signup).not.toContain("password.length < 11")
+  })
+
   it("documents PineTree-branded Supabase reset email template", () => {
     const template = read("docs/auth/supabase-email-templates.md")
 

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ChainEnum, useDynamicContext, useDynamicEvents, useDynamicWaas, useEmbeddedWallet, useExternalAuth, useRefreshUser, useSwitchWallet, useUserWallets } from "@dynamic-labs/sdk-react-core"
 import { Transaction } from "@solana/web3.js"
-import { AlertTriangle, CheckCircle2, ChevronDown, Copy, Loader2, X } from "lucide-react"
+import { AlertTriangle, CheckCircle2, ChevronDown, Copy, Eye, EyeOff, Loader2, X } from "lucide-react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import {
@@ -2205,15 +2205,6 @@ function WithdrawalFormShell({
         >
           {reviewing ? "Reviewing..." : missingRuntimeSigner ? "Reconnect PineTree Wallet" : "Review withdrawal"}
         </button>
-        {missingRuntimeSigner && onFinishSetup ? (
-          <button
-            type="button"
-            onClick={onFinishSetup}
-            className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700"
-          >
-            Finish setup
-          </button>
-        ) : null}
       </div>
 
       {process.env.NODE_ENV !== "production" ? (
@@ -2717,6 +2708,7 @@ function PineTreeWalletRuntime() {
   const [sdkTimedOut, setSdkTimedOut] = useState(false)
   const [walletOpen, setWalletOpen] = useState(false)
   const [walletOpening, setWalletOpening] = useState(false)
+  const [frontBalanceHidden, setFrontBalanceHidden] = useState(true)
   const [walletSetupOpeningAfterCreate, setWalletSetupOpeningAfterCreate] = useState(false)
   const [openWalletReconnectNeeded, setOpenWalletReconnectNeeded] = useState(false)
   const [activeTab, setActiveTab] = useState<WalletTab>("overview")
@@ -7817,6 +7809,9 @@ function PineTreeWalletRuntime() {
   // Main card
   // ---------------------------------------------------------------------------
 
+  const frontCardLastSynced = formatLastSynced(walletSync.lastSyncedAt)
+  const frontCardBalanceLabel = formatWalletTotalBalance(walletSync.totalUsd, walletSyncing)
+
   return (
     <>
       {businessProfileGateBlocking ? (
@@ -7835,6 +7830,32 @@ function PineTreeWalletRuntime() {
             <div>
               <EnabledRailChips rows={walletRailRows} />
             </div>
+            {hasWallet ? (
+              <div className="mt-5 grid gap-4 sm:grid-cols-[minmax(0,0.9fr)_minmax(9rem,0.55fr)]">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-blue-700/80">Wallet Balance</p>
+                    <button
+                      type="button"
+                      onClick={() => setFrontBalanceHidden((hidden) => !hidden)}
+                      aria-label={frontBalanceHidden ? "Show wallet balance" : "Hide wallet balance"}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-blue-100 bg-white/80 text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-white"
+                    >
+                      {frontBalanceHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xl font-semibold leading-tight text-gray-950">
+                    {frontBalanceHidden ? "••••••••" : frontCardBalanceLabel}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-blue-700/80">Last synced</p>
+                  <p className="mt-1 text-sm font-semibold leading-5 text-gray-950">
+                    {walletSyncing ? "Syncing..." : frontCardLastSynced ?? "Pending sync"}
+                  </p>
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
 

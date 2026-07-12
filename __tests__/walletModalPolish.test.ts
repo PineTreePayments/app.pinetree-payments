@@ -376,6 +376,29 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(src).toContain("mt-auto flex justify-start pt-7")
   })
 
+  it("front wallet card adds compact hidden balance and sync details without duplicating the modal overview", () => {
+    const src = runtimeSrc()
+    const setupCard = src.slice(
+      src.indexOf("<article className=\"max-w-2xl"),
+      src.indexOf("{/* Exactly one problem card renders")
+    )
+    const modalOverview = walletOverviewSrc()
+
+    expect(setupCard).toContain("Wallet Balance")
+    expect(src).toContain('const [frontBalanceHidden, setFrontBalanceHidden] = useState(true)')
+    expect(setupCard).toContain('frontBalanceHidden ? "••••••••" : frontCardBalanceLabel')
+    expect(setupCard).toContain('aria-label={frontBalanceHidden ? "Show wallet balance" : "Hide wallet balance"}')
+    expect(setupCard).toContain("<Eye size={14} />")
+    expect(setupCard).toContain("<EyeOff size={14} />")
+    expect(setupCard).toContain("Last synced")
+    expect(src).toContain("formatWalletTotalBalance(walletSync.totalUsd, walletSyncing)")
+    expect(setupCard).not.toContain(">TOTAL BALANCE</p>")
+    expect(setupCard).not.toContain(">WALLET SUMMARY</p>")
+    expect(setupCard).not.toContain("Recent withdrawals")
+    expect(modalOverview).toContain(">TOTAL BALANCE</p>")
+    expect(modalOverview).toContain(">WALLET SUMMARY</p>")
+  })
+
   it("main Connected pill is removed from the wallet setup card header area", () => {
     const src = runtimeSrc()
     expect(src).toContain("<h2 className=\"min-w-0 text-base font-semibold text-gray-950\">PineTree Wallet</h2>")
@@ -414,6 +437,22 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(src).toContain("Create PineTree Wallet")
     expect(src).toContain("mt-auto flex justify-start pt-7")
     expect(src).toContain("h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60")
+  })
+
+  it("withdrawal reconnect keeps Reconnect PineTree Wallet as the only visible action", () => {
+    const formShell = walletPage.slice(
+      walletPage.indexOf("function WithdrawalFormShell("),
+      walletPage.indexOf("function formatUsd(")
+    )
+    const actionBlock = formShell.slice(
+      formShell.lastIndexOf('<div className="flex flex-col items-center gap-2 sm:flex-row sm:justify-center">'),
+      formShell.indexOf('{process.env.NODE_ENV !== "production" ? (')
+    )
+
+    expect(formShell).toContain('missingRuntimeSigner ? "Reconnect PineTree Wallet" : "Review withdrawal"')
+    expect(formShell).toContain("missingRuntimeSigner && onFinishSetup ? onFinishSetup : onReview")
+    expect(actionBlock).not.toContain("Finish setup")
+    expect(actionBlock).not.toContain("border border-gray-200 bg-white px-4")
   })
 
   it("EnabledRailChips renders Connected rails label above active rail pills", () => {

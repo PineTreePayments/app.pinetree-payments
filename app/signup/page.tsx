@@ -148,11 +148,21 @@ export default function SignupPage() {
         <input
           type="password"
           autoComplete="new-password"
-          className="mb-4 w-full rounded-md border border-gray-300 p-2.5 text-gray-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+          className="mb-3 w-full rounded-md border border-gray-300 p-2.5 text-gray-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
           placeholder="Password"
           value={password}
           onChange={(e)=>setPassword(e.target.value)}
         />
+
+        <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50/70 px-3 py-2.5 text-xs leading-5 text-blue-900">
+          <p className="font-semibold">Password must:</p>
+          <ul className="mt-1 space-y-0.5">
+            <li>• Be at least 11 characters</li>
+            <li>• Include one uppercase letter</li>
+            <li>• Include one lowercase letter</li>
+            <li>• Include one number</li>
+          </ul>
+        </div>
 
         <button
           onClick={handleSignup}
